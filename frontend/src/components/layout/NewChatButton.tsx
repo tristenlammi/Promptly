@@ -208,7 +208,7 @@ function PopoverItem({
         "hover:bg-[var(--hover)]"
       )}
     >
-      <span className="mt-0.5 text-[var(--accent)]">{icon}</span>
+      <span className="mt-0.5 text-[var(--accent-text)]">{icon}</span>
       <span className="flex flex-col">
         <span className="text-sm font-medium text-[var(--text)]">{title}</span>
         <span className="text-xs text-[var(--text-muted)]">{subtitle}</span>

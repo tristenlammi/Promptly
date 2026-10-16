@@ -82,7 +82,7 @@ export function WorkspaceRememberModal({
         aria-label="Save to workspace memory"
       >
         <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
-          <Brain className="h-4 w-4 text-[var(--accent)]" />
+          <Brain className="h-4 w-4 text-[var(--accent-text)]" />
           <h3 className="flex-1 text-sm font-semibold">
             Save to workspace memory
           </h3>

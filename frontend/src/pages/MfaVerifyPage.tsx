@@ -1,3 +1,5 @@
+import { peekReturnTo } from "@/lib/returnTo";
+import { usePasswordPolicy } from "@/hooks/usePasswordPolicy";
 import { useEffect, useState, type FormEvent } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { Mail, ShieldCheck, Smartphone } from "lucide-react";
@@ -9,6 +11,7 @@ import { useAuthStore } from "@/store/authStore";
 
 /** Login challenge — second-factor screen reached after a password OK. */
 export function MfaVerifyPage() {
+  const trustedDays = usePasswordPolicy().trusted_device_days;
   const pendingMfa = useAuthStore((s) => s.pendingMfa);
   const loginSuccess = useAuthStore((s) => s.loginSuccess);
   const clear = useAuthStore((s) => s.clear);
@@ -72,7 +75,7 @@ export function MfaVerifyPage() {
 
       const res = await mfaApi.verifyChallenge(pendingMfa.token, body);
       loginSuccess(res.user, res.access_token);
-      navigate("/chat", { replace: true });
+      navigate(peekReturnTo("/chat"), { replace: true });
     } catch (err) {
       setError(apiErrorMessage(err, "Verification failed. Please try again."));
     } finally {
@@ -145,7 +148,7 @@ export function MfaVerifyPage() {
               onChange={(e) => setTrustDevice(e.target.checked)}
               className="h-3.5 w-3.5 accent-[var(--accent)]"
             />
-            Trust this device for 30 days
+            Trust this device for {trustedDays} days
           </label>
 
           {error && (

@@ -114,6 +114,9 @@ class CommandMatchRequest(BaseModel):
     """What the user said or typed, before we know if it means anything."""
 
     utterance: str = Field(min_length=1, max_length=500)
+    # Where it was said ("voice", "chat"). Near-misses from voice are
+    # recorded in History, where "why didn't that run?" gets answered.
+    source: str | None = Field(default=None, max_length=16)
 
 
 class CommandMatchResponse(BaseModel):

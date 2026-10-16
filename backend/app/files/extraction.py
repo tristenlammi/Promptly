@@ -50,6 +50,13 @@ def extract_content_text(f: UserFile) -> str | None:
     can still land (we'd rather index the filename alone than
     reject the whole file).
     """
+    text = _extract_content_text(f)
+    # Postgres text can't hold NUL: a ".txt" that's really binary failed the
+    # save (and the upload answered 500 though the file was stored).
+    return text.replace("\x00", "") if text else text
+
+
+def _extract_content_text(f: UserFile) -> str | None:
     # Drive Documents store their rendered HTML snapshot as the
     # blob. Strip tags so FTS indexes the visible text rather than
     # markup. Keeps ``ts_headline`` snippets readable.
@@ -70,6 +77,18 @@ def extract_content_text(f: UserFile) -> str | None:
         from app.files.document_render import extract_text_from_html
 
         return extract_text_from_html(html_text) or None
+
+    # Office files (WP-4.3): the worker already read them at upload; this
+    # path (backfill, RAG ingestion — never a request) reads them itself.
+    from app.files.office_formats import extract_office_text, office_ext
+
+    ext = office_ext(getattr(f, "filename", None))
+    if ext is not None:
+        if getattr(f, "content_text", None):
+            return f.content_text
+        from app.files.storage import absolute_path
+
+        return extract_office_text(absolute_path(f.storage_path), ext)
 
     if _looks_textual(f):
         try:

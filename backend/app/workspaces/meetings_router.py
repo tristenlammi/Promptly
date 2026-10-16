@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import (
     APIRouter,
@@ -31,6 +31,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.files.disk_guard import require_disk_room
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
@@ -66,8 +67,20 @@ class MeetingJobResponse(BaseModel):
     error: str | None
     note_item_id: uuid.UUID | None
     created_at: datetime
+    # A failed summary keeps the transcript: download it, or retry the
+    # summary without transcribing again (R-133).
+    has_transcript: bool = False
 
     model_config = {"from_attributes": True}
+
+    @classmethod
+    def of(cls, job: MeetingJob) -> "MeetingJobResponse":
+        out = cls.model_validate(job)
+        out.has_transcript = bool(job.transcript)
+        return out
+
+
+ACTIVE_STATES = ("pending", "transcribing", "summarising")
 
 
 @router.post(
@@ -83,7 +96,8 @@ async def create_meeting_job(
     language: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> MeetingJob:
+    _room: None = Depends(require_disk_room),  # WP-7.2
+) -> MeetingJobResponse:
     ws, role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(role)
 
@@ -96,10 +110,16 @@ async def create_meeting_job(
 
     # One at a time per workspace: transcription monopolises the (single
     # model) Whisper worker anyway, and it keeps the failure story simple.
+    # A job a restart orphaned stops counting once it's older than any real
+    # run could be (the reaper marks it failed soon after) — it used to
+    # block new recordings in this workspace forever (R-240).
+    from app.tasks.stale_run_reaper import MEETING_STALE_AFTER
+
     active = await db.scalar(
         select(MeetingJob.id).where(
             MeetingJob.workspace_id == ws.id,
-            MeetingJob.status.in_(("pending", "transcribing", "summarising")),
+            MeetingJob.status.in_(ACTIVE_STATES),
+            MeetingJob.updated_at > datetime.now(timezone.utc) - MEETING_STALE_AFTER,
         )
     )
     if active is not None:
@@ -108,6 +128,15 @@ async def create_meeting_job(
             detail="A recording is already being processed for this "
             "workspace — wait for it to finish.",
         )
+
+    # No model to summarise with means an hour of transcription for nothing
+    # — say so before taking the upload (R-133).
+    from app.workspaces.meetings_runner import MeetingError, resolve_summary_model
+
+    try:
+        await resolve_summary_model(db, ws)
+    except MeetingError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     job = MeetingJob(
         workspace_id=ws.id,
@@ -151,7 +180,7 @@ async def create_meeting_job(
         raise
     await db.refresh(job)
     await enqueue_meeting(job.id)
-    return job
+    return MeetingJobResponse.of(job)
 
 
 @router.get(
@@ -161,7 +190,7 @@ async def list_meeting_jobs(
     workspace_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> list[MeetingJob]:
+) -> list[MeetingJobResponse]:
     ws, _role = await get_accessible_workspace(workspace_id, user, db)
     rows = (
         (
@@ -175,7 +204,7 @@ async def list_meeting_jobs(
         .scalars()
         .all()
     )
-    return list(rows)
+    return [MeetingJobResponse.of(r) for r in rows]
 
 
 @router.get(
@@ -186,12 +215,103 @@ async def get_meeting_job(
     job_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
-) -> MeetingJob:
+) -> MeetingJobResponse:
     ws, _role = await get_accessible_workspace(workspace_id, user, db)
     job = await db.get(MeetingJob, job_id)
     if job is None or job.workspace_id != ws.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return job
+    return MeetingJobResponse.of(job)
+
+
+@router.get("/{workspace_id}/meetings/{job_id}/transcript")
+async def download_meeting_transcript(
+    workspace_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """The raw transcript as a text file — kept when the summary fails, so
+    an hour of transcription isn't lost (R-133)."""
+    from fastapi.responses import PlainTextResponse
+
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    job = await db.get(MeetingJob, job_id)
+    if job is None or job.workspace_id != ws.id or not job.transcript:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return PlainTextResponse(
+        job.transcript,
+        headers={
+            "Content-Disposition": f'attachment; filename="transcript-{job.id}.txt"'
+        },
+    )
+
+
+@router.post(
+    "/{workspace_id}/meetings/{job_id}/retry", response_model=MeetingJobResponse
+)
+async def retry_meeting_summary(
+    workspace_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MeetingJobResponse:
+    """Summarise a failed job's saved transcript again (after setting a
+    model, say) — without re-uploading or re-transcribing."""
+    from app.chat.models import Workspace
+    from app.workspaces.meetings_runner import MeetingError, resolve_summary_model
+
+    ws, role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(role)
+    job = await db.get(MeetingJob, job_id)
+    if job is None or job.workspace_id != ws.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if job.status != "failed" or not job.transcript:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only a recording whose notes failed after transcription can be retried.",
+        )
+    try:
+        await resolve_summary_model(db, await db.get(Workspace, ws.id))
+    except MeetingError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    job.status = "pending"
+    job.error = None
+    await db.commit()
+    await db.refresh(job)
+    await enqueue_meeting(job.id)
+    return MeetingJobResponse.of(job)
+
+
+@router.post(
+    "/{workspace_id}/meetings/{job_id}/cancel", response_model=MeetingJobResponse
+)
+async def cancel_meeting_job(
+    workspace_id: uuid.UUID,
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MeetingJobResponse:
+    """Stop a recording that's still being processed. The uploader, or a
+    workspace owner/admin, can cancel; the worker notices at its next step."""
+    from app.files.storage import delete_blob
+    from app.workspaces.shares import require_workspace_admin
+
+    ws, role = await get_accessible_workspace(workspace_id, user, db)
+    job = await db.get(MeetingJob, job_id)
+    if job is None or job.workspace_id != ws.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    if job.user_id != user.id:
+        require_workspace_admin(role)
+    if job.status not in ACTIVE_STATES:
+        return MeetingJobResponse.of(job)
+    job.status = "failed"
+    job.error = "Cancelled."
+    audio_rel, job.audio_path = job.audio_path, None
+    await db.commit()
+    await db.refresh(job)
+    if audio_rel:
+        delete_blob(audio_rel)
+    return MeetingJobResponse.of(job)
 
 
 __all__ = ["router"]

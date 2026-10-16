@@ -28,6 +28,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -35,11 +36,14 @@ from fastapi import (
     APIRouter,
     BackgroundTasks,
     Depends,
+    File,
     HTTPException,
     Request,
     Response,
+    UploadFile,
     status,
 )
+from fastapi.concurrency import run_in_threadpool
 from jose import jwt
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,6 +52,8 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.auth.utils import JWT_ALGORITHM
 from app.config import get_settings
+from app.files.generated_kinds import GeneratedKind
+from app.files.office import add_with_shell
 from app.files.schemas import CollabTokenResponse, CollabTokenUser
 from app.chat.models import (
     Conversation,
@@ -83,6 +89,7 @@ from app.workspaces.schemas import (
     WorkspaceMemoryResponse,
     WorkspaceMemorySaveRequest,
 )
+from app.workspaces.visibility import conversation_visible_to, item_visible_to
 from app.workspaces.shares import (
     get_accessible_workspace,
     require_workspace_admin,
@@ -108,6 +115,34 @@ _DEFAULT_BOARD_TITLE = "Board"
 _DEFAULT_NOTEBOOK_TITLE = "Notebook"
 _DEFAULT_ROSTER_TITLE = "Untitled roster"
 _DEFAULT_DISCUSSION_TITLE = "Discussion"
+
+
+# ``config`` keys only the server may set. ``text_file_id`` points a
+# discussion at its transcript file in Drive; letting the client set it
+# meant anyone could aim the indexer at another user's file and have it
+# overwritten or trashed.
+SERVER_MANAGED_CONFIG_KEYS: frozenset[str] = frozenset({"text_file_id"})
+
+
+def _merge_client_config(
+    current: dict[str, Any] | None, incoming: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Apply a client-sent ``config`` without letting it touch server keys.
+
+    Client values replace the whole config as before (boards rely on
+    that), except server-managed keys: those are dropped from the
+    incoming dict and carried over from the current one.
+    """
+    if incoming is None:
+        kept = {
+            k: v for k, v in (current or {}).items() if k in SERVER_MANAGED_CONFIG_KEYS
+        }
+        return kept or None
+    merged = {k: v for k, v in incoming.items() if k not in SERVER_MANAGED_CONFIG_KEYS}
+    for key in SERVER_MANAGED_CONFIG_KEYS:
+        if current and key in current:
+            merged[key] = current[key]
+    return merged
 
 
 def _strip_doc_ext(name: str) -> str:
@@ -517,6 +552,10 @@ async def create_workspace_item(
             # be embedded until a member explicitly turns "use as context"
             # on — unlike notes/canvases, which default to on.
             context_enabled=payload.kind != "discussion",
+            # Boards, notebooks and discussions were created unattributed —
+            # so nobody could ever make a board private, and the activity
+            # feed showed no creator.
+            created_by=user.id,
         )
         db.add(item)
         await db.commit()
@@ -564,8 +603,8 @@ async def create_workspace_item(
             db, ws.id, payload.parent_id, _DEFAULT_SHEET_TITLE
         )
         sheet = Spreadsheet(workspace_id=ws.id, title=sheet_title)
-        db.add(sheet)
-        await db.flush()  # assign sheet.id before the item links to it
+        # With its Drive shell (WP-3.2); flushes, so sheet.id is assigned.
+        await add_with_shell(db, sheet, kind=GeneratedKind.SHEET.value)
         item = WorkspaceItem(
             workspace_id=ws.id,
             parent_id=payload.parent_id,
@@ -662,6 +701,250 @@ async def create_workspace_item(
     return WorkspaceItemResponse.model_validate(item)
 
 
+COPYABLE_KINDS = ("note", "sheet", "board", "canvas", "roster", "container")
+
+
+async def reconcile_board_cards(db: AsyncSession, board: WorkspaceItem) -> int:
+    """Bring cards in line with the board's columns after a config change
+    (R-201): a column flagged (or un-flagged) Done updates its cards' done
+    state, and cards whose column was deleted move to the first column
+    instead of keeping a status nothing shows. Returns cards changed."""
+    from app.workspaces.board_columns import board_columns, done_status_ids
+
+    cols = [cid for cid, _ in board_columns(board.config)]
+    done_ids = set(done_status_ids(board.config))
+    now = datetime.now(timezone.utc)
+    changed = 0
+    for t in (
+        await db.execute(select(WorkspaceTask).where(WorkspaceTask.board_item_id == board.id))
+    ).scalars():
+        status_ = t.status if t.status in cols else (cols[0] if cols else t.status)
+        done = status_ in done_ids
+        if status_ != t.status or done != bool(t.done):
+            t.status = status_
+            if done != bool(t.done):
+                t.done = done
+                t.completed_at = now if done else None
+            changed += 1
+    return changed
+
+
+async def copy_item_into(
+    db: AsyncSession,
+    src: WorkspaceItem,
+    *,
+    dest_ws: Workspace,
+    owner: User,
+    creator_id: uuid.UUID,
+    parent_id: uuid.UUID | None,
+    position: float,
+    title: str,
+) -> WorkspaceItem:
+    """Deep-copy one item into ``dest_ws`` (the same workspace for
+    "Duplicate", another for duplicating a whole workspace — R-204).
+    Flushes, doesn't commit; the caller schedules re-indexing."""
+    same_ws = dest_ws.id == src.workspace_id
+    if src.kind == "note":
+        src_file = await db.get(UserFile, src.ref_id) if src.ref_id else None
+        if src_file is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="This note has no underlying document.",
+            )
+        folder_id = (
+            src_file.folder_id
+            if same_ws
+            else await _resolve_subfolder_id(db, dest_ws, owner, "Notes")
+        )
+        doc = await create_blank_document(
+            db, owner_id=owner.id, folder_id=folder_id, name=title
+        )
+        # Copy the rendered HTML blob so preview/download match immediately.
+        try:
+            blob = absolute_path(src_file.storage_path).read_bytes()
+            absolute_path(doc.storage_path).write_bytes(blob)
+            doc.size_bytes = len(blob)
+        except OSError:
+            pass  # blob copy is best-effort; the Yjs state is the truth
+        doc.content_text = src_file.content_text
+        # Copy the merged Y.Doc so the collab server serves the full
+        # content for the copy (create_blank_document seeded an empty row).
+        src_state = await db.get(DocumentState, src.ref_id)
+        new_state = await db.get(DocumentState, doc.id)
+        if src_state is not None and new_state is not None:
+            new_state.yjs_update = src_state.yjs_update
+            new_state.version = src_state.version
+        # The copy gets its own pictures, re-pointed in its content (R-228).
+        from app.files.doc_assets import relink_copy
+
+        await relink_copy(db, src_file.id, doc)
+        item = WorkspaceItem(
+            workspace_id=dest_ws.id,
+            parent_id=parent_id,
+            kind="note",
+            ref_id=doc.id,
+            title=title,
+            position=position,
+            indexing_status="queued",
+            context_enabled=src.context_enabled,
+        )
+        db.add(item)
+    elif src.kind == "sheet":
+        src_sheet = (
+            await db.get(Spreadsheet, src.ref_id) if src.ref_id else None
+        )
+        if src_sheet is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="This sheet has no underlying spreadsheet.",
+            )
+        sheet = Spreadsheet(
+            workspace_id=dest_ws.id,
+            title=title,
+            data=src_sheet.data,
+            yjs_update=src_sheet.yjs_update,
+            version=src_sheet.version,
+            content_text=src_sheet.content_text,
+        )
+        await add_with_shell(db, sheet, kind=GeneratedKind.SHEET.value)
+        item = WorkspaceItem(
+            workspace_id=dest_ws.id,
+            parent_id=parent_id,
+            kind="sheet",
+            ref_id=sheet.id,
+            title=title,
+            position=position,
+            context_enabled=src.context_enabled,
+        )
+        db.add(item)
+    elif src.kind == "canvas":
+        src_canvas = (
+            await db.get(WorkspaceCanvas, src.ref_id) if src.ref_id else None
+        )
+        if src_canvas is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="This canvas has no underlying scene.",
+            )
+        canvases_folder_id = await _resolve_subfolder_id(
+            db, dest_ws, owner, "Canvases"
+        )
+        item = await create_canvas_with_item(
+            db,
+            ws=dest_ws,
+            owner=owner,
+            title=title,
+            parent_id=parent_id,
+            position=position,
+            canvases_folder_id=canvases_folder_id,
+        )
+        item.context_enabled = src.context_enabled
+        # The scene is the Y.Doc bytes — images ride along inside its
+        # ``files`` map, so a byte copy is complete.
+        copy_canvas = await db.get(WorkspaceCanvas, item.ref_id)
+        if copy_canvas is not None:
+            copy_canvas.yjs_update = src_canvas.yjs_update
+            copy_canvas.version = src_canvas.version
+            copy_canvas.content_text = src_canvas.content_text
+            # Mirror the flattened text onto the new backing file (same
+            # as POST /canvas/{id}/text) so retrieval picks the copy up
+            # without waiting for a client push.
+            if copy_canvas.text_file_id is not None and src_canvas.content_text:
+                tf = await db.get(UserFile, copy_canvas.text_file_id)
+                if tf is not None:
+                    text = src_canvas.content_text
+                    abs_path = absolute_path(tf.storage_path)
+                    abs_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(abs_path, "w", encoding="utf-8") as fh:
+                        fh.write(text)
+                    tf.size_bytes = len(text.encode("utf-8"))
+                    tf.content_text = text
+    elif src.kind == "roster":
+        src_roster = await db.get(Roster, src.ref_id) if src.ref_id else None
+        roster = Roster(
+            workspace_id=dest_ws.id,
+            title=title,
+            data=src_roster.data if src_roster else None,
+            content_text=src_roster.content_text if src_roster else None,
+        )
+        db.add(roster)
+        await db.flush()
+        item = WorkspaceItem(
+            workspace_id=dest_ws.id,
+            parent_id=parent_id,
+            kind="roster",
+            ref_id=roster.id,
+            title=title,
+            position=position,
+            context_enabled=src.context_enabled,
+        )
+        db.add(item)
+    elif src.kind == "container":
+        # The notebook itself — its pages are copied by the caller.
+        item = WorkspaceItem(
+            workspace_id=dest_ws.id,
+            parent_id=None,
+            kind="container",
+            title=title,
+            position=position,
+            icon=src.icon,
+            config=src.config,
+            context_enabled=src.context_enabled,
+        )
+        db.add(item)
+    else:  # board
+        item = WorkspaceItem(
+            workspace_id=dest_ws.id,
+            parent_id=parent_id,
+            kind="board",
+            ref_id=None,
+            title=title,
+            position=position,
+            config=src.config,
+            context_enabled=src.context_enabled,
+        )
+        db.add(item)
+        await db.flush()
+        tasks = (
+            (
+                await db.execute(
+                    select(WorkspaceTask).where(
+                        WorkspaceTask.board_item_id == src.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for t in tasks:
+            db.add(
+                WorkspaceTask(
+                    workspace_id=dest_ws.id,
+                    board_item_id=item.id,
+                    title=t.title,
+                    description=t.description,
+                    subtasks=t.subtasks,
+                    labels=t.labels,
+                    links=t.links,
+                    attachments=t.attachments,
+                    # Another workspace's members aren't this one's.
+                    assignee_user_id=t.assignee_user_id if same_ws else None,
+                    done=t.done,
+                    status=t.status,
+                    priority=t.priority,
+                    due_at=t.due_at,
+                    position=t.position,
+                    completed_at=t.completed_at,
+                    fields=t.fields,  # custom-field values (R-201)
+                    created_by=creator_id,
+                )
+            )
+
+    item.created_by = creator_id  # whoever copied it owns the copy (0134)
+    await db.flush()
+    return item
+
+
 @router.post(
     "/{workspace_id}/items/{item_id}/duplicate",
     response_model=WorkspaceItemResponse,
@@ -718,159 +1001,16 @@ async def duplicate_workspace_item(
     # yields "Research 2" (or " 3", …) directly.
     title = await _dedupe_default_title(db, ws.id, src.parent_id, src.title)
 
-    if src.kind == "note":
-        src_file = await db.get(UserFile, src.ref_id) if src.ref_id else None
-        if src_file is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="This note has no underlying document.",
-            )
-        doc = await create_blank_document(
-            db, owner_id=owner.id, folder_id=src_file.folder_id, name=title
-        )
-        # Copy the rendered HTML blob so preview/download match immediately.
-        try:
-            blob = absolute_path(src_file.storage_path).read_bytes()
-            absolute_path(doc.storage_path).write_bytes(blob)
-            doc.size_bytes = len(blob)
-        except OSError:
-            pass  # blob copy is best-effort; the Yjs state is the truth
-        doc.content_text = src_file.content_text
-        # Copy the merged Y.Doc so the collab server serves the full
-        # content for the copy (create_blank_document seeded an empty row).
-        src_state = await db.get(DocumentState, src.ref_id)
-        new_state = await db.get(DocumentState, doc.id)
-        if src_state is not None and new_state is not None:
-            new_state.yjs_update = src_state.yjs_update
-            new_state.version = src_state.version
-        item = WorkspaceItem(
-            workspace_id=ws.id,
-            parent_id=src.parent_id,
-            kind="note",
-            ref_id=doc.id,
-            title=title,
-            position=position,
-            indexing_status="queued",
-            context_enabled=src.context_enabled,
-        )
-        db.add(item)
-    elif src.kind == "sheet":
-        src_sheet = (
-            await db.get(Spreadsheet, src.ref_id) if src.ref_id else None
-        )
-        if src_sheet is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="This sheet has no underlying spreadsheet.",
-            )
-        sheet = Spreadsheet(
-            workspace_id=ws.id,
-            title=title,
-            data=src_sheet.data,
-            yjs_update=src_sheet.yjs_update,
-            version=src_sheet.version,
-            content_text=src_sheet.content_text,
-        )
-        db.add(sheet)
-        await db.flush()
-        item = WorkspaceItem(
-            workspace_id=ws.id,
-            parent_id=src.parent_id,
-            kind="sheet",
-            ref_id=sheet.id,
-            title=title,
-            position=position,
-            context_enabled=src.context_enabled,
-        )
-        db.add(item)
-    elif src.kind == "canvas":
-        src_canvas = (
-            await db.get(WorkspaceCanvas, src.ref_id) if src.ref_id else None
-        )
-        if src_canvas is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="This canvas has no underlying scene.",
-            )
-        canvases_folder_id = await _resolve_subfolder_id(
-            db, ws, owner, "Canvases"
-        )
-        item = await create_canvas_with_item(
-            db,
-            ws=ws,
-            owner=owner,
-            title=title,
-            parent_id=src.parent_id,
-            position=position,
-            canvases_folder_id=canvases_folder_id,
-        )
-        item.context_enabled = src.context_enabled
-        # The scene is the Y.Doc bytes — images ride along inside its
-        # ``files`` map, so a byte copy is complete.
-        copy_canvas = await db.get(WorkspaceCanvas, item.ref_id)
-        if copy_canvas is not None:
-            copy_canvas.yjs_update = src_canvas.yjs_update
-            copy_canvas.version = src_canvas.version
-            copy_canvas.content_text = src_canvas.content_text
-            # Mirror the flattened text onto the new backing file (same
-            # as POST /canvas/{id}/text) so retrieval picks the copy up
-            # without waiting for a client push.
-            if copy_canvas.text_file_id is not None and src_canvas.content_text:
-                tf = await db.get(UserFile, copy_canvas.text_file_id)
-                if tf is not None:
-                    text = src_canvas.content_text
-                    abs_path = absolute_path(tf.storage_path)
-                    abs_path.parent.mkdir(parents=True, exist_ok=True)
-                    with open(abs_path, "w", encoding="utf-8") as fh:
-                        fh.write(text)
-                    tf.size_bytes = len(text.encode("utf-8"))
-                    tf.content_text = text
-    else:  # board
-        item = WorkspaceItem(
-            workspace_id=ws.id,
-            parent_id=src.parent_id,
-            kind="board",
-            ref_id=None,
-            title=title,
-            position=position,
-            config=src.config,
-            context_enabled=src.context_enabled,
-        )
-        db.add(item)
-        await db.flush()
-        tasks = (
-            (
-                await db.execute(
-                    select(WorkspaceTask).where(
-                        WorkspaceTask.board_item_id == src.id
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for t in tasks:
-            db.add(
-                WorkspaceTask(
-                    workspace_id=ws.id,
-                    board_item_id=item.id,
-                    title=t.title,
-                    description=t.description,
-                    subtasks=t.subtasks,
-                    labels=t.labels,
-                    links=t.links,
-                    attachments=t.attachments,
-                    assignee_user_id=t.assignee_user_id,
-                    done=t.done,
-                    status=t.status,
-                    priority=t.priority,
-                    due_at=t.due_at,
-                    position=t.position,
-                    completed_at=t.completed_at,
-                    created_by=user.id,
-                )
-            )
-
+    item = await copy_item_into(
+        db,
+        src,
+        dest_ws=ws,
+        owner=owner,
+        creator_id=user.id,
+        parent_id=src.parent_id,
+        position=position,
+        title=title,
+    )
     item.created_by = user.id  # the duplicator owns the copy (0134)
     ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
@@ -897,6 +1037,219 @@ async def duplicate_workspace_item(
 
 
 _DEFAULT_SHEET_TITLE = "Untitled sheet"
+
+# A version at most this often while someone edits; always before an
+# import, restore or clear (R-132).
+# Workbook JSON a save may carry (WP-3.3) — generous for real sheets.
+_MAX_WORKBOOK_JSON_BYTES = 20 * 1024 * 1024
+_SHEET_VERSION_EVERY = timedelta(minutes=10)
+_SHEET_VERSIONS_KEPT = 100
+
+
+async def snapshot_spreadsheet(
+    db: AsyncSession, sheet: Spreadsheet, user: User, *, reason: str
+) -> bool:
+    """Keep the workbook as it is *now* as a version (before it changes).
+    Autosaves are throttled; other reasons always snapshot. Flushes."""
+    from app.chat.models import SpreadsheetVersion
+    from app.workspaces.sheet_io import cell_count
+
+    n = cell_count(sheet.data)
+    if n == 0:
+        return False
+    if reason == "autosave":
+        last = await db.scalar(
+            select(func.max(SpreadsheetVersion.created_at)).where(
+                SpreadsheetVersion.spreadsheet_id == sheet.id
+            )
+        )
+        if last is not None and datetime.now(timezone.utc) - last < _SHEET_VERSION_EVERY:
+            return False
+    db.add(
+        SpreadsheetVersion(
+            spreadsheet_id=sheet.id, data=sheet.data, cell_count=n, reason=reason, created_by=user.id
+        )
+    )
+    await db.flush()
+    stale = (
+        await db.execute(
+            select(SpreadsheetVersion.id)
+            .where(SpreadsheetVersion.spreadsheet_id == sheet.id)
+            .order_by(SpreadsheetVersion.created_at.desc())
+            .offset(_SHEET_VERSIONS_KEPT)
+        )
+    ).scalars().all()
+    if stale:
+        from sqlalchemy import delete as _delete
+
+        await db.execute(_delete(SpreadsheetVersion).where(SpreadsheetVersion.id.in_(stale)))
+    if reason != "autosave":
+        # Also a full editor-state snapshot (Yjs + workbook), recoverable
+        # even after these workbook versions roll off (WP-3.3).
+        from app.files.versions import snapshot_file
+
+        shell = await db.get(UserFile, sheet.file_id)
+        if shell is not None:
+            await snapshot_file(
+                db,
+                shell,
+                source={"import": "import", "restore": "restore"}.get(reason, "manual"),
+                label="Before Clear sheet" if reason == "clear" else None,
+                author_id=user.id,
+            )
+    return True
+
+
+@router.get("/{workspace_id}/spreadsheets/{sheet_id}/export")
+async def export_spreadsheet(
+    workspace_id: uuid.UUID,
+    sheet_id: uuid.UUID,
+    format: str = "xlsx",
+    tab: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """The sheet as .xlsx (every tab, formulas kept) or .csv (one tab)."""
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
+    return await sheet_export_response(sheet, format, tab)
+
+
+async def sheet_export_response(sheet: Spreadsheet, format: str, tab: int) -> Response:
+    """The sheet as .xlsx (every tab, formulas kept) or .csv (one tab)."""
+    from app.workspaces.sheet_io import to_csv, to_xlsx
+
+    stem = sanitize_filename((sheet.title or "Sheet").strip() or "Sheet")[:80]
+    if format == "csv":
+        body = to_csv(sheet.data, tab).encode("utf-8-sig")
+        media, ext = "text/csv; charset=utf-8", "csv"
+    elif format == "xlsx":
+        body = await run_in_threadpool(to_xlsx, sheet.data)
+        media, ext = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="format must be xlsx or csv")
+    return Response(
+        content=body,
+        media_type=media,
+        headers={"Content-Disposition": f'attachment; filename="{stem}.{ext}"'},
+    )
+
+
+@router.post("/{workspace_id}/spreadsheets/{sheet_id}/import")
+async def import_into_spreadsheet(
+    workspace_id: uuid.UUID,
+    sheet_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Convert an .xlsx or .csv into this sheet's format and return it; the
+    editor loads it (so it reaches everyone in the room) and saves. The
+    current contents are kept as a version first, so it can be undone."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
+    return await sheet_import_data(db, sheet, file, user)
+
+
+async def sheet_import_data(db: AsyncSession, sheet: Spreadsheet, file: UploadFile, user: User) -> dict:
+    """Convert an upload into the sheet's format (current contents become a
+    version first). Shared with the file route. Commits."""
+    from app.workspaces.sheet_io import SheetImportError, import_spreadsheet
+
+    raw = await file.read(25 * 1024 * 1024 + 1)
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Files are capped at 25 MB.")
+    try:
+        data, notes = await run_in_threadpool(import_spreadsheet, raw, file.filename or "")
+    except SheetImportError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    await snapshot_spreadsheet(db, sheet, user, reason="import")
+    await db.commit()
+    # ``notes``: what didn't come across (charts, comments, …) — WP-4.4.
+    return {"data": data, "notes": notes}
+
+
+class SheetVersionRow(BaseModel):
+    id: uuid.UUID
+    created_at: datetime
+    cell_count: int
+    reason: str
+    author: str | None = None
+
+
+@router.get(
+    "/{workspace_id}/spreadsheets/{sheet_id}/versions",
+    response_model=list[SheetVersionRow],
+)
+async def list_spreadsheet_versions(
+    workspace_id: uuid.UUID,
+    sheet_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[SheetVersionRow]:
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
+    return await sheet_version_rows(db, sheet)
+
+
+async def sheet_version_rows(db: AsyncSession, sheet: Spreadsheet) -> list[SheetVersionRow]:
+    from app.chat.models import SpreadsheetVersion
+
+    rows = (
+        await db.execute(
+            select(SpreadsheetVersion, User.username)
+            .outerjoin(User, User.id == SpreadsheetVersion.created_by)
+            .where(SpreadsheetVersion.spreadsheet_id == sheet.id)
+            .order_by(SpreadsheetVersion.created_at.desc())
+            .limit(_SHEET_VERSIONS_KEPT)
+        )
+    ).all()
+    return [
+        SheetVersionRow(id=v.id, created_at=v.created_at, cell_count=v.cell_count, reason=v.reason, author=name)
+        for v, name in rows
+    ]
+
+
+@router.get("/{workspace_id}/spreadsheets/{sheet_id}/versions/{version_id}")
+async def get_spreadsheet_version(
+    workspace_id: uuid.UUID,
+    sheet_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """A version's workbook — the editor restores it through the room (and
+    the current contents become a version first, via the import path's
+    snapshot on the next save)."""
+    from app.chat.models import SpreadsheetVersion
+
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
+    v = await db.get(SpreadsheetVersion, version_id)
+    if v is None or v.spreadsheet_id != sheet.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return {"data": v.data}
+
+
+@router.post("/{workspace_id}/spreadsheets/{sheet_id}/versions/checkpoint")
+async def checkpoint_spreadsheet(
+    workspace_id: uuid.UUID,
+    sheet_id: uuid.UUID,
+    reason: str = "restore",
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Keep the current contents as a version right now — before a restore
+    or a clear, so either can be undone."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
+    made = await snapshot_spreadsheet(
+        db, sheet, user, reason=reason if reason in ("restore", "clear") else "restore"
+    )
+    await db.commit()
+    return {"saved": made}
 
 
 # ---------------------------------------------------------------------
@@ -944,27 +1297,43 @@ async def get_spreadsheet(
     """Load a spreadsheet page's workbook. Read access (any member)."""
     ws, _role = await get_accessible_workspace(workspace_id, user, db)
     sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
+    from app.files.office_router import _name_tabs
+
+    await _name_tabs(db, sheet)
     return SpreadsheetResponse.model_validate(sheet)
 
 
-@router.put(
-    "/{workspace_id}/spreadsheets/{sheet_id}",
-    response_model=SpreadsheetResponse,
-)
-async def save_spreadsheet(
-    workspace_id: uuid.UUID,
-    sheet_id: uuid.UUID,
+async def apply_sheet_save(
+    db: AsyncSession,
+    sheet: Spreadsheet,
     payload: SpreadsheetSaveRequest,
+    user: User,
     background: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> SpreadsheetResponse:
-    """Persist a spreadsheet page's workbook (debounced save from the
-    editor). Single-user for now — live collaboration is a later phase.
-    Re-indexes the sheet so its cell text feeds workspace RAG + memory."""
-    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    require_workspace_write(access_role)
-    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
+) -> Spreadsheet:
+    """The workbook save, once access is checked — shared by the workspace
+    route and the file route (``/api/files/{id}/sheet``, WP-3.4). Commits."""
+    # Size cap: the workbook used to be accepted at any size.
+    import json as _json
+
+    if len(_json.dumps(payload.data, separators=(",", ":"))) > _MAX_WORKBOOK_JSON_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="This workbook is too large to save — split it into smaller sheets.",
+        )
+    # Conditional save (WP-3.3): based on an older version means someone
+    # else saved in between — don't overwrite their tabs and structure.
+    if payload.data_version is not None and payload.data_version != (sheet.data_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "stale",
+                "data_version": sheet.data_version or 0,
+                "data": sheet.data,
+            },
+        )
+    if payload.data != sheet.data:
+        await snapshot_spreadsheet(db, sheet, user, reason="autosave")
+        sheet.data_version = (sheet.data_version or 0) + 1
     sheet.data = payload.data
     text_changed = (
         payload.content_text is not None
@@ -987,7 +1356,10 @@ async def save_spreadsheet(
         sheet.title = new_title
         if sheet_item is not None:
             sheet_item.title = new_title
-    ws.updated_at = datetime.now(timezone.utc)
+    if sheet.workspace_id is not None:
+        ws = await db.get(Workspace, sheet.workspace_id)
+        if ws is not None:
+            ws.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(sheet)
     # Embed the fresh cell text off the request path (no-op without an
@@ -995,7 +1367,29 @@ async def save_spreadsheet(
     if text_changed and sheet_item is not None:
         from app.workspaces.knowledge import index_sheet_for_workspace
 
-        background.add_task(index_sheet_for_workspace, ws.id, sheet_item.id)
+        background.add_task(index_sheet_for_workspace, sheet.workspace_id, sheet_item.id)
+    return sheet
+
+
+@router.put(
+    "/{workspace_id}/spreadsheets/{sheet_id}",
+    response_model=SpreadsheetResponse,
+)
+async def save_spreadsheet(
+    workspace_id: uuid.UUID,
+    sheet_id: uuid.UUID,
+    payload: SpreadsheetSaveRequest,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> SpreadsheetResponse:
+    """Persist a spreadsheet page's workbook (debounced save from the
+    editor). Single-user for now — live collaboration is a later phase.
+    Re-indexes the sheet so its cell text feeds workspace RAG + memory."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
+    await apply_sheet_save(db, sheet, payload, user, background)
     return SpreadsheetResponse.model_validate(sheet)
 
 
@@ -1038,8 +1432,15 @@ async def get_roster(
     user: User = Depends(get_current_user),
 ) -> RosterResponse:
     """Load a roster's schedule. Read access (any member)."""
-    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    ws, role = await get_accessible_workspace(workspace_id, user, db)
     roster = await _load_workspace_roster(db, ws.id, roster_id, user)
+    data = roster.data if isinstance(roster.data, dict) else None
+    if role not in ("owner", "admin") and data and isinstance(data.get("published_shifts"), list):
+        # Staff see what was published, not the manager's work in progress
+        # (R-174 — Publish used to change nothing anyone else saw).
+        out = RosterResponse.model_validate(roster)
+        out.data = {**data, "shifts": data["published_shifts"]}
+        return out
     return RosterResponse.model_validate(roster)
 
 
@@ -1060,13 +1461,23 @@ async def save_roster(
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_admin(access_role)
     roster = await _load_workspace_roster(db, ws.id, roster_id, user)
-    roster.data = payload.data
-    text_changed = (
-        payload.content_text is not None
-        and payload.content_text != roster.content_text
-    )
-    if payload.content_text is not None:
-        roster.content_text = payload.content_text
+    if payload.base_revision is not None and payload.base_revision != roster.revision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This roster was changed somewhere else. Reload to see the latest.",
+        )
+    prev = roster.data if isinstance(roster.data, dict) else {}
+    data = dict(payload.data) if isinstance(payload.data, dict) else payload.data
+    # The published snapshot is server-owned — a client save never drops it.
+    if isinstance(data, dict) and "published_shifts" in prev:
+        data["published_shifts"] = prev["published_shifts"]
+    roster.data = data
+    roster.revision = (roster.revision or 0) + 1
+    # The schedule's text is rendered here, dated and windowed around today
+    # (R-174), rather than taken from whichever browser saved last.
+    text = await roster_context_text(db, ws, roster)
+    text_changed = text != roster.content_text
+    roster.content_text = text
     roster_item = (
         await db.execute(
             select(WorkspaceItem).where(
@@ -1090,13 +1501,113 @@ async def save_roster(
     return RosterResponse.model_validate(roster)
 
 
+async def roster_member_names(db: AsyncSession, ws: Workspace) -> dict[str, str]:
+    from app.workspaces.shares import load_workspace_participants
+
+    parts = await load_workspace_participants(ws, db)
+    names = {str(parts.owner.user_id): parts.owner.username}
+    for c in parts.collaborators:
+        names[str(c.user_id)] = c.username
+    return names
+
+
+async def roster_context_text(db: AsyncSession, ws: Workspace, roster: Roster) -> str:
+    from app.workspaces.roster_text import flatten_roster
+
+    return flatten_roster(roster.title or "Roster", roster.data, await roster_member_names(db, ws))
+
+
+class RosterPublishRequest(BaseModel):
+    data: Any
+    base_revision: int | None = None
+
+
+@router.post(
+    "/{workspace_id}/rosters/{roster_id}/publish",
+    response_model=RosterResponse,
+)
+async def publish_roster(
+    workspace_id: uuid.UUID,
+    roster_id: uuid.UUID,
+    payload: RosterPublishRequest,
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RosterResponse:
+    """Save the roster and publish it: staff now see this version, and
+    everyone whose shifts changed since the last publish is told (R-174)."""
+    from app.workspaces.roster_text import publish_diff
+
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_admin(access_role)
+    roster = await _load_workspace_roster(db, ws.id, roster_id, user)
+    if payload.base_revision is not None and payload.base_revision != roster.revision:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This roster was changed somewhere else. Reload to see the latest.",
+        )
+    prev = roster.data if isinstance(roster.data, dict) else {}
+    old_published = [s for s in (prev.get("published_shifts") or []) if isinstance(s, dict)]
+    data = dict(payload.data) if isinstance(payload.data, dict) else {}
+    shifts = [s for s in (data.get("shifts") or []) if isinstance(s, dict)]
+    now = datetime.now(timezone.utc)
+    settings = dict(data.get("settings") or {})
+    settings.update({"published": True, "publishedAt": now.isoformat()})
+    data["settings"] = settings
+    data["published_shifts"] = shifts
+    roster.data = data
+    roster.revision = (roster.revision or 0) + 1
+    roster.content_text = await roster_context_text(db, ws, roster)
+    ws.updated_at = now
+    roster_item = (
+        await db.execute(
+            select(WorkspaceItem).where(
+                WorkspaceItem.ref_id == roster.id, WorkspaceItem.kind == "roster"
+            )
+        )
+    ).scalars().first()
+    await db.commit()
+    await db.refresh(roster)
+
+    names = await roster_member_names(db, ws)
+    diff = publish_diff(old_published, shifts)
+    from app.notifications import notify_user
+
+    for pid, d in diff.items():
+        if pid not in names or pid == str(user.id):
+            continue
+        what = []
+        if d["added"]:
+            what.append(f"{d['added']} new or changed")
+        if d["removed"] and not d["added"]:
+            what.append(f"{d['removed']} removed")
+        try:
+            await notify_user(
+                user_id=uuid.UUID(pid),
+                category="assignment",
+                title=f"Your shifts in “{roster.title or 'Roster'}” changed",
+                body=f"{user.username} published the roster — {', '.join(what) or 'updated'} shift(s).",
+                url=f"/workspaces/{ws.id}?item={roster_item.id}" if roster_item else f"/workspaces/{ws.id}",
+                tag=f"promptly-roster-{roster.id}-{pid}",
+                actor_user_id=user.id,
+                workspace_id=ws.id,
+            )
+        except Exception:  # noqa: BLE001 — a failed push never fails the publish
+            logger.warning("roster publish notification failed", exc_info=True)
+    if roster_item is not None:
+        from app.workspaces.knowledge import index_roster_for_workspace
+
+        background.add_task(index_roster_for_workspace, ws.id, roster_item.id)
+    return RosterResponse.model_validate(roster)
+
+
 # Match the document/canvas collab token lifetime so the frontend's refresh
 # scheduling is identical across all three editor types.
 _SHEET_TOKEN_TTL_SECONDS = 5 * 60
 
 
 def _mint_sheet_token(
-    *, sheet_id: uuid.UUID, user: User, perm: str
+    *, sheet_id: uuid.UUID, user: User, perm: str, epoch: int = 0
 ) -> tuple[str, int]:
     """A short-lived HS256 JWT the collab server validates for ``sheet:<id>``
     rooms — mirrors the canvas token, with ``type='sheet'``/``sheet_id``."""
@@ -1110,6 +1621,7 @@ def _mint_sheet_token(
         "type": "sheet",
         "sheet_id": str(sheet_id),
         "perm": perm,
+        "epoch": epoch,
         "name": user.username,
         # Chosen profile colour wins; palette hash is the fallback.
         "color": user.avatar_color or _color_for_user(user.id),
@@ -1134,20 +1646,15 @@ async def get_sheet_collab_token(
 ) -> CollabTokenResponse:
     """Mint the collab JWT for a sheet's ``sheet:<id>`` Yjs room. Viewers get
     a read-only token; editors get write."""
-    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    ws, _access_role = await get_accessible_workspace(workspace_id, user, db)
     sheet = await _load_workspace_spreadsheet(db, ws.id, sheet_id, user)
-    perm = "read" if access_role == "viewer" else "write"
-    token, exp = _mint_sheet_token(sheet_id=sheet.id, user=user, perm=perm)
-    return CollabTokenResponse(
-        token=token,
-        expires_at=exp,
-        user=CollabTokenUser(
-            id=user.id,
-            name=user.username,
-            color=user.avatar_color or _color_for_user(user.id),
-            avatar=user.avatar_url,
-        ),
-    )
+    # Same answer as the unified endpoint (WP-3.2).
+    from app.files.office_router import office_token_response
+
+    shell = await db.get(UserFile, sheet.file_id)
+    if shell is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sheet not found")
+    return await office_token_response(db, shell, user)
 
 
 # ---------------------------------------------------------------------
@@ -1206,7 +1713,9 @@ async def save_workspace_memory_endpoint(
     """Hand-edit the workspace memory. Replaces the stored Markdown in place
     and re-indexes it so the edit feeds retrieval. Requires write access."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    require_workspace_write(access_role)
+    # Memory is shared by every member and injected into their chats,
+    # so rewriting it is an admin action (matches the settings UI).
+    require_workspace_admin(access_role)
     from app.workspaces.knowledge import (
         get_workspace_memory_doc,
         index_file_for_workspace,
@@ -1248,7 +1757,9 @@ async def regenerate_workspace_memory_endpoint(
     access. Runs the distillation inline so the fresh memory comes back in the
     response."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    require_workspace_write(access_role)
+    # Memory is shared by every member and injected into their chats,
+    # so rewriting it is an admin action (matches the settings UI).
+    require_workspace_admin(access_role)
     from app.workspaces.knowledge import (
         get_workspace_memory_doc,
         index_file_for_workspace,
@@ -1297,7 +1808,9 @@ async def append_workspace_memory_endpoint(
     (falling back to a verbatim pinned append if no model is available).
     Requires write access; re-indexes off the request path."""
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    require_workspace_write(access_role)
+    # Memory is shared by every member and injected into their chats,
+    # so rewriting it is an admin action (matches the settings UI).
+    require_workspace_admin(access_role)
     from app.workspaces.knowledge import (
         get_workspace_memory_doc,
         index_file_for_workspace,
@@ -1401,7 +1914,9 @@ async def update_workspace_item(
         item.pinned = payload.pinned
     if "config" in sent:
         # Kind-specific config (boards: label registry / columns).
-        item.config = payload.config
+        item.config = _merge_client_config(item.config, payload.config)
+        if item.kind == "board":
+            await reconcile_board_cards(db, item)
     if "visibility" in sent and payload.visibility is not None:
         if payload.visibility not in ("workspace", "private"):
             raise HTTPException(
@@ -1490,10 +2005,18 @@ async def set_chat_context(
     require_workspace_write(access_role)
 
     conv = await db.get(Conversation, conversation_id)
-    if conv is None or conv.workspace_id != ws.id:
+    # Only the chat's own creator may put its transcript into the shared
+    # pool — indexing writes the transcript into the workspace owner's
+    # Drive and makes it retrievable by every member (roadmap R-039).
+    if conv is None or conv.workspace_id != ws.id or conv.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Chat not found in this workspace",
+        )
+    if payload.enabled and conv.visibility != "workspace":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Share this chat with the workspace before using it as context.",
         )
 
     conv.context_enabled = payload.enabled
@@ -1555,7 +2078,9 @@ async def move_workspace_item(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="An item can't be moved inside itself.",
         )
-    await _validate_parent(db, ws.id, payload.parent_id)
+    # The item's own kind, so a notebook can't be moved into a notebook —
+    # the create path checked it but a move didn't (R-181).
+    await _validate_parent(db, ws.id, payload.parent_id, child_kind=item.kind)
 
     item.parent_id = payload.parent_id
     item.position = payload.position
@@ -1717,6 +2242,7 @@ async def get_workspace_archive(
                     WorkspaceItem.workspace_id == ws.id,
                     WorkspaceItem.archived_at.is_not(None),
                     WorkspaceItem.trashed_at.is_(None),
+                    item_visible_to(user.id),
                 )
                 .order_by(WorkspaceItem.archived_at.desc())
             )
@@ -1746,6 +2272,7 @@ async def get_workspace_archive(
                 .where(
                     Conversation.workspace_id == ws.id,
                     Conversation.archived_at.is_not(None),
+                    conversation_visible_to(user.id),
                 )
                 .order_by(Conversation.archived_at.desc())
             )
@@ -1790,6 +2317,7 @@ async def get_item_backlinks(
     from app.files.storage import absolute_path
 
     ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    await _load_item(db, ws.id, item_id, user)
     needle = f"item={item_id}"
 
     notes = list(
@@ -1800,6 +2328,10 @@ async def get_item_backlinks(
                     WorkspaceItem.workspace_id == ws.id,
                     WorkspaceItem.kind == "note",
                     WorkspaceItem.archived_at.is_(None),
+                    WorkspaceItem.trashed_at.is_(None),
+                    # Someone else's private note linking here mustn't
+                    # surface its title (R-168).
+                    item_visible_to(user.id),
                     WorkspaceItem.id != item_id,
                 )
                 .order_by(WorkspaceItem.position.asc())
@@ -2118,17 +2650,18 @@ async def _purge_item(
             # A discussion has no backing row — its (opt-in) RAG transcript
             # file id lives in ``config['text_file_id']``. Threads/messages
             # cascade off the item FK; the file + chunks don't.
-            raw = (it.config or {}).get("text_file_id")
-            if raw:
-                try:
-                    dfid = uuid.UUID(str(raw))
-                except (ValueError, TypeError):
-                    dfid = None
-                if dfid is not None:
-                    df = await db.get(UserFile, dfid)
-                    if df is not None and df.trashed_at is None:
-                        df.trashed_at = now
-                    chunk_file_ids.add(dfid)
+            from app.workspaces.knowledge import load_discussion_backing_file
+
+            # Only trash it once it's proven to be this discussion's own
+            # transcript — the pointer must never become a way to trash
+            # an arbitrary file.
+            df = await load_discussion_backing_file(
+                db, owner_user_id=ws.user_id, item=it
+            )
+            if df is not None:
+                if df.trashed_at is None:
+                    df.trashed_at = now
+                chunk_file_ids.add(df.id)
 
     # Purge the RAG chunks for every backing file we just retired so a
     # deleted item stops contributing to retrieval (and to the indexed-token
@@ -2183,6 +2716,13 @@ async def list_workspace_trash(
         await db.commit()
         roots = await _trash_roots(db, ws.id)
 
+    # The sweeper above purges everyone's expired items; the *listing* only
+    # shows what the caller may see — never another member's private draft.
+    roots = [
+        (it, n)
+        for it, n in roots
+        if it.visibility != "private" or it.created_by == user.id
+    ]
     return [
         TrashEntry(
             id=it.id,

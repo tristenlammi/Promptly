@@ -188,8 +188,16 @@ export function WorkspaceSearchPane({
             })
           )}
           {debounced.length >= 2 &&
+            data?.degraded === "embedder_unavailable" && (
+              <p className="text-center text-[11px] text-[var(--text-muted)]/70">
+                Semantic search is temporarily unavailable — showing keyword
+                matches.
+              </p>
+            )}
+          {debounced.length >= 2 &&
             data &&
             !data.semantic_available &&
+            !data.degraded &&
             hits.length > 0 && (
               <p className="text-center text-[11px] text-[var(--text-muted)]/70">
                 Semantic matching is off — an admin can configure an

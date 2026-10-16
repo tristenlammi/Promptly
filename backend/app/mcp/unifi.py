@@ -12,12 +12,14 @@ history isn't in the GA integration API (legacy/cookie-auth) — a later add.
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 from typing import Any
 
 import httpx
 
-from app.net.safe_fetch import assert_provider_url_safe
+from app.net.safe_fetch import UnsafeURLError, assert_provider_url_safe
 
 logger = logging.getLogger("promptly.mcp.unifi")
 
@@ -96,7 +98,12 @@ def _rows(payload: Any) -> list[dict]:
 
 
 async def _get(console_url: str, api_key: str, path: str) -> Any:
-    assert_provider_url_safe(console_url)
+    try:
+        await asyncio.to_thread(assert_provider_url_safe, console_url)  # DNS lookup
+    except UnsafeURLError as e:
+        from app.mcp.client import url_problem
+
+        raise UniFiError(url_problem(e)) from e
     base = console_url.rstrip("/") + _INTEGRATION_PATH
     url = base + path
     headers = {"X-API-KEY": api_key, "Accept": "application/json"}

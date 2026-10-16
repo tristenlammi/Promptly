@@ -2,8 +2,8 @@ import { cn } from "@/utils/cn";
 import type { TaskRunStatus } from "@/api/tasks";
 
 const STYLES: Record<TaskRunStatus, string> = {
-  pending: "bg-[var(--accent)]/10 text-[var(--accent)]",
-  running: "bg-[var(--accent)]/10 text-[var(--accent)]",
+  pending: "bg-[var(--accent)]/10 text-[var(--accent-text)]",
+  running: "bg-[var(--accent)]/10 text-[var(--accent-text)]",
   success: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
   warning: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
   failed: "bg-red-500/15 text-red-600 dark:text-red-400",

@@ -44,6 +44,7 @@ import type { ReasoningEffort, WebSearchMode } from "@/api/types";
 import { useInvalidateFiles } from "@/hooks/useFiles";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { VoiceWaveform } from "@/components/voice/VoiceWaveform";
+import { ChatConnectorsSection } from "@/components/chat/ChatConnectorsSection";
 import { useDictation } from "@/hooks/useDictation";
 import { EMPTY_QUEUE, useComposerStore } from "@/store/composerStore";
 import type { QueuedPrompt } from "@/store/composerStore";
@@ -304,6 +305,7 @@ export function InputBar({
       // Tool Activity Card rather than only a toast that vanishes.
       const ran = await runCommand(command, {
         conversationId: currentConversationId,
+        source: "menu",
       });
       if (!ran) {
         // Backed out at the confirm — put their typing back rather than
@@ -321,6 +323,26 @@ export function InputBar({
   // mode, subchat, more-menu) collapse behind a "+" so the composer is a
   // single row by default instead of eating a third of the screen.
   const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+  // Desktop "+" menu: attach, talk, subchat — the things you add to or
+  // start from a message, out of the way until wanted (V5).
+  const [plusOpen, setPlusOpen] = useState(false);
+  const plusRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!plusOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (!plusRef.current?.contains(e.target as Node)) setPlusOpen(false);
+    };
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") setPlusOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    plusRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [plusOpen]);
   const selectedModel = useModelStore((s) =>
     s.available.find(
       (m) =>
@@ -778,6 +800,9 @@ export function InputBar({
   };
 
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Mid-IME composition (Chinese, Japanese, Korean…) Enter picks a
+    // candidate — it must not send, or pick a mention / command (R-071).
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     // Give the @-mention popover first crack at navigation keys.
     // If it consumes (Up/Down/Enter/Tab while open, Esc), we stop
     // here and don't fall through to Enter-to-send.
@@ -941,7 +966,9 @@ export function InputBar({
       disabled={sendDisabled}
       className={cn(
         "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition",
-        "bg-[var(--accent)] text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+        // Not ready: a neutral chip, not a washed-out accent (V14).
+        "bg-[var(--accent)] text-white hover:opacity-90",
+        "disabled:cursor-not-allowed disabled:bg-[var(--surface-2)] disabled:text-[var(--text-muted)] disabled:hover:opacity-100"
       )}
       aria-label="Send message"
       title={
@@ -987,9 +1014,13 @@ export function InputBar({
         "inline-flex items-center rounded-full border transition",
         "disabled:cursor-not-allowed disabled:opacity-50",
         dictation.isRecording
-          ? "border-[var(--accent)]/60 bg-[var(--accent)]/10 text-[var(--accent)]"
+          ? "border-[var(--accent)]/60 bg-[var(--accent)]/10 text-[var(--accent-text)]"
           : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--text)]",
-        isMobile ? "h-9 w-9 shrink-0 justify-center" : "h-8 gap-1.5 px-2.5 text-xs"
+        isMobile
+          ? "h-9 w-9 shrink-0 justify-center"
+          : dictation.isRecording || dictation.status === "transcribing"
+            ? "h-8 gap-1.5 px-2.5 text-xs"
+            : "h-8 w-8 shrink-0 justify-center"
       )}
       aria-label={dictation.isRecording ? "Stop dictation" : "Dictate message"}
       aria-pressed={dictation.isRecording}
@@ -1017,18 +1048,12 @@ export function InputBar({
       ) : (
         <Mic className={isMobile ? "h-4 w-4" : "h-3.5 w-3.5"} />
       )}
-      {!isMobile && (
-        <span className="font-medium">
-          {/* "Dictate", not "Voice" — sitting next to the voice-mode
-              "Talk" button, two voice-ish labels were a coin flip for
-              new users. */}
-          {dictation.isRecording
-            ? "Stop"
-            : dictation.status === "transcribing"
-              ? "Transcribing…"
-              : "Dictate"}
-        </span>
-      )}
+      {!isMobile &&
+        (dictation.isRecording || dictation.status === "transcribing") && (
+          <span className="font-medium">
+            {dictation.isRecording ? "Stop" : "Transcribing…"}
+          </span>
+        )}
     </button>
   ) : null;
 
@@ -1198,7 +1223,7 @@ export function InputBar({
             <div
               className={cn(
                 "flex items-center gap-2 rounded-md px-2 py-1 text-[11px]",
-                "bg-[var(--accent)]/10 text-[var(--accent)]"
+                "bg-[var(--accent)]/10 text-[var(--accent-text)]"
               )}
               role="status"
             >
@@ -1218,7 +1243,7 @@ export function InputBar({
             <div
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]",
-                "bg-[var(--accent)]/10 text-[var(--accent)]"
+                "bg-[var(--accent)]/10 text-[var(--accent-text)]"
               )}
               role="status"
             >
@@ -1242,7 +1267,7 @@ export function InputBar({
             <div
               className={cn(
                 "flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px]",
-                "bg-[var(--accent)]/10 text-[var(--accent)]"
+                "bg-[var(--accent)]/10 text-[var(--accent-text)]"
               )}
               role="status"
             >
@@ -1277,7 +1302,7 @@ export function InputBar({
                 "border-[var(--accent)]/40 bg-[var(--accent)]/[0.06]"
               )}
             >
-              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-[var(--accent)]">
+              <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-[var(--accent-text)]">
                 <Sparkles className="h-3 w-3" />
                 Enhanced prompt
               </div>
@@ -1328,7 +1353,7 @@ export function InputBar({
                 className={cn(
                   "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border transition",
                   mobileActionsOpen
-                    ? "border-[var(--accent)]/60 bg-[var(--accent)]/10 text-[var(--accent)]"
+                    ? "border-[var(--accent)]/60 bg-[var(--accent)]/10 text-[var(--accent-text)]"
                     : "border-[var(--border)] text-[var(--text-muted)]"
                 )}
                 aria-label={
@@ -1377,7 +1402,154 @@ export function InputBar({
                 ? talkOrb
                 : sendOrStop)}
           </div>
-          {(!isMobile || mobileActionsOpen) && (
+          {/* Desktop: [+] [More] … [Enhance] [Queue] [mic] [send] — the
+              phone composer's shape. Enhance shows once there's text to
+              enhance and Queue only while a reply streams; they used to sit
+              greyed out the rest of the time (V5). */}
+          {!isMobile && (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                {(allowAttachments || onVoiceMode || onSubchat) && (
+                  <div ref={plusRef} className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setPlusOpen((o) => !o)}
+                      disabled={disabled}
+                      aria-label="Add to message"
+                      aria-haspopup="menu"
+                      aria-expanded={plusOpen}
+                      title="Attach files, talk, or open a subchat"
+                      className={cn(
+                        "inline-flex h-8 w-8 items-center justify-center rounded-full border transition",
+                        "disabled:cursor-not-allowed disabled:opacity-50",
+                        plusOpen
+                          ? "border-[var(--accent)]/60 bg-[var(--accent)]/10 text-[var(--accent-text)]"
+                          : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--text)]"
+                      )}
+                    >
+                      <Plus className={cn("h-4 w-4 transition-transform duration-200", plusOpen && "rotate-45")} />
+                    </button>
+                    {plusOpen && (
+                      <div
+                        role="menu"
+                        aria-label="Add to message"
+                        className="absolute bottom-full left-0 z-30 mb-1.5 w-60 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl"
+                      >
+                        {allowAttachments && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={streaming}
+                            onClick={() => {
+                              setPlusOpen(false);
+                              setPickerOpen(true);
+                            }}
+                            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-[var(--text)] transition hover:bg-[var(--hover)] focus:bg-[var(--hover)] focus:outline-none disabled:opacity-50"
+                          >
+                            <Paperclip className="h-4 w-4 text-[var(--text-muted)]" />
+                            Attach files
+                          </button>
+                        )}
+                        {onVoiceMode && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={streaming}
+                            onClick={() => {
+                              setPlusOpen(false);
+                              onVoiceMode();
+                            }}
+                            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-[var(--text)] transition hover:bg-[var(--hover)] focus:bg-[var(--hover)] focus:outline-none disabled:opacity-50"
+                          >
+                            <AudioLines className="h-4 w-4 text-[var(--text-muted)]" />
+                            Talk — voice mode
+                          </button>
+                        )}
+                        {onSubchat && (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={streaming}
+                            onClick={() => {
+                              setPlusOpen(false);
+                              onSubchat();
+                            }}
+                            className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-[var(--text)] transition hover:bg-[var(--hover)] focus:bg-[var(--hover)] focus:outline-none disabled:opacity-50"
+                          >
+                            <MessagesSquare className="h-4 w-4 text-[var(--text-muted)]" />
+                            Subchat — ask a tangent
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <ComposerMoreMenu
+                  reasoningEffort={reasoningEffort}
+                  onReasoningEffortChange={onReasoningEffortChange}
+                  webSearchMode={webSearchMode}
+                  onWebSearchModeChange={onWebSearchModeChange}
+                  toolsEnabled={toolsEnabled}
+                  onToolsChange={onToolsChange}
+                  onResearch={onResearch}
+                  researchDisabled={disabled || streaming || value.trim().length === 0}
+                  disabled={disabled || streaming}
+                  conversationId={currentConversationId}
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                {showEnhance &&
+                  !streaming &&
+                  (value.trim().length > 0 || enhanceStatus === "loading") && (
+                    <button
+                      type="button"
+                      onClick={() => void handleEnhance()}
+                      disabled={disabled || enhanceStatus === "loading"}
+                      title="Enhance prompt — rewrite for a sharper answer"
+                      className={cn(
+                        "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs transition",
+                        "disabled:cursor-not-allowed disabled:opacity-50",
+                        enhanceStatus === "loading"
+                          ? "border-[var(--accent)]/60 text-[var(--accent-text)]"
+                          : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--accent-text)]"
+                      )}
+                    >
+                      {enhanceStatus === "loading" ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Sparkles className="h-3.5 w-3.5" />
+                      )}
+                      <span className="font-medium">Enhance</span>
+                    </button>
+                  )}
+                {streaming && (
+                  <button
+                    type="button"
+                    onClick={handleQueue}
+                    disabled={disabled || value.trim().length === 0 || uploadingCount > 0}
+                    aria-label="Queue this prompt for later"
+                    title={
+                      value.trim().length === 0
+                        ? "Queue — type a message to send when this reply finishes"
+                        : "Queue — send this when the reply finishes"
+                    }
+                    className={cn(
+                      "inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-xs transition",
+                      "border-[var(--border)] text-[var(--text-muted)]",
+                      "hover:border-[var(--accent)]/60 hover:text-[var(--accent-text)]",
+                      "disabled:cursor-not-allowed disabled:opacity-50"
+                    )}
+                  >
+                    <ListPlus className="h-3.5 w-3.5" />
+                    <span className="font-medium">Queue</span>
+                  </button>
+                )}
+                {dictateButton}
+                {sendOrStop}
+              </div>
+            </div>
+          )}
+          {isMobile && mobileActionsOpen && (
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               {allowAttachments && (
@@ -1424,8 +1596,8 @@ export function InputBar({
                   "disabled:cursor-not-allowed disabled:opacity-50",
                   isMobile ? "h-9 w-9 justify-center" : "h-8 gap-1.5 px-2.5 text-xs",
                   enhanceStatus === "loading"
-                    ? "border-[var(--accent)]/60 text-[var(--accent)]"
-                    : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--accent)]"
+                    ? "border-[var(--accent)]/60 text-[var(--accent-text)]"
+                    : "border-[var(--border)] text-[var(--text-muted)] hover:border-[var(--accent)]/60 hover:text-[var(--accent-text)]"
                 )}
               >
                 {enhanceStatus === "loading" ? (
@@ -1435,29 +1607,6 @@ export function InputBar({
                 )}
                 {!isMobile && <span className="font-medium">Enhance</span>}
               </button>}
-              {/* On mobile the dictate mic lives in the input row above. */}
-              {!isMobile && dictateButton}
-              {/* Mobile surfaces voice mode as the orb in the input row —
-                  only desktop needs the labelled Talk button here. */}
-              {onVoiceMode && !isMobile && (
-                <button
-                  type="button"
-                  onClick={onVoiceMode}
-                  disabled={disabled || streaming}
-                  className={cn(
-                    "inline-flex items-center rounded-full border transition",
-                    "disabled:cursor-not-allowed disabled:opacity-50",
-                    "border-[var(--border)] text-[var(--text-muted)]",
-                    "hover:border-[var(--accent)]/60 hover:text-[var(--accent)]",
-                    "h-8 gap-1.5 px-2.5 text-xs"
-                  )}
-                  aria-label="Voice mode — talk hands-free"
-                  title="Voice mode — talk hands-free"
-                >
-                  <AudioLines className="h-3.5 w-3.5" />
-                  <span className="font-medium">Talk</span>
-                </button>
-              )}
               {onSubchat && (
                 <button
                   type="button"
@@ -1467,7 +1616,7 @@ export function InputBar({
                     "inline-flex items-center rounded-full border transition",
                     "disabled:cursor-not-allowed disabled:opacity-50",
                     "border-[var(--border)] text-[var(--text-muted)]",
-                    "hover:border-[var(--accent)]/60 hover:text-[var(--accent)]",
+                    "hover:border-[var(--accent)]/60 hover:text-[var(--accent-text)]",
                     isMobile
                       ? "h-9 w-9 justify-center"
                       : "h-8 gap-1.5 px-2.5 text-xs"
@@ -1494,7 +1643,7 @@ export function InputBar({
                 className={cn(
                   "inline-flex items-center rounded-full border transition",
                   "border-[var(--border)] text-[var(--text-muted)]",
-                  "hover:border-[var(--accent)]/60 hover:text-[var(--accent)]",
+                  "hover:border-[var(--accent)]/60 hover:text-[var(--accent-text)]",
                   "disabled:cursor-not-allowed disabled:opacity-50",
                   isMobile ? "h-9 w-9 justify-center" : "h-8 gap-1.5 px-2.5 text-xs"
                 )}
@@ -1518,10 +1667,9 @@ export function InputBar({
                 onResearch={onResearch}
                 researchDisabled={disabled || streaming || value.trim().length === 0}
                 disabled={disabled || streaming}
+                conversationId={currentConversationId}
               />
             </div>
-            {/* On mobile the send button lives in the input row above. */}
-            {!isMobile && sendOrStop}
           </div>
           )}
         </div>
@@ -1605,7 +1753,9 @@ function ComposerMoreMenu({
   onResearch,
   researchDisabled,
   disabled,
+  conversationId,
 }: {
+  conversationId?: string | null;
   reasoningEffort: ReasoningEffort | null;
   onReasoningEffortChange?: (effort: ReasoningEffort) => void;
   webSearchMode: WebSearchMode;
@@ -1689,7 +1839,7 @@ function ComposerMoreMenu({
               : "h-9 w-9 justify-center"
             : "h-8 gap-1.5 px-2.5 text-xs",
           open || nonDefault
-            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent-text)]"
             : "border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
         )}
       >
@@ -1746,7 +1896,7 @@ function ComposerMoreMenu({
                     <span
                       className={cn(
                         "inline-flex h-4 w-4 shrink-0 items-center justify-center",
-                        selected ? "text-[var(--accent)]" : "text-transparent"
+                        selected ? "text-[var(--accent-text)]" : "text-transparent"
                       )}
                       aria-hidden
                     >
@@ -1755,7 +1905,7 @@ function ComposerMoreMenu({
                     <span
                       className={cn(
                         "text-sm font-medium",
-                        selected ? "text-[var(--accent)]" : "text-[var(--text)]"
+                        selected ? "text-[var(--accent-text)]" : "text-[var(--text)]"
                       )}
                     >
                       {WEB_LABELS[value]}
@@ -1784,7 +1934,7 @@ function ComposerMoreMenu({
                 <span
                   className={cn(
                     "inline-flex h-4 w-4 shrink-0 items-center justify-center",
-                    toolsEnabled ? "text-[var(--accent)]" : "text-transparent"
+                    toolsEnabled ? "text-[var(--accent-text)]" : "text-transparent"
                   )}
                   aria-hidden
                 >
@@ -1802,7 +1952,7 @@ function ComposerMoreMenu({
                       className={cn(
                         "text-sm font-medium",
                         toolsEnabled
-                          ? "text-[var(--accent)]"
+                          ? "text-[var(--accent-text)]"
                           : "text-[var(--text)]"
                       )}
                     >
@@ -1815,6 +1965,9 @@ function ComposerMoreMenu({
                   </span>
                 </span>
               </button>
+              {toolsEnabled && conversationId && (
+                <ChatConnectorsSection conversationId={conversationId} />
+              )}
             </>
           )}
 
@@ -1843,7 +1996,7 @@ function ComposerMoreMenu({
                   "disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
                 )}
               >
-                <FlaskConical className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+                <FlaskConical className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium text-[var(--text)]">
                     Deep Research
@@ -1892,7 +2045,7 @@ function ComposerMoreMenu({
                     <span
                       className={cn(
                         "inline-flex h-4 w-4 shrink-0 items-center justify-center",
-                        selected ? "text-[var(--accent)]" : "text-transparent"
+                        selected ? "text-[var(--accent-text)]" : "text-transparent"
                       )}
                       aria-hidden
                     >
@@ -1901,7 +2054,7 @@ function ComposerMoreMenu({
                     <span
                       className={cn(
                         "text-sm font-medium",
-                        selected ? "text-[var(--accent)]" : "text-[var(--text)]"
+                        selected ? "text-[var(--accent-text)]" : "text-[var(--text)]"
                       )}
                     >
                       {m.label}
@@ -1948,7 +2101,7 @@ function QueuedPromptRow({
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
         title="Load this queued prompt into the composer"
       >
-        <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)] transition group-hover:text-[var(--accent)]" />
+        <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)] transition group-hover:text-[var(--accent-text)]" />
         <span className="min-w-0 flex-1 truncate text-[var(--text)]">
           {preview || "(empty)"}
         </span>
@@ -1989,7 +2142,7 @@ function DropOverlay() {
         <div
           className={cn(
             "flex h-12 w-12 items-center justify-center rounded-full",
-            "bg-[var(--accent)]/10 text-[var(--accent)]"
+            "bg-[var(--accent)]/10 text-[var(--accent-text)]"
           )}
         >
           <Upload className="h-6 w-6" />
@@ -2023,7 +2176,7 @@ function AttachmentChip({
       )}
       title={`${file.filename} · ${humanSize(file.size_bytes)}`}
     >
-      <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+      <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
       <span className="truncate">{file.filename}</span>
       <button
         onClick={onRemove}
@@ -2064,7 +2217,7 @@ function PendingChip({
       {errored ? (
         <X className="h-3.5 w-3.5 shrink-0" />
       ) : (
-        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent)]" />
+        <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent-text)]" />
       )}
       <span className="min-w-0">
         <span className="block truncate">{pending.filename}</span>

@@ -7,10 +7,12 @@ a slow storage leak, and the source of the duplicate résumés cluttering
 the ``@``-mention picker.
 
 A Chat Uploads file is *referenced* while its id appears in some live
-``messages.attachments`` snapshot. ``resolve_attachments`` only lets a
-user attach files they own, so a given user's upload can only ever be
-referenced by that same user's messages — which makes the "is anything
-still pointing at this?" check a single scan of the owner's messages.
+``messages.attachments`` snapshot — or anywhere else that uploads through
+the chat route: a custom model's knowledge library, a board card's
+attachments, a workspace pin. Only checking messages used to trash all of
+those within hours (R-026, R-034). Uploads younger than
+:data:`GRACE_HOURS` are never pruned either: the composer uploads on
+attach, so an unsent message's files have no reference yet.
 
 Pruning is a **soft delete** (``trashed_at``): the files drop out of
 Chat Uploads, Drive listings, and the ``@`` picker immediately but land
@@ -22,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,6 +34,8 @@ from app.files.models import FileFolder, UserFile
 from app.files.system_folders import SystemKind
 
 logger = logging.getLogger(__name__)
+
+GRACE_HOURS = 24
 
 
 async def _referenced_file_ids(db: AsyncSession, user_id: uuid.UUID) -> set[str]:
@@ -56,6 +60,36 @@ async def _referenced_file_ids(db: AsyncSession, user_id: uuid.UUID) -> set[str]
             if fid:
                 referenced.add(str(fid))
     return referenced
+
+
+async def _referenced_elsewhere(db: AsyncSession, candidate_ids) -> set[str]:
+    """Candidates something other than a chat message still uses."""
+    from app.chat.models import WorkspaceFile, WorkspaceTask
+    from app.custom_models.models import CustomModelFile
+
+    ids = list(candidate_ids)
+    out: set[str] = set()
+    out.update(
+        str(r)
+        for (r,) in await db.execute(
+            select(CustomModelFile.user_file_id).where(CustomModelFile.user_file_id.in_(ids))
+        )
+    )
+    out.update(
+        str(r)
+        for (r,) in await db.execute(
+            select(WorkspaceFile.file_id).where(WorkspaceFile.file_id.in_(ids))
+        )
+    )
+    wanted = {str(i) for i in ids}
+    for (atts,) in await db.execute(
+        select(WorkspaceTask.attachments).where(WorkspaceTask.attachments.is_not(None))
+    ):
+        for a in atts or []:
+            fid = str(a.get("file_id")) if isinstance(a, dict) else None
+            if fid in wanted:
+                out.add(fid)
+    return out
 
 
 async def prune_orphaned_chat_uploads(
@@ -85,6 +119,8 @@ async def prune_orphaned_chat_uploads(
                     UserFile.folder_id == folder.id,
                     UserFile.user_id == user_id,
                     UserFile.trashed_at.is_(None),
+                    UserFile.created_at
+                    < datetime.now(timezone.utc) - timedelta(hours=GRACE_HOURS),
                 )
             )
         )
@@ -96,6 +132,9 @@ async def prune_orphaned_chat_uploads(
 
     referenced = await _referenced_file_ids(db, user_id)
     orphan_ids = [fid for fid in candidate_ids if str(fid) not in referenced]
+    if orphan_ids:
+        used = await _referenced_elsewhere(db, orphan_ids)
+        orphan_ids = [fid for fid in orphan_ids if str(fid) not in used]
     if not orphan_ids:
         return 0
 

@@ -98,7 +98,7 @@ export function VoicePanel() {
           The voice Promptly uses when it reads replies aloud and in voice
           mode. Click a voice to select it and hear a sample — your choice is
           saved to your account and follows you across devices. Look for the{" "}
-          <span className="inline-flex items-center gap-0.5 font-medium text-[var(--accent)]">
+          <span className="inline-flex items-center gap-0.5 font-medium text-[var(--accent-text)]">
             <Sparkle className="h-3 w-3" /> Calm
           </span>{" "}
           tag for the smoothest, most relaxed voices.
@@ -123,7 +123,7 @@ export function VoicePanel() {
                     className={cn(
                       "group inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition",
                       isSelected
-                        ? "border-[var(--accent)] bg-[var(--accent)]/[0.10] text-[var(--accent)]"
+                        ? "border-[var(--accent)] bg-[var(--accent)]/[0.10] text-[var(--accent-text)]"
                         : "border-[var(--border)] text-[var(--text)] hover:border-[var(--accent)]/50"
                     )}
                   >
@@ -141,7 +141,7 @@ export function VoicePanel() {
                       </span>
                     )}
                     {voice.calm && (
-                      <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+                      <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--accent-text)]">
                         <Sparkle className="h-2.5 w-2.5" />
                         Calm
                       </span>

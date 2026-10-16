@@ -9,6 +9,7 @@ import {
   type Task,
   type TaskFrequency,
   type TaskInput,
+  type TaskNotifyMode,
 } from "@/api/tasks";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
@@ -105,6 +106,7 @@ export function TaskFormModal({
   const [timezone, setTimezone] = useState(defaultTimezone);
   const [enabled, setEnabled] = useState(true);
   const [concurrency, setConcurrency] = useState<"allow" | "skip">("allow");
+  const [notifyMode, setNotifyMode] = useState<TaskNotifyMode>("failures");
   const [error, setError] = useState<string | null>(null);
 
   // Hydrate when opening (create = blank defaults; edit = task values).
@@ -134,6 +136,7 @@ export function TaskFormModal({
       setTimezone(task.timezone);
       setEnabled(task.enabled);
       setConcurrency(task.concurrency === "skip" ? "skip" : "allow");
+      setNotifyMode(task.notify ? task.notify_mode ?? "failures" : "never");
     } else {
       setTitle("");
       setPrompt("");
@@ -214,8 +217,10 @@ export function TaskFormModal({
       day_of_month: frequency === "monthly" ? dayOfMonth : null,
       timezone,
       enabled,
-      notify: true,
-      retention_runs: 30,
+      notify: notifyMode !== "never",
+      notify_mode: notifyMode,
+      // No field for this — keep the task's own setting.
+      retention_runs: task?.retention_runs ?? 30,
       concurrency,
     };
   };
@@ -357,7 +362,7 @@ export function TaskFormModal({
                   />
                   <span className="text-[var(--text)]">{c.name}</span>
                   {c.kind !== "mcp" && (
-                    <span className="rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                    <span className="rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent-text)]">
                       {c.kind}
                     </span>
                   )}
@@ -456,7 +461,7 @@ export function TaskFormModal({
                         className={cn(
                           "rounded-md border px-2.5 py-1.5 text-xs font-medium transition",
                           on
-                            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent-text)]"
                             : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
                         )}
                       >
@@ -512,6 +517,20 @@ export function TaskFormModal({
           />
           <span>Enabled — run on schedule</span>
         </label>
+
+        <div>
+          <label className={labelCls}>Notify me</label>
+          <select
+            className={fieldCls}
+            value={notifyMode}
+            onChange={(e) => setNotifyMode(e.target.value as TaskNotifyMode)}
+          >
+            <option value="failures">When it fails (and the first time it works)</option>
+            <option value="changes">When the result changes</option>
+            <option value="every">After every run</option>
+            <option value="never">Never</option>
+          </select>
+        </div>
 
         <div>
           <label className={labelCls}>If a run is still going at the next fire</label>

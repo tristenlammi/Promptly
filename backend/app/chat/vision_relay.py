@@ -184,7 +184,7 @@ async def caption_image(
     # transcoding, and Pillow verify all behave identically to the
     # normal pipeline. ``build_image_parts`` returns at most one part
     # for our single-element list (or empty + warnings on failure).
-    parts, warnings = build_image_parts([image_file])
+    parts, warnings = await asyncio.to_thread(build_image_parts, [image_file])
     if not parts:
         first_warning = warnings[0] if warnings else "Image could not be read."
         return CaptionResult(ok=False, error=first_warning)

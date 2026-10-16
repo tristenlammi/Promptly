@@ -32,6 +32,8 @@ class WorkspaceTemplate:
     system_prompt: str
     notes: list[tuple[str, str]] = field(default_factory=list)  # (title, md)
     board: tuple[str, list[dict[str, Any]]] | None = None  # (title, labels)
+    # Picker section: "Home & family" or "Work" (V10).
+    group: str = "Work"
 
 
 TEMPLATES: dict[str, WorkspaceTemplate] = {
@@ -61,7 +63,7 @@ TEMPLATES: dict[str, WorkspaceTemplate] = {
                     "Client intake",
                     "# Client intake\n\n"
                     "## Contact\n- Name: \n- Email: \n- Phone: \n\n"
-                    "## Engagement\n- Scope: \n- Fee arrangement: \n- Conflicts check: [ ] done\n\n"
+                    "## Engagement\n- Scope: \n- Fee arrangement: \n- [ ] Conflicts check done\n\n"
                     "## Documents received\n- [ ] ",
                 ),
             ],
@@ -149,6 +151,171 @@ TEMPLATES: dict[str, WorkspaceTemplate] = {
                 ],
             ),
         ),
+        # --- Home & family (V10) — the business-only list said Promptly
+        # wasn't for households.
+        WorkspaceTemplate(
+            key="household",
+            name="Household",
+            group="Home & family",
+            description="Chores board, a shopping list, key contacts and bills.",
+            system_prompt=(
+                "You help a household run smoothly. Be practical and brief. "
+                "Use the workspace's notes for who does what, recurring bills "
+                "and contacts; suggest fair ways to share chores, and turn "
+                "plans into checklists."
+            ),
+            notes=[
+                (
+                    "Household info",
+                    "# Household info\n\n"
+                    "## Key contacts\n| Who | Phone | Notes |\n|---|---|---|\n"
+                    "| Doctor |  |  |\n| School |  |  |\n| Plumber |  |  |\n\n"
+                    "## Bills & renewals\n| Bill | Due | Amount | Paid by |\n|---|---|---|---|\n|  |  |  |  |\n\n"
+                    "## Wi-Fi & codes\n- Wi-Fi: \n- Alarm: ",
+                ),
+                (
+                    "Shopping list",
+                    "# Shopping list\n\n"
+                    "## Groceries\n- [ ] \n\n"
+                    "## Household\n- [ ] \n\n"
+                    "## Someday\n- [ ] ",
+                ),
+                (
+                    "Meal plan",
+                    "# Meal plan\n\n"
+                    "| Day | Dinner | Who cooks |\n|---|---|---|\n"
+                    "| Mon |  |  |\n| Tue |  |  |\n| Wed |  |  |\n"
+                    "| Thu |  |  |\n| Fri |  |  |\n| Sat |  |  |\n| Sun |  |  |",
+                ),
+            ],
+            board=(
+                "Chores",
+                [
+                    {"name": "Weekly", "color": "#4F46E5"},
+                    {"name": "Monthly", "color": "#0EA5E9"},
+                    {"name": "Kids", "color": "#10B981"},
+                    {"name": "Errand", "color": "#F59E0B"},
+                ],
+            ),
+        ),
+        WorkspaceTemplate(
+            key="trip",
+            name="Trip",
+            group="Home & family",
+            description="Itinerary, packing list, bookings and a to-do board.",
+            system_prompt=(
+                "You help plan a trip. Keep the itinerary, bookings and budget "
+                "in the workspace notes as the source of truth; flag clashes, "
+                "missing bookings and deadlines (visas, check-in times), and "
+                "keep suggestions realistic for the group."
+            ),
+            notes=[
+                (
+                    "Itinerary",
+                    "# Itinerary\n\n"
+                    "**Dates:** \n**Travellers:** \n\n"
+                    "| Day | Where | Plans | Stay |\n|---|---|---|---|\n"
+                    "| 1 |  |  |  |\n| 2 |  |  |  |\n| 3 |  |  |  |",
+                ),
+                (
+                    "Bookings",
+                    "# Bookings\n\n"
+                    "| What | Ref | Date & time | Cost | Paid |\n|---|---|---|---|---|\n"
+                    "| Flights |  |  |  |  |\n| Stay |  |  |  |  |\n| Car |  |  |  |  |\n\n"
+                    "## Budget\n- Total: \n- Per person: ",
+                ),
+                (
+                    "Packing list",
+                    "# Packing list\n\n"
+                    "## Documents\n- [ ] Passports / ID\n- [ ] Tickets\n- [ ] Insurance\n\n"
+                    "## Clothes\n- [ ] \n\n"
+                    "## Gear & chargers\n- [ ] ",
+                ),
+            ],
+            board=(
+                "Trip to-dos",
+                [
+                    {"name": "Book", "color": "#4F46E5"},
+                    {"name": "Buy", "color": "#F59E0B"},
+                    {"name": "Before we go", "color": "#EF4444"},
+                ],
+            ),
+        ),
+        WorkspaceTemplate(
+            key="renovation",
+            name="Renovation",
+            group="Home & family",
+            description="Scope and budget, trades and quotes, and a works board.",
+            system_prompt=(
+                "You help manage a home renovation. Track scope, budget and "
+                "quotes from the workspace notes; compare quotes like for like, "
+                "flag budget overruns and decisions that block the trades, and "
+                "keep the order of works sensible."
+            ),
+            notes=[
+                (
+                    "Scope & budget",
+                    "# Scope & budget\n\n"
+                    "## What we're doing\n- \n\n"
+                    "## Budget\n| Item | Estimate | Actual |\n|---|---|---|\n|  |  |  |\n\n"
+                    "**Contingency:** \n\n"
+                    "## Decisions to make\n- [ ] ",
+                ),
+                (
+                    "Trades & quotes",
+                    "# Trades & quotes\n\n"
+                    "| Trade | Name | Phone | Quote | Status |\n|---|---|---|---|---|\n"
+                    "| Builder |  |  |  |  |\n| Electrician |  |  |  |  |\n"
+                    "| Plumber |  |  |  |  |",
+                ),
+            ],
+            board=(
+                "Works",
+                [
+                    {"name": "Waiting on quote", "color": "#F59E0B"},
+                    {"name": "Booked", "color": "#4F46E5"},
+                    {"name": "Needs a decision", "color": "#EF4444"},
+                    {"name": "DIY", "color": "#10B981"},
+                ],
+            ),
+        ),
+        WorkspaceTemplate(
+            key="school",
+            name="School",
+            group="Home & family",
+            description="Term dates, subjects and a homework board for a student.",
+            system_prompt=(
+                "You help a student (and their family) stay on top of school. "
+                "Explain things step by step at the student's level, encourage "
+                "them to try before giving answers, and use the workspace's "
+                "notes for term dates, subjects and due dates."
+            ),
+            notes=[
+                (
+                    "Term overview",
+                    "# Term overview\n\n"
+                    "**Term dates:** \n**Year / class:** \n\n"
+                    "## Key dates\n| Date | What |\n|---|---|\n|  |  |\n\n"
+                    "## Teachers\n| Subject | Teacher | Contact |\n|---|---|---|\n|  |  |  |",
+                ),
+                (
+                    "Study notes",
+                    "# Study notes\n\n"
+                    "## This week\n- \n\n"
+                    "## Things I don't get yet\n- [ ] \n\n"
+                    "## Before the next test\n- [ ] ",
+                ),
+            ],
+            board=(
+                "Homework",
+                [
+                    {"name": "Maths", "color": "#4F46E5"},
+                    {"name": "English", "color": "#10B981"},
+                    {"name": "Science", "color": "#0EA5E9"},
+                    {"name": "Project", "color": "#F59E0B"},
+                ],
+            ),
+        ),
     ]
 }
 
@@ -156,7 +323,12 @@ TEMPLATES: dict[str, WorkspaceTemplate] = {
 def template_catalog() -> list[dict[str, str]]:
     """Key/name/description rows for the create-workspace picker."""
     return [
-        {"key": t.key, "name": t.name, "description": t.description}
+        {
+            "key": t.key,
+            "name": t.name,
+            "description": t.description,
+            "group": t.group,
+        }
         for t in TEMPLATES.values()
     ]
 

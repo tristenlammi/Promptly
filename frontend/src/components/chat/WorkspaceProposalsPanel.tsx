@@ -4,20 +4,27 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
+  ArrowRight,
   Check,
   ChevronDown,
   ChevronRight,
   CircleDot,
   Clock,
   ExternalLink,
+  File as FileIcon,
   FileText,
+  Folder,
+  FolderPlus,
   Loader2,
+  PencilLine,
   Sparkles,
   SquareKanban,
   X,
 } from "lucide-react";
 
-import { proposalsApi, type WorkspaceProposal } from "@/api/chat";
+import { proposalsApi, type FileChangeStep, type WorkspaceProposal } from "@/api/chat";
+import { photosApi } from "@/api/photos";
+import { invalidateFileQueries } from "@/hooks/useFiles";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import { useItemPreview } from "@/components/workspaces/itemPreviewContext";
 import { toast } from "@/store/toastStore";
@@ -44,16 +51,20 @@ export function WorkspaceProposalsPanel({
   workspaceId,
 }: {
   conversationId: string;
-  workspaceId: string;
+  /** ``null`` outside a workspace — only file-change proposals there. */
+  workspaceId: string | null;
 }) {
   const qc = useQueryClient();
   const key = ["chat", "proposals", conversationId];
   const { data: proposals } = useQuery({
     queryKey: key,
     queryFn: () => proposalsApi.list(conversationId),
-    // The AI files proposals mid-stream; a short poll picks them up
-    // right after the reply lands without wiring into the SSE stream.
-    refetchInterval: 7000,
+    // A tool that files a proposal refreshes this from the stream; the
+    // poll is the backstop (workspace chats, or while one is pending).
+    refetchInterval: (q) =>
+      workspaceId || (q.state.data as WorkspaceProposal[] | undefined)?.some((p) => p.status === "pending")
+        ? 7000
+        : false,
   });
 
   const apply = useMutation({
@@ -62,6 +73,17 @@ export function WorkspaceProposalsPanel({
       qc.setQueryData<WorkspaceProposal[]>(key, (old) =>
         (old ?? []).map((p) => (p.id === updated.id ? updated : p))
       );
+      if (updated.kind === "file_changes") {
+        invalidateFileQueries(qc);
+        toast.success("Files organised");
+        return;
+      }
+      if (updated.kind.startsWith("photo_")) {
+        void qc.invalidateQueries({ queryKey: ["albums"] });
+        void qc.invalidateQueries({ queryKey: ["people"] });
+        toast.success(PHOTO_DONE[updated.kind] ?? "Done");
+        return;
+      }
       // The workspace tree/overview just gained content.
       qc.invalidateQueries({ queryKey: ["workspaces", "tree", workspaceId] });
       qc.invalidateQueries({ queryKey: ["workspaces", "tasks", workspaceId] });
@@ -125,6 +147,8 @@ function ProposalCard({
   const [expanded, setExpanded] = useState(false);
   const isNote = p.kind === "create_note";
   const isUpdate = p.kind === "update_cards";
+  const isFiles = p.kind === "file_changes";
+  const isPhoto = p.kind.startsWith("photo_");
   const cards = p.payload.cards ?? [];
   const applied = p.status === "applied";
   const changeSummary = isUpdate ? describeChanges(p.payload.changes) : null;
@@ -147,12 +171,18 @@ function ProposalCard({
     if (!applied) setPhase("full");
   }, [applied]);
 
-  const appliedLabel = isNote
+  const appliedLabel = isPhoto
+    ? PHOTO_DONE[p.kind] ?? "Done"
+    : isFiles
+    ? "Files organised"
+    : isNote
     ? "Note created"
     : isUpdate
       ? `Updated ${cards.length} card${cards.length === 1 ? "" : "s"}`
       : `Added ${cards.length} card${cards.length === 1 ? "" : "s"}`;
-  const appliedContext = isNote
+  const appliedContext = isFiles || isPhoto
+    ? p.payload.summary
+    : isNote
     ? p.payload.title
     : p.payload.board_title;
 
@@ -160,6 +190,19 @@ function ProposalCard({
   // (same as an @-mention pill) when we're inside the workspace page;
   // fall back to a route change otherwise.
   const openApplied = () => {
+    if (isPhoto) {
+      navigate(
+        p.kind === "photo_relationship"
+          ? `/files/photos/people/${p.applied_item_id ?? ""}`
+          : p.applied_item_id ? `/files/photos/albums/${p.applied_item_id}` : "/files/photos/albums",
+      );
+      return;
+    }
+    if (isFiles) {
+      // Where the files went (the first destination), else Files.
+      navigate(p.applied_item_id ? `/files/folder/${p.applied_item_id}` : "/files");
+      return;
+    }
     const kind: WorkspaceItemNode["kind"] = isNote ? "note" : "board";
     if (p.applied_item_id && preview) {
       preview({
@@ -251,12 +294,19 @@ function ProposalCard({
         <Sparkles
           className={cn(
             "h-4 w-4 shrink-0",
-            applied ? "text-[var(--success)]" : "text-[var(--accent)]"
+            applied ? "text-[var(--success)]" : "text-[var(--accent-text)]"
           )}
         />
         <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">
           {applied ? "Applied: " : "AI proposes: "}
-          {isNote ? (
+          {isPhoto ? (
+            <span className="text-[var(--text)]">{p.payload.summary}</span>
+          ) : isFiles ? (
+            <>
+              organise your files{" "}
+              <span className="text-[var(--text-muted)]">· {p.payload.summary}</span>
+            </>
+          ) : isNote ? (
             <>
               create note{" "}
               <span className="font-medium">
@@ -345,7 +395,11 @@ function ProposalCard({
 
       {expanded && (
         <div className="border-t border-[var(--border)] px-3 py-2.5">
-          {isNote ? (
+          {isPhoto ? (
+            <PhotoProposalPreview proposal={p} />
+          ) : isFiles ? (
+            <FileChangeList steps={p.payload.operations ?? []} />
+          ) : isNote ? (
             <div className="promptly-prose max-h-72 overflow-y-auto text-sm">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {p.payload.markdown ?? ""}
@@ -353,7 +407,7 @@ function ProposalCard({
             </div>
           ) : isUpdate ? (
             <>
-              <div className="mb-2 inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)]/10 px-2 py-1 text-xs font-medium text-[var(--accent)]">
+              <div className="mb-2 inline-flex items-center gap-1.5 rounded-md bg-[var(--accent)]/10 px-2 py-1 text-xs font-medium text-[var(--accent-text)]">
                 <SquareKanban className="h-3.5 w-3.5" />
                 {changeSummary ?? "update cards"}
               </div>
@@ -398,18 +452,69 @@ function ProposalCard({
             </ul>
           )}
           <p className="mt-2 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
-            {isNote ? (
+            {isFiles ? (
+              <Folder className="h-3 w-3" />
+            ) : isNote ? (
               <FileText className="h-3 w-3" />
             ) : (
               <SquareKanban className="h-3 w-3" />
             )}
-            {isUpdate
+            {isFiles
+              ? "Nothing moves until you hit Apply — and then all of it or none of it."
+              : isUpdate
               ? "Nothing changes on the board until you hit Apply."
               : "Nothing is written to the workspace until you hit Apply."}
           </p>
         </div>
       )}
     </div>
+  );
+}
+
+/** The steps of a ``file_changes`` proposal, in order, in paths. */
+function FileChangeList({ steps }: { steps: FileChangeStep[] }) {
+  const where = (path?: string) => (path ? path : "My files");
+  return (
+    <ol className="max-h-72 space-y-1.5 overflow-y-auto text-sm" aria-label="Proposed file changes">
+      {steps.map((s, i) => {
+        const Icon = s.item_type === "folder" ? Folder : FileIcon;
+        if (s.op === "create_folder") {
+          return (
+            <li key={i} className="flex items-center gap-2 text-[var(--text)]">
+              <FolderPlus className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
+              <span className="min-w-0 truncate">
+                New folder <span className="font-medium">{s.path}</span>
+                {s.exists && <span className="text-[var(--text-muted)]"> (already there)</span>}
+              </span>
+            </li>
+          );
+        }
+        if (s.op === "rename") {
+          return (
+            <li key={i} className="flex min-w-0 items-center gap-2 text-[var(--text)]">
+              <PencilLine className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+              <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+              <span className="min-w-0 truncate">{s.name}</span>
+              <ArrowRight className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
+              <span className="min-w-0 truncate font-medium">{s.new_name}</span>
+              <span className="shrink-0 text-xs text-[var(--text-muted)]">in {where(s.from)}</span>
+            </li>
+          );
+        }
+        return (
+          <li key={i} className="flex min-w-0 items-center gap-2 text-[var(--text)]">
+            <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+            <span className="min-w-0 truncate font-medium">{s.name}</span>
+            <span className="shrink-0 text-xs text-[var(--text-muted)]">{where(s.from)}</span>
+            <ArrowRight className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
+            <span className="min-w-0 truncate">
+              {where(s.to)}
+              {s.to_new && <span className="text-xs text-[var(--accent-text)]"> (new)</span>}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -429,4 +534,49 @@ function describeChanges(
   if (changes.due_date === null) bits.push("clear due date");
   else if (changes.due_date) bits.push(`due ${changes.due_date}`);
   return bits.length ? bits.join(" · ") : null;
+}
+
+const PHOTO_DONE: Record<string, string> = {
+  photo_album: "Album ready",
+  photo_share: "Album shared",
+  photo_relationship: "Remembered",
+};
+
+/** What a photo proposal would do: the photos (first dozen), who it's
+ *  shared with, or who someone is to you. */
+function PhotoProposalPreview({ proposal: p }: { proposal: WorkspaceProposal }) {
+  const ids = (p.payload.file_ids ?? []).slice(0, 12);
+  const { data: photos } = useQuery({
+    queryKey: ["proposal-photos", p.id],
+    queryFn: () => photosApi.items(ids),
+    enabled: p.kind === "photo_album" && ids.length > 0,
+    staleTime: 5 * 60_000,
+  });
+  if (p.kind === "photo_share") {
+    return (
+      <p className="text-sm text-[var(--text)]">
+        {(p.payload.people ?? []).map((x) => x.username).join(", ")} {p.payload.role === "contributor" ? "can see it and add their photos" : "can see it"}.
+      </p>
+    );
+  }
+  if (p.kind === "photo_relationship") {
+    return (
+      <p className="text-sm text-[var(--text)]">
+        Searches like “me and {p.payload.label}” will find {p.payload.person_name}. Only you see this.
+      </p>
+    );
+  }
+  return (
+    <div>
+      <p className="mb-2 text-xs text-[var(--text-muted)]">
+        {p.payload.count ?? ids.length} photo{(p.payload.count ?? ids.length) === 1 ? "" : "s"}
+        {p.payload.smart_rules ? " now — new ones that match join by themselves" : ""}
+      </p>
+      <div className="flex flex-wrap gap-1" aria-label="Photos in the proposal">
+        {(photos ?? []).map((ph) =>
+          ph.thumb ? <img key={ph.id} src={ph.thumb} alt="" className="h-14 w-14 rounded object-cover" /> : <span key={ph.id} className="h-14 w-14 rounded bg-[var(--hover)]" />,
+        )}
+      </div>
+    </div>
+  );
 }

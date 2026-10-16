@@ -173,8 +173,9 @@ async def get_runtime_metrics(_: User = Depends(require_admin)) -> dict:
     single uvicorn worker there is exactly one process to describe.
     """
     from app.observability.metrics import snapshot
+    from app.wyoming_bridge.startup import wyoming_status
 
-    return snapshot()
+    return {**snapshot(), "wyoming": wyoming_status()}
 
 
 # --------------------------------------------------------------------

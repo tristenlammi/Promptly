@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import {
   BarChart3,
   Bell,
   Bookmark,
   Brain,
+  FolderInput,
   LayoutGrid,
   ShieldCheck,
   SlidersHorizontal,
+  Smartphone,
   UserRound,
   Volume2,
 } from "lucide-react";
@@ -14,11 +17,14 @@ import {
 import { ChangePasswordPanel } from "@/components/account/ChangePasswordPanel";
 import { ChatPreferencesPanel } from "@/components/account/ChatPreferencesPanel";
 import { FeatureVisibilityPanel } from "@/components/account/FeatureVisibilityPanel";
+import { ImportExportPanel } from "@/components/account/ImportExportPanel";
 import { MemoryPanel } from "@/components/account/MemoryPanel";
 import { NotificationsPanel } from "@/components/account/NotificationsPanel";
 import { PersonalContextPanel } from "@/components/account/PersonalContextPanel";
 import { ProfilePanel } from "@/components/account/ProfilePanel";
 import { SavedPromptsPanel } from "@/components/account/SavedPromptsPanel";
+import { SignOutEverywherePanel } from "@/components/account/SignOutEverywherePanel";
+import { DevicesPanel } from "@/components/account/DevicesPanel";
 import { UsagePanel } from "@/components/account/UsagePanel";
 import { VoicePanel } from "@/components/account/VoicePanel";
 import { MfaSettingsPanel } from "@/components/mfa/MfaSettingsPanel";
@@ -26,7 +32,8 @@ import { TopNav } from "@/components/layout/TopNav";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
-/** User-facing account settings. Lives at /account/security and is
+/** User-facing account settings. Lives at /account (and /account/<section>
+ * for a deep link to one section) and is
  * accessible to every authenticated user (admin or otherwise). The
  * admin-only "App settings" panel for org-wide MFA enforcement and
  * SMTP config lives separately on the admin page.
@@ -48,18 +55,22 @@ interface Section {
 export function AccountSecurityPage() {
   const user = useAuthStore((s) => s.user);
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const [active, setActive] = useState<string>("about");
+  const { section } = useParams<{ section?: string }>();
+  const navigate = useNavigate();
+  const [active, setActive] = useState<string>(section ?? "profile");
 
   const sections: Section[] = [
     { id: "profile", label: "Profile", icon: UserRound, node: <ProfilePanel /> },
     { id: "about", label: "About you", icon: UserRound, node: <PersonalContextPanel /> },
     { id: "chat", label: "Chat defaults", icon: SlidersHorizontal, node: <ChatPreferencesPanel /> },
     { id: "memory", label: "Memory", icon: Brain, node: <MemoryPanel /> },
+    { id: "data", label: "Import & export", icon: FolderInput, node: <ImportExportPanel /> },
     { id: "interface", label: "Interface", icon: LayoutGrid, node: <FeatureVisibilityPanel /> },
     { id: "voice", label: "Voice", icon: Volume2, node: <VoicePanel /> },
     { id: "usage", label: "Usage & cost", icon: BarChart3, node: <UsagePanel /> },
     { id: "prompts", label: "Saved prompts", icon: Bookmark, node: <SavedPromptsPanel /> },
     { id: "notifications", label: "Notifications", icon: Bell, node: <NotificationsPanel /> },
+    { id: "devices", label: "Devices", icon: Smartphone, node: <DevicesPanel /> },
     {
       id: "security",
       label: "Security & MFA",
@@ -68,6 +79,7 @@ export function AccountSecurityPage() {
         <div className="space-y-6">
           <ChangePasswordPanel />
           <MfaSettingsPanel defaultEmail={user?.email} />
+          <SignOutEverywherePanel />
         </div>
       ),
     },
@@ -94,7 +106,48 @@ export function AccountSecurityPage() {
     // Sections array is stable in shape; re-running on user change is fine.
   }, [user?.email]);
 
+  // Open at the section the address names (a notification or a link
+  // elsewhere can point straight at Security or Memory).
+  const jumpedRef = useRef(false);
+  useEffect(() => {
+    if (!section) return;
+    // A click on the rail already scrolled there (smoothly).
+    if (jumpedRef.current) {
+      jumpedRef.current = false;
+      return;
+    }
+    // The panels above load their data after this runs and grow, pushing
+    // the section down — so re-anchor a few times while the page settles,
+    // and stop as soon as the user scrolls themselves.
+    const root = scrollRef.current;
+    if (!root) return;
+    const anchor = () =>
+      root.querySelector(`#section-${section}`)?.scrollIntoView({ block: "start" });
+    let userScrolled = false;
+    const stop = () => {
+      userScrolled = true;
+    };
+    root.addEventListener("wheel", stop, { passive: true });
+    root.addEventListener("touchmove", stop, { passive: true });
+    root.addEventListener("keydown", stop);
+    anchor();
+    const timers = [150, 400, 800, 1500].map((ms) =>
+      window.setTimeout(() => {
+        if (!userScrolled) anchor();
+      }, ms),
+    );
+    return () => {
+      timers.forEach(clearTimeout);
+      root.removeEventListener("wheel", stop);
+      root.removeEventListener("touchmove", stop);
+      root.removeEventListener("keydown", stop);
+    };
+  }, [section]);
+
   const jump = (id: string) => {
+    // Keep the address in step so it can be copied or bookmarked.
+    jumpedRef.current = id !== section;
+    navigate(`/account/${id}`, { replace: true });
     scrollRef.current
       ?.querySelector(`#section-${id}`)
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -118,7 +171,7 @@ export function AccountSecurityPage() {
                 className={cn(
                   "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition",
                   active === s.id
-                    ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                    ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent-text)]"
                     : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]",
                 )}
               >
@@ -141,7 +194,7 @@ export function AccountSecurityPage() {
                   className={cn(
                     "flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-sm transition",
                     active === s.id
-                      ? "bg-[var(--accent)]/10 font-medium text-[var(--accent)]"
+                      ? "bg-[var(--accent)]/10 font-medium text-[var(--accent-text)]"
                       : "text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]",
                   )}
                 >

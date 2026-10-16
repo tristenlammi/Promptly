@@ -20,11 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
-from app.chat.models import Conversation, WorkspaceItem
+from app.chat.models import Conversation, WorkspaceFile, WorkspaceItem
 from app.database import get_db
 from app.files.models import UserFile
 from app.files.storage import absolute_path
+from app.workspaces.knowledge import WORKSPACE_MEMORY_SOURCE_KIND
 from app.workspaces.shares import get_accessible_workspace
+from app.workspaces.visibility import conversation_visible_to, item_visible_to
 
 router = APIRouter()
 
@@ -58,6 +60,8 @@ class OverviewCounts(BaseModel):
     sheets: int = 0
     chats: int = 0
     files: int = 0
+    rosters: int = 0
+    discussions: int = 0
 
 
 class RecentItem(BaseModel):
@@ -131,6 +135,7 @@ async def workspace_overview(
                     WorkspaceItem.kind == kind,
                     WorkspaceItem.archived_at.is_(None),
                     WorkspaceItem.trashed_at.is_(None),
+                    item_visible_to(user.id),
                 )
             )
             or 0
@@ -141,7 +146,27 @@ async def workspace_overview(
         canvases=await _count_kind("canvas"),
         boards=await _count_kind("board"),
         sheets=await _count_kind("sheet"),
-        files=await _count_kind("file"),
+        # Pinned files live in workspace_files, not the item tree — "file"
+        # was never an item kind, so this was always 0 and a files-only
+        # workspace got the "get started" card (R-203). The memory doc is
+        # the app's own, not the user's.
+        files=int(
+            await db.scalar(
+                select(func.count())
+                .select_from(WorkspaceFile)
+                .join(UserFile, UserFile.id == WorkspaceFile.file_id)
+                .where(
+                    WorkspaceFile.workspace_id == ws.id,
+                    UserFile.trashed_at.is_(None),
+                    UserFile.source_kind.is_distinct_from(
+                        WORKSPACE_MEMORY_SOURCE_KIND
+                    ),
+                )
+            )
+            or 0
+        ),
+        rosters=await _count_kind("roster"),
+        discussions=await _count_kind("discussion"),
         chats=int(
             await db.scalar(
                 select(func.count())
@@ -149,6 +174,7 @@ async def workspace_overview(
                 .where(
                     Conversation.workspace_id == ws.id,
                     Conversation.archived_at.is_(None),
+                    conversation_visible_to(user.id),
                 )
             )
             or 0
@@ -165,6 +191,7 @@ async def workspace_overview(
                     WorkspaceItem.kind == "note",
                     WorkspaceItem.archived_at.is_(None),
                     WorkspaceItem.trashed_at.is_(None),
+                    item_visible_to(user.id),
                 )
                 .order_by(WorkspaceItem.position.asc())
                 .limit(_MAX_NOTES_SCANNED)
@@ -209,6 +236,7 @@ async def workspace_overview(
                     WorkspaceItem.kind.in_(("note", "canvas", "board", "sheet")),
                     WorkspaceItem.archived_at.is_(None),
                     WorkspaceItem.trashed_at.is_(None),
+                    item_visible_to(user.id),
                 )
                 .order_by(WorkspaceItem.updated_at.desc())
                 .limit(6)
@@ -232,6 +260,7 @@ async def workspace_overview(
                 .where(
                     Conversation.workspace_id == ws.id,
                     Conversation.archived_at.is_(None),
+                    conversation_visible_to(user.id),
                 )
                 .order_by(Conversation.updated_at.desc())
                 .limit(3)
@@ -421,6 +450,10 @@ async def workspace_activity(
     )
     from sqlalchemy import or_
 
+    # Members only — this had no access check at all, so anyone signed in
+    # who knew the workspace id could read its activity (R-168).
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    workspace_id = ws.id
     limit = max(1, min(100, limit))
     events: list[tuple] = []  # (created_at, ActivityEvent)
 
@@ -436,7 +469,7 @@ async def workspace_activity(
     visible = or_(
         WorkspaceItem.visibility != "private",
         WorkspaceItem.created_by == user.id,
-    )
+    ) & WorkspaceItem.trashed_at.is_(None)
 
     # 1) Item creations (notes / canvases / boards / sheets / folders).
     created_rows = (
@@ -506,7 +539,13 @@ async def workspace_activity(
             .outerjoin(
                 User, User.id == WorkspaceTaskComment.author_user_id
             )
-            .where(WorkspaceTask.workspace_id == workspace_id)
+            # Cards on someone else's private board stay private.
+            .join(WorkspaceItem, WorkspaceItem.id == WorkspaceTask.board_item_id)
+            .where(
+                WorkspaceTask.workspace_id == workspace_id,
+                item_visible_to(user.id),
+                WorkspaceItem.trashed_at.is_(None),
+            )
             .order_by(WorkspaceTaskComment.created_at.desc())
             .limit(limit)
         )

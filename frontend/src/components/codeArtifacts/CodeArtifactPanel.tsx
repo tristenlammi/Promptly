@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invalidateFileQueries } from "@/hooks/useFiles";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   Check,
@@ -344,7 +345,7 @@ function ArtifactEditBar({
   return (
     <div className="shrink-0 border-t border-[var(--border)] bg-[var(--surface)] px-3 py-2">
       <div className="flex items-center gap-2">
-        <Wand2 className="h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden />
+        <Wand2 className="h-4 w-4 shrink-0 text-[var(--accent-text)]" aria-hidden />
         <input
           type="text"
           value={instruction}
@@ -530,8 +531,7 @@ function SaveToDriveButton({
       const blob = new Blob([text], { type: `${mime};charset=utf-8` });
       const file = new File([blob], filename, { type: mime });
       await filesApi.upload("mine", file, null, "generated");
-      await qc.invalidateQueries({ queryKey: ["files"] });
-      await qc.invalidateQueries({ queryKey: ["quota"] });
+      await invalidateFileQueries(qc);
       setState("saved");
     } catch (e) {
       setState("error");

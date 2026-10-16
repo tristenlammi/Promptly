@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { authApi } from "@/api/auth";
+import { isServerUnavailable } from "@/api/client";
 import { useAuthStore } from "@/store/authStore";
 
 /**
@@ -36,14 +37,31 @@ export function useAuthBootstrap() {
         // out of the setup wizard.
       }
 
-      try {
-        const user = await authApi.me();
-        if (cancelled) return;
-        setUser(user);
-        setStatus("authenticated");
-      } catch {
-        if (cancelled) return;
-        setStatus("unauthenticated");
+      // While the server is unreachable (restarting for an update), keep
+      // retrying instead of showing the login page — the session is
+      // probably fine, and the login page made it look like it wasn't.
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const user = await authApi.me();
+          if (cancelled) return;
+          setUser(user);
+          setStatus("authenticated");
+          return;
+        } catch (err) {
+          if (cancelled) return;
+          // Retry what's temporary — a restart, a rate limit, a server
+          // error — rather than show the login page for it (R-142).
+          const statusCode = (err as { response?: { status?: number } })?.response?.status;
+          const temporary =
+            isServerUnavailable(err) || statusCode === 429 || (statusCode ?? 0) >= 500;
+          if (!temporary) {
+            setStatus("unauthenticated");
+            return;
+          }
+          setStatus("reconnecting");
+          await new Promise((r) => setTimeout(r, Math.min(15_000, 1000 * 2 ** attempt)));
+          if (cancelled) return;
+        }
       }
     })();
 

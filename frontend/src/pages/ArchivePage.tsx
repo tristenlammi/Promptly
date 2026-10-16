@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Archive, MessageSquare, RotateCcw, Search, Trash2 } from "lucide-react";
 
@@ -24,21 +24,22 @@ import { cn } from "@/utils/cn";
  */
 export function ArchivePage() {
   const navigate = useNavigate();
-  const { data, isLoading } = useArchivedConversationsQuery();
+  const [query, setQuery] = useState("");
+  // Searched on the server (titles), so it covers the whole archive, not
+  // just what has loaded; debounced so typing doesn't fire per keystroke.
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setSearch(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
+  const { data, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage } =
+    useArchivedConversationsQuery(search);
   const unarchive = useUnarchiveConversation();
   const remove = useDeleteConversation();
-  const [query, setQuery] = useState("");
   // Track which row is mid-action so we can disable just that row.
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const archived = useMemo(() => data ?? [], [data]);
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return archived;
-    return archived.filter((c) =>
-      (c.title || "Untitled chat").toLowerCase().includes(q)
-    );
-  }, [archived, query]);
+  const filtered = useMemo(() => data?.pages.flat() ?? [], [data]);
 
   const handleRestore = async (conv: ConversationSummary) => {
     setBusyId(conv.id);
@@ -83,7 +84,7 @@ export function ArchivePage() {
         <div className="mx-auto w-full max-w-3xl px-6 py-6">
           {/* Search filter — client-side over the archived list (archived
               chats are deliberately excluded from the global palette). */}
-          {archived.length > 0 && (
+          {(filtered.length > 0 || !!query) && (
             <div className="mb-4 flex items-center gap-2 rounded-input border border-[var(--border)] bg-[var(--surface)] px-3 py-2">
               <Search className="h-4 w-4 text-[var(--text-muted)]" />
               <input
@@ -99,7 +100,7 @@ export function ArchivePage() {
             <div className="text-sm text-[var(--text-muted)]">Loading…</div>
           )}
 
-          {!isLoading && archived.length === 0 && (
+          {!isLoading && !search && filtered.length === 0 && (
             <EmptyState
               icon={<Archive className="h-5 w-5" />}
               title="No archived chats"
@@ -107,7 +108,7 @@ export function ArchivePage() {
             />
           )}
 
-          {!isLoading && archived.length > 0 && filtered.length === 0 && (
+          {!isLoading && !!search && filtered.length === 0 && (
             <EmptyState
               icon={<Search className="h-5 w-5" />}
               title="No matches"
@@ -128,6 +129,19 @@ export function ArchivePage() {
                 />
               ))}
             </ul>
+          )}
+
+          {hasNextPage && (
+            <div className="mt-3 flex justify-center">
+              <button
+                type="button"
+                onClick={() => void fetchNextPage()}
+                disabled={isFetchingNextPage}
+                className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)] disabled:opacity-60"
+              >
+                {isFetchingNextPage ? "Loading…" : "Show more"}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -162,7 +176,7 @@ function ArchiveRow({
         className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
         title="Open chat"
       >
-        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10 text-[var(--accent)]">
+        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10 text-[var(--accent-text)]">
           <MessageSquare className="h-3.5 w-3.5" />
         </span>
         <span className="min-w-0 flex-1">

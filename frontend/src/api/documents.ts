@@ -1,8 +1,11 @@
+import { normalisePageSetup, type PageSetup } from "@/lib/pageSetup";
 import { apiClient } from "./client";
 import type { FileItem, FileScope } from "./files";
 
 /** Output formats supported by ``GET /api/documents/:id/download``. */
-export type DocumentDownloadFormat = "html" | "md" | "pdf";
+/** ``fragment`` is the bare sanitised HTML the browser's .docx export
+ *  builds from (WP-4.3); ``html`` is a standalone page. */
+export type DocumentDownloadFormat = "html" | "md" | "pdf" | "fragment";
 
 /**
  * Client for the Drive Documents API (``/api/documents/*``).
@@ -21,9 +24,15 @@ export interface DocumentCreatePayload {
 }
 
 export interface CollabTokenResponse {
+  /** The file's edit generation (WP-6.2) — a newer one means it was restored. */
+  epoch?: number;
   token: string;
   /** Unix seconds; the editor schedules a refresh a few seconds before. */
   expires_at: number;
+  /** The server's answer to "may I edit the content?" (documents only).
+   *  The editor obeys this rather than guessing from Drive grants, which
+   *  knew nothing about workspace roles. */
+  can_edit?: boolean;
   user: {
     id: string;
     name: string;
@@ -86,11 +95,11 @@ export const documentsApi = {
   async manualSave(
     documentId: string,
     html: string,
-    source?: "restore"
+    opts: { source?: "restore"; yjsState?: string; epoch?: number | null } = {}
   ): Promise<FileItem> {
     const { data } = await apiClient.post<FileItem>(
       `/documents/${documentId}/save`,
-      { html, source }
+      { html, source: opts.source, yjs_state: opts.yjsState, epoch: opts.epoch ?? undefined }
     );
     return data;
   },
@@ -119,7 +128,8 @@ export const documentsApi = {
    *  Returns a ``Blob`` so the caller can trigger a browser save
    *  via an object URL. ``html`` is the canonical export (just the
    *  on-disk blob), ``md`` runs through markdownify on the server,
-   *  ``pdf`` renders via xhtml2pdf. The backend always sets
+   *  ``pdf`` renders via WeasyPrint under the document's page setup
+   *  (WP-6.4). The backend always sets
    *  ``Content-Disposition: attachment``.
    */
   async download(
@@ -131,6 +141,8 @@ export const documentsApi = {
       {
         params: { format },
         responseType: "blob",
+        // A long document's PDF can take a while to render.
+        ...(format === "pdf" ? { timeout: 150_000 } : {}),
       }
     );
     // RFC 6266 ``filename="..."`` plus optional ``filename*=UTF-8''…``
@@ -150,6 +162,37 @@ export const documentsApi = {
       filename = plainMatch[1];
     }
     return { blob: data, filename };
+  },
+
+  /** The document's page setup (WP-6.4) — the editor reads it from the
+   *  Y.Doc; this is for exports made without the editor open. */
+  async pageSetup(documentId: string): Promise<PageSetup> {
+    const { data } = await apiClient.get<unknown>(`/documents/${documentId}/page-setup`);
+    return normalisePageSetup(data);
+  },
+
+  /** "Open in Promptly Docs": a blank document next to an uploaded .docx,
+   *  linked to it (WP-4.3). Seed it with ``seedState``. */
+  async importDocument(sourceFileId: string, name?: string): Promise<FileItem> {
+    const { data } = await apiClient.post<FileItem>("/documents/import", {
+      source_file_id: sourceFileId,
+      name: name ?? null,
+    });
+    return data;
+  },
+
+  /** The new document's first content (base64 Y.Doc update) — once. */
+  /** Tell someone they were @-mentioned in this document (R-232). */
+  async notifyMention(documentId: string, userId: string): Promise<void> {
+    await apiClient.post(`/documents/${documentId}/mentions`, { user_id: userId });
+  },
+  async seedState(documentId: string, yjsState: string): Promise<FileItem> {
+    const { data } = await apiClient.post<FileItem>(
+      `/documents/${documentId}/initial-state`,
+      { yjs_state: yjsState },
+      { timeout: 120_000 }
+    );
+    return data;
   },
 
   async uploadAsset(documentId: string, file: File): Promise<DocumentAsset> {

@@ -113,6 +113,76 @@ def normalise(text: str) -> str:
     return _strip_filler(cleaned)
 
 
+def _clean_word(raw: str) -> list[str]:
+    """One raw word as the normalised words it becomes ("O'Brien's" →
+    o, brien, s; "21.5" → 21, 5)."""
+    decomposed = unicodedata.normalize("NFKD", raw)
+    stripped = "".join(c for c in decomposed if not unicodedata.combining(c))
+    return _PUNCT_RE.sub(" ", stripped.lower()).split()
+
+
+def _aligned(text: str) -> tuple[str, list[tuple[int, int]]]:
+    """``normalise(text)`` plus, for each normalised word, the span of raw
+    (whitespace-separated) words it came from — so a slot captured from
+    the normalised form can be read back from what was actually said."""
+    raw = text.split()
+    words: list[tuple[str, int, int]] = []
+    for i, r in enumerate(raw):
+        for w in _clean_word(r):
+            words.append((w, i, i))
+    # Number words → digits, as _numbers_to_digits does, keeping spans.
+    merged: list[tuple[str, int, int]] = []
+    i = 0
+    while i < len(words):
+        w, a, b = words[i]
+        value = _NUMBER_WORDS.get(w)
+        if value is None:
+            merged.append((w, a, b))
+            i += 1
+            continue
+        if value >= 20 and value % 10 == 0 and i + 1 < len(words):
+            unit = _NUMBER_WORDS.get(words[i + 1][0])
+            if unit is not None and 1 <= unit <= 9:
+                merged.append((str(value + unit), a, words[i + 1][2]))
+                i += 2
+                continue
+        merged.append((str(value), a, b))
+        i += 1
+    joined = " ".join(w for w, _, _ in merged)
+    kept = _strip_filler(joined)
+    if not kept:
+        return "", []
+    kept_words = kept.split(" ")
+    tokens = [w for w, _, _ in merged]
+    for start in range(len(tokens) - len(kept_words) + 1):
+        if tokens[start : start + len(kept_words)] == kept_words:
+            spans = [(a, b) for _, a, b in merged[start : start + len(kept_words)]]
+            return kept, spans
+    return kept, []
+
+
+def _original_slot(text: str, normalised: str, spans: list[tuple[int, int]], start: int, end: int) -> str | None:
+    """The words the user actually said for a slot captured at
+    ``normalised[start:end]``. Slot values used to be the normalised text,
+    so "21.5" reached the tool as "21 5", "O'Brien's" as "o brien s" and
+    "café" as "cafe" (R-162)."""
+    if not spans:
+        return None
+    first = normalised.count(" ", 0, start)
+    last = first + normalised[start:end].strip().count(" ")
+    if last >= len(spans):
+        return None
+    raw = text.split()
+    value = " ".join(raw[spans[first][0] : spans[last][1] + 1])
+    words = [w for r in value.split() for w in _clean_word(r)]
+    if words and all(w in _NUMBER_WORDS for w in words):
+        # "twenty one" is a number to the tool — the digits, not the words.
+        return normalised[start:end].strip()
+    # Only the edges: keep "21.5" and "O'Brien's", drop "garage," / "door?".
+    value = value.strip().strip(",;:!?\"“”()").rstrip(".")
+    return value or None
+
+
 def _strip_filler(text: str) -> str:
     """Peel wake words and politeness off both ends, repeatedly.
 
@@ -261,7 +331,10 @@ def near_matches(
 
 
 def match(
-    utterance: str, candidates: Iterable[MatchCandidate]
+    utterance: str,
+    candidates: Iterable[MatchCandidate],
+    *,
+    tied: list | None = None,
 ) -> MatchResult | None:
     """The one command this utterance means, or ``None``.
 
@@ -271,11 +344,15 @@ def match(
 
     Ambiguity inside a tier returns ``None``. Two commands claiming the
     same phrase is a mistake in the library, and the honest response is
-    to do nothing and say so, not to pick the lower id.
+    to do nothing and say so, not to pick the lower id. Pass ``tied`` to
+    learn which commands tied, so History can say so (R-163).
     """
     said = normalise(utterance)
     if not said:
         return None
+    aligned, spans = _aligned(utterance)
+    if aligned != said:
+        spans = []  # can't line them up — fall back to the normalised words
 
     exact: list[MatchResult] = []
     slotted: list[MatchResult] = []
@@ -293,16 +370,16 @@ def match(
                 continue
             found = pattern.match(said)
             if found and _slots_are_sane(found.groupdict()):
-                slotted.append(
-                    MatchResult(
-                        command_id=cand.command_id,
-                        slots={
-                            k: v.strip()
-                            for k, v in (found.groupdict() or {}).items()
-                            if v and v.strip()
-                        },
-                        kind="slot",
+                slots: dict[str, str] = {}
+                for k, v in (found.groupdict() or {}).items():
+                    if not v or not v.strip():
+                        continue
+                    slots[k] = (
+                        _original_slot(utterance, said, spans, found.start(k), found.end(k))
+                        or v.strip()
                     )
+                slotted.append(
+                    MatchResult(command_id=cand.command_id, slots=slots, kind="slot")
                 )
 
     for tier in (exact, slotted):
@@ -313,5 +390,7 @@ def match(
         distinct = {r.command_id for r in tier}
         if len(distinct) == 1:
             return tier[0]
+        if tied is not None:
+            tied.extend(dict.fromkeys(r.command_id for r in tier))
         return None
     return None

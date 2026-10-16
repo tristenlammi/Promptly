@@ -8,11 +8,13 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import DOMPurify from "dompurify";
 import {
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   Copy as CopyIcon,
@@ -22,16 +24,30 @@ import {
   Share2,
   Star,
   X,
+  MessageSquareText,
+  Sparkles,
+  FilePen,
+  FileSpreadsheet,
 } from "lucide-react";
 
 import { apiClient } from "@/api/client";
+import { pdfApi } from "@/api/pdf";
+import { useQueryClient } from "@tanstack/react-query";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import {
   filesApi,
   type FileItem,
+  type SignedUrls,
 } from "@/api/files";
 import { Button } from "@/components/shared/Button";
 import { CodeArtifactView } from "@/components/codeArtifacts/CodeArtifactView";
 import { GranteesPill } from "@/components/files/GranteesPill";
+import { askAboutFiles } from "@/components/files/askAbout";
+import { ConvertWithAi } from "@/components/files/ConvertWithAi";
+import { OfficeTextPreview, SpreadsheetPreview, WordPreview } from "@/components/files/OfficePreviews";
+import { resolveAssetsInHtml } from "@/lib/assetLinks";
+import { isSpreadsheetFile, openSpreadsheetAsSheet } from "@/lib/office/sheetActions";
+import { isWordFile, openWordAsDocument } from "@/lib/office/wordActions";
 import {
   artifactLanguageFromFile,
   type ArtifactLanguage,
@@ -70,6 +86,8 @@ interface FilePreviewModalProps {
    *  file. The parent wires this to ``filesApi.copyFileToMine``
    *  + a query refetch + toast. */
   onCopyToMine?: (file: FileItem) => void;
+  /** Open a PDF at this page — a chat citation's link (WP-5.2). */
+  initialPage?: number;
 }
 
 // Hosts allowed as <iframe> embeds inside rendered documents — matches
@@ -117,7 +135,12 @@ export function FilePreviewModal({
   onShare,
   onEdit,
   onCopyToMine,
+  initialPage,
 }: FilePreviewModalProps) {
+  // "Ask about this" / "Summarize" from Files (WP-3.5): a new chat with
+  // this file attached. Not offered inside a chat — it already is one.
+  const navigate = useNavigate();
+  const inFiles = useLocation().pathname.startsWith("/files");
   const index = useMemo(() => {
     if (!file || !siblings?.length) return -1;
     return siblings.findIndex((s) => s.id === file.id);
@@ -126,30 +149,66 @@ export function FilePreviewModal({
   const hasPrev = index > 0;
   const hasNext = index >= 0 && siblings !== undefined && index < siblings.length - 1;
 
+  // Unsaved changes in the PDF viewer (WP-6.5) — leaving asks first.
+  const dirtyRef = useRef(false);
+  const leave = useCallback(async (go: () => void) => {
+    if (dirtyRef.current) {
+      const ok = await confirm({
+        title: "Discard your changes?",
+        message: "This PDF has changes that haven't been saved.",
+        confirmLabel: "Discard",
+        danger: true,
+      });
+      if (!ok) return;
+      dirtyRef.current = false;
+    }
+    go();
+  }, []);
+  const close = useCallback(() => void leave(onClose), [leave, onClose]);
+  useEffect(() => {
+    dirtyRef.current = false;
+  }, [file?.id]);
+  useEffect(() => {
+    if (!open) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirtyRef.current) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [open]);
+
   const goPrev = useCallback(() => {
-    if (hasPrev && siblings && onSelect) onSelect(siblings[index - 1]);
-  }, [hasPrev, siblings, onSelect, index]);
+    if (hasPrev && siblings && onSelect) void leave(() => onSelect(siblings[index - 1]));
+  }, [hasPrev, siblings, onSelect, index, leave]);
   const goNext = useCallback(() => {
-    if (hasNext && siblings && onSelect) onSelect(siblings[index + 1]);
-  }, [hasNext, siblings, onSelect, index]);
+    if (hasNext && siblings && onSelect) void leave(() => onSelect(siblings[index + 1]));
+  }, [hasNext, siblings, onSelect, index, leave]);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      // Typing in a form field, the PDF search or a markup note isn't
+      // navigation; arrows inside the PDF viewer scroll it.
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+      const inPdf = !!t?.closest?.("[data-pdf-viewer]");
       if (e.key === "Escape") {
+        if (e.defaultPrevented || typing) return;
         e.preventDefault();
-        onClose();
+        close();
       } else if (e.key === "ArrowLeft") {
+        if (typing || inPdf) return;
         e.preventDefault();
         goPrev();
       } else if (e.key === "ArrowRight") {
+        if (typing || inPdf) return;
         e.preventDefault();
         goNext();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose, goPrev, goNext]);
+  }, [open, close, goPrev, goNext]);
 
   useEffect(() => {
     if (!open) return;
@@ -249,14 +308,73 @@ export function FilePreviewModal({
               <Share2 className="h-5 w-5 md:h-4 md:w-4" />
             </PreviewIconButton>
           )}
+          {inFiles && !file.trashed_at && isWordFile(file) && (
+            <PreviewIconButton
+              label="Open in Promptly Docs"
+              onClick={() => {
+                onClose();
+                void openWordAsDocument(file, navigate);
+              }}
+            >
+              <FilePen className="h-5 w-5 md:h-4 md:w-4" />
+            </PreviewIconButton>
+          )}
+          {inFiles && !file.trashed_at && isSpreadsheetFile(file) && (
+            <PreviewIconButton
+              label="Open in Promptly Sheets"
+              onClick={() => {
+                onClose();
+                void openSpreadsheetAsSheet(file, navigate);
+              }}
+            >
+              <FileSpreadsheet className="h-5 w-5 md:h-4 md:w-4" />
+            </PreviewIconButton>
+          )}
+          {inFiles && !file.trashed_at && (kind === "image" || kind === "pdf") && (
+            <ConvertWithAi file={file} onDone={onClose} />
+          )}
+          {inFiles && !file.trashed_at && (
+            <>
+              <PreviewIconButton
+                label="Ask about this"
+                onClick={() => {
+                  onClose();
+                  askAboutFiles([file], navigate);
+                }}
+              >
+                <MessageSquareText className="h-5 w-5 md:h-4 md:w-4" />
+              </PreviewIconButton>
+              <PreviewIconButton
+                label="Summarize"
+                onClick={() => {
+                  onClose();
+                  askAboutFiles([file], navigate, "Summarize this file.");
+                }}
+              >
+                <Sparkles className="h-5 w-5 md:h-4 md:w-4" />
+              </PreviewIconButton>
+            </>
+          )}
           <PreviewIconButton label="Download" onClick={() => downloadAuthed(file)}>
             <Download className="h-5 w-5 md:h-4 md:w-4" />
           </PreviewIconButton>
-          <PreviewIconButton label="Close" onClick={onClose}>
+          <PreviewIconButton label="Close" onClick={close}>
             <X className="h-5 w-5 md:h-4 md:w-4" />
           </PreviewIconButton>
         </div>
       </div>
+
+      {(file.blob_state === "missing" || file.blob_state === "damaged") && (
+        <div
+          role="alert"
+          className="flex shrink-0 items-center gap-2 border-b border-red-500/40 bg-red-500/15 px-4 py-2 text-sm text-red-100"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          {file.blob_state === "missing"
+            ? "This file's contents are missing from storage. Restore it from a backup — your admin can see it in Admin → Storage."
+            : "This file no longer matches what was stored — it may be damaged. Restore it from a backup — your admin can see it in Admin → Storage."}
+        </div>
+      )}
 
       {/* Viewport */}
       <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-2 pb-safe md:p-4">
@@ -284,7 +402,14 @@ export function FilePreviewModal({
           </button>
         )}
 
-        <PreviewBody file={file} kind={kind} />
+        <PreviewBody
+          file={file}
+          kind={kind}
+          initialPage={initialPage}
+          onDirtyChange={(d) => {
+            dirtyRef.current = d;
+          }}
+        />
       </div>
     </div>,
     document.body
@@ -322,12 +447,24 @@ function PreviewIconButton({
   );
 }
 
-function PreviewBody({ file, kind }: { file: FileItem; kind: PreviewKind }) {
+function PreviewBody({
+  file,
+  kind,
+  initialPage,
+  onDirtyChange,
+}: {
+  file: FileItem;
+  kind: PreviewKind;
+  initialPage?: number;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   switch (kind) {
     case "image":
       return <ImagePreview file={file} />;
+    case "video":
+      return <VideoPreview file={file} />;
     case "pdf":
-      return <PdfPreview file={file} />;
+      return <PdfPreview file={file} initialPage={initialPage} onDirtyChange={onDirtyChange} />;
     case "document":
       return <DocumentPreview file={file} />;
     case "code_artifact":
@@ -337,6 +474,12 @@ function PreviewBody({ file, kind }: { file: FileItem; kind: PreviewKind }) {
     case "code":
     case "text":
       return <TextPreview file={file} kind={kind} />;
+    case "word":
+      return <WordPreview file={file} />;
+    case "office":
+      return <OfficeTextPreview file={file} />;
+    case "spreadsheet":
+      return <SpreadsheetPreview file={file} />;
     default:
       return <BinaryFallback file={file} />;
   }
@@ -345,40 +488,152 @@ function PreviewBody({ file, kind }: { file: FileItem; kind: PreviewKind }) {
 // ----------------------------------------------------------------
 // Image — authenticated fetch → object URL → <img>
 // ----------------------------------------------------------------
+// Images a browser shows as-is; anything else (an iPhone's HEIC, a TIFF, a
+// camera raw) is shown through the server's renderer (WP-7.3).
+const BROWSER_IMAGES = new Set(["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp", "image/bmp", "image/avif", "image/svg+xml"]);
+
 function ImagePreview({ file }: { file: FileItem }) {
   const [url, setUrl] = useState<string | null>(null);
+  const [original, setOriginal] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const rendered = !BROWSER_IMAGES.has((file.mime_type ?? "").toLowerCase());
   useEffect(() => {
     let revoked = false;
     let blobUrl: string | null = null;
+    setUrl(null);
+    setOriginal(null);
     (async () => {
       try {
+        // Signed links (WP-7.5): the media worker's 1440 px preview first —
+        // a fraction of a phone photo's bytes — with the original a click
+        // away for photos the browser can show as they are.
+        const links = await filesApi.signedUrls(file.id).catch(() => null);
+        if (revoked) return;
+        const direct = links?.preview ?? (!rendered ? links?.original : null);
+        if (direct) {
+          setUrl(direct);
+          if (links?.preview && !rendered && links.original) setOriginal(links.original);
+          return;
+        }
         const res = await apiClient.get<Blob>(
-          filesApi.downloadUrl(file.id).replace(/^\/api/, ""),
+          rendered
+            ? `/files/${file.id}/thumbnail?size=1024`
+            : filesApi.downloadUrl(file.id).replace(/^\/api/, ""),
           { responseType: "blob" }
         );
         if (revoked) return;
         blobUrl = URL.createObjectURL(res.data);
         setUrl(blobUrl);
       } catch (e) {
-        if (!revoked) setErr(extractError(e));
+        if (!revoked)
+          setErr(
+            rendered
+              ? "There's no preview for this kind of camera file yet. Download it to open it in a photo editor."
+              : extractError(e)
+          );
       }
     })();
     return () => {
       revoked = true;
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
-  }, [file.id]);
+  }, [file.id, rendered]);
 
   if (err) return <PreviewError>{err}</PreviewError>;
   if (!url) return <PreviewLoading />;
   return (
-    <img
-      src={url}
-      alt={file.filename}
-      className="max-h-full max-w-full select-none rounded-md shadow-2xl"
-      draggable={false}
-    />
+    <div className="relative flex max-h-full max-w-full items-center justify-center">
+      <img
+        src={url}
+        alt={file.filename}
+        className="max-h-full max-w-full select-none rounded-md shadow-2xl"
+        draggable={false}
+        onError={() => setErr("This picture couldn't be loaded. Close it and open it again.")}
+      />
+      {original && (
+        <button
+          type="button"
+          onClick={() => {
+            setUrl(original);
+            setOriginal(null);
+          }}
+          className="absolute bottom-2 right-2 rounded-md bg-black/60 px-2 py-1 text-xs text-white hover:bg-black/80"
+        >
+          Full size
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------
+// Video — a signed, Range-capable link straight into <video> (WP-7.5):
+// it starts at once and seeks anywhere without downloading the lot.
+// ----------------------------------------------------------------
+function VideoPreview({ file }: { file: FileItem }) {
+  const [links, setLinks] = useState<SignedUrls | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  // A source the browser couldn't play (an HEVC .mp4 in some browsers);
+  // wait for the web copy instead.
+  const [unplayable, setUnplayable] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | undefined;
+    const load = async () => {
+      try {
+        const next = await filesApi.signedUrls(file.id);
+        if (cancelled) return;
+        setLinks(next);
+        const playable = next.video && next.video !== unplayable;
+        const busy = next.state === null || next.state === "pending" || next.state === "processing";
+        // Still being prepared: look again in a few seconds.
+        if (!playable && busy) timer = window.setTimeout(() => void load(), 4000);
+      } catch (e) {
+        if (!cancelled) setErr(extractError(e));
+      }
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [file.id, unplayable]);
+
+  if (err) return <PreviewError>{err}</PreviewError>;
+  if (!links) return <PreviewLoading />;
+  const src = links.video && links.video !== unplayable ? links.video : null;
+  if (src) {
+    return (
+      <video
+        key={src}
+        src={src}
+        poster={links.poster ?? undefined}
+        controls
+        playsInline
+        preload="metadata"
+        aria-label={file.filename}
+        onError={() => setUnplayable(src)}
+        className="max-h-full max-w-full rounded-md bg-black shadow-2xl"
+      />
+    );
+  }
+  if (links.state === "failed" || links.state === "skipped") {
+    return (
+      <PreviewError>
+        This video couldn't be made playable in the browser. Download it to watch it.
+      </PreviewError>
+    );
+  }
+  return (
+    <div className="flex flex-col items-center gap-3 text-sm text-white/80">
+      {links.poster && (
+        <img src={links.poster} alt="" className="max-h-[60vh] max-w-full rounded-md opacity-60 shadow-2xl" />
+      )}
+      <div className="flex items-center gap-2" role="status">
+        <Loader2 className="h-4 w-4 animate-spin" /> Preparing this video for the browser…
+      </div>
+    </div>
   );
 }
 
@@ -397,25 +652,37 @@ function ImagePreview({ file }: { file: FileItem }) {
 // pdf.js is lazy-loaded so the ~350 kB only arrives for people who
 // actually open a PDF.
 // ----------------------------------------------------------------
-const PdfCanvasPreview = lazy(() =>
-  import("./PdfCanvasPreview").then((m) => ({ default: m.PdfCanvasPreview }))
-);
+// WP-6.5: the full viewer — text, search, forms, markup, page tools and
+// Save (a new version) for anyone who can edit the file.
+const PdfViewer = lazy(() => import("./pdf/PdfViewer").then((m) => ({ default: m.PdfViewer })));
 
-function PdfPreview({ file }: { file: FileItem }) {
-  const [data, setData] = useState<ArrayBuffer | null>(null);
+function PdfPreview({
+  file,
+  initialPage,
+  onDirtyChange,
+}: {
+  file: FileItem;
+  initialPage?: number;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  const qc = useQueryClient();
+  const [loaded, setLoaded] = useState<{ data: ArrayBuffer; revision: string | null; canEdit: boolean } | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [reloads, setReloads] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    setData(null);
+    setLoaded(null);
     setErr(null);
     (async () => {
       try {
-        const res = await apiClient.get<ArrayBuffer>(
-          filesApi.downloadUrl(file.id).replace(/^\/api/, ""),
-          { responseType: "arraybuffer" }
-        );
+        const [{ data, revision }, info] = await Promise.all([
+          pdfApi.load(file.id),
+          // Not every PDF is editable here (a chat-made one is rebuilt from
+          // its Markdown) — those just open read-only.
+          pdfApi.info(file.id).catch(() => null),
+        ]);
         if (cancelled) return;
-        setData(res.data);
+        setLoaded({ data, revision, canEdit: !!info?.can_edit && !file.trashed_at });
       } catch (e) {
         if (!cancelled) setErr(extractError(e));
       }
@@ -423,13 +690,28 @@ function PdfPreview({ file }: { file: FileItem }) {
     return () => {
       cancelled = true;
     };
-  }, [file.id]);
+  }, [file.id, file.trashed_at, reloads]);
 
   if (err) return <PreviewError>{err}</PreviewError>;
-  if (!data) return <PreviewLoading />;
+  if (!loaded) return <PreviewLoading />;
+  const mine = file.sharing?.role !== "grantee";
   return (
     <Suspense fallback={<PreviewLoading />}>
-      <PdfCanvasPreview key={file.id} data={data} filename={file.filename} />
+      <PdfViewer
+        key={`${file.id}-${reloads}`}
+        fileId={file.id}
+        filename={file.filename}
+        data={loaded.data}
+        revision={loaded.revision}
+        canEdit={loaded.canEdit}
+        copyFolderId={mine ? file.folder_id : null}
+        initialPage={initialPage}
+        onDirtyChange={onDirtyChange}
+        onChanged={() =>
+          void qc.invalidateQueries({ predicate: (q) => String(q.queryKey[0] ?? "").startsWith("files-") })
+        }
+        onReload={() => setReloads((n) => n + 1)}
+      />
     </Suspense>
   );
 }
@@ -440,6 +722,26 @@ function PdfPreview({ file }: { file: FileItem }) {
 // braces; the backend already sanitizes) and render inside a
 // prose-styled shell. Opens via the Edit button on the header.
 // ----------------------------------------------------------------
+/** Render a document's LaTeX (``data-latex`` on inline / block maths,
+ *  WP-4.5) with KaTeX, which is only fetched when there's maths. */
+async function renderDocMath(html: string): Promise<string> {
+  if (!html.includes("data-latex")) return html;
+  try {
+    const { default: katex } = await import("katex");
+    const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+    doc.querySelectorAll<HTMLElement>("[data-latex]").forEach((el) => {
+      const latex = el.getAttribute("data-latex") ?? "";
+      el.innerHTML = katex.renderToString(latex, {
+        displayMode: el.getAttribute("data-type") === "block-math",
+        throwOnError: false,
+      });
+    });
+    return doc.body.innerHTML;
+  } catch {
+    return html; // the LaTeX source still reads
+  }
+}
+
 function DocumentPreview({ file }: { file: FileItem }) {
   const [html, setHtml] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -477,7 +779,8 @@ function DocumentPreview({ file }: { file: FileItem }) {
         // could carry <iframe src="https://evil/"> that DOMPurify keeps
         // (src is in ADD_ATTR). Post-process the sanitized string in a
         // throwaway document and drop any iframe whose src isn't allowed.
-        const safe = stripDisallowedIframes(sanitized);
+        const safe = await resolveAssetsInHtml(await renderDocMath(stripDisallowedIframes(sanitized)));
+        if (cancelled) return;
         setHtml(safe);
       } catch (e) {
         if (!cancelled) setErr(extractError(e));

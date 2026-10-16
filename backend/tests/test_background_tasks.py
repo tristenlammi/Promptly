@@ -100,7 +100,10 @@ async def test_failure_is_logged_not_swallowed(caplog):
         for r in caplog.records
         if r.levelname == "ERROR"
     ), "the failure should have been logged"
-    assert background.pending_count() == 0
+    # The failed task itself is released. (Not ``pending_count() == 0``:
+    # once the app's logging is configured, the ERROR above makes the DB
+    # error capture spawn its own write — see the note in background.py.)
+    assert task not in background._background_tasks
 
 
 async def test_cancellation_is_not_logged_as_an_error(caplog):

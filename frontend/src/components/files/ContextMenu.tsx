@@ -48,13 +48,18 @@ export function ContextMenu({ open, x, y, onClose, items }: ContextMenuProps) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
+    // Close when the *user* scrolls. Not on every scroll event: a
+    // virtualised list nudges its own scroll position as it measures rows
+    // (WP-7.6), which closed the menu the moment it opened.
     const onScroll = () => onClose();
     window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("wheel", onScroll, { capture: true, passive: true });
+    window.addEventListener("touchmove", onScroll, { capture: true, passive: true });
     window.addEventListener("resize", onScroll);
     return () => {
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("wheel", onScroll, { capture: true });
+      window.removeEventListener("touchmove", onScroll, { capture: true });
       window.removeEventListener("resize", onScroll);
     };
   }, [open, onClose]);

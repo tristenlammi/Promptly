@@ -50,6 +50,7 @@ from app.auth.events import (  # noqa: F401
     EVENT_MFA_VERIFIED,
     EVENT_PASSWORD_CHANGE,
     EVENT_PASSWORD_RESET_BY_ADMIN,
+    EVENT_PASSWORD_RESET_REQUESTED,
     EVENT_RATE_LIMITED,
     EVENT_REFRESH_REJECTED,
     EVENT_SSRF_BLOCKED,
@@ -57,6 +58,12 @@ from app.auth.events import (  # noqa: F401
     EVENT_TOOL_FAILED,
     EVENT_TOOL_INVOKED,
     EVENT_UNLOCK,
+    EVENT_USER_CREATED,
+    EVENT_ROLE_CHANGED,
+    EVENT_EMAIL_CHANGED,
+    EVENT_USERS_IMPORTED,
+    EVENT_GROUP_CHANGED,
+    EVENT_PROVIDER_KEY_CHANGED,
 )
 
 
@@ -85,9 +92,13 @@ def request_meta(request: Request | None) -> tuple[str, str]:
     is a configured trusted proxy (``TRUSTED_PROXY_IPS`` — the private
     docker/nginx range by default). From a trusted proxy the preference is:
 
-      1. ``CF-Connecting-IP`` — set by Cloudflare's tunnel/proxy.
-      2. ``X-Real-IP`` — set by our nginx to the connection's ``$remote_addr``.
-      3. ``X-Forwarded-For`` (first hop) — fallback.
+      1. ``X-Real-IP`` — our nginx always overwrites it with ``$remote_addr``,
+         which nginx has already resolved from Cloudflare's header when (and
+         only when) the request came through a trusted tunnel/proxy.
+      2. ``X-Forwarded-For`` (first hop) — fallback.
+
+    ``CF-Connecting-IP`` is *not* read here: it used to win, and any client
+    could set it, picking a fresh rate-limit bucket per request (R-014).
 
     From an **untrusted** peer (e.g. someone hitting the backend port
     directly) all forwarded headers are ignored and we use the raw socket
@@ -104,8 +115,7 @@ def request_meta(request: Request | None) -> tuple[str, str]:
     peer = (request.client.host if request.client else "") or ""
     if _peer_is_trusted_proxy(peer):
         ip = (
-            headers.get("CF-Connecting-IP")
-            or headers.get("X-Real-IP")
+            headers.get("X-Real-IP")
             or headers.get("X-Forwarded-For", "").split(",")[0].strip()
             or peer
             or ""

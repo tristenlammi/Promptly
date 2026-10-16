@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   CircleAlert,
   FileText,
@@ -13,12 +13,11 @@ import {
 import {
   useSetFileContext,
   useUnpinWorkspaceFile,
-  useUploadDriveFile,
   useWorkspace,
 } from "@/hooks/useWorkspaces";
 import type { WorkspaceFilePin } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
-import { apiErrorMessage } from "@/utils/apiError";
+import { useUploadStore } from "@/store/uploadStore";
 
 /**
  * Workspace "drive" on the home screen — drag/drop or pick photos and
@@ -33,8 +32,10 @@ function humanSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// What the server accepts (R-212) — Office files since WP-4.3; .html
+// stays out (stored-XSS on a shared host).
 const ACCEPT =
-  "image/*,.pdf,.txt,.md,.markdown,.csv,.json,.docx,.doc,.rtf,.html";
+  "image/*,audio/*,.pdf,.txt,.md,.markdown,.csv,.json,.log,.yaml,.yml,.xml,.docx,.xlsx,.pptx,.odt,.ods,.odp,.rtf";
 
 export function WorkspaceFilesPanel({
   workspaceId,
@@ -50,53 +51,40 @@ export function WorkspaceFilesPanel({
   onOpenDrive?: () => void;
 }) {
   const { data: workspace } = useWorkspace(workspaceId);
-  const upload = useUploadDriveFile(workspaceId);
+  const startUploads = useUploadStore((st) => st.startUploads);
   const unpin = useUnpinWorkspaceFile(workspaceId);
   const setContext = useSetFileContext(workspaceId);
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [uploading, setUploading] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  // In flight for this workspace, from the one upload queue (WP-7.6) —
+  // its panel shows progress and any refusal with the reason.
+  const tasks = useUploadStore((st) => st.tasks);
+  const uploading = useMemo(
+    () =>
+      tasks
+        .filter((t) => t.workspaceId === workspaceId && (t.status === "queued" || t.status === "uploading"))
+        .map((t) => t.name),
+    [tasks, workspaceId]
+  );
 
   const files = workspace?.files ?? [];
   const inContext = files.filter((f) => f.context_enabled !== false).length;
   const totalBytes = files.reduce((sum, f) => sum + f.size_bytes, 0);
 
-  const handleFiles = async (picked: FileList | File[]) => {
+  const handleFiles = (picked: FileList | File[]) => {
     const list = Array.from(picked);
     if (list.length === 0) return;
-    setError(null);
-    setUploading((u) => [...u, ...list.map((f) => f.name)]);
-    // Uploads land in the *workspace's* drive (owner-owned) no matter who
-    // uploads — the drive endpoint stores, pins, and indexes in one shot.
-    for (const file of list) {
-      try {
-        await upload.mutateAsync({ file, folderId: null });
-      } catch (err) {
-        setError(
-          apiErrorMessage(
-            err,
-            `Couldn't add "${file.name}". It may be too large or an unsupported type.`
-          )
-        );
-      } finally {
-        setUploading((u) => {
-          const i = u.indexOf(file.name);
-          if (i === -1) return u;
-          const next = u.slice();
-          next.splice(i, 1);
-          return next;
-        });
-      }
-    }
+    // Into the *workspace's* drive (owner-owned) no matter who uploads —
+    // the one Drive upload, then pinned and indexed (WP-7.6).
+    startUploads({ files: list, scope: "mine", folderId: null, workspaceId, onConflict: "keep_both" });
   };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     if (!canEdit) return;
-    if (e.dataTransfer.files?.length) void handleFiles(e.dataTransfer.files);
+    if (e.dataTransfer.files?.length) handleFiles(e.dataTransfer.files);
   };
 
   return (
@@ -155,17 +143,11 @@ export function WorkspaceFilesPanel({
             accept={ACCEPT}
             className="hidden"
             onChange={(e) => {
-              if (e.target.files?.length) void handleFiles(e.target.files);
+              if (e.target.files?.length) handleFiles(e.target.files);
               e.target.value = "";
             }}
           />
         </button>
-      )}
-
-      {error && (
-        <div className="mt-2 rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-xs text-[var(--danger)]">
-          {error}
-        </div>
       )}
 
       {compact && uploading.length > 0 && (
@@ -269,7 +251,7 @@ function FileRow({
             className={
               "shrink-0 rounded p-1 transition hover:bg-[var(--hover)] " +
               (contextOn
-                ? "text-[var(--accent)]"
+                ? "text-[var(--accent-text)]"
                 : "text-[var(--text-muted)]")
             }
           >
@@ -312,7 +294,7 @@ function FileStatus({
   }
   if (status === "ready") {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] text-[var(--accent)]">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] text-[var(--accent-text)]">
         <Zap className="h-2.5 w-2.5" />
         searchable
       </span>

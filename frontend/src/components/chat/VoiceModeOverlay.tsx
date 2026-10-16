@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, Mic, Square, X } from "lucide-react";
 
+import { isBareNo, isSpokenYes } from "@/lib/spokenConfirm";
 import { VoiceWaveform } from "@/components/voice/VoiceWaveform";
 import { commandsApi, type Command as VoiceCommand } from "@/api/commands";
 import { useDictation } from "@/hooks/useDictation";
@@ -55,10 +56,6 @@ type Phase =
   | "speaking"
   | "error";
 
-/** What counts as "yes" out loud. Anything else cancels: the safe
- *  reading of an ambiguous answer to "shall I open the garage door?" is
- *  no, so this stays a small closed list rather than a fuzzy guess. */
-const AFFIRMATIVE = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|confirm|affirmative)/i;
 
 /** How long a spoken "shall I?" stays answerable.
  *
@@ -203,7 +200,7 @@ export function VoiceModeOverlay({
   useEffect(() => {
     onFinalRef.current = (text: string) => {
       if (closingRef.current) return;
-      const t = text.trim();
+      let t = text.trim();
       if (!t) {
         // Nothing intelligible (e.g. the auto-stop timed out on silence) —
         // fall back to idle rather than looping the mic. The user taps to
@@ -228,7 +225,7 @@ export function VoiceModeOverlay({
       if (pending && !stale) {
         pendingRef.current = null;
         setPendingCommand(null);
-        if (AFFIRMATIVE.test(t)) {
+        if (isSpokenYes(t)) {
           void runMatched(pending.command, pending.slots, pending.utterance ?? t);
           return;
         }
@@ -237,8 +234,11 @@ export function VoiceModeOverlay({
           return;
         }
         // They declined a guess, not a command — so answer what they
-        // actually said instead of saying "cancelled" at them.
+        // actually said instead of saying "cancelled" at them. A bare
+        // "no" isn't a question for the model: answer the original
+        // request instead (R-165). Anything longer is a new request.
         declinedSuggestion = true;
+        if (isBareNo(t) && pending.utterance) t = pending.utterance;
       } else if (stale) {
         pendingRef.current = null;
         setPendingCommand(null);

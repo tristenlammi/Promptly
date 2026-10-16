@@ -27,14 +27,15 @@ const blobToDataURL = (blob: Blob): Promise<string> =>
 export async function removeImageBackground(
   api: ExcalidrawImperativeAPI,
   elementId: string,
-  fileId: string
+  fileId: string,
+  workspaceId: string
 ): Promise<void> {
   const file = api.getFiles()[fileId];
   if (!file?.dataURL) throw new Error("Image data unavailable.");
 
   // The image is held as a data: URL; turn it back into bytes to upload.
   const inputBlob = await (await fetch(file.dataURL)).blob();
-  const cutout = await canvasApi.removeBackground(inputBlob);
+  const cutout = await canvasApi.removeBackground(inputBlob, workspaceId);
   const dataURL = await blobToDataURL(cutout);
 
   const newFileId = `bgremoved_${Math.random().toString(36).slice(2)}`;

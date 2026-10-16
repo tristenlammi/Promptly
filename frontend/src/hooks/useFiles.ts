@@ -1,10 +1,19 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 
 import {
   filesApi,
   type BrowseResult,
   type BulkIds,
   type DriveSort,
+  type SharedView,
   type FileScope,
   type FileSearchResponse,
   type RecentFilesResponse,
@@ -13,7 +22,9 @@ import {
   type StarredListResponse,
   type StorageQuota,
   type TrashListResponse,
+  type FileSearchFilters,
 } from "@/api/files";
+import { toast } from "@/store/toastStore";
 
 const BROWSE_KEY = "files-browse" as const;
 const RECENT_KEY = "files-recent" as const;
@@ -31,15 +42,60 @@ export function browseKey(scope: FileScope, folderId: string | null) {
 export function useBrowseFiles(
   scope: FileScope,
   folderId: string | null,
-  sort?: DriveSort
+  sort?: DriveSort,
+  shared?: SharedView
 ) {
   return useQuery<BrowseResult>({
     // Sort is part of the key so changing it refetches; browseKey stays
     // the prefix used for invalidation after mutations.
-    queryKey: [...browseKey(scope, folderId), sort?.key ?? "name", sort?.dir ?? "asc"],
-    queryFn: () => filesApi.browse(scope, folderId, sort),
+    queryKey: [...browseKey(scope, folderId), sort?.key ?? "name", sort?.dir ?? "asc", shared ?? "all"],
+    queryFn: () => filesApi.browse(scope, folderId, sort, shared),
     staleTime: 10_000,
   });
+}
+
+const PAGE = 200;
+
+/** Merge pages of a listing: folders come on the first page, files on
+ *  every page. */
+function mergePages<T extends { folders: unknown[]; files: unknown[]; next_cursor?: string | null }>(
+  pages: T[] | undefined
+): T | undefined {
+  if (!pages?.length) return undefined;
+  const last = pages[pages.length - 1];
+  return { ...pages[0], files: pages.flatMap((p) => p.files), next_cursor: last.next_cursor ?? null };
+}
+
+/** Just a folder's subfolders (WP-7.6) — under the browse key, so the
+ *  usual invalidations refresh it. */
+export function useSubfolders(scope: FileScope, parentId: string | null) {
+  return useQuery<BrowseResult>({
+    queryKey: [...browseKey(scope, parentId), "folders-only"],
+    queryFn: () => filesApi.subfolders(scope, parentId),
+    staleTime: 30_000,
+  });
+}
+
+/** A folder a page at a time (WP-7.6): 200 files, then more as the list
+ *  scrolls. While a newly opened folder loads, the last one stays on
+ *  screen rather than flashing a skeleton. */
+export function useBrowsePaged(
+  scope: FileScope,
+  folderId: string | null,
+  sort?: DriveSort,
+  shared?: SharedView
+) {
+  const q = useInfiniteQuery<BrowseResult>({
+    queryKey: [...browseKey(scope, folderId), sort?.key ?? "name", sort?.dir ?? "asc", shared ?? "all", "paged"],
+    queryFn: ({ pageParam }) =>
+      filesApi.browse(scope, folderId, sort, shared, { limit: PAGE, cursor: pageParam as string | null }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    staleTime: 10_000,
+    placeholderData: keepPreviousData,
+  });
+  const data = useMemo(() => mergePages(q.data?.pages), [q.data]);
+  return { ...q, data };
 }
 
 /** Invalidate every Drive list view — used after mutations that
@@ -51,8 +107,14 @@ export function useBrowseFiles(
  * changed usage. */
 export function useInvalidateFiles() {
   const qc = useQueryClient();
-  return (scope?: FileScope) =>
-    qc.invalidateQueries({
+  return (scope?: FileScope) => invalidateFileQueries(qc, scope);
+}
+
+/** The same, for code that holds a QueryClient rather than calling the
+ *  hook. Callers used to invalidate ``["files"]`` / ``["quota"]``, keys no
+ *  query has, so share/copy/save-to-Drive left the lists stale (R-216). */
+export function invalidateFileQueries(qc: QueryClient, scope?: FileScope) {
+  return qc.invalidateQueries({
       predicate: (q) => {
         const head = q.queryKey[0];
         if (head === QUOTA_KEY) return true;
@@ -68,7 +130,23 @@ export function useInvalidateFiles() {
         if (!scope) return true;
         return q.queryKey[1] === scope;
       },
-    });
+  });
+}
+
+/** After uploads (WP-7.6): refresh only the folders they landed in, the
+ *  storage pill and Recent — not every Drive list. Search results are
+ *  marked stale for next time rather than refetched. */
+export function invalidateUploadTargets(qc: QueryClient, targets: { scope: FileScope; folderId: string | null }[]) {
+  const seen = new Set<string>();
+  for (const t of targets) {
+    const key = browseKey(t.scope, t.folderId);
+    if (seen.has(key.join("|"))) continue;
+    seen.add(key.join("|"));
+    void qc.invalidateQueries({ queryKey: key });
+  }
+  void qc.invalidateQueries({ queryKey: [QUOTA_KEY] });
+  void qc.invalidateQueries({ queryKey: [RECENT_KEY] });
+  void qc.invalidateQueries({ queryKey: [SEARCH_KEY], refetchType: "none" });
 }
 
 /** Live storage usage for the Drive sub-nav pill. Short stale time
@@ -106,6 +184,13 @@ export function useBulkRestore() {
   const invalidate = useInvalidateFiles();
   return useMutation({
     mutationFn: (ids: BulkIds) => filesApi.bulkRestore(ids),
+    onSuccess: () => invalidate(),
+  });
+}
+export function useBulkPurge() {
+  const invalidate = useInvalidateFiles();
+  return useMutation({
+    mutationFn: (ids: BulkIds) => filesApi.bulkPurge(ids),
     onSuccess: () => invalidate(),
   });
 }
@@ -184,8 +269,19 @@ export function useMoveFile() {
       id: string;
       folderId: string | null;
       scope: FileScope;
+      /** Where it was — pass it to get an "Undo" toast (WP-3.5). */
+      from?: string | null;
+      name?: string;
     }) => filesApi.moveFile(args.id, args.folderId),
-    onSuccess: (_data, vars) => invalidate(vars.scope),
+    onSuccess: (_data, vars) => {
+      invalidate(vars.scope);
+      if (vars.from !== undefined) {
+        undoToast(`Moved “${vars.name ?? "file"}”`, async () => {
+          await filesApi.moveFile(vars.id, vars.from ?? null);
+          invalidate(vars.scope);
+        });
+      }
+    },
   });
 }
 
@@ -196,8 +292,32 @@ export function useMoveFolder() {
       id: string;
       parentId: string | null;
       scope: FileScope;
+      from?: string | null;
+      name?: string;
     }) => filesApi.moveFolder(args.id, args.parentId),
-    onSuccess: (_data, vars) => invalidate(vars.scope),
+    onSuccess: (_data, vars) => {
+      invalidate(vars.scope);
+      if (vars.from !== undefined) {
+        undoToast(`Moved “${vars.name ?? "folder"}”`, async () => {
+          await filesApi.moveFolder(vars.id, vars.from ?? null);
+          invalidate(vars.scope);
+        });
+      }
+    },
+  });
+}
+
+/** A success toast with an "Undo" action (trash, move — Part C §2.2). */
+export function undoToast(message: string, undo: () => Promise<unknown>) {
+  toast.success(message, {
+    action: {
+      label: "Undo",
+      onClick: () => {
+        undo().catch((e: unknown) =>
+          toast.error(e instanceof Error ? e.message : "Couldn't undo that.")
+        );
+      },
+    },
   });
 }
 
@@ -209,7 +329,13 @@ export function useTrashFile() {
   return useMutation({
     mutationFn: (args: { id: string; scope: FileScope }) =>
       filesApi.trashFile(args.id),
-    onSuccess: (_data, vars) => invalidate(vars.scope),
+    onSuccess: (_data, vars) => {
+      invalidate(vars.scope);
+      undoToast("Moved to trash", async () => {
+        await filesApi.restoreFile(vars.id);
+        invalidate(vars.scope);
+      });
+    },
   });
 }
 
@@ -227,7 +353,13 @@ export function useTrashFolder() {
   return useMutation({
     mutationFn: (args: { id: string; scope: FileScope }) =>
       filesApi.trashFolder(args.id),
-    onSuccess: (_data, vars) => invalidate(vars.scope),
+    onSuccess: (_data, vars) => {
+      invalidate(vars.scope);
+      undoToast("Folder moved to trash", async () => {
+        await filesApi.restoreFolder(vars.id);
+        invalidate(vars.scope);
+      });
+    },
   });
 }
 
@@ -241,11 +373,15 @@ export function useRestoreFolder() {
 }
 
 export function useTrashContents(scope: FileScope) {
-  return useQuery<TrashListResponse>({
+  const q = useInfiniteQuery<TrashListResponse>({
     queryKey: [TRASH_KEY, scope] as const,
-    queryFn: () => filesApi.listTrash(scope),
+    queryFn: ({ pageParam }) => filesApi.listTrash(scope, { limit: PAGE, cursor: pageParam as string | null }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
     staleTime: 10_000,
   });
+  const data = useMemo(() => mergePages(q.data?.pages), [q.data]);
+  return { ...q, data };
 }
 
 export function useEmptyTrash() {
@@ -296,11 +432,15 @@ export function useUnstarFolder() {
 }
 
 export function useStarredFiles(scope: FileScope) {
-  return useQuery<StarredListResponse>({
+  const q = useInfiniteQuery<StarredListResponse>({
     queryKey: [STARRED_KEY, scope] as const,
-    queryFn: () => filesApi.listStarred(scope),
+    queryFn: ({ pageParam }) => filesApi.listStarred(scope, { limit: PAGE, cursor: pageParam as string | null }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
     staleTime: 10_000,
   });
+  const data = useMemo(() => mergePages(q.data?.pages), [q.data]);
+  return { ...q, data };
 }
 
 export function useRecentFiles(scope: FileScope, limit = 50) {
@@ -317,13 +457,38 @@ export function useRecentFiles(scope: FileScope, limit = 50) {
 export function useSearchFiles(
   q: string,
   scope: FileScope,
-  opts: { limit?: number; enabled?: boolean } = {}
+  opts: { limit?: number; enabled?: boolean; folderId?: string | null } = {}
 ) {
   const enabled = opts.enabled !== false && q.trim().length > 0;
   return useQuery<FileSearchResponse>({
-    queryKey: [SEARCH_KEY, scope, q.trim(), opts.limit ?? 20] as const,
-    queryFn: () => filesApi.search(q.trim(), scope, opts.limit ?? 20),
+    queryKey: [SEARCH_KEY, scope, q.trim(), opts.limit ?? 20, opts.folderId ?? null] as const,
+    queryFn: () =>
+      filesApi.search(q.trim(), scope, opts.limit ?? 20, false, { folderId: opts.folderId ?? null }),
     enabled,
+    staleTime: 5_000,
+  });
+}
+
+const SEARCH_PAGE = 30;
+
+/** Paged search for the results page — filters plus "Load more" (R-213;
+ *  it was capped at 20 with no way past them). */
+export function useSearchFilesPaged(
+  q: string,
+  scope: FileScope,
+  filters: Omit<FileSearchFilters, "offset"> = {}
+) {
+  return useInfiniteQuery<FileSearchResponse>({
+    queryKey: [SEARCH_KEY, scope, q.trim(), "paged", filters] as const,
+    queryFn: ({ pageParam }) =>
+      filesApi.search(q.trim(), scope, SEARCH_PAGE, false, {
+        ...filters,
+        offset: pageParam as number,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) =>
+      last.has_more ? pages.length * SEARCH_PAGE : undefined,
+    enabled: q.trim().length > 0,
     staleTime: 5_000,
   });
 }

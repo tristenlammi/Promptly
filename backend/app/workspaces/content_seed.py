@@ -23,6 +23,24 @@ from app.chat.models import Workspace, WorkspaceItem
 logger = logging.getLogger("promptly.workspaces.seed")
 
 
+def render_note_markdown(markdown: str) -> tuple[bytes, str, str | None]:
+    """Markdown → ``(Y.Doc update, HTML blob, plain text)`` for a new note.
+
+    Pure CPU, no I/O — a bulk caller (the Markdown-zip import) runs it in
+    ``asyncio.to_thread`` and hands the result to ``create_note_with_item``
+    so hundreds of conversions don't stall the single event loop (R-315).
+    """
+    from app.files.document_build import markdown_to_doc_update
+    from app.files.document_render import (
+        extract_text_from_html,
+        render_html_from_update,
+    )
+
+    update = markdown_to_doc_update(markdown)
+    html = render_html_from_update(update)
+    return update, html, extract_text_from_html(html) or None
+
+
 async def create_note_with_item(
     db: AsyncSession,
     *,
@@ -32,18 +50,17 @@ async def create_note_with_item(
     title: str,
     markdown: str,
     parent_id: uuid.UUID | None = None,
+    rendered: tuple[bytes, str, str | None] | None = None,
 ) -> WorkspaceItem:
     """Create a Drive-backed note seeded from Markdown + its tree item.
 
     Mirrors a normal editor save end-to-end: Y.Doc seed (so the collab
     editor opens populated), HTML blob (preview/download), content_text
     (FTS + RAG), ``queued`` index status. Flushed, not committed.
+
+    ``rendered`` is ``render_note_markdown(markdown)`` computed ahead of
+    time (off the event loop); when omitted it's computed inline.
     """
-    from app.files.document_build import markdown_to_doc_update
-    from app.files.document_render import (
-        extract_text_from_html,
-        render_html_from_update,
-    )
     from app.files.documents_router import create_blank_document
     from app.files.models import DocumentState
     from app.files.storage import absolute_path
@@ -57,13 +74,12 @@ async def create_note_with_item(
     doc = await create_blank_document(
         db, owner_id=owner.id, folder_id=notes_folder_id, name=title
     )
-    update = markdown_to_doc_update(markdown)
+    update, html, text = rendered or render_note_markdown(markdown)
     ds = await db.get(DocumentState, doc.id)
     if ds is not None:
         ds.yjs_update = update
         ds.version = (ds.version or 0) + 1
-    html = render_html_from_update(update)
-    doc.content_text = extract_text_from_html(html) or None
+    doc.content_text = text
     try:
         with open(absolute_path(doc.storage_path), "w", encoding="utf-8") as f:
             f.write(html)

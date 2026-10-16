@@ -94,7 +94,7 @@ export function RangePicker({
           className={cn(
             "px-2.5 py-1 text-[11px] font-medium transition",
             d === value
-              ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+              ? "bg-[var(--accent)]/10 text-[var(--accent-text)]"
               : "text-[var(--text-muted)] hover:text-[var(--text)]"
           )}
         >
@@ -121,7 +121,7 @@ export function MetricToggle({
           className={cn(
             "px-2.5 py-1 text-[11px] font-medium transition flex items-center gap-1",
             m === value
-              ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+              ? "bg-[var(--accent)]/10 text-[var(--accent-text)]"
               : "text-[var(--text-muted)] hover:text-[var(--text)]"
           )}
         >
@@ -158,7 +158,7 @@ export function StatCard({
   return (
     <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-3">
       <div className="flex items-center gap-2 text-[11px] text-[var(--text-muted)]">
-        <span className="text-[var(--accent)]">{icon}</span>
+        <span className="text-[var(--accent-text)]">{icon}</span>
         <span className="uppercase tracking-wider">{label}</span>
       </div>
       <div className="mt-1.5 flex items-baseline gap-2">

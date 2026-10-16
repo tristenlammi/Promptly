@@ -9,6 +9,8 @@ import type {
 
 export interface SetupStatus {
   requires_setup: boolean;
+  /** The installer printed a setup code that creating the admin needs. */
+  setup_code_required?: boolean;
 }
 
 export interface SsoStatus {
@@ -49,13 +51,30 @@ export const authApi = {
   async setup(
     email: string,
     username: string,
-    password: string
+    password: string,
+    setupCode?: string
   ): Promise<AuthResponseOk> {
     const { data } = await apiClient.post<AuthResponseOk>("/auth/setup", {
       email,
       username,
       password,
+      ...(setupCode ? { setup_code: setupCode } : {}),
     });
+    return data;
+  },
+  async forgotPassword(email: string): Promise<void> {
+    await apiClient.post("/auth/forgot-password", { email });
+  },
+  async resetPassword(token: string, newPassword: string): Promise<void> {
+    await apiClient.post("/auth/reset-password", { token, new_password: newPassword });
+  },
+  /** Sign this account out on every device, this one included. */
+  async logoutEverywhere(): Promise<void> {
+    await apiClient.post("/auth/logout-everywhere");
+  },
+  /** The MFA step an SSO sign-in still needs, handed over once. */
+  async oidcPending(): Promise<AuthResponse> {
+    const { data } = await apiClient.post<AuthResponse>("/auth/oidc/pending");
     return data;
   },
   async login(email: string, password: string): Promise<AuthResponse> {
@@ -69,8 +88,10 @@ export const authApi = {
     const { data } = await apiClient.post<TokenResponse>("/auth/refresh");
     return data;
   },
-  async logout(): Promise<void> {
-    await apiClient.post("/auth/logout");
+  /** ``pushEndpoint``: this browser's push subscription, so the server
+   *  stops sending the user's notifications here. */
+  async logout(pushEndpoint?: string): Promise<void> {
+    await apiClient.post("/auth/logout", { push_endpoint: pushEndpoint ?? null });
   },
   /** Merge a small whitelisted set of keys into ``user.settings``.
    *

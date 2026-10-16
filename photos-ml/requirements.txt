@@ -1,0 +1,23 @@
+# Promptly photos-ml (Part E §E4.2). Pinned to releases at least two weeks old
+# when chosen (2026-10-14).
+onnxruntime==1.30.0
+tokenizers==0.23.2
+numpy==2.5.3
+pillow==12.3.0
+fastapi==0.142.1
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+httpx==0.28.1
+# Faces: cv2.FaceDetectorYN (YuNet) + the ArcFace alignment (WP-PH2.3).
+opencv-python-headless==4.14.0.94
+# Text in photos (WP-PH2.5): RapidOCR's own dependencies. rapidocr itself is
+# installed with --no-deps in the Dockerfile: 3.9.2 asks for the GUI build of
+# OpenCV (opencv-python, needing X libraries) beside the headless one above.
+pyclipper==1.4.0
+shapely==2.1.2
+six==1.17.0
+pyyaml==6.0.3
+tqdm==4.70.1
+omegaconf==2.3.0
+requests==2.34.2
+colorlog==6.12.0

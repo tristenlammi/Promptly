@@ -17,10 +17,10 @@ from app.tasks.flow_graph import (
     NodeType,
     ReportOutputData,
     ScheduleTriggerData,
+    dag_ai_nodes,
     graph_to_task_fields,
     is_executable_graph,
     is_simple_graph,
-    ordered_ai_nodes,
     output_nodes,
     task_to_graph,
 )
@@ -101,6 +101,10 @@ async def apply_graph(db: AsyncSession, task: Task, graph: FlowGraph) -> None:
         task.reasoning_effort = f.reasoning_effort
         task.use_web_search = f.use_web_search
         task.notify = f.notify
+        if not f.notify:
+            task.notify_mode = "never"
+        elif task.notify_mode == "never":
+            task.notify_mode = "failures"
         task.flow_graph = None
         await _sync_task_connectors(db, task, set(f.connector_ids))
         return
@@ -136,11 +140,17 @@ async def apply_graph(db: AsyncSession, task: Task, graph: FlowGraph) -> None:
     )
     if report_node is not None:
         task.notify = ReportOutputData.model_validate(report_node.data).notify
+        # The mode follows the switch (R-152): off means never; switching
+        # it back on restores the default rather than "every run".
+        if not task.notify:
+            task.notify_mode = "never"
+        elif task.notify_mode == "never":
+            task.notify_mode = "failures"
 
     # Project the first AI node onto the prompt/model columns when there is one.
     # A flow can now be AI-free (e.g. search → report), in which case the
     # column projection just keeps whatever the task already had.
-    ai_nodes = ordered_ai_nodes(graph)
+    ai_nodes = dag_ai_nodes(graph)
     if ai_nodes:
         first = AIPromptData.model_validate(ai_nodes[0].data)
         task.prompt = first.prompt
@@ -157,6 +167,43 @@ async def apply_graph(db: AsyncSession, task: Task, graph: FlowGraph) -> None:
         for c in AIPromptData.model_validate(n.data).connector_ids:
             union.add(uuid.UUID(c))
     await _sync_task_connectors(db, task, union)
+
+
+def has_schedule_trigger(task: Task) -> bool:
+    """Whether the clock may start this automation. A Simple task always
+    has a schedule; a flow only if its trigger is a schedule — its stale
+    schedule columns used to start webhook/event flows on the clock (R-010)."""
+    if task.flow_graph is None:
+        return True
+    return any(
+        n.get("type") == NodeType.TRIGGER_SCHEDULE for n in task.flow_graph.get("nodes", [])
+    )
+
+
+_EVENT_LABELS = {
+    "file_added": "When a file is added",
+    "card_moved": "When a card moves",
+    "item_created": "When something is created",
+}
+
+
+def trigger_label(task: Task) -> str | None:
+    """How a non-schedule flow starts, for the list view; None when the
+    schedule columns describe it."""
+    if task.flow_graph is None:
+        return None
+    for n in task.flow_graph.get("nodes", []):
+        t = n.get("type")
+        if t == NodeType.TRIGGER_SCHEDULE:
+            return None
+        if t == NodeType.TRIGGER_WEBHOOK:
+            return "On webhook"
+        if t == NodeType.TRIGGER_MANUAL:
+            return "Run manually"
+        if t == NodeType.TRIGGER_EVENT:
+            ev = str((n.get("data") or {}).get("event") or "")
+            return _EVENT_LABELS.get(ev, "On a workspace event")
+    return None
 
 
 async def promote_task(db: AsyncSession, task: Task) -> FlowGraph:

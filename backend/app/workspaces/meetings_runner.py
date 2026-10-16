@@ -77,6 +77,18 @@ class MeetingError(Exception):
     """A stage failed in a way worth showing to the user verbatim."""
 
 
+class MeetingCancelled(Exception):
+    """The job was cancelled (or reaped) while this worker was on it."""
+
+
+async def _stop_if_cancelled(db: AsyncSession, job) -> None:
+    """Re-read the status between stages; a cancel or the stale-job reaper
+    flips it to ``failed``, and finishing anyway would resurrect the job."""
+    await db.refresh(job, ["status"])
+    if job.status == "failed":
+        raise MeetingCancelled()
+
+
 async def _run_cmd(*args: str) -> tuple[int, bytes, bytes]:
     proc = await asyncio.create_subprocess_exec(
         *args,
@@ -157,6 +169,8 @@ async def _transcribe_chunks(
                     content_type="audio/ogg",
                     language=job.language,
                     timeout_s=_CHUNK_STT_TIMEOUT_S,
+                    # Its own lane, so dictation isn't stuck behind it.
+                    batch=True,
                 )
                 break
             except TranscriptionError as exc:
@@ -170,6 +184,7 @@ async def _transcribe_chunks(
                 f"Transcription failed on part {i + 1} of {len(chunks)}: "
                 f"{last_exc}"
             )
+        await _stop_if_cancelled(db, job)
         text = (result.text or "").strip()
         if text:
             parts.append(f"{_anchor(i * _CHUNK_SECONDS)} {text}")
@@ -182,23 +197,46 @@ async def _transcribe_chunks(
     return "\n\n".join(parts)
 
 
+async def resolve_summary_model(db: AsyncSession, ws):
+    """``(provider, model_id)`` that will summarise this workspace's
+    meetings: its default chat model, its memory model, else the app's
+    default chat model. Raises :class:`MeetingError` when there's none —
+    checked at upload too, so nobody waits an hour of transcription to
+    learn there was never a model to summarise with (R-133)."""
+    from app.app_settings.defaults import load_effective_defaults, org_id_of
+    from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+    from app.models_config.models import ModelProvider
+
+    candidates = [
+        (ws.default_provider_id, ws.default_model_id),
+        (ws.memory_provider_id, ws.memory_model_id),
+    ]
+    eff = await load_effective_defaults(db, await org_id_of(db, ws.user_id))
+    if eff.default_chat_configured:
+        candidates.append((eff.default_chat_provider_id, eff.default_chat_model_id))
+    for provider_id, model_id in candidates:
+        if not provider_id or not model_id:
+            continue
+        provider = await db.get(ModelProvider, provider_id)
+        if provider is None or not provider.enabled:
+            continue
+        if is_custom_model_id(model_id):
+            resolved = await resolve_custom_model(model_id, db)
+            if resolved is None:
+                continue
+            return resolved.base_provider, resolved.base_model_id
+        return provider, model_id
+    raise MeetingError(
+        "There's no model to write the notes with — set a default model on "
+        "the workspace (or ask an admin to set an app default), then try again."
+    )
+
+
 async def _summarise(db: AsyncSession, ws, transcript: str) -> str:
     """One model call: transcript → structured minutes (Markdown)."""
-    from app.models_config.models import ModelProvider
     from app.models_config.provider import ChatMessage, model_router
 
-    provider_id = ws.default_provider_id or ws.memory_provider_id
-    model_id = ws.default_model_id or ws.memory_model_id
-    if not provider_id or not model_id:
-        raise MeetingError(
-            "This workspace has no default chat model — set one in the "
-            "workspace settings, then try again."
-        )
-    provider = await db.get(ModelProvider, provider_id)
-    if provider is None or not provider.enabled:
-        raise MeetingError(
-            "The workspace's default model provider is unavailable."
-        )
+    provider, model_id = await resolve_summary_model(db, ws)
 
     body = transcript
     if len(body) > _SUMMARY_INPUT_CHAR_CAP:
@@ -258,8 +296,26 @@ async def execute_meeting(job_id: uuid.UUID) -> None:
             return  # gone, or an Arq redelivery of an already-running job
         try:
             await _execute(db, job)
+        except MeetingCancelled:
+            return  # already marked failed by whoever cancelled it
         except MeetingError as exc:
             await _fail(db, job, str(exc))
+        except asyncio.CancelledError:
+            # The worker shut down or the job hit arq's timeout. ``except
+            # Exception`` never saw this, so the row stayed "transcribing"
+            # for good and blocked new uploads (R-133). Record it, shielded
+            # from the cancellation, then let the cancel carry on.
+            try:
+                await asyncio.shield(
+                    _fail(
+                        db,
+                        job,
+                        "Processing was interrupted (the server restarted or it "
+                        "ran too long). Try again.",
+                    )
+                )
+            finally:
+                raise
         except Exception:  # noqa: BLE001 — belt and braces
             logger.exception("meeting job %s crashed", job_id)
             await _fail(db, job, "Something went wrong while processing the recording.")
@@ -276,25 +332,31 @@ async def _execute(db: AsyncSession, job) -> None:
     ws = await db.get(Workspace, job.workspace_id)
     if ws is None:
         raise MeetingError("The workspace no longer exists.")
-    if not job.audio_path:
-        raise MeetingError("The uploaded recording is gone.")
-    try:
-        src = absolute_path(job.audio_path)
-    except ValueError as exc:
-        raise MeetingError("The uploaded recording is gone.") from exc
-    if not src.exists():
-        raise MeetingError("The uploaded recording is gone.")
 
-    # ---- Stage 1+2: chunk + transcribe -------------------------------
-    job.status = "transcribing"
-    job.duration_s = await _probe_duration(src)
-    await db.commit()
+    if job.transcript and not job.audio_path:
+        # A retry after the summary failed: the transcript survived, so go
+        # straight to summarising (R-133).
+        transcript = job.transcript
+    else:
+        if not job.audio_path:
+            raise MeetingError("The uploaded recording is gone.")
+        try:
+            src = absolute_path(job.audio_path)
+        except ValueError as exc:
+            raise MeetingError("The uploaded recording is gone.") from exc
+        if not src.exists():
+            raise MeetingError("The uploaded recording is gone.")
 
-    with tempfile.TemporaryDirectory(prefix="meeting_") as tmp:
-        chunks = await _segment_audio(src, Path(tmp))
-        job.progress_total = len(chunks)
+        # ---- Stage 1+2: chunk + transcribe ---------------------------
+        job.status = "transcribing"
+        job.duration_s = await _probe_duration(src)
         await db.commit()
-        transcript = await _transcribe_chunks(db, job, chunks)
+
+        with tempfile.TemporaryDirectory(prefix="meeting_") as tmp:
+            chunks = await _segment_audio(src, Path(tmp))
+            job.progress_total = len(chunks)
+            await db.commit()
+            transcript = await _transcribe_chunks(db, job, chunks)
 
     job.transcript = transcript
     job.status = "summarising"
@@ -302,6 +364,7 @@ async def _execute(db: AsyncSession, job) -> None:
 
     # ---- Stage 3: summarise ------------------------------------------
     notes_md = await _summarise(db, ws, transcript)
+    await _stop_if_cancelled(db, job)
 
     # ---- Stage 4: seed the note --------------------------------------
     date_label = datetime.now(timezone.utc).strftime("%d %b %Y")

@@ -42,6 +42,23 @@ _REAL_DB = os.environ.get(
 _TEST_DB = os.environ.get("TEST_DATABASE_URL") or _REAL_DB.rsplit("/", 1)[0] + "/promptly_test"
 os.environ["DATABASE_URL"] = _TEST_DB
 
+# And at a scratch uploads folder: the test container mounts the real
+# ./data/uploads, so a test that didn't point storage elsewhere wrote its
+# blobs into the live install (rows in the test DB, bytes in real data) —
+# the integrity scrubber found them as orphans (WP-7.2). Tests that set
+# their own UPLOAD_ROOT still do.
+import tempfile  # noqa: E402
+
+os.environ["PROMPTLY_UPLOAD_ROOT"] = tempfile.mkdtemp(prefix="promptly-test-uploads-")
+
+# And a signing key, where none is set: the app refuses to boot on the dev
+# placeholder, so a bare ``pytest`` (CI has no .env) errored on every test
+# that imported ``app.main``. A random one per run is all a test needs.
+if not os.environ.get("SECRET_KEY"):
+    import secrets  # noqa: E402
+
+    os.environ["SECRET_KEY"] = secrets.token_urlsafe(48)
+
 import asyncio  # noqa: E402
 import uuid  # noqa: E402
 from datetime import datetime, timezone  # noqa: E402
@@ -86,6 +103,19 @@ async def _reset_redis() -> None:
         await redis.aclose()
     except Exception:  # noqa: BLE001 — best effort between tests
         pass
+
+
+@pytest.fixture(autouse=True)
+def _no_photos_ml(monkeypatch):
+    """No test talks to a real photos-ml service (the test container is on
+    the compose network, where one may be running); tests that need it fake
+    ``app.photos.ml``."""
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "PHOTOS_ML_URL", "")
+    import app.photos.ml as ml
+
+    monkeypatch.setattr(ml, "_health", (0.0, None))
 
 
 @pytest.fixture(scope="session")
@@ -142,6 +172,17 @@ async def db(database):
     # writes is far faster than dropping/recreating the schema, and keeps
     # alembic_version intact so migrations run once per session.
     async with engine.begin() as conn:
+        # A background write from the previous test (an error-log row, a
+        # notification) can be cut off mid-transaction when its event loop
+        # closes, leaving a connection that holds locks for ever — the
+        # truncate below then waited indefinitely and the suite "hung".
+        # End any such leftovers first.
+        await conn.execute(
+            text(
+                "select pg_terminate_backend(pid) from pg_stat_activity "
+                "where datname = current_database() and pid <> pg_backend_pid()"
+            )
+        )
         rows = await conn.execute(
             text(
                 "select tablename from pg_tables where schemaname='public' "

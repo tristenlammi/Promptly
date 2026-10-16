@@ -84,11 +84,14 @@ export function NotificationsPanel() {
     setTestStatus(null);
     setTestBusy(true);
     try {
-      const sent = await notificationsApi.sendTest();
+      const { sent, failed, removed } = await notificationsApi.sendTest();
+      const parts: string[] = [];
+      if (sent) parts.push(`Sent to ${sent} device${sent === 1 ? "" : "s"} — check for it.`);
+      if (failed) parts.push(`${failed} couldn't be reached.`);
+      if (removed)
+        parts.push(`${removed} had stopped accepting notifications and ${removed === 1 ? "was" : "were"} removed.`);
       setTestStatus(
-        sent === 0
-          ? "No active subscriptions to send to."
-          : `Sent to ${sent} device${sent === 1 ? "" : "s"}.`
+        parts.length ? parts.join(" ") : "No devices are set up for notifications yet."
       );
     } catch (e) {
       setTestStatus((e as Error)?.message ?? "Test failed.");
@@ -121,7 +124,7 @@ export function NotificationsPanel() {
   return (
     <section className="rounded-lg border border-[var(--border)] bg-[var(--surface)] p-5">
       <header className="mb-4 flex items-start gap-3">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent)]/15 text-[var(--accent)]">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--accent)]/15 text-[var(--accent-text)]">
           <BellRing className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">

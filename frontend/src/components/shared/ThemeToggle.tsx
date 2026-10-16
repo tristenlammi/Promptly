@@ -10,9 +10,11 @@ const OPTIONS: Array<{ value: Theme; icon: typeof Sun; label: string }> = [
   { value: "system", icon: Monitor, label: "System" },
 ];
 
-export function ThemeToggle() {
+/** Apply the chosen theme, and follow the OS when it's "system". Mount
+ *  once somewhere always on screen (the sidebar footer) — the toggle
+ *  itself may live in a closed menu. */
+export function useThemeSync() {
   const theme = useThemeStore((s) => s.theme);
-  const setTheme = useThemeStore((s) => s.setTheme);
 
   useEffect(() => {
     applyTheme();
@@ -26,6 +28,12 @@ export function ThemeToggle() {
     mql.addEventListener("change", handler);
     return () => mql.removeEventListener("change", handler);
   }, [theme]);
+}
+
+export function ThemeToggle() {
+  const theme = useThemeStore((s) => s.theme);
+  const setTheme = useThemeStore((s) => s.setTheme);
+  useThemeSync();
 
   return (
     <div

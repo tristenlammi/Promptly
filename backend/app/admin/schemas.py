@@ -5,7 +5,9 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.auth.email_address import EmailAddress
 
 from app.auth.password_policy import (
     MAX_PASSWORD_LENGTH,
@@ -25,7 +27,7 @@ class AdminUserResponse(BaseModel):
     # Display-only: read back whatever is stored. Not ``EmailStr`` — historical
     # / seeded / test accounts can hold non-RFC addresses (e.g. ``@x.test``),
     # and one such row must not 500 the entire admin user list. Input schemas
-    # (create/update) keep ``EmailStr`` to validate new addresses.
+    # (create/update) validate new addresses with the shared lenient rule.
     email: str
     username: str
     role: UserRole
@@ -37,6 +39,8 @@ class AdminUserResponse(BaseModel):
     can_generate_images: bool = True
     # Whether the user may run code via the "Run" button on code artifacts.
     can_execute_code: bool = True
+    # Whether the user's automation HTTP steps may reach the local network.
+    can_reach_private_network: bool = False
     # Groups this user belongs to (role bundles — grant connectors + models).
     group_ids: list[uuid.UUID] = []
     created_at: datetime
@@ -48,6 +52,7 @@ class AdminUserResponse(BaseModel):
     must_change_password: bool = False
     last_login_at: datetime | None = None
     last_login_ip: str | None = None
+    last_seen_at: datetime | None = None
 
     # ----- MFA enrollment (admin visibility) -----
     # NULL method = the user has NOT enrolled any second factor. Lets an
@@ -158,6 +163,8 @@ class AppSettingsResponse(BaseModel):
     oidc_client_id: str | None = None
     oidc_button_label: str | None = None
     oidc_scopes: str | None = None
+    oidc_trust_unverified_email: bool = False
+    oidc_satisfies_mfa: bool = False
     oidc_client_secret_set: bool = False
     oidc_configured: bool = False
 
@@ -165,6 +172,7 @@ class AppSettingsResponse(BaseModel):
     # NULL on any of these means "no default — users without a
     # personal override are uncapped".
     default_storage_cap_bytes: int | None = None
+    max_upload_bytes_large: int | None = None
     default_daily_token_budget: int | None = None
     default_monthly_token_budget: int | None = None
 
@@ -225,6 +233,12 @@ class AppSettingsResponse(BaseModel):
     voice_model_id: str | None = None
     voice_configured: bool
 
+    # ----- Photos vision (PH-2) -----
+    photos_vision_provider_id: uuid.UUID | None = None
+    photos_vision_model_id: str | None = None
+    photos_vision_configured: bool = False
+    photos_vision_monthly_limit: int = 2000
+
     updated_at: datetime
 
 
@@ -248,7 +262,7 @@ class AppSettingsUpdate(BaseModel):
     smtp_username: str | None = Field(default=None, max_length=255)
     smtp_password: str | None = Field(default=None, max_length=512)
     smtp_use_tls: bool | None = None
-    smtp_from_address: EmailStr | None = None
+    smtp_from_address: EmailAddress | None = None
     smtp_from_name: str | None = Field(default=None, max_length=128)
 
     # ----- SSO (OIDC) — client secret follows the smtp_password idiom
@@ -259,10 +273,13 @@ class AppSettingsUpdate(BaseModel):
     oidc_client_secret: str | None = Field(default=None, max_length=1024)
     oidc_button_label: str | None = Field(default=None, max_length=64)
     oidc_scopes: str | None = Field(default=None, max_length=256)
+    oidc_trust_unverified_email: bool | None = None
+    oidc_satisfies_mfa: bool | None = None
 
     # ge=0 (not ge=1) so an admin can park the org at "0 tokens for
     # everyone unless overridden" during a kill-switch incident.
     default_storage_cap_bytes: int | None = Field(default=None, ge=0)
+    max_upload_bytes_large: int | None = Field(default=None, ge=1)
     default_daily_token_budget: int | None = Field(default=None, ge=0)
     default_monthly_token_budget: int | None = Field(default=None, ge=0)
 
@@ -328,9 +345,16 @@ class AppSettingsUpdate(BaseModel):
     voice_provider_id: uuid.UUID | None = None
     voice_model_id: str | None = Field(default=None, max_length=255)
 
+    # ----- Photos vision (PH-2) -----
+    # Same paired semantics; the limit is photos a cloud model may describe
+    # a month, across everyone.
+    photos_vision_provider_id: uuid.UUID | None = None
+    photos_vision_model_id: str | None = Field(default=None, max_length=255)
+    photos_vision_monthly_limit: int | None = Field(default=None, ge=0, le=1_000_000)
+
 
 class AdminUserCreate(BaseModel):
-    email: EmailStr
+    email: EmailAddress
     username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     password: str = Field(
         min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH
@@ -353,6 +377,14 @@ class AdminUserCreate(BaseModel):
     storage_cap_bytes: int | None = Field(default=None, ge=0)
     daily_token_budget: int | None = Field(default=None, ge=0)
     monthly_token_budget: int | None = Field(default=None, ge=0)
+    # Capability toggles from the create dialog — previously dropped on the
+    # floor, so a user meant to be locked down got everything (R-260).
+    can_generate_images: bool | None = None
+    can_execute_code: bool | None = None
+    can_reach_private_network: bool | None = None
+    # Admin-chosen passwords are hand-delivered; make the person pick their
+    # own on first sign-in (R-259). The dialog can untick it.
+    must_change_password: bool = True
 
 
 class AdminUserUpdate(BaseModel):
@@ -367,7 +399,7 @@ class AdminUserUpdate(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    email: EmailStr | None = None
+    email: EmailAddress | None = None
     username: str | None = Field(
         default=None, min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$"
     )
@@ -388,6 +420,9 @@ class AdminUserUpdate(BaseModel):
     can_generate_images: bool | None = None
     # Omit to leave unchanged; send a bool to toggle code-execution access.
     can_execute_code: bool | None = None
+    # Omit to leave unchanged; send a bool to allow/deny local-network
+    # access for the user's automation HTTP steps.
+    can_reach_private_network: bool | None = None
     # Omit to leave membership unchanged; send a (possibly empty) list to
     # replace the user's group set.
     group_ids: list[uuid.UUID] | None = None
@@ -462,7 +497,7 @@ class AnalyticsUserRow(BaseModel):
 
     user_id: uuid.UUID
     username: str
-    email: EmailStr
+    email: str
     messages_window: int
     prompt_tokens_window: int
     completion_tokens_window: int

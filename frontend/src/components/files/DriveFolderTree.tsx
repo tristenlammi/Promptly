@@ -82,6 +82,7 @@ export function DriveFolderTree({
   /** Bumped by the parent after a folder mutation (create / move / trash)
    *  so the tree reloads its top level. */
   version = 0,
+  embedded = false,
 }: {
   scope: FileScope;
   currentFolderId: string | null;
@@ -89,6 +90,9 @@ export function DriveFolderTree({
   /** Opens the parent's "new folder" flow (creates in the current folder). */
   onNewFolder?: () => void;
   version?: number;
+  /** Inside the Files rail (WP-3.5): just the folders — the rail has its
+   *  own "My files" entry, New menu and "From chats" group. */
+  embedded?: boolean;
 }) {
   const [roots, setRoots] = useState<TreeNode[]>([]);
   const [loading, setLoading] = useState(false);
@@ -108,7 +112,7 @@ export function DriveFolderTree({
     setLoading(true);
     setError(null);
     filesApi
-      .browse(scope, null)
+      .subfolders(scope, null)
       .then((res) => {
         if (cancelled) return;
         // Preserve expansion across a version reload; a scope switch starts
@@ -139,7 +143,7 @@ export function DriveFolderTree({
       node.loading = true;
       setRoots((r) => [...r]);
       try {
-        const res = await filesApi.browse(scope, node.folder.id);
+        const res = await filesApi.subfolders(scope, node.folder.id);
         node.children = res.folders.map((f) => makeNode(f, node.depth + 1));
         node.loaded = true;
       } catch {
@@ -206,7 +210,8 @@ export function DriveFolderTree({
   }, [currentFolderId, scope, roots.length, loadChildren]);
 
   return (
-    <nav aria-label="Folders" className="flex flex-col gap-0.5 p-2 text-sm">
+    <nav aria-label="Folders" className={cn("flex flex-col gap-0.5 text-sm", embedded ? "py-0.5 pl-3" : "p-2")}>
+      {!embedded && (
       <button
         type="button"
         onClick={() => onNavigate(null)}
@@ -219,15 +224,16 @@ export function DriveFolderTree({
       >
         <Home className="h-4 w-4 shrink-0" />
         <span className="truncate">
-          {scope === "mine" ? "Drive" : "Shared with me"}
+          {scope === "mine" ? "My files" : "Shared with me"}
         </span>
       </button>
+      )}
 
-      {onNewFolder && scope === "mine" && (
+      {!embedded && onNewFolder && scope === "mine" && (
         <button
           type="button"
           onClick={onNewFolder}
-          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--accent)]"
+          className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--accent-text)]"
           title="New folder here"
         >
           <FolderPlus className="h-4 w-4 shrink-0" />
@@ -260,7 +266,7 @@ export function DriveFolderTree({
           ))}
       </ul>
 
-      {roots.some((n) => n.folder.system_kind) && (
+      {!embedded && roots.some((n) => n.folder.system_kind) && (
         <div className="mt-1">
           <button
             type="button"

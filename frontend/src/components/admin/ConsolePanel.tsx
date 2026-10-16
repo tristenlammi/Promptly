@@ -60,7 +60,7 @@ export function ConsolePanel() {
             className={cn(
               "flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium transition",
               tab === t
-                ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                ? "bg-[var(--accent)]/10 text-[var(--accent-text)]"
                 : "text-[var(--text-muted)] hover:text-[var(--text)]"
             )}
           >
@@ -690,7 +690,7 @@ function ErrorGroupDialog({
                         className={cn(
                           "block w-full px-2.5 py-1.5 text-left text-[11px]",
                           ev.id === eventId
-                            ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+                            ? "bg-[var(--accent)]/10 text-[var(--accent-text)]"
                             : "hover:bg-[var(--surface-hover)]"
                         )}
                       >

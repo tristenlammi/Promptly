@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.commands.service import (
     CommandError,
     execute,
+    explain_miss,
+    log_command_run,
     needs_confirmation,
     resolve,
 )
@@ -63,7 +65,15 @@ async def answer(db: AsyncSession, user, utterance: str) -> SpokenResult:
 
     command, slots = await resolve(db, user.id, said)
     if command is None:
-        # Not ours. HA's own agent takes it from here.
+        # Not ours. HA's own agent takes it from here — unless it nearly
+        # was, which is worth a History entry (R-163).
+        miss = await explain_miss(db, user.id, said)
+        if miss is not None:
+            log_command_run(
+                db, user_id=user.id, command=None, name=miss[0], source="wyoming",
+                ok=False, detail=miss[1], utterance=said,
+            )
+            await db.commit()
         return SpokenResult("", handled=False)
 
     if needs_confirmation(command):
@@ -75,6 +85,12 @@ async def answer(db: AsyncSession, user, utterance: str) -> SpokenResult:
             "wyoming: %s needs confirmation, refusing over this transport",
             command.name,
         )
+        log_command_run(
+            db, user_id=user.id, command=command, name=command.name, source="wyoming",
+            ok=False, detail="Didn't run: it asks first, which a satellite can't do.",
+            utterance=said, slots=slots,
+        )
+        await db.commit()
         return SpokenResult(
             f"{command.name} is set to ask first, so I've left it. "
             "Run it from the app."
@@ -83,9 +99,19 @@ async def answer(db: AsyncSession, user, utterance: str) -> SpokenResult:
     try:
         result = await execute(db, command, user, slots=slots)
     except CommandError as exc:
+        log_command_run(
+            db, user_id=user.id, command=command, name=command.name, source="wyoming",
+            ok=False, detail=str(exc), utterance=said, slots=slots,
+        )
+        await db.commit()
         # Spoken back, not swallowed. The reason is the useful part.
         return SpokenResult(str(exc))
 
+    log_command_run(
+        db, user_id=user.id, command=command, name=command.name, source="wyoming",
+        ok=True, detail=command.response_template or f"{command.name} done.",
+        utterance=said, slots=slots,
+    )
     await db.commit()
 
     if command.response_template:

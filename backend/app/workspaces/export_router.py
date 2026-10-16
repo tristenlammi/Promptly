@@ -9,21 +9,39 @@ could hand to a client or park in cold storage:
                            labels, assignee, checklist)
     sheets/<title>.csv     one CSV per sheet tab, rebuilt from the
                            Fortune-sheet cell grid
-    canvases/<title>.txt   the canvas's extracted text (the scene itself
-                           is a collab CRDT the server can't render)
+    canvases/<title>.excalidraw  the drawing (opens in Excalidraw), plus
+    canvases/<title>.txt         its extracted text
+    rosters/<title>.csv    one row per shift (date, person, times, hours)
+    discussions/<title>.md every thread and message
+    automations.json       the workspace's automations (prompt, schedule,
+                           flow graph) — no credentials
     chats/<title>.md       conversation transcripts
     files/<filename>       pinned Drive files, raw bytes
 
+The manifest lists every item with its notebook path, so the structure
+survives. The download is a short-lived signed link the browser streams
+itself (``POST /export-link``) — the old blob fetch held the whole zip in
+memory and gave up after five minutes (R-188).
+
 Owner-only: the bundle is total exfiltration by design, so the bar is
-the same as deleting the workspace. Other people's private drafts are
-excluded even from the owner's bundle. Every export writes an audit row.
+the same as deleting the workspace. Other people's private drafts and
+private chats are excluded even from the owner's bundle (R-312). Every
+export writes an audit row.
+
+The bundle is a human-readable export, not a restorable backup — a full
+restore is the instance backup (Admin → Backups). Importing a bundle
+brings back its notes (with their notebooks) and nothing else.
 
 **Import** — ``POST /api/workspaces/import`` accepts a zip of Markdown
 files (an Obsidian vault, a Notion/Confluence Markdown export) and
-builds a fresh workspace from it: directories become folders, ``.md``
-files become collaborative notes (full Y.Doc seed + RAG indexing).
+builds a fresh workspace from it: top-level directories become
+notebooks, deeper directories stay in the note title, ``.md`` files
+become collaborative notes (full Y.Doc seed + RAG indexing). Everything
+skipped is reported back by reason.
 """
 from __future__ import annotations
+
+import asyncio
 
 import csv
 import io
@@ -54,6 +72,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
 
+from app.files.disk_guard import require_disk_room
 from app.auth.audit import record_event
 from app.auth.deps import get_current_user
 from app.auth.events import (
@@ -63,7 +82,10 @@ from app.auth.events import (
 from app.auth.models import User
 from app.chat.models import (
     Conversation,
+    DiscussionMessage,
+    DiscussionThread,
     Message,
+    Roster,
     Spreadsheet,
     Workspace,
     WorkspaceCanvas,
@@ -76,14 +98,46 @@ from app.database import get_db
 from app.files.models import UserFile
 
 logger = logging.getLogger("promptly.workspaces.export")
+from app.workspaces.visibility import conversation_visible_to
+from app.chat.versioning import active_path
 
 router = APIRouter()
 
 # Import guardrails: a Markdown export is thousands of small text files
-# at most — anything past these bounds is a mispackaged upload.
-_IMPORT_MAX_NOTES = 400
+# at most — anything past these bounds is a mispackaged upload. The note
+# cap was 400, which turned away an ordinary Notion workspace whole
+# (R-315); the total-size guard is what really bounds the work.
+_IMPORT_MAX_NOTES = 2000
 _IMPORT_MAX_NOTE_BYTES = 2 * 1024 * 1024
+_IMPORT_MAX_TOTAL_BYTES = 200 * 1024 * 1024
 _MD_EXTS = {".md", ".markdown", ".txt"}
+
+# Notion appends " <32-hex block id>" to every page and folder name
+# ("Meeting notes 1a2b…f0.md") — noise in a title (R-315).
+_NOTION_ID_RE = re.compile(r"\s+[0-9a-fA-F]{32}$")
+
+# Why an archive entry wasn't imported — returned to the UI as
+# ``skipped: {reason: count}`` instead of a bare number (R-315).
+_SKIP_NOT_MARKDOWN = "Not Markdown (images, attachments, other files)"
+_SKIP_TOO_LARGE = "Markdown file larger than 2 MB"
+_SKIP_UNREADABLE = "Damaged entry in the zip (couldn't be read)"
+# Our own export bundle is a readable export, not a backup: only its
+# notes come back. Everything else is reported, never turned into notes
+# (a chat transcript imported as a note was the R-327 bug).
+_BUNDLE_SKIP_REASONS = {
+    "chats": "Chat transcripts from a Promptly export (not re-imported)",
+    "canvases": "Canvases from a Promptly export (not re-imported)",
+    "boards": "Boards, sheets and rosters from a Promptly export (CSV, not re-imported)",
+    "sheets": "Boards, sheets and rosters from a Promptly export (CSV, not re-imported)",
+    "rosters": "Boards, sheets and rosters from a Promptly export (CSV, not re-imported)",
+    "discussions": "Discussions from a Promptly export (not re-imported)",
+    "files": "Pinned files from a Promptly export (upload them to Drive instead)",
+    "automations.json": "Automations from a Promptly export (not re-imported)",
+}
+_SKIP_BUNDLE_OTHER = "Other files from a Promptly export (not re-imported)"
+# A zip with a root manifest.json and any of these folders is one of our
+# bundles even if the manifest's ``format`` is missing or unreadable.
+_BUNDLE_MARKER_DIRS = {"chats", "canvases", "boards", "sheets"}
 
 
 def _safe_name(title: str, used: set[str], ext: str) -> str:
@@ -228,6 +282,158 @@ def _chat_markdown(title: str, messages: list[Message]) -> str:
 # ---------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------
+def canvas_scene_json(yjs_update: bytes) -> str | None:
+    """A canvas's Y.Doc → an ``.excalidraw`` file: its live elements and
+    only the images they use."""
+    from pycrdt import Doc, Map
+
+    try:
+        doc = Doc()
+        doc.apply_update(bytes(yjs_update))
+        elements = doc.get("elements", type=Map).to_py() or {}
+        files = doc.get("files", type=Map).to_py() or {}
+    except Exception:  # noqa: BLE001 — a damaged doc just isn't exported
+        logger.warning("export: couldn't decode a canvas", exc_info=True)
+        return None
+    live = [
+        e for e in elements.values()
+        if isinstance(e, dict) and not e.get("isDeleted")
+    ]
+    if not live:
+        return None
+    used_files = {e.get("fileId") for e in live if e.get("fileId")}
+    live.sort(key=lambda e: str(e.get("index") or ""))
+    return json.dumps(
+        {
+            "type": "excalidraw",
+            "version": 2,
+            "source": "promptly",
+            "elements": live,
+            "appState": {"viewBackgroundColor": "#ffffff"},
+            "files": {k: v for k, v in files.items() if k in used_files},
+        }
+    )
+
+
+def _roster_csv(data: Any, names: dict[str, str]) -> str:
+    """One row per shift. ``personId`` is a member's user id (or a guest
+    name); tags resolve through the roster's own tag list."""
+    data = data if isinstance(data, dict) else {}
+    settings = data.get("settings") if isinstance(data.get("settings"), dict) else {}
+    tag_names = {
+        t.get("id"): t.get("name") or t.get("label") or t.get("id")
+        for t in (settings.get("tags") or [])
+        if isinstance(t, dict)
+    }
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["date", "person", "start", "end", "hours", "tags", "note", "published"])
+    shifts = [x for x in (data.get("shifts") or []) if isinstance(x, dict)]
+    shifts.sort(key=lambda x: (str(x.get("date") or ""), str(x.get("start") or "")))
+    for sh in shifts:
+        pid = str(sh.get("personId") or "")
+        w.writerow([
+            sh.get("date") or "",
+            names.get(pid, pid),
+            sh.get("start") or "",
+            sh.get("end") or "",
+            sh.get("hours") if sh.get("hours") is not None else "",
+            "; ".join(str(tag_names.get(t, t)) for t in (sh.get("tags") or [])),
+            sh.get("note") or "",
+            "yes" if sh.get("published") else "",
+        ])
+    return buf.getvalue()
+
+
+def _discussion_markdown(
+    title: str,
+    threads: list[DiscussionThread],
+    messages: dict[uuid.UUID, list[DiscussionMessage]],
+    names: dict[str, str],
+) -> str:
+    out = [f"# {title}", ""]
+    for th in threads:
+        out += [f"## {th.title}", ""]
+        for m in messages.get(th.id, []):
+            who = names.get(str(m.author_user_id), "Someone") if m.author_user_id else "Someone"
+            when = m.created_at.strftime("%Y-%m-%d %H:%M") if m.created_at else ""
+            out += [f"**{who}** · {when}", "", m.body.strip(), ""]
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _item_paths(items: list[WorkspaceItem]) -> dict[uuid.UUID, str]:
+    """``Notebook / Page`` path for each item, so the manifest keeps the
+    tree's structure (it only had flat parent ids)."""
+    by_id = {i.id: i for i in items}
+    out: dict[uuid.UUID, str] = {}
+    for i in items:
+        parts, cur, seen = [], i, set()
+        while cur is not None and cur.id not in seen:
+            seen.add(cur.id)
+            parts.append(cur.title or "Untitled")
+            cur = by_id.get(cur.parent_id) if cur.parent_id else None
+        out[i.id] = " / ".join(reversed(parts))
+    return out
+
+
+_EXPORT_LINK_TTL_S = 300
+
+
+def _export_signature(workspace_id: uuid.UUID, user_id: uuid.UUID, exp: int) -> str:
+    import hashlib
+    import hmac
+
+    from app.config import get_settings
+
+    msg = f"workspace-export:{workspace_id}:{user_id}:{exp}".encode()
+    return hmac.new(get_settings().SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()
+
+
+@router.post("/{workspace_id}/export-link")
+async def export_link(
+    workspace_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """A five-minute signed URL the browser downloads directly, streaming
+    to disk — no bearer header needed, nothing held in page memory."""
+    import time
+
+    ws = await db.get(Workspace, workspace_id)
+    if ws is None or ws.user_id != user.id or ws.trashed_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    exp = int(time.time()) + _EXPORT_LINK_TTL_S
+    sig = _export_signature(ws.id, user.id, exp)
+    return {
+        "url": f"/api/workspaces/{ws.id}/export/download?u={user.id}&exp={exp}&sig={sig}"
+    }
+
+
+@router.get("/{workspace_id}/export/download")
+async def export_download(
+    workspace_id: uuid.UUID,
+    u: uuid.UUID,
+    exp: int,
+    sig: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    import hmac
+    import time
+
+    if exp < int(time.time()) or not hmac.compare_digest(
+        sig, _export_signature(workspace_id, u, exp)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This download link has expired — start the export again.",
+        )
+    user = await db.get(User, u)
+    if user is None or user.disabled:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
+    return await _export_response(workspace_id, request, db, user)
+
+
 @router.get("/{workspace_id}/export")
 async def export_workspace(
     workspace_id: uuid.UUID,
@@ -235,12 +441,30 @@ async def export_workspace(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> FileResponse:
+    return await _export_response(workspace_id, request, db, user)
+
+
+def _read_text(path) -> str:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except (OSError, ValueError):
+        return ""
+
+
+async def _export_response(
+    workspace_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession,
+    user: User,
+) -> FileResponse:
     from app.files.documents_router import _html_to_markdown
     from app.files.storage import absolute_path
+    from app.tasks.models import Task as AutomationTask
     from app.workspaces.knowledge import WORKSPACE_MEMORY_SOURCE_KIND
 
     ws = await db.get(Workspace, workspace_id)
-    if ws is None or ws.user_id != user.id:
+    if ws is None or ws.user_id != user.id or ws.trashed_at is not None:
         # Owner only — same bar as delete. Members see a 404, not a 403,
         # to avoid confirming the workspace id.
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
@@ -273,33 +497,40 @@ async def export_workspace(
     member_names: dict[uuid.UUID, str] = {uid: name for uid, name in member_rows}
     member_names[ws.user_id] = user.username
 
-    counts = {"notes": 0, "boards": 0, "sheets": 0, "canvases": 0, "chats": 0, "files": 0}
+    names_by_str = {str(k): v for k, v in member_names.items()}
+    counts = {
+        "notes": 0, "boards": 0, "sheets": 0, "canvases": 0, "rosters": 0,
+        "discussions": 0, "automations": 0, "chats": 0, "files": 0,
+    }
     tmp = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
     tmp_path = tmp.name
     tmp.close()
     try:
         with zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zf:
-            used: dict[str, set[str]] = {
-                "notes": set(), "boards": set(), "sheets": set(),
-                "canvases": set(), "chats": set(), "files": set(),
-            }
+            used: dict[str, set[str]] = {k: set() for k in counts}
+            # item id -> its file in the zip, for the manifest (and import).
+            files_of: dict[uuid.UUID, str] = {}
 
             for item in items:
                 if item.kind == "note" and item.ref_id is not None:
                     uf = await db.get(UserFile, item.ref_id)
                     if uf is None or uf.trashed_at is not None:
                         continue
-                    html = ""
+                    # File I/O and conversion off the event loop (R-188).
                     try:
-                        with open(absolute_path(uf.storage_path), encoding="utf-8") as f:
-                            html = f.read()
-                    except (OSError, ValueError):
-                        pass
-                    md = _html_to_markdown(html) or (uf.content_text or "")
-                    zf.writestr(
-                        "notes/" + _safe_name(item.title, used["notes"], ".md"),
-                        md,
-                    )
+                        html = await asyncio.to_thread(
+                            _read_text, absolute_path(uf.storage_path)
+                        )
+                    except ValueError:
+                        html = ""
+                    md = (
+                        await asyncio.to_thread(_html_to_markdown, html)
+                        if html
+                        else ""
+                    ) or (uf.content_text or "")
+                    arc = "notes/" + _safe_name(item.title, used["notes"], ".md")
+                    zf.writestr(arc, md)
+                    files_of[item.id] = arc
                     counts["notes"] += 1
                 elif item.kind == "board":
                     tasks = list(
@@ -344,6 +575,18 @@ async def export_workspace(
                     counts["sheets"] += 1
                 elif item.kind == "canvas" and item.ref_id is not None:
                     canvas = await db.get(WorkspaceCanvas, item.ref_id)
+                    # The drawing itself, as a file Excalidraw (or
+                    # excalidraw.com) opens — the bundle used to carry only
+                    # the canvas's extracted text (R-175).
+                    scene = (
+                        await asyncio.to_thread(canvas_scene_json, canvas.yjs_update)
+                        if canvas is not None and canvas.yjs_update
+                        else None
+                    )
+                    if scene:
+                        stem = _safe_name(item.title, used["canvases"], ".excalidraw")
+                        zf.writestr("canvases/" + stem, scene)
+                        files_of[item.id] = "canvases/" + stem
                     text = (canvas.content_text or "").strip() if canvas else ""
                     if text:
                         zf.writestr(
@@ -352,6 +595,83 @@ async def export_workspace(
                             text,
                         )
                     counts["canvases"] += 1
+                elif item.kind == "roster" and item.ref_id is not None:
+                    roster = await db.get(Roster, item.ref_id)
+                    if roster is None:
+                        continue
+                    zf.writestr(
+                        "rosters/" + _safe_name(item.title, used["rosters"], ".csv"),
+                        _roster_csv(roster.data, names_by_str),
+                    )
+                    counts["rosters"] += 1
+                elif item.kind == "discussion":
+                    threads = list(
+                        (
+                            await db.execute(
+                                select(DiscussionThread)
+                                .where(DiscussionThread.item_id == item.id)
+                                .order_by(DiscussionThread.created_at.asc())
+                            )
+                        ).scalars()
+                    )
+                    msgs: dict[uuid.UUID, list[DiscussionMessage]] = {}
+                    if threads:
+                        for m in (
+                            await db.execute(
+                                select(DiscussionMessage)
+                                .where(
+                                    DiscussionMessage.thread_id.in_(
+                                        [t.id for t in threads]
+                                    )
+                                )
+                                .order_by(DiscussionMessage.created_at.asc())
+                            )
+                        ).scalars():
+                            msgs.setdefault(m.thread_id, []).append(m)
+                    zf.writestr(
+                        "discussions/"
+                        + _safe_name(item.title, used["discussions"], ".md"),
+                        _discussion_markdown(item.title, threads, msgs, names_by_str),
+                    )
+                    counts["discussions"] += 1
+
+            # Automations homed here — what they do and when, never their
+            # credentials (those live in the vault, not on the task).
+            autos = list(
+                (
+                    await db.execute(
+                        select(AutomationTask).where(
+                            AutomationTask.workspace_id == ws.id
+                        )
+                    )
+                ).scalars()
+            )
+            if autos:
+                zf.writestr(
+                    "automations.json",
+                    json.dumps(
+                        [
+                            {
+                                "title": t.title,
+                                "prompt": t.prompt,
+                                "enabled": t.enabled,
+                                "frequency": t.frequency,
+                                "hour": t.hour,
+                                "minute": t.minute,
+                                "weekday": t.weekday,
+                                "day_of_month": t.day_of_month,
+                                "timezone": t.timezone,
+                                "model_id": t.model_id,
+                                "graph": t.flow_graph,
+                                "owner": member_names.get(t.user_id),
+                            }
+                            for t in autos
+                        ],
+                        indent=2,
+                        default=str,
+                    ),
+                )
+                counts["automations"] = len(autos)
 
             # Chats — workspace conversations (tree chat pages point at the
             # same Conversation rows, so exporting by workspace covers both).
@@ -359,21 +679,27 @@ async def export_workspace(
                 (
                     await db.execute(
                         select(Conversation).where(
-                            Conversation.workspace_id == ws.id
+                            Conversation.workspace_id == ws.id,
+                            # The owner exports shared chats and their own —
+                            # never another member's private chats.
+                            conversation_visible_to(ws.user_id),
                         )
                     )
                 ).scalars()
             )
             for conv in convs:
-                msgs = list(
+                rows = list(
                     (
                         await db.execute(
                             select(Message)
                             .where(Message.conversation_id == conv.id)
-                            .order_by(Message.created_at.asc())
+                            .order_by(Message.created_at.asc(), Message.id.asc())
                         )
                     ).scalars()
                 )
+                # Only the thread the user sees — not every regeneration
+                # and edit sibling interleaved by timestamp (R-307).
+                msgs = active_path(rows, conv.active_leaf_message_id)
                 if not msgs:
                     continue
                 title = conv.title or "Untitled chat"
@@ -403,7 +729,11 @@ async def export_workspace(
                     path = absolute_path(uf.storage_path)
                     if not path.exists():
                         continue
-                    zf.write(
+                    # Deflating a pinned file (up to 100 MB) is CPU-bound —
+                    # in a thread, so the export doesn't freeze every other
+                    # user's chat (R-016). Writes stay sequential.
+                    await asyncio.to_thread(
+                        zf.write,
                         path,
                         "files/"
                         + _safe_name(
@@ -418,7 +748,10 @@ async def export_workspace(
                         "export: skipping unreadable file %s", uf.id
                     )
 
+            paths = _item_paths(items)
             manifest = {
+                "format": "promptly-workspace-export",
+                "version": 2,
                 "workspace": {
                     "id": str(ws.id),
                     "title": ws.title,
@@ -435,13 +768,22 @@ async def export_workspace(
                         "kind": i.kind,
                         "title": i.title,
                         "parent_id": str(i.parent_id) if i.parent_id else None,
+                        "path": paths.get(i.id),
+                        "file": files_of.get(i.id),
                     }
                     for i in items
                 ],
                 "limitations": [
-                    "Canvas scenes are collaborative CRDTs; only their "
-                    "extracted text is included.",
-                    "Sheets export computed display values, not formulas.",
+                    "This is a readable export, not a restorable backup. "
+                    "Importing it brings back the notes only; a full "
+                    "restore is the instance backup (Admin → Backups).",
+                    "Chats are the exporter's own chats plus chats shared "
+                    "with the workspace; other members' private chats and "
+                    "private drafts are never included.",
+                    "Chat transcripts hold the visible thread only, not "
+                    "regenerated or edited alternatives.",
+                    "Sheets here are display values (CSV); download a sheet "
+                    "as .xlsx from the sheet itself to keep its formulas.",
                 ],
             }
             zf.writestr("manifest.json", json.dumps(manifest, indent=2))
@@ -474,6 +816,128 @@ async def export_workspace(
 # ---------------------------------------------------------------------
 # Import (Markdown zip → new workspace)
 # ---------------------------------------------------------------------
+def _clean_segment(seg: str) -> str:
+    """A path segment as a title: Notion's trailing block id removed."""
+    cleaned = _NOTION_ID_RE.sub("", seg).strip()
+    return cleaned or seg.strip()
+
+
+def _note_target(
+    path: str, meta: dict | None, bundle: bool
+) -> tuple[str | None, str]:
+    """``(notebook name or None, note title)`` for an archive path.
+
+    An export bundle's manifest knows each note's real title and notebook.
+    Otherwise the top-level directory becomes the notebook (notebooks
+    don't nest, so one level) and any deeper directories stay in the
+    title: ``Specs/2024/API.md`` → notebook "Specs", note "2024 / API".
+    """
+    if meta is not None:
+        title = (meta.get("title") or "Untitled")[:200]
+        crumbs = [c for c in str(meta.get("path") or "").split(" / ") if c]
+        return (crumbs[0][:200] if len(crumbs) > 1 else None), title
+    parts = path.split("/")
+    if bundle and parts[0] == "notes" and len(parts) > 1:
+        parts = parts[1:]
+    *dirs, leaf = parts
+    stem = _clean_segment(posixpath.splitext(leaf)[0]) or "Untitled"
+    dirs = [d for d in (_clean_segment(d) for d in dirs) if d]
+    if not dirs:
+        return None, stem[:200]
+    return dirs[0][:200], " / ".join([*dirs[1:], stem])[:200]
+
+
+class _ImportPlan:
+    """What an uploaded archive will turn into, worked out before any row
+    is created."""
+
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, zipfile.ZipInfo]] = []
+        self.skipped: dict[str, int] = {}
+        self.manifest: dict | None = None
+        self.bundle = False
+
+    def skip(self, reason: str) -> None:
+        self.skipped[reason] = self.skipped.get(reason, 0) + 1
+
+
+def _scan_archive(zf: zipfile.ZipFile) -> _ImportPlan:
+    """Sort an archive's entries into notes to import and skips by reason.
+
+    Blocking (reads the manifest) — run it in a thread.
+    """
+    plan = _ImportPlan()
+    cands: list[tuple[list[str], zipfile.ZipInfo]] = []
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        # Zips from macOS bundle metadata; Notion exports carry asset dirs.
+        # Neither is the user's content, so they're dropped unreported.
+        parts = [p for p in posixpath.normpath(info.filename).split("/") if p]
+        if (
+            not parts
+            or any(p.startswith(("__MACOSX", ".")) for p in parts)
+            or ".." in parts
+        ):
+            continue
+        cands.append((parts, info))
+
+    # A zip of a folder ("My Vault/…", Notion's "Export-<id>/…") wraps
+    # everything in one root directory — that's the archive, not a
+    # notebook, and a re-zipped export bundle hides its manifest under it.
+    if (
+        cands
+        and all(len(p) > 1 for p, _ in cands)
+        and len({p[0] for p, _ in cands}) == 1
+    ):
+        cands = [(p[1:], i) for p, i in cands]
+
+    paths = {"/".join(p): i for p, i in cands}
+    if "manifest.json" in paths:
+        try:
+            parsed = json.loads(
+                zf.read(paths["manifest.json"]).decode("utf-8", errors="replace")
+            )
+        except (ValueError, zipfile.BadZipFile, OSError):
+            parsed = None
+        if (
+            isinstance(parsed, dict)
+            and parsed.get("format") == "promptly-workspace-export"
+        ):
+            plan.manifest = parsed
+        top_dirs = {p[0] for p, _ in cands if len(p) > 1}
+        plan.bundle = plan.manifest is not None or bool(
+            top_dirs & _BUNDLE_MARKER_DIRS
+        )
+
+    for parts, info in cands:
+        path = "/".join(parts)
+        if plan.bundle:
+            if path == "manifest.json":
+                continue
+            if parts[0] != "notes" or len(parts) == 1:
+                plan.skip(_BUNDLE_SKIP_REASONS.get(parts[0], _SKIP_BUNDLE_OTHER))
+                continue
+        ext = posixpath.splitext(path)[1].lower()
+        if ext not in _MD_EXTS:
+            plan.skip(_SKIP_NOT_MARKDOWN)
+            continue
+        if info.file_size > _IMPORT_MAX_NOTE_BYTES:
+            plan.skip(_SKIP_TOO_LARGE)
+            continue
+        plan.entries.append((path, info))
+    return plan
+
+
+def _read_and_render(zf: zipfile.ZipFile, info: zipfile.ZipInfo):
+    """One archive entry → ``(markdown, rendered note)``. Blocking and CPU
+    bound (zip inflate, Markdown → Y.Doc → HTML) — run it in a thread."""
+    from app.workspaces.content_seed import render_note_markdown
+
+    markdown = zf.read(info).decode("utf-8-sig", errors="replace")
+    return markdown, render_note_markdown(markdown)
+
+
 @router.post("/import", status_code=status.HTTP_201_CREATED)
 async def import_workspace(
     request: Request,
@@ -482,52 +946,43 @@ async def import_workspace(
     title: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _room: None = Depends(require_disk_room),  # WP-7.2
 ) -> dict:
     """Build a new workspace from a zip of Markdown files.
 
     Understands the folder layout of Obsidian vaults and Notion /
-    Confluence Markdown exports: ``.md`` files become collaborative notes at
-    the top level (folders were removed as a grouping primitive, so the
-    directory path is folded into each note's title instead). Non-Markdown
-    entries (images, attachments) are skipped and counted in the response.
+    Confluence Markdown exports: top-level directories become notebooks,
+    ``.md`` files become collaborative notes (deeper directories stay in
+    the note's title, Notion's block-id suffixes are stripped). A Promptly
+    export bundle brings back its notes only. Every entry not imported is
+    reported in ``skipped`` as ``{reason: count}``.
+
+    Parsing and conversion run in worker threads; only the DB writes stay
+    on the event loop (R-315).
     """
     from app.files.system_folders import create_workspace_folder_tree
-    from app.workspaces.content_seed import create_note_with_item
+    from app.workspaces.content_seed import (
+        create_note_with_item,
+        resolve_or_create_notebook,
+    )
     from app.workspaces.knowledge import index_note_for_workspace
 
     try:
-        zf = zipfile.ZipFile(file.file)
+        zf = await asyncio.to_thread(zipfile.ZipFile, file.file)
+        plan = await asyncio.to_thread(_scan_archive, zf)
     except zipfile.BadZipFile:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail="That isn't a zip archive.",
         )
 
-    # Collect the importable entries first so validation happens before
-    # any rows are created.
-    entries: list[tuple[str, zipfile.ZipInfo]] = []
-    skipped = 0
-    for info in zf.infolist():
-        if info.is_dir():
-            continue
-        name = info.filename
-        # Zips from macOS bundle metadata; Notion exports carry asset dirs.
-        parts = [p for p in posixpath.normpath(name).split("/") if p]
-        if (
-            not parts
-            or any(p.startswith(("__MACOSX", ".")) for p in parts)
-            or ".." in parts
-        ):
-            continue
-        ext = posixpath.splitext(name)[1].lower()
-        if ext not in _MD_EXTS or info.file_size > _IMPORT_MAX_NOTE_BYTES:
-            skipped += 1
-            continue
-        entries.append(("/".join(parts), info))
+    entries = plan.entries
     if not entries:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="No Markdown files found in the archive.",
+            detail="That export has no notes to import."
+            if plan.bundle
+            else "No Markdown files found in the archive.",
         )
     if len(entries) > _IMPORT_MAX_NOTES:
         raise HTTPException(
@@ -535,9 +990,27 @@ async def import_workspace(
             detail=f"Imports are capped at {_IMPORT_MAX_NOTES} notes; "
             f"the archive holds {len(entries)}.",
         )
+    total = sum(info.file_size for _, info in entries)
+    if total > _IMPORT_MAX_TOTAL_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Imports are capped at "
+            f"{_IMPORT_MAX_TOTAL_BYTES // (1024 * 1024)} MB of Markdown; "
+            f"the archive holds {total // (1024 * 1024)} MB.",
+        )
+
+    # Our own export bundle: notes come back with their titles and
+    # notebooks from the manifest (R-188).
+    manifest = plan.manifest
+    note_meta: dict[str, dict] = {}
+    for it in (manifest or {}).get("items") or []:
+        if isinstance(it, dict) and it.get("kind") == "note" and it.get("file"):
+            note_meta[it["file"]] = it
 
     ws_title = (title or "").strip()[:100] or (
-        posixpath.splitext(file.filename or "")[0].strip() or "Imported workspace"
+        (manifest or {}).get("workspace", {}).get("title")
+        or _clean_segment(posixpath.splitext(file.filename or "")[0])
+        or "Imported workspace"
     )[:100]
     ws = Workspace(user_id=user.id, title=ws_title)
     db.add(ws)
@@ -545,17 +1018,33 @@ async def import_workspace(
     ws_folder = await create_workspace_folder_tree(db, user, ws.title)
     ws.root_folder_id = ws_folder.id
 
-    # Folders were removed as a workspace grouping primitive, so a nested
-    # export can't be rebuilt as a folder tree (and notebooks can't nest).
-    # Import every note at the top level instead, folding the sub-directory
-    # path into the title so the original structure stays legible — e.g.
-    # "Specs/2024/API.md" becomes a note titled "Specs / 2024 / API".
     note_item_ids: list[uuid.UUID] = []
-    for path, info in sorted(entries, key=lambda e: e[0]):
-        raw = zf.read(info)
-        markdown = raw.decode("utf-8", errors="replace")
-        stem = posixpath.splitext(path)[0]  # drop ".md", keep the dir path
-        note_title = stem.replace("/", " / ")[:200]
+    # Notebooks created so far, by lower-cased title.
+    notebooks: dict[str, uuid.UUID] = {}
+
+    async def _notebook(name: str) -> uuid.UUID:
+        key = name.strip().lower()
+        if key not in notebooks:
+            notebooks[key] = await resolve_or_create_notebook(
+                db, ws=ws, creator_id=user.id, name=name
+            )
+        return notebooks[key]
+
+    # New items land at the top of their list, so create Z→A to leave the
+    # tree reading A→Z.
+    for path, info in sorted(entries, key=lambda e: e[0], reverse=True):
+        try:
+            markdown, rendered = await asyncio.to_thread(
+                _read_and_render, zf, info
+            )
+        except (zipfile.BadZipFile, OSError, EOFError):
+            # A damaged member (bad CRC, truncated) — skip it, keep the rest.
+            plan.skip(_SKIP_UNREADABLE)
+            continue
+        nb_name, note_title = _note_target(path, note_meta.get(path), plan.bundle)
+        parent_id = (
+            await _notebook(nb_name) if nb_name and nb_name.strip() else None
+        )
         item = await create_note_with_item(
             db,
             ws=ws,
@@ -563,17 +1052,19 @@ async def import_workspace(
             creator_id=user.id,
             title=note_title,
             markdown=markdown,
-            parent_id=None,
+            parent_id=parent_id,
+            rendered=rendered,
         )
         note_item_ids.append(item.id)
 
+    skipped_total = sum(plan.skipped.values())
     await record_event(
         db,
         event_type=EVENT_WORKSPACE_IMPORTED,
         request=request,
         user_id=user.id,
         detail=f'"{ws.title}" (ws={ws.id}) — {len(note_item_ids)} note(s), '
-        f"{skipped} entr(ies) skipped",
+        f"{len(notebooks)} notebook(s), {skipped_total} entr(ies) skipped",
     )
     await db.commit()
 
@@ -585,7 +1076,11 @@ async def import_workspace(
         "id": str(ws.id),
         "title": ws.title,
         "notes": len(note_item_ids),
-        "skipped": skipped,
+        "notebooks": len(notebooks),
+        # {reason: count}, most common first — the UI lists these after
+        # the import instead of discarding a bare number (R-315).
+        "skipped": dict(sorted(plan.skipped.items(), key=lambda kv: -kv[1])),
+        "skipped_total": skipped_total,
     }
 
 

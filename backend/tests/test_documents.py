@@ -69,16 +69,21 @@ class FakeUser:
 # ---------------------------------------------------------------------------
 
 
+def _link_parts(url: str) -> tuple[str, int]:
+    q = dict(p.split("=") for p in url.split("?")[1].split("&"))
+    return q["sig"], int(q["exp"])
+
+
 def test_asset_signature_round_trip() -> None:
-    """A signature minted for (asset_id, document_id) verifies back."""
+    """A short-lived link minted for (asset_id, document_id) verifies back
+    (WP-4.6, R-228) — and so does a pre-R-228 permanent one."""
+    from app.files import doc_assets
 
     asset_id = uuid.uuid4()
     doc_id = uuid.uuid4()
-    sig = documents_router._asset_signature(asset_id=asset_id, document_id=doc_id)
-
-    assert documents_router._verify_asset_signature(
-        asset_id=asset_id, document_id=doc_id, signature=sig
-    )
+    sig, exp = _link_parts(doc_assets.signed_url(doc_id, asset_id))
+    assert doc_assets.verify(doc_id, asset_id, sig, exp)
+    assert doc_assets.verify(doc_id, asset_id, doc_assets._legacy_sig(asset_id, doc_id), None)
 
 
 def test_asset_signature_rejects_wrong_document() -> None:
@@ -88,37 +93,34 @@ def test_asset_signature_rejects_wrong_document() -> None:
     discovering doc A's asset id and replaying the signature they
     already have for their own doc.
     """
+    from app.files import doc_assets
 
     asset_id = uuid.uuid4()
     doc_a = uuid.uuid4()
     doc_b = uuid.uuid4()
-    sig = documents_router._asset_signature(asset_id=asset_id, document_id=doc_a)
-
-    assert not documents_router._verify_asset_signature(
-        asset_id=asset_id, document_id=doc_b, signature=sig
-    )
+    sig, exp = _link_parts(doc_assets.signed_url(doc_a, asset_id))
+    assert not doc_assets.verify(doc_b, asset_id, sig, exp)
+    assert not doc_assets.verify(doc_b, asset_id, doc_assets._legacy_sig(asset_id, doc_a), None)
 
 
 def test_asset_signature_rejects_garbage() -> None:
+    from app.files import doc_assets
+
     doc_id = uuid.uuid4()
     asset_id = uuid.uuid4()
-    assert not documents_router._verify_asset_signature(
-        asset_id=asset_id, document_id=doc_id, signature=""
-    )
-    assert not documents_router._verify_asset_signature(
-        asset_id=asset_id,
-        document_id=doc_id,
-        signature="0" * 64,
-    )
+    assert not doc_assets.verify(doc_id, asset_id, "", None)
+    assert not doc_assets.verify(doc_id, asset_id, "0" * 64, None)
+    assert not doc_assets.verify(doc_id, asset_id, "0" * 64, 9_999_999_999)
 
 
 def test_signed_asset_url_shape() -> None:
-    """Generated URLs are routed through the documents endpoint."""
+    """Links go through the documents endpoint and expire (R-228)."""
 
     asset_id = uuid.uuid4()
     doc_id = uuid.uuid4()
     url = documents_router._signed_asset_url(asset_id=asset_id, document_id=doc_id)
-    assert url.startswith(f"/api/documents/{doc_id}/assets/{asset_id}?sig=")
+    assert url.startswith(f"/api/documents/{doc_id}/assets/{asset_id}?exp=")
+    assert "&sig=" in url
 
 
 # ---------------------------------------------------------------------------
@@ -175,10 +177,17 @@ def test_collab_token_color_is_stable_per_user() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_internal_bearer_accepts_secret() -> None:
-    secret = get_settings().SECRET_KEY
+def test_internal_bearer_accepts_the_internal_token_not_secret_key() -> None:
+    from fastapi import HTTPException
+
+    from app.collab_internal import internal_token
+
     # Should not raise.
-    documents_router._verify_collab_internal_caller(f"Bearer {secret}")
+    documents_router._verify_collab_internal_caller(f"Bearer {internal_token()}")
+    # SECRET_KEY itself is no longer the collab bearer (WP-3.2).
+    with pytest.raises(HTTPException) as exc:
+        documents_router._verify_collab_internal_caller(f"Bearer {get_settings().SECRET_KEY}")
+    assert exc.value.status_code == 403
 
 
 def test_internal_bearer_rejects_mismatched_secret() -> None:
@@ -343,20 +352,18 @@ def test_html_to_markdown_empty_input() -> None:
 
 
 def test_html_to_pdf_returns_pdf_bytes() -> None:
-    """xhtml2pdf produces bytes that start with the PDF magic.
+    """WeasyPrint (WP-6.4) produces bytes that start with the PDF magic.
 
     The renderer is a black box for this test — we only confirm we
     got back a non-empty body that the browser would recognise as
     a PDF, so the download endpoint can hand it out without
-    parsing.
+    parsing. Page setup is covered in test_page_setup_wp64.
     """
+    from app.files.page_setup import PageSetup
+    from app.files.pdf_export import build_pdf_html, html_to_pdf
 
-    pdf = documents_router._html_to_pdf_bytes(
-        "<p>Hello world</p>", title="Greeting"
-    )
-    assert pdf.startswith(b"%PDF"), "xhtml2pdf output is not a PDF"
-    # A non-trivial body (xhtml2pdf still emits a few KB even for
-    # one paragraph because of fonts + structure).
+    pdf = html_to_pdf(build_pdf_html("<p>Hello world</p>", PageSetup(), title="Greeting"))
+    assert pdf.startswith(b"%PDF"), "output is not a PDF"
     assert len(pdf) > 500
 
 

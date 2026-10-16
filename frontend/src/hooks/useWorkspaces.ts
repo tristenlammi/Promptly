@@ -10,7 +10,7 @@
  * underlying endpoint is cheap and we only have ~dozens of workspaces.
  */
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   workspacesApi,
@@ -20,6 +20,7 @@ import {
   type WorkspaceInviteRow,
   type WorkspaceShareRow,
   type WorkspaceShareRole,
+  type WorkspaceTask,
   type UpdateWorkspacePayload,
   type WorkspaceItemNode,
   type CreateWorkspaceItemPayload,
@@ -59,11 +60,48 @@ export function useWorkspaces(opts: { archived?: boolean } = {}) {
   });
 }
 
+/** The caller's recently deleted workspaces (restorable for 30 days). */
+export function useTrashedWorkspaces(enabled = true) {
+  return useQuery<WorkspaceSummary[]>({
+    queryKey: ["workspaces", "trash"],
+    queryFn: () => workspacesApi.list({ trashed: true }),
+    enabled,
+  });
+}
+
+export function useRestoreWorkspace() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => workspacesApi.restore(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.root });
+    },
+  });
+}
+
+export function useTransferWorkspace(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { userId: string; keepAccess?: boolean }) =>
+      workspacesApi.transfer(id, vars.userId, vars.keepAccess ?? true),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.root });
+    },
+  });
+}
+
 export function useWorkspace(id: string | undefined) {
   return useQuery<WorkspaceDetail>({
     queryKey: id ? KEYS.detail(id) : ["workspaces", "detail", "_"],
     queryFn: () => workspacesApi.get(id as string),
     enabled: Boolean(id),
+    // Coming back to the tab picks up what teammates changed (R-187).
+    refetchOnWindowFocus: true,
+    // Gone / no access won't change on a retry — show it straight away.
+    retry: (count, err) => {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      return status !== 404 && status !== 403 && count < 2;
+    },
     // Poll while files are mid-index so the Files tab flips from
     // "indexing…" to "searchable" without a manual refresh. Stops as
     // soon as nothing is in flight (the common steady state).
@@ -102,6 +140,7 @@ export function useWorkspaceTree(id: string | undefined) {
     queryKey: id ? KEYS.tree(id) : ["workspaces", "tree", "_"],
     queryFn: () => workspacesApi.tree(id as string),
     enabled: Boolean(id),
+    refetchOnWindowFocus: true,
     // Poll only while something is *actively embedding* so the spinner
     // clears without a manual refresh. We intentionally do NOT poll on
     // ``queued`` — an empty note/canvas (or a workspace with no embedding
@@ -159,21 +198,18 @@ export function useWorkspaceDrive(id: string | undefined) {
 
 /** Every drive mutation refreshes the drive + the detail (pins list feeds
  *  context stats) so overview summaries stay honest. */
+/** After uploads into a workspace's drive (the shared upload queue). */
+export function invalidateWorkspaceDrive(qc: QueryClient, workspaceId: string) {
+  void qc.invalidateQueries({ queryKey: driveKey(workspaceId) });
+  void qc.invalidateQueries({ queryKey: KEYS.detail(workspaceId) });
+}
+
 function useDriveInvalidate(workspaceId: string) {
   const qc = useQueryClient();
   return () => {
     void qc.invalidateQueries({ queryKey: driveKey(workspaceId) });
     void qc.invalidateQueries({ queryKey: KEYS.detail(workspaceId) });
   };
-}
-
-export function useUploadDriveFile(workspaceId: string) {
-  const invalidate = useDriveInvalidate(workspaceId);
-  return useMutation({
-    mutationFn: (vars: { file: File; folderId: string | null }) =>
-      workspacesApi.uploadDriveFile(workspaceId, vars.file, vars.folderId),
-    onSuccess: invalidate,
-  });
 }
 
 export function useCreateDriveFolder(workspaceId: string) {
@@ -290,6 +326,7 @@ export function useWorkspaceOverview(id: string | undefined) {
     queryKey: id ? KEYS.overview(id) : ["workspaces", "overview", "_"],
     queryFn: () => workspacesApi.overview(id as string),
     enabled: Boolean(id),
+    refetchOnWindowFocus: true,
   });
 }
 
@@ -438,16 +475,47 @@ export function useWorkspaceItem(
 
 export function useSetBoardConfig(workspaceId: string, itemId: string) {
   const qc = useQueryClient();
+  const key = ["workspaces", "item", workspaceId, itemId];
   return useMutation({
     mutationKey: ["ws-board", workspaceId],
     mutationFn: (config: BoardConfig) =>
       workspacesApi.setItemConfig(workspaceId, itemId, config),
-    onSuccess: () => {
-      qc.invalidateQueries({
-        queryKey: ["workspaces", "item", workspaceId, itemId],
-      });
+    // Show the change straight away; put it back (and say so) if the save
+    // fails — renames used to wait a round trip and fail silently (R-170).
+    onMutate: async (config) => {
+      await qc.cancelQueries({ queryKey: key });
+      const prev = qc.getQueryData(key);
+      qc.setQueryData(key, (old: unknown) =>
+        old && typeof old === "object" ? { ...(old as object), config } : old
+      );
+      return { prev };
+    },
+    onError: (err, _config, ctx) => {
+      if (ctx?.prev !== undefined) qc.setQueryData(key, ctx.prev);
+      toast.error(apiErrorMessage(err, "Couldn't save the board settings."));
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: key });
+      // Column changes can move or re-flag cards server-side (R-201).
+      qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) });
     },
   });
+}
+
+type TaskListSnapshot = [readonly unknown[], WorkspaceTask[] | undefined][];
+
+/** Patch every cached task list for this workspace in place; returns the
+ *  previous lists for rollback. */
+function patchTaskLists(
+  qc: ReturnType<typeof useQueryClient>,
+  workspaceId: string,
+  fn: (tasks: WorkspaceTask[]) => WorkspaceTask[]
+): TaskListSnapshot {
+  const prev = qc.getQueriesData<WorkspaceTask[]>({ queryKey: KEYS.tasks(workspaceId) });
+  qc.setQueriesData<WorkspaceTask[]>({ queryKey: KEYS.tasks(workspaceId) }, (old) =>
+    Array.isArray(old) ? fn(old) : old
+  );
+  return prev;
 }
 
 export function useWorkspaceTasks(
@@ -489,7 +557,25 @@ export function useUpdateWorkspaceTask(workspaceId: string) {
       taskId: string;
       payload: WorkspaceTaskUpdatePayload;
     }) => workspacesApi.updateTask(workspaceId, vars.taskId, vars.payload),
-    onSuccess: () => {
+    // Optimistic: a dropped card stays where it was dropped instead of
+    // snapping back for a round trip; a failed save puts it back and says
+    // so instead of failing silently (R-170).
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: KEYS.tasks(workspaceId) });
+      const prev = patchTaskLists(qc, workspaceId, (tasks) =>
+        tasks.map((t) =>
+          t.id === vars.taskId
+            ? ({ ...t, ...(vars.payload as Partial<WorkspaceTask>) } as WorkspaceTask)
+            : t
+        )
+      );
+      return { prev };
+    },
+    onError: (err, _vars, ctx) => {
+      for (const [key, data] of ctx?.prev ?? []) qc.setQueryData(key, data);
+      toast.error(apiErrorMessage(err, "Couldn't save that change to the card."));
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) });
       qc.invalidateQueries({ queryKey: KEYS.overview(workspaceId) });
     },
@@ -502,7 +588,17 @@ export function useDeleteWorkspaceTask(workspaceId: string) {
     mutationKey: boardMutationKey(workspaceId),
     mutationFn: (taskId: string) =>
       workspacesApi.deleteTask(workspaceId, taskId),
-    onSuccess: () => {
+    onMutate: async (taskId) => {
+      await qc.cancelQueries({ queryKey: KEYS.tasks(workspaceId) });
+      return {
+        prev: patchTaskLists(qc, workspaceId, (tasks) => tasks.filter((t) => t.id !== taskId)),
+      };
+    },
+    onError: (err, _id, ctx) => {
+      for (const [key, data] of ctx?.prev ?? []) qc.setQueryData(key, data);
+      toast.error(apiErrorMessage(err, "Couldn't delete the card."));
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: KEYS.tasks(workspaceId) });
       qc.invalidateQueries({ queryKey: KEYS.overview(workspaceId) });
     },
@@ -593,7 +689,10 @@ export function useUpdateWorkspace(id: string) {
 export function useDeleteWorkspace() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => workspacesApi.remove(id),
+    mutationFn: (arg: string | { id: string; permanent?: boolean }) =>
+      typeof arg === "string"
+        ? workspacesApi.remove(arg)
+        : workspacesApi.remove(arg.id, { permanent: arg.permanent }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.root });
       // Deleting a workspace detaches its conversations at the
@@ -711,6 +810,18 @@ export function useCreateWorkspaceShare(workspaceId: string) {
   });
 }
 
+export function useUpdateWorkspaceShare(workspaceId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { shareId: string; role: WorkspaceShareRole }) =>
+      workspacesApi.updateShare(workspaceId, vars.shareId, vars.role),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: KEYS.shares(workspaceId) });
+      qc.invalidateQueries({ queryKey: KEYS.detail(workspaceId) });
+    },
+  });
+}
+
 export function useDeleteWorkspaceShare(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -768,10 +879,12 @@ export function useDeclineWorkspaceInvite() {
 export function useReindexWorkspace(workspaceId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: () => workspacesApi.reindex(workspaceId),
+    mutationFn: (opts?: { failedOnly?: boolean }) =>
+      workspacesApi.reindex(workspaceId, opts),
     onSuccess: () => {
       // Refresh the detail so the Files tab starts polling for indexing progress.
       qc.invalidateQueries({ queryKey: KEYS.detail(workspaceId) });
+      qc.invalidateQueries({ queryKey: KEYS.tree(workspaceId) });
     },
   });
 }

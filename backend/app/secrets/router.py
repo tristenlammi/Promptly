@@ -42,6 +42,8 @@ EVENT_SECRET_DELETED = "secret_deleted"
 class SecretResponse(BaseModel):
     id: uuid.UUID
     name: str
+    # Where it may be sent; empty = anywhere.
+    allowed_hosts: list[str] = []
     created_at: datetime
     updated_at: datetime
 
@@ -52,10 +54,22 @@ class SecretResponse(BaseModel):
 class SecretCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     value: str = Field(min_length=1, max_length=8192)
+    allowed_hosts: list[str] = Field(default_factory=list, max_length=20)
 
 
 class SecretUpdate(BaseModel):
-    value: str = Field(min_length=1, max_length=8192)
+    # Either or both; omitted fields are left as they are.
+    value: str | None = Field(default=None, min_length=1, max_length=8192)
+    allowed_hosts: list[str] | None = Field(default=None, max_length=20)
+
+
+def _hosts(raw: list[str]) -> list[str]:
+    from app.secrets.hosts import normalise_hosts
+
+    try:
+        return normalise_hosts(raw)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)) from e
 
 
 def _validate_name(name: str) -> str:
@@ -114,6 +128,7 @@ async def create_secret(
         user_id=user.id,
         name=name,
         value_encrypted=encrypt_secret(payload.value),
+        allowed_hosts=_hosts(payload.allowed_hosts),
     )
     db.add(row)
     await record_event(
@@ -139,7 +154,10 @@ async def update_secret(
     row = await db.get(UserSecret, secret_id)
     if row is None or row.user_id != user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    row.value_encrypted = encrypt_secret(payload.value)
+    if payload.value is not None:
+        row.value_encrypted = encrypt_secret(payload.value)
+    if payload.allowed_hosts is not None:
+        row.allowed_hosts = _hosts(payload.allowed_hosts)
     await record_event(
         db,
         event_type=EVENT_SECRET_UPDATED,

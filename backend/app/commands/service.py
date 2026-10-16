@@ -73,11 +73,84 @@ async def resolve(db: AsyncSession, user_id, utterance: str):
         for r in rows
         if r.phrases
     ]
-    result = match(utterance, candidates)
+    tied: list = []
+    result = match(utterance, candidates, tied=tied)
+    by_id = {r.id: r for r in rows}
+    if result is None and tied:
+        # Someone's shared command claiming your phrase used to switch
+        # off your own command too. Yours wins a tie with shared ones
+        # (R-196); two of your own still tie, and nothing runs.
+        own = [c for c in candidates if by_id[c.command_id].user_id == user_id]
+        if any(by_id[i].user_id == user_id for i in tied) and len(own) < len(candidates):
+            result = match(utterance, own)
     if result is None:
         return None, {}
-    by_id = {r.id: r for r in rows}
     return by_id.get(result.command_id), result.slots
+
+
+async def tied_commands(db: AsyncSession, user_id, utterance: str) -> list:
+    """The commands that all claimed this utterance, when it matched
+    several (so none ran)."""
+    rows = await load_commands(db, user_id)
+    candidates = [
+        MatchCandidate(command_id=r.id, phrases=list(r.phrases or []), enabled=r.enabled)
+        for r in rows
+        if r.phrases
+    ]
+    tied: list = []
+    match(utterance, candidates, tied=tied)
+    by_id = {r.id: r for r in rows}
+    return [by_id[i] for i in tied if i in by_id]
+
+
+async def explain_miss(db: AsyncSession, user_id, utterance: str) -> tuple[str, str] | None:
+    """``(name, reason)`` for a miss worth a History entry, or ``None``.
+
+    Only near-misses: an ambiguity, or a close phrase. A plain miss is
+    just a sentence for the model, and logging every one would bury the
+    entries that explain "why didn't that work?" (R-163).
+    """
+    tied = await tied_commands(db, user_id, utterance)
+    if len(tied) > 1:
+        names = " and ".join(f"“{c.name}”" for c in tied[:3])
+        return (
+            tied[0].name,
+            f"Didn't run: {names} all match this — give one of them a different phrase.",
+        )
+    close = await nearest(db, user_id, utterance)
+    if close:
+        return (close[0].name, f"Didn't run: no exact match — “{close[0].name}” was the nearest.")
+    return None
+
+
+def log_command_run(
+    db: AsyncSession,
+    *,
+    user_id,
+    command: Command | None,
+    name: str,
+    source: str,
+    ok: bool,
+    detail: str,
+    utterance: str | None = None,
+    slots: dict | None = None,
+) -> None:
+    """Add an entry to the user's command History. The name is copied so
+    the entry still reads right after a rename or delete."""
+    from app.commands.models import CommandRun
+
+    db.add(
+        CommandRun(
+            user_id=user_id,
+            command_id=command.id if command is not None else None,
+            command_name=(name or "Command")[:120],
+            source=(source or "chat")[:16],
+            ok=ok,
+            utterance=(utterance or None) and utterance[:500],
+            slots=dict(slots or {}),
+            detail=(detail or "")[:500] or None,
+        )
+    )
 
 
 async def nearest(db: AsyncSession, user_id, utterance: str, limit: int = 1):
@@ -144,19 +217,30 @@ async def assert_runnable(db: AsyncSession, command: Command, user) -> None:
         return
 
     if command.action_type == "mcp_tool":
-        from app.mcp.models import McpConnector
+        from app.mcp.service import McpError, authorize_connector_tool
 
         connector_id, _, tool = (command.action_ref or "").partition(":")
         if not connector_id or not tool:
             raise CommandError(f'"{command.name}" has no tool set.')
         try:
-            connector = await db.get(McpConnector, uuid.UUID(connector_id))
+            cid = uuid.UUID(connector_id)
         except ValueError as exc:
             raise CommandError(f'"{command.name}" has no tool set.') from exc
-        if connector is None or not connector.enabled:
-            raise CommandError(
-                f'"{command.name}" uses a connector that is switched off.'
+        # The same decision chat makes, for *the person running it* — not
+        # the command's author. A shared command is a shared phrasing; it
+        # must not lend anyone the author's connector access (R-031).
+        # Destructive tools are allowed only behind "ask before running".
+        try:
+            await authorize_connector_tool(
+                db,
+                user_id=user.id,
+                workspace_id=None,
+                connector_id=cid,
+                real_tool=tool,
+                allow_destructive=bool(command.confirm_before_run),
             )
+        except McpError as exc:
+            raise CommandError(f'"{command.name}": {exc}') from exc
         return
 
     raise CommandError(f"Don't know how to run {command.action_type}.")
@@ -178,6 +262,50 @@ def needs_confirmation(command: Command) -> bool:
     return bool(command.confirm_before_run)
 
 
+async def _tool_schema(db: AsyncSession, command: Command) -> dict:
+    """The input schema of the connector tool a command calls, if any."""
+    if command.action_type != "mcp_tool" or not command.action_ref:
+        return {}
+    from app.mcp.models import McpConnector
+
+    connector_id, _, tool = command.action_ref.partition(":")
+    try:
+        connector = await db.get(McpConnector, uuid.UUID(connector_id))
+    except ValueError:
+        return {}
+    entry = next(
+        (t for t in (connector.tool_catalog if connector else None) or [] if t.get("name") == tool),
+        None,
+    )
+    return (entry or {}).get("input_schema") or {}
+
+
+def coerce_args(args: dict[str, Any], schema: dict) -> dict[str, Any]:
+    """Arguments typed as the tool declares them. Everything arrived as a
+    string — a brightness of "50", a volume slot of "0.5" — and strict
+    servers refuse those (R-164). Values that don't convert are left as
+    they are, for the server to explain."""
+    props = (schema or {}).get("properties") or {}
+    out: dict[str, Any] = {}
+    for key, value in args.items():
+        kind = (props.get(key) or {}).get("type")
+        if isinstance(kind, list):
+            kind = next((k for k in kind if k != "null"), None)
+        if isinstance(value, str):
+            text = value.strip()
+            try:
+                if kind == "integer":
+                    value = int(float(text)) if float(text).is_integer() else value
+                elif kind == "number":
+                    value = float(text)
+                elif kind == "boolean" and text.lower() in ("true", "false", "yes", "no", "on", "off"):
+                    value = text.lower() in ("true", "yes", "on")
+            except ValueError:
+                pass
+        out[key] = value
+    return out
+
+
 async def execute(
     db: AsyncSession,
     command: Command,
@@ -192,7 +320,13 @@ async def execute(
     the server deciding to send a chat message on the user's behalf.
     """
     await assert_runnable(db, command, user)
-    args = {**(command.action_args or {}), **(slots or {})}
+    # Only slots the command's own phrases declare may override its fixed
+    # arguments — otherwise a caller could inject any argument they like
+    # (e.g. retarget a shared "turn off the lamp" at a different device).
+    declared = {name for phrase in (command.phrases or []) for name in slot_names(phrase)}
+    slots = {k: v for k, v in (slots or {}).items() if k in declared}
+    args = {**(command.action_args or {}), **slots}
+    args = coerce_args(args, await _tool_schema(db, command))
 
     if command.action_type == "prompt":
         return {
@@ -234,6 +368,9 @@ async def execute(
                 connector_id=uuid.UUID(connector_id),
                 real_tool=tool,
                 arguments=args,
+                # "Ask before running" is the human confirmation a
+                # destructive tool needs (assert_runnable checked the rest).
+                allow_destructive=bool(command.confirm_before_run),
             )
         except McpError as exc:
             # The connector's own failure, reported as-is. "I couldn't

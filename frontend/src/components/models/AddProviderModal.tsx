@@ -316,7 +316,7 @@ function ExternalHint({
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+      className="font-medium text-[var(--accent-text)] underline-offset-2 hover:underline"
     >
       {children}
     </a>

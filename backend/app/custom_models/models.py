@@ -219,6 +219,15 @@ class KnowledgeChunk(Base):
         nullable=True,
         index=True,
     )
+    # Scope: a user's Drive (0193, WP-5.1) — the *owner* of the file, who
+    # opted in to having it indexed. Readers find it through the shared
+    # read check (``app.files.access``), so a file shared with you counts.
+    drive_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     user_file_id: Mapped[uuid.UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("files.id", ondelete="CASCADE"),

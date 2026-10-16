@@ -18,11 +18,14 @@ exactly one audit row describing the *outcome*, commits, and returns.
 """
 from __future__ import annotations
 
+import logging
+
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.cookies import cookie_secure
 from app.auth.audit import (
     EVENT_MFA_BACKUP_USED,
     EVENT_MFA_DEVICE_REVOKED,
@@ -42,7 +45,7 @@ from app.auth.utils import (
     create_refresh_token,
     decrypt_secret,
     encrypt_secret,
-    verify_password,
+    averify_password,
 )
 from app.config import get_settings
 from app.database import get_db
@@ -73,6 +76,7 @@ from app.mfa.schemas import (
     MfaEmailEnrollVerifyRequest,
     MfaEmailSendResponse,
     MfaEnrollmentCompleteResponse,
+    MfaReauthRequest,
     MfaStatusResponse,
     MfaTotpEnrollResponse,
     MfaTotpEnrollVerifyRequest,
@@ -83,6 +87,8 @@ from app.mfa.smtp import SmtpNotConfiguredError, SmtpSendError
 from app.rate_limit import RateLimitMfaEmailSend, RateLimitMfaVerify
 
 settings = get_settings()
+logger = logging.getLogger("promptly.mfa")
+
 router = APIRouter()
 
 ACCESS_TOKEN_EXPIRE_SECONDS = ACCESS_TOKEN_EXPIRE_MINUTES * 60
@@ -108,7 +114,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         value=token,
         max_age=REFRESH_TOKEN_EXPIRE_SECONDS,
         httponly=True,
-        secure=settings.COOKIE_SECURE,
+        secure=cookie_secure(),
         samesite=settings.COOKIE_SAMESITE,
         path="/api/auth",
     )
@@ -120,8 +126,11 @@ async def _issue_session(
     response: Response,
 ) -> tuple[str, int]:
     """Mint access + refresh + set the refresh cookie. Returns (access, ttl_s)."""
-    access = create_access_token(user.id, token_version=user.token_version)
-    refresh = create_refresh_token(user.id, token_version=user.token_version)
+    from app.auth.utils import new_session_id
+
+    sid = new_session_id()
+    access = create_access_token(user.id, token_version=user.token_version, session_id=sid)
+    refresh = create_refresh_token(user.id, token_version=user.token_version, session_id=sid)
     _set_refresh_cookie(response, refresh)
     return access, ACCESS_TOKEN_EXPIRE_SECONDS
 
@@ -182,6 +191,22 @@ async def mfa_verify(
             detail="MFA is no longer enrolled for this account.",
         )
 
+    from app.mfa import attempts
+
+    jti = getattr(request.state, "mfa_jti", None)
+    blocked = await attempts.blocked_reason(user.id, jti)
+    if blocked is not None:
+        # Refused before the code is even checked: guessing can't continue
+        # by retrying (R-003).
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=(
+                "Too many wrong codes — sign in again to get a new code."
+                if blocked == "challenge"
+                else "Too many wrong codes for this account. Try again in an hour."
+            ),
+        )
+
     secret = await mfa_service.get_secret(db, user_id=user.id)
     method_used: str | None = None
 
@@ -206,6 +231,7 @@ async def mfa_verify(
     if method_used is None and payload.totp_code:
         if (
             secret is not None
+            and secret.enrolled_at is not None  # never a half-set-up one
             and secret.method == METHOD_TOTP
             and secret.totp_secret_encrypted
         ):
@@ -224,7 +250,7 @@ async def mfa_verify(
 
     # ---- Email OTP ----
     if method_used is None and payload.email_code:
-        if secret is not None and secret.method == METHOD_EMAIL:
+        if secret is not None and secret.enrolled_at is not None and secret.method == METHOD_EMAIL:
             if await verify_email_otp(
                 db,
                 user_id=user.id,
@@ -242,12 +268,30 @@ async def mfa_verify(
             identifier=user.username,
         )
         await db.commit()
+        if await attempts.record_failure(user.id, jti):
+            # Someone has the password and is guessing codes — the owner
+            # should know (and change their password).
+            from app.notifications.dispatch import notify_user
+
+            await notify_user(
+                user_id=user.id,
+                category="system_alert",
+                title="Repeated wrong sign-in codes",
+                body=(
+                    "Someone entered your password correctly and then got the "
+                    "second-factor code wrong many times. If that wasn't you, "
+                    "change your password now."
+                ),
+                url="/settings",
+                tag="promptly-mfa-guessing",
+            )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=GENERIC_VERIFY_FAIL,
         )
 
     # ---- Success path ----
+    await attempts.record_success(user.id, jti)
     now = datetime.now(timezone.utc)
     if secret is not None:
         secret.last_used_at = now
@@ -350,6 +394,7 @@ async def mfa_email_send(
 # =====================================================================
 @router.post("/setup/totp", response_model=MfaTotpEnrollResponse)
 async def mfa_setup_totp(
+    payload: MfaReauthRequest | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> MfaTotpEnrollResponse:
@@ -359,7 +404,40 @@ async def mfa_setup_totp(
     until they hit /setup/totp/verify to scan it; failing to verify
     leaves the row in place but inactive (it doesn't gate login).
     """
+    await _require_password_if_enrolled(user, payload.password if payload else None)
     return await _begin_totp_enrollment(db, user=user)
+
+
+async def _require_password_if_enrolled(user: User, password: str | None) -> None:
+    """Changing an existing second factor needs the password too. An
+    access token alone could re-point MFA at an attacker's authenticator
+    (R-141)."""
+    if not user.has_mfa:
+        return
+    if not password or not await averify_password(password, user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Enter your password to change two-step verification.",
+        )
+
+
+async def _tell_mfa_changed(db: AsyncSession, user: User, what: str) -> None:
+    """Email the account owner whenever MFA changes, so a change they
+    didn't make doesn't go unnoticed. Best-effort: SMTP is optional."""
+    try:
+        from app.mfa.smtp import send_message
+
+        await send_message(
+            db,
+            to=user.email,
+            subject="Promptly: two-step verification changed",
+            text_body=(
+                f"Hi {user.username},\n\n{what}\n\nIf this wasn't you, sign in and "
+                "change your password now, then tell your administrator."
+            ),
+        )
+    except Exception:  # noqa: BLE001
+        logger.info("couldn't email MFA change notice to user %s", user.id)
 
 
 @router.post("/setup/totp/forced", response_model=MfaTotpEnrollResponse)
@@ -448,17 +526,14 @@ async def _commit_totp_enrollment(
     issue_session: bool,
 ) -> MfaEnrollmentCompleteResponse:
     secret = await mfa_service.get_secret(db, user_id=user.id)
-    if (
-        secret is None
-        or secret.method != METHOD_TOTP
-        or not secret.totp_secret_encrypted
-    ):
+    pending = mfa_service.pending_factor(secret)
+    if pending is None or pending[0] != METHOD_TOTP or not pending[1]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No pending TOTP enrollment. Restart the setup flow.",
         )
     try:
-        plaintext = decrypt_secret(secret.totp_secret_encrypted)
+        plaintext = decrypt_secret(pending[1])
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -480,12 +555,14 @@ async def _commit_totp_enrollment(
             detail=GENERIC_VERIFY_FAIL,
         )
 
+    was_on = user.has_mfa
     plaintext_codes = backup_codes.generate_codes()
     await backup_codes.replace_codes_for_user(
         db,
         user_id=user.id,
         plaintext_codes=plaintext_codes,
     )
+    mfa_service.promote_pending(secret)
     await mfa_service.mark_enrolled(db, user=user, secret=secret)
     await record_event(
         db,
@@ -494,6 +571,10 @@ async def _commit_totp_enrollment(
         user_id=user.id,
         identifier=user.username,
         detail="method=totp",
+    )
+    await _tell_mfa_changed(
+        db, user,
+        "Your sign-in now uses an authenticator app" + (" instead of your previous method." if was_on else "."),
     )
 
     access = ""
@@ -552,6 +633,7 @@ async def _begin_email_enrollment(
     to_address = (
         str(payload.email_address) if payload.email_address else user.email
     )
+    await _require_password_if_enrolled(user, payload.password)
     await mfa_service.upsert_pending(
         db,
         user_id=user.id,
@@ -642,7 +724,8 @@ async def _commit_email_enrollment(
     issue_session: bool,
 ) -> MfaEnrollmentCompleteResponse:
     secret = await mfa_service.get_secret(db, user_id=user.id)
-    if secret is None or secret.method != METHOD_EMAIL:
+    pending = mfa_service.pending_factor(secret)
+    if pending is None or pending[0] != METHOD_EMAIL:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No pending email enrollment. Restart the setup flow.",
@@ -668,12 +751,14 @@ async def _commit_email_enrollment(
             detail=GENERIC_VERIFY_FAIL,
         )
 
+    was_on = user.has_mfa
     plaintext_codes = backup_codes.generate_codes()
     await backup_codes.replace_codes_for_user(
         db,
         user_id=user.id,
         plaintext_codes=plaintext_codes,
     )
+    mfa_service.promote_pending(secret)
     await mfa_service.mark_enrolled(db, user=user, secret=secret)
     await record_event(
         db,
@@ -682,6 +767,10 @@ async def _commit_email_enrollment(
         user_id=user.id,
         identifier=user.username,
         detail="method=email",
+    )
+    await _tell_mfa_changed(
+        db, user,
+        "Your sign-in now sends a code by email" + (" instead of your previous method." if was_on else "."),
     )
 
     access = ""
@@ -709,6 +798,7 @@ async def _commit_email_enrollment(
 )
 async def mfa_regenerate_backup_codes(
     request: Request,
+    payload: MfaReauthRequest | None = Body(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> MfaBackupCodesResponse:
@@ -717,6 +807,9 @@ async def mfa_regenerate_backup_codes(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="MFA must be enrolled before generating backup codes.",
         )
+    # New codes replace the old — anyone holding just a session could
+    # otherwise mint themselves a way in (R-141).
+    await _require_password_if_enrolled(user, payload.password if payload else None)
     plaintext_codes = backup_codes.generate_codes()
     await backup_codes.replace_codes_for_user(
         db, user_id=user.id, plaintext_codes=plaintext_codes
@@ -730,6 +823,7 @@ async def mfa_regenerate_backup_codes(
         detail="backup_codes_regenerated",
     )
     await db.commit()
+    await _tell_mfa_changed(db, user, "New backup codes were made; the old ones no longer work.")
     return MfaBackupCodesResponse(codes=plaintext_codes)
 
 
@@ -750,7 +844,7 @@ async def mfa_disable(
         response.status_code = status.HTTP_204_NO_CONTENT
         return response
 
-    if not verify_password(payload.password, user.password_hash):
+    if not await averify_password(payload.password, user.password_hash):
         await record_event(
             db,
             request=request,

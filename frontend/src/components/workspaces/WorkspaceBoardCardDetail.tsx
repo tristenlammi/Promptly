@@ -21,8 +21,11 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { DraftInput } from "@/components/shared/DraftInput";
 
 import { filesApi } from "@/api/files";
+import { downloadAuthed, extractError } from "@/components/files/helpers";
+import { toast } from "@/store/toastStore";
 import type {
   BoardColumn,
   BoardLabel,
@@ -164,12 +167,25 @@ export function WorkspaceBoardCardDetail({
 
   const doneCount = subtasks.filter((s) => s.done).length;
 
+  // Escape closes the card (saving what's typed) — it had no keyboard way
+  // out (R-202). An input's own Escape (cancel a rename) stops propagation.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) handleSave();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title || "Card"}
         className="mt-4 w-full max-w-lg rounded-card border border-[var(--border)] bg-[var(--bg)] shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -189,6 +205,8 @@ export function WorkspaceBoardCardDetail({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Close card"
+            title="Close"
             className="shrink-0 rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
           >
             <X className="h-4 w-4" />
@@ -410,13 +428,14 @@ export function WorkspaceBoardCardDetail({
                       <Square className="h-4 w-4" />
                     )}
                   </button>
-                  <input
+                  <DraftInput
                     value={s.text}
                     disabled={!canEdit}
-                    onChange={(e) =>
+                    aria-label="Checklist item"
+                    onCommit={(text) =>
                       setSubtasks(
                         subtasks.map((x) =>
-                          x.id === s.id ? { ...x, text: e.target.value } : x
+                          x.id === s.id ? { ...x, text } : x
                         )
                       )
                     }
@@ -600,9 +619,10 @@ function LabelsSection({
         <div className="space-y-2">
           {labels.map((l) => (
             <div key={l.id} className="flex items-center gap-2">
-              <input
+              <DraftInput
                 value={l.name}
-                onChange={(e) => update(l.id, { name: e.target.value })}
+                aria-label="Label name"
+                onCommit={(name) => update(l.id, { name: name.trim() || l.name })}
                 className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--surface)] px-1.5 py-0.5 text-sm text-[var(--text)] outline-none"
               />
               <ColorDots
@@ -1169,7 +1189,7 @@ function AttachmentsSection({
                       {a.filename || "File"}
                     </span>
                     {a.is_cover && (
-                      <span className="shrink-0 rounded bg-[var(--accent)]/15 px-1 text-[10px] font-medium text-[var(--accent)]">
+                      <span className="shrink-0 rounded bg-[var(--accent)]/15 px-1 text-[10px] font-medium text-[var(--accent-text)]">
                         Cover
                       </span>
                     )}
@@ -1193,7 +1213,7 @@ function AttachmentsSection({
                     className={cn(
                       "shrink-0 rounded p-1 transition",
                       a.is_cover
-                        ? "text-[var(--accent)]"
+                        ? "text-[var(--accent-text)]"
                         : "text-[var(--text-muted)] opacity-0 hover:text-[var(--text)] group-hover:opacity-100"
                     )}
                   >
@@ -1204,15 +1224,20 @@ function AttachmentsSection({
                   </button>
                 )}
 
-                <a
-                  href={filesApi.downloadUrl(a.file_id)}
-                  target="_blank"
-                  rel="noreferrer"
+                {/* A plain link can't carry the bearer token, so it 401'd
+                    for everyone (R-034); fetch with auth instead. */}
+                <button
+                  type="button"
+                  onClick={() =>
+                    downloadAuthed({ id: a.file_id, filename: a.filename || "file" }).catch(
+                      (e) => toast.error(extractError(e))
+                    )
+                  }
                   title="Download"
                   className="shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:text-[var(--text)] group-hover:opacity-100"
                 >
                   <Download className="h-3.5 w-3.5" />
-                </a>
+                </button>
 
                 {canEdit && (
                   <button

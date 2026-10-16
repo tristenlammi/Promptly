@@ -148,7 +148,7 @@ export function MemoryConversationButton({
               <ul className="space-y-0.5">
                 {memoriesUsed.map((item, i) => (
                   <li key={`${i}-${item.id}`} className="flex items-start gap-1.5 text-xs">
-                    <span className="mt-0.5 shrink-0 text-[var(--accent)]/60">·</span>
+                    <span className="mt-0.5 shrink-0 text-[var(--accent-text)]/60">·</span>
                     <span className="leading-snug text-[var(--text)]">{item.content}</span>
                   </li>
                 ))}

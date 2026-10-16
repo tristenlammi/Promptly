@@ -66,7 +66,9 @@ def _board_pill(board: WorkspaceItem, workspace_id: uuid.UUID) -> dict[str, Any]
 
 class ProposeWorkspaceNoteTool(Tool):
     name = "propose_workspace_note"
-    category = "workspace"
+    # Separate from the read-only "workspace" tools so a viewer (or a
+    # member who has since been removed) never gets the write proposals.
+    category = "workspace_write"
     max_per_turn = 3
     # Pure DB write — anything past 30s means the pool is wedged.
     timeout_seconds = 30.0
@@ -80,11 +82,6 @@ class ProposeWorkspaceNoteTool(Tool):
         "is created if it doesn't exist. The note is NOT created immediately "
         "— the user sees a preview card and must approve it, so never claim "
         "the note already exists."
-    )
-    prompt_hint = (
-        "propose_workspace_note — draft a workspace note from this chat, "
-        "optionally filed under a `notebook` group (the user approves it from "
-        "a preview card before anything is created)"
     )
     parameters = {
         "type": "object",
@@ -157,7 +154,9 @@ class ProposeWorkspaceNoteTool(Tool):
 
 class ProposeBoardCardsTool(Tool):
     name = "propose_board_cards"
-    category = "workspace"
+    # Separate from the read-only "workspace" tools so a viewer (or a
+    # member who has since been removed) never gets the write proposals.
+    category = "workspace_write"
     max_per_turn = 3
     # Pure DB write — anything past 30s means the pool is wedged.
     timeout_seconds = 30.0
@@ -168,10 +167,6 @@ class ProposeBoardCardsTool(Tool):
         "from a preview card, so never claim they already exist. To CHANGE "
         "existing cards (mark done, move column, priority, due date), use "
         "propose_board_updates instead — do NOT re-add them as new cards."
-    )
-    prompt_hint = (
-        "propose_board_cards — turn action items into board cards "
-        "(user-approved before anything is created)"
     )
     parameters = {
         "type": "object",
@@ -286,7 +281,9 @@ class ProposeBoardCardsTool(Tool):
 
 class ProposeBoardUpdatesTool(Tool):
     name = "propose_board_updates"
-    category = "workspace"
+    # Separate from the read-only "workspace" tools so a viewer (or a
+    # member who has since been removed) never gets the write proposals.
+    category = "workspace_write"
     max_per_turn = 3
     timeout_seconds = 30.0
     description = (
@@ -299,10 +296,6 @@ class ProposeBoardUpdatesTool(Tool):
         "the change(s) in 'set'. Nothing changes until the user approves the "
         "preview card, so never claim the cards are already updated. To ADD "
         "new cards, use propose_board_cards instead."
-    )
-    prompt_hint = (
-        "propose_board_updates — change existing board cards (status / "
-        "priority / due), e.g. mark the in-progress cards done (user-approved)"
     )
     parameters = {
         "type": "object",

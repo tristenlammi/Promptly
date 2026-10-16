@@ -16,6 +16,27 @@ logger = logging.getLogger("promptly.wyoming")
 
 _server: asyncio.AbstractServer | None = None
 
+# What Admin → Health shows (R-200). Every reason the listener didn't start
+# used to be in the log only, and nothing said whether a satellite had
+# ever connected.
+_status: dict = {"state": "off", "reason": None}
+
+
+def wyoming_status() -> dict:
+    return dict(_status)
+
+
+def note_activity(kind: str) -> None:
+    """Stamp a client connecting (``"client"``) or an utterance arriving."""
+    from datetime import datetime, timezone
+
+    _status[f"last_{kind}_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _not_started(reason: str) -> None:
+    _status.clear()
+    _status.update({"state": "not_started", "reason": reason})
+
 
 async def start_wyoming() -> None:
     """Bind the Wyoming port, or explain in the log why we didn't.
@@ -29,6 +50,8 @@ async def start_wyoming() -> None:
     settings = get_settings()
 
     if not settings.WYOMING_ENABLED:
+        _status.clear()
+        _status.update({"state": "off", "reason": None})
         return
 
     raw_user = (settings.WYOMING_USER_ID or "").strip()
@@ -38,6 +61,7 @@ async def start_wyoming() -> None:
             "bridge needs to know whose commands satellites may run. Not "
             "starting."
         )
+        _not_started("WYOMING_USER_ID isn't set — the bridge needs to know whose commands to run.")
         return
     try:
         user_id = uuid.UUID(raw_user)
@@ -46,6 +70,7 @@ async def start_wyoming() -> None:
             "WYOMING_USER_ID (%r) isn't a valid user id. Not starting.",
             raw_user,
         )
+        _not_started("WYOMING_USER_ID isn't a valid user id.")
         return
 
     # Import here: the ``wyoming`` package is only needed when the bridge
@@ -59,6 +84,7 @@ async def start_wyoming() -> None:
             "installed (%s). Not starting.",
             exc,
         )
+        _not_started("The 'wyoming' package isn't installed in this image.")
         return
 
     try:
@@ -73,7 +99,17 @@ async def start_wyoming() -> None:
             settings.WYOMING_PORT,
             exc,
         )
+        _not_started(f"Couldn't use port {settings.WYOMING_PORT}: {exc}")
         return
+
+    _status.clear()
+    _status.update({
+        "state": "listening",
+        "reason": None,
+        "host": settings.WYOMING_HOST,
+        "port": settings.WYOMING_PORT,
+        "user_id": str(user_id),
+    })
 
     logger.warning(
         "Wyoming bridge is LISTENING on %s:%s for user %s. This protocol "

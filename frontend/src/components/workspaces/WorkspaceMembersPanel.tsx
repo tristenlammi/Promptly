@@ -1,12 +1,16 @@
 import { useMemo, useState } from "react";
-import { Loader2, Trash2, UserPlus } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Loader2, LogOut, Trash2, UserPlus } from "lucide-react";
 
 import { UserPicker, type UserPickerValue } from "@/components/shared/UserPicker";
 import {
   useCreateWorkspaceShare,
   useDeleteWorkspaceShare,
+  useUpdateWorkspaceShare,
   useWorkspaceShares,
 } from "@/hooks/useWorkspaces";
+import { useAuthStore } from "@/store/authStore";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import type {
   WorkspaceParticipant,
   WorkspaceShareRole,
@@ -31,14 +35,54 @@ export function WorkspaceMembersPanel({
   canManage,
   owner,
   collaborators,
+  myShareId = null,
 }: {
   workspaceId: string;
   canManage: boolean;
   owner: WorkspaceParticipant | null;
   collaborators: WorkspaceParticipant[];
+  /** The caller's own share (null for the owner) — enables "Leave". */
+  myShareId?: string | null;
 }) {
   if (canManage) return <OwnerShareManager workspaceId={workspaceId} />;
-  return <ReadOnlyRoster owner={owner} collaborators={collaborators} />;
+  return (
+    <ReadOnlyRoster
+      workspaceId={workspaceId}
+      owner={owner}
+      collaborators={collaborators}
+      myShareId={myShareId}
+    />
+  );
+}
+
+const ROLE_LABEL: Record<WorkspaceShareRole, string> = {
+  admin: "Admin",
+  editor: "Editor",
+  viewer: "Viewer",
+};
+
+/** Leave a workspace you were invited to — confirm, revoke your own share,
+ *  then back to the workspace list (R-180). */
+function useLeaveWorkspace(workspaceId: string) {
+  const remove = useDeleteWorkspaceShare(workspaceId);
+  const navigate = useNavigate();
+  return {
+    pending: remove.isPending,
+    leave: async (shareId: string) => {
+      const ok = await confirm({
+        title: "Leave this workspace?",
+        message:
+          "You'll lose access to everything in it. Files you pinned here are " +
+          "unpinned (they stay in your Drive). To come back, someone has to " +
+          "invite you again.",
+        confirmLabel: "Leave",
+        danger: true,
+      });
+      if (!ok) return;
+      await remove.mutateAsync(shareId);
+      navigate("/workspaces");
+    },
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -48,6 +92,9 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
   const { data, isLoading, isError } = useWorkspaceShares(workspaceId);
   const create = useCreateWorkspaceShare(workspaceId);
   const remove = useDeleteWorkspaceShare(workspaceId);
+  const updateRole = useUpdateWorkspaceShare(workspaceId);
+  const me = useAuthStore((s) => s.user?.id ?? null);
+  const { leave, pending: leaving } = useLeaveWorkspace(workspaceId);
 
   const [picked, setPicked] = useState<UserPickerValue>(null);
   const [role, setRole] = useState<WorkspaceShareRole>("editor");
@@ -78,8 +125,10 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
   return (
     <div>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
-        Invite a teammate to the whole workspace — every chat, file, note, and
-        canvas. <span className="font-medium text-[var(--text)]">Admins</span>{" "}
+        Invite a teammate to the workspace — its notes, boards, sheets, files
+        and instructions, plus any chats people share with it. Chats and
+        drafts stay private to whoever made them until they share them.{" "}
+        <span className="font-medium text-[var(--text)]">Admins</span>{" "}
         also manage settings and members;{" "}
         <span className="font-medium text-[var(--text)]">Editors</span> create
         and edit content;{" "}
@@ -167,30 +216,76 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
                     {row.invitee.email}
                   </div>
                 </div>
-                <span className="shrink-0 rounded-full bg-[var(--border)]/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                  {row.role === "viewer"
-                    ? "Viewer"
-                    : row.role === "admin"
-                      ? "Admin"
-                      : "Editor"}
-                </span>
-                <StatusPill status={row.status} />
-                <button
-                  type="button"
-                  onClick={() => remove.mutate(row.id)}
-                  className="rounded-md p-1.5 text-[var(--text-muted)] transition hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
-                  title={
-                    row.status === "accepted"
-                      ? "Remove access"
-                      : row.status === "declined"
-                        ? "Remove invite"
-                        : "Cancel invite"
-                  }
-                  aria-label="Remove share"
-                  disabled={remove.isPending}
+                {/* Change a role in place — remove + re-invite used to cost
+                    them their pinned files and reset them to pending (R-180). */}
+                <select
+                  value={row.role}
+                  aria-label={`Role for ${row.invitee.username}`}
+                  disabled={updateRole.isPending}
+                  onChange={(e) => {
+                    setErrorMsg(null);
+                    updateRole
+                      .mutateAsync({
+                        shareId: row.id,
+                        role: e.target.value as WorkspaceShareRole,
+                      })
+                      .catch((err: unknown) =>
+                        setErrorMsg(apiErrorMessage(err, "Couldn't change the role."))
+                      );
+                  }}
+                  className="shrink-0 rounded-input border border-[var(--border)] bg-[var(--surface)] px-1.5 py-1 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
+                  {(["admin", "editor", "viewer"] as const).map((r) => (
+                    <option key={r} value={r}>
+                      {ROLE_LABEL[r]}
+                    </option>
+                  ))}
+                </select>
+                <StatusPill status={row.status} />
+                {row.invitee.user_id === me ? (
+                  <button
+                    type="button"
+                    onClick={() => void leave(row.id)}
+                    className="rounded-md p-1.5 text-[var(--text-muted)] transition hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
+                    title="Leave workspace"
+                    aria-label="Leave workspace"
+                    disabled={leaving}
+                  >
+                    <LogOut className="h-3.5 w-3.5" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (row.status === "accepted") {
+                        const ok = await confirm({
+                          title: `Remove ${row.invitee.username}?`,
+                          message:
+                            "They lose access straight away. Files they pinned " +
+                            "here are unpinned and drop out of the workspace's " +
+                            "AI context (the files stay in their Drive). Their " +
+                            "notes, cards and shared chats stay.",
+                          confirmLabel: "Remove",
+                          danger: true,
+                        });
+                        if (!ok) return;
+                      }
+                      remove.mutate(row.id);
+                    }}
+                    className="rounded-md p-1.5 text-[var(--text-muted)] transition hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
+                    title={
+                      row.status === "accepted"
+                        ? "Remove access"
+                        : row.status === "declined"
+                          ? "Remove invite"
+                          : "Cancel invite"
+                    }
+                    aria-label="Remove share"
+                    disabled={remove.isPending}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -204,24 +299,28 @@ function OwnerShareManager({ workspaceId }: { workspaceId: string }) {
 // Collaborator: read-only roster
 // ---------------------------------------------------------------------
 function ReadOnlyRoster({
+  workspaceId,
   owner,
   collaborators,
+  myShareId,
 }: {
+  workspaceId: string;
   owner: WorkspaceParticipant | null;
   collaborators: WorkspaceParticipant[];
+  myShareId: string | null;
 }) {
-  const rows: Array<{ person: WorkspaceParticipant; role: "Owner" | "Member" }> =
-    [];
+  const { leave, pending: leaving } = useLeaveWorkspace(workspaceId);
+  const rows: Array<{ person: WorkspaceParticipant; role: string }> = [];
   if (owner) rows.push({ person: owner, role: "Owner" });
   for (const c of collaborators) {
     if (owner && c.user_id === owner.user_id) continue;
-    rows.push({ person: c, role: "Member" });
+    rows.push({ person: c, role: c.role ? ROLE_LABEL[c.role] : "Member" });
   }
 
   return (
     <div>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
-        Everyone with access to this workspace. Only the owner can invite or
+        Everyone with access to this workspace. The owner and admins invite and
         remove people.
       </p>
       {rows.length === 0 ? (
@@ -254,7 +353,7 @@ function ReadOnlyRoster({
                 className={cn(
                   "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
                   role === "Owner"
-                    ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+                    ? "bg-[var(--accent)]/15 text-[var(--accent-text)]"
                     : "bg-[var(--border)]/40 text-[var(--text-muted)]"
                 )}
               >
@@ -263,6 +362,17 @@ function ReadOnlyRoster({
             </li>
           ))}
         </ul>
+      )}
+      {myShareId && (
+        <button
+          type="button"
+          onClick={() => void leave(myShareId)}
+          disabled={leaving}
+          className="mt-4 inline-flex items-center gap-1.5 rounded-input border border-[var(--border)] px-3 py-1.5 text-xs font-medium text-[var(--danger)] transition hover:bg-[var(--danger-bg)] disabled:opacity-50"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Leave workspace
+        </button>
       )}
     </div>
   );

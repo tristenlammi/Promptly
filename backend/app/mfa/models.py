@@ -46,6 +46,13 @@ class UserMfaSecret(UUIDPKMixin, Base):
     # Fernet-encrypted base32 string. NULL for email-method users.
     totp_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     email_address: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    # A new factor being set up while the current one stays in force. It
+    # used to replace the enrolled secret (and the backup codes) the moment
+    # setup *started*, so an abandoned switch left no working factor, and a
+    # stolen session could re-point MFA in one call (R-141).
+    pending_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    pending_totp_secret_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pending_email_address: Mapped[str | None] = mapped_column(String(320), nullable=True)
     enrolled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -88,6 +95,11 @@ class MfaBackupCode(UUIDPKMixin, CreatedAtMixin, Base):
     # user exactly once (right after they're generated) and never
     # stored anywhere.
     code_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Keyed fingerprint (HMAC with the server key) used to find the one
+    # row a submitted code could be, so only that row pays for a bcrypt
+    # verify. Checking all ten made each wrong guess cost ~1.6 s of CPU
+    # (R-139). NULL on codes issued before it existed.
+    lookup: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     used_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

@@ -24,6 +24,7 @@
  *     the app layer (IndexedDB / React Query) where a SW uninstall
  *     doesn't leak into other browser profiles.
  */
+import { stashSharedFiles } from "./lib/shareTargetStash";
 import {
   cleanupOutdatedCaches,
   matchPrecache,
@@ -62,6 +63,8 @@ registerRoute(
   new NavigationRoute(navigationHandler, {
     denylist: [
       /^\/api\//,
+      // Signed media links (WP-7.5) — a file, never the app shell.
+      /^\/m\//,
       /^\/uploads\//,
       /^\/openapi\.json$/,
       /^\/docs/,
@@ -69,6 +72,27 @@ registerRoute(
     ],
   })
 );
+
+// ----- Share target: "Share → Promptly Files" (R-211) -----
+// The installed Files app is a share target; the OS POSTs the shared files
+// here. Stash them and send the app to Files, which uploads them (the
+// upload needs the signed-in page — the worker has no token).
+self.addEventListener("fetch", (event: FetchEvent) => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== "POST" || url.pathname !== "/files/share-target") return;
+  event.respondWith(
+    (async () => {
+      try {
+        const form = await event.request.formData();
+        const files = form.getAll("files").filter((v): v is File => v instanceof File);
+        await stashSharedFiles(files);
+      } catch {
+        // Nothing usable arrived — still land the user in Files.
+      }
+      return Response.redirect("/files/?shared=1", 303);
+    })()
+  );
+});
 
 // Activate immediately + take control of open tabs so a deploy
 // doesn't leave half the sessions on the old SW.

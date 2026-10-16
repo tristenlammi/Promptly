@@ -1,7 +1,14 @@
 # ---- Web framework ----
-fastapi==0.115.0
+# FastAPI 0.128 is the newest line that still allows pydantic 2.9 (pinned
+# below for the mcp library) — 0.135+ wants Starlette 1.x. Starlette is
+# pinned explicitly: 0.38 had a pre-auth multipart memory DoS
+# (CVE-2024-47874), a blocking spool rollover (CVE-2025-54121) and no HTTP
+# Range support; 0.49.1+ also carries the fix for its new Range handling
+# (CVE-2025-62727). R-017.
+fastapi==0.128.8
+starlette==0.52.1
 uvicorn[standard]==0.30.6
-python-multipart==0.0.9
+python-multipart==0.0.32
 
 # ---- Database ----
 sqlalchemy[asyncio]==2.0.35
@@ -50,6 +57,14 @@ anthropic==0.34.2
 
 # ---- Document parsing (attachments) ----
 pypdf==6.10.2
+# Sheets import/export to .xlsx (R-132) — MIT, pure Python.
+openpyxl==3.1.5
+# openpyxl uses defusedxml when present — without it it doesn't guard
+# against billion-laughs / quadratic-blowup XML (WP-4.3).
+defusedxml==0.7.1
+# Text from uploaded Word / PowerPoint files for search and RAG (WP-4.3).
+python-docx==1.2.0
+python-pptx==1.0.2
 # Rasterises PDF pages to images so a scan-only PDF (no embedded text
 # layer) can be OCR'd through the Vision relay for workspace indexing.
 # pypdfium2 is a permissively-licensed (Apache-2.0 / BSD-3) pure-wheel
@@ -73,6 +88,12 @@ markdown==3.7
 # the PDF-signing feature, so the older release is functionally
 # identical for our purposes.
 xhtml2pdf==0.2.11
+# A Doc's PDF (WP-6.4): CSS Paged Media, so the page setup — paper,
+# margins, header/footer, page numbers — becomes @page rules, and real
+# fonts mean Cyrillic/CJK render. Needs Pango + HarfBuzz-subset from the
+# system (see the Dockerfile). BSD. Chat's generate_pdf still uses
+# xhtml2pdf above.
+weasyprint==70.0
 # HTML -> Markdown converter for Drive-document downloads. Pure-python
 # wrapper around BeautifulSoup; we already pull bs4 transitively via
 # bleach/xhtml2pdf, so adding markdownify doesn't materially grow the
@@ -92,7 +113,17 @@ filetype==1.2.0
 # Pillow ships with ``qrcode[pil]`` already, but we depend on it
 # directly here for EXIF/GPS stripping on uploaded images, so it gets
 # its own line in case the qrcode pin ever loosens.
-Pillow==10.4.0
+Pillow==12.3.0
+# HEIC/HEIF photos (iPhones) — decoding for thumbnails, previews and the
+# vision models, which all reject HEIC (WP-7.3). Its wheels bundle libheif
+# and the HEVC decoder (GPL; fine for images built locally — Part C open
+# question 11 if images are ever published). AVIF comes with Pillow ≥11.3.
+pillow-heif==1.8.1
+# The media worker (WP-7.4): a camera raw's embedded preview, without
+# decoding the raw (rawpy wraps LibRaw — LGPL/CDDL). ThumbHash is encoded
+# by app/files/thumbhash.py (a port of the MIT reference; the PyPI port
+# pins Pillow<11).
+rawpy==0.27.1
 
 # ---- MFA (Phase 2) ----
 # TOTP / HOTP shared-secret arithmetic.
@@ -132,10 +163,9 @@ bleach==6.1.0
 # relaxation. The ``[cpu]`` extra pulls onnxruntime; the u2net model is
 # pre-downloaded in the Dockerfile (U2NET_HOME) so first use is offline.
 # Pulls opencv-python-headless + scipy/scikit-image — hence the extra
-# system libs in the Dockerfile. Pinned to 2.0.65 (not the latest 2.0.76)
-# because 2.0.7x requires Pillow>=12, which clashes with our Pillow 10.4
-# pin; 2.0.65 leaves Pillow unconstrained.
-rembg[cpu]==2.0.65
+# system libs in the Dockerfile. 2.0.85 needs Pillow>=12.1, taken together
+# with the Pillow 12 bump in WP-7.3.
+rembg[cpu]==2.0.85
 
 # ---- MCP (Phase 10 — Connectors) ----
 # Official Model Context Protocol SDK. We only use the *client* side

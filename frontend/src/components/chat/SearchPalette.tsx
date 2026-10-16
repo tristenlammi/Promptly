@@ -72,6 +72,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   // a slow request from an older query doesn't clobber the UI once
   // the user has kept typing.
   const fetchSeq = useRef(0);
+  const wsAbort = useRef<AbortController | null>(null);
 
   // Reset state on close so the next open starts fresh (no stale
   // results flashing before the new query fires).
@@ -111,8 +112,12 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
       // own request so a slow pass can't delay chat results). Dates
       // don't apply to it — a date-only browse clears the section.
       if (trimmed.length >= 2) {
+        // A newer query cancels the one still in flight (R-186).
+        wsAbort.current?.abort();
+        const ctrl = new AbortController();
+        wsAbort.current = ctrl;
         void workspacesApi
-          .searchAll(trimmed)
+          .searchAll(trimmed, ctrl.signal)
           .then((res) => {
             if (seq === fetchSeq.current) setWsGroups(res.groups);
           })
@@ -438,7 +443,7 @@ function Section({
               </span>
               {hit.match === "semantic" && (
                 <span
-                  className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-[var(--accent)]/15 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-[var(--accent)]"
+                  className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-[var(--accent)]/15 px-1.5 py-px text-[9px] font-medium uppercase tracking-wide text-[var(--accent-text)]"
                   title="Found by meaning, not exact words"
                 >
                   <Sparkles className="h-2.5 w-2.5" />

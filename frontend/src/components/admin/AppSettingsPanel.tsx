@@ -325,6 +325,7 @@ function bytesToGbString(bytes: number): string {
 
 interface QuotasForm {
   default_storage_cap_gb: string;
+  max_upload_gb: string;
   default_daily_token_budget: string;
   default_monthly_token_budget: string;
 }
@@ -335,6 +336,7 @@ function quotasToForm(s: AppSettings): QuotasForm {
       s.default_storage_cap_bytes == null
         ? ""
         : bytesToGbString(s.default_storage_cap_bytes),
+    max_upload_gb: s.max_upload_bytes_large == null ? "" : bytesToGbString(s.max_upload_bytes_large),
     default_daily_token_budget:
       s.default_daily_token_budget == null
         ? ""
@@ -358,6 +360,7 @@ function QuotasCard({ settings, onSubmit, busy }: CardSubmit) {
 
   const dirty =
     form.default_storage_cap_gb !== initial.default_storage_cap_gb ||
+    form.max_upload_gb !== initial.max_upload_gb ||
     form.default_daily_token_budget !== initial.default_daily_token_budget ||
     form.default_monthly_token_budget !== initial.default_monthly_token_budget;
 
@@ -396,6 +399,14 @@ function QuotasCard({ settings, onSubmit, busy }: CardSubmit) {
         return;
       }
       patch.default_storage_cap_bytes = bytes;
+    }
+    if (form.max_upload_gb !== initial.max_upload_gb) {
+      const bytes = parseGbToBytes(form.max_upload_gb);
+      if (bytes === "invalid" || bytes === 0) {
+        setError("The largest upload must be a positive number of GB.");
+        return;
+      }
+      patch.max_upload_bytes_large = bytes;
     }
     if (
       form.default_daily_token_budget !== initial.default_daily_token_budget
@@ -476,7 +487,8 @@ function QuotasCard({ settings, onSubmit, busy }: CardSubmit) {
     >
       <p className="mb-4 text-xs text-[var(--text-muted)]">
         Applied to every user whose own override is unset. Leave a field
-        blank to keep that quota uncapped. Token budgets count prompt +
+        blank to keep that quota uncapped (the largest single upload — a
+        long video, say — defaults to 10 GB). Token budgets count prompt +
         completion tokens combined; storage applies to each user's
         private file pool only (admin-uploaded shared files are
         untracked).
@@ -489,6 +501,16 @@ function QuotasCard({ settings, onSubmit, busy }: CardSubmit) {
           placeholder="unlimited"
           type="number"
           step={0.1}
+          min={0}
+          disabled={busy}
+        />
+        <Field
+          label="Largest upload (GB)"
+          value={form.max_upload_gb}
+          onChange={(v) => setField("max_upload_gb", v)}
+          placeholder="10"
+          type="number"
+          step={0.5}
           min={0}
           disabled={busy}
         />
@@ -598,10 +620,10 @@ function AuthCard({ settings, onSubmit, busy }: CardSubmit) {
             Require multi-factor authentication
           </label>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            When enabled, every user without MFA enrolled is forced through
-            the enrollment flow on their next login. Existing sessions are
-            not invalidated. Users can choose between an authenticator app
-            (TOTP) or one-time emailed codes.
+            When enabled, everyone without MFA is signed out and goes through
+            set-up the next time they sign in — single sign-on included.
+            Users can choose between an authenticator app (TOTP) or one-time
+            emailed codes.
           </p>
         </div>
         <Toggle
@@ -626,8 +648,8 @@ function AuthCard({ settings, onSubmit, busy }: CardSubmit) {
         >
           <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
-            Every user without MFA configured will be required to enroll on
-            their next login before they can use the app. Click <span className="font-semibold">Yes, require MFA</span> again to confirm.
+            Everyone without MFA (except you) will be signed out now and must
+            set it up when they sign back in. Click <span className="font-semibold">Yes, require MFA</span> again to confirm.
           </span>
         </div>
       )}
@@ -945,7 +967,7 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
             href="https://myaccount.google.com/apppasswords"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[var(--accent)] underline"
+            className="text-[var(--accent-text)] underline"
           >
             App Password
           </a>{" "}
@@ -1079,6 +1101,8 @@ function OidcCard({ settings, onSubmit, busy }: CardSubmit) {
   const [clearSecret, setClearSecret] = useState(false);
   const [label, setLabel] = useState(settings.oidc_button_label ?? "");
   const [scopes, setScopes] = useState(settings.oidc_scopes ?? "");
+  const [trustEmail, setTrustEmail] = useState(settings.oidc_trust_unverified_email);
+  const [satisfiesMfa, setSatisfiesMfa] = useState(settings.oidc_satisfies_mfa);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -1087,6 +1111,8 @@ function OidcCard({ settings, onSubmit, busy }: CardSubmit) {
     setClientId(settings.oidc_client_id ?? "");
     setLabel(settings.oidc_button_label ?? "");
     setScopes(settings.oidc_scopes ?? "");
+    setTrustEmail(settings.oidc_trust_unverified_email);
+    setSatisfiesMfa(settings.oidc_satisfies_mfa);
     setSecret("");
     setClearSecret(false);
   }, [
@@ -1095,6 +1121,8 @@ function OidcCard({ settings, onSubmit, busy }: CardSubmit) {
     settings.oidc_client_id,
     settings.oidc_button_label,
     settings.oidc_scopes,
+    settings.oidc_trust_unverified_email,
+    settings.oidc_satisfies_mfa,
   ]);
 
   // The exact callback URL the operator must register at their IdP — shown so
@@ -1111,6 +1139,9 @@ function OidcCard({ settings, onSubmit, busy }: CardSubmit) {
     patch.oidc_button_label = label.trim() || null;
   if (scopes.trim() !== (settings.oidc_scopes ?? ""))
     patch.oidc_scopes = scopes.trim() || null;
+  if (trustEmail !== settings.oidc_trust_unverified_email)
+    patch.oidc_trust_unverified_email = trustEmail;
+  if (satisfiesMfa !== settings.oidc_satisfies_mfa) patch.oidc_satisfies_mfa = satisfiesMfa;
   if (clearSecret) patch.oidc_client_secret = "";
   else if (secret) patch.oidc_client_secret = secret;
   const dirty = Object.keys(patch).length > 0;
@@ -1163,8 +1194,9 @@ function OidcCard({ settings, onSubmit, busy }: CardSubmit) {
             Optional. When on, invited users can sign in with your identity
             provider. SSO only logs in accounts an admin has already created
             (matched by verified email) — it never creates new accounts, so it
-            can't widen access beyond your user list. Local password login
-            keeps working.
+            can't widen access beyond your user list. After the first SSO
+            sign-in an account is tied to that provider identity, not just the
+            email. Local password login keeps working.
           </p>
         </div>
         <Toggle
@@ -1239,6 +1271,20 @@ function OidcCard({ settings, onSubmit, busy }: CardSubmit) {
             disabled={busy}
           />
         </div>
+        <SsoSwitch
+          label="Accept emails the provider hasn't verified"
+          hint="Only for providers that never say whether an email is verified (Azure AD). Otherwise anyone who can set that address at the provider could sign in as the account."
+          checked={trustEmail}
+          onChange={setTrustEmail}
+          disabled={busy}
+        />
+        <SsoSwitch
+          label="Let SSO sign-in replace two-step verification"
+          hint="Off: people who use two-step verification are asked for it after SSO too, and “Require two-step verification” applies to SSO sign-ins. Turn on only if your provider already enforces MFA."
+          checked={satisfiesMfa}
+          onChange={setSatisfiesMfa}
+          disabled={busy}
+        />
       </div>
 
       <div className="mt-4 rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-xs text-[var(--text-muted)]">
@@ -1250,6 +1296,36 @@ function OidcCard({ settings, onSubmit, busy }: CardSubmit) {
         </code>
       </div>
     </SettingsCard>
+  );
+}
+
+function SsoSwitch({
+  label,
+  hint,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-2">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        disabled={disabled}
+        className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent)]"
+      />
+      <span>
+        <span className="text-sm text-[var(--text)]">{label}</span>
+        <span className="mt-0.5 block text-xs text-[var(--text-muted)]">{hint}</span>
+      </span>
+    </label>
   );
 }
 

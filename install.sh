@@ -66,12 +66,12 @@ if ! docker compose version >/dev/null 2>&1; then
   red "docker compose v2 is not available. Update Docker Engine to a recent version."
   exit 1
 fi
-# The compose file uses optional depends_on (``required: false``), which
-# needs compose >= 2.20 (mid-2023). Fail early with a clear message
-# instead of a cryptic error at `up` time.
+# The compose file uses optional depends_on and env_file entries
+# (``required: false``), which need compose >= 2.24 (early 2024). Fail
+# early with a clear message instead of a cryptic error at `up` time.
 compose_ver=$(docker compose version --short 2>/dev/null | sed 's/^v//')
-if [[ -n "$compose_ver" ]] && ! printf '2.20.0\n%s\n' "$compose_ver" | sort -V -C; then
-  red "docker compose ${compose_ver} is too old (need >= 2.20). Update Docker Engine / Compose."
+if [[ -n "$compose_ver" ]] && ! printf '2.24.0\n%s\n' "$compose_ver" | sort -V -C; then
+  red "docker compose ${compose_ver} is too old (need >= 2.24). Update Docker Engine / Compose."
   exit 1
 fi
 if ! docker info >/dev/null 2>&1; then
@@ -85,7 +85,11 @@ fi
 green "  Docker, docker compose v2 and openssl detected"
 
 # ---------- 2. .env bootstrap ----------
+# A brand-new .env copies COMPOSE_PROFILES from the example, so "the line
+# is missing" can't be how a first install is recognised.
+FRESH_ENV=false
 if [[ ! -f .env ]]; then
+  FRESH_ENV=true
   bold "Creating .env from .env.example"
   cp .env.example .env
 fi
@@ -109,6 +113,8 @@ bold "Seeding secrets"
 seed_secret SECRET_KEY        "$(openssl rand -hex 32)"
 seed_secret SEARXNG_SECRET    "$(openssl rand -hex 32)"
 seed_secret POSTGRES_PASSWORD "$(openssl rand -hex 24)"
+seed_secret SETUP_TOKEN       "$(openssl rand -hex 6)"
+seed_secret TUS_HOOK_SECRET   "$(openssl rand -hex 32)"
 
 # ---------- 3. optional services (compose profiles) ----------
 # COMPOSE_PROFILES in .env is the persistent source of truth: docker
@@ -175,28 +181,29 @@ profiles=()
 $NO_SEARCH || profiles+=("search")
 profiles_csv=$(IFS=,; printf '%s' "${profiles[*]-}")
 
-if $PROFILE_FLAGS_GIVEN || ! grep -qE '^COMPOSE_PROFILES=' .env; then
+if $PROFILE_FLAGS_GIVEN || $FRESH_ENV || ! grep -qE '^COMPOSE_PROFILES=' .env; then
   bold "Configuring optional services"
   set_env_line COMPOSE_PROFILES "$profiles_csv"
   # The backend health probe + search provisioning key off this flag.
   set_env_line SEARXNG_ENABLED "$($NO_SEARCH && echo false || echo true)"
   green "  Ollama: ${OLLAMA_LABEL}"
   [[ -n "$OLLAMA_NOTE" ]] && yellow "  ${OLLAMA_NOTE}"
-  if [[ "$OLLAMA_MODE" == "host" ]]; then
-    # Point the backend at the host's native Ollama. Respect an
-    # operator-set URL; only seed when the line is missing. The
-    # host.docker.internal alias is provided to the backend + worker in
-    # compose via extra_hosts (works on Linux/Unraid too, not just
-    # Docker Desktop).
-    grep -qE '^OLLAMA_URL=' .env \
-      || printf 'OLLAMA_URL=http://host.docker.internal:11434\n' >> .env
-    [[ "$(uname -s)" == "Linux" ]] \
-      && yellow "  If the backend can't reach it, start host Ollama with OLLAMA_HOST=0.0.0.0"
-  fi
   $NO_SEARCH && yellow "  --no-search: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)"
   green "  COMPOSE_PROFILES=${profiles_csv:-<none>}"
 else
   yellow "  COMPOSE_PROFILES already set, leaving untouched (re-run with --with-ollama/--no-search to change)"
+fi
+
+# A host Ollama is wired whenever one is detected and nothing is set yet —
+# not only when the profile block above runs. Respect an operator-set URL.
+# The host.docker.internal alias is provided to the backend + worker in
+# compose via extra_hosts (works on Linux/Unraid too, not just Docker
+# Desktop).
+if [[ "$OLLAMA_MODE" == "host" ]] && ! grep -qE '^OLLAMA_URL=' .env; then
+  printf 'OLLAMA_URL=http://host.docker.internal:11434\n' >> .env
+  green "  OLLAMA_URL -> the Ollama running on this machine"
+  [[ "$(uname -s)" == "Linux" ]] \
+    && yellow "  If the backend can't reach it, start host Ollama with OLLAMA_HOST=0.0.0.0"
 fi
 
 # ---------- 4. build + start ----------
@@ -250,17 +257,19 @@ green " Promptly is up. "
 bold "=========================================================="
 echo
 echo "  Open in your browser:"
-if [[ "$http_port" == "80" ]]; then
-  echo "    http://localhost"
-else
-  echo "    http://localhost:${http_port}"
-fi
+suffix=""
+[[ "$http_port" != "80" ]] && suffix=":${http_port}"
+echo "    http://localhost${suffix}"
+lan_ip=$( (hostname -I 2>/dev/null || ipconfig getifaddr en0 2>/dev/null) | awk '{print $1}')
+[[ -n "$lan_ip" ]] && echo "    http://${lan_ip}${suffix}   (from other devices on your network)"
 echo
-echo "  The first visit will launch the setup wizard:"
-echo "    1. Create the bootstrap admin account."
-echo "    2. (Optional) Set the public URL people will reach Promptly on."
-echo "    3. (Optional) Pick how knowledge libraries get embedded."
-echo "    4. (Optional) Protect the admin account with two-step verification."
+setup_code=$(grep -E '^SETUP_TOKEN=' .env | cut -d= -f2- || true)
+if [[ -n "$setup_code" && "$setup_code" != change-me* ]]; then
+  echo "  Setup code (asked for when you create the admin account): ${setup_code}"
+  echo
+fi
+echo "  The setup wizard walks you through your admin account, a model"
+echo "  provider, the public URL, embeddings, email and two-step verification."
 if [[ "$OLLAMA_MODE" == "cloud" ]]; then
   echo
   yellow "  Note: no local-model runtime. Connect a cloud provider (OpenAI,"

@@ -1,5 +1,6 @@
 import {
   Archive,
+  Camera,
   File as FileIcon,
   FileCode,
   FileText,
@@ -9,6 +10,7 @@ import {
   Inbox,
   type LucideIcon,
   Music,
+  PenTool,
   Sparkles,
   Table as TableIcon,
 } from "lucide-react";
@@ -74,6 +76,10 @@ function fileTint(file: IconFile): Tint {
     return { Icon: Music, text: "text-pink-500", tile: "bg-pink-500/15" };
   if (/\.(zip|tar|gz|tgz|rar|7z)$/.test(lower))
     return { Icon: Archive, text: "text-amber-600", tile: "bg-amber-600/15" };
+  if (file.source_kind === "sheet")
+    return { Icon: TableIcon, text: "text-emerald-600", tile: "bg-emerald-600/15" };
+  if (file.source_kind === "whiteboard")
+    return { Icon: PenTool, text: "text-orange-500", tile: "bg-orange-500/15" };
 
   const kind = classifyMime(file.mime_type, file.filename, file.source_kind);
   switch (kind) {
@@ -108,9 +114,11 @@ function folderTint(kind: SystemFolderKind | null | undefined): Tint {
           ? FileText
           : kind === "generated_media"
             ? ImageIcon
-            : FolderIcon;
+            : kind === "camera_uploads"
+              ? Camera
+              : FolderIcon;
   // Folders anchor the structure — the accent tile, echoing the navigator.
-  return { Icon, text: "text-[var(--accent)]", tile: "bg-[var(--accent-soft)]" };
+  return { Icon, text: "text-[var(--accent-text)]", tile: "bg-[var(--accent-soft)]" };
 }
 
 export function DriveItemIcon({

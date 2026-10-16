@@ -123,6 +123,11 @@ export function useEmbeddingConfig() {
   return useQuery({
     queryKey: EMBEDDING_CONFIG_KEY,
     queryFn: () => customModelsApi.getEmbeddingConfig(),
+    // Keep the re-index progress moving while something is waiting.
+    refetchInterval: (q) => {
+      const p = q.state.data?.pending;
+      return p && p.files + p.items + p.memories > 0 ? 10_000 : false;
+    },
   });
 }
 

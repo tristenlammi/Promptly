@@ -215,7 +215,7 @@ export function ChatPreferencesPanel() {
         />
         <div className="border-t border-[var(--border)]" />
         <ToggleRow
-          icon={<Wrench className="h-4 w-4 text-[var(--accent)]" />}
+          icon={<Wrench className="h-4 w-4 text-[var(--accent-text)]" />}
           title="Tools"
           description={
             <>
@@ -344,7 +344,7 @@ function WebSearchModeRow({
     <div className="flex items-start justify-between gap-4">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10">
-          <Globe className="h-4 w-4 text-[var(--accent)]" />
+          <Globe className="h-4 w-4 text-[var(--accent-text)]" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">Web search</p>
@@ -379,7 +379,7 @@ function WebSearchModeRow({
                   <span
                     className={cn(
                       "mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center",
-                      selected ? "text-[var(--accent)]" : "text-transparent"
+                      selected ? "text-[var(--accent-text)]" : "text-transparent"
                     )}
                     aria-hidden
                   >
@@ -389,7 +389,7 @@ function WebSearchModeRow({
                     <span
                       className={cn(
                         "block font-semibold",
-                        selected ? "text-[var(--accent)]" : "text-[var(--text)]"
+                        selected ? "text-[var(--accent-text)]" : "text-[var(--text)]"
                       )}
                     >
                       {opt.label}
@@ -428,7 +428,7 @@ function CustomInstructionsRow({
     <div className="flex items-start justify-between gap-4">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10">
-          <MessageSquareText className="h-4 w-4 text-[var(--accent)]" />
+          <MessageSquareText className="h-4 w-4 text-[var(--accent-text)]" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">Custom instructions</p>
@@ -513,7 +513,7 @@ function DefaultModelRow({
     <div className="flex items-start justify-between gap-4">
       <div className="flex min-w-0 flex-1 items-start gap-3">
         <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--accent)]/10">
-          <Cpu className="h-4 w-4 text-[var(--accent)]" />
+          <Cpu className="h-4 w-4 text-[var(--accent-text)]" />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">Default model</p>

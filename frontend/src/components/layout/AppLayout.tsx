@@ -2,6 +2,8 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
+import { RouteBoundary } from "@/components/system/RouteBoundary";
+
 import { SearchPalette } from "@/components/chat/SearchPalette";
 import { UploadProgressPanel } from "@/components/files/UploadProgressPanel";
 import { UploadQueueWatcher } from "@/components/files/UploadQueueWatcher";
@@ -26,9 +28,11 @@ export function AppLayout() {
   // restores the user's previous state on exit (Batch 10). Manual
   // toggles while inside are respected: we only touch the state on the
   // enter/leave transitions.
-  const inWorkspace = /^\/workspaces\/[0-9a-fA-F-]{36}/.test(
-    location.pathname
-  );
+  // Files has its own rail too (WP-3.5, Part C §2.2): the app sidebar
+  // becomes an icon strip there the same way.
+  const inWorkspace =
+    /^\/workspaces\/[0-9a-fA-F-]{36}/.test(location.pathname) ||
+    /^\/files(\/|$)/.test(location.pathname);
   const wasInWorkspace = useRef(false);
   const preWorkspaceCollapsed = useRef(false);
   const collapsedRef = useRef(collapsed);
@@ -121,6 +125,25 @@ export function AppLayout() {
   // rotation, desktop window resize) re-styles rather than remounts.
   // That preserves chat scroll position and in-flight component state
   // that the old two-tree split used to wipe.
+  // The phone drawer: Escape closes it, and while closed it's inert — its
+  // links were still reachable by Tab and screen readers (R-095).
+  const drawerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = drawerRef.current;
+    if (!el) return;
+    if (isMobile && !mobileNavOpen) el.setAttribute("inert", "");
+    else el.removeAttribute("inert");
+  }, [isMobile, mobileNavOpen]);
+  useEffect(() => {
+    if (!isMobile || !mobileNavOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) closeMobileNav();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isMobile, mobileNavOpen]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--text)]">
       {/* Mobile-only backdrop. Inert (and hidden) on desktop. */}
@@ -141,6 +164,7 @@ export function AppLayout() {
           overlays the content. The hosted <Sidebar> is the same element
           either way, so it never remounts on a breakpoint change. */}
       <div
+        ref={drawerRef}
         role={isMobile ? "dialog" : undefined}
         aria-label={isMobile ? "Navigation menu" : undefined}
         aria-modal={isMobile ? true : undefined}
@@ -160,23 +184,26 @@ export function AppLayout() {
         />
       </div>
 
-      <div className="flex h-full min-w-0 flex-1 flex-col">
+      {/* The page's own content — the one "main" landmark (PH-7 a11y). */}
+      <main id="main" className="flex h-full min-w-0 flex-1 flex-col">
         {/* Route components are code-split (see App.tsx), so a first visit
             to a page fetches its chunk. The boundary sits *here* rather
             than around the whole router on purpose: the sidebar stays put
             and only the content area shows the pending state, so navigation
             doesn't blank the app. */}
-        <Suspense
-          fallback={
-            <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Loading…
-            </div>
-          }
-        >
-          <Outlet />
-        </Suspense>
-      </div>
+        <RouteBoundary>
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Loading…
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
+        </RouteBoundary>
+      </main>
 
       <NetworkStatusToast />
       <SearchPalette open={searchPaletteOpen} onClose={closeSearchPalette} />

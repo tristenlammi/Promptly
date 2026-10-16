@@ -18,6 +18,11 @@ import type {
   ShareLinkUnlockResponse,
 } from "./files";
 
+/** A shared spreadsheet or whiteboard, read-only (WP-3.4). */
+export type ShareOfficeView =
+  | { kind: "sheet"; title: string; data: unknown[] }
+  | { kind: "whiteboard"; title: string; scene: { elements?: unknown[]; files?: Record<string, unknown> } };
+
 /** Header name the landing page uses to carry an unlock token. */
 export const SHARE_UNLOCK_HEADER = "X-Share-Unlock";
 
@@ -63,6 +68,25 @@ export const shareApi = {
   downloadUrl(token: string, fileId?: string | null): string {
     if (fileId) return `/api/s/${token}/file/${fileId}/download`;
     return `/api/s/${token}/download`;
+  },
+
+  /** A shared sheet's workbook or whiteboard's scene (WP-3.4). */
+  async office(
+    token: string,
+    opts: { fileId?: string | null; unlockToken?: string | null } = {}
+  ): Promise<ShareOfficeView> {
+    const url = opts.fileId ? `/s/${token}/file/${opts.fileId}/office` : `/s/${token}/office`;
+    try {
+      const { data } = await apiClient.get<ShareOfficeView>(url, {
+        headers: opts.unlockToken ? { [SHARE_UNLOCK_HEADER]: opts.unlockToken } : undefined,
+      });
+      return data;
+    } catch (e) {
+      const detail = normalizeApiDetail(
+        (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      );
+      throw new Error(detail || "Couldn't open it.");
+    }
   },
 
   /**

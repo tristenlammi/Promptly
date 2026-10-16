@@ -130,13 +130,20 @@ async def upsert_pending(
     totp_secret_encrypted: str | None = None,
     email_address: str | None = None,
 ) -> UserMfaSecret:
-    """Create or replace the in-progress (unverified) secret row.
+    """Start setting up a factor.
 
-    Wipes any prior secret + backup codes for the user — restarting
-    enrollment from scratch must never leave an old secret silently
-    valid in the DB.
+    Already enrolled: the new factor is held in the ``pending_*`` fields
+    and the current one keeps working until the new one is verified
+    (:func:`promote_pending`). Not enrolled: any half-finished row and
+    stale backup codes are wiped and a fresh unverified row is made.
     """
     existing = await get_secret(db, user_id=user_id)
+    if existing is not None and existing.enrolled_at is not None:
+        existing.pending_method = method
+        existing.pending_totp_secret_encrypted = totp_secret_encrypted
+        existing.pending_email_address = email_address
+        await db.flush()
+        return existing
     if existing is not None:
         await db.delete(existing)
         await db.flush()
@@ -158,6 +165,34 @@ async def upsert_pending(
     db.add(row)
     await db.flush()
     return row
+
+
+def pending_factor(secret: UserMfaSecret | None) -> tuple[str, str | None, str | None] | None:
+    """``(method, totp_secret_encrypted, email_address)`` of the factor
+    being set up, or ``None`` when nothing is in progress."""
+    if secret is None:
+        return None
+    if secret.pending_method:
+        return (
+            secret.pending_method,
+            secret.pending_totp_secret_encrypted,
+            secret.pending_email_address,
+        )
+    if secret.enrolled_at is None:
+        return (secret.method, secret.totp_secret_encrypted, secret.email_address)
+    return None
+
+
+def promote_pending(secret: UserMfaSecret) -> None:
+    """The verified new factor replaces the old one. Caller commits."""
+    if not secret.pending_method:
+        return
+    secret.method = secret.pending_method
+    secret.totp_secret_encrypted = secret.pending_totp_secret_encrypted
+    secret.email_address = secret.pending_email_address
+    secret.pending_method = None
+    secret.pending_totp_secret_encrypted = None
+    secret.pending_email_address = None
 
 
 async def mark_enrolled(

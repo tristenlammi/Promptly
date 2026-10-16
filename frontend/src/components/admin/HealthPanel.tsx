@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Activity, Database, MessageSquare, Timer } from "lucide-react";
 
 import { adminApi } from "@/api/admin";
+import type { RuntimeMetrics } from "@/api/types";
 import { cn } from "@/utils/cn";
 
 /**
@@ -47,7 +48,7 @@ export function HealthPanel() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         <Stat
           icon={<Timer className="h-4 w-4" />}
           label="Uptime"
@@ -68,6 +69,12 @@ export function HealthPanel() {
           label="Background tasks"
           value={String(data.background_tasks)}
           hint="in flight"
+        />
+        <Stat
+          icon={<Timer className="h-4 w-4" />}
+          label="Event loop lag"
+          value={data.loop_lag ? `${Math.round(data.loop_lag.max_1m_ms)} ms` : "—"}
+          hint="worst in the last minute — high means something blocked every reply"
         />
         <Stat
           icon={<Database className="h-4 w-4" />}
@@ -158,12 +165,43 @@ export function HealthPanel() {
         )}
       </section>
 
+      {data.wyoming && <WyomingStatus status={data.wyoming} />}
+
       <p className="text-[11px] text-[var(--text-muted)]">
         Process-local and reset on restart — the backend runs as a single
         worker, so this describes the whole app. Updated{" "}
         {new Date(dataUpdatedAt).toLocaleTimeString()}.
       </p>
     </div>
+  );
+}
+
+/** The Home Assistant voice bridge (Wyoming): off, refusing to start and
+ *  why, or listening and when it last heard from a satellite (R-200). */
+function WyomingStatus({ status }: { status: NonNullable<RuntimeMetrics["wyoming"]> }) {
+  const when = (iso?: string) => (iso ? new Date(iso).toLocaleString() : "never");
+  return (
+    <section className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-4">
+      <h4 className="mb-2 text-xs font-medium text-[var(--text)]">
+        Home Assistant voice (Wyoming)
+      </h4>
+      {status.state === "off" && (
+        <p className="text-xs text-[var(--text-muted)]">
+          Off. Set WYOMING_ENABLED and WYOMING_USER_ID in .env to let Home
+          Assistant satellites run your commands.
+        </p>
+      )}
+      {status.state === "not_started" && (
+        <p className="text-xs text-[var(--danger)]">Not running: {status.reason}</p>
+      )}
+      {status.state === "listening" && (
+        <div className="grid grid-cols-1 gap-y-1 text-xs sm:grid-cols-3">
+          <Row label="Listening on" value={`${status.host}:${status.port}`} />
+          <Row label="Last satellite" value={when(status.last_client_at)} />
+          <Row label="Last heard" value={when(status.last_utterance_at)} />
+        </div>
+      )}
+    </section>
   );
 }
 

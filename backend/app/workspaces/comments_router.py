@@ -50,6 +50,7 @@ class CommentResponse(BaseModel):
     author_user_id: uuid.UUID | None
     author_name: str
     resolved_at: datetime | None = None
+    edited_at: datetime | None = None
     created_at: datetime
 
 
@@ -65,6 +66,7 @@ def _to_response(
         author_name=author_name,
         resolved_at=c.resolved_at,
         created_at=c.created_at,
+        edited_at=c.edited_at,
     )
 
 
@@ -197,6 +199,39 @@ async def set_comment_resolved(
     return _to_response(comment, author or "former member")
 
 
+class CommentEdit(BaseModel):
+    body: str = Field(min_length=1, max_length=_MAX_BODY)
+
+
+@router.patch(
+    "/{workspace_id}/items/{item_id}/comments/{comment_id}",
+    response_model=CommentResponse,
+)
+async def edit_comment(
+    workspace_id: uuid.UUID,
+    item_id: uuid.UUID,
+    comment_id: uuid.UUID,
+    payload: CommentEdit,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> CommentResponse:
+    """The author edits their comment (R-202)."""
+    ws, role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(role)
+    comment = await db.get(WorkspaceItemComment, comment_id)
+    if comment is None or comment.item_id != item_id or comment.workspace_id != workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    if comment.author_user_id != user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the author can edit a comment.")
+    body = payload.body.strip()
+    if body != comment.body:
+        comment.body = body
+        comment.edited_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(comment)
+    return _to_response(comment, user.username)
+
+
 @router.delete(
     "/{workspace_id}/items/{item_id}/comments/{comment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -218,11 +253,12 @@ async def delete_comment(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found"
         )
-    # Author or workspace owner may delete.
-    if comment.author_user_id != user.id and ws.user_id != user.id:
+    # The author, or a workspace owner/admin moderating — the same rule as
+    # discussion messages (it was owner-only here, R-202).
+    if comment.author_user_id != user.id and _role not in ("owner", "admin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the author or workspace owner can delete this comment.",
+            detail="Only the author or a workspace admin can delete this comment.",
         )
     await db.delete(comment)
     await db.commit()

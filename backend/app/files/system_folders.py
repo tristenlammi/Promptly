@@ -53,6 +53,13 @@ class SystemKind(str, Enum):
     # / move); the per-workspace folders + their Notes/Canvases/Files
     # subfolders inside it are ordinary, fully-editable folders.
     WORKSPACES_ROOT = "workspaces_root"
+    # WP-3.4 — office-file templates ("New → From template…"); created
+    # with a starter set the first time it's needed (files/office_templates).
+    TEMPLATES = "templates"
+    # WP-8.5 — where phone backups and shared photos land, sorted into
+    # YYYY/MM (ordinary folders) by the date each was taken. Photos stay
+    # ordinary files: movable, shareable, WebDAV-synced (Part E §4.7).
+    CAMERA_UPLOADS = "camera_uploads"
     # NOTE: a Phase-12 ``EMAIL_ATTACHMENTS`` kind used to live here, lazily
     # seeded on first email-account connect. Email/calendar integration was
     # removed, and migration ``0106_remove_email_attachments_folder`` deletes
@@ -65,6 +72,8 @@ DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
     SystemKind.GENERATED_FILES: "Files",
     SystemKind.GENERATED_MEDIA: "Media",
     SystemKind.WORKSPACES_ROOT: "Workspaces",
+    SystemKind.TEMPLATES: "Templates",
+    SystemKind.CAMERA_UPLOADS: "Camera Uploads",
 }
 
 # The per-type subfolders auto-created inside each workspace's Drive
@@ -164,6 +173,62 @@ async def ensure_generated_media(db: AsyncSession, user: User) -> FileFolder:
     )
 
 
+async def ensure_camera_uploads(db: AsyncSession, user: User) -> FileFolder:
+    """Find-or-create ``Camera Uploads`` at the top of My files. A folder
+    the user already made with that name becomes it (a phone app may
+    have been pointed there already)."""
+    existing = await _fetch(db, user.id, SystemKind.CAMERA_UPLOADS)
+    if existing is not None:
+        return existing
+    from sqlalchemy import func
+
+    theirs = (
+        await db.execute(
+            select(FileFolder).where(
+                FileFolder.user_id == user.id,
+                FileFolder.parent_id.is_(None),
+                FileFolder.trashed_at.is_(None),
+                FileFolder.system_kind.is_(None),
+                func.lower(FileFolder.name) == DISPLAY_NAMES[SystemKind.CAMERA_UPLOADS].lower(),
+            )
+        )
+    ).scalars().first()
+    if theirs is not None:
+        theirs.system_kind = SystemKind.CAMERA_UPLOADS.value
+        await db.flush()
+        return theirs
+    return await _ensure(db, user.id, SystemKind.CAMERA_UPLOADS)
+
+
+async def camera_month_folder(db: AsyncSession, user: User, when) -> FileFolder:  # noqa: ANN001 — datetime
+    """``Camera Uploads/YYYY/MM`` for ``when``, made as needed."""
+    root = await ensure_camera_uploads(db, user)
+    year = await _child_folder(db, user.id, root.id, f"{when.year:04d}")
+    return await _child_folder(db, user.id, year.id, f"{when.month:02d}")
+
+
+async def _child_folder(db: AsyncSession, user_id, parent_id, name: str) -> FileFolder:  # noqa: ANN001
+    """A live child folder, made if missing — safe when two uploads race
+    to make it (the loser re-reads the winner's)."""
+    def find():  # noqa: ANN202
+        return select(FileFolder).where(
+            FileFolder.user_id == user_id, FileFolder.parent_id == parent_id,
+            FileFolder.name == name, FileFolder.trashed_at.is_(None),
+        )
+
+    existing = (await db.execute(find())).scalars().first()
+    if existing is not None:
+        return existing
+    try:
+        async with db.begin_nested():
+            folder = FileFolder(user_id=user_id, parent_id=parent_id, name=name)
+            db.add(folder)
+            await db.flush()
+        return folder
+    except IntegrityError:
+        return (await db.execute(find())).scalars().one()
+
+
 async def ensure_workspaces_root(db: AsyncSession, user: User) -> FileFolder:
     """Find-or-create the single protected ``Workspaces`` root folder.
 
@@ -222,9 +287,26 @@ async def create_workspace_folder_tree(
     Does not commit; the caller batches this into the workspace-create
     transaction.
     """
+    from sqlalchemy import select as _select
+
     root = await ensure_workspaces_root(db, user)
-    clean = (title or "Workspace").strip()[:255] or "Workspace"
-    ws_folder = FileFolder(user_id=user.id, parent_id=root.id, name=clean)
+    clean = (title or "Workspace").strip()[:250] or "Workspace"
+    # Two workspaces can share a title (a duplicate, a re-import); their
+    # folders can't share a name — "Team 2", "Team 3"… (R-204).
+    taken = set(
+        (
+            await db.execute(
+                _select(FileFolder.name).where(
+                    FileFolder.user_id == user.id, FileFolder.parent_id == root.id
+                )
+            )
+        ).scalars()
+    )
+    name, n = clean, 2
+    while name in taken:
+        name = f"{clean} {n}"
+        n += 1
+    ws_folder = FileFolder(user_id=user.id, parent_id=root.id, name=name)
     db.add(ws_folder)
     await db.flush()
     for sub in WORKSPACE_SUBFOLDERS:

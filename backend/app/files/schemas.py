@@ -14,7 +14,7 @@ Scope = Literal["mine", "shared"]
 # Drive" PWA (stage 3) can pick a start_url without forking.
 FileListView = Literal["mine", "shared", "starred", "recent", "trash", "search"]
 ShareAccessMode = Literal["public", "invite"]
-ShareResourceType = Literal["file", "folder"]
+ShareResourceType = Literal["file", "folder", "album"]  # album: a photo album (WP-9.5)
 
 
 class GranteeBrief(BaseModel):
@@ -42,6 +42,10 @@ class GranteeBrief(BaseModel):
     email: str | None = None
     can_copy: bool
     can_edit: bool = False
+    # WP-6.6: comment-only role, and whether this person joined through a
+    # comment / edit link (the grant lasts while the link does).
+    can_comment: bool = False
+    via_link: bool = False
 
 
 class GrantSummary(BaseModel):
@@ -66,7 +70,11 @@ class GrantSummary(BaseModel):
     grantees: list[GranteeBrief] = Field(default_factory=list)
     can_copy: bool = False  # only meaningful when role == "grantee"
     can_edit: bool = False  # only meaningful when role == "grantee"
+    can_comment: bool = False  # only meaningful when role == "grantee"
     owner: "GranteeBrief | None" = None
+    # Live public links on it (owner's view only) — a linked file looked
+    # private in Drive (R-208).
+    public_links: int = 0
 
 
 class FolderResponse(BaseModel):
@@ -87,11 +95,15 @@ class FolderResponse(BaseModel):
     updated_at: datetime | None = None
     starred_at: datetime | None = None
     trashed_at: datetime | None = None
+    hide_from_photos: bool = False
     # Per-user share grants. ``None`` on rows where neither the
     # caller nor anyone else has a grant — keeps the wire payload
     # tiny on the common "private folder" case. See
     # :class:`GrantSummary` for shape + role semantics.
     sharing: GrantSummary | None = None
+    # Where it lives (or lived) — "My files / Projects". Filled in by the
+    # trash listing and by restore (R-209).
+    location: str | None = None
 
 
 class FileResponse(BaseModel):
@@ -119,6 +131,18 @@ class FileResponse(BaseModel):
     source_file_id: uuid.UUID | None = None
     # Same shape + semantics as ``FolderResponse.sharing``.
     sharing: GrantSummary | None = None
+    # When the content last changed (``updated_at`` is the same value now;
+    # kept for older clients).
+    modified_at: datetime | None = None
+    location: str | None = None
+    # What the integrity scrubber found (WP-7.2): ready, or missing /
+    # damaged — the file's banner says to restore it from a backup.
+    blob_state: str = "ready"
+    # A photo's / video's blurred placeholder (WP-7.4), on listings.
+    thumbhash: str | None = None
+    # A signed link to the WebP grid tile, once the media worker has made
+    # it (WP-7.5) — a plain <img>, no per-tile API call.
+    thumb_url: str | None = None
 
 
 GrantSummary.model_rebuild()
@@ -136,6 +160,13 @@ class BrowseResponse(BaseModel):
     folders: list[FolderResponse]
     files: list[FileResponse]
     writable: bool
+    # Set when this folder is (inside) a workspace's folder: its contents
+    # are managed from the workspace (R-215).
+    workspace_id: uuid.UUID | None = None
+    workspace_title: str | None = None
+    # More files after these (WP-7.6): pass it back as ``cursor``. Folders
+    # come on the first page only.
+    next_cursor: str | None = None
 
 
 def _clean_name(raw: str) -> str:
@@ -164,6 +195,8 @@ class FolderUpdateRequest(BaseModel):
     # "leave unchanged". Pydantic can't distinguish omitted vs. explicit
     # null on its own.
     move_to_root: bool = False
+    # Leave this folder (and everything in it) out of Photos (WP-9.1).
+    hide_from_photos: bool | None = None
 
     @field_validator("name")
     @classmethod
@@ -194,6 +227,9 @@ class StorageQuotaResponse(BaseModel):
 
     cap_bytes: int | None
     used_bytes: int
+    # Sheets and whiteboards, shown in usage but not counted toward the cap
+    # until ``app_settings.office_quota_from`` (0189).
+    office_pending_bytes: int = 0
     remaining_bytes: int | None
 
 
@@ -256,14 +292,31 @@ class FileSearchHit(BaseModel):
     file: FileResponse
     rank: float
     snippet: str | None = None
-    # Short, human-readable folder trail like ``"My Drive › Invoices"``.
+    # Short, human-readable folder trail like ``"My files / Invoices"``, or
+    # ``"Shared by sam / Projects / Q3"`` for something shared with you.
     # Helps disambiguate identically-named files in a flat list.
     breadcrumb: str | None = None
+    # Where the trail leads — the containing folder, as an app path (WP-5.4).
+    parent_link: str | None = None
+    # Why it matched: ``name`` / ``content`` (words) or ``meaning`` (the
+    # AI search index — no shared words needed).
+    match: str | None = None
 
 
 class FileSearchResponse(BaseModel):
     query: str
     hits: list[FileSearchHit]
+    # Folders whose name matches (first page only, R-213) — yours and ones
+    # shared with you (WP-5.4).
+    folders: list[FolderResponse] = []
+    # Each folder hit's trail, by folder id.
+    folder_breadcrumbs: dict[str, str] = {}
+    has_more: bool = False
+    # First page, when asked for and AI search of your files is on: files
+    # about the query that don't contain its words (WP-5.4).
+    related: list[FileSearchHit] = []
+    # With ``folder_id``: that folder's trail, for the "In …" chip.
+    within_trail: str | None = None
 
 
 class RecentFilesResponse(BaseModel):
@@ -275,6 +328,8 @@ class StarredListResponse(BaseModel):
 
     folders: list[FolderResponse]
     files: list[FileResponse]
+    # More files after these (WP-7.6); folders come on the first page.
+    next_cursor: str | None = None
 
 
 class TrashListResponse(BaseModel):
@@ -284,6 +339,8 @@ class TrashListResponse(BaseModel):
 
     folders: list[FolderResponse]
     files: list[FileResponse]
+    # More files after these (WP-7.6); folders come on the first page.
+    next_cursor: str | None = None
 
 
 class ShareLinkCreateRequest(BaseModel):
@@ -296,8 +353,14 @@ class ShareLinkCreateRequest(BaseModel):
     """
 
     access_mode: ShareAccessMode = "public"
+    # WP-6.6: what people with the link can do. ``comment`` / ``edit`` need
+    # ``access_mode="invite"`` — editing is never anonymous.
+    role: Literal["view", "comment", "edit"] = "view"
     password: str | None = Field(default=None, min_length=4, max_length=128)
     expires_in_days: int | None = Field(default=None, ge=1, le=365)
+    # Photos keep their location / camera details for people with the link.
+    # Off by default: they get a metadata-free copy.
+    keep_location: bool = False
 
 
 class ShareLinkResponse(BaseModel):
@@ -308,7 +371,9 @@ class ShareLinkResponse(BaseModel):
     resource_id: uuid.UUID
     token: str
     access_mode: ShareAccessMode
+    role: Literal["view", "comment", "edit"] = "view"
     has_password: bool
+    keep_location: bool = False
     expires_at: datetime | None
     revoked_at: datetime | None
     access_count: int
@@ -323,6 +388,17 @@ class ShareLinkResponse(BaseModel):
 
 class ShareLinkListResponse(BaseModel):
     links: list[ShareLinkResponse]
+
+
+class OwnedShareLink(ShareLinkResponse):
+    """One row of the "Shared links" view: the link plus what it opens."""
+
+    resource_name: str | None = None
+    resource_trashed: bool = False
+
+
+class OwnedShareLinksResponse(BaseModel):
+    links: list[OwnedShareLink]
 
 
 class ShareLinkMetaResponse(BaseModel):
@@ -346,6 +422,9 @@ class ShareLinkMetaResponse(BaseModel):
     filename: str | None = None
     mime_type: str | None = None
     size_bytes: int | None = None
+    # WP-6.6: a comment / edit link, opened signed in — where its editor is.
+    role: Literal["view", "comment", "edit"] = "view"
+    open_path: str | None = None
 
 
 class ShareLinkUnlockRequest(BaseModel):
@@ -407,6 +486,13 @@ class CollabTokenResponse(BaseModel):
     """
 
     token: str
+    # The file's edit generation (WP-6.2): an editor that loaded an older one
+    # reloads instead of merging a replaced state back in.
+    epoch: int = 0
+    # The server's single answer to "may this user edit the content?" —
+    # the editor drives editable / Save / image paste / AI from it instead
+    # of guessing from Drive grants (roadmap R-218).
+    can_edit: bool = False
     # Unix timestamp. The client uses this to schedule a refresh a
     # few seconds before the old token stops working so an edit
     # session never drops.
@@ -415,6 +501,10 @@ class CollabTokenResponse(BaseModel):
     # pre-fill the collaboration-cursor awareness state without a
     # separate ``/me`` round trip.
     user: "CollabTokenUser"
+    # The collab room to join and the file's kind — set by the unified
+    # ``POST /api/files/{id}/collab-token`` (WP-3.2).
+    room: str | None = None
+    kind: str | None = None
 
 
 class CollabTokenUser(BaseModel):
@@ -461,6 +551,16 @@ class ManualDocumentSaveRequest(BaseModel):
     # so the captured version is tagged distinctly. Defaults to a normal
     # manual save.
     source: str | None = Field(default=None, max_length=16)
+    # Base64 ``Y.encodeStateAsUpdate(ydoc)`` from the editor. When present
+    # the server merges it into the document's CRDT state and renders the
+    # HTML from the merge, so a Save made while live sync is down is part
+    # of the document — not just a blob the next live edit overwrites
+    # (R-022). Merging is idempotent, so it can't duplicate content.
+    yjs_state: str | None = Field(default=None, max_length=24 * 1024 * 1024)
+    # The edit generation the editor loaded (WP-6.2). After a restore an
+    # older editor's state would merge the replaced content back in — such
+    # a save is refused and the editor reloads.
+    epoch: int | None = None
 
 
 # --------------------------------------------------------------------
@@ -523,6 +623,8 @@ class GrantsListResponse(BaseModel):
 class CreateGrantRequest(BaseModel):
     grantee_user_id: uuid.UUID
     can_copy: bool = False
+    # WP-6.6: comment without editing (Docs, Sheets, Whiteboards).
+    can_comment: bool = False
     # Stage 5.1: write access. The router enforces "Editor mode is
     # only valid on a Drive Document file" — folder grants and
     # non-document file grants are rejected with a 400 if this is
@@ -538,6 +640,7 @@ class UpdateGrantRequest(BaseModel):
     # flag. ``None`` means "leave can_edit alone"; ``True`` /
     # ``False`` overwrite the stored value.
     can_edit: bool | None = None
+    can_comment: bool | None = None
 
 
 # Hard cap from the product spec — refused at the API layer rather
@@ -569,4 +672,7 @@ class DocumentAssetResponse(BaseModel):
     filename: str
     mime_type: str
     size_bytes: int
+    # The stable path the document stores (R-228) …
     url: str
+    # … and a short-lived signed link to show it right away.
+    display_url: str | None = None

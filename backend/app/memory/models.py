@@ -80,6 +80,8 @@ class UserMemory(UUIDPKMixin, TimestampMixin, Base):
     # edits; ``embed_dim`` records which vector column is populated. Both
     # NULL until embedded (or forever when embeddings aren't configured).
     embed_dim: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Which embedding model made the vector (0186, R-317).
+    embed_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     def __repr__(self) -> str:

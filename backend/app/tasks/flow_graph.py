@@ -68,6 +68,10 @@ class NodeType:
     # arguments — no model in the loop (unlike attaching a connector to an
     # AI step). The result flows downstream as text / ``{{json.*}}``.
     MCP_ACTION = "mcp.action"
+    # Read the workspace's own content (R-153): search it, or read one
+    # note / board / sheet / canvas / roster, or a file's extracted text.
+    # Workspace-homed automations only.
+    WORKSPACE_READ = "workspace.read"
     # Compound node: search → fetch top-N pages → synthesise a cited report.
     DEEP_RESEARCH = "research.deep"
     # Map node: split the upstream into items, run an AI body per item, aggregate.
@@ -121,6 +125,7 @@ PROCESSING_TYPES = frozenset(
         NodeType.FETCH_PAGE,
         NodeType.HTTP_REQUEST,
         NodeType.MCP_ACTION,
+        NodeType.WORKSPACE_READ,
         NodeType.DEEP_RESEARCH,
         NodeType.LOOP,
         NodeType.MEMORY,
@@ -274,6 +279,25 @@ class WebSearchData(BaseModel):
 
     query: str = ""
     count: int = 5  # 1..20
+
+
+class WorkspaceReadData(BaseModel):
+    """Read from the automation's workspace (R-153).
+
+    * ``search``: the top passages for ``query`` (a template; blank = the
+      upstream text) across the workspace's notes, boards, sheets and files;
+    * ``item``: one item's full text, by ``item_id`` or by ``title``
+      (a template, e.g. ``{{trigger.json.item_title}}``);
+    * ``file``: a file's extracted text by ``file_id`` (a template, e.g.
+      ``{{trigger.json.file_id}}`` from a "file added" event)."""
+
+    mode: str = "search"  # search | item | file
+    query: str = ""
+    item_id: str | None = None
+    title: str = ""
+    file_id: str = ""
+    top_k: int = 6
+    max_chars: int = 20000
 
 
 class FetchPageData(BaseModel):
@@ -828,11 +852,9 @@ def ordered_flow_nodes(graph: FlowGraph) -> list[FlowNode]:
     """Every interior processing node (AI / search / fetch / …) in execution
     order along the linear path. Assumes :func:`is_linear_flow` holds."""
     out_adj, _ = _adjacency(graph)
-    trig = [
-        n
-        for n in graph.nodes
-        if n.type in (NodeType.TRIGGER_SCHEDULE, NodeType.TRIGGER_MANUAL, NodeType.TRIGGER_WEBHOOK)
-    ][0]
+    # Any trigger kind — listing them by name missed ``trigger.event``, so
+    # event-triggered flows couldn't be saved at all (R-009).
+    trig = [n for n in graph.nodes if n.type.startswith("trigger.")][0]
     ordered: list[FlowNode] = []
     cur = trig.id
     while True:
@@ -851,6 +873,15 @@ def ordered_ai_nodes(graph: FlowGraph) -> list[FlowNode]:
     AI-only subset of :func:`ordered_flow_nodes`. Assumes
     :func:`is_linear_flow` holds (call it first)."""
     return [n for n in ordered_flow_nodes(graph) if n.type == NodeType.AI_PROMPT]
+
+
+def dag_ai_nodes(graph: FlowGraph) -> list[FlowNode]:
+    """Every ``ai.prompt`` node in execution order across the whole DAG —
+    not just the first edge out of each node, which missed AI steps on a
+    branch (and so their connectors)."""
+    order = topological_order(graph)
+    nodes = [graph.node(nid) for nid in order]
+    return [n for n in nodes if n is not None and n.type == NodeType.AI_PROMPT]
 
 
 def graph_to_task_fields(graph: FlowGraph) -> SimpleTaskFields:
@@ -906,6 +937,7 @@ __all__ = [
     "SheetOutputData",
     "WebSearchData",
     "FetchPageData",
+    "WorkspaceReadData",
     "DeepResearchData",
     "LoopData",
     "MemoryData",

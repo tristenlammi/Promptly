@@ -2,6 +2,7 @@ import { useState } from "react";
 import { KeyRound, Loader2 } from "lucide-react";
 
 import { authApi } from "@/api/auth";
+import { usePasswordPolicy } from "@/hooks/usePasswordPolicy";
 import { toast } from "@/store/toastStore";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
@@ -13,10 +14,12 @@ import { apiErrorMessage } from "@/utils/apiError";
  *  on the new one, and — because the server rotates ``token_version`` —
  *  swaps in the fresh access token it returns so this tab stays signed in
  *  while every OTHER session is logged out. */
-const MIN_LEN = 12;
 
 export function ChangePasswordPanel() {
+  const policy = usePasswordPolicy();
+  const MIN_LEN = policy.min_length;
   const setAccessToken = useAuthStore((s) => s.setAccessToken);
+  const setUser = useAuthStore((s) => s.setUser);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -37,6 +40,8 @@ export function ChangePasswordPanel() {
     try {
       const res = await authApi.changePassword(current, next);
       if (res.access_token) setAccessToken(res.access_token);
+      // Clears must_change_password, which lifts the first-sign-in gate.
+      if (res.user) setUser(res.user);
       setCurrent("");
       setNext("");
       setConfirm("");
@@ -58,8 +63,7 @@ export function ChangePasswordPanel() {
         Password
       </h2>
       <p className="mb-3 text-xs text-[var(--text-muted)]">
-        Use at least {MIN_LEN} characters. Changing it signs out every other
-        device.
+        {policy.summary} Changing it signs out every other device.
       </p>
       <div className="grid max-w-md gap-2.5">
         <input

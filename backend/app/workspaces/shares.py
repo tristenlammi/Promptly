@@ -51,7 +51,11 @@ WorkspaceShareStatus = Literal["pending", "accepted", "declined"]
 # Access helpers
 # ====================================================================
 async def is_owner_of_workspace(
-    workspace_id: uuid.UUID, user: User, db: AsyncSession
+    workspace_id: uuid.UUID,
+    user: User,
+    db: AsyncSession,
+    *,
+    allow_trashed: bool = False,
 ) -> Workspace:
     """Return the workspace iff ``user`` owns it, else 404.
 
@@ -61,7 +65,11 @@ async def is_owner_of_workspace(
     one with an accepted workspace share.
     """
     ws = await db.get(Workspace, workspace_id)
-    if ws is None or ws.user_id != user.id:
+    if (
+        ws is None
+        or ws.user_id != user.id
+        or (ws.trashed_at is not None and not allow_trashed)
+    ):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workspace not found",
@@ -89,6 +97,33 @@ def normalize_share_role(raw: str | None) -> ShareRole:
     return "editor"
 
 
+async def workspace_role(
+    db: AsyncSession, workspace_id: uuid.UUID, user: User
+) -> WorkspaceAccessRole | None:
+    """The caller's current role in a workspace, or ``None``.
+
+    Non-raising twin of :func:`get_accessible_workspace`, for code paths
+    that must *degrade* rather than 404 — e.g. a chat turn in a workspace
+    the caller has since been removed from, which should simply lose its
+    workspace tools and context.
+    """
+    ws = await db.get(Workspace, workspace_id)
+    if ws is None or ws.trashed_at is not None:
+        return None
+    if ws.user_id == user.id:
+        return "owner"
+    share = (
+        await db.execute(
+            select(WorkspaceShare).where(
+                WorkspaceShare.workspace_id == workspace_id,
+                WorkspaceShare.invitee_user_id == user.id,
+                WorkspaceShare.status == "accepted",
+            )
+        )
+    ).scalars().first()
+    return normalize_share_role(share.role) if share is not None else None
+
+
 async def get_accessible_workspace(
     workspace_id: uuid.UUID,
     user: User,
@@ -103,7 +138,7 @@ async def get_accessible_workspace(
     keep calling :func:`is_owner_of_workspace` directly.
     """
     ws = await db.get(Workspace, workspace_id)
-    if ws is None:
+    if ws is None or ws.trashed_at is not None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Workspace not found",
@@ -216,6 +251,9 @@ class WorkspaceParticipants(BaseModel):
 
     owner: ShareUserBrief
     collaborators: list[ShareUserBrief] = Field(default_factory=list)
+    # user id -> share role / share id, for the accepted collaborators.
+    roles: dict[uuid.UUID, str] = Field(default_factory=dict)
+    share_ids: dict[uuid.UUID, uuid.UUID] = Field(default_factory=dict)
 
 
 async def load_workspace_participants(
@@ -236,7 +274,7 @@ async def load_workspace_participants(
         )
     rows = (
         await db.execute(
-            select(User)
+            select(User, WorkspaceShare.role, WorkspaceShare.id)
             .join(WorkspaceShare, WorkspaceShare.invitee_user_id == User.id)
             .where(
                 WorkspaceShare.workspace_id == ws.id,
@@ -244,10 +282,12 @@ async def load_workspace_participants(
             )
             .order_by(User.username.asc())
         )
-    ).scalars().all()
+    ).all()
     return WorkspaceParticipants(
         owner=_brief(owner),
-        collaborators=[_brief(u) for u in rows],
+        collaborators=[_brief(u) for u, _, _ in rows],
+        roles={u.id: normalize_share_role(r) for u, r, _ in rows},
+        share_ids={u.id: sid for u, _, sid in rows},
     )
 
 
@@ -406,6 +446,68 @@ async def create_workspace_share(
     )
 
 
+class UpdateWorkspaceShareRequest(BaseModel):
+    role: ShareRole
+
+
+@router.patch(
+    "/{workspace_id}/shares/{share_id}",
+    response_model=WorkspaceShareRow,
+)
+async def update_workspace_share(
+    workspace_id: uuid.UUID,
+    share_id: uuid.UUID,
+    payload: UpdateWorkspaceShareRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceShareRow:
+    """Change a member's role in place. The only way used to be remove and
+    re-invite, which unpinned their files, purged their chunks and reset
+    them to pending (R-180). Owner + admin."""
+    ws = await require_admin_workspace(workspace_id, user, db)
+    share = await db.get(WorkspaceShare, share_id)
+    if share is None or share.workspace_id != ws.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Share not found"
+        )
+    invitee = await db.get(User, share.invitee_user_id)
+    if invitee is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Share not found"
+        )
+    if normalize_share_role(share.role) != payload.role:
+        from app.auth.audit import record_event
+        from app.auth.events import EVENT_WORKSPACE_SHARE_CREATED
+
+        before = normalize_share_role(share.role)
+        share.role = payload.role
+        share.updated_at = datetime.now(timezone.utc)
+        await record_event(
+            db,
+            event_type=EVENT_WORKSPACE_SHARE_CREATED,
+            request=request,
+            user_id=user.id,
+            detail=f'"{ws.title}" (ws={ws.id}) → {invitee.username} '
+            f"{before} → {payload.role}",
+        )
+        await db.commit()
+        await db.refresh(share)
+        # Their open sockets reconnect under the new role (WP-3.2).
+        from app.collab_internal import drop_user_soon
+
+        drop_user_soon(invitee.id)
+    return WorkspaceShareRow(
+        id=share.id,
+        workspace_id=share.workspace_id,
+        invitee=_brief(invitee),
+        status=share.status,  # type: ignore[arg-type]
+        role=normalize_share_role(share.role),
+        created_at=share.created_at,
+        accepted_at=share.accepted_at,
+    )
+
+
 @router.delete(
     "/{workspace_id}/shares/{share_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -477,6 +579,25 @@ async def revoke_workspace_share(
 
     departing_id = share.invitee_user_id
     await db.delete(share)
+
+    # Their automations homed here stop: they'd otherwise keep writing into
+    # (and reading events from) a workspace they've left (R-007).
+    from sqlalchemy import update as _update
+
+    from app.tasks.models import Task
+
+    paused = (
+        await db.execute(
+            _update(Task)
+            .where(
+                Task.user_id == departing_id,
+                Task.workspace_id == workspace_id,
+                Task.enabled.is_(True),
+            )
+            .values(enabled=False, next_run_at=None)
+            .returning(Task.id)
+        )
+    ).scalars().all()
     from app.auth.audit import record_event
     from app.auth.events import EVENT_WORKSPACE_SHARE_REVOKED
 
@@ -489,6 +610,11 @@ async def revoke_workspace_share(
         + ("left" if is_invitee and not is_owner else "removed by owner"),
     )
     await db.commit()
+    # Cut their live editing sockets now (WP-3.2) — they used to last until
+    # the next token refresh.
+    from app.collab_internal import drop_user_soon
+
+    drop_user_soon(departing_id)
 
     if purged_file_ids:
         logger.info(
@@ -499,6 +625,21 @@ async def revoke_workspace_share(
         )
     for fid in purged_file_ids:
         background.add_task(delete_workspace_file_chunks, workspace_id, fid)
+    if paused:
+        from app.notifications.dispatch import notify_user
+
+        background.add_task(
+            notify_user,
+            user_id=departing_id,
+            category="task_complete",
+            title="Automations paused",
+            body=(
+                f"{len(paused)} automation(s) in “{ws.title}” were paused because "
+                "you're no longer a member there."
+            ),
+            url="/tasks",
+            tag=f"promptly-ws-left-{workspace_id}",
+        )
 
 
 # ====================================================================

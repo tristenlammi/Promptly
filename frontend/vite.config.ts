@@ -94,12 +94,71 @@ const pkg = JSON.parse(
   fs.readFileSync(path.resolve(__dirname, "package.json"), "utf8"),
 ) as { version: string };
 
+/**
+ * Emits ``/version.json`` next to the bundle. Open tabs poll it and offer a
+ * reload when it no longer matches the version they were built as — after
+ * an update they otherwise kept running the old code against the new API
+ * (R-247). Not precached by the service worker (json isn't in its glob)
+ * and served no-store by nginx.
+ */
+/**
+ * pdf.js's data files (WP-6.5): Adobe CMaps (CJK and other non-embedded
+ * encodings), the standard 14 fonts (form fields drawn with Helvetica and
+ * friends), its image-decoder wasm and ICC profiles. Served at ``/pdfjs/…``
+ * — copied into the build, read from node_modules in dev. Only fetched when
+ * a PDF needs them, so they stay out of the service-worker precache.
+ */
+function pdfjsAssets(): Plugin {
+  const root = path.resolve(__dirname, "node_modules/pdfjs-dist");
+  const dirs = ["cmaps", "standard_fonts", "wasm", "iccs"];
+  return {
+    name: "promptly-pdfjs-assets",
+    configureServer(server) {
+      server.middlewares.use("/pdfjs", (req, res, next) => {
+        const rel = decodeURIComponent((req.url || "").split("?")[0]).replace(/^\/+/, "");
+        const [dir] = rel.split("/");
+        const file = path.resolve(root, rel);
+        if (!dirs.includes(dir) || !file.startsWith(root + path.sep) || !fs.existsSync(file)) return next();
+        if (file.endsWith(".wasm")) res.setHeader("Content-Type", "application/wasm");
+        fs.createReadStream(file).pipe(res);
+      });
+    },
+    generateBundle() {
+      for (const dir of dirs) {
+        const base = path.join(root, dir);
+        if (!fs.existsSync(base)) continue;
+        for (const name of fs.readdirSync(base)) {
+          const file = path.join(base, name);
+          if (!fs.statSync(file).isFile()) continue;
+          this.emitFile({ type: "asset", fileName: `pdfjs/${dir}/${name}`, source: fs.readFileSync(file) });
+        }
+      }
+    },
+  };
+}
+
+function versionManifest(): Plugin {
+  return {
+    name: "promptly-version-json",
+    apply: "build",
+    generateBundle() {
+      this.emitFile({
+        type: "asset",
+        fileName: "version.json",
+        source: JSON.stringify({ version: pkg.version }),
+      });
+    },
+  };
+}
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   plugins: [
     react(),
+    versionManifest(),
+    pdfjsAssets(),
     hunspellDictionaries(),
     reactUmdRuntime(),
     VitePWA({
@@ -188,6 +247,11 @@ export default defineConfig({
         globIgnores: [
           "**/excalidraw-assets/**",
           "**/excalidraw-*.js",
+          // The Photos map (~1 MB) and its offline country outlines: only for
+          // whoever opens the map.
+          "**/maplibre-gl-*.js",
+          "**/maplibre-gl-*.css",
+          "**/maps/**",
           // Spell-check dictionaries: large (up to ~5.5 MB for pt) and only
           // loaded when the user turns spell-check on for a language. Keep them
           // out of the precache so first install stays lean (same rationale as
@@ -195,6 +259,17 @@ export default defineConfig({
           // last segment — ``virtual:hunspell/dictionary-en`` → ``dictionary-en-*.js``
           // — so the ignore must match ``dictionary-*``, not ``hunspell-*``.
           "**/dictionary-*.js",
+          // Photos (WP-9.2): its own small chunk, fetched when someone opens it.
+          "**/PhotosPage-*.js",
+          "**/PhotoAlbumsPage-*.js",
+          "**/ImportPage-*.js",
+          // Word in and out (WP-4.3): mammoth (~1.2 MB), the .docx writer,
+          // docx-preview and the zip reader they share — only fetched when
+          // someone converts, exports or previews a Word file.
+          "**/word-import-*.js",
+          "**/word-export-*.js",
+          "**/word-preview-*.js",
+          "**/jszip-*.js",
           // React artifact preview: ~350 KB, almost all of it React's UMD
           // runtime inlined as text for the sandboxed iframe. Only needed
           // when someone opens a jsx/tsx artifact, so same rationale again.
@@ -205,6 +280,8 @@ export default defineConfig({
           // glob would otherwise sweep into the precache.
           "**/pdfjs-*.js",
           "**/pdf.worker*.mjs",
+          // pdf.js data files (CMaps, standard fonts, wasm) — WP-6.5.
+          "**/pdfjs/**",
         ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
@@ -222,6 +299,9 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Workers bundled by Vite (``?worker&url``) are ES modules — the Photos map's
+  // MapLibre worker is started with ``type: "module"``.
+  worker: { format: "es" },
   build: {
     // Bumped from Vite's default 500 KB so the chart / editor chunks
     // below don't trip the warning. They're intentionally large; the
@@ -257,6 +337,15 @@ export default defineConfig({
           if (id.includes("vite/preload-helper")) {
             return "vite-preload";
           }
+          // Rollup's CommonJS interop helpers (``\0commonjsHelpers.js``) —
+          // same story: no ``node_modules`` in the id, so left alone they
+          // landed in the tiptap chunk once TipTap v3 brought CJS deps, and
+          // react → tiptap → state → react became a cycle that crashed the
+          // app on load ("reading 'createContext'"). They have no imports
+          // of their own, so they sit with the preload helper.
+          if (id.includes("commonjsHelpers")) {
+            return "vite-preload";
+          }
           if (!id.includes("node_modules")) return undefined;
           // DOMPurify is imported eagerly by the chat markdown renderer AND
           // by Excalidraw. Matching no rule here, it was left unassigned —
@@ -280,6 +369,16 @@ export default defineConfig({
           // The whiteboard editor is large and only loaded on the
           // (lazily mounted) workspace canvas — keep it out of the main
           // chunk. ``roughjs`` is its hand-drawn renderer.
+          // Word import / export / preview (WP-4.3) — lazy, and kept out of
+          // the precache by name (see globIgnores).
+          if (
+            /\/(mammoth|@xmldom|lop|underscore|bluebird|dingbat-to-unicode|option)\//.test(id)
+          ) {
+            return "word-import";
+          }
+          if (id.includes("/docx-preview/")) return "word-preview";
+          if (id.includes("/docx/")) return "word-export";
+          if (id.includes("/jszip/") || id.includes("/pako/")) return "jszip";
           if (id.includes("@excalidraw") || id.includes("roughjs")) {
             return "excalidraw";
           }
@@ -303,10 +402,38 @@ export default defineConfig({
           // pdf.js renders the Drive PDF preview. Lazy-loaded with the
           // preview component, so keep it out of whatever chunk happens
           // to import it first.
+          // The full viewer (WP-6.5) reads ``globalThis.pdfjsLib`` when it
+          // runs, so it can't share the library's chunk — every module in a
+          // chunk runs when the chunk loads, possibly before pdf.js itself.
+          if (id.includes("pdfjs-dist/web/")) {
+            return "pdfjs-viewer";
+          }
           if (id.includes("pdfjs-dist")) {
             return "pdfjs";
           }
-          if (id.includes("@tiptap") || id.includes("prosemirror")) {
+          // Libraries the editor shares with code every page loads. Left
+          // unassigned, Rollup parked them in the tiptap chunk, and the
+          // entry imported all ~230 KB gz of the editor to reach them.
+          if (id.includes("/entities/")) return "markdown";
+          if (id.includes("/yjs/") || id.includes("/lib0/") || id.includes("/y-protocols/")) {
+            return "yjs";
+          }
+          if (
+            id.includes("@tiptap") ||
+            id.includes("prosemirror") ||
+            id.includes("tiptap-markdown") ||
+            id.includes("/markdown-it/") ||
+            id.includes("/linkify") ||
+            id.includes("/mdurl/") ||
+            id.includes("/uc.micro/") ||
+            id.includes("/punycode") ||
+            id.includes("tippy.js") ||
+            id.includes("@popperjs") ||
+            // TipTap v3's menus position with Floating UI.
+            id.includes("@floating-ui") ||
+            id.includes("orderedmap") ||
+            id.includes("rope-sequence")
+          ) {
             return "tiptap";
           }
           if (
@@ -327,6 +454,18 @@ export default defineConfig({
           ) {
             return "highlight";
           }
+          // ``clsx`` (behind every ``cn()`` call) and tailwind-merge. Left
+          // unassigned, Rollup put clsx inside the *charts* chunk (recharts
+          // uses it too), so the entry statically imported all of recharts
+          // — 112 KB gz — on every page load just to join class names.
+          if (
+            id.includes("/clsx/") ||
+            id.includes("tailwind-merge") ||
+            // Also used by code every page loads; was parked in tiptap.
+            id.includes("w3c-keyname")
+          ) {
+            return "classnames";
+          }
           // recharts only. d3-* is deliberately left unassigned so Vite
           // auto-hoists the modules shared with React Flow (d3-color,
           // d3-interpolate, …) into a common async chunk — assigning them
@@ -344,6 +483,9 @@ export default defineConfig({
           if (
             id.includes("react-router") ||
             id.includes("react-dom") ||
+            // React's own store hook (zustand, react-query and TipTap v3's
+            // React bindings all use it) belongs with React.
+            id.includes("use-sync-external-store") ||
             id.includes("react/") ||
             id.includes("/react@") ||
             id.includes("scheduler")

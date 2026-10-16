@@ -9,24 +9,14 @@ import { useAuthStore } from "@/store/authStore";
 import { AVAILABLE_MODELS_KEY } from "@/hooks/useProviders";
 
 export const INSTALLED_MODELS_KEY = ["local-models", "installed"] as const;
-export const LIBRARY_KEY = ["local-models", "library"] as const;
 export const HARDWARE_KEY = ["local-models", "hardware"] as const;
 
 export function useInstalledLocalModels() {
   return useQuery({
     queryKey: INSTALLED_MODELS_KEY,
     queryFn: () => localModelsApi.listInstalled(),
-    // Keep the list reasonably fresh so the installed badge on
-    // library cards stays accurate without spamming Ollama.
+    // Keep the list reasonably fresh without spamming Ollama.
     staleTime: 15_000,
-  });
-}
-
-export function useLocalModelsLibrary() {
-  return useQuery({
-    queryKey: LIBRARY_KEY,
-    queryFn: () => localModelsApi.library(),
-    staleTime: Infinity,
   });
 }
 
@@ -94,7 +84,13 @@ export function useModelPull() {
           accessToken,
         })) {
           if (evt.error) {
-            setError(evt.detail ?? "Pull failed");
+            // Ollama's own message (a mistyped tag is the usual cause)
+            // used to be replaced by a bare "Pull failed" (R-278).
+            setError(
+              typeof evt.error === "string"
+                ? evt.error
+                : evt.detail ?? "Pull failed"
+            );
             break;
           }
           setProgress(evt);

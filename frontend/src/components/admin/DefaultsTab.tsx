@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AudioLines, Bot, Brain, CheckCircle2, Eye, FlaskConical, ImagePlus } from "lucide-react";
+import { AudioLines, Bot, Brain, CheckCircle2, Eye, FlaskConical, ImagePlus, Images } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
 import { useAppSettings, useUpdateAppSettings } from "@/hooks/useAdminUsers";
@@ -85,6 +85,11 @@ export function DefaultsTab() {
         busy={update.isPending}
       />
       <VoiceModelCard
+        settings={data}
+        onSubmit={submit}
+        busy={update.isPending}
+      />
+      <PhotosVisionCard
         settings={data}
         onSubmit={submit}
         busy={update.isPending}
@@ -861,6 +866,154 @@ function VoiceModelCard({ settings, onSubmit, busy }: CardProps) {
             Loading models…
           </span>
         )}
+      </label>
+    </SettingsCard>
+  );
+}
+
+// --------------------------------------------------------------------
+// Photos vision (PH-2) — describes the photos of people who turn
+// "Describe my photos" on. A cloud model is limited to so many photos a
+// month, across everyone; a local one isn't.
+// --------------------------------------------------------------------
+
+function PhotosVisionCard({ settings, onSubmit, busy }: CardProps) {
+  const OFF = "";
+  const initialKey =
+    settings.photos_vision_configured && settings.photos_vision_provider_id && settings.photos_vision_model_id
+      ? `${settings.photos_vision_provider_id}::${settings.photos_vision_model_id}`
+      : OFF;
+  const initialLimit = String(settings.photos_vision_monthly_limit ?? 2000);
+  const [value, setValue] = useState(initialKey);
+  const [limit, setLimit] = useState(initialLimit);
+  const [error, setError] = useState<string | null>(null);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const { data: models, isLoading: modelsLoading } = useAvailableModels();
+
+  useEffect(() => setValue(initialKey), [initialKey]);
+  useEffect(() => setLimit(initialLimit), [initialLimit]);
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = window.setTimeout(() => setSavedAt(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [savedAt]);
+
+  const grouped = useMemo(() => {
+    const byProvider = new Map<string, AvailableModel[]>();
+    for (const m of models ?? []) {
+      const existing = byProvider.get(m.provider_name) ?? [];
+      existing.push(m);
+      byProvider.set(m.provider_name, existing);
+    }
+    return Array.from(byProvider.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [models]);
+
+  const dirty = value !== initialKey || limit !== initialLimit;
+
+  const handleSave = async () => {
+    setError(null);
+    const n = Number(limit);
+    if (!Number.isInteger(n) || n < 0) {
+      setError("The monthly limit is a whole number of photos.");
+      return;
+    }
+    try {
+      if (value === OFF) {
+        await onSubmit({ photos_vision_provider_id: null, photos_vision_model_id: null, photos_vision_monthly_limit: n });
+      } else {
+        const [provider_id, ...rest] = value.split("::");
+        const model_id = rest.join("::");
+        if (!provider_id || !model_id) {
+          setError("Pick a model from the list, or choose Off.");
+          return;
+        }
+        await onSubmit({ photos_vision_provider_id: provider_id, photos_vision_model_id: model_id, photos_vision_monthly_limit: n });
+      }
+      setSavedAt(Date.now());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <SettingsCard
+      title="Photos vision"
+      icon={<Images className="h-4 w-4" />}
+      footer={
+        <>
+          {error && <span className="mr-auto text-xs text-red-600 dark:text-red-400">{error}</span>}
+          {savedAt && !error && (
+            <span className="mr-auto inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Saved
+            </span>
+          )}
+          {dirty && (
+            <Button variant="ghost" size="sm" onClick={() => { setValue(initialKey); setLimit(initialLimit); setError(null); }} disabled={busy}>
+              Discard
+            </Button>
+          )}
+          <Button variant="primary" size="sm" onClick={handleSave} disabled={!dirty || busy} loading={busy}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <p className="mb-3 text-xs text-[var(--text-muted)]">
+        Writes a sentence and a few tags for each photo of the people who turn{" "}
+        <span className="font-medium">Describe my photos</span> on (Photos → settings), so they can search for
+        “birthday party” or “sunset on the water”. Each person sees this model's name before turning it on. A model on
+        this server (Ollama, or a provider on your network) describes as many as it's given; a cloud model only up to the
+        monthly limit below, across everyone. Photos are sent at most 1024 px, without their location.
+      </p>
+      <ul className="mb-4 space-y-1 text-xs text-[var(--text-muted)]">
+        <li>
+          <strong>Needs:</strong> a model that can see images — one running locally (e.g. in Ollama), or a cloud one.
+        </li>
+      </ul>
+      <label className="flex flex-col gap-1.5 text-sm">
+        <span className="text-xs font-medium text-[var(--text-muted)]">Photos vision model</span>
+        <select
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            setError(null);
+            setSavedAt(null);
+          }}
+          disabled={busy || modelsLoading}
+          className={cn(
+            "rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm",
+            "focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/40",
+            "disabled:cursor-not-allowed disabled:opacity-60",
+          )}
+        >
+          <option value={OFF}>Off — photos aren't described</option>
+          {grouped.map(([providerName, entries]) => (
+            <optgroup key={providerName} label={providerName}>
+              {entries.map((m) => (
+                <option key={`${m.provider_id}::${m.model_id}`} value={`${m.provider_id}::${m.model_id}`}>
+                  {m.display_name || m.model_id}
+                  {m.is_custom ? " (custom)" : ""}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </label>
+      <label className="mt-3 flex flex-col gap-1.5 text-sm">
+        <span className="text-xs font-medium text-[var(--text-muted)]">Photos a cloud model may describe each month</span>
+        <input
+          type="number"
+          min={0}
+          step={100}
+          value={limit}
+          onChange={(e) => {
+            setLimit(e.target.value);
+            setSavedAt(null);
+          }}
+          disabled={busy}
+          className="w-40 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+        />
       </label>
     </SettingsCard>
   );

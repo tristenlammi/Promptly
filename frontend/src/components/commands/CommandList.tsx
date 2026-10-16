@@ -91,7 +91,7 @@ export function CommandList({
                   {isSideEffecting(command.action_type) && (
                     <span
                       title="Does something — runs when picked"
-                      className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]"
+                      className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent-text)]"
                     >
                       <Zap className="h-2.5 w-2.5" />
                       {command.action_type === "automation" ? "Automation" : "Tool"}
@@ -171,7 +171,7 @@ export function CommandList({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => void runCommand(command)}
+                    onClick={() => void runCommand(command, { source: "library" })}
                     disabled={!command.enabled || running}
                     leftIcon={<Play className="h-3.5 w-3.5" />}
                   >

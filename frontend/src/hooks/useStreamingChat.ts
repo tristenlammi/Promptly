@@ -8,9 +8,13 @@ import {
   type SendMessagePayload,
 } from "@/api/chat";
 import { authHeader } from "@/api/client";
+import { memoryApi } from "@/api/memory";
+import { toast } from "@/store/toastStore";
+import { apiErrorMessage } from "@/utils/apiError";
 import { useChatStore } from "@/store/chatStore";
 import type {
   ChatMessage,
+  ContextUsage,
   ConversationDetail,
   ConversationSummary,
   MessageAttachmentSnapshot,
@@ -181,6 +185,7 @@ interface SSEPayload {
   // Assistant performance metrics (attached to the `done` payload).
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
+  context_usage?: ContextUsage | null;
   ttft_ms?: number | null;
   total_ms?: number | null;
   model_id?: string | null;
@@ -250,6 +255,128 @@ interface UseStreamingChatResult {
  * Hook that drives the chat send + SSE stream lifecycle. All state flows
  * through the chatStore so the UI can subscribe granularly.
  */
+/** Events that can follow a reply's ``done``: the chat's new title and
+ *  memory saves / proposals. The backend sends ``done`` as soon as the reply
+ *  is saved and runs the titler and memory capture afterwards (they used
+ *  to hold the composer in "Stop" for seconds), so these are read by the
+ *  main loop *and* by the background reader that keeps going after
+ *  ``done``. Returns true when it handled the event. */
+function handleAfterReplyEvent(
+  data: SSEPayload,
+  conversationId: string,
+  qc: QueryClient
+): boolean {
+  // Memory changes are never silent (R-019): every save shows with
+  // Undo, and a save held back because the turn read outside content
+  // (a web page, a connector, a file) is offered for one-click saving.
+  if (data.event === "memory_saved" && data.facts?.length) {
+    const ids: string[] = (data.ids ?? []).filter(Boolean);
+    const facts: string[] = data.facts;
+    toast.info(
+      facts.length === 1 ? `“${facts[0]}”` : facts.map((f) => `• ${f}`).join("\n"),
+      {
+        title: facts.length === 1 ? "Saved to memory" : `Saved ${facts.length} things to memory`,
+        duration: 10_000,
+        action: ids.length
+          ? {
+              label: "Undo",
+              onClick: () => {
+                void memoryApi
+                  .bulkRemove(ids)
+                  .then(() => toast.success("Removed from memory"));
+              },
+            }
+          : undefined,
+      }
+    );
+    return true;
+  }
+  if (data.event === "memory_proposed" && data.facts?.length) {
+    for (const p of data.facts as unknown as { content: string; category?: string | null }[]) {
+      toast.info(`“${p.content}”`, {
+        title: "Save to memory?",
+        duration: 20_000,
+        action: {
+          label: "Save",
+          onClick: () => {
+            void memoryApi
+              .create(p.content, { category: p.category ?? null })
+              .then(() => toast.success("Saved to memory"))
+              .catch(() => toast.error("Couldn't save that to memory."));
+          },
+        },
+      });
+    }
+    return true;
+  }
+  if (data.event === "memory_removed" && data.facts?.length) {
+    // The background pass dropped facts it judged outdated ("I no longer
+    // use Vim"). Never silent, and one click puts them back (R-267).
+    const facts = data.facts as unknown as { content: string; category?: string | null }[];
+    toast.info(facts.map((f) => `“${f.content}”`).join("\n"), {
+      title: facts.length === 1 ? "Removed from memory" : `Removed ${facts.length} things from memory`,
+      duration: 12_000,
+      action: {
+        label: "Undo",
+        onClick: () => {
+          void Promise.all(
+            facts.map((f) => memoryApi.create(f.content, { category: f.category ?? null }))
+          ).then(() => toast.success("Restored to memory"));
+        },
+      },
+    });
+    return true;
+  }
+  if (data.event === "title_updated" && data.title) {
+    // Backend auto-generated the chat title after the first turn —
+    // reflect it everywhere the UI reads titles from.
+    const nextTitle = data.title;
+    const current = useChatStore
+      .getState()
+      .conversations.find((c) => c.id === conversationId);
+    if (current) {
+      useChatStore.getState().upsertConversation({
+        ...current,
+        title: nextTitle,
+      });
+    }
+    qc.setQueryData<ConversationSummary>(
+      ["conversation", conversationId],
+      (old) => (old ? { ...old, title: nextTitle } : old)
+    );
+    // Arrives after the send's own list refresh now — refresh again so
+    // the sidebar picks the title up.
+    qc.invalidateQueries({ queryKey: ["conversations"] });
+    return true;
+  }
+  return false;
+}
+
+/** Keep reading a stream after its ``done`` for the late extras. Never
+ *  touches streaming state — the turn is already over. Any failure just
+ *  ends it: a missed title shows on the next refetch. */
+async function readAfterReply(
+  sse: AsyncGenerator<string>,
+  conversationId: string,
+  qc: QueryClient
+): Promise<void> {
+  try {
+    for (;;) {
+      const step = await sse.next();
+      if (step.done) return;
+      let data: SSEPayload;
+      try {
+        data = JSON.parse(step.value) as SSEPayload;
+      } catch {
+        continue;
+      }
+      handleAfterReplyEvent(data, conversationId, qc);
+    }
+  } catch {
+    // Aborted (a new turn took over) or the connection dropped — fine.
+  }
+}
+
 export function useStreamingChat(): UseStreamingChatResult {
   const qc = useQueryClient();
   const abortRef = useRef<AbortController | null>(null);
@@ -342,8 +469,13 @@ export function useStreamingChat(): UseStreamingChatResult {
         }
       };
 
+      const sse = iterateSSE(resp.body, ac.signal);
+      let replyDone = false;
       try {
-        for await (const raw of iterateSSE(resp.body, ac.signal)) {
+        for (;;) {
+        const step = await sse.next();
+        if (step.done) break;
+        const raw = step.value;
         let data: SSEPayload;
         try {
           data = JSON.parse(raw) as SSEPayload;
@@ -387,6 +519,10 @@ export function useStreamingChat(): UseStreamingChatResult {
           store.setMemoriesUsed(items);
           continue;
         }
+        // Title and memory updates. They usually arrive *after* ``done`` now
+        // (the reply no longer waits for them), but older backends and
+        // replays send them before it.
+        if (handleAfterReplyEvent(data, conversationId, qc)) continue;
         if (data.event === "vision_relay_started" && data.id) {
           store.startVisionRelay({
             id: data.id,
@@ -414,6 +550,11 @@ export function useStreamingChat(): UseStreamingChatResult {
           continue;
         }
         if (data.event === "tool_finished" && data.id) {
+          // A tool filed a proposal (workspace write-back, file changes):
+          // show its card now rather than on the next poll.
+          if ((data.meta as { proposal_id?: string } | undefined)?.proposal_id) {
+            void qc.invalidateQueries({ queryKey: ["chat", "proposals", conversationId] });
+          }
           store.finishToolInvocation(data.id, {
             ok: !!data.ok,
             error: data.error ?? null,
@@ -443,25 +584,6 @@ export function useStreamingChat(): UseStreamingChatResult {
           // The MAX_TOOL_HOPS guard. Surface as a stream error so the
           // existing red banner picks it up — no need for a bespoke UI.
           store.setStreamError(data.error);
-          continue;
-        }
-        if (data.event === "title_updated" && data.title) {
-          // Backend auto-generated the chat title after the first turn —
-          // reflect it everywhere the UI reads titles from.
-          const nextTitle = data.title;
-          const current = useChatStore
-            .getState()
-            .conversations.find((c) => c.id === conversationId);
-          if (current) {
-            useChatStore.getState().upsertConversation({
-              ...current,
-              title: nextTitle,
-            });
-          }
-          qc.setQueryData<ConversationSummary>(
-            ["conversation", conversationId],
-            (old) => (old ? { ...old, title: nextTitle } : old)
-          );
           continue;
         }
 
@@ -495,6 +617,7 @@ export function useStreamingChat(): UseStreamingChatResult {
               created_at: data.created_at,
               prompt_tokens: data.prompt_tokens ?? null,
               completion_tokens: data.completion_tokens ?? null,
+              context_usage: data.context_usage ?? null,
               ttft_ms: data.ttft_ms ?? null,
               total_ms: data.total_ms ?? null,
               model_id: data.model_id ?? null,
@@ -502,6 +625,7 @@ export function useStreamingChat(): UseStreamingChatResult {
               truncated: data.truncated ?? false,
             };
           }
+          replyDone = true;
           break;
         }
         }
@@ -514,6 +638,8 @@ export function useStreamingChat(): UseStreamingChatResult {
         cancelScheduledFlush();
         flushDelta();
       }
+
+      if (replyDone) void readAfterReply(sse, conversationId, qc);
 
       if (finalMessage) {
         // Only append into the visible list if the user is still on this
@@ -574,7 +700,7 @@ export function useStreamingChat(): UseStreamingChatResult {
           // Caller cancelled — partial content is already in streamingContent.
           return;
         }
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = apiErrorMessage(err, "Couldn't send that. Try again.");
         store.setStreamError(msg);
       } finally {
         // A newer turn may have taken over the stream slot after
@@ -637,7 +763,7 @@ export function useStreamingChat(): UseStreamingChatResult {
         await drainStream(conversationId, stream_id, ac);
       } catch (err) {
         if (ac.signal.aborted) return;
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = apiErrorMessage(err, "Couldn't send that. Try again.");
         store.setStreamError(msg);
       } finally {
         // A newer turn may have taken over the stream slot after
@@ -682,7 +808,7 @@ export function useStreamingChat(): UseStreamingChatResult {
         await drainStream(conversationId, streamId, ac);
       } catch (err) {
         if (ac.signal.aborted) return;
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = apiErrorMessage(err, "Couldn't send that. Try again.");
         store.setStreamError(msg);
       } finally {
         // A newer turn may have taken over the stream slot after
@@ -745,7 +871,7 @@ export function useStreamingChat(): UseStreamingChatResult {
         await drainStream(conversationId, stream_id, ac);
       } catch (err) {
         if (ac.signal.aborted) return;
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = apiErrorMessage(err, "Couldn't send that. Try again.");
         store.setStreamError(msg);
       } finally {
         // A newer turn may have taken over the stream slot after
@@ -816,7 +942,7 @@ export function useStreamingChat(): UseStreamingChatResult {
         await drainStream(conversationId, stream_id, ac);
       } catch (err) {
         if (ac.signal.aborted) return;
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = apiErrorMessage(err, "Couldn't send that. Try again.");
         store.setStreamError(msg);
       } finally {
         // A newer turn may have taken over the stream slot after

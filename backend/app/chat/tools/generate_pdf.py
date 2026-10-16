@@ -77,15 +77,6 @@ class GeneratePdfTool(Tool):
         "ordered + bulleted lists, GFM tables, fenced code blocks with "
         "syntax labels, blockquotes, and links."
     )
-    # Conversational version for the tool-aware system prompt. Kept
-    # short because it appears in a bullet list with the other tools.
-    prompt_hint = (
-        "Render a downloadable PDF (with editable Markdown source) and "
-        "attach it to your reply. Use ONLY when the user explicitly asks "
-        "for a PDF or other downloadable file — never for ordinary "
-        "answers, summaries, reports, or write-ups they just want to "
-        "read inline. Don't proactively offer or auto-generate PDFs."
-    )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {

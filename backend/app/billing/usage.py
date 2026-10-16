@@ -196,8 +196,12 @@ async def record_usage(
     completion_tokens: int | None,
     cost_usd: float | None = None,
     day: date | None = None,
+    count_message: bool = True,
 ) -> None:
     """Fold one stream's usage into ``usage_daily``.
+
+    ``count_message=False`` for side calls (titles, memory, captions…):
+    their tokens count, but they aren't a message the user sent.
 
     ``None`` token counts (sloppy provider, OpenAI sometimes drops
     ``usage`` mid-stream) become 0 — we still bump the message
@@ -225,7 +229,7 @@ async def record_usage(
             day=when,
             prompt_tokens=pt,
             completion_tokens=ct,
-            messages_sent=1,
+            messages_sent=1 if count_message else 0,
             cost_usd_micros=cost_micros,
         )
         .on_conflict_do_update(
@@ -233,7 +237,7 @@ async def record_usage(
             set_={
                 "prompt_tokens": UsageDaily.prompt_tokens + pt,
                 "completion_tokens": UsageDaily.completion_tokens + ct,
-                "messages_sent": UsageDaily.messages_sent + 1,
+                "messages_sent": UsageDaily.messages_sent + (1 if count_message else 0),
                 "cost_usd_micros": UsageDaily.cost_usd_micros + cost_micros,
                 "updated_at": func.now(),
             },

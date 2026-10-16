@@ -208,7 +208,13 @@ export const useChatStore = create<ChatState>((set) => ({
   setActive: (activeId) => set({ activeId }),
   setMessages: (messages) => set({ messages }),
   appendMessage: (message) =>
-    set((state) => ({ messages: [...state.messages, message] })),
+    set((state) => ({
+      // Same id = the same message arriving twice (a replayed stream after
+      // a reload, a refetch racing the stream's ``done``): replace it.
+      messages: state.messages.some((m) => m.id === message.id)
+        ? state.messages.map((m) => (m.id === message.id ? message : m))
+        : [...state.messages, message],
+    })),
   removeMessage: (id) =>
     set((state) => ({
       messages: state.messages.filter((m) => m.id !== id),

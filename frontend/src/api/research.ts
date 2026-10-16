@@ -1,5 +1,4 @@
 import { apiClient } from "./client";
-import { useAuthStore } from "@/store/authStore";
 
 export interface ResearchStartPayload {
   query: string;
@@ -15,47 +14,30 @@ export interface ResearchRefinePayload {
 }
 
 export const researchApi = {
-  /**
-   * Start a deep research investigation. Returns a raw fetch Response
-   * whose body is a text/event-stream SSE stream — use useResearch() to
-   * consume it instead of calling this directly.
-   *
-   * Uses the same auth token as the Axios client (from authStore, not
-   * localStorage) to avoid 401s on the raw fetch call.
-   */
-  startStream(conversationId: string, payload: ResearchStartPayload): Promise<Response> {
-    const token = useAuthStore.getState().accessToken;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    return fetch(`/api/conversations/${conversationId}/research`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-    });
+  /** Start a deep research investigation. It runs on the server as a
+   *  background job (it survives a reload and can be stopped); follow it
+   *  with useResearch(), which attaches to the returned stream. */
+  async start(
+    conversationId: string,
+    payload: ResearchStartPayload
+  ): Promise<{ stream_id: string }> {
+    const { data } = await apiClient.post<{ stream_id: string }>(
+      `/conversations/${conversationId}/research`,
+      payload
+    );
+    return data;
   },
 
-  /** Refine an existing report ("dig deeper"). Same SSE shape as
-   *  startStream — consume via useResearch().refineResearch. */
-  refineStream(
+  /** Refine an existing report ("dig deeper"). Same job shape as start. */
+  async refine(
     conversationId: string,
     payload: ResearchRefinePayload
-  ): Promise<Response> {
-    const token = useAuthStore.getState().accessToken;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    return fetch(`/api/conversations/${conversationId}/research/refine`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
-    });
+  ): Promise<{ stream_id: string }> {
+    const { data } = await apiClient.post<{ stream_id: string }>(
+      `/conversations/${conversationId}/research/refine`,
+      payload
+    );
+    return data;
   },
 
   /** Classify whether a query warrants a proactive deep-research suggestion. */

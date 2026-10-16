@@ -41,7 +41,7 @@ export function SavedPromptsPanel() {
             variant="secondary"
             size="sm"
             rightIcon={<ArrowRight className="h-3.5 w-3.5" />}
-            onClick={() => navigate("/tasks")}
+            onClick={() => navigate("/tasks?tab=prompts")}
           >
             Open Automations
           </Button>

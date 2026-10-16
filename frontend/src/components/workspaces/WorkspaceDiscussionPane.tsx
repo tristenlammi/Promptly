@@ -4,6 +4,7 @@ import {
   ArrowLeft,
   Loader2,
   MessagesSquare,
+  Pencil,
   Plus,
   Send,
   Trash2,
@@ -92,6 +93,14 @@ export function WorkspaceDiscussionPane({
       );
       // The rail shows counts + last activity.
       void qc.invalidateQueries({ queryKey: threads });
+      return;
+    }
+    if (event.type === "message_updated" && event.thread_id && event.message) {
+      const incoming = event.message as DiscussionMessage;
+      qc.setQueryData<DiscussionMessage[]>(
+        messagesKey(workspaceId, event.thread_id),
+        (prev) => prev?.map((m) => (m.id === incoming.id ? incoming : m))
+      );
       return;
     }
     if (event.type === "message_deleted" && event.thread_id) {
@@ -474,7 +483,47 @@ function ThreadView({
     refetchOnWindowFocus: true,
   });
 
-  const list = messages.data;
+  // Threads load their newest page; older messages come in on demand
+  // (R-176 — the whole thread used to load every time).
+  const PAGE = 200;
+  const [older, setOlder] = useState<DiscussionMessage[]>([]);
+  const [olderDone, setOlderDone] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const list = useMemo(() => {
+    const latest = messages.data;
+    if (!latest) return latest;
+    const seen = new Set(latest.map((m) => m.id));
+    return [...older.filter((m) => !seen.has(m.id)), ...latest];
+  }, [messages.data, older]);
+  const canLoadOlder =
+    !olderDone && (older.length > 0 || (messages.data?.length ?? 0) >= PAGE);
+  const loadOlder = async () => {
+    const first = list?.[0];
+    if (!first || loadingOlder) return;
+    setLoadingOlder(true);
+    try {
+      const page = await discussionsApi.listMessages(workspaceId, thread.id, first.created_at);
+      if (page.length < PAGE) setOlderDone(true);
+      setOlder((o) => [...page, ...o]);
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't load earlier messages."));
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
+
+  const edit = useMutation({
+    mutationFn: (v: { id: string; body: string }) =>
+      discussionsApi.editMessage(workspaceId, v.id, v.body),
+    onSuccess: (updated) => {
+      qc.setQueryData<DiscussionMessage[]>(
+        messagesKey(workspaceId, thread.id),
+        (prev) => prev?.map((m) => (m.id === updated.id ? updated : m))
+      );
+      setOlder((o) => o.map((m) => (m.id === updated.id ? updated : m)));
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Couldn't save the edit.")),
+  });
 
   // Follow the conversation as it grows (including polled-in messages).
   useEffect(() => {
@@ -553,12 +602,26 @@ function ThreadView({
           </p>
         ) : (
           <ul className="space-y-3">
+            {canLoadOlder && (
+              <li>
+                <button
+                  type="button"
+                  onClick={() => void loadOlder()}
+                  disabled={loadingOlder}
+                  className="text-xs font-medium text-[var(--accent-text)] disabled:opacity-50"
+                >
+                  {loadingOlder ? "Loading…" : "Load earlier messages"}
+                </button>
+              </li>
+            )}
             {(list ?? []).map((m) => (
               <MessageRow
                 key={m.id}
                 message={m}
                 canDelete={m.author_user_id === currentUserId || isAdmin}
                 onDelete={() => remove.mutate(m.id)}
+                canEdit={canEdit && m.author_user_id === currentUserId}
+                onEdit={(body) => edit.mutate({ id: m.id, body })}
               />
             ))}
           </ul>
@@ -614,11 +677,22 @@ function MessageRow({
   message: m,
   canDelete,
   onDelete,
+  canEdit = false,
+  onEdit,
 }: {
   message: DiscussionMessage;
   canDelete: boolean;
   onDelete: () => void;
+  canEdit?: boolean;
+  onEdit?: (body: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(m.body);
+  const save = () => {
+    const body = text.trim();
+    if (body && body !== m.body) onEdit?.(body);
+    setEditing(false);
+  };
   return (
     <li className="group flex gap-2 text-sm">
       <UserAvatar
@@ -637,10 +711,61 @@ function MessageRow({
           </span>
           {m.edited_at && <span>(edited)</span>}
         </div>
-        <div className="whitespace-pre-wrap break-words text-[var(--text)]">
-          {m.body}
-        </div>
+        {editing ? (
+          <div className="mt-1 space-y-1">
+            <textarea
+              value={text}
+              autoFocus
+              aria-label="Edit message"
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  save();
+                } else if (e.key === "Escape") {
+                  setText(m.body);
+                  setEditing(false);
+                }
+              }}
+              rows={Math.min(8, Math.max(2, text.split("\n").length))}
+              className="w-full resize-y rounded-input border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+            />
+            <div className="flex gap-2 text-xs">
+              <button type="button" onClick={save} className="font-medium text-[var(--accent-text)]">
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setText(m.body);
+                  setEditing(false);
+                }}
+                className="text-[var(--text-muted)]"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="whitespace-pre-wrap break-words text-[var(--text)]">
+            {m.body}
+          </div>
+        )}
       </div>
+      {canEdit && !editing && (
+        <button
+          type="button"
+          onClick={() => {
+            setText(m.body);
+            setEditing(true);
+          }}
+          title="Edit message"
+          aria-label="Edit message"
+          className="h-fit shrink-0 rounded p-1 text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--hover)] hover:text-[var(--text)] group-hover:opacity-100 focus:opacity-100"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+      )}
       {canDelete && (
         <button
           type="button"

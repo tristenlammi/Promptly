@@ -1,5 +1,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 
+import { showAssetSource } from "./DocImage";
+
 /**
  * Custom block node for embedded audio clips inside a document.
  *
@@ -84,6 +86,26 @@ export const AudioExtension = Node.create<AudioOptions>({
         HTMLAttributes
       ),
     ];
+  },
+
+  // Document audio is stored as a path; play it through a short-lived
+  // signed link (WP-4.6, R-228).
+  addNodeView() {
+    return ({ node }) => {
+      const audio = document.createElement("audio");
+      audio.controls = true;
+      audio.preload = "metadata";
+      audio.dataset.type = "audio";
+      showAssetSource(audio, node.attrs.src as string | null);
+      return {
+        dom: audio,
+        update: (n) => {
+          if (n.type !== node.type) return false;
+          showAssetSource(audio, n.attrs.src as string | null);
+          return true;
+        },
+      };
+    };
   },
 
   addCommands() {

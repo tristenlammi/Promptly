@@ -342,11 +342,21 @@ async def get_embedding_config(
     if settings.embedding_provider_id:
         provider = await db.get(ModelProvider, settings.embedding_provider_id)
         provider_name = provider.name if provider else None
+    health = None
+    pending = None
+    if settings.embedding_provider_id:
+        from app.custom_models.backfill import pending_counts
+        from app.custom_models.embedding import embedder_health
+
+        health = embedder_health().get(str(settings.embedding_provider_id)) or {}
+        pending = await pending_counts(db)
     return EmbeddingConfig(
         embedding_provider_id=settings.embedding_provider_id,
         embedding_model_id=settings.embedding_model_id,
         embedding_dim=settings.embedding_dim,
         embedding_provider_name=provider_name,
+        health=health,
+        pending=pending,
     )
 
 
@@ -397,35 +407,50 @@ async def set_embedding_config(
             detail="embedding_provider_id does not refer to an enabled provider",
         )
 
-    # Resolve the dim. Caller-provided wins (admin knows best); else
-    # fall back to our table; else probe the provider with a single
-    # short embed call.
-    dim = payload.embedding_dim or embedding_dim_for(payload.embedding_model_id)
-    if dim is None:
-        try:
-            probe = await embed_texts(
-                provider=provider,
-                model_id=payload.embedding_model_id,
-                texts=["x"],
-                # Pass the admin's requested dimension so MRL-capable
-                # models (Qwen3, text-embedding-3, …) truncate the
-                # probe vector to the target size. Without this the
-                # probe returns the model's native dim (often 4096)
-                # and the SUPPORTED_DIMS guard rejects it even though
-                # the model can produce a perfectly valid 1536-dim vec.
-                dimensions=payload.embedding_dim,
-            )
-        except Exception as exc:  # noqa: BLE001
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"could not probe embedding dimension: {exc}",
-            ) from exc
-        if not probe:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="embedding provider returned no vectors",
-            )
-        dim = len(probe[0])
+    # The target dim: the admin's "Output dimensions" wins, else our table
+    # of known models. Then ALWAYS one real embed at that dim before
+    # saving — a known model or a set dimension used to save without a
+    # single call, so a broken config looked fine (R-333).
+    target = payload.embedding_dim or embedding_dim_for(payload.embedding_model_id)
+    if target is not None and target not in SUPPORTED_DIMS and payload.embedding_dim is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"{payload.embedding_model_id} makes {target}-dimension vectors, and this "
+                f"database stores {' or '.join(str(d) for d in sorted(SUPPORTED_DIMS))}. "
+                "If the model can shorten its output (text-embedding-3 and Qwen3-embedding "
+                "can), set Output dimensions to 1536 or 768."
+            ),
+        )
+    try:
+        probe = await embed_texts(
+            provider=provider,
+            model_id=payload.embedding_model_id,
+            texts=["x"],
+            # MRL-capable models (Qwen3, text-embedding-3, …) shorten to
+            # the target; without it they return their native size.
+            dimensions=target,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"The embedding model didn't answer a test call: {exc}",
+        ) from exc
+    if not probe or not probe[0]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="embedding provider returned no vectors",
+        )
+    dim = len(probe[0])
+    if target is not None and dim != target:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Asked for {target}-dimension vectors but the model returned {dim}. "
+                "It may not support shortening its output; pick a model that makes "
+                f"{' or '.join(str(d) for d in sorted(SUPPORTED_DIMS))} dimensions."
+            ),
+        )
 
     if dim not in SUPPORTED_DIMS:
         raise HTTPException(
@@ -433,14 +458,24 @@ async def set_embedding_config(
             detail=(
                 f"embedding model produces dim={dim}, which has no vector "
                 f"column in this database. Supported dims: {sorted(SUPPORTED_DIMS)}. "
-                f"Add a column in a follow-up migration to enable other dims."
+                "If the model can shorten its output, set Output dimensions to 1536 or 768."
             ),
         )
 
-    dim_changed = settings.embedding_dim != dim
+    # A different model makes vectors in a different space even at the
+    # same size, so any model or dim change re-embeds (R-317) — it used
+    # to be a dim change only.
+    dim_changed = (
+        settings.embedding_dim != dim
+        or settings.embedding_model_id != payload.embedding_model_id
+    )
     settings.embedding_provider_id = provider.id
     settings.embedding_model_id = payload.embedding_model_id
     settings.embedding_dim = dim
+    if dim_changed:
+        from app.custom_models.backfill import mark_all_for_reembed
+
+        await mark_all_for_reembed(db, model_id=payload.embedding_model_id)
     await db.commit()
 
     # Re-embed every existing custom model when the dim flips so the
@@ -451,6 +486,12 @@ async def set_embedding_config(
         ).scalars().all()
         for cm_id in cm_ids:
             background.add_task(reembed_custom_model, cm_id)
+
+    # Catch up on files, notes and memories that couldn't be embedded
+    # before — or were embedded with a different model (R-261/R-268).
+    from app.custom_models.backfill import start_backfill
+
+    start_backfill()
 
     return EmbeddingConfig(
         embedding_provider_id=provider.id,
@@ -562,6 +603,21 @@ async def test_embedding_config(
         )
 
     vec = vectors[0]
+    if settings.embedding_dim and len(vec) != settings.embedding_dim:
+        # Vectors of the wrong size can't be stored — every index write
+        # would fail, so "Test passed" was misleading (R-333).
+        return EmbeddingConfigTestResult(
+            ok=False,
+            embedding_provider_id=provider.id,
+            embedding_model_id=settings.embedding_model_id,
+            embedding_provider_name=provider.name,
+            dimension=len(vec),
+            latency_ms=latency_ms,
+            error=(
+                f"The model returned {len(vec)}-dimension vectors but Promptly is set up "
+                f"for {settings.embedding_dim}. Re-save the embedding choice to re-probe it."
+            ),
+        )
     return EmbeddingConfigTestResult(
         ok=True,
         embedding_provider_id=provider.id,
@@ -804,6 +860,52 @@ async def list_known_embedding_models(
     return dict(KNOWN_EMBEDDING_DIMS)
 
 
+async def _ollama_installed_models(base: str) -> set[str] | None:
+    """Models the local Ollama has, or ``None`` when it isn't reachable."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(f"{base}/api/tags")
+            r.raise_for_status()
+            names = {m.get("name", "") for m in r.json().get("models", [])}
+    except Exception:  # noqa: BLE001 — unreachable is the answer
+        return None
+    # "nomic-embed-text:latest" also answers to "nomic-embed-text".
+    return names | {n.split(":", 1)[0] for n in names}
+
+
+async def _ollama_pull(base: str, model: str) -> None:
+    import httpx
+
+    async with httpx.AsyncClient(timeout=httpx.Timeout(900.0, connect=5.0)) as client:
+        r = await client.post(f"{base}/api/pull", json={"model": model, "stream": False})
+        r.raise_for_status()
+
+
+def _local_ollama_base() -> str:
+    import os
+
+    return os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
+
+
+@router.get("/local-embedding-status")
+async def local_embedding_status(user: User = Depends(require_admin)) -> dict:
+    """Can this install embed locally? The setup wizard asks before
+    recommending it — on the default (cloud-only) install there is no
+    Ollama, and offering "Local — Recommended" there saved an embedder that
+    could never answer (R-253)."""
+    import os
+
+    model = os.environ.get("OLLAMA_DEFAULT_EMBEDDING_MODEL", "nomic-embed-text")
+    installed = await _ollama_installed_models(_local_ollama_base())
+    return {
+        "ollama_reachable": installed is not None,
+        "model": model,
+        "model_installed": bool(installed) and model in installed,
+    }
+
+
 @router.post("/bootstrap-local-embedding", response_model=EmbeddingConfig)
 async def bootstrap_local_embedding(
     background: BackgroundTasks,
@@ -837,6 +939,28 @@ async def bootstrap_local_embedding(
     default_model = os.environ.get(
         "OLLAMA_DEFAULT_EMBEDDING_MODEL", "nomic-embed-text"
     )
+
+    # Check it can actually work before saving anything (R-253): this
+    # used to point every install at an Ollama that wasn't there and
+    # report success.
+    installed = await _ollama_installed_models(internal_base)
+    if installed is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "There's no local Ollama running for this install, so local "
+                "embeddings aren't available. Use a cloud embedding model "
+                "(Admin → Models), or install Ollama and re-run the installer."
+            ),
+        )
+    if default_model not in installed:
+        try:
+            await _ollama_pull(internal_base, default_model)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Ollama is running but couldn't download {default_model}: {e}",
+            ) from e
 
     # Reuse an existing internal Ollama provider when one is present
     # so the admin doesn't end up with duplicate "Ollama (Local)"
@@ -909,10 +1033,32 @@ async def bootstrap_local_embedding(
                 f"which isn't in the supported vector columns {sorted(SUPPORTED_DIMS)}"
             ),
         )
-    dim_changed = settings_row.embedding_dim != dim
+    # One real embedding before switching anything over.
+    from app.custom_models.embedding import embed_texts
+
+    try:
+        vectors = await embed_texts(
+            provider=provider, model_id=default_model, texts=["Promptly setup check"]
+        )
+        if not vectors or len(vectors[0]) != dim:
+            raise RuntimeError(f"expected {dim}-dimension vectors")
+    except Exception as e:  # noqa: BLE001
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"The local embedding model didn't answer a test request: {e}",
+        ) from e
+
+    dim_changed = (
+        settings_row.embedding_dim != dim or settings_row.embedding_model_id != default_model
+    )
     settings_row.embedding_provider_id = provider.id
     settings_row.embedding_model_id = default_model
     settings_row.embedding_dim = dim
+    if dim_changed:
+        from app.custom_models.backfill import mark_all_for_reembed
+
+        await mark_all_for_reembed(db, model_id=default_model)
     await db.commit()
 
     # If the dim flipped (e.g. switching from a 1536-dim OpenAI model
@@ -925,6 +1071,12 @@ async def bootstrap_local_embedding(
         ).scalars().all()
         for cm_id in cm_ids:
             background.add_task(reembed_custom_model, cm_id)
+
+    # Catch up on files, notes and memories that couldn't be embedded
+    # before — or were embedded with a different model (R-261/R-268).
+    from app.custom_models.backfill import start_backfill
+
+    start_backfill()
 
     return EmbeddingConfig(
         embedding_provider_id=provider.id,

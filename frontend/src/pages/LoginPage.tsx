@@ -1,9 +1,11 @@
+import { peekReturnTo, rememberReturnTo } from "@/lib/returnTo";
 import { useEffect, useState, type FormEvent } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Sparkles } from "lucide-react";
 
 import { authApi } from "@/api/auth";
+import type { AuthResponse } from "@/api/types";
 import { apiErrorMessage } from "@/utils/apiError";
 import { useAuthStore } from "@/store/authStore";
 import { Button } from "@/components/shared/Button";
@@ -22,6 +24,8 @@ const SSO_ERROR_MESSAGES: Record<string, string> = {
     "Couldn't reach the single sign-on provider. Please try again shortly.",
   provider_denied: "Sign-in was cancelled or denied at the provider.",
   sso_disabled: "Single sign-on isn't enabled on this server.",
+  linked_elsewhere:
+    "This Promptly account is linked to a different sign-in at your identity provider. Ask your administrator.",
 };
 
 export function LoginPage() {
@@ -36,6 +40,22 @@ export function LoginPage() {
     queryFn: () => authApi.ssoStatus(),
     staleTime: 60_000,
   });
+
+  // A link that needed signing in first (the share page sends ``?next=``).
+  useEffect(() => {
+    rememberReturnTo(searchParams.get("next"));
+  }, [searchParams]);
+
+  // Why we're here, when it was on purpose.
+  const signedOut = searchParams.get("signed_out");
+  const signedOutNote =
+    signedOut === "mfa_disabled"
+      ? "Two-step verification is off, and you've been signed out everywhere. Sign in again."
+      : signedOut === "password_reset"
+        ? "Your password is changed, and you've been signed out everywhere. Sign in with the new one."
+        : signedOut === "everywhere"
+          ? "You've been signed out on every device."
+          : null;
 
   // Surface an SSO failure the callback redirected back with.
   useEffect(() => {
@@ -53,8 +73,51 @@ export function LoginPage() {
   const setPendingMfa = useAuthStore((s) => s.setPendingMfa);
   const navigate = useNavigate();
 
+  // Signed in, or a second step to take — the same for a password sign-in
+  // and an SSO one that still needs MFA.
+  const applyAuthResponse = (res: AuthResponse) => {
+    switch (res.status) {
+      case "ok":
+        loginSuccess(res.user, res.access_token);
+        navigate(peekReturnTo("/chat"), { replace: true });
+        break;
+      case "mfa_required":
+        setPendingMfa({
+          kind: "challenge",
+          token: res.challenge_token,
+          method: res.method,
+          emailHint: res.email_hint ?? null,
+          expiresAt: Date.now() + res.expires_in * 1000,
+        });
+        setStatus("mfa_required");
+        navigate("/mfa/verify", { replace: true });
+        break;
+      case "mfa_enrollment_required":
+        setPendingMfa({
+          kind: "enrollment",
+          token: res.enrollment_token,
+          expiresAt: Date.now() + res.expires_in * 1000,
+        });
+        setStatus("mfa_enrollment_required");
+        navigate("/mfa/enroll", { replace: true });
+        break;
+    }
+  };
+
+  // Back from SSO with Promptly's own second factor still to do (R-140).
+  const ssoContinue = searchParams.get("sso") === "continue";
+  useEffect(() => {
+    if (!ssoContinue) return;
+    authApi
+      .oidcPending()
+      .then(applyAuthResponse)
+      .catch((err) => setError(apiErrorMessage(err, "That sign-in expired — try again.")));
+    // Once per arrival; the cookie it reads is single-use.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ssoContinue]);
+
   if (status === "authenticated") {
-    return <Navigate to="/chat" replace />;
+    return <Navigate to={peekReturnTo("/chat")} replace />;
   }
 
   const onSubmit = async (e: FormEvent) => {
@@ -62,33 +125,7 @@ export function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      const res = await authApi.login(email, password);
-      switch (res.status) {
-        case "ok":
-          loginSuccess(res.user, res.access_token);
-          navigate("/chat", { replace: true });
-          break;
-        case "mfa_required":
-          setPendingMfa({
-            kind: "challenge",
-            token: res.challenge_token,
-            method: res.method,
-            emailHint: res.email_hint ?? null,
-            expiresAt: Date.now() + res.expires_in * 1000,
-          });
-          setStatus("mfa_required");
-          navigate("/mfa/verify", { replace: true });
-          break;
-        case "mfa_enrollment_required":
-          setPendingMfa({
-            kind: "enrollment",
-            token: res.enrollment_token,
-            expiresAt: Date.now() + res.expires_in * 1000,
-          });
-          setStatus("mfa_enrollment_required");
-          navigate("/mfa/enroll", { replace: true });
-          break;
-      }
+      applyAuthResponse(await authApi.login(email, password));
     } catch (err) {
       setError(apiErrorMessage(err, "Request failed"));
     } finally {
@@ -130,6 +167,14 @@ export function LoginPage() {
             autoComplete="current-password"
           />
 
+          {signedOutNote && !error && (
+            <div
+              role="status"
+              className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]"
+            >
+              {signedOutNote}
+            </div>
+          )}
           {error && (
             <div
               role="alert"
@@ -142,6 +187,11 @@ export function LoginPage() {
           <Button type="submit" variant="primary" className="w-full" loading={loading}>
             Sign in
           </Button>
+          <p className="text-right text-xs">
+            <Link to="/forgot-password" className="text-[var(--accent-text)] underline-offset-2 hover:underline">
+              Forgot password?
+            </Link>
+          </p>
         </form>
 
         {sso?.enabled && (
@@ -154,7 +204,9 @@ export function LoginPage() {
             <button
               type="button"
               onClick={() => {
-                window.location.href = "/api/auth/oidc/login";
+                // Carry the destination through the identity provider.
+                const next = peekReturnTo("/");
+                window.location.href = `/api/auth/oidc/login?next=${encodeURIComponent(next)}`;
               }}
               className="w-full rounded-input border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm font-medium text-[var(--text)] transition hover:bg-[var(--hover)]"
             >

@@ -19,8 +19,9 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 
+from app.chat.models import Workspace
 from app.database import SessionLocal
 from app.tasks.models import Task, TaskRun
 from app.tasks.queue import enqueue_run
@@ -47,6 +48,11 @@ async def _claim_due() -> list[uuid.UUID]:
                         Task.enabled.is_(True),
                         Task.next_run_at.is_not(None),
                         Task.next_run_at <= now,
+                        # Not while its workspace is in the trash (R-177).
+                        ~exists().where(
+                            Workspace.id == Task.workspace_id,
+                            Workspace.trashed_at.is_not(None),
+                        ),
                     )
                     .order_by(Task.next_run_at.asc())
                     .limit(_CLAIM_LIMIT)
@@ -56,7 +62,14 @@ async def _claim_due() -> list[uuid.UUID]:
             .scalars()
             .all()
         )
+        from app.tasks.flow_service import has_schedule_trigger
+
         for task in rows:
+            if not has_schedule_trigger(task):
+                # A webhook / event / manual flow carrying a stale slot from
+                # its schedule columns — never fire it on the clock (R-010).
+                task.next_run_at = None
+                continue
             # Advance to the next slot up front so we don't re-claim it.
             try:
                 task.next_run_at = compute_next_run(

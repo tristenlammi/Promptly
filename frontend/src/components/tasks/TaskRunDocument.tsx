@@ -80,7 +80,7 @@ export function TaskRunDocument({ run }: { run: TaskRun }) {
                   href={s.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="truncate text-[var(--accent)] hover:underline"
+                  className="truncate text-[var(--accent-text)] hover:underline"
                   title={s.title || s.url}
                 >
                   {s.title || s.url}

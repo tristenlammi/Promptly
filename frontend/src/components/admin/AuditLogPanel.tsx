@@ -3,6 +3,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Loader2,
+  Download,
   RefreshCw,
   ShieldAlert,
   ShieldCheck,
@@ -11,6 +12,9 @@ import {
 
 import { Button } from "@/components/shared/Button";
 import { useAdminUsers, useAuthEvents } from "@/hooks/useAdminUsers";
+import { apiErrorMessage } from "@/utils/apiError";
+import { toast } from "@/store/toastStore";
+import { adminApi } from "@/api/admin";
 import { cn } from "@/utils/cn";
 import type { AdminUser, AuthEvent } from "@/api/types";
 
@@ -42,6 +46,14 @@ const EVENT_LABELS: Record<string, string> = {
   mfa_device_trusted: "Device trusted",
   mfa_device_revoked: "Device revoked",
   app_settings_changed: "App settings changed",
+  // R-145 — admin account actions.
+  user_created: "User created",
+  user_deleted: "User deleted",
+  role_changed: "Role changed",
+  email_changed: "Email changed",
+  users_imported: "Users imported",
+  group_changed: "Group changed",
+  provider_key_changed: "Provider key changed",
   // Batch 6 — workspace content lifecycle.
   workspace_created: "Workspace created",
   workspace_deleted: "Workspace deleted",
@@ -78,6 +90,14 @@ const EVENT_FILTERS: { value: string; label: string }[] = [
   { value: "mfa_backup_used", label: EVENT_LABELS.mfa_backup_used },
   { value: "mfa_device_trusted", label: EVENT_LABELS.mfa_device_trusted },
   { value: "app_settings_changed", label: EVENT_LABELS.app_settings_changed },
+  { value: "user_created", label: EVENT_LABELS.user_created },
+  { value: "user_deleted", label: EVENT_LABELS.user_deleted },
+  { value: "role_changed", label: EVENT_LABELS.role_changed },
+  { value: "email_changed", label: EVENT_LABELS.email_changed },
+  { value: "users_imported", label: EVENT_LABELS.users_imported },
+  { value: "group_changed", label: EVENT_LABELS.group_changed },
+  { value: "provider_key_changed", label: EVENT_LABELS.provider_key_changed },
+  { value: "mfa_reset", label: EVENT_LABELS.mfa_reset },
   { value: "workspace_created", label: EVENT_LABELS.workspace_created },
   { value: "workspace_deleted", label: EVENT_LABELS.workspace_deleted },
   { value: "workspace_exported", label: EVENT_LABELS.workspace_exported },
@@ -90,16 +110,43 @@ const EVENT_FILTERS: { value: string; label: string }[] = [
 export function AuditLogPanel() {
   const [eventType, setEventType] = useState<string>("");
   const [userId, setUserId] = useState<string>("");
+  const [since, setSince] = useState<string>("");
+  const [until, setUntil] = useState<string>("");
   const [page, setPage] = useState(0);
 
+  // "To" is a whole day: everything before the start of the next one.
+  const untilExclusive = until
+    ? new Date(new Date(`${until}T00:00:00`).getTime() + 86_400_000).toISOString()
+    : undefined;
+  const range = {
+    since: since ? new Date(`${since}T00:00:00`).toISOString() : undefined,
+    until: untilExclusive,
+  };
   const { data: users } = useAdminUsers();
   const { data: events, isLoading, isFetching, isError, error, refetch } =
     useAuthEvents({
       event_type: eventType || undefined,
       user_id: userId || undefined,
+      ...range,
       limit: PAGE_SIZE,
       offset: page * PAGE_SIZE,
     });
+
+  const exportCsv = async () => {
+    try {
+      const blob = await adminApi.exportAuthEvents({ event_type: eventType || undefined, ...range });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "promptly-audit-log.csv";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't export the audit log."));
+    }
+  };
 
   const usersById = useMemo(() => {
     const map = new Map<string, AdminUser>();
@@ -129,6 +176,17 @@ export function AuditLogPanel() {
         users={users ?? []}
         onEventChange={onFilterChange}
         onUserChange={onUserChange}
+        since={since}
+        until={until}
+        onSinceChange={(v) => {
+          setSince(v);
+          setPage(0);
+        }}
+        onUntilChange={(v) => {
+          setUntil(v);
+          setPage(0);
+        }}
+        onExport={() => void exportCsv()}
         onRefresh={() => refetch()}
         refreshing={isFetching && !isLoading}
       />
@@ -198,6 +256,11 @@ function FilterBar({
   users,
   onEventChange,
   onUserChange,
+  since,
+  until,
+  onSinceChange,
+  onUntilChange,
+  onExport,
   onRefresh,
   refreshing,
 }: {
@@ -206,9 +269,16 @@ function FilterBar({
   users: AdminUser[];
   onEventChange: (v: string) => void;
   onUserChange: (v: string) => void;
+  since: string;
+  until: string;
+  onSinceChange: (v: string) => void;
+  onUntilChange: (v: string) => void;
+  onExport: () => void;
   onRefresh: () => void;
   refreshing: boolean;
 }) {
+  const dateClass =
+    "h-8 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2 text-xs text-[var(--text)]";
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Select value={eventType} onChange={onEventChange} ariaLabel="Filter by event type">
@@ -226,6 +296,14 @@ function FilterBar({
           </option>
         ))}
       </Select>
+      <label className="flex items-center gap-1 text-xs text-[var(--text-muted)]">
+        From
+        <input type="date" value={since} onChange={(e) => onSinceChange(e.target.value)} className={dateClass} />
+      </label>
+      <label className="flex items-center gap-1 text-xs text-[var(--text-muted)]">
+        To
+        <input type="date" value={until} onChange={(e) => onUntilChange(e.target.value)} className={dateClass} />
+      </label>
       <Button
         variant="ghost"
         size="sm"
@@ -236,6 +314,9 @@ function FilterBar({
         disabled={refreshing}
       >
         Refresh
+      </Button>
+      <Button variant="ghost" size="sm" leftIcon={<Download className="h-3.5 w-3.5" />} onClick={onExport}>
+        Export CSV
       </Button>
     </div>
   );
@@ -350,7 +431,7 @@ function EventRow({ event, user }: { event: AuthEvent; user?: AdminUser }) {
 function SeverityBadge({ severity, label }: { severity: Severity; label: string }) {
   const styles: Record<Severity, string> = {
     success: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-    info: "bg-[var(--accent)]/10 text-[var(--accent)]",
+    info: "bg-[var(--accent)]/10 text-[var(--accent-text)]",
     warn: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
     danger: "bg-red-500/10 text-red-600 dark:text-red-400",
   };

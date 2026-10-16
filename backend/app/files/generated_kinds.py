@@ -90,5 +90,30 @@ class GeneratedKind(str, Enum):
     # ``Automations/`` Drive folder; keyed off ``Workspace.automations_text_file_id``.
     AUTOMATIONS_TEXT = "automations_text"
 
+    # The Drive identity of a spreadsheet / whiteboard (WP-3.2, 0189): a
+    # shell row whose content lives in ``spreadsheets`` / ``workspace_canvas``
+    # (``file_id`` points back). Listed, searched, shared and counted like
+    # any file; downloads export to .xlsx / .excalidraw.
+    SHEET = "sheet"
+    WHITEBOARD = "whiteboard"
 
-__all__ = ["GeneratedKind"]
+
+# Derived rows that exist for the AI (and a document's inline media), not
+# for people: never listed in Drive — browse, Recent, Starred, Trash,
+# Search. The text mirrors cluttered Search with a second hit per sheet,
+# canvas or board and opened as raw Markdown (part C §2.1).
+HIDDEN_KINDS: frozenset[str] = frozenset(
+    {
+        GeneratedKind.DOCUMENT_ASSET.value,
+        GeneratedKind.CANVAS_TEXT.value,
+        GeneratedKind.CHAT_TRANSCRIPT.value,
+        GeneratedKind.BOARD_TEXT.value,
+        GeneratedKind.SHEET_TEXT.value,
+        GeneratedKind.ROSTER_TEXT.value,
+        GeneratedKind.DISCUSSION_TEXT.value,
+        GeneratedKind.AUTOMATIONS_TEXT.value,
+    }
+)
+
+
+__all__ = ["GeneratedKind", "HIDDEN_KINDS"]

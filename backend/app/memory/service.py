@@ -163,6 +163,7 @@ async def embed_memory_row(
                        SET {col} = CAST(:vec AS vector({cfg.dim})),
                            {other} = NULL,
                            embed_dim = :dim,
+                           embed_model = :em,
                            content_hash = :chash
                      WHERE id = :mid
                     """
@@ -170,6 +171,7 @@ async def embed_memory_row(
                 {
                     "vec": vector_literal(vectors[0]),
                     "dim": cfg.dim,
+                    "em": cfg.model_id,
                     "chash": _content_hash(memory.content or ""),
                     "mid": memory.id,
                 },
@@ -541,6 +543,10 @@ async def count_memories(db: AsyncSession, user_id) -> int:
     )
 
 
+# Cosine similarity below this is noise for any embedder we ship with.
+_MIN_MEMORY_SIMILARITY: Final[float] = 0.2
+
+
 async def retrieve_relevant_memories(
     db: AsyncSession,
     user_id,
@@ -584,6 +590,7 @@ async def retrieve_relevant_memories(
 
     try:
         vectors = await embed_texts(
+            fast=True,
             provider=cfg.provider,
             model_id=cfg.model_id,
             texts=[cleaned],
@@ -611,7 +618,7 @@ async def retrieve_relevant_memories(
                times_used,
                last_used_at
         FROM user_memories
-        WHERE user_id = :uid AND {col} IS NOT NULL
+        WHERE user_id = :uid AND {col} IS NOT NULL AND embed_model = :em
         ORDER BY dist
         LIMIT :k
         """
@@ -626,7 +633,7 @@ async def retrieve_relevant_memories(
             rows_raw = (
                 await db.execute(
                     sql,
-                    {"uid": user_id, "qvec": vector_literal(vectors[0]), "k": fetch_k},
+                    {"uid": user_id, "qvec": vector_literal(vectors[0]), "k": fetch_k, "em": cfg.model_id},
                 )
             ).all()
     except Exception as exc:  # noqa: BLE001
@@ -650,9 +657,17 @@ async def retrieve_relevant_memories(
                 score += 0.03  # recently useful
         return score
 
-    candidates = [r for r in rows_raw if r[0] not in _excl]
+    # Nearest isn't the same as relevant: with a handful of facts the top-k
+    # were injected into every chat however unrelated ("allergic to
+    # peanuts" on a Python question). Drop clearly off-topic ones (R-296).
+    candidates = [
+        r for r in rows_raw
+        if r[0] not in _excl and 1.0 - float(r[1]) >= _MIN_MEMORY_SIMILARITY
+    ]
     candidates.sort(key=_rank, reverse=True)
     ids = [r[0] for r in candidates][:k]
+    if not ids and any(r[0] not in _excl for r in rows_raw):
+        return []  # facts are embedded, just none on topic — inject nothing
     if not ids:
         rows = await load_memories(db, user_id, limit=k + len(_excl))
         return _fallback(rows)
@@ -848,6 +863,7 @@ async def _nearest_similarity(
         return 0.0
     try:
         vectors = await embed_texts(
+            fast=True,
             provider=cfg.provider,
             model_id=cfg.model_id,
             texts=[cleaned],
@@ -862,7 +878,7 @@ async def _nearest_similarity(
         f"""
         SELECT 1 - ({col} <=> CAST(:qvec AS vector({cfg.dim}))) AS sim
         FROM user_memories
-        WHERE user_id = :uid AND {col} IS NOT NULL
+        WHERE user_id = :uid AND {col} IS NOT NULL AND embed_model = :em
         ORDER BY {col} <=> CAST(:qvec AS vector({cfg.dim}))
         LIMIT 1
         """
@@ -870,7 +886,7 @@ async def _nearest_similarity(
     try:
         row = (
             await db.execute(
-                sql, {"uid": user_id, "qvec": vector_literal(vectors[0])}
+                sql, {"uid": user_id, "qvec": vector_literal(vectors[0]), "em": cfg.model_id}
             )
         ).first()
     except Exception:  # noqa: BLE001
@@ -982,6 +998,14 @@ async def resolve_memory_model(
     return None
 
 
+_CORRECTION_RE: Final[re.Pattern[str]] = re.compile(
+    r"\b(no longer|not any ?more|anymore|actually|i stopped|i've stopped|i switched|"
+    r"i've switched|i moved|i've moved|that's wrong|that is wrong|not true|"
+    r"correction|forget (that|it)|update (that|my))\b",
+    re.IGNORECASE,
+)
+
+
 async def capture_memories(
     db: AsyncSession,
     *,
@@ -1069,19 +1093,39 @@ async def capture_memories(
     # Separate tracking: updates know their id immediately (the row already
     # exists); new rows get their id after flush().
     saved_updates: list[dict] = []
+    removed: list[dict] = []
     new_rows: list[UserMemory] = []
     updated_rows: list[UserMemory] = []
+
+    # Pinned facts are never changed by the background pass, and facts the
+    # user wrote themselves only when this message corrects them ("I no
+    # longer use Vim", "actually…"). Capture used to quietly rewrite or
+    # delete both (R-267/R-292).
+    corrects = is_explicit_memory_request(user_text) or bool(_CORRECTION_RE.search(user_text or ""))
+
+    def _protected(row: UserMemory) -> bool:
+        if row.pinned:
+            return True
+        return row.source == "manual" and not corrects
 
     for op in ops:
         kind = op["op"]
         if kind == "delete":
             row = by_id.get(op["id"])
-            if row is not None:
+            if row is not None and not _protected(row):
+                removed.append(
+                    {"id": str(row.id), "content": row.content, "category": row.category, "removed": True}
+                )
                 await db.delete(row)
+            elif row is not None:
+                logger.info("memory capture: left protected fact %s alone (delete)", row.id)
             continue
         if kind == "update":
             row = by_id.get(op["id"])
             if row is None:
+                continue
+            if _protected(row):
+                logger.info("memory capture: left protected fact %s alone (update)", row.id)
                 continue
             new_text = op["text"]
             if _normalise(new_text) == _normalise(row.content):
@@ -1153,7 +1197,12 @@ async def capture_memories(
     else:
         saved_new = []
 
-    return saved_updates + saved_new
+    # Commit here, whatever was applied: a capture that only deleted
+    # ("I no longer use Vim") returned nothing, so the caller never
+    # committed and the delete was rolled back (R-270).
+    if removed or new_rows or updated_rows:
+        await db.commit()
+    return saved_updates + saved_new + removed
 
 
 # ----------------------------------------------------------------------
@@ -1164,7 +1213,7 @@ async def capture_memories(
 # model can never delete or invent facts through this path).
 
 _MAX_MERGE_OPS: Final[int] = 20
-_MAX_CONSOLIDATE_TOKENS: Final[int] = 1200
+_MAX_CONSOLIDATE_TOKENS: Final[int] = 4000
 
 _CONSOLIDATE_SYSTEM_PROMPT: Final[str] = (
     "You tidy a user's long-term memory store for an AI assistant. You are "
@@ -1188,6 +1237,31 @@ _CONSOLIDATE_SYSTEM_PROMPT: Final[str] = (
     "- Each id may appear in at most one operation, and every id must come "
     "from the list. If nothing should merge, output []."
 )
+
+
+_CUT_OFF_MSG: Final[str] = (
+    "The AI's answer was cut off before it finished, so nothing was "
+    "changed. Try again — or with a smaller request."
+)
+
+
+def _answer_cut_off(raw: str) -> bool:
+    """True when the model started a JSON array but it doesn't parse —
+    almost always the token cap biting mid-answer. Treating that as
+    "nothing to do" told the user everything was tidy when it wasn't
+    (R-265)."""
+    cleaned = _strip_think_blocks(raw).strip()
+    start = cleaned.find("[")
+    if start == -1:
+        return False
+    end = cleaned.rfind("]")
+    if end <= start:
+        return True
+    try:
+        json.loads(cleaned[start : end + 1])
+    except (ValueError, TypeError):
+        return True
+    return False
 
 
 def _parse_merge_ops(raw: str, valid_ids: set[str]) -> list[dict]:
@@ -1282,7 +1356,10 @@ async def consolidate_memories(db: AsyncSession, *, user_id) -> dict:
         chunks.append(token)
 
     by_id = {str(m.id): m for m in rows}
-    ops = _parse_merge_ops("".join(chunks), set(by_id))
+    raw = "".join(chunks)
+    if _answer_cut_off(raw):
+        raise ValueError(_CUT_OFF_MSG)
+    ops = _parse_merge_ops(raw, set(by_id))
     if not ops:
         return {"merged_groups": 0, "removed": 0, "changes": []}
 
@@ -1345,7 +1422,7 @@ async def consolidate_memories(db: AsyncSession, *, user_id) -> dict:
 # state — the same reasoning behind the workspace write-back proposals.
 # Preview costs one model call; applying costs none.
 
-_MAX_INSTRUCT_TOKENS: Final[int] = 1200
+_MAX_INSTRUCT_TOKENS: Final[int] = 4000
 
 _INSTRUCT_SYSTEM_PROMPT: Final[str] = (
     "You edit a user's saved long-term memory on their explicit "
@@ -1423,7 +1500,10 @@ async def plan_memory_edits(
         chunks.append(token)
 
     by_id = {str(m.id): m for m in rows}
-    ops = _parse_ops("".join(chunks), set(by_id))
+    raw = "".join(chunks)
+    if _answer_cut_off(raw):
+        raise ValueError(_CUT_OFF_MSG)
+    ops = _parse_ops(raw, set(by_id))
 
     enriched: list[dict] = []
     for op in ops:

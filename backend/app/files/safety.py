@@ -29,6 +29,8 @@ import unicodedata
 from pathlib import Path
 
 import filetype
+
+import app.files.imaging  # noqa: F401,E402 — HEIC/AVIF decoding (WP-7.3)
 from PIL import Image, UnidentifiedImageError
 
 # Decompression-bomb guard (process-wide). ``Image`` is a module
@@ -63,6 +65,27 @@ _ALLOWED_EXTS: dict[str, tuple[str, frozenset[str]]] = {
     ".gif": ("image/gif", frozenset()),
     ".webp": ("image/webp", frozenset()),
     ".bmp": ("image/bmp", frozenset({"image/x-bmp", "image/x-ms-bmp"})),
+    # ----- Phone photos and videos, previewed (WP-7.3, Part C §4.4) -----
+    # HEIC/HEIF decode through pillow-heif (app.files.imaging), AVIF through
+    # Pillow itself. A MOV from an iPhone is QuickTime; a phone MP4's ftyp
+    # brand varies, so the MP4 family accepts each other's sniffed type.
+    ".heic": ("image/heic", frozenset({"image/heif", "image/heic-sequence", "image/heif-sequence"})),
+    ".heif": ("image/heif", frozenset({"image/heic", "image/heif-sequence", "image/heic-sequence"})),
+    ".avif": ("image/avif", frozenset()),
+    ".mp4": ("video/mp4", frozenset({"video/x-m4v", "audio/mp4", "video/quicktime"})),
+    ".mov": ("video/quicktime", frozenset({"video/mp4"})),
+    ".m4v": ("video/x-m4v", frozenset({"video/mp4"})),
+    ".3gp": ("video/3gpp", frozenset({"video/mp4", "video/3gpp2", "audio/3gpp"})),
+    # ----- Camera originals, stored as-is (store tier) -----
+    # Kept and downloadable, not previewed by the browser. ``filetype``
+    # can't sniff CR3, NEF or ARW, so ExifTool vouches for these (below).
+    ".tif": ("image/tiff", frozenset()),
+    ".tiff": ("image/tiff", frozenset()),
+    ".dng": ("image/x-adobe-dng", frozenset({"image/dng", "image/tiff"})),
+    ".cr2": ("image/x-canon-cr2", frozenset({"image/tiff"})),
+    ".cr3": ("image/x-canon-cr3", frozenset()),
+    ".nef": ("image/x-nikon-nef", frozenset({"image/tiff"})),
+    ".arw": ("image/x-sony-arw", frozenset({"image/tiff"})),
     # ----- Audio (embedded inline in documents via <audio controls>) -----
     # Without these, the document-asset endpoint's ``audio/`` MIME prefix is
     # moot: sniff_and_validate rejects the extension first ("bad_extension"),
@@ -100,6 +123,13 @@ _ALLOWED_EXTS: dict[str, tuple[str, frozenset[str]]] = {
     # of stored-XSS foot-guns on a multi-user host. Notes/documents are a
     # separate first-class feature, not uploads.
 }
+# ----- Office files (WP-4.3): Word, Excel, PowerPoint, OpenDocument, RTF.
+# Previewed, searched, and convertible to Promptly documents and sheets.
+# Every zip-based one passes the zip-bomb guard before anything parses it.
+from app.files.office_formats import LEGACY_OFFICE_ALLOWLIST, OFFICE_ALLOWLIST, ZIP_OFFICE_EXTS, check_zip_container  # noqa: E402
+
+_ALLOWED_EXTS.update(OFFICE_ALLOWLIST)
+_ALLOWED_EXTS.update(LEGACY_OFFICE_ALLOWLIST)
 
 # MIME types that are allowed to come back from the magic-byte sniffer
 # even though we don't know the canonical extension for them. Mostly
@@ -293,6 +323,10 @@ def sniff_and_validate(
                     f"file extension {ext!r}",
                 )
 
+    # Camera originals are vouched for by ExifTool, not ``filetype`` (WP-7.3).
+    if ext in STORE_TIER_EXTS:
+        return _check_store_tier(path, ext, canonical)
+
     # Magic-byte sniff. ``filetype`` returns ``None`` for plain text /
     # markdown / etc. — the library only knows binary signatures —
     # which is fine for our text-like extensions and a hard fail for
@@ -306,6 +340,14 @@ def sniff_and_validate(
     if kind is None:
         if ext in _TEXT_LIKE_EXTS:
             return canonical
+        if ext == ".rtf" and path.read_bytes()[:5] == b"{\\rtf":
+            return canonical
+        # A legacy Office file ``filetype`` can't place: still an OLE
+        # compound file, which is all we need (it's never parsed here).
+        if ext in LEGACY_OFFICE_ALLOWLIST:
+            with path.open("rb") as fh:
+                if fh.read(8) == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+                    return canonical
         raise UnsafeUploadError(
             "mime_mismatch",
             f"Could not verify the contents of the uploaded file as {canonical}",
@@ -328,6 +370,49 @@ def sniff_and_validate(
             f"but the filename claims {canonical!r}",
         )
 
+    if ext in ZIP_OFFICE_EXTS:
+        check_zip_container(path, ext)
+
+    return canonical
+
+
+# Store-tier camera files: what ExifTool must recognise them as. The
+# TIFF-based raws (DNG, CR2, NEF, ARW) may read as plain TIFF without their
+# extension, which still proves a real image container.
+_EXIFTOOL_TYPES: dict[str, frozenset[str]] = {
+    ".tif": frozenset({"TIFF", "BTF"}),
+    ".tiff": frozenset({"TIFF", "BTF"}),
+    ".dng": frozenset({"DNG", "TIFF"}),
+    ".cr2": frozenset({"CR2", "TIFF"}),
+    ".cr3": frozenset({"CR3"}),
+    ".nef": frozenset({"NEF", "NRW", "TIFF"}),
+    ".arw": frozenset({"ARW", "SR2", "SRF", "TIFF"}),
+}
+STORE_TIER_EXTS = frozenset(_EXIFTOOL_TYPES)
+
+
+def _exiftool_file_type(path: Path) -> str | None:
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["exiftool", "-s3", "-fast2", "-FileType", str(path)],
+            capture_output=True, text=True, timeout=20, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        logger.warning("exiftool couldn't check %s", path, exc_info=True)
+        return None
+    return (out.stdout or "").strip() or None
+
+
+def _check_store_tier(path: Path, ext: str, canonical: str) -> str:
+    kind = _exiftool_file_type(path)
+    if kind not in _EXIFTOOL_TYPES[ext]:
+        raise UnsafeUploadError(
+            "mime_mismatch",
+            f"Could not verify the contents of the uploaded file as {canonical}"
+            + (f" (it looks like {kind})" if kind else ""),
+        )
     return canonical
 
 
@@ -432,6 +517,18 @@ def strip_image_metadata_in_place(path: Path, canonical_mime: str) -> None:
             raise OSError("Pillow produced an empty output file")
 
         os.replace(tmp_path, path)
+    except Image.DecompressionBombError as e:
+        # Over 2x MAX_IMAGE_PIXELS (80 MP): refuse it clearly. It used to
+        # escape as a 500 and leave the blob on disk outside any quota
+        # (R-206).
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise UnsafeUploadError(
+            "image_too_large",
+            f"Image is too large to process (max {2 * Image.MAX_IMAGE_PIXELS // 1_000_000} megapixels).",
+        ) from e
     except (UnidentifiedImageError, OSError, ValueError) as e:
         logger.warning(
             "EXIF strip failed for %s (%s); leaving original bytes in place: %s",

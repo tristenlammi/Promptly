@@ -21,6 +21,7 @@ export interface DiscussionEvent {
     | "thread_created"
     | "thread_deleted"
     | "message_created"
+    | "message_updated"
     | "message_deleted";
   item_id: string;
   thread_id?: string;

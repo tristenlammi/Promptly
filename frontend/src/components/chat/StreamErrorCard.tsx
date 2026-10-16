@@ -235,6 +235,30 @@ function describeClassifiedError(code: string): ClassifiedCopy {
         helpLabel: "Learn more",
       };
 
+    case "out_of_credits":
+      return {
+        fallbackTitle: "The provider account is out of credits",
+        explanation:
+          "The model provider says the account behind this model has no credit or quota left. Trying again won't help until it's topped up — an admin can add credit with the provider, or you can pick a different model to keep going.",
+        helpLabel: "Learn more",
+      };
+
+    case "model_unavailable":
+      return {
+        fallbackTitle: "This model isn't available any more",
+        explanation:
+          "The provider no longer offers this model (it may have been retired or renamed), or this account can't use it. Pick another model from the picker above. An admin can refresh the provider's model list in Admin → Models.",
+        helpLabel: "Learn more",
+      };
+
+    case "context_overflow":
+      return {
+        fallbackTitle: "This chat is too long for the model",
+        explanation:
+          "The conversation, plus any files attached to it, no longer fits in what this model can read at once. Compact the conversation (from the chat menu) to summarise the older part, start a new chat, or pick a model with a larger context window.",
+        helpLabel: "Learn more",
+      };
+
     case "provider_overloaded":
       return {
         fallbackTitle: "The model host hiccuped",

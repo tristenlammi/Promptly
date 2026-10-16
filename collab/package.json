@@ -8,14 +8,14 @@
     "start": "node src/server.js"
   },
   "dependencies": {
-    "@hocuspocus/extension-database": "^3.1.4",
-    "@hocuspocus/server": "^3.1.4",
+    "@hocuspocus/extension-database": "^4.7.0",
+    "@hocuspocus/server": "^4.7.0",
     "jose": "^5.9.6",
     "pg": "^8.13.1",
     "undici": "^6.21.0",
     "yjs": "^13.6.20"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

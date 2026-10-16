@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { usePasswordPolicy } from "@/hooks/usePasswordPolicy";
 import { Eye, EyeOff, KeyRound, Loader2, ShieldAlert } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
@@ -14,7 +15,6 @@ interface ResetPasswordModalProps {
   onClose: () => void;
 }
 
-const MIN_LENGTH = 8;
 
 /**
  * Lets an admin set a one-shot password for another account. The
@@ -28,6 +28,7 @@ export function ResetPasswordModal({
   onConfirm,
   onClose,
 }: ResetPasswordModalProps) {
+  const MIN_LENGTH = usePasswordPolicy().min_length;
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [show, setShow] = useState(false);

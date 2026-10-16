@@ -20,7 +20,7 @@ from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
 
 logger = logging.getLogger("promptly.chat.tools.read_workspace_item")
 
-_READABLE_KINDS = ("note", "board", "sheet", "canvas")
+_READABLE_KINDS = ("note", "board", "sheet", "canvas", "roster")
 
 
 class ReadWorkspaceItemTool(Tool):
@@ -34,16 +34,12 @@ class ReadWorkspaceItemTool(Tool):
     # dominate every subsequent hop's re-fed context.
     max_content_chars = 20_000
     description = (
-        "Read the FULL current content of a note, board, sheet, or canvas in "
+        "Read the FULL current content of a note, board, sheet, canvas or roster in "
         "this chat's workspace, by its title exactly as it appears in the "
         "workspace map. Use this when an item exists (it's in the map or was "
         "mentioned above) but its full text wasn't included — e.g. the user "
         "asks about a specific note or board that was omitted or only "
         "summarised for length. Returns the item's live content."
-    )
-    prompt_hint = (
-        "read_workspace_item — open a note/board/sheet/canvas by title to "
-        "read its full current content when it wasn't fully included above"
     )
     parameters = {
         "type": "object",
@@ -94,7 +90,7 @@ class ReadWorkspaceItemTool(Tool):
         )
         if result is None:
             raise ToolError(
-                f'No note, board, sheet, or canvas titled "{title}" is visible '
+                f'No note, board, sheet, canvas or roster titled "{title}" is visible '
                 "in this workspace. Check the workspace map for the exact title."
             )
         item, text = result

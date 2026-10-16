@@ -33,6 +33,8 @@ EVENT_DISABLE = "disable"
 EVENT_ENABLE = "enable"
 EVENT_PASSWORD_CHANGE = "password_change"
 EVENT_PASSWORD_RESET_BY_ADMIN = "password_reset_by_admin"
+# Someone asked for a reset link (R-191). Logged only for real accounts.
+EVENT_PASSWORD_RESET_REQUESTED = "password_reset_requested"
 EVENT_FORCE_LOGOUT_ALL = "force_logout_all"
 EVENT_TOKEN_REFRESH = "token_refresh"
 EVENT_REFRESH_REJECTED = "refresh_rejected"
@@ -45,7 +47,20 @@ EVENT_MFA_RESET = "mfa_reset"
 EVENT_MFA_BACKUP_USED = "mfa_backup_used"
 EVENT_MFA_DEVICE_TRUSTED = "mfa_device_trusted"
 EVENT_MFA_DEVICE_REVOKED = "mfa_device_revoked"
+# App passwords for syncing devices (WP-8.3).
+EVENT_APP_PASSWORD_CREATED = "app_password_created"
+EVENT_APP_PASSWORD_REVOKED = "app_password_revoked"
+EVENT_APP_PASSWORD_FAILED = "app_password_failed"
 EVENT_APP_SETTINGS_CHANGED = "app_settings_changed"
+# Admin account actions (R-145) — the most sensitive changes an admin can
+# make, which the trail used to miss. ``detail`` carries ``by_admin`` and a
+# redacted summary; never a password or key.
+EVENT_USER_CREATED = "user_created"
+EVENT_ROLE_CHANGED = "role_changed"
+EVENT_EMAIL_CHANGED = "email_changed"
+EVENT_USERS_IMPORTED = "users_imported"
+EVENT_GROUP_CHANGED = "group_changed"
+EVENT_PROVIDER_KEY_CHANGED = "provider_key_changed"
 
 # Emitted when the rate limiter rejects a request. Surfaced in the audit
 # log so admins can spot brute-force / spray attempts at a glance even

@@ -7,6 +7,10 @@ from __future__ import annotations
 
 from app.app_settings.models import AppSettings  # noqa: F401
 from app.auth.events import AuthEvent  # noqa: F401
+from app.auth.app_passwords import AppPassword  # noqa: F401
+from app.photos.models import PhotoAsset  # noqa: F401
+from app.photos.album_models import Album, AlbumItem, AlbumMember  # noqa: F401
+from app.imports.models import FileImportMeta, ImportJob  # noqa: F401
 from app.auth.models import User  # noqa: F401
 from app.billing.models import UsageDaily  # noqa: F401
 from app.chat.models import (  # noqa: F401
@@ -30,7 +34,9 @@ from app.custom_models.models import (  # noqa: F401
     CustomModelFile,
     KnowledgeChunk,
 )
+from app.backups.models import BackupRun, OffsiteBackupConfig  # noqa: F401
 from app.files.models import (  # noqa: F401
+    BlobTombstone,
     DocumentState,
     FileFolder,
     FileShareGrant,

@@ -243,7 +243,7 @@ export function SearchProvidersPanel() {
                   {TYPE_INFO[p.type]?.label ?? p.type}
                 </span>
                 {i === 0 && p.enabled && (
-                  <span className="inline-flex items-center gap-1 rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--accent)]">
+                  <span className="inline-flex items-center gap-1 rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--accent-text)]">
                     <Star className="h-2.5 w-2.5" /> primary
                   </span>
                 )}

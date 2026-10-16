@@ -112,6 +112,8 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         oidc_client_id=row.oidc_client_id,
         oidc_button_label=row.oidc_button_label,
         oidc_scopes=row.oidc_scopes,
+        oidc_trust_unverified_email=row.oidc_trust_unverified_email,
+        oidc_satisfies_mfa=row.oidc_satisfies_mfa,
         oidc_client_secret_set=bool(row.oidc_client_secret_encrypted),
         oidc_configured=bool(
             row.oidc_enabled
@@ -120,6 +122,7 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
             and row.oidc_client_secret_encrypted
         ),
         default_storage_cap_bytes=row.default_storage_cap_bytes,
+        max_upload_bytes_large=row.max_upload_bytes_large,
         default_daily_token_budget=row.default_daily_token_budget,
         default_monthly_token_budget=row.default_monthly_token_budget,
         public_origins=list(row.public_origins or []),
@@ -142,6 +145,10 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         voice_provider_id=row.voice_provider_id,
         voice_model_id=row.voice_model_id,
         voice_configured=row.voice_configured,
+        photos_vision_provider_id=row.photos_vision_provider_id,
+        photos_vision_model_id=row.photos_vision_model_id,
+        photos_vision_configured=row.photos_vision_configured,
+        photos_vision_monthly_limit=row.photos_vision_monthly_limit,
         updated_at=row.updated_at,
     )
 
@@ -189,6 +196,20 @@ async def update_app_settings(
     if "mfa_required" in fields and payload.mfa_required is not None:
         if row.mfa_required != payload.mfa_required:
             diff["mfa_required"] = payload.mfa_required
+            if payload.mfa_required:
+                # Reach people who are already signed in: end the sessions
+                # of everyone without MFA, so their next sign-in goes
+                # through set-up. It used to wait for a sign-in that, with
+                # 30-day sessions, might never come (R-190). The admin
+                # making the change keeps their session.
+                from sqlalchemy import update
+
+                result = await db.execute(
+                    update(User)
+                    .where(User.mfa_enrolled_method.is_(None), User.id != actor.id)
+                    .values(token_version=User.token_version + 1)
+                )
+                diff["signed_out_without_mfa"] = result.rowcount or 0
         row.mfa_required = payload.mfa_required
 
     if "smtp_host" in fields:
@@ -245,6 +266,12 @@ async def update_app_settings(
             diff["oidc_enabled"] = payload.oidc_enabled
         row.oidc_enabled = payload.oidc_enabled
 
+    for flag in ("oidc_trust_unverified_email", "oidc_satisfies_mfa"):
+        if flag in fields and getattr(payload, flag) is not None:
+            if getattr(row, flag) != getattr(payload, flag):
+                diff[flag] = getattr(payload, flag)
+            setattr(row, flag, getattr(payload, flag))
+
     for field_name in ("oidc_issuer", "oidc_client_id", "oidc_button_label", "oidc_scopes"):
         if field_name in fields:
             new_val = getattr(payload, field_name)
@@ -272,6 +299,7 @@ async def update_app_settings(
     # null = revert to "no default" (uncapped), int = new default.
     for field_name in (
         "default_storage_cap_bytes",
+        "max_upload_bytes_large",
         "default_daily_token_budget",
         "default_monthly_token_budget",
     ):
@@ -489,6 +517,36 @@ async def update_app_settings(
             diff["voice_model_id"] = new_mid
         row.voice_provider_id = new_pid
         row.voice_model_id = new_mid
+
+    # ----- Photos vision model (PH-2) -----
+    ppid_set = "photos_vision_provider_id" in fields
+    pmid_set = "photos_vision_model_id" in fields
+    if ppid_set != pmid_set:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "photos_vision_provider_id and photos_vision_model_id must be sent "
+                "together — pass both to set the model, or both as null to clear."
+            ),
+        )
+    if ppid_set and pmid_set:
+        new_pid = payload.photos_vision_provider_id
+        new_mid = payload.photos_vision_model_id
+        if (new_pid is None) != (new_mid is None):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="photos_vision_provider_id and photos_vision_model_id must both be set or both be null.",
+            )
+        if row.photos_vision_provider_id != new_pid:
+            diff["photos_vision_provider_id"] = str(new_pid) if new_pid else None
+        if row.photos_vision_model_id != new_mid:
+            diff["photos_vision_model_id"] = new_mid
+        row.photos_vision_provider_id = new_pid
+        row.photos_vision_model_id = new_mid
+    if "photos_vision_monthly_limit" in fields and payload.photos_vision_monthly_limit is not None:
+        if row.photos_vision_monthly_limit != payload.photos_vision_monthly_limit:
+            diff["photos_vision_monthly_limit"] = payload.photos_vision_monthly_limit
+        row.photos_vision_monthly_limit = payload.photos_vision_monthly_limit
 
     # ----- Public CORS origins -----
     # Validated and de-duplicated; cache flushed below so the next

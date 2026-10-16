@@ -42,15 +42,100 @@ configure_logging(enable_ring=False)
 logger = logging.getLogger("promptly.bootstrap")
 
 
-def run_migrations() -> None:
+def _alembic_cfg() -> Config:
     settings = get_settings()
     cfg_path = Path(__file__).resolve().parent.parent / "alembic.ini"
     cfg = Config(str(cfg_path))
     cfg.set_main_option("script_location", str(cfg_path.parent / "alembic"))
     cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+    return cfg
+
+
+def run_migrations() -> None:
+    cfg = _alembic_cfg()
     logger.info("Running Alembic migrations to head...")
     command.upgrade(cfg, "head")
     logger.info("Migrations complete.")
+
+
+class SchemaAheadError(RuntimeError):
+    """The database was migrated by newer code than this image."""
+
+
+# Filled by the pre-migration backup, recorded once ``backup_runs`` exists.
+_premigrate_record: dict | None = None
+
+
+async def _pre_migration_backup() -> None:
+    """Dump the database before applying a schema change (WP-0.2, R-237).
+
+    Updates used to apply irreversible, data-deleting migrations with
+    nothing to roll back to. Runs only when there's something to migrate on
+    an existing install. Fails closed: if the dump can't be taken the
+    migration doesn't run, and the log says how to proceed anyway
+    (``PROMPTLY_SKIP_PREMIGRATE_BACKUP=1``).
+    """
+    global _premigrate_record
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import text
+
+    from app.backups.service import dump_database, server_major
+    from app.database import engine
+
+    script = ScriptDirectory.from_config(_alembic_cfg())
+    head = script.get_current_head()
+    try:
+        async with SessionLocal() as db:
+            try:
+                current = (
+                    await db.execute(text("SELECT version_num FROM alembic_version"))
+                ).scalar_one_or_none()
+            except Exception:  # noqa: BLE001 — no table yet: a fresh install
+                current = None
+            if current is None or current == head:
+                return
+            try:
+                script.get_revision(current)
+            except Exception as e:  # noqa: BLE001 — revision not in this code
+                raise SchemaAheadError(
+                    f"The database is at schema revision {current}, which this "
+                    f"version of Promptly doesn't know (its newest is {head}). "
+                    "It was upgraded by a newer release. Run that release again, "
+                    "or restore the backup taken before the upgrade "
+                    "(data/backups/pre-migrate-*.dump, see README → Backups)."
+                ) from e
+            if os.environ.get("PROMPTLY_SKIP_PREMIGRATE_BACKUP") == "1":
+                logger.warning(
+                    "Skipping the pre-migration backup (PROMPTLY_SKIP_PREMIGRATE_BACKUP=1)"
+                )
+                return
+            logger.info("Schema %s -> %s: backing up the database first...", current, head)
+            res = await dump_database(
+                "pre_migrate", label=current, server_version=await server_major(db)
+            )
+            logger.info("Pre-migration backup written: %s (%d bytes)", res.path.name, res.size_bytes)
+            _premigrate_record = {
+                "filename": res.path.name, "size_bytes": res.size_bytes, "revision": current,
+            }
+    finally:
+        await engine.dispose()
+
+
+async def _record_premigrate_backup() -> None:
+    if not _premigrate_record:
+        return
+    from datetime import datetime, timezone
+
+    from app.backups.models import BackupRun
+
+    async with SessionLocal() as db:
+        db.add(
+            BackupRun(
+                kind="pre_migrate", status="ok", finished_at=datetime.now(timezone.utc),
+                **_premigrate_record,
+            )
+        )
+        await db.commit()
 
 
 async def provision_singleton_user() -> None:
@@ -173,10 +258,18 @@ async def provision_env_model_provider() -> None:
             type=provider_type,
             api_key=encrypt_api_key(api_key),
             enabled=True,
-            # Left empty deliberately — the model list is fetched on demand
-            # ("Refresh models"), and guessing it here would go stale.
             models=[],
         )
+        # Fetch the real catalog now. Left empty, the provider looked
+        # "connected" in the wizard while the chat picker had nothing to
+        # offer until someone found "Refresh models" (R-283). Best effort:
+        # offline or a bad key keeps the empty list, as before.
+        try:
+            from app.models_config.provider import model_router
+
+            mp.models = await asyncio.wait_for(model_router.list_models(mp), timeout=20)
+        except Exception:  # noqa: BLE001
+            logger.warning("Couldn't fetch the %s model list at startup", name, exc_info=True)
         db.add(mp)
         await db.commit()
         logger.info(
@@ -289,12 +382,24 @@ async def provision_vapid_keys() -> None:
         if env_contact and row.vapid_contact != env_contact:
             row.vapid_contact = env_contact
             changed = True
-        elif row.vapid_contact is None:
-            # Default contact — push services accept either mailto: or
-            # https: URIs; this placeholder is fine until an admin
-            # customises it under Admin → Settings.
-            row.vapid_contact = "mailto:admin@localhost"
-            changed = True
+        elif row.vapid_contact in (None, "mailto:admin@localhost"):
+            # Push services use this to reach whoever runs the server when
+            # something's wrong; some reject a placeholder. Use the first
+            # admin's address once there is one (R-167).
+            from app.auth.models import User
+
+            admin_email = (
+                await db.execute(
+                    select(User.email)
+                    .where(User.role == "admin", User.disabled.is_(False))
+                    .order_by(User.created_at)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            contact = f"mailto:{admin_email}" if admin_email else "mailto:admin@localhost"
+            if row.vapid_contact != contact:
+                row.vapid_contact = contact
+                changed = True
 
         if changed:
             await db.commit()
@@ -308,6 +413,7 @@ async def _provision_all() -> None:
     calls leaves pooled connections bound to closed loops and subsequent
     calls raise ``Future attached to a different loop``.
     """
+    await _record_premigrate_backup()
     await provision_app_settings()
     await provision_vapid_keys()
     await provision_singleton_user()
@@ -316,6 +422,19 @@ async def _provision_all() -> None:
 
 
 def main() -> int:
+    try:
+        asyncio.run(_pre_migration_backup())
+    except SchemaAheadError as e:
+        logger.error("%s", e)
+        return 3
+    except Exception:  # noqa: BLE001
+        logger.exception(
+            "Couldn't back up the database before migrating, so the migration "
+            "was not run. Free some disk space or fix the error above; to "
+            "migrate without a backup, set PROMPTLY_SKIP_PREMIGRATE_BACKUP=1."
+        )
+        return 4
+
     try:
         run_migrations()
     except Exception:  # noqa: BLE001 — want full traceback on container stdout

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEditorStore } from "@/store/editorStore";
+import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -13,6 +15,14 @@ import {
   Zap,
 } from "lucide-react";
 
+// The PDF side-panel editor is TipTap — about 230 KB gzipped that every
+// chat page load used to fetch for a panel most people never open. It
+// loads the first time a PDF is opened for editing.
+const PdfEditorPanel = lazyWithRetry(
+  () => import("@/components/chat/PdfEditorPanel").then((m) => ({ default: m.PdfEditorPanel })),
+  "PdfEditorPanel"
+);
+
 import { chatApi } from "@/api/chat";
 import { TopNav } from "@/components/layout/TopNav";
 import { ChatWindow } from "@/components/chat/ChatWindow";
@@ -23,7 +33,7 @@ import { WorkspaceFilesToggle } from "@/components/chat/WorkspaceFilesToggle";
 import { ChatVisibilityToggle } from "@/components/chat/ChatVisibilityToggle";
 import type { RegenerateOverride } from "@/components/chat/MessageBubble";
 import { EditableTitle } from "@/components/chat/EditableTitle";
-import { EmptyState } from "@/components/chat/EmptyState";
+import { EmptyState, type ModelStatus } from "@/components/chat/EmptyState";
 import { StreamingAnnouncer } from "@/components/chat/StreamingAnnouncer";
 import { InputBar } from "@/components/chat/InputBar";
 import { SubchatModal } from "@/components/chat/SubchatModal";
@@ -35,7 +45,6 @@ import { RefineResearchDialog } from "@/components/chat/RefineResearchDialog";
 import { VoiceModeOverlay } from "@/components/chat/VoiceModeOverlay";
 import { ResearchProgressCard } from "@/components/chat/ResearchProgressCard";
 import { WorkspaceProposalsPanel } from "@/components/chat/WorkspaceProposalsPanel";
-import { PdfEditorPanel } from "@/components/chat/PdfEditorPanel";
 import { CodeArtifactPanel } from "@/components/codeArtifacts/CodeArtifactPanel";
 import {
   useBranchConversation,
@@ -100,6 +109,7 @@ export function ChatPage({
    *  the context and a "Back to workspace" row is redundant. */
   hideWorkspaceBar?: boolean;
 } = {}) {
+  const pdfEditorOpen = useEditorStore((st) => st.open);
   const { id: routeId } = useParams<{ id?: string }>();
   const id = embeddedConversationId ?? routeId;
   const navigate = useNavigate();
@@ -170,7 +180,18 @@ export function ChatPage({
   // embedded workspace chat — which hides the top bar + selector — still
   // populates ``available``; otherwise the selected model can't resolve and
   // sending is blocked with a "configure a model" dead end.
-  useAvailableModels();
+  const availableModels = useAvailableModels();
+  // Loading and a failed fetch used to read as "no provider connected"
+  // — on every cold load, and for good when offline (R-284).
+  const modelStatus: ModelStatus = selectedModel
+    ? "ready"
+    : availableModels.isPending
+      ? "loading"
+      : availableModels.isError && !availableModels.data
+        ? "error"
+        : (availableModels.data?.length ?? 0) > 0
+          ? "ready"
+          : "none";
 
   // Both toggles seed from the user's account defaults whenever a new chat
   // starts. Web search mode also reads the per-conversation stored value
@@ -200,7 +221,7 @@ export function ChatPage({
   // Phase 11 — Deep Research.
   const [researchDialogOpen, setResearchDialogOpen] = useState(false);
   const [voiceModeOpen, setVoiceModeOpen] = useState(false);
-  const { startResearch, refineResearch, cancelResearch } = useResearch();
+  const { startResearch, refineResearch, reattachResearch, cancelResearch } = useResearch();
   // "Dig deeper" refinement target — the research report message id being
   // expanded (the dialog owns the instruction draft).
   const [refineTarget, setRefineTarget] = useState<string | null>(null);
@@ -621,6 +642,20 @@ export function ChatPage({
       // thread + optimistic bubble — don't wipe it.
       return;
     }
+    if (st.streamError) {
+      // A send that failed before reaching the server: keep the message
+      // on screen with the error under it, so it can be sent again. It
+      // used to vanish — and in a brand-new chat the error went with it,
+      // leaving an empty chat as if nothing had happened.
+      const serverIds = new Set(conversation.messages.map((m) => m.id));
+      const unsent = st.messages.filter(
+        (m) => m.id.startsWith("optimistic-") && belongsHere(m) && !serverIds.has(m.id)
+      );
+      if (unsent.length > 0) {
+        setMessages([...conversation.messages, ...unsent]);
+        return;
+      }
+    }
     setMessages(conversation.messages);
   }, [id, conversation, setMessages]);
 
@@ -652,8 +687,14 @@ export function ChatPage({
     let cancelled = false;
     void (async () => {
       try {
-        const streamId = await chatApi.activeStream(id);
+        const active = await chatApi.activeStreamInfo(id);
+        const streamId = active.stream_id;
         if (cancelled || !streamId) return;
+        // A Deep Research run has its own progress view.
+        if (active.kind === "research") {
+          await reattachResearch(id, streamId, active.label ?? "Deep Research");
+          return;
+        }
         // Re-check in case the user kicked off a fresh turn here between
         // the check above and the network round-trip.
         if (owns(useChatStore.getState())) return;
@@ -667,7 +708,7 @@ export function ChatPage({
     return () => {
       cancelled = true;
     };
-  }, [id, conversation, reattach]);
+  }, [id, conversation, reattach, reattachResearch]);
 
   // Reset the reattach guard when the active conversation switches so
   // the new chat gets its own one-shot reattach attempt.
@@ -818,12 +859,15 @@ export function ChatPage({
           navigate(`/chat/${conv.id}`, { replace: true });
         } catch (err) {
           // Roll back the optimistic bubble so the user can retry cleanly.
+          const message = apiErrorMessage(err, "Couldn't start a new chat. Try again.");
           useChatStore.setState((s) => ({
             messages: s.messages.filter((m) => m.id !== optimisticId),
             isStreaming: false,
             streamingConversationId: null,
-            streamError: err instanceof Error ? err.message : String(err),
+            streamError: message,
           }));
+          // The empty new-chat screen has no error card to show it in.
+          toast.error(message);
           return;
         }
       }
@@ -1108,9 +1152,9 @@ export function ChatPage({
 
   // Auto-compaction path (opt-in, fired by the context pill at ~90%).
   // No confirm dialog — enabling the setting *is* the consent — but we
-  // still toast so the shortened history isn't a silent surprise. Errors
-  // are swallowed quietly: an auto-compact that can't run yet (too little
-  // history, provider hiccup) shouldn't nag the user with a red toast.
+  // still toast so the shortened history isn't a silent surprise. "Not
+  // enough history yet" (400) stays quiet; a real failure is shown, since
+  // otherwise the chat runs into the context limit without anyone knowing.
   const handleAutoCompact = useCallback(async () => {
     if (!id) return;
     try {
@@ -1118,8 +1162,10 @@ export function ChatPage({
       await queryClient.invalidateQueries({ queryKey: ["conversation", id] });
       await queryClient.invalidateQueries({ queryKey: ["conversations"] });
       toast.success("Auto-compacted to free up context");
-    } catch {
-      // Best-effort — the manual button (with its error toast) remains.
+    } catch (e) {
+      const status = (e as { response?: { status?: number } })?.response?.status;
+      if (status === 400) return;
+      toast.error(`Auto-compact failed: ${apiErrorMessage(e)}`);
     }
   }, [id, queryClient]);
 
@@ -1377,7 +1423,7 @@ export function ChatPage({
           ) : (
             <div className="flex flex-1 items-center justify-center">
               <EmptyState
-                hasModel={Boolean(selectedModel)}
+                modelStatus={modelStatus}
                 workspaceId={conversation?.workspace_id ?? null}
                 onSuggestion={(s) => handleSend(s)}
               />
@@ -1393,13 +1439,14 @@ export function ChatPage({
             />
           )}
 
-          {/* Batch 4.1 — the AI's pending workspace write-back proposals.
-              Preview + Apply/Dismiss cards; nothing is written until the
-              owner approves. */}
-          {id && isOwner && conversation?.workspace_id && (
+          {/* Batch 4.1 — the AI's pending write-back proposals (workspace
+              notes / cards; file changes in any chat, WP-5.3). Preview +
+              Apply/Dismiss cards; nothing is written until the owner
+              approves. */}
+          {id && isOwner && (
             <WorkspaceProposalsPanel
               conversationId={id}
-              workspaceId={conversation.workspace_id}
+              workspaceId={conversation?.workspace_id ?? null}
             />
           )}
 
@@ -1463,7 +1510,11 @@ export function ChatPage({
       {/* Phase A3: side-panel Markdown editor for AI-generated PDFs.
           Renders into the same DOM tree but its fixed positioning takes
           it out of normal flow; null when no file is selected. */}
-      <PdfEditorPanel />
+      {pdfEditorOpen && (
+        <Suspense fallback={null}>
+          <PdfEditorPanel />
+        </Suspense>
+      )}
 
       {/* Subchat — floating, draggable side-conversation. Mounted only
           while open; the hook resets/aborts on unmount. */}
@@ -1614,7 +1665,7 @@ function WorkspaceBreadcrumb({
         Back to workspace
       </button>
       <span className="inline-flex items-center gap-1 text-[var(--text-muted)]">
-        <LayoutGrid className="h-3 w-3 text-[var(--accent)]" />
+        <LayoutGrid className="h-3 w-3 text-[var(--accent-text)]" />
         <span className="truncate font-medium text-[var(--text)]">
           {workspace?.title ?? "Workspace"}
         </span>
@@ -1644,7 +1695,7 @@ function RetrievalBadge() {
   return (
     <span
       title="This workspace uses semantic retrieval — only the most relevant chunks are included in context each turn"
-      className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent)]"
+      className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium text-[var(--accent-text)]"
     >
       <Zap className="h-2.5 w-2.5" />
       Retrieval on
@@ -1664,12 +1715,12 @@ function BranchBanner({ parentId, parentMessageId }: BranchBannerProps) {
     : `/chat/${parentId}`;
   return (
     <div className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-2 text-xs text-[var(--text-muted)]">
-      <GitBranch className="h-3 w-3 text-[var(--accent)]" />
+      <GitBranch className="h-3 w-3 text-[var(--accent-text)]" />
       <span>Branched from a previous chat.</span>
       <button
         type="button"
         onClick={() => navigate(target)}
-        className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+        className="font-medium text-[var(--accent-text)] underline-offset-2 hover:underline"
       >
         Jump to original →
       </button>

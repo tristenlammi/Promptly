@@ -23,8 +23,9 @@ import { cn } from "@/utils/cn";
 export function ToastViewport() {
   const toasts = useToastStore((s) => s.toasts);
 
-  if (toasts.length === 0) return null;
-
+  // The live region is always mounted (empty when idle): one that appears
+  // together with its first toast isn't announced by many screen readers
+  // (R-122).
   return createPortal(
     <div
       className={cn(
@@ -67,7 +68,7 @@ const TYPE_META: Record<
   info: {
     icon: Info,
     accent: "var(--accent)",
-    iconClass: "text-[var(--accent)]",
+    iconClass: "text-[var(--accent-text)]",
     role: "status",
   },
 };
@@ -121,8 +122,14 @@ function ToastItem({ toast }: { toast: Toast }) {
   return (
     <div
       role={meta.role}
+      // Paused while you're pointing at it, touching it, or tabbed into it.
       onMouseEnter={pause}
       onMouseLeave={resume}
+      onPointerDown={pause}
+      onFocus={pause}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) resume();
+      }}
       className={cn(
         "promptly-toast-in pointer-events-auto flex w-full max-w-sm items-start gap-2.5 rounded-card border p-3 shadow-lg",
         "border-[var(--border)] bg-[var(--surface)] text-[var(--text)]",
@@ -138,7 +145,7 @@ function ToastItem({ toast }: { toast: Toast }) {
         )}
         <div
           className={cn(
-            "text-sm leading-snug",
+            "whitespace-pre-line text-sm leading-snug",
             toast.title ? "text-[var(--text-muted)]" : "text-[var(--text)]",
           )}
         >
@@ -153,7 +160,7 @@ function ToastItem({ toast }: { toast: Toast }) {
             }}
             className={cn(
               "mt-1.5 rounded-md px-2 py-1 text-xs font-semibold transition",
-              "bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/20",
+              "bg-[var(--accent)]/10 text-[var(--accent-text)] hover:bg-[var(--accent)]/20",
             )}
           >
             {toast.action.label}

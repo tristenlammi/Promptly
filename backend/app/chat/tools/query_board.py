@@ -126,10 +126,6 @@ class QueryBoardCardsTool(Tool):
         "priority cards', 'what's assigned to me', 'unassigned cards'. Returns "
         "an accurate count and the matching cards. Filters combine (AND)."
     )
-    prompt_hint = (
-        "query_board_cards — count/filter board cards by status, assignee, "
-        "priority, label or due date (e.g. 'overdue for Jane')"
-    )
     parameters = {
         "type": "object",
         "properties": {
@@ -300,7 +296,10 @@ class QueryBoardCardsTool(Tool):
             if r.assignee_user_id:
                 bits.append(names.get(r.assignee_user_id, "someone"))
             if r.due_at is not None:
-                bits.append(f"due {r.due_at.date().isoformat()}")
+                # The asker's local day, not the UTC date (R-173).
+                from app.workspaces.localtime import local_date, zone_of
+
+                bits.append(f"due {local_date(r.due_at, zone_of(ctx.user))}")
             bits.append(r.priority)
             lines.append(f'- "{r.title}" · ' + " · ".join(bits))
         if count > len(rows):

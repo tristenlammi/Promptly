@@ -19,6 +19,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -93,6 +94,20 @@ class McpConnector(UUIDPKMixin, TimestampMixin, Base):
     tools_refreshed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Health (R-158): stamped by every refresh and by every call from chat,
+    # commands and automations, so the admin list can say whether the
+    # connector actually works. A tool reporting its own failure ("no device
+    # called garage") isn't a connector problem and doesn't count.
+    last_ok_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_error_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
 
     created_by: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -116,6 +131,13 @@ class WorkspaceMcpConnector(Base):
     connector_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("mcp_connectors.id", ondelete="CASCADE"),
         primary_key=True,
+    )
+    # Attached from Admin → Connectors rather than by the workspace's owner
+    # or admins. Workspace-side saves leave these alone: they used to wipe
+    # every row and re-add only what the owner could personally reach,
+    # silently detaching the admin's choices (R-156).
+    attached_by_admin: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
     )
 
 

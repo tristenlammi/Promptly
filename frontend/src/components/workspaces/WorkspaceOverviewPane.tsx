@@ -1,8 +1,10 @@
+import { workspaceDefaultsApi } from "@/api/workspaceDefaults";
 import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   ArrowRight,
   Brain,
+  CalendarDays,
   CheckCircle2,
   ChevronRight,
   Circle,
@@ -37,6 +39,7 @@ import {
 } from "@/api/workspaces";
 import {
   useRegenerateWorkspaceMemory,
+  useReindexWorkspace,
   useUpdateWorkspaceTask,
   useWorkspace,
   useWorkspaceMemory,
@@ -98,6 +101,16 @@ export function WorkspaceOverviewPane({
 
   // Indexing-health rollup across tree items + pinned files, so "the AI
   // hasn't caught up with X yet" stops being invisible.
+  // No embedding model → nothing will ever finish indexing; say so rather
+  // than spin forever (R-261). Unknown (still loading) counts as ready.
+  const { data: wsDefaults } = useQuery({
+    queryKey: ["workspace-defaults"],
+    queryFn: () => workspaceDefaultsApi.get(),
+    staleTime: 60_000,
+  });
+  const searchReady = wsDefaults?.embedding_configured !== false;
+  const reindex = useReindexWorkspace(workspaceId);
+  const isOwner = workspace?.access_role === "owner";
   const indexing = useMemo(() => {
     const flat: WorkspaceItemNode[] = [];
     const walk = (nodes: WorkspaceItemNode[]) => {
@@ -171,6 +184,8 @@ export function WorkspaceOverviewPane({
       (counts?.boards ?? 0) +
       (counts?.sheets ?? 0) +
       (counts?.chats ?? 0) +
+      (counts?.rosters ?? 0) +
+      (counts?.discussions ?? 0) +
       (counts?.files ?? 0) ===
     0;
 
@@ -183,14 +198,12 @@ export function WorkspaceOverviewPane({
         {/* The workspace name is the page title in the top bar now (titleSize
             "lg"), so the overview leads with context, not a duplicate title. */}
         <div className="min-w-0">
-          {workspace?.description ? (
+          {/* No stock subtitle: "everything here is context" is said once,
+              by the banner (or Get started) below — it used to appear three
+              times on one page (V11). */}
+          {workspace?.description && (
             <p className="max-w-xl text-sm text-[var(--text-muted)]">
               {workspace.description}
-            </p>
-          ) : (
-            <p className="text-sm text-[var(--text-muted)]">
-              Everything here — notes, boards, files, chats — feeds one
-              project brain.
             </p>
           )}
         </div>
@@ -233,7 +246,7 @@ export function WorkspaceOverviewPane({
         <GettingStarted />
       ) : !bannerDismissed ? (
         <div className="relative mt-4 flex items-start gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 pr-8 text-xs text-[var(--text-muted)]">
-          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+          <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
           <span>
             Everything you add here — notes, canvases, and files — becomes{" "}
             <span className="font-medium text-[var(--text)]">context</span> your
@@ -330,7 +343,7 @@ export function WorkspaceOverviewPane({
                     {t.checked ? (
                       <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
                     ) : (
-                      <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                      <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
                     )}
                     <span className="min-w-0 flex-1">
                       <span
@@ -366,6 +379,8 @@ export function WorkspaceOverviewPane({
                     ["board", "board", "boards", counts?.boards ?? 0, Columns3],
                     ["sheet", "sheet", "sheets", counts?.sheets ?? 0, Table2],
                     ["canvas", "canvas", "canvases", counts?.canvases ?? 0, PenTool],
+                    ["roster", "roster", "rosters", counts?.rosters ?? 0, CalendarDays],
+                    ["discussion", "discussion", "discussions", counts?.discussions ?? 0, MessagesSquare],
                     ["chat", "chat", "chats", counts?.chats ?? 0, MessageSquare],
                     ["file", "file", "files", counts?.files ?? 0, Layers],
                   ] as const
@@ -383,10 +398,19 @@ export function WorkspaceOverviewPane({
                   <span className="h-1.5 w-1.5 rounded-full bg-[var(--success)]" />
                   {indexing.inContext} in context
                 </span>
-                {indexing.pending > 0 && (
+                {indexing.pending > 0 && searchReady && (
                   <span className="inline-flex items-center gap-1.5">
                     <Loader2 className="h-3 w-3 animate-spin" />
                     {indexing.pending} indexing
+                  </span>
+                )}
+                {indexing.pending > 0 && !searchReady && (
+                  <span
+                    className="inline-flex items-center gap-1.5 text-[var(--warning)]"
+                    title="Files and notes are indexed once an embedding model is set up (Admin → Models). Until then chats here can't search them."
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
+                    Search is off — no embedding model yet
                   </span>
                 )}
                 {indexing.failedNames.length > 0 && (
@@ -396,7 +420,41 @@ export function WorkspaceOverviewPane({
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-[var(--danger)]" />
                     {indexing.failedNames.length} failed
+                    {isOwner && searchReady && (
+                      <button
+                        type="button"
+                        disabled={reindex.isPending}
+                        onClick={() =>
+                          reindex.mutate(
+                            { failedOnly: true },
+                            {
+                              onSuccess: () => toast.success("Retrying — this can take a minute."),
+                              onError: () => toast.error("Couldn't start the retry."),
+                            }
+                          )
+                        }
+                        className="ml-1 rounded px-1 font-medium underline-offset-2 hover:underline disabled:opacity-50"
+                      >
+                        Retry
+                      </button>
+                    )}
                   </span>
+                )}
+                {isOwner && searchReady && (
+                  <button
+                    type="button"
+                    disabled={reindex.isPending}
+                    title="Re-embed every file, item and chat in this workspace"
+                    onClick={() =>
+                      reindex.mutate(undefined, {
+                        onSuccess: () => toast.success("Re-indexing the workspace."),
+                        onError: () => toast.error("Couldn't start the re-index."),
+                      })
+                    }
+                    className="ml-auto rounded px-1 hover:text-[var(--text)] hover:underline disabled:opacity-50"
+                  >
+                    Re-index
+                  </button>
                 )}
               </div>
             </section>
@@ -758,7 +816,7 @@ function GettingStarted() {
     {
       icon: FileText,
       title: "Add a note or upload a file",
-      body: "Use “+ New” in the rail, or drop files into the drive below. Notes, canvases, and files become the AI's context for this workspace.",
+      body: "Use “+ New” in the rail, or drop files into the drive below.",
     },
     {
       icon: MessageSquare,
@@ -783,7 +841,7 @@ function GettingStarted() {
       <ol className="mt-4 space-y-3">
         {steps.map((s, i) => (
           <li key={i} className="flex items-start gap-3">
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/10 text-xs font-semibold text-[var(--accent)]">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/10 text-xs font-semibold text-[var(--accent-text)]">
               {i + 1}
             </span>
             <div className="min-w-0">
@@ -856,7 +914,7 @@ function MemoryCard({
             "rounded-full px-2 py-0.5 font-medium",
             off
               ? "bg-[var(--hover-strong)] text-[var(--text-muted)]"
-              : "bg-[var(--accent)]/10 text-[var(--accent)]"
+              : "bg-[var(--accent)]/10 text-[var(--accent-text)]"
           )}
         >
           {MEMORY_MODE_LABELS[mode] ?? mode}

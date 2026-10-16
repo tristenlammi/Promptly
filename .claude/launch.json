@@ -3,8 +3,7 @@
   "configurations": [
     {
       "name": "promptly",
-      "runtimeExecutable": "docker",
-      "runtimeArgs": ["compose", "up", "-d"],
+      "url": "http://localhost:8091",
       "port": 8091,
       "autoPort": false
     },

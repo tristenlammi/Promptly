@@ -38,3 +38,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency that yields a database session per request."""
     async with SessionLocal() as session:
         yield session
+
+
+# Structural-change hooks for live workspace updates (R-187) — registered
+# wherever sessions are, so the worker's commits notify open pages too.
+import app.workspaces.live  # noqa: E402,F401
+# Office files keep their Drive shells in step (WP-3.2).
+import app.files.office  # noqa: E402,F401

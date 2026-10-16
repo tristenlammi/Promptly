@@ -19,9 +19,12 @@ import base64
 import io
 import logging
 import os
+import threading
+from collections import OrderedDict
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
+import app.files.imaging  # noqa: F401 — HEIC/AVIF → JPEG for the models (WP-7.3)
 from app.files.models import UserFile
 from app.files.storage import absolute_path, read_text
 from app.models_config.provider import ImagePart
@@ -55,10 +58,11 @@ _IMAGE_MIMES: frozenset[str] = frozenset(
         "image/gif",
         "image/heic",
         "image/heif",
+        "image/avif",
     }
 )
 _IMAGE_EXTS: frozenset[str] = frozenset(
-    {".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".heif"}
+    {".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic", ".heif", ".avif"}
 )
 
 # Vision models downsample images to a fixed resolution before they ever
@@ -145,6 +149,30 @@ def _looks_textual(f: UserFile) -> bool:
         return True
     ext = os.path.splitext(f.filename or "")[1].lower()
     return ext in _INLINE_TEXT_EXTS
+
+
+def _office_text(f: UserFile) -> str | None:
+    """A Document's visible text, or a Sheet's / Whiteboard's flattened text
+    (their Drive row has no blob, WP-3.2) — None for any other file."""
+    kind = getattr(f, "source_kind", None)
+    from app.files.office_formats import office_ext
+
+    if office_ext(getattr(f, "filename", None)) is not None:
+        # An uploaded Word / Excel / PowerPoint file: the worker's text.
+        return (f.content_text or "[This file's text is still being read — ask again in a moment.]")[
+            :_TEXT_ATTACHMENT_LIMIT
+        ]
+    if kind in ("sheet", "whiteboard"):
+        return (f.content_text or "")[:_TEXT_ATTACHMENT_LIMIT]
+    if kind == "document":
+        try:
+            html = read_text(f.storage_path, _TEXT_ATTACHMENT_LIMIT * 4)
+        except OSError:
+            return f.content_text or ""
+        from app.files.document_render import extract_text_from_html
+
+        return (extract_text_from_html(html) or f.content_text or "")[:_TEXT_ATTACHMENT_LIMIT]
+    return None
 
 
 def _looks_pdf(f: UserFile) -> bool:
@@ -298,7 +326,10 @@ def build_attachment_preamble(
             f"size=\"{_human_size(f.size_bytes)}\">"
         )
 
-        if looks_image(f):
+        office_text = _office_text(f)
+        if office_text is not None:
+            body = office_text or "[Empty.]"
+        elif looks_image(f):
             if vision_handles_images:
                 body = (
                     f"[Image — {_human_size(f.size_bytes)}. The image bytes "
@@ -377,7 +408,21 @@ def _prepare_image_for_vision(raw: bytes, mime: str) -> tuple[bytes, str] | None
                 and longest <= _MAX_IMAGE_EDGE
             )
             if already_fine:
-                return raw, mime
+                # Sent as-is, but never with its metadata: an AI provider
+                # is somewhere the photo leaves Promptly, so location and
+                # camera details come off (losslessly). If that fails, the
+                # re-encode below drops them instead.
+                from app.files.egress import strip_bytes
+
+                stripped = strip_bytes(raw)
+                if stripped is not None:
+                    return stripped, mime
+
+            # Originals keep their EXIF orientation now; apply it before
+            # re-encoding (which drops EXIF) so the model sees it upright.
+            im = ImageOps.exif_transpose(im)
+            width, height = im.size
+            longest = max(width, height)
 
             # Cap the longest edge, preserving aspect ratio.
             if longest > _MAX_IMAGE_EDGE:
@@ -454,6 +499,20 @@ def build_image_parts(
         if not looks_image(f):
             continue
 
+        # Every image in the history is re-sent on every turn; decoding and
+        # re-encoding a 12 MP photo costs ~200 ms each time (R-016). The
+        # prepared result only changes when the file does.
+        try:
+            path = absolute_path(f.storage_path)
+            st = path.stat()
+            cache_key = (f.storage_path, st.st_size, st.st_mtime_ns)
+        except (OSError, ValueError):
+            cache_key = None
+        cached = _vision_cache_get(cache_key)
+        if cached is not None:
+            parts.append(ImagePart(url=cached, detail="auto"))
+            continue
+
         try:
             path = absolute_path(f.storage_path)
             with open(path, "rb") as fh:
@@ -507,9 +566,37 @@ def build_image_parts(
 
         encoded = base64.b64encode(payload).decode("ascii")
         url = f"data:{mime};base64,{encoded}"
+        _vision_cache_put(cache_key, url)
         parts.append(ImagePart(url=url, detail="auto"))
 
     return parts, warnings
+
+
+# Prepared vision payloads, most recently used last. Small: each entry is a
+# downscaled image's data URL (well under the per-image budget).
+_VISION_CACHE_MAX = 32
+_vision_cache: "OrderedDict[tuple, str]" = OrderedDict()
+_vision_cache_lock = threading.Lock()
+
+
+def _vision_cache_get(key) -> str | None:
+    if key is None:
+        return None
+    with _vision_cache_lock:
+        url = _vision_cache.get(key)
+        if url is not None:
+            _vision_cache.move_to_end(key)
+        return url
+
+
+def _vision_cache_put(key, url: str) -> None:
+    if key is None:
+        return
+    with _vision_cache_lock:
+        _vision_cache[key] = url
+        _vision_cache.move_to_end(key)
+        while len(_vision_cache) > _VISION_CACHE_MAX:
+            _vision_cache.popitem(last=False)
 
 
 def build_image_part_from_bytes(

@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
 import {
   Ban,
   BarChart3,
@@ -7,6 +7,7 @@ import {
   Loader2,
   Lock,
   LogOut,
+  ShieldOff,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -18,6 +19,10 @@ import {
   Download,
   User as UserIcon,
 } from "lucide-react";
+
+import { confirm } from "@/components/shared/ConfirmDialog";
+import { toast } from "@/store/toastStore";
+import { apiErrorMessage } from "@/utils/apiError";
 import { createPortal } from "react-dom";
 
 import { DeleteUserModal } from "@/components/admin/DeleteUserModal";
@@ -36,12 +41,17 @@ import {
   useDisableUser,
   useEnableUser,
   useLogoutEverywhere,
+  useResetUserMfa,
   useResetUserPassword,
   useUnlockUser,
   useUpdateAdminUser,
 } from "@/hooks/useAdminUsers";
 import { Modal } from "@/components/shared/Modal";
-import { adminApi, type UserImportResult } from "@/api/admin";
+import {
+  adminApi,
+  type DeleteUserPayload,
+  type UserImportResult,
+} from "@/api/admin";
 import { groupsApi, type UserGroup } from "@/api/groups";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
@@ -67,6 +77,7 @@ export function UsersPanel() {
   const disableUser = useDisableUser();
   const enableUser = useEnableUser();
   const logoutEverywhere = useLogoutEverywhere();
+  const resetMfa = useResetUserMfa();
   const resetPassword = useResetUserPassword();
 
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
@@ -115,9 +126,11 @@ export function UsersPanel() {
     try {
       const result = await adminApi.importUsersCsv(file);
       setImportResult(result);
+      if (result.failed) toast.error(result.failed);
       void refetch();
-    } catch {
-      // non-fatal — surfaced by the axios interceptor
+    } catch (e) {
+      // There is no interceptor that reports this (R-137).
+      toast.error(apiErrorMessage(e, "Couldn't import that file."));
     } finally {
       setImporting(false);
     }
@@ -130,6 +143,12 @@ export function UsersPanel() {
       password: values.password,
       role: values.role,
       allowed_models: values.allowed_models,
+      // These were collected by the dialog and then dropped, so a user
+      // meant to be locked down got every capability (R-260).
+      can_generate_images: values.can_generate_images,
+      can_execute_code: values.can_execute_code,
+      can_reach_private_network: values.can_reach_private_network,
+      must_change_password: values.must_change_password ?? true,
       group_ids: values.group_ids,
       storage_cap_bytes: values.storage_cap_bytes,
       daily_token_budget: values.daily_token_budget,
@@ -167,6 +186,10 @@ export function UsersPanel() {
           values.can_execute_code !== target.can_execute_code
             ? values.can_execute_code
             : undefined,
+        can_reach_private_network:
+          values.can_reach_private_network !== target.can_reach_private_network
+            ? values.can_reach_private_network
+            : undefined,
         group_ids: sameStringSet(values.group_ids, target.group_ids)
           ? undefined
           : values.group_ids,
@@ -186,8 +209,8 @@ export function UsersPanel() {
     });
   };
 
-  const handleDelete = async (target: AdminUser) => {
-    await deleteUser.mutateAsync(target.id);
+  const handleDelete = async (target: AdminUser, payload: DeleteUserPayload) => {
+    await deleteUser.mutateAsync({ id: target.id, payload });
     close();
   };
 
@@ -206,9 +229,36 @@ export function UsersPanel() {
   // The "N without MFA" pill doubles as a filter toggle so an admin can act
   // on the list it summarises instead of scanning the table for the chips.
   const [showNoMfaOnly, setShowNoMfaOnly] = useState(false);
-  const visibleUsers = showNoMfaOnly
-    ? (users ?? []).filter((u) => !u.mfa_enrolled_method)
-    : users;
+  // Find someone in a long list (R-192): search, a status/role filter and
+  // a sort, all on what's already loaded.
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "disabled" | "locked" | "admins">("all");
+  const [sortBy, setSortBy] = useState<"name" | "seen" | "created">("name");
+  const visibleUsers = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const seen = (u: AdminUser) => new Date(u.last_seen_at ?? u.last_login_at ?? 0).getTime();
+    return (users ?? [])
+      .filter((u) => !showNoMfaOnly || !u.mfa_enrolled_method)
+      .filter((u) => !q || u.username.toLowerCase().includes(q) || u.email.toLowerCase().includes(q))
+      .filter((u) =>
+        statusFilter === "all"
+          ? true
+          : statusFilter === "active"
+            ? !u.disabled && u.locked_at === null
+            : statusFilter === "disabled"
+              ? u.disabled
+              : statusFilter === "locked"
+                ? u.locked_at !== null
+                : u.role === "admin"
+      )
+      .sort((a, b) =>
+        sortBy === "seen"
+          ? seen(b) - seen(a)
+          : sortBy === "created"
+            ? new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+            : a.username.localeCompare(b.username)
+      );
+  }, [users, showNoMfaOnly, search, statusFilter, sortBy]);
 
   return (
     <>
@@ -245,7 +295,37 @@ export function UsersPanel() {
             </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name or email"
+            aria-label="Search users"
+            className="h-8 w-48 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2.5 text-xs text-[var(--text)] focus:border-[var(--accent)] focus:outline-none"
+          />
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            aria-label="Filter users"
+            className="h-8 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2 text-xs text-[var(--text)]"
+          >
+            <option value="all">Everyone</option>
+            <option value="active">Active</option>
+            <option value="disabled">Disabled</option>
+            <option value="locked">Locked</option>
+            <option value="admins">Admins</option>
+          </select>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
+            aria-label="Sort users"
+            className="h-8 rounded-input border border-[var(--border)] bg-[var(--bg)] px-2 text-xs text-[var(--text)]"
+          >
+            <option value="name">Sort: name</option>
+            <option value="seen">Sort: last seen</option>
+            <option value="created">Sort: newest</option>
+          </select>
           <input
             ref={importInputRef}
             type="file"
@@ -337,9 +417,34 @@ export function UsersPanel() {
                   onResetPassword={() => setModal({ kind: "reset", user: u })}
                   onViewUsage={() => setModal({ kind: "usage", user: u })}
                   onUnlock={() => unlockUser.mutate(u.id)}
-                  onDisable={() => disableUser.mutate(u.id)}
+                  onDisable={async () => {
+                    const ok = await confirm({
+                      title: `Disable ${u.username}?`,
+                      message: "They're signed out everywhere and can't sign in until you enable the account again. Nothing is deleted.",
+                      confirmLabel: "Disable",
+                      danger: true,
+                    });
+                    if (ok) disableUser.mutate(u.id, { onSuccess: () => toast.success(`${u.username} disabled.`) });
+                  }}
                   onEnable={() => enableUser.mutate(u.id)}
-                  onLogoutEverywhere={() => logoutEverywhere.mutate(u.id)}
+                  onLogoutEverywhere={async () => {
+                    const ok = await confirm({
+                      title: `Sign ${u.username} out everywhere?`,
+                      message: "Every device they're signed in on is signed out. They can sign straight back in.",
+                      confirmLabel: "Sign out",
+                    });
+                    if (ok) logoutEverywhere.mutate(u.id, { onSuccess: () => toast.success(`${u.username} signed out everywhere.`) });
+                  }}
+                  onResetMfa={async () => {
+                    const ok = await confirm({
+                      title: `Reset two-step verification for ${u.username}?`,
+                      message:
+                        "Their authenticator and backup codes stop working and they're signed out everywhere. They can set it up again after signing in.",
+                      confirmLabel: "Reset",
+                      danger: true,
+                    });
+                    if (ok) resetMfa.mutate(u.id, { onSuccess: () => toast.success("Two-step verification reset.") });
+                  }}
                   busy={
                     unlockUser.isPending ||
                     disableUser.isPending ||
@@ -376,10 +481,24 @@ export function UsersPanel() {
       />
       <DeleteUserModal
         open={modal.kind === "delete"}
+        userId={modal.kind === "delete" ? modal.user.id : null}
         username={modal.kind === "delete" ? modal.user.username : ""}
+        adminOptions={(users ?? [])
+          .filter((u) => u.role === "admin" && !u.disabled)
+          .map((u) => ({ id: u.id, username: u.username }))}
+        onDisableInstead={
+          modal.kind === "delete" && !modal.user.disabled
+            ? async () => {
+                await disableUser.mutateAsync(modal.user.id);
+                close();
+              }
+            : undefined
+        }
         onClose={close}
-        onConfirm={() =>
-          modal.kind === "delete" ? handleDelete(modal.user) : Promise.resolve()
+        onConfirm={(payload) =>
+          modal.kind === "delete"
+            ? handleDelete(modal.user, payload)
+            : Promise.resolve()
         }
       />
       <ResetPasswordModal
@@ -416,6 +535,7 @@ interface UserRowProps {
   onDisable: () => void;
   onEnable: () => void;
   onLogoutEverywhere: () => void;
+  onResetMfa: () => void;
   busy: boolean;
 }
 
@@ -431,6 +551,7 @@ function UserRow({
   onDisable,
   onEnable,
   onLogoutEverywhere,
+  onResetMfa,
   busy,
 }: UserRowProps) {
   const isAdmin = user.role === "admin";
@@ -472,7 +593,7 @@ function UserRow({
           className={cn(
             "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold",
             isAdmin
-              ? "bg-[var(--accent)]/10 text-[var(--accent)]"
+              ? "bg-[var(--accent)]/10 text-[var(--accent-text)]"
               : "bg-black/[0.04] text-[var(--text-muted)] dark:bg-white/[0.06]"
           )}
         >
@@ -486,9 +607,9 @@ function UserRow({
       </td>
 
       <td className="px-4 py-3 text-xs text-[var(--text-muted)]">
-        {user.last_login_at ? (
-          <div title={`${user.last_login_at}${user.last_login_ip ? `\n${user.last_login_ip}` : ""}`}>
-            {formatRelative(new Date(user.last_login_at))}
+        {user.last_seen_at || user.last_login_at ? (
+          <div title={`Last signed in ${user.last_login_at ?? "—"}${user.last_login_ip ? ` from ${user.last_login_ip}` : ""}`}>
+            {formatRelative(new Date((user.last_seen_at ?? user.last_login_at)!))}
           </div>
         ) : (
           <span className="text-[var(--text-muted)]">Never</span>
@@ -513,6 +634,7 @@ function UserRow({
             onDisable={onDisable}
             onEnable={onEnable}
             onLogoutEverywhere={onLogoutEverywhere}
+            onResetMfa={onResetMfa}
             onDelete={onDelete}
           />
         </div>
@@ -557,7 +679,7 @@ function ImportResultModal({
               <button
                 type="button"
                 onClick={copyAll}
-                className="text-xs text-[var(--accent)] hover:underline"
+                className="text-xs text-[var(--accent-text)] hover:underline"
               >
                 Copy all
               </button>
@@ -664,6 +786,7 @@ interface ActionMenuProps {
   onDisable: () => void;
   onEnable: () => void;
   onLogoutEverywhere: () => void;
+  onResetMfa: () => void;
   onDelete: () => void;
 }
 
@@ -678,6 +801,7 @@ function ActionMenu({
   onDisable,
   onEnable,
   onLogoutEverywhere,
+  onResetMfa,
   onDelete,
 }: ActionMenuProps) {
   const [open, setOpen] = useState(false);
@@ -764,6 +888,14 @@ function ActionMenu({
               onClick={wrap(onLogoutEverywhere)}
               disabled={busy}
             />
+            {user.mfa_enrolled_method ? (
+              <MenuItem
+                icon={<ShieldOff className="h-3.5 w-3.5" />}
+                label="Reset two-step verification"
+                onClick={wrap(onResetMfa)}
+                disabled={busy || isSelf}
+              />
+            ) : null}
             {user.disabled ? (
               <MenuItem
                 icon={<CheckCircle2 className="h-3.5 w-3.5" />}
@@ -847,7 +979,7 @@ function Pill({
 }) {
   const styles: Record<PillTone, string> = {
     success: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
-    info: "bg-[var(--accent)]/10 text-[var(--accent)]",
+    info: "bg-[var(--accent)]/10 text-[var(--accent-text)]",
     warn: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
     danger: "bg-red-500/10 text-red-600 dark:text-red-400",
   };

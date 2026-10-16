@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.utils import decrypt_secret
 from app.groups.models import UserGroupMember
-from app.mcp.client import McpError, call_tool, fetch_tools
+from app.mcp.client import McpError, McpToolFailed, call_tool, fetch_tools, normalise_schema
 from app.mcp.models import (
     ConnectorGroup,
     ConnectorUser,
@@ -216,10 +216,15 @@ async def connectors_for_turn(
 
 def build_tools_from_connectors(
     connectors: list[McpConnector],
+    *,
+    ask_first: bool = False,
 ) -> tuple[list[dict[str, Any]], dict[str, tuple[uuid.UUID, str]]]:
     """(OpenAI tool schemas, {advertised_name: (connector_id, real_tool)}).
 
-    Honours each connector's allow-list and drops destructive tools (MVP).
+    Honours each connector's allow-list. Destructive tools are dropped —
+    unless ``ask_first``: chat can offer them, because a call there doesn't
+    run until the user approves it on an approval card. Automations have
+    nobody to ask, so they keep the old behaviour.
     """
     schemas: list[dict[str, Any]] = []
     dispatch: dict[str, tuple[uuid.UUID, str]] = {}
@@ -233,7 +238,8 @@ def build_tools_from_connectors(
                 continue
             if allow is not None and real not in allow:
                 continue
-            if _is_blocked_destructive(tool.get("annotations") or {}):
+            destructive = _is_blocked_destructive(tool.get("annotations") or {})
+            if destructive and not ask_first:
                 continue
             advertised = _safe_tool_name(c.slug, real, taken)
             schemas.append(
@@ -242,10 +248,13 @@ def build_tools_from_connectors(
                     "function": {
                         "name": advertised,
                         "description": (
-                            f"[{c.name}] {tool.get('description') or real}"
+                            f"[{c.name}]"
+                            + (" (the user approves it before it runs)" if destructive else "")
+                            + f" {tool.get('description') or real}"
                         )[:1024],
-                        "parameters": tool.get("input_schema")
-                        or {"type": "object", "properties": {}},
+                        # Normalised here too, for catalogs stored
+                        # before refresh started cleaning them (R-160).
+                        "parameters": normalise_schema(tool.get("input_schema")),
                     },
                 }
             )
@@ -262,44 +271,204 @@ def _native_api_key(connector: McpConnector) -> str:
         return ""
 
 
+async def authorize_connector_tool(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+    connector_id: uuid.UUID,
+    real_tool: str,
+    allow_destructive: bool = False,
+) -> McpConnector:
+    """The one decision: may *this* user call this tool, right now?
+
+    Chat enforces this by only ever building tools from
+    :func:`connectors_for_turn` + the allow-list + the destructive block.
+    Anything that calls a connector by stored id (commands, automations,
+    device lookups) must come through here instead, or it skips all three
+    — which is exactly how a shared command used to let anyone run the
+    owner's tool on a connector they had no access to (roadmap R-031).
+
+    ``allow_destructive`` is only for callers that have already put a human
+    confirmation in front of the call (a command with "ask before running").
+    Raises :class:`McpError` with a user-safe message when refused.
+    """
+    reachable = await connectors_for_turn(
+        db, user_id=user_id, workspace_id=workspace_id
+    )
+    connector = next((c for c in reachable if c.id == connector_id), None)
+    if connector is None:
+        existing = await db.get(McpConnector, connector_id)
+        if existing is not None and not existing.enabled:
+            # Say *why* when it's simply been turned off — that's actionable.
+            raise McpError(f"{existing.name} is switched off.")
+        raise McpError("That connector isn't available to you.")
+    entry = next(
+        (t for t in connector.tool_catalog or [] if t.get("name") == real_tool),
+        None,
+    )
+    if entry is None:
+        raise McpError(f"{connector.name} doesn't offer a tool called {real_tool!r}.")
+    if connector.allowed_tools is not None and real_tool not in connector.allowed_tools:
+        raise McpError(f"{real_tool!r} is switched off on {connector.name}.")
+    if not allow_destructive and _is_blocked_destructive(entry.get("annotations") or {}):
+        raise McpError(
+            f"{real_tool!r} can change things, so it needs a command set to "
+            "'ask before running'."
+        )
+    return connector
+
+
 async def call_connector_tool(
     db: AsyncSession,
     *,
     connector_id: uuid.UUID,
     real_tool: str,
     arguments: dict[str, Any],
+    allow_destructive: bool = False,
 ) -> str:
     """Invoke a tool on its connector. Raises :class:`McpError` on failure.
 
     Routes by ``kind``: native connectors (UniFi/Omada) hit our first-party
     client; ``mcp`` connectors speak the MCP protocol.
 
-    ``connector_id`` is ONLY ever taken from a per-turn dispatch map built by
-    ``build_tools_from_connectors`` over the output of ``connectors_for_turn``
-    (which resolves enabled connectors globally for the single-tenant app), so
-    connectors are gated at resolution time rather than being re-checked here.
+    *Who* may call it is the caller's job (:func:`authorize_connector_tool`
+    or a dispatch map built from :func:`connectors_for_turn`). *What* may be
+    called is enforced here for every caller: the tool must be in the
+    connector's catalog and on its allow-list, and a destructive tool needs
+    ``allow_destructive`` (a human confirmed it). The automation MCP step
+    once called any tool name its graph JSON contained (R-006).
     """
     connector = await db.get(McpConnector, connector_id)
     if connector is None or not connector.enabled:
         raise McpError("Connector is no longer available.")
-
-    if connector.kind == "unifi":
-        from app.mcp.unifi import UniFiError, call_unifi_tool
-
-        try:
-            return await call_unifi_tool(
-                connector.url, _native_api_key(connector), real_tool, arguments
-            )
-        except UniFiError as e:
-            raise McpError(str(e)) from e
-
-    return await call_tool(
-        connector.url,
-        real_tool,
-        arguments,
-        headers=_auth_headers(connector),
-        transport=connector.transport or "http",
+    entry = next(
+        (t for t in connector.tool_catalog or [] if t.get("name") == real_tool), None
     )
+    if entry is None:
+        raise McpError(f"{connector.name} doesn't offer a tool called {real_tool!r}.")
+    if connector.allowed_tools is not None and real_tool not in connector.allowed_tools:
+        raise McpError(f"{real_tool!r} is switched off on {connector.name}.")
+    if not allow_destructive and _is_blocked_destructive(entry.get("annotations") or {}):
+        raise McpError(f"{real_tool!r} can change things and needs a confirmation to run.")
+
+    try:
+        if connector.kind == "unifi":
+            from app.mcp.unifi import UniFiError, call_unifi_tool
+
+            try:
+                out = await call_unifi_tool(
+                    connector.url, _native_api_key(connector), real_tool, arguments
+                )
+            except UniFiError as e:
+                raise McpError(str(e)) from e
+        else:
+            out = await call_tool(
+                connector.url,
+                real_tool,
+                arguments,
+                headers=_auth_headers(connector),
+                transport=connector.transport or "http",
+            )
+    except McpToolFailed:
+        # The connector answered; the tool said no. Reachable is healthy.
+        await record_health(connector.id, ok=True)
+        raise
+    except McpError as e:
+        await record_health(connector.id, ok=False, error=str(e))
+        raise
+    await record_health(connector.id, ok=True)
+    return out
+
+
+_TARGET_KEYS = ("name", "entity_id", "area", "device", "target", "room", "query", "path", "repo", "title")
+
+
+async def describe_call(
+    db: AsyncSession, connector_id: uuid.UUID, real_tool: str, arguments: dict[str, Any] | None
+) -> dict[str, Any]:
+    """What a connector call did, for the chat's activity card (R-166):
+    "Home Assistant · Turn off · garage". A call that changes something in
+    the outside world is marked so it doesn't read like a lookup."""
+    connector = await db.get(McpConnector, connector_id)
+    entry = next(
+        (t for t in (connector.tool_catalog if connector else None) or [] if t.get("name") == real_tool),
+        {},
+    )
+    ann = entry.get("annotations") or {}
+    args = arguments or {}
+    target = next(
+        (str(args[k]) for k in _TARGET_KEYS if isinstance(args.get(k), (str, int, float)) and str(args[k]).strip()),
+        None,
+    )
+    if target is None:
+        target = next((str(v) for v in args.values() if isinstance(v, str) and v.strip()), None)
+    return {
+        "connector": connector.name if connector else "Connector",
+        "tool": real_tool,
+        "title": ann.get("title") or re.sub(r"(?<!^)(?=[A-Z])|_", " ", real_tool).strip().capitalize(),
+        **({"target": target[:80]} if target else {}),
+        # Unannotated tools may change things; only a read-only hint says not.
+        "acts": not ann.get("readOnlyHint", False),
+        "destructive": _is_blocked_destructive(ann),
+    }
+
+
+# Consecutive transport failures before admins are told (once per streak).
+ALERT_AFTER_FAILURES = 3
+
+
+async def record_health(
+    connector_id: uuid.UUID, *, ok: bool, error: str | None = None
+) -> None:
+    """Stamp a connector's health in its own short session, so callers in
+    the middle of a chat stream or command run keep their transaction to
+    themselves. Never raises — health is bookkeeping."""
+    from app.database import SessionLocal
+
+    try:
+        async with SessionLocal() as s:
+            c = await s.get(McpConnector, connector_id)
+            if c is None:
+                return
+            now = datetime.now(timezone.utc)
+            if ok:
+                c.last_ok_at = now
+                c.consecutive_failures = 0
+                await s.commit()
+                return
+            c.last_error = (error or "Failed")[:1000]
+            c.last_error_at = now
+            c.consecutive_failures = (c.consecutive_failures or 0) + 1
+            alert = c.consecutive_failures == ALERT_AFTER_FAILURES
+            name, cid, last_error = c.name, c.id, c.last_error
+            await s.commit()
+            if alert:
+                await _alert_admins_connector_down(s, name, cid, last_error)
+    except Exception:  # noqa: BLE001
+        logger.exception("Couldn't record health for connector %s", connector_id)
+
+
+async def _alert_admins_connector_down(
+    db: AsyncSession, name: str, connector_id: uuid.UUID, error: str
+) -> None:
+    from app.auth.models import User
+    from app.notifications.dispatch import notify_user
+
+    admins = (
+        await db.execute(
+            select(User).where(User.role == "admin", User.disabled.is_(False))
+        )
+    ).scalars().all()
+    for a in admins:
+        await notify_user(
+            user_id=a.id,
+            category="system_alert",
+            title=f"Connector “{name}” isn't working",
+            body=f"The last {ALERT_AFTER_FAILURES} attempts failed: {error[:300]}",
+            url="/admin?tab=connectors",
+            tag=f"connector-down-{connector_id}",
+        )
 
 
 async def refresh_catalog(db: AsyncSession, connector: McpConnector) -> int:
@@ -315,18 +484,73 @@ async def refresh_catalog(db: AsyncSession, connector: McpConnector) -> int:
         try:
             await probe(connector.url, _native_api_key(connector))
         except UniFiError as e:
+            await _note_refresh_failure(db, connector, str(e))
             raise McpError(str(e)) from e
         connector.tool_catalog = UNIFI_TOOLS
         connector.tools_refreshed_at = datetime.now(timezone.utc)
+        connector.last_ok_at = connector.tools_refreshed_at
+        connector.consecutive_failures = 0
         await db.commit()
         return len(UNIFI_TOOLS)
 
-    tools = await fetch_tools(
-        connector.url,
-        headers=_auth_headers(connector),
-        transport=connector.transport or "http",
-    )
+    try:
+        tools = await fetch_tools(
+            connector.url,
+            headers=_auth_headers(connector),
+            transport=connector.transport or "http",
+        )
+    except McpError as e:
+        await _note_refresh_failure(db, connector, str(e))
+        raise
     connector.tool_catalog = tools
     connector.tools_refreshed_at = datetime.now(timezone.utc)
+    connector.last_ok_at = connector.tools_refreshed_at
+    connector.consecutive_failures = 0
     await db.commit()
     return len(tools)
+
+
+async def _note_refresh_failure(
+    db: AsyncSession, connector: McpConnector, error: str
+) -> None:
+    connector.last_error = error[:1000]
+    connector.last_error_at = datetime.now(timezone.utc)
+    connector.consecutive_failures = (connector.consecutive_failures or 0) + 1
+    alert = connector.consecutive_failures == ALERT_AFTER_FAILURES
+    await db.commit()
+    if alert:
+        await _alert_admins_connector_down(
+            db, connector.name, connector.id, connector.last_error or error
+        )
+
+
+async def refresh_all_catalogs() -> dict[str, int]:
+    """Keep every enabled connector's tool list current (R-160): tools
+    added or removed upstream used to stay stale until an admin pressed
+    Refresh. Runs on the worker every few hours; failures land in health."""
+    from app.database import SessionLocal
+
+    done = {"ok": 0, "failed": 0}
+    async with SessionLocal() as db:
+        ids = list(
+            (
+                await db.execute(
+                    select(McpConnector.id).where(McpConnector.enabled.is_(True))
+                )
+            ).scalars()
+        )
+        for cid in ids:
+            c = await db.get(McpConnector, cid)
+            if c is None:
+                continue
+            try:
+                await refresh_catalog(db, c)
+                done["ok"] += 1
+            except McpError:
+                done["failed"] += 1
+            except Exception:  # noqa: BLE001
+                await db.rollback()
+                done["failed"] += 1
+                logger.exception("catalog refresh crashed for connector %s", cid)
+    logger.info("Connector catalog refresh: %s", done)
+    return done

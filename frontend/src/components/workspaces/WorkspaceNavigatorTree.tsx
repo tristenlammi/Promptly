@@ -62,6 +62,8 @@ import {
   Unlock,
   Zap,
   ZapOff,
+  BookOpen,
+  CornerLeftUp,
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
@@ -87,6 +89,7 @@ import {
 import { useAuthStore } from "@/store/authStore";
 import { useModelStore } from "@/store/modelStore";
 import { toast } from "@/store/toastStore";
+import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 /**
@@ -102,6 +105,23 @@ import { cn } from "@/utils/cn";
  * float midpoint position among the new siblings and calls the ``/move``
  * endpoint (optimistic tree update first).
  */
+// Rows an item can be filed *into*. Notebooks ("container") are the only
+// grouping kind now; every nest check still tested the removed "folder"
+// kind, so nothing could be dragged into a notebook (R-181).
+const NEST_KINDS = new Set(["folder", "container"]);
+
+function canNestInto(
+  target: { kind: string } | null | undefined,
+  activeKind: string | undefined
+): boolean {
+  if (!target || !NEST_KINDS.has(target.kind)) return false;
+  // Chats and automations are synthesised rows, not pages; notebooks
+  // don't nest inside notebooks.
+  if (activeKind === "chat" || activeKind === "task" || activeKind === "container")
+    return false;
+  return true;
+}
+
 export function WorkspaceNavigatorTree({
   workspaceId,
   tree,
@@ -261,7 +281,7 @@ export function WorkspaceNavigatorTree({
   const intoFolder =
     dropEdge === "into" &&
     overItem &&
-    overItem.node.kind === "folder" &&
+    canNestInto(overItem.node, activeItem?.node.kind) &&
     overItem.group === "main" &&
     overItem.id !== activeId
       ? overItem
@@ -305,8 +325,10 @@ export function WorkspaceNavigatorTree({
     }
     const frac = (startY + delta.y - rect.top) / Math.max(rect.height, 1);
     const overFlat = flatItems.find((i) => i.id === String(over.id));
+    const activeKind = flatItems.find((i) => i.id === activeId)?.node.kind;
     const folderish =
-      overFlat?.node.kind === "folder" &&
+      !!overFlat &&
+      canNestInto(overFlat.node, activeKind) &&
       overFlat.group === "main" &&
       overFlat.id !== activeId;
     if (folderish && frac >= 0.3 && frac <= 0.7) setDropEdge("into");
@@ -415,7 +437,10 @@ export function WorkspaceNavigatorTree({
     if (
       dropEdge === "into" &&
       overFlat &&
-      overFlat.node.kind === "folder" &&
+      canNestInto(
+        overFlat.node,
+        flatItems.find((i) => i.id === String(active.id))?.node.kind
+      ) &&
       overFlat.id !== String(active.id)
     ) {
       // Filing straight into the hovered folder: append as its last child.
@@ -485,6 +510,29 @@ export function WorkspaceNavigatorTree({
     }
   };
 
+  // "Move to…" — the keyboard / accessible path for filing an item into a
+  // notebook or back out to the top level, without dragging (R-181).
+  const notebooks = flatItems
+    .filter((i) => i.group === "main" && i.node.kind === "container")
+    .map((i) => ({ id: i.id, title: i.node.title || "Untitled notebook" }));
+  const handleMoveTo = (node: WorkspaceItemNode, parentId: string | null) => {
+    const siblings = parentId
+      ? flatItems.find((i) => i.id === parentId)?.node.children ?? []
+      : flatItems
+          .filter((i) => i.group === "main" && i.parentId == null)
+          .map((i) => i.node);
+    const last = siblings.reduce(
+      (m, n) => (n.id !== node.id && n.position > m ? n.position : m),
+      0
+    );
+    const position = last + 1;
+    qc.setQueryData<WorkspaceItemNode[]>(
+      ["workspaces", "tree", workspaceId],
+      (old) => (old ? moveNodeInTree(old, node.id, parentId, position) : old)
+    );
+    move.mutate({ itemId: node.id, payload: { parent_id: parentId, position } });
+  };
+
   const handleCreate = async (
     kind:
       | "note"
@@ -550,8 +598,9 @@ export function WorkspaceNavigatorTree({
         indexing_status: null,
         children: [],
       });
-    } catch {
-      // Best-effort; the axios interceptor surfaces failures as toasts.
+    } catch (e) {
+      // Nothing else reports this — there is no error interceptor (R-199).
+      toast.error(apiErrorMessage(e, "Couldn't start a chat here."));
     } finally {
       setCreatingChat(false);
     }
@@ -753,7 +802,7 @@ export function WorkspaceNavigatorTree({
                       isDropParent={
                         !!activeId &&
                         !dropInPinned &&
-                        item.node.kind === "folder" &&
+                        NEST_KINDS.has(item.node.kind) &&
                         (intoFolder?.id === item.id ||
                           projected?.parentId === item.id)
                       }
@@ -772,6 +821,8 @@ export function WorkspaceNavigatorTree({
                               void handleCreate(kind, parentId)
                           : undefined
                       }
+                      moveTargets={canEdit ? notebooks : undefined}
+                      onMoveTo={canEdit ? handleMoveTo : undefined}
                     />
                   ))}
               </ul>
@@ -899,7 +950,7 @@ function getProjection(
   const maxDepth = activeIsSynth
     ? 0
     : prev
-      ? prev.node.kind === "folder"
+      ? canNestInto(prev.node, active.node.kind)
         ? prev.depth + 1
         : prev.depth
       : 0;
@@ -928,7 +979,7 @@ function PinDropZone({ active }: { active: boolean }) {
       className={cn(
         "mb-2 flex items-center justify-center gap-1.5 rounded-md border border-dashed py-2 text-[11px] font-medium transition",
         active
-          ? "scale-[1.01] border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+          ? "scale-[1.01] border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent-text)]"
           : "border-[var(--border)] text-[var(--text-muted)]"
       )}
     >
@@ -1271,6 +1322,8 @@ function TreeRow({
   renameRequest,
   onRenameHandled,
   isOwner,
+  moveTargets,
+  onMoveTo,
 }: {
   workspaceId: string;
   item: FlatItem;
@@ -1300,6 +1353,9 @@ function TreeRow({
   onRenameHandled?: () => void;
   /** Workspace owner — may mint public share links for notes (9.1). */
   isOwner?: boolean;
+  /** Notebooks this row could be moved into ("Move to…"). */
+  moveTargets?: { id: string; title: string }[];
+  onMoveTo?: (node: WorkspaceItemNode, parentId: string | null) => void;
 }) {
   const { node, depth } = item;
   const expanded = !collapsed.has(node.id);
@@ -1659,6 +1715,17 @@ function TreeRow({
                 ? (kind) => onCreateInside(kind, node.id)
                 : undefined
             }
+            moveTargets={
+              onMoveTo && !isChat && !isTask && !isContainer
+                ? [
+                    ...(item.parentId != null
+                      ? [{ id: null as string | null, title: "Top level" }]
+                      : []),
+                    ...(moveTargets ?? []).filter((t) => t.id !== item.parentId),
+                  ]
+                : undefined
+            }
+            onMoveTo={onMoveTo ? (parentId) => onMoveTo(node, parentId) : undefined}
             onDuplicate={
               ["note", "sheet", "board", "canvas"].includes(node.kind)
                 ? () => duplicateItem.mutate(node.id)
@@ -1748,7 +1815,7 @@ function TreeRow({
 // both grounds. (Reinstated after the P1 monochrome pass; the tinted tiles
 // tested better in the marketing mock and the user asked to try them live.)
 const KIND_TILE: Record<string, { tile: string; ink: string }> = {
-  folder: { tile: "bg-[var(--accent-soft)]", ink: "text-[var(--accent)]" },
+  folder: { tile: "bg-[var(--accent-soft)]", ink: "text-[var(--accent-text)]" },
   chat: { tile: "bg-[rgba(217,119,87,0.16)]", ink: "text-[#D97757]" },
   note: { tile: "bg-[rgba(245,158,11,0.16)]", ink: "text-[#F59E0B]" },
   canvas: { tile: "bg-[rgba(59,130,246,0.16)]", ink: "text-[#3B82F6]" },
@@ -1829,6 +1896,8 @@ function NodeActions({
   onToggleContext,
   onCreateInside,
   onDuplicate,
+  moveTargets,
+  onMoveTo,
   visibility,
   onToggleVisibility,
   onChangeIcon,
@@ -1853,6 +1922,8 @@ function NodeActions({
   onCreateInside?: (kind: "note" | "canvas" | "board" | "sheet") => void;
   /** Notes / sheets / boards / canvases — deep-copy as a sibling;
    *  automations — copy the task (arrives paused). */
+  moveTargets?: { id: string | null; title: string }[];
+  onMoveTo?: (parentId: string | null) => void;
   onDuplicate?: () => void;
   /** Current visibility when the caller may flip it (creator only,
    *  0134); null hides the menu entry. */
@@ -1893,7 +1964,7 @@ function NodeActions({
           className={cn(
             "inline-flex items-center p-1",
             contextState === "on"
-              ? "text-[var(--accent)]/80 opacity-0 group-hover:opacity-100"
+              ? "text-[var(--accent-text)]/80 opacity-0 group-hover:opacity-100"
               : "text-[var(--text-muted)]"
           )}
         >
@@ -1989,6 +2060,29 @@ function NodeActions({
                     onClearIcon();
                   }}
                 />
+              )}
+              {onMoveTo && moveTargets && moveTargets.length > 0 && (
+                <>
+                  <MenuSection label="Move to" />
+                  {moveTargets.map((t) => (
+                    <MenuItem
+                      key={t.id ?? "root"}
+                      icon={
+                        t.id ? (
+                          <BookOpen className="h-3.5 w-3.5" />
+                        ) : (
+                          <CornerLeftUp className="h-3.5 w-3.5" />
+                        )
+                      }
+                      label={t.title}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onMoveTo(t.id);
+                      }}
+                    />
+                  ))}
+                  <div className="my-1 border-t border-[var(--border)]" />
+                </>
               )}
               {onDuplicate && (
                 <MenuItem

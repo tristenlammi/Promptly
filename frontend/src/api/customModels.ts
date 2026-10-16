@@ -64,11 +64,23 @@ export interface CustomModelUpdate {
   top_k?: number;
 }
 
+export interface EmbedderHealth {
+  consecutive_failures?: number;
+  skipping?: boolean;
+  last_ok_at?: number | null;
+  last_error?: string | null;
+  last_error_at?: number | null;
+}
+
 export interface EmbeddingConfig {
   embedding_provider_id: string | null;
   embedding_model_id: string | null;
   embedding_dim: number | null;
   embedding_provider_name: string | null;
+  /** In-process embedder health (R-322). */
+  health?: EmbedderHealth | null;
+  /** Still waiting to be (re)embedded (R-321). */
+  pending?: { files: number; items: number; memories: number; failed: number } | null;
 }
 
 export interface EmbeddingConfigUpdate {
@@ -158,8 +170,21 @@ export const customModelsApi = {
   },
   async bootstrapLocalEmbedding(): Promise<EmbeddingConfig> {
     const { data } = await apiClient.post<EmbeddingConfig>(
-      `${BASE}/bootstrap-local-embedding`
+      `${BASE}/bootstrap-local-embedding`,
+      undefined,
+      // It may download the embedding model first (about 270 MB).
+      { timeout: 15 * 60_000 }
     );
+    return data;
+  },
+  /** Whether this install can embed locally (is an Ollama reachable, and
+   *  does it have the embedding model yet). */
+  async localEmbeddingStatus(): Promise<{
+    ollama_reachable: boolean;
+    model: string;
+    model_installed: boolean;
+  }> {
+    const { data } = await apiClient.get(`${BASE}/local-embedding-status`);
     return data;
   },
   async testEmbeddingConfig(): Promise<EmbeddingConfigTestResult> {

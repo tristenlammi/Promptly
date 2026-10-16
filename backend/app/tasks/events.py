@@ -132,6 +132,29 @@ async def _folder_matches(
     return False
 
 
+async def _owner_may_see(
+    db, task: Task, workspace_id: uuid.UUID, payload: dict[str, Any]
+) -> bool:
+    from app.auth.models import User
+    from app.chat.models import WorkspaceItem
+    from app.workspaces.shares import workspace_role
+
+    owner = await db.get(User, task.user_id)
+    if owner is None or await workspace_role(db, workspace_id, owner) is None:
+        return False
+    for key in ("item_id", "board_item_id"):
+        raw = payload.get(key)
+        if not raw:
+            continue
+        try:
+            item = await db.get(WorkspaceItem, uuid.UUID(str(raw)))
+        except ValueError:
+            continue
+        if item is not None and item.visibility == "private" and item.created_by != owner.id:
+            return False
+    return True
+
+
 async def _dispatch(
     *,
     event: str,
@@ -170,6 +193,14 @@ async def _dispatch(
                     None,
                 )
                 if trigger is None:
+                    continue
+                # The owner must still be in the workspace, and must be able
+                # to see what the event is about — a removed member's flow
+                # used to keep receiving card titles, item titles and file
+                # names, and any flow saw other members' private drafts (R-007).
+                if workspace_id is not None and not await _owner_may_see(
+                    db, task, workspace_id, payload
+                ):
                     continue
                 # Folder filter (file_added only) — needs the DB for the
                 # ancestor walk, so it runs after the pure-config match.

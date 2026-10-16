@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import httpx
 import json
 import logging
 import re
@@ -9,7 +10,7 @@ import time
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -24,9 +25,10 @@ from fastapi import (
     status,
 )
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select, text, update
+from sqlalchemy import Integer, cast, func, select, text, tuple_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.files.disk_guard import require_disk_room
 from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 from app.app_settings.defaults import load_effective_defaults
 from app.auth.audit import (
@@ -167,6 +169,8 @@ from app.models_config.provider import (
     model_router,
 )
 from app.rate_limit import enforce_user_message_rate
+from app.models_config.provider import _model_tool_support
+from app.chat.context_usage import build_context_usage, history_chars
 from app.chat.base_prompt import PROMPTLY_BASE_PROMPT, VOICE_SYSTEM_PROMPT
 from app.search.service import (
     canonicalise_url,
@@ -175,6 +179,10 @@ from app.search.service import (
 )
 
 logger = logging.getLogger("promptly.chat")
+# How long a send waits for its attachments to index before inlining them
+# instead (R-320) — well under the client's 30 s request timeout.
+_ATTACHMENT_INDEX_WAIT_SECONDS = 15.0
+
 router = APIRouter()
 
 
@@ -844,6 +852,17 @@ async def list_conversations(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     archived: bool = Query(default=False),
+    # Paging and filters for the sidebar and Archive (R-047/R-098):
+    #   scope=personal   only chats outside workspaces (the sidebar's list)
+    #   folder=none|<id> only unfiled chats, or one folder's chats
+    #   cursor           keyset continuation built from the previous page's
+    #                    last row: "pinned|updated_at|id" (active) or
+    #                    "archived_at|id" (archive). Stable while chats move.
+    #   q                title contains (case-insensitive)
+    scope: Literal["all", "personal"] = Query(default="all"),
+    folder: str | None = Query(default=None, max_length=64),
+    cursor: str | None = Query(default=None, max_length=200),
+    q: str | None = Query(default=None, max_length=200),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[ConversationSummary]:
@@ -918,11 +937,39 @@ async def list_conversations(
         query = query.where(Conversation.archived_at.is_(None))
     if hidden_ids:
         query = query.where(Conversation.id.not_in(hidden_ids))
-    order = (
-        (Conversation.archived_at.desc(),)
-        if archived
-        else (Conversation.pinned.desc(), Conversation.updated_at.desc())
-    )
+    if scope == "personal":
+        query = query.where(Conversation.workspace_id.is_(None))
+    if folder == "none":
+        query = query.where(Conversation.folder_id.is_(None))
+    elif folder:
+        folder_id = _uuid_or_none(folder)
+        if folder_id is None:
+            raise HTTPException(status_code=400, detail="Bad folder id")
+        query = query.where(Conversation.folder_id == folder_id)
+    if q and q.strip():
+        needle = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        query = query.where(Conversation.title.ilike(f"%{needle}%", escape="\\"))
+
+    # ``id`` breaks ties, so rows sharing a timestamp page deterministically.
+    pinned_rank = cast(Conversation.pinned, Integer)
+    if archived:
+        order = (Conversation.archived_at.desc(), Conversation.id.desc())
+    else:
+        order = (pinned_rank.desc(), Conversation.updated_at.desc(), Conversation.id.desc())
+    if cursor:
+        try:
+            parts = cursor.split("|")
+            if archived:
+                at, cid = datetime.fromisoformat(parts[0]), uuid.UUID(parts[1])
+                query = query.where(tuple_(Conversation.archived_at, Conversation.id) < (at, cid))
+            else:
+                cp, cu, cid = int(parts[0]), datetime.fromisoformat(parts[1]), uuid.UUID(parts[2])
+                query = query.where(
+                    tuple_(pinned_rank, Conversation.updated_at, Conversation.id) < (cp, cu, cid)
+                )
+        except (ValueError, IndexError):
+            raise HTTPException(status_code=400, detail="Bad cursor")
+        offset = 0
     result = await db.execute(
         query
         .order_by(*order)
@@ -1751,13 +1798,39 @@ async def send_message(
     # normal inline-preamble path.
     if payload.index_attachments and attached_files:
         try:
+            from app.background import spawn
             from app.chat.attachment_rag import (
-                index_attachments_for_conversation,
+                conversation_indexed_file_ids,
+                index_turn_attachments,
             )
 
-            await index_attachments_for_conversation(
-                db, conversation_id=conv.id, files=attached_files
+            # In its own task with its own session, as interactive work,
+            # and waited on for a bounded time: a big file on a slow
+            # embedder used to hold the send request past the client's 30 s
+            # timeout. If it isn't done in time this turn inlines the file
+            # and indexing finishes for the next turns (R-320).
+            task = spawn(
+                index_turn_attachments(
+                    conv.id, [f.id for f in attached_files], interactive=True
+                ),
+                name=f"index-attachments-{conv.id}",
             )
+            n_indexed = 0
+            if task is not None:
+                done, _ = await asyncio.wait({task}, timeout=_ATTACHMENT_INDEX_WAIT_SECONDS)
+                if task in done and not task.cancelled() and task.exception() is None:
+                    n_indexed = task.result()
+            if n_indexed and user_msg.attachments:
+                # Flag them on the turn: it retrieves these instead of
+                # inlining them (they were too big), which a regenerate
+                # needs to know too.
+                indexed_now = await conversation_indexed_file_ids(db, conv.id)
+                user_msg.attachments = [
+                    {**a, "rag": True}
+                    if isinstance(a, dict) and _uuid_or_none(a.get("id")) in indexed_now
+                    else a
+                    for a in user_msg.attachments
+                ]
         except Exception:  # noqa: BLE001
             logger.exception(
                 "attachment indexing failed for conversation %s", conv.id
@@ -1813,7 +1886,11 @@ async def send_message(
         "voice": bool(getattr(payload, "voice", False)),
         "reasoning_effort": effective_reasoning,
     }
+    # The reply is generated from its own DB session, so this turn must be
+    # on disk before generation starts.
+    await db.commit()
     await enqueue_stream(stream_id, ctx)
+    await _start_generation(stream_id, conv.id, user, request)
 
     return SendMessageResponse(
         stream_id=stream_id,
@@ -2002,7 +2079,11 @@ async def edit_and_resend_message(
         "voice": bool(getattr(payload, "voice", False)),
         "reasoning_effort": effective_reasoning,
     }
+    # The reply is generated from its own DB session, so this turn must be
+    # on disk before generation starts.
+    await db.commit()
     await enqueue_stream(stream_id, ctx)
+    await _start_generation(stream_id, conv.id, user, request)
 
     return SendMessageResponse(
         stream_id=stream_id,
@@ -2365,8 +2446,13 @@ async def regenerate_assistant_message(
         # getattr. Drives the brevity system-prompt + token backstop.
         "voice": bool(getattr(payload, "voice", False)),
         "reasoning_effort": effective_reasoning,
+        "restore_leaf_id": str(target.id),
     }
+    # The reply is generated from its own DB session, so this turn must be
+    # on disk before generation starts.
+    await db.commit()
     await enqueue_stream(stream_id, ctx)
+    await _start_generation(stream_id, conv.id, user, request)
 
     return SendMessageResponse(
         stream_id=stream_id,
@@ -2523,7 +2609,11 @@ async def continue_assistant_message(
         "reasoning_effort": effective_reasoning,
         "continue_from_message_id": str(target.id),
     }
+    # The reply is generated from its own DB session, so this turn must be
+    # on disk before generation starts.
+    await db.commit()
     await enqueue_stream(stream_id, ctx)
+    await _start_generation(stream_id, conv.id, user, request)
 
     return SendMessageResponse(
         stream_id=stream_id,
@@ -2695,6 +2785,39 @@ async def edit_artifact_endpoint(
     return ArtifactEditResponse(updated=updated)
 
 
+async def _conversation_llm(
+    conv: Conversation, db: AsyncSession
+) -> tuple[ModelProvider, str]:
+    """The provider + real model id behind a chat, for side calls like
+    compaction. A Custom Model chat stores ``custom:<uuid>``, which no
+    provider accepts — compaction on those always failed (R-018)."""
+    from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+
+    if not conv.provider_id or not conv.model_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "No model configured for this conversation. Send at "
+                "least one message first so a default is persisted."
+            ),
+        )
+    if is_custom_model_id(conv.model_id):
+        resolved = await resolve_custom_model(conv.model_id, db)
+        if resolved is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This conversation's assistant is unavailable.",
+            )
+        return resolved.base_provider, resolved.base_model_id
+    provider = await db.get(ModelProvider, conv.provider_id)
+    if provider is None or not provider.enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This conversation's provider is unavailable.",
+        )
+    return provider, conv.model_id
+
+
 @router.post(
     "/conversations/{conversation_id}/compact",
     response_model=CompactionResponse,
@@ -2727,27 +2850,13 @@ async def compact_conversation_endpoint(
             detail="Only the conversation owner can compact this chat.",
         )
 
-    if not conv.provider_id or not conv.model_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "No model configured for this conversation. Send at "
-                "least one message first so a default is persisted."
-            ),
-        )
-
-    provider = await db.get(ModelProvider, conv.provider_id)
-    if provider is None or not provider.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This conversation's provider is unavailable.",
-        )
+    provider, model_id = await _conversation_llm(conv, db)
 
     try:
         result = await compact_conversation(
             conversation=conv,
             llm_provider=provider,
-            llm_model_id=conv.model_id,
+            llm_model_id=model_id,
             db=db,
         )
     except CompactionError as e:
@@ -2830,27 +2939,13 @@ async def summarise_to_workspace_endpoint(
             detail="Parent workspace not found.",
         )
 
-    if not conv.provider_id or not conv.model_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "No model configured for this conversation. Send at "
-                "least one message first so a default is persisted."
-            ),
-        )
-
-    provider = await db.get(ModelProvider, conv.provider_id)
-    if provider is None or not provider.enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This conversation's provider is unavailable.",
-        )
+    provider, model_id = await _conversation_llm(conv, db)
 
     try:
         summary_md = await summarise_conversation_to_markdown(
             conversation=conv,
             llm_provider=provider,
-            llm_model_id=conv.model_id,
+            llm_model_id=model_id,
             db=db,
         )
     except SummariseError as e:
@@ -2931,6 +3026,13 @@ async def summarise_to_workspace_endpoint(
 # ====================================================================
 # SSE stream
 # ====================================================================
+def _uuid_or_none(raw: Any) -> uuid.UUID | None:
+    try:
+        return uuid.UUID(str(raw))
+    except (ValueError, TypeError):
+        return None
+
+
 def _sse(data: dict) -> str:
     """Format a dict as a single SSE `data:` event."""
     return f"data: {json.dumps(data)}\n\n"
@@ -2997,6 +3099,52 @@ def _classify_upstream_error(
         }
 
     # --- Generic, provider-agnostic classes (status-code first) --------
+    # Out of credits / quota used up. Checked before "rate limited": an
+    # exhausted quota used to show a retry countdown that could never
+    # succeed (R-301).
+    if (
+        status_code == 402
+        or "insufficient_quota" in lowered
+        or "insufficient credits" in lowered
+        or "out of credits" in lowered
+        or "credit balance" in lowered
+        or "payment required" in lowered
+        or "billing" in lowered
+        or ("quota" in lowered and ("exceeded" in lowered or "exhausted" in lowered))
+    ):
+        return {
+            "error_code": "out_of_credits",
+            "error_title": "The provider account is out of credits",
+            "error_help_url": None,
+        }
+    # The model is gone (retired, renamed, or not on this account).
+    if (
+        status_code == 404
+        or "model not found" in lowered
+        or "model_not_found" in lowered
+        or "no endpoints found" in lowered
+        or ("does not exist" in lowered and "model" in lowered)
+        or "has been deprecated" in lowered
+    ):
+        return {
+            "error_code": "model_unavailable",
+            "error_title": "This model isn't available any more",
+            "error_help_url": None,
+        }
+    # The conversation no longer fits the model's context window.
+    if (
+        "context_length_exceeded" in lowered
+        or "context length" in lowered
+        or "maximum context" in lowered
+        or "context window" in lowered
+        or "prompt is too long" in lowered
+        or "too many tokens" in lowered
+    ):
+        return {
+            "error_code": "context_overflow",
+            "error_title": "This chat is too long for the model",
+            "error_help_url": None,
+        }
     # Rate limited. Pass the retry countdown through when the provider
     # told us how long to wait so the card can tick it down.
     if (
@@ -3236,6 +3384,19 @@ async def _load_message_attachments(
 # model produces neither text nor tool-calls on the forced hop.
 MAX_TOOL_HOPS = 8
 
+# Upper bounds for the work that follows a saved reply. Both are extra
+# model calls; neither may hold the stream open indefinitely when the
+# provider stalls (R-273).
+_TITLE_TIMEOUT_S = 15.0
+# Sticky context (R-045): how far back attachments and mentions reach.
+# Images are re-sent for the newest few image turns only (older ones become
+# a one-line note, or their saved caption); documents that aren't indexed
+# for retrieval are re-sent for the newest two earlier turns that had them.
+_IMAGE_TURNS_RESENT = 3
+_EARLIER_DOC_TURNS = 2
+_MENTION_TURNS = 6
+_MEMORY_CAPTURE_TIMEOUT_S = 25.0
+
 # Appended to a reply that was saved before it finished. There's no
 # ``truncated`` column on ``messages`` to flag it structurally, and an answer
 # that just stops mid-sentence reads like the model broke — so the reason is
@@ -3247,6 +3408,7 @@ _INTERRUPTED_SUFFIXES = {
         "being written.]_"
     ),
     "stopped": "\n\n_[Stopped.]_",
+    "error": "\n\n_[This reply didn't finish — the model returned an error.]_",
 }
 
 # Token backstop for voice-mode turns when the client didn't set its own
@@ -3359,6 +3521,31 @@ def _cap_tool_content(tool_cap: int | None, content: str) -> str:
     )
 
 
+# Tools whose output is text from outside the user's own words — web pages,
+# search results, other members' workspace content, files, sub-agents, and
+# every connector (MCP) tool. A turn that ran one is "untrusted" (R-019).
+UNTRUSTED_CONTENT_TOOLS = frozenset(
+    {
+        "fetch_url", "web_search", "deep_research", "run_agents",
+        "read_workspace_item", "query_board_cards", "code_interpreter",
+        # File text — including files other people shared (WP-5.2/5.3).
+        "search_my_files", "read_file", "list_my_files",
+    }
+)
+
+
+def reads_outside_content(tool_name: str) -> bool:
+    return tool_name in UNTRUSTED_CONTENT_TOOLS or tool_name.startswith("mcp__")
+
+
+def _frame_untrusted(content: str, tool_name: str) -> str:
+    """Label outside content as data for the model — the guideline in the
+    system prompt says never to follow instructions found inside it."""
+    return (
+        f'<untrusted_content source="{tool_name}">\n{content}\n</untrusted_content>'
+    )
+
+
 async def _run_native_tool(
     *,
     tool,  # noqa: ANN001 — Tool instance from the registry
@@ -3368,6 +3555,7 @@ async def _run_native_tool(
     user_message_id: uuid.UUID,
     sem: asyncio.Semaphore,
     on_progress: Any = None,  # callable: str -> None | None
+    turn: dict[str, Any] | None = None,
 ) -> tuple[str, Any, int]:
     """Run one native tool on its own DB session, bounded by ``sem``.
 
@@ -3411,6 +3599,7 @@ async def _run_native_tool(
                     conversation_id=conversation_id,
                     user_message_id=user_message_id,
                     on_progress=on_progress,
+                    turn=turn,
                 )
                 if timeout_s:
                     async with asyncio.timeout(timeout_s):
@@ -3459,6 +3648,11 @@ async def _dispatch_tools(
     per_tool_caps: dict[str, int] | None = None,
     dedup_cache: dict[str, str] | None = None,
     mcp_dispatch: dict[str, tuple[uuid.UUID, str]] | None = None,
+    # Native tools the model was actually offered this turn. ``None`` means
+    # unrestricted (forced hops and sub-agents pick their own tools). The
+    # main loop always passes it, so a tool that wasn't offered — named by
+    # a confused model or by injected web/file content — never runs.
+    allowed_tool_names: set[str] | None = None,
 ) -> AsyncGenerator[
     tuple[str, dict[str, Any] | None], None
 ]:
@@ -3524,6 +3718,14 @@ async def _dispatch_tools(
             canonical = repr(parsed)
         return f"{tool_name}:{canonical}"
 
+    # A hop that reads outside content marks the turn untrusted *before*
+    # anything runs: calls in one hop run in parallel, so a ``remember``
+    # alongside a ``fetch_url`` must already see it (R-019).
+    if ctx.turn is not None and any(
+        reads_outside_content(slot.get("name") or "") for slot in pending_calls.values()
+    ):
+        ctx.turn["untrusted"] = True
+
     # ---- Phase 1: validate, account, launch --------------------------
     for idx in sorted(pending_calls.keys()):
         slot = pending_calls[idx]
@@ -3576,6 +3778,20 @@ async def _dispatch_tools(
                     name,
                     "fail",
                     (f"Unknown tool: {name!r}", "unknown_tool", None),
+                )
+            )
+            continue
+        if allowed_tool_names is not None and name not in allowed_tool_names:
+            plan.append(
+                (
+                    call_id,
+                    name,
+                    "fail",
+                    (
+                        f"Tool {name!r} isn't available in this chat.",
+                        "tool_not_offered",
+                        None,
+                    ),
                 )
             )
             continue
@@ -3669,6 +3885,7 @@ async def _dispatch_tools(
                 user_message_id=ctx.user_message_id,
                 sem=sem,
                 on_progress=_make_progress(call_id, name),
+                turn=ctx.turn,
             )
         )
         tasks.append(task)
@@ -3764,6 +3981,47 @@ async def _dispatch_tools(
             if kind == "mcp":
                 (connector_id, real_tool), args = payload
                 mcp_t0 = time.monotonic()
+                from app.mcp.service import describe_call
+
+                try:
+                    mcp_meta = await describe_call(db, connector_id, real_tool, args)
+                except Exception:  # noqa: BLE001 — labelling must not break the call
+                    mcp_meta = {"tool": real_tool}
+                if mcp_meta.get("destructive"):
+                    # Changes something that can't be taken back (unlock,
+                    # delete, open): don't run it — put an approval card in
+                    # front of the user with exactly what would happen. The
+                    # Approve button runs it (chat/approvals_router.py).
+                    approval_meta = {
+                        **mcp_meta,
+                        "approval": "pending",
+                        "connector_id": str(connector_id),
+                        "arguments": args,
+                    }
+                    event = {
+                        "event": "tool_finished",
+                        "id": call_id,
+                        "name": name,
+                        "ok": True,
+                        "elapsed_ms": 0,
+                        "meta": approval_meta,
+                    }
+                    _record_tool_event(event, elapsed_ms=0, meta=approval_meta)
+                    yield (
+                        sse_yield(event),
+                        {
+                            "role": "tool",
+                            "tool_call_id": call_id,
+                            "content": (
+                                f"Not run yet. {mcp_meta.get('title', real_tool)} on "
+                                f"{mcp_meta.get('connector', 'the connector')} changes "
+                                "something, so the user has been shown an approval card "
+                                "and it runs only if they approve. In one sentence, say "
+                                "what will happen if they do — don't say it has happened."
+                            ),
+                        },
+                    )
+                    continue
                 try:
                     from app.mcp.service import call_connector_tool
 
@@ -3788,9 +4046,10 @@ async def _dispatch_tools(
                         "name": name,
                         "ok": True,
                         "elapsed_ms": int((time.monotonic() - mcp_t0) * 1000),
+                        "meta": mcp_meta,
                     }
                     _record_tool_event(
-                        event, elapsed_ms=event["elapsed_ms"]
+                        event, elapsed_ms=event["elapsed_ms"], meta=mcp_meta
                     )
                     yield (
                         sse_yield(event),
@@ -3818,9 +4077,10 @@ async def _dispatch_tools(
                         "ok": False,
                         "error": err_msg,
                         "elapsed_ms": int((time.monotonic() - mcp_t0) * 1000),
+                        "meta": mcp_meta,
                     }
                     _record_tool_event(
-                        event, elapsed_ms=event["elapsed_ms"]
+                        event, elapsed_ms=event["elapsed_ms"], meta=mcp_meta
                     )
                     yield (
                         sse_yield(event),
@@ -4184,25 +4444,26 @@ async def _stream_generator(
         # slots in alongside the tools-aware and personal-context
         # prompts.
         workspace_system_prompt: str | None = None
+        # What retrieval found in the workspace for *this* message — kept
+        # apart from the workspace's instructions, which don't change.
+        workspace_knowledge_block: str | None = None
         if conv.workspace_id is not None:
             # Walk the workspace-share ACL so a collaborator's send
             # still picks up the workspace's system prompt + pinned
             # files. Owner check first (common path); fall back to
             # :func:`_has_workspace_access` for accepted collaborators.
             workspace_row = await db.get(Workspace, conv.workspace_id)
-            caller_has_workspace = False
-            if workspace_row is not None:
-                if workspace_row.user_id == user.id:
-                    caller_has_workspace = True
-                else:
-                    # Import locally to avoid a cycle — ``shares``
-                    # imports ``workspaces.shares`` which imports this
-                    # router indirectly.
-                    from app.chat.shares import _has_workspace_access
+            # The caller's *current* role. A member who has since been
+            # removed gets ``None`` here, so their old workspace chats lose
+            # the workspace prompt, context and tools (roadmap R-032).
+            from app.workspaces.shares import workspace_role
 
-                    caller_has_workspace = await _has_workspace_access(
-                        workspace_row.id, user, db
-                    )
+            caller_workspace_role = (
+                await workspace_role(db, workspace_row.id, user)
+                if workspace_row is not None
+                else None
+            )
+            caller_has_workspace = caller_workspace_role is not None
             if workspace_row is not None and caller_has_workspace:
                 workspace_system_prompt = (
                     workspace_row.system_prompt.strip()
@@ -4266,15 +4527,7 @@ async def _stream_generator(
                     )
                     injection = WorkspaceInjection()
                 if injection.system_block:
-                    # Workspace instructions stay first; the retrieved
-                    # "Workspace knowledge" block sits under them.
-                    workspace_system_prompt = (
-                        merge_system_prompt(
-                            workspace_system_prompt, injection.system_block
-                        )
-                        if workspace_system_prompt
-                        else injection.system_block
-                    )
+                    workspace_knowledge_block = injection.system_block
 
                 # ACL for pinned files in a (possibly shared) workspace:
                 # anyone with workspace access can *use* any file pinned
@@ -4326,9 +4579,29 @@ async def _stream_generator(
                 db, conv.id
             )
             if attachment_indexed_ids:
-                attachment_rag_system = await attachment_rag_block(
-                    db, conversation_id=conv.id, query=triggering_text or ""
+                # The last few user turns, so a short follow-up ("and
+                # clause 9?") still finds the passages it's about.
+                recent_user_text = "\n".join(
+                    (m.content or "")
+                    for m in [r for r in history_rows if r.role == "user"][-3:]
                 )
+                attachment_rag_system = await attachment_rag_block(
+                    db,
+                    conversation_id=conv.id,
+                    query=recent_user_text or triggering_text or "",
+                )
+                from app.custom_models.retrieval import vector_status
+
+                if not attachment_rag_system and vector_status() != "ok":
+                    # The embedder is down and keywords found nothing: put
+                    # the files back inline (truncated) rather than answer
+                    # without them (R-319).
+                    logger.info(
+                        "attachment RAG unavailable for %s; inlining %d file(s)",
+                        conv.id,
+                        len(attachment_indexed_ids),
+                    )
+                    attachment_indexed_ids = set()
         except Exception:
             logger.exception(
                 "attachment RAG gathering failed (conversation_id=%s); "
@@ -4346,6 +4619,14 @@ async def _stream_generator(
         # description content. A chip pair (started/finished) is
         # emitted per image so the user sees what happened.
         triggering_files = per_message_attachments.get(triggering_user_msg_id, [])
+        # Shared by every tool call this turn (see ToolContext.turn).
+        # Attached files are outside content too.
+        turn_state: dict[str, Any] = {"untrusted": bool(triggering_files)}
+        # Memory changes made by tools this turn, surfaced to the UI.
+        tool_memory_writes: list[dict] = []
+        tool_memory_proposals: list[dict] = []
+        # call id → tool name, to label outside content in the history.
+        call_names: dict[str, str] = {}
         triggering_image_files = [f for f in triggering_files if looks_image(f)]
         has_image = bool(triggering_image_files)
 
@@ -4484,6 +4765,24 @@ async def _stream_generator(
         caption_preamble = (
             format_captions_as_text(caption_results) if caption_results else ""
         )
+        # Keep each caption with its image (R-045): later turns — and a
+        # regenerate — reuse it, instead of the picture vanishing for a
+        # text-only model or being captioned again at full cost.
+        fresh_captions = {
+            str(fid): r.text for fid, _name, r in caption_results if r.ok and r.text
+        }
+        if fresh_captions:
+            trig_for_caption = next(
+                (m for m in history_rows if m.id == triggering_user_msg_id), None
+            )
+            if trig_for_caption is not None and trig_for_caption.attachments:
+                trig_for_caption.attachments = [
+                    {**a, "caption": fresh_captions[str(a.get("id"))]}
+                    if isinstance(a, dict) and str(a.get("id")) in fresh_captions
+                    else a
+                    for a in trig_for_caption.attachments
+                ]
+                await db.commit()
         # If at least one caption succeeded the model genuinely has
         # image context to work with, so we flip
         # ``vision_handles_images`` on for the attachment preamble.
@@ -4494,6 +4793,26 @@ async def _stream_generator(
         any_caption_ok = any(r[2].ok for r in caption_results)
         vision_effective = model_supports_vision or any_caption_ok
 
+        # Which earlier turns still bring their files and pictures (R-045).
+        image_turns = [
+            m.id
+            for m in history_rows
+            if m.role == "user"
+            and any(looks_image(f) for f in per_message_attachments.get(m.id, []))
+        ]
+        image_turn_ids = set(image_turns[-_IMAGE_TURNS_RESENT:])
+        doc_turns = [
+            m.id
+            for m in history_rows
+            if m.role == "user"
+            and m.id != triggering_user_msg_id
+            and any(
+                not looks_image(f) and f.id not in attachment_indexed_ids
+                for f in per_message_attachments.get(m.id, [])
+            )
+        ]
+        reinline_doc_turn_ids = set(doc_turns[-_EARLIER_DOC_TURNS:])
+
         history: list[ChatMessage] = []
         for m in history_rows:
             if m.role not in ("user", "assistant", "system"):
@@ -4503,23 +4822,65 @@ async def _stream_generator(
             attachments = per_message_attachments.get(m.id, [])
             is_triggering = m.id == triggering_user_msg_id
 
-            # Text/PDF preamble: only on the triggering turn. Prior turns
-            # already produced an assistant reply with the file context
-            # baked in, so re-feeding the text would waste tokens.
-            if is_triggering and attachments:
-                # Drop indexed attachments from the inline preamble — their
-                # content reaches the model via retrieval instead, so
-                # inlining (and truncating) them too would be wasteful.
-                preamble_files = (
-                    [a for a in attachments if a.id not in attachment_indexed_ids]
-                    if attachment_indexed_ids
-                    else attachments
-                )
-                preamble = build_attachment_preamble(
-                    preamble_files, vision_handles_images=vision_effective
+            snaps = {
+                str(a.get("id")): a for a in (m.attachments or []) if isinstance(a, dict)
+            }
+
+            # Text/PDF preamble. The turn that brought a file gets all of it.
+            # Later turns used to get nothing — the model answered follow-ups
+            # from its own summary (R-045). Now an indexed file reaches them
+            # through retrieval, and one that isn't indexed (no embedder, or
+            # not yet) is re-sent for the newest couple of turns that had one.
+            if m.role == "user" and attachments and (
+                is_triggering or m.id in reinline_doc_turn_ids
+            ):
+                if is_triggering:
+                    # Files indexed on send because they were too big to
+                    # inline arrive through retrieval instead.
+                    preamble_files = [
+                        a for a in attachments
+                        if not (snaps.get(str(a.id)) or {}).get("rag")
+                    ]
+                else:
+                    preamble_files = [
+                        a for a in attachments
+                        if not looks_image(a) and a.id not in attachment_indexed_ids
+                    ]
+                # PDF text extraction and file reads — off the event loop
+                # so one big attachment can't stall every stream (R-016).
+                preamble = await asyncio.to_thread(
+                    build_attachment_preamble,
+                    preamble_files,
+                    vision_handles_images=vision_effective,
                 )
             else:
                 preamble = ""
+
+            # Pictures this turn won't re-send: their saved caption if the
+            # relay described them, else a one-line note that they existed.
+            resends_images = (
+                model_supports_vision and m.role == "user" and m.id in image_turn_ids
+            )
+            if (
+                m.role == "user"
+                and attachments
+                and not resends_images
+                and not (is_triggering and caption_preamble)
+            ):
+                earlier_images = [f for f in attachments if looks_image(f)]
+                cached = [
+                    (f.id, f.filename, CaptionResult(ok=True, text=snaps[str(f.id)]["caption"]))
+                    for f in earlier_images
+                    if (snaps.get(str(f.id)) or {}).get("caption")
+                ]
+                if cached:
+                    preamble = format_captions_as_text(cached) + "\n\n" + preamble
+                elif earlier_images and model_supports_vision:
+                    names = ", ".join(f.filename or "image" for f in earlier_images)
+                    preamble = (
+                        f"[The user shared an image here ({names}) — not re-sent, "
+                        "to keep the conversation small.]\n\n" + preamble
+                    )
 
             # Splice the vision-relay caption block in front of the
             # standard preamble for the triggering turn. Caption block
@@ -4530,16 +4891,25 @@ async def _stream_generator(
                 preamble = caption_preamble + preamble
 
             full_text = preamble + base_text
+            if m.role == "assistant" and attachments:
+                # What this reply produced (generated images, charts,
+                # documents), named so the model can refer back to them.
+                full_text += "\n\n[Files from this reply: " + ", ".join(
+                    f"{f.filename or 'file'} (file id {f.id})" for f in attachments
+                ) + "]"
 
             # Image bytes: re-fed on EVERY user turn that had them, so the
             # model can keep referring back to the picture across multi-
             # turn conversations. Vision-incapable models silently drop
             # the bytes — when relay ran successfully the caption above
             # carries the visual content instead.
+            # Only on user turns: an image part inside an *assistant* message
+            # is rejected by OpenAI and Anthropic, and generated images and
+            # charts used to be replayed that way on every later turn (R-046).
             image_parts: list[ImagePart] = []
-            if model_supports_vision and attachments:
-                images, _img_warnings = build_image_parts(
-                    [f for f in attachments if looks_image(f)]
+            if resends_images and attachments:
+                images, _img_warnings = await asyncio.to_thread(
+                    build_image_parts, [f for f in attachments if looks_image(f)]
                 )
                 # We only add per-image warnings (oversize, IO error) for
                 # the triggering turn; older turns shipping fine before
@@ -4618,8 +4988,12 @@ async def _stream_generator(
         # system prompt, the memory block, and the capture pass all key
         # off it, and they're spread across a few hundred lines.
         memory_mode = _resolve_memory_mode(user)
+        from app.files.drive_index import chat_mode_for
+
+        drive_chat_mode = "off" if voice_turn else chat_mode_for(user)
 
         enabled_categories: set[str] = set()
+        no_inspect = False  # inspect_photos needs a Photos vision model
         # Real-time voice turns skip tools + web search entirely. A spoken
         # conversation needs a fast, direct reply, and letting the model
         # fire a web search or tool call mid-turn injects a 2–5s external
@@ -4639,8 +5013,25 @@ async def _stream_generator(
                 # workspace chats. The tools never write; they file a
                 # pending proposal the user applies from a preview card,
                 # so chats stay read-only until a human approves.
-                if conv.workspace_id is not None:
+                # Read tools for any *current* member; write proposals only
+                # for members who can write. Based on the caller's role now,
+                # not on the chat having once been in the workspace.
+                # Find / open / organise the user's files (WP-5.3).
+                enabled_categories.add("files")
+                # Ask your photos (PH-4): for anyone with a photo library.
+                from app.chat.tools.photos import has_library
+
+                if await has_library(db, user.id):
+                    enabled_categories.add("photos")
+                    # Looking at photos needs a Photos vision model.
+                    from app.photos.captions import configured as _vision
+
+                    if await _vision(db) is None:
+                        no_inspect = True
+                if conv.workspace_id is not None and caller_has_workspace:
                     enabled_categories.add("workspace")
+                    if caller_workspace_role in ("owner", "admin", "editor"):
+                        enabled_categories.add("workspace_write")
             # Memory writes. Gated on the Tools toggle like every other
             # category *and* on the user's own memory setting — a user
             # with memory off must not have the model quietly saving
@@ -4657,16 +5048,32 @@ async def _stream_generator(
                 # sub-agent's tool set is search-only.
                 if ctx.get("tools_enabled"):
                     enabled_categories.add("agents")
+            # Answers from the user's own files (WP-5.2) — their AI-search
+            # setting, not a per-chat toggle: on when they opted their Drive
+            # in and didn't switch chats off.
+            if drive_chat_mode != "off":
+                enabled_categories.add("drive")
 
         # Per-user capability gate: withhold ``generate_image`` from users
         # who don't have image-gen access so the model is never even
         # offered it (the tool also re-checks on dispatch). Admins are
         # never gated.
         excluded_tools: set[str] = set()
+        if no_inspect:
+            excluded_tools.add("inspect_photos")
         if user.role != "admin" and not getattr(
             user, "can_generate_images", True
         ):
             excluded_tools.add("generate_image")
+
+        # A model with no native function-calling never gets the tools (the
+        # provider layer drops them), so don't spend ~1.5k tokens telling it
+        # about tools it can't call — or tempt it to fake a call (WP-1.4).
+        model_can_call_tools = (
+            _model_tool_support(provider, ctx["model_id"]) is not False
+        )
+        if not model_can_call_tools:
+            enabled_categories = set()
 
         tools_payload: list[dict[str, Any]] | None = (
             list_openai_tools(enabled_categories) if enabled_categories else None
@@ -4684,7 +5091,12 @@ async def _stream_generator(
         # map so calls route back to the right server. Soft-fail — a connector
         # problem must never abort the turn.
         mcp_dispatch: dict[str, tuple[uuid.UUID, str]] = {}
-        if ctx.get("tools_enabled"):
+        # Spoken turns get no connector tools either (R-198): native tools
+        # were already dropped for them, but MCP ones rode along whenever
+        # the hidden composer toggle was on — and a reply could claim an
+        # action nobody could see. Voice acts through the command fast
+        # path, which runs before the model is asked.
+        if ctx.get("tools_enabled") and model_can_call_tools and not voice_turn:
             try:
                 from app.mcp.service import (
                     build_tools_from_connectors,
@@ -4696,9 +5108,13 @@ async def _stream_generator(
                     user_id=user.id,
                     workspace_id=conv.workspace_id,
                 )
+                # Switched off for this chat (R-161). An explicit
+                # @-mention still invokes one — that's a direct request.
+                _off = set(conv.disabled_connector_ids or [])
+                _mcp_connectors = [c for c in _mcp_connectors if str(c.id) not in _off]
                 if _mcp_connectors:
                     _mcp_schemas, mcp_dispatch = build_tools_from_connectors(
-                        _mcp_connectors
+                        _mcp_connectors, ask_first=True
                     )
                     if _mcp_schemas:
                         tools_payload = (tools_payload or []) + _mcp_schemas
@@ -4716,15 +5132,22 @@ async def _stream_generator(
         # Promptly base guidelines (lowest priority — every user/workspace/tool
         # layer stacked on top overrides these). Covers rendering capabilities
         # (KaTeX, markdown tables) and basic response quality steer.
-        system_prompt: str | None = merge_system_prompt(
-            workspace_system_prompt or "", PROMPTLY_BASE_PROMPT
-        )
-        # Phase 9 — retrieved chunks from this chat's indexed attachments,
-        # injected as a knowledge block above the base guidelines.
+        #
+        # The prompt is built in two halves (WP-1.4). ``system_prompt`` holds
+        # the standing layers — tools, guidelines, instructions — which are
+        # the same on every turn of this chat. ``turn_context`` holds what's
+        # looked up for this message: the date and time, memories, retrieved
+        # files, @-mentions. The standing half goes first, so the start of
+        # every request is byte-identical and a provider's prompt cache can
+        # reuse it; the base guidelines are added in front at the end.
+        system_prompt: str | None = workspace_system_prompt or None
+        turn_context: list[str] = []
+        tools_prompt_text: str | None = None
+        if workspace_knowledge_block:
+            turn_context.append(workspace_knowledge_block)
+        # Phase 9 — retrieved chunks from this chat's indexed attachments.
         if attachment_rag_system:
-            system_prompt = merge_system_prompt(
-                attachment_rag_system, system_prompt or ""
-            )
+            turn_context.append(attachment_rag_system)
         # Account-wide custom system prompt. A global persona / standing
         # instruction the user set in Chat defaults that seeds EVERY new
         # chat. It's the broadest steer, so it sits *under* both the
@@ -4833,63 +5256,6 @@ async def _stream_generator(
         # ends up NULL.
         collected_reasoning: list[str] = []
 
-        # ---- Shutdown safety net ---------------------------------------
-        # Generation state lives only in this process. Register a callback
-        # the shutdown hook can call to persist whatever has accumulated so
-        # far, so a restart mid-reply leaves a truncated answer rather than
-        # a question with no answer (and no error) at all. Uses its own
-        # session: by the time this runs the generator's task is being
-        # cancelled and its session can't be trusted.
-        if session is not None:
-
-            async def _flush_partial_reply(reason: str = "shutdown") -> bool:
-                text = _strip_leaked_tool_call_xml("".join(collected_text)).strip()
-                if not text:
-                    return False
-                text += _INTERRUPTED_SUFFIXES.get(
-                    reason, _INTERRUPTED_SUFFIXES["shutdown"]
-                )
-                reasoning = "".join(collected_reasoning) or None
-                async with SessionLocal() as fdb:
-                    conv_row = await fdb.get(Conversation, conv_id)
-                    if conv_row is None:
-                        # Chat was deleted mid-stream — nothing to attach to.
-                        return False
-                    if continue_from_id is not None:
-                        # Continue-generation extends an existing reply in
-                        # place; appending a sibling here would split one
-                        # answer across two bubbles.
-                        target = await fdb.get(Message, continue_from_id)
-                        if target is None:
-                            return False
-                        target.content = (target.content or "") + text
-                        leaf_id = target.id
-                    else:
-                        msg = Message(
-                            conversation_id=conv_id,
-                            role="assistant",
-                            content=text,
-                            parent_id=triggering_user_msg_id,
-                            reasoning_content=reasoning,
-                            model_id=ctx["model_id"],
-                        )
-                        fdb.add(msg)
-                        await fdb.flush()
-                        leaf_id = msg.id
-                    conv_row.active_leaf_message_id = leaf_id
-                    conv_row.updated_at = datetime.now(timezone.utc)
-                    await fdb.commit()
-                logger.info(
-                    "Persisted partial reply (%d chars) for conversation %s "
-                    "(reason=%s stream=%s)",
-                    len(text),
-                    conv_id,
-                    reason,
-                    stream_id,
-                )
-                return True
-
-            session.flush_partial = _flush_partial_reply
 
         assistant_attachment_snaps: list[dict[str, Any]] = []
         # Tool Activity Card — compact per-call records ({id, name, ok,
@@ -4916,10 +5282,23 @@ async def _stream_generator(
             return _sse(data)
 
         def _log_visible(rec: dict) -> None:
+            meta = rec.get("meta") or {}
+            # Memory tools are silent (no tool card), but what they saved
+            # must not be: collected here and shown as a "Saved to memory ·
+            # Undo" chip at the end of the turn (R-019).
+            tool_memory_writes.extend(meta.get("memory_writes") or [])
+            tool_memory_proposals.extend(meta.get("memory_proposals") or [])
+            if rec.get("id") and rec.get("name"):
+                call_names[rec["id"]] = rec["name"]
             if rec.get("name") not in SILENT_TOOL_NAMES:
                 tool_call_log.append(rec)
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
+        # The last hop's own prompt size and shape — what the model had in
+        # view when it wrote the reply. ``prompt_tokens`` above is the sum
+        # over hops (billing); the context meter wants this (WP-1.4).
+        last_hop_prompt_tokens: int | None = None
+        last_hop_shape: dict[str, int] = {}
         # Sum of provider-reported USD cost across hops + tool
         # invocations. ``None`` until at least one hop / tool actually
         # reports a cost so we can distinguish "free / unknown" from
@@ -5006,6 +5385,7 @@ async def _stream_generator(
                     user=user,
                     conversation_id=conv.id,
                     user_message_id=triggering_user_msg_id,
+                    turn=turn_state,
                 )
                 async for sse_event, tool_history_msg in _dispatch_tools(
                     db=db,
@@ -5030,6 +5410,93 @@ async def _stream_generator(
                 ):
                     yield sse_event
                     if tool_history_msg is not None:
+                        _name = call_names.get(tool_history_msg.get("tool_call_id") or "", "")
+                        if reads_outside_content(_name) and isinstance(
+                            tool_history_msg.get("content"), str
+                        ):
+                            tool_history_msg = {
+                                **tool_history_msg,
+                                "content": _frame_untrusted(tool_history_msg["content"], _name),
+                            }
+                        running_history.append(tool_history_msg)
+
+        # ---- "always" Drive mode: look in the user's files first ----
+        # Same shape as forced web search above: a synthesised
+        # ``search_my_files`` call, so the lookup shows as a tool card and
+        # its passages reach the model as a real tool result with citations.
+        # The question itself is the query — hybrid retrieval handles a
+        # natural-language question, and it saves a distillation call. Only
+        # when something in the files shares a word with the question: a
+        # "thanks" or "hello" shouldn't drag in passages (the model can
+        # still search itself — the tool stays offered).
+        if drive_chat_mode == "always" and "drive" in enabled_categories:
+            from app.chat.tools.search_my_files import lexical_hits, search_drive
+
+            last_user = next(
+                (m.content for m in reversed(history_rows) if m.role == "user"),
+                "",
+            )
+            drive_query = (last_user or "").strip()[:400]
+            try:
+                drive_relevant = bool(drive_query) and bool(
+                    lexical_hits(drive_query, await search_drive(db, user.id, drive_query))
+                )
+            except Exception:  # noqa: BLE001 - best-effort, the turn goes on
+                logger.exception("drive pre-check failed; not forcing a file search")
+                drive_relevant = False
+            if drive_relevant:
+                forced_call_id = f"forced_drive_{uuid.uuid4().hex[:8]}"
+                forced_args = json.dumps({"query": drive_query})
+                running_history.append(
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": forced_call_id,
+                                "type": "function",
+                                "function": {
+                                    "name": "search_my_files",
+                                    "arguments": forced_args,
+                                },
+                            }
+                        ],
+                    }
+                )
+                async for sse_event, tool_history_msg in _dispatch_tools(
+                    db=db,
+                    request=request,
+                    user=user,
+                    pending_calls={
+                        0: {
+                            "id": forced_call_id,
+                            "name": "search_my_files",
+                            "arguments": forced_args,
+                        }
+                    },
+                    ctx=ToolContext(
+                        db=db,
+                        user=user,
+                        conversation_id=conv.id,
+                        user_message_id=triggering_user_msg_id,
+                        turn=turn_state,
+                    ),
+                    sse_yield=_sse_visible,
+                    on_attachment=assistant_attachment_snaps.append,
+                    on_sources=sources_accumulator.extend,
+                    on_cost=_record_tool_cost,
+                    on_tool_event=_log_visible,
+                    invocation_counts=tool_invocation_counts,
+                    per_tool_caps=per_tool_caps,
+                    dedup_cache=tool_dedup_cache,
+                ):
+                    yield sse_event
+                    if tool_history_msg is not None:
+                        if isinstance(tool_history_msg.get("content"), str):
+                            tool_history_msg = {
+                                **tool_history_msg,
+                                "content": _frame_untrusted(tool_history_msg["content"], "search_my_files"),
+                            }
                         running_history.append(tool_history_msg)
 
         # When tools are on, *prepend* a tool-aware system prompt that
@@ -5037,8 +5504,8 @@ async def _stream_generator(
         # the tool". Sidesteps the common refusal pattern (Gemini in
         # particular) where the model insists it can't produce binary
         # artefacts even with a valid tools[] payload in scope.
-        if enabled_categories:
-            system_prompt = merge_system_prompt(
+        if enabled_categories and tools_payload:
+            tools_prompt_text = (
                 build_tools_system_prompt(
                     enabled_categories,
                     excluded_tools,
@@ -5051,8 +5518,7 @@ async def _stream_generator(
                         memory_mode == "manual"
                         or bool(conv.memory_capture_paused)
                     ),
-                ),
-                system_prompt or "",
+                )
             )
 
         # Ambient personal context (date, time, location). Phrased as
@@ -5065,9 +5531,7 @@ async def _stream_generator(
         # in location / timezone / currency.
         personal_context = build_personal_context_prompt(user)
         if personal_context:
-            system_prompt = merge_system_prompt(
-                personal_context, system_prompt or ""
-            )
+            turn_context.append(personal_context)
 
         # Phase 6 — cross-chat memory. Inject the user's saved durable
         # facts as background knowledge (same "don't recite it" framing as
@@ -5115,9 +5579,7 @@ async def _stream_generator(
                 can_recall="memory" in enabled_categories,
             )
             if memory_block:
-                system_prompt = merge_system_prompt(
-                    memory_block, system_prompt or ""
-                )
+                turn_context.append(memory_block)
 
         # Phase C — @-mention resolution. Scan the triggering user
         # message for ``@[title](id)`` tokens, verify the caller has
@@ -5127,8 +5589,15 @@ async def _stream_generator(
         # error, inaccessible id, chat too short) drop individual
         # references without blocking the send — the raw tokens
         # still render as chips in the user's message.
-        if trig_row is not None and trig_row.content:
-            mentions_found = extract_mentions(trig_row.content)
+        # Mentions keep applying after the turn they were typed in (R-045):
+        # read them from the last few user turns, newest first, so "make it
+        # shorter" still has the chat or file it was about.
+        mention_text = "\n".join(
+            (r.content or "")
+            for r in reversed([r for r in history_rows if r.role == "user"][-_MENTION_TURNS:])
+        )
+        if mention_text.strip():
+            mentions_found = extract_mentions(mention_text)
             if mentions_found:
                 refs = await resolve_mentions(
                     mentions_found,
@@ -5140,21 +5609,14 @@ async def _stream_generator(
                 )
                 ref_block = build_reference_system_block(refs)
                 if ref_block:
-                    # Mentions land on top (first arg to
-                    # ``merge_system_prompt``) so the model reads
-                    # "you've been given these reference chats"
-                    # before the longer-lived project / tool /
-                    # personal layers.
-                    system_prompt = merge_system_prompt(
-                        ref_block, system_prompt or ""
-                    )
+                    turn_context.append(ref_block)
 
             # Drive-file @-mentions (Phase 2.2). Resolve each referenced
             # file the caller can read and inject its extracted text as
             # background context. Access control + text extraction are
             # delegated to the files package; unreadable / missing files
             # are dropped silently so a stale token can't block the send.
-            file_mentions_found = extract_file_mentions(trig_row.content)
+            file_mentions_found = extract_file_mentions(mention_text)
             if file_mentions_found:
                 # NB: do NOT re-import UserFile here. It's already imported at
                 # module scope; a local ``import UserFile`` would make the name
@@ -5175,11 +5637,9 @@ async def _stream_generator(
                         )
                         continue
                     resolved_files.append(uf)
-                file_block = build_file_mention_block(resolved_files)
+                file_block = await asyncio.to_thread(build_file_mention_block, resolved_files)
                 if file_block:
-                    system_prompt = merge_system_prompt(
-                        file_block, system_prompt or ""
-                    )
+                    turn_context.append(file_block)
 
             # Connector @-mentions (Phase 10). ``@[name](connector:id)``
             # explicitly invokes an MCP connector's tools for this turn —
@@ -5205,7 +5665,7 @@ async def _stream_generator(
                     invoked = [c for c in reachable if c.id in wanted]
                     fresh = [c for c in invoked if c.id not in already]
                     if fresh:
-                        _schemas, _disp = build_tools_from_connectors(fresh)
+                        _schemas, _disp = build_tools_from_connectors(fresh, ask_first=True)
                         if _schemas:
                             tools_payload = (tools_payload or []) + _schemas
                             mcp_dispatch.update(_disp)
@@ -5216,9 +5676,7 @@ async def _stream_generator(
                             + ", ".join(c.name for c in invoked)
                             + ". Use their tools to answer this message."
                         )
-                        system_prompt = merge_system_prompt(
-                            note, system_prompt or ""
-                        )
+                        turn_context.append(note)
                 except Exception:
                     logger.exception(
                         "Connector mention resolution failed (conversation_id=%s)",
@@ -5269,17 +5727,35 @@ async def _stream_generator(
                     )
                     retrieved = []
 
-            blocks: list[str] = []
             if custom_assistant.personality:
-                blocks.append(custom_assistant.personality.strip())
+                system_prompt = merge_system_prompt(
+                    custom_assistant.personality.strip(), system_prompt or ""
+                )
             knowledge_block = format_retrieved_block(retrieved)
             if knowledge_block:
-                blocks.append(knowledge_block)
+                turn_context.append(knowledge_block)
 
-            if blocks:
-                system_prompt = merge_system_prompt(
-                    "\n\n".join(blocks), system_prompt or ""
-                )
+        # A model that can't call tools still gets "always" Drive answers:
+        # the passages ride in this turn's context, with the same citations.
+        if drive_chat_mode == "always" and not model_can_call_tools:
+            from app.chat.tools.search_my_files import lexical_hits, render_hits, search_drive
+
+            drive_q = next(
+                (m.content for m in reversed(history_rows) if m.role == "user"),
+                "",
+            )
+            drive_q = (drive_q or "").strip()[:400]
+            if drive_q:
+                try:
+                    drive_hits = lexical_hits(drive_q, await search_drive(db, user.id, drive_q))
+                except Exception:  # noqa: BLE001 - best-effort, like the knowledge block
+                    logger.exception("drive retrieval failed; answering without files")
+                    drive_hits = []
+                if drive_hits:
+                    drive_text, drive_sources = render_hits(drive_q, drive_hits)
+                    turn_context.append(_frame_untrusted(drive_text, "search_my_files"))
+                    sources_accumulator.extend(drive_sources)
+                    turn_state["untrusted"] = True
 
         # Voice mode (Phase 2): a spoken turn. Merge the brevity steer
         # LAST so it's the highest-priority layer — format/length for
@@ -5287,6 +5763,27 @@ async def _stream_generator(
         if voice_turn:
             system_prompt = merge_system_prompt(
                 VOICE_SYSTEM_PROMPT, system_prompt or ""
+            )
+
+        # Standing layers first (cacheable), this turn's context last.
+        _turn_text = "\n\n".join(p.strip() for p in turn_context if p and p.strip())
+        system_prompt = "\n\n".join(
+            part.strip()
+            for part in (tools_prompt_text, PROMPTLY_BASE_PROMPT, system_prompt, _turn_text)
+            if part and part.strip()
+        ) or None
+        turn_context_chars = len(_turn_text)
+
+        def _context_usage_now() -> dict[str, Any] | None:
+            """The last request's size and make-up (see context_usage.py)."""
+            if not last_hop_shape:
+                return None
+            return build_context_usage(
+                measured_prompt_tokens=last_hop_prompt_tokens,
+                instructions_chars=max(0, last_hop_shape["system"] - turn_context_chars),
+                turn_chars=turn_context_chars,
+                tools_chars=last_hop_shape["tools"],
+                history_chars=last_hop_shape["history"],
             )
 
         # Phase 3.2 — in-chat transparency. Emit which facts were injected
@@ -5306,12 +5803,163 @@ async def _stream_generator(
         # so the ``done`` event can flag truncation (``"length"``).
         # Initialised here so it's always bound even on the (impossible)
         # zero-iteration path.
+        # ---- Keeping unfinished work ------------------------------------
+        # A reply that doesn't finish — Stop, a provider error halfway, a
+        # dropped connection, a restart, a bug — keeps what it already
+        # produced: the text the user watched stream in, tool calls, files
+        # and sources, and the tokens it cost (R-042/R-043/R-077/R-272).
+        #
+        # ``inflight`` is the hop that's streaming right now. Its text only
+        # reaches ``collected_text`` when the hop ends, so the old flush,
+        # which read just ``collected_text``, saved nothing for the usual
+        # single-hop reply that's stopped mid-sentence.
+        inflight: dict[str, list[str]] = {"text": [], "reasoning": []}
+        # The reply's id once *any* path has saved it, so nothing saves it
+        # twice (Stop pressed in the gap between the save and ``done`` used
+        # to add a duplicate tagged "Stopped" as the visible version).
+        saved_reply: dict[str, uuid.UUID | None] = {"id": None}
+        restore_leaf_raw = ctx.get("restore_leaf_id")
+
+        async def _flush_partial_reply(reason: str = "shutdown") -> bool:
+            if saved_reply["id"] is not None:
+                return False
+            text = _strip_leaked_tool_call_xml(
+                "".join(collected_text) + "".join(inflight["text"])
+            ).strip()
+            has_work = bool(
+                text or assistant_attachment_snaps or tool_call_log or sources_accumulator
+            )
+            async with SessionLocal() as fdb:
+                conv_row = await fdb.get(Conversation, conv_id)
+                if conv_row is None:
+                    # Chat was deleted mid-stream — nothing to attach to.
+                    return False
+                if not has_work:
+                    # Nothing to keep. A regenerate pointed the chat at the
+                    # question while the new answer streamed; put the answer
+                    # that was there back instead of leaving it looking
+                    # unanswered (R-060).
+                    if (
+                        restore_leaf_raw
+                        and conv_row.active_leaf_message_id == triggering_user_msg_id
+                    ):
+                        conv_row.active_leaf_message_id = uuid.UUID(restore_leaf_raw)
+                        await fdb.commit()
+                    return False
+                suffix = _INTERRUPTED_SUFFIXES.get(reason, _INTERRUPTED_SUFFIXES["shutdown"])
+                body = text + suffix if text else suffix.strip()
+                reasoning = (
+                    "".join(collected_reasoning) + "".join(inflight["reasoning"])
+                ) or None
+                micros = (
+                    max(0, int(round(cost_usd * 1_000_000))) if cost_usd is not None else None
+                )
+                if continue_from_id is not None:
+                    # Continue-generation extends an existing reply in
+                    # place; appending a sibling here would split one
+                    # answer across two bubbles.
+                    target = await fdb.get(Message, continue_from_id)
+                    if target is None:
+                        return False
+                    target.content = (target.content or "") + (
+                        text + suffix if text else suffix
+                    )
+                    if tool_call_log:
+                        target.tool_calls = list(target.tool_calls or []) + tool_call_log
+                    if assistant_attachment_snaps:
+                        target.attachments = (
+                            list(target.attachments or []) + assistant_attachment_snaps
+                        )
+                    leaf_id = target.id
+                else:
+                    msg = Message(
+                        conversation_id=conv_id,
+                        role="assistant",
+                        content=body,
+                        parent_id=triggering_user_msg_id,
+                        reasoning_content=reasoning,
+                        sources=(
+                            _dedupe_sources(sources_accumulator)
+                            if sources_accumulator
+                            else None
+                        ),
+                        tool_calls=tool_call_log or None,
+                        attachments=assistant_attachment_snaps or None,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        context_usage=_context_usage_now(),
+                        cost_usd_micros=micros,
+                        model_id=ctx["model_id"],
+                    )
+                    fdb.add(msg)
+                    await fdb.flush()
+                    leaf_id = msg.id
+                conv_row.active_leaf_message_id = leaf_id
+                conv_row.updated_at = datetime.now(timezone.utc)
+                # What it cost is real whether or not it finished.
+                try:
+                    await record_usage(
+                        fdb,
+                        user_id=user.id,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        cost_usd=cost_usd,
+                    )
+                except Exception:  # noqa: BLE001 — billing must never block the save
+                    logger.exception("Failed to record usage for partial reply %s", stream_id)
+                await fdb.commit()
+            saved_reply["id"] = leaf_id
+            logger.info(
+                "Persisted partial reply (%d chars) for conversation %s "
+                "(reason=%s stream=%s)",
+                len(text),
+                conv_id,
+                reason,
+                stream_id,
+            )
+            return True
+
+        if session is not None:
+            session.flush_partial = _flush_partial_reply
+
+        async def _fail_turn(payload: dict[str, Any]) -> list[str]:
+            """End a turn that went wrong: keep what it produced, then say
+            what happened. ``done`` carries the saved reply so the client
+            keeps the bubble under the error card instead of blanking it."""
+            if session is not None:
+                if session.flushed:
+                    return [_sse(payload), _sse({"done": True})]
+                session.flushed = True
+            try:
+                await _flush_partial_reply("error")
+            except Exception:  # noqa: BLE001 — reporting the error matters more
+                logger.exception("Failed to keep the partial reply for stream %s", stream_id)
+            done: dict[str, Any] = {"done": True}
+            if saved_reply["id"] is not None:
+                async with SessionLocal() as fdb:
+                    m = await fdb.get(Message, saved_reply["id"])
+                    if m is not None:
+                        payload["message_id"] = str(m.id)
+                        done.update(
+                            message_id=str(m.id),
+                            created_at=m.created_at.isoformat(),
+                            content=m.content,
+                            sources=m.sources,
+                            tool_calls=m.tool_calls,
+                            attachments=m.attachments,
+                            prompt_tokens=m.prompt_tokens,
+                            completion_tokens=m.completion_tokens,
+                            model_id=m.model_id,
+                        )
+            return [_sse(payload), _sse(done)]
+
         hop_finish: str | None = None
         try:
             for hop in range(MAX_TOOL_HOPS):
                 # Accumulators for the *current* hop. Tool-call deltas
                 # come back fragmented per ``index``; we merge by index.
                 hop_text_parts: list[str] = []
+                inflight["text"] = hop_text_parts
                 # DeepSeek thinking-mode chain-of-thought for this
                 # hop. Captured separately so we can attach it to
                 # the assistant turn appended to ``running_history``
@@ -5319,6 +5967,7 @@ async def _stream_generator(
                 # ``reasoning_content`` on assistant turns of tool-
                 # call multi-turn DeepSeek conversations).
                 hop_reasoning_parts: list[str] = []
+                inflight["reasoning"] = hop_reasoning_parts
                 # Each entry: {"id": str, "name": str, "arguments": str}
                 pending_calls: dict[int, dict[str, str]] = {}
                 hop_finish = None
@@ -5391,6 +6040,11 @@ async def _stream_generator(
                 # failed. Tools below re-acquire a connection on demand.
                 await db.commit()
 
+                last_hop_shape = {
+                    "system": len(hop_system or ""),
+                    "tools": len(json.dumps(hop_tools)) if hop_tools else 0,
+                    "history": history_chars(running_history),
+                }
                 async for ev in model_router.stream_chat_events(
                     provider=provider,
                     model_id=ctx["model_id"],
@@ -5447,6 +6101,7 @@ async def _stream_generator(
                         # tool loop made on their behalf.
                         if ev.prompt_tokens is not None:
                             prompt_tokens = (prompt_tokens or 0) + ev.prompt_tokens
+                            last_hop_prompt_tokens = ev.prompt_tokens
                         if ev.completion_tokens is not None:
                             completion_tokens = (
                                 completion_tokens or 0
@@ -5464,6 +6119,8 @@ async def _stream_generator(
                 hop_reasoning = "".join(hop_reasoning_parts)
                 if hop_reasoning:
                     collected_reasoning.append(hop_reasoning)
+                inflight["text"] = []
+                inflight["reasoning"] = []
 
                 # We're done with the tool loop in one of three cases:
                 #
@@ -5544,6 +6201,7 @@ async def _stream_generator(
                     user=user,
                     conversation_id=conv.id,
                     user_message_id=triggering_user_msg_id,
+                    turn=turn_state,
                 )
                 async for sse_event, tool_history_msg in _dispatch_tools(
                     db=db,
@@ -5560,6 +6218,10 @@ async def _stream_generator(
                     per_tool_caps=per_tool_caps,
                     dedup_cache=tool_dedup_cache,
                     mcp_dispatch=mcp_dispatch,
+                    allowed_tool_names={
+                        t.get("function", {}).get("name")
+                        for t in (tools_payload or [])
+                    },
                 ):
                     # Always forward the SSE event. ``tool_history_msg``
                     # is None for "started" pre-events (which have no
@@ -5567,6 +6229,14 @@ async def _stream_generator(
                     # a history row to feed back to the next hop.
                     yield sse_event
                     if tool_history_msg is not None:
+                        _name = call_names.get(tool_history_msg.get("tool_call_id") or "", "")
+                        if reads_outside_content(_name) and isinstance(
+                            tool_history_msg.get("content"), str
+                        ):
+                            tool_history_msg = {
+                                **tool_history_msg,
+                                "content": _frame_untrusted(tool_history_msg["content"], _name),
+                            }
                         running_history.append(tool_history_msg)
             # NOTE: no ``for...else`` clause here on purpose. The
             # forced-finish hop's unconditional ``break`` above
@@ -5605,15 +6275,35 @@ async def _stream_generator(
                 getattr(e, "status_code", None),
                 e,
             )
-            if classified is not None:
-                yield _sse({"error": str(e), **classified})
-            else:
-                yield _sse({"error": str(e)})
-            yield _sse({"done": True})
+            for chunk in await _fail_turn({"error": str(e), **(classified or {})}):
+                yield chunk
             return
         except asyncio.CancelledError:
             logger.info("Stream %s cancelled", stream_id)
             raise
+        except httpx.HTTPError as e:
+            # The provider adapter wraps these now, but a tool's own HTTP
+            # call can raise one too. Either way it's a dropped connection,
+            # not silence (R-255).
+            message = (
+                "The model timed out before finishing."
+                if isinstance(e, httpx.TimeoutException)
+                else "Connection error: the reply was cut off before it finished."
+            )
+            logger.warning("Transport error on stream %s: %r", stream_id, e)
+            classified = _classify_upstream_error(message, provider_type=provider.type)
+            for chunk in await _fail_turn({"error": message, **(classified or {})}):
+                yield chunk
+            return
+        except Exception:
+            # A bug, not the provider. Still keep the text and say so —
+            # this used to end the stream with no reply and no error.
+            logger.exception("Stream %s failed", stream_id)
+            for chunk in await _fail_turn(
+                {"error": "Something went wrong while writing this reply. What it wrote so far is kept."}
+            ):
+                yield chunk
+            return
 
         stream_end = time.monotonic()
         ttft_ms = (
@@ -5841,6 +6531,7 @@ async def _stream_generator(
             yield _sse({"done": True})
             return
 
+        context_usage = _context_usage_now()
         if continue_target is not None:
             # Continue-generation (Phase 3.1): append the freshly streamed
             # text onto the existing reply rather than creating a sibling.
@@ -5877,6 +6568,7 @@ async def _stream_generator(
             assistant.prompt_tokens = (
                 (assistant.prompt_tokens or 0) + (prompt_tokens or 0)
             ) or None
+            assistant.context_usage = context_usage
             assistant.completion_tokens = (
                 (assistant.completion_tokens or 0) + (completion_tokens or 0)
             ) or None
@@ -5910,6 +6602,7 @@ async def _stream_generator(
                 attachments=assistant_attachment_snaps or None,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
+                context_usage=context_usage,
                 ttft_ms=ttft_ms,
                 total_ms=total_ms,
                 cost_usd_micros=cost_micros,
@@ -5940,8 +6633,77 @@ async def _stream_generator(
                 "Failed to record usage for stream=%s user=%s", stream_id, user.id
             )
 
-        await db.commit()
+        # Marked before the commit, not after: a Stop landing while the
+        # commit is in flight saw the reply in the database but not the mark,
+        # and saved it a second time as "Stopped".
+        saved_reply["id"] = assistant.id
+        try:
+            await db.commit()
+        except BaseException:
+            saved_reply["id"] = None
+            raise
         await db.refresh(assistant)
+        # Saved: a late Stop or a shutdown must not save it again.
+        if session is not None:
+            session.flush_partial = None
+
+        # ``done`` goes out as soon as the reply is saved. It used to wait
+        # for the budget check, memory capture and the titler — two more
+        # model calls with no time limit — so a finished answer sat with a
+        # Stop button and no actions for seconds, or indefinitely when the
+        # provider stalled (R-063/R-078/R-273). Those run below; their
+        # events follow ``done`` on the same stream, which the client keeps
+        # reading after the turn ends.
+        yield _sse(
+            {
+                "done": True,
+                "message_id": str(assistant.id),
+                "created_at": assistant.created_at.isoformat(),
+                # The authoritative persisted reply text. The client streamed
+                # the raw deltas, but the persisted copy can differ: leaked
+                # tool-call markup is stripped, and a synthesis-retry can
+                # replace an empty reply entirely. Without this field the
+                # client's bubble kept the raw junk until the next refetch.
+                "content": assistant.content,
+                "sources": sources_payload,
+                "tool_calls": tool_call_log or None,
+                "attachments": assistant_attachment_snaps or None,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "context_usage": context_usage,
+                "ttft_ms": ttft_ms,
+                "total_ms": total_ms,
+                # The model that produced this reply, so the version pager
+                # can show it without waiting for a reload.
+                "model_id": ctx["model_id"],
+                # Per-message dollar cost (provider completion + any
+                # paid tools that ran on this turn). Floats are fine
+                # over the wire — micros stays a server-side detail.
+                "cost_usd": cost_usd,
+                # The upstream stopped because it hit the output-token
+                # ceiling rather than finishing naturally — the reply is
+                # cut off mid-thought. Surface it so the UI can show a
+                # "response was truncated" hint + a regenerate nudge.
+                # ``hop_finish`` retains the final hop's finish_reason
+                # after the loop breaks.
+                "truncated": hop_finish == "length",
+            }
+        )
+
+        # This turn's documents, indexed for the rest of the conversation in
+        # the background (R-045). Images ride the vision / caption path.
+        turn_docs = [
+            f.id
+            for f in triggering_files
+            if not looks_image(f) and f.id not in attachment_indexed_ids
+        ]
+        if turn_docs:
+            from app.chat import attachment_rag as _attachment_rag
+
+            spawn_background(
+                _attachment_rag.index_turn_attachments(conv.id, turn_docs),
+                name=f"index-turn-files-{conv.id}",
+            )
 
         # Post-commit: snapshot the user's new spend posture and, if
         # they just crossed 80% of monthly, fire a one-shot warning
@@ -5990,13 +6752,11 @@ async def _stream_generator(
         # disturbs the reply that's already on disk.
         # capture_memories now returns list[dict] with {"id", "content"}
         # so the UI can undo individual facts by id (Phase 2.2).
-        # Memory writes are deliberately silent — no tool card, no chip,
-        # nothing in scrollback. Saving what someone told you is not an
-        # event worth interrupting the conversation for, and the Memory
-        # panel remains the one honest view of what is stored. The
-        # ``memory_saved`` event below is still emitted for the composer's
-        # memory popover; it no longer drives an in-chat banner.
+        # Memory writes have no tool card, but they are never invisible:
+        # the ``memory_saved`` event below drives a "Saved to memory · Undo"
+        # chip on the reply (R-019).
         memory_saved: list[dict] = []
+        memory_removed: list[dict] = []
         if (
             # Auto-capture only in "auto" mode; "manual" injects saved
             # facts but never volunteers new ones.
@@ -6009,23 +6769,32 @@ async def _stream_generator(
             and should_attempt_capture(trig_row.content)
         ):
             try:
-                captured = await capture_memories(
-                    db,
-                    user_id=user.id,
-                    user_text=trig_row.content,
-                    assistant_text=full,
-                    source_conversation_id=conv.id,
-                    provider=provider,
-                    model_id=ctx["model_id"],
-                )
-                if captured:
-                    await db.commit()
-                memory_saved.extend(captured)
+                async with asyncio.timeout(_MEMORY_CAPTURE_TIMEOUT_S):
+                    captured = await capture_memories(
+                        db,
+                        user_id=user.id,
+                        user_text=trig_row.content,
+                        # On a turn that read outside content, the reply may be
+                        # repeating it — capture only from the user's own words.
+                        assistant_text="" if turn_state.get("untrusted") else full,
+                        source_conversation_id=conv.id,
+                        provider=provider,
+                        model_id=ctx["model_id"],
+                    )
+                # Removals are shown with an Undo of their own.
+                memory_removed = [c for c in captured if c.get("removed")]
+                memory_saved.extend(c for c in captured if not c.get("removed"))
+            except TimeoutError:
+                logger.warning("Memory capture timed out for user=%s", user.id)
             except Exception:  # noqa: BLE001
                 logger.exception("Memory capture failed for user=%s", user.id)
                 # Leave any tool-written facts in place — the extraction
                 # pass failing says nothing about writes that already
                 # committed earlier in the turn.
+        # Every memory change this turn is shown with Undo — tool writes
+        # included (R-019). Writes held back on an untrusted turn are offered
+        # instead, for the user to save with one click.
+        memory_saved = tool_memory_writes + memory_saved
         if memory_saved:
             yield _sse(
                 {
@@ -6033,6 +6802,18 @@ async def _stream_generator(
                     "facts": [m["content"] for m in memory_saved],
                     "ids": [m["id"] for m in memory_saved],
                     "count": len(memory_saved),
+                }
+            )
+        if tool_memory_proposals:
+            yield _sse({"event": "memory_proposed", "facts": tool_memory_proposals})
+        if memory_removed:
+            yield _sse(
+                {
+                    "event": "memory_removed",
+                    "facts": [
+                        {"content": m["content"], "category": m.get("category")}
+                        for m in memory_removed
+                    ],
                 }
             )
 
@@ -6053,12 +6834,13 @@ async def _stream_generator(
         )
         if is_first_turn and not conv.title_manually_set:
             try:
-                new_title = await generate_conversation_title(
-                    user_message=first_user_message,
-                    assistant_message=full,
-                    llm_provider=provider,
-                    llm_model_id=ctx["model_id"],
-                )
+                async with asyncio.timeout(_TITLE_TIMEOUT_S):
+                    new_title = await generate_conversation_title(
+                        user_message=first_user_message,
+                        assistant_message=full,
+                        llm_provider=provider,
+                        llm_model_id=ctx["model_id"],
+                    )
             except Exception:  # pragma: no cover
                 logger.exception("Titler crashed; keeping provisional title")
                 new_title = ""
@@ -6077,12 +6859,15 @@ async def _stream_generator(
             )
             conv.title_refined = True
             try:
-                new_title = await generate_conversation_title(
-                    user_message=transcript or first_user_message,
-                    assistant_message=full,
-                    llm_provider=provider,
-                    llm_model_id=ctx["model_id"],
-                )
+                async with asyncio.timeout(_TITLE_TIMEOUT_S):
+                    new_title = await generate_conversation_title(
+                        user_message=transcript or first_user_message,
+                        assistant_message=full,
+                        llm_provider=provider,
+                        llm_model_id=ctx["model_id"],
+                        # A failed refine keeps the title it has.
+                        fallback=False,
+                    )
             except Exception:  # pragma: no cover
                 logger.exception("Title refine crashed; keeping title")
                 new_title = ""
@@ -6095,40 +6880,31 @@ async def _stream_generator(
             else:
                 await db.commit()
 
-        yield _sse(
-            {
-                "done": True,
-                "message_id": str(assistant.id),
-                "created_at": assistant.created_at.isoformat(),
-                # The authoritative persisted reply text. The client streamed
-                # the raw deltas, but the persisted copy can differ: leaked
-                # tool-call markup is stripped, and a synthesis-retry can
-                # replace an empty reply entirely. Without this field the
-                # client's bubble kept the raw junk until the next refetch.
-                "content": assistant.content,
-                "sources": sources_payload,
-                "tool_calls": tool_call_log or None,
-                "attachments": assistant_attachment_snaps or None,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "ttft_ms": ttft_ms,
-                "total_ms": total_ms,
-                # The model that produced this reply, so the version pager
-                # can show it without waiting for a reload.
-                "model_id": ctx["model_id"],
-                # Per-message dollar cost (provider completion + any
-                # paid tools that ran on this turn). Floats are fine
-                # over the wire — micros stays a server-side detail.
-                "cost_usd": cost_usd,
-                # The upstream stopped because it hit the output-token
-                # ceiling rather than finishing naturally — the reply is
-                # cut off mid-thought. Surface it so the UI can show a
-                # "response was truncated" hint + a regenerate nudge.
-                # ``hop_finish`` retains the final hop's finish_reason
-                # after the loop breaks.
-                "truncated": hop_finish == "length",
-            }
+
+
+async def _start_generation(
+    stream_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    user: User,
+    request: Request,
+) -> None:
+    """Start writing the reply now, not when the client opens the stream.
+
+    Generation used to begin only on ``GET /stream``, and the context it
+    needs expires after 60 s — so a phone that went to the background right
+    after Send (the exact case the background runner exists for) never got
+    an answer (R-055). ``GET /stream`` is now a plain attach / replay; it
+    still starts the run itself if this didn't.
+    """
+    try:
+        await get_or_create_session(
+            stream_id=stream_id,
+            user_id=user.id,
+            conversation_id=conversation_id,
+            runner=lambda s: _bridge_generator_to_session(stream_id, user, request, s),
         )
+    except Exception:  # noqa: BLE001 — the attach path can still start it
+        logger.exception("Couldn't start generation for stream %s", stream_id)
 
 
 async def _bridge_generator_to_session(
@@ -6295,30 +7071,6 @@ async def export_conversation(
     )
     messages = list(msgs_q.scalars().all())
 
-    # Audit: lets admins see export activity in the same timeline as
-    # other sensitive actions (budget bumps, MFA changes). Kept
-    # best-effort — the export itself succeeds even if the audit
-    # write hiccups.
-    try:
-        await record_event(
-            db,
-            request=request,
-            user_id=user.id,
-            event_type="conversation.exported",
-            identifier=user.username,
-            detail=safe_dict(
-                {
-                    "conversation_id": str(conv.id),
-                    "format": fmt,
-                    "message_count": len(messages),
-                }
-            ),
-        )
-    except Exception:  # pragma: no cover — audit is never critical path
-        logging.getLogger("promptly.chat.export").warning(
-            "audit-write-failed", exc_info=True
-        )
-
     from app.chat.export import (
         render_conversation_json_bytes,
         render_conversation_markdown,
@@ -6329,34 +7081,111 @@ async def export_conversation(
     filename = safe_export_filename(conv, fmt)
     headers = {"Content-Disposition": _content_disposition(filename)}
 
+    # Markdown and PDF are the visible thread; JSON keeps every version
+    # with its parent_id so the round trip rebuilds the tree (R-307).
     if fmt == "markdown":
-        body = render_conversation_markdown(conv, messages).encode("utf-8")
-        return Response(
-            content=body,
-            media_type="text/markdown; charset=utf-8",
-            headers=headers,
-        )
-    if fmt == "json":
+        body = render_conversation_markdown(
+            conv, active_path(messages, conv.active_leaf_message_id)
+        ).encode("utf-8")
+        media_type = "text/markdown; charset=utf-8"
+    elif fmt == "json":
         body = render_conversation_json_bytes(conv, messages)
-        return Response(
-            content=body,
-            media_type="application/json",
-            headers=headers,
-        )
-    # fmt == "pdf"
+        media_type = "application/json"
+    else:  # pdf
+        try:
+            body = await asyncio.to_thread(render_conversation_pdf, conv, messages)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"PDF rendering failed: {exc}",
+            ) from exc
+        media_type = "application/pdf"
+
+    # Audit: lets admins see export activity in the same timeline as
+    # other sensitive actions (budget bumps, MFA changes). Committed here
+    # — it used to be staged and never committed, so no export was ever
+    # recorded (R-316). Best-effort: the export succeeds regardless.
+    conv_id = conv.id
     try:
-        body = await asyncio.to_thread(
-            render_conversation_pdf, conv, messages
+        await record_event(
+            db,
+            request=request,
+            user_id=user.id,
+            event_type="conversation.exported",
+            identifier=user.username,
+            detail=safe_dict(
+                {
+                    "conversation_id": str(conv_id),
+                    "format": fmt,
+                    "message_count": len(messages),
+                }
+            ),
         )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"PDF rendering failed: {exc}",
-        ) from exc
+        await db.commit()
+    except Exception:  # pragma: no cover — audit is never critical path
+        await db.rollback()
+        logging.getLogger("promptly.chat.export").warning(
+            "audit-write-failed", exc_info=True
+        )
+
+    return Response(content=body, media_type=media_type, headers=headers)
+
+
+@router.get("/exports/conversations")
+async def export_all_conversations(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Every conversation the caller owns as one ``promptly.conversations``
+    JSON file, re-importable here or on another instance (R-310). Exporting
+    hundreds of chats one at a time was the only way out before."""
+    from app.chat.export import render_conversations_bundle_bytes
+
+    convs = list(
+        (
+            await db.execute(
+                select(Conversation)
+                .where(Conversation.user_id == user.id)
+                .order_by(Conversation.created_at.asc())
+            )
+        ).scalars()
+    )
+    by_conv: dict[uuid.UUID, list[Message]] = {c.id: [] for c in convs}
+    if convs:
+        rows = (
+            await db.execute(
+                select(Message)
+                .join(Conversation, Conversation.id == Message.conversation_id)
+                .where(Conversation.user_id == user.id)
+                .order_by(Message.created_at.asc(), Message.id.asc())
+            )
+        ).scalars()
+        for m in rows:
+            by_conv.setdefault(m.conversation_id, []).append(m)
+    items = [(c, by_conv.get(c.id, [])) for c in convs]
+    # Serialising a few thousand chats is CPU work — off the event loop.
+    body = await asyncio.to_thread(render_conversations_bundle_bytes, items)
+    n = len(convs)
+    try:
+        await record_event(
+            db,
+            request=request,
+            user_id=user.id,
+            event_type="conversations.exported",
+            identifier=user.username,
+            detail=safe_dict({"count": n, "format": "json"}),
+        )
+        await db.commit()
+    except Exception:  # pragma: no cover
+        await db.rollback()
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return Response(
         content=body,
-        media_type="application/pdf",
-        headers=headers,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": _content_disposition(f"Promptly conversations · {stamp}.json")
+        },
     )
 
 
@@ -6377,12 +7206,89 @@ _IMPORT_MAX_BYTES = 100 * 1024 * 1024  # 100 MB
 _IMPORT_MAX_MESSAGES_PER_CONV = 5000
 
 
+def _clean_text(value: str | None) -> str | None:
+    """Postgres text can't hold NUL — one in an export used to fail the
+    whole import (R-309)."""
+    return value.replace("\x00", "") if isinstance(value, str) else value
+
+
+def _import_rows(
+    conv_id: uuid.UUID, parsed, max_messages: int, base_ts: datetime
+) -> tuple[list[Message], uuid.UUID | None, bool]:
+    """Messages for one parsed conversation, with the source tree mapped
+    onto fresh ids (R-307): regenerations and edits stay siblings, and the
+    active leaf is the one the source showed. Linear sources chain in order.
+    Messages without a source timestamp get increasing ones from
+    ``base_ts`` — one shared ``now()`` let everything ordered by
+    ``created_at`` shuffle them. Returns (rows, active leaf id, truncated)."""
+    msgs = parsed.messages[:max_messages]
+    truncated = len(parsed.messages) > max_messages
+    # Every source id first: a child can come before its parent in the file
+    # (rows sharing a timestamp sort by id).
+    new_ids = [uuid.uuid4() for _ in msgs]
+    id_map: dict[str, uuid.UUID] = {
+        pm.source_id: mid for pm, mid in zip(msgs, new_ids) if pm.source_id is not None
+    }
+    rows: list[Message] = []
+    prev: uuid.UUID | None = None
+    cursor: datetime | None = None
+    for pm, mid in zip(msgs, new_ids):
+        ts = pm.created_at or ((cursor or base_ts) + timedelta(milliseconds=1))
+        cursor = ts if cursor is None or ts > cursor else cursor
+        if pm.source_id is not None:
+            parent = id_map.get(pm.parent_source_id) if pm.parent_source_id else None
+        else:
+            parent = prev
+        m = Message(
+            id=mid,
+            conversation_id=conv_id,
+            role=pm.role,
+            content=_clean_text(pm.content) or "",
+            sources=pm.sources,
+            parent_id=parent,
+            # Attachment snapshots come from another install — their file
+            # ids won't resolve here. Kept so the filenames still show as
+            # chips; their bytes are never re-fed on a later send.
+            attachments=pm.attachments,
+            model_id=pm.model_id,
+            reasoning_content=_clean_text(pm.reasoning_content),
+            tool_calls=pm.tool_calls,
+        )
+        m.created_at = ts
+        rows.append(m)
+        prev = mid
+    # Parents before children: the batched insert checks the parent_id
+    # foreign key row by row. Depth sorts that, stably.
+    by_id = {m.id: m for m in rows}
+    depth: dict[uuid.UUID, int] = {}
+
+    def _depth(m: Message) -> int:
+        seen: list[Message] = []
+        cur: Message | None = m
+        while cur is not None and cur.id not in depth and len(seen) <= n_rows:
+            seen.append(cur)
+            cur = by_id.get(cur.parent_id) if cur.parent_id else None
+        base = depth.get(cur.id, -1) if cur is not None else -1
+        for i, node in enumerate(reversed(seen), start=1):
+            depth[node.id] = base + i
+        return depth[m.id]
+
+    n_rows = len(rows)
+    # Computed up front: a list being sorted reads as empty to its key.
+    order = {m.id: _depth(m) for m in rows}
+    rows.sort(key=lambda m: order[m.id])
+    leaf = id_map.get(parsed.active_leaf_source_id) if parsed.active_leaf_source_id else None
+    return rows, leaf or prev, truncated
+
+
 @router.post("/conversations/import", status_code=status.HTTP_201_CREATED)
 async def import_conversations(
+    request: Request,
     file: UploadFile = File(...),
     workspace_id: uuid.UUID | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _room: None = Depends(require_disk_room),  # WP-7.2
 ) -> dict[str, Any]:
     """Import chats from a Promptly / ChatGPT / Claude / Markdown file.
 
@@ -6393,10 +7299,13 @@ async def import_conversations(
     the source provided them so imported chats land in the right
     history buckets on the sidebar.
 
-    Optional ``workspace_id`` form field drops every imported
-    conversation into the named workspace — a shortcut for "migrate
-    everything from ChatGPT into this one workspace". Rejected if the
-    workspace belongs to someone else or doesn't exist.
+    Each chat goes in under its own savepoint, so one bad chat is skipped
+    and reported instead of failing the lot, and chats already imported
+    (same source id) are skipped, so a retry doesn't duplicate everything
+    (R-309).
+
+    Optional ``workspace_id`` drops every imported conversation into that
+    workspace; anyone who can add chats there can import into it (R-326).
     """
     from app.chat import import_ as importer
 
@@ -6415,18 +7324,17 @@ async def import_conversations(
             ),
         )
 
-    # Optional workspace target.
-    workspace_row: Workspace | None = None
+    # Optional workspace target — the same rule as creating a chat there
+    # (owner, admin or editor). Imported chats are private to the importer.
+    workspace_db_id: uuid.UUID | None = None
     if workspace_id is not None:
-        workspace_row = await db.get(Workspace, workspace_id)
-        if workspace_row is None or workspace_row.user_id != user.id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Unknown workspace",
-            )
+        ws_row, wrole = await get_accessible_workspace(workspace_id, user, db)
+        require_workspace_write(wrole)
+        workspace_db_id = ws_row.id
 
     try:
-        parsed_list = importer.parse_upload(
+        parsed_list = await asyncio.to_thread(
+            importer.parse_upload,
             filename=file.filename or "",
             content_type=file.content_type,
             data=data,
@@ -6435,6 +7343,7 @@ async def import_conversations(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
+    del data
 
     if not parsed_list:
         raise HTTPException(
@@ -6442,10 +7351,29 @@ async def import_conversations(
             detail="No conversations could be parsed from the upload.",
         )
 
+    keys = {p.source_key for p in parsed_list if p.source_key}
+    existing: set[str] = set()
+    if keys:
+        existing = set(
+            (
+                await db.execute(
+                    select(Conversation.import_source_key).where(
+                        Conversation.user_id == user.id,
+                        Conversation.import_source_key.in_(list(keys)),
+                    )
+                )
+            ).scalars()
+        )
+
     created: list[dict[str, Any]] = []
     skipped: int = 0
+    duplicates: int = 0
+    failed: list[str] = []
+    truncated: list[str] = []
     total_messages: int = 0
     now = datetime.now(timezone.utc)
+    user_id = user.id
+    username = user.username
 
     for parsed in parsed_list:
         # Skip empty shells — importing a chat with zero turns would
@@ -6453,92 +7381,90 @@ async def import_conversations(
         if not parsed.messages:
             skipped += 1
             continue
+        if parsed.source_key and parsed.source_key in existing:
+            duplicates += 1
+            continue
 
-        title = importer.synthesise_title(parsed)
-
-        conv = Conversation(
-            user_id=user.id,
-            title=title,
-            # We *don't* carry over the source's model/provider — those
-            # IDs wouldn't be valid on this install. Leaving them NULL
-            # makes the imported chat inherit the user's current
-            # selection on the next send.
-            model_id=None,
-            provider_id=None,
-            web_search_mode="off",
-            workspace_id=workspace_row.id if workspace_row else None,
-        )
-        # Preserve original created_at when the parser surfaced one —
-        # keeps date-group bucketing ("Last week", "April 2025", ...)
-        # accurate on the sidebar instead of dumping everything under
-        # "Today".
-        if parsed.created_at is not None:
-            conv.created_at = parsed.created_at
-            conv.updated_at = parsed.created_at
-        db.add(conv)
-        # Flush so ``conv.id`` is populated before we start attaching
-        # messages; a single explicit flush per conversation is cheap
-        # and avoids relying on SQLAlchemy's autoflush heuristics.
-        await db.flush()
-
-        count = 0
-        prev_msg_id: uuid.UUID | None = None
-        for msg in parsed.messages[:_IMPORT_MAX_MESSAGES_PER_CONV]:
-            m = Message(
-                conversation_id=conv.id,
-                role=msg.role,
-                content=msg.content,
-                sources=msg.sources,
-                # Phase 2.6 — rebuild a linear lineage on import so the
-                # active-path walk + version metadata stay coherent.
-                parent_id=prev_msg_id,
-                # Attachments carried on the imported rows are
-                # *snapshots* from a different install — the file
-                # ids inside won't resolve to anything in this
-                # user's library. We keep them for archival
-                # purposes so the original filenames still show
-                # up as chips, but the backend won't try to
-                # re-feed their bytes on the next send.
-                attachments=msg.attachments,
+        title = _clean_text(importer.synthesise_title(parsed)) or "Imported conversation"
+        conv_id = uuid.uuid4()
+        try:
+            async with db.begin_nested():
+                conv = Conversation(
+                    id=conv_id,
+                    user_id=user_id,
+                    title=title,
+                    # The source's model/provider ids wouldn't be valid on
+                    # this install; NULL inherits the user's current pick.
+                    model_id=None,
+                    provider_id=None,
+                    web_search_mode="off",
+                    workspace_id=workspace_db_id,
+                    # A title from the source is the one the user knows the
+                    # chat by — the next send used to replace it (R-328).
+                    title_refined=bool(parsed.title and parsed.title.strip()),
+                    import_source_key=(parsed.source_key or None),
+                )
+                # Preserve the original created_at so date-group bucketing
+                # ("Last week", "April 2025", ...) stays accurate.
+                if parsed.created_at is not None:
+                    conv.created_at = parsed.created_at
+                    conv.updated_at = parsed.created_at
+                db.add(conv)
+                await db.flush()
+                rows, leaf, cut = _import_rows(
+                    conv_id, parsed, _IMPORT_MAX_MESSAGES_PER_CONV, parsed.created_at or now
+                )
+                # One batched INSERT per chat instead of a round trip per
+                # message (R-309).
+                db.add_all(rows)
+                await db.flush()
+                conv.active_leaf_message_id = leaf
+                # Tag latest activity so history-grouping sorts correctly.
+                last_ts = next(
+                    (pm.created_at for pm in reversed(parsed.messages) if pm.created_at), None
+                )
+                if last_ts is not None:
+                    conv.updated_at = last_ts
+                elif parsed.created_at is None:
+                    conv.updated_at = now
+                await db.flush()
+        except Exception:  # noqa: BLE001 — skip this chat, keep the rest
+            logging.getLogger("promptly.chat.import").warning(
+                "import: chat %r failed", title, exc_info=True
             )
-            if msg.created_at is not None:
-                m.created_at = msg.created_at
-            db.add(m)
-            await db.flush()
-            prev_msg_id = m.id
-            count += 1
-        total_messages += count
-        # The last imported message is the active leaf.
-        conv.active_leaf_message_id = prev_msg_id
-
-        # Tag latest activity so history-grouping sorts correctly.
-        if parsed.messages and parsed.messages[-1].created_at:
-            conv.updated_at = parsed.messages[-1].created_at
-        elif parsed.created_at is None:
-            conv.updated_at = now
-
+            failed.append(title)
+            continue
+        if parsed.source_key:
+            existing.add(parsed.source_key)
+        if cut:
+            truncated.append(title)
+        total_messages += len(rows)
         created.append(
             {
-                "id": str(conv.id),
+                "id": str(conv_id),
                 "title": title,
-                "message_count": count,
+                "message_count": len(rows),
                 "source": parsed.source_format,
             }
         )
 
-    await db.commit()
-
+    # Audit row in the same commit — it used to be staged after the commit
+    # and never written (R-316).
     try:
         await record_event(
-            db=db,
+            db,
+            request=request,
+            user_id=user_id,
             event_type="conversations.imported",
-            identifier=user.username,
+            identifier=username,
             detail=safe_dict(
                 {
                     "count": len(created),
                     "skipped": skipped,
+                    "duplicates": duplicates,
+                    "failed": len(failed),
                     "total_messages": total_messages,
-                    "workspace_id": str(workspace_row.id) if workspace_row else None,
+                    "workspace_id": str(workspace_db_id) if workspace_db_id else None,
                     "filename": file.filename,
                 }
             ),
@@ -6547,19 +7473,19 @@ async def import_conversations(
         logging.getLogger("promptly.chat.import").warning(
             "audit-write-failed", exc_info=True
         )
+    await db.commit()
 
     # Fire-and-forget push so a big ChatGPT account export can be
     # kicked off, the user can switch tabs, and they get a ping when
-    # it's done. Skipped silently when VAPID isn't configured.
+    # it's done. Skipped silently when VAPID isn't configured. (It
+    # referenced an undefined name and never fired — R-316.)
     if created:
         try:
             from app.notifications import notify_user
 
-            target_url = (
-                f"/projects/{project_row.id}" if project_row else "/chat"
-            )
+            target_url = f"/workspaces/{workspace_db_id}" if workspace_db_id else "/chat"
             await notify_user(
-                user_id=user.id,
+                user_id=user_id,
                 category="import_done",
                 title="Import complete",
                 body=(
@@ -6579,6 +7505,9 @@ async def import_conversations(
     return {
         "imported": len(created),
         "skipped": skipped,
+        "duplicates": duplicates,
+        "failed": failed,
+        "truncated": truncated,
         "total_messages": total_messages,
         "conversations": created,
     }
@@ -6592,6 +7521,9 @@ async def get_active_stream(
 ) -> dict[str, str | None]:
     """Tell the client whether a generation is in flight for this convo.
 
+    ``kind`` is "chat" or "research" so the client reattaches with the
+    right view (a Deep Research run has its own progress panel).
+
     Called when the conversation page mounts. If a stream is found, the
     frontend reattaches to it (replays buffered tokens + tails the live
     feed) instead of leaving the user staring at the persisted-but-stale
@@ -6602,7 +7534,9 @@ async def get_active_stream(
     # to, not just their own. Raises 404 itself if the user can't see it.
     await get_accessible_conversation(conversation_id, user, db)
     session = find_active_for_conversation(conversation_id=conversation_id)
-    return {"stream_id": str(session.stream_id) if session else None}
+    if session is None:
+        return {"stream_id": None, "kind": None, "label": None}
+    return {"stream_id": str(session.stream_id), "kind": session.kind, "label": session.label}
 
 
 @router.post("/stream/{stream_id}/stop")

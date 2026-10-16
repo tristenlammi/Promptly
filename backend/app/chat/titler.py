@@ -97,7 +97,13 @@ def _sanitize(raw: str) -> str:
             candidate = stripped
             break
     # Strip common prefixes LLMs add despite instructions.
-    candidate = re.sub(r"^(title|chat title)\s*[:\-]\s*", "", candidate, flags=re.I)
+    # Including a role label echoed from the transcript ("user: …") (V4).
+    candidate = re.sub(
+        r"^(?:(?:chat )?title|topic|user(?: message)?|assistant(?: reply)?)\s*[:\-]\s*",
+        "",
+        candidate,
+        flags=re.I,
+    )
     # Iteratively peel off wrapping quotes / trailing punctuation / backticks
     # so inputs like ``'Foo'.`` converge to ``Foo``.
     for _ in range(4):
@@ -117,13 +123,17 @@ async def generate_conversation_title(
     assistant_message: str,
     llm_provider: ModelProvider,
     llm_model_id: str,
+    fallback: bool = True,
 ) -> str:
     """Ask the chat provider for a short title. Never raises — any failure
-    degrades gracefully to :func:`fallback_title`."""
+    degrades gracefully to :func:`fallback_title`, or to ``""`` with
+    ``fallback=False``. The re-title pass passes a "user: … assistant: …"
+    transcript as ``user_message``; its first line made titles like
+    "user: Is brave open source?" when the model call failed (V4)."""
     user = (user_message or "").strip()[:_MAX_SOURCE_CHARS]
     assistant = (assistant_message or "").strip()[:_MAX_SOURCE_CHARS]
     if not user:
-        return fallback_title(user_message)
+        return fallback_title(user_message) if fallback else ""
 
     prompt = (
         "USER MESSAGE:\n"
@@ -165,4 +175,4 @@ async def generate_conversation_title(
     except Exception:  # pragma: no cover - defensive belt-and-braces
         logger.exception("Unexpected error during title generation")
 
-    return fallback_title(user_message)
+    return fallback_title(user_message) if fallback else ""

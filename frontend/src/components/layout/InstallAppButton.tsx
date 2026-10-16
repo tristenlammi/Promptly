@@ -65,7 +65,7 @@ export function InstallAppButton() {
       title="Install Promptly as an app"
       aria-label="Install Promptly"
       className={cn(
-        "mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--accent)] transition",
+        "mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--accent-text)] transition",
         "hover:bg-[var(--accent)]/10"
       )}
     >

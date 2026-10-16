@@ -95,11 +95,18 @@ async def fire_webhook(
     raw = await request.body()
     payload = raw[:_MAX_PAYLOAD_BYTES].decode("utf-8", errors="replace")
 
+    trig = next(
+        (n for n in graph.get("nodes", []) if n.get("type") == NodeType.TRIGGER_WEBHOOK),
+        {},
+    )
+    await _verify_signature(db, task, trig.get("data") or {}, request, raw)
+
     run = TaskRun(
         task_id=task.id,
         status="pending",
         trigger="webhook",
         trigger_payload=payload or None,
+        trigger_meta=_request_meta(request),
     )
     db.add(run)
     await db.commit()
@@ -107,6 +114,49 @@ async def fire_webhook(
     await enqueue_run(run.id)
     logger.info("webhook fired task=%s run=%s", task.id, run.id)
     return HookAccepted(run_id=run.id)
+
+
+# Headers a flow may read as {{trigger.headers.<name>}} (lower-case, dashes
+# as underscores). Never auth/cookie headers (R-195).
+_HEADER_ALLOW_PREFIXES = ("x-", "content-type", "user-agent")
+_HEADER_DENY = {"x-real-ip", "x-forwarded-for", "x-forwarded-proto", "x-forwarded-host"}
+
+
+def _request_meta(request: Request) -> dict:
+    headers = {}
+    for k, v in request.headers.items():
+        lk = k.lower()
+        if lk in _HEADER_DENY or not lk.startswith(_HEADER_ALLOW_PREFIXES):
+            continue
+        headers[lk.replace("-", "_")] = v[:500]
+        if len(headers) >= 40:
+            break
+    query = {k[:60]: v[:500] for k, v in list(request.query_params.items())[:40]}
+    return {"headers": headers, "query": query}
+
+
+async def _verify_signature(db, task: Task, data: dict, request: Request, raw: bytes) -> None:
+    """Optional HMAC check (GitHub's X-Hub-Signature-256, Stripe-style
+    ``sha256=`` headers): the trigger names the header and a credential from
+    the vault holding the shared secret. A bad or missing signature → 401."""
+    header = str(data.get("signature_header") or "").strip()
+    cred = str(data.get("signature_secret") or "").strip().upper()
+    if not header or not cred:
+        return
+    import hashlib
+
+    from app.tasks.graph_runner import _load_secrets
+
+    secrets_map = await _load_secrets(db, task.user_id)
+    key = secrets_map.get(cred)
+    if not key:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Signature check isn't set up.")
+    sent = (request.headers.get(header) or "").strip()
+    if sent.lower().startswith("sha256="):
+        sent = sent[7:]
+    want = hmac.new(key.encode(), raw, hashlib.sha256).hexdigest()
+    if not sent or not hmac.compare_digest(sent.lower(), want):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Bad signature.")
 
 
 __all__ = ["router"]

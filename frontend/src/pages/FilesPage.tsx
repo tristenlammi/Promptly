@@ -1,71 +1,86 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowDown,
   ArrowDownUp,
   ArrowUp,
-  Check,
   ChevronRight,
   Download,
   Eye,
-  FileText,
   Folder as FolderClosedIcon,
   FolderInput,
   FolderPlus,
   Home,
+  Images,
   LayoutGrid,
-  List as ListIcon,
-  MoreVertical,
   Pencil,
-  Plus,
   Share2,
   Star,
   Trash2,
   Upload,
+  Sparkles,
 } from "lucide-react";
 
 import {
   filesApi,
-  isDocumentFile,
   type DriveSort,
   type DriveSortKey,
   type FileItem,
   type FileScope,
   type FolderItem,
-  type SystemFolderKind,
+  type SharedView,
+  supportsEditGrant,
+  shareRolesFor,
+  type ShareLinkRole,
 } from "@/api/files";
 import { ContextMenu, type ContextMenuItem } from "@/components/files/ContextMenu";
-import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
 import { DriveDetailsPanel } from "@/components/files/DriveDetailsPanel";
-import { DriveFolderTree } from "@/components/files/DriveFolderTree";
+import { useFilesShellStore } from "@/store/filesShellStore";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
-import { GranteesPill } from "@/components/files/GranteesPill";
 import { MoveItemModal } from "@/components/files/MoveItemModal";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
-import { documentsApi } from "@/api/documents";
+import { NewFolderModal, NewMenu } from "@/components/files/NewMenu";
+import { askAboutFiles } from "@/components/files/askAbout";
+import { useDriveAi } from "@/components/files/DriveAiDialog";
+import { isSpreadsheetFile, openSpreadsheetAsSheet } from "@/lib/office/sheetActions";
+import { isWordFile, openWordAsDocument } from "@/lib/office/wordActions";
 import {
   displayFileName,
   downloadAuthed,
   extractError,
-  formatRelativeTime,
   humanSize,
-  kindLabel,
   splitFileExt,
   withFileExt,
+  openFile as openInEditor,
 } from "@/components/files/helpers";
-import { DriveItemIcon, fileKindTint } from "@/components/files/DriveItemIcon";
 import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
-import { DriveThumb } from "@/components/files/DriveThumb";
+import { ViewToggle } from "@/components/files/ViewToggle";
+import { treeFromDrop, uploadTree } from "@/lib/folderUpload";
+import { VersionHistoryPanel } from "@/components/files/VersionHistoryPanel";
+import { DriveItemList, type DriveItemListHandle, type DriveListItem } from "@/components/files/DriveItemList";
+import {
+  DriveListHeader,
+  DriveListProvider,
+  dragHasItem,
+  entryId,
+  fileEntry,
+  folderEntry,
+  readDragPayload,
+  type DragPayload,
+  type DriveEntry,
+  type DriveListController,
+  type DropOutcome,
+} from "@/components/files/DriveItemRow";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { Modal } from "@/components/shared/Modal";
 import { Skeleton } from "@/components/shared/Skeleton";
 import {
-  useBrowseFiles,
+  useBrowsePaged,
   useBulkMove,
   useBulkStar,
   useBulkTrash,
@@ -81,15 +96,13 @@ import {
   useTrashFolder,
   useUnstarFile,
   useUnstarFolder,
+  invalidateFileQueries,
+  undoToast,
 } from "@/hooks/useFiles";
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import { useUploadStore } from "@/store/uploadStore";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
-
-const DRAG_FILE = "application/x-promptly-file";
-const DRAG_FOLDER = "application/x-promptly-folder";
-const DRAG_SOURCE_PARENT = "application/x-promptly-source-parent";
 
 type ViewMode = "list" | "grid";
 const VIEW_MODE_KEY = "promptly.filesViewMode";
@@ -142,48 +155,12 @@ function readStoredGridTile(): number {
   return GRID_TILE_DEFAULT;
 }
 
-interface DragPayload {
-  kind: "file" | "folder";
-  id: string;
-  sourceParent: string | null;
-}
-
-function readDragPayload(dt: DataTransfer): DragPayload | null {
-  const fileId = dt.getData(DRAG_FILE);
-  if (fileId) {
-    return {
-      kind: "file",
-      id: fileId,
-      sourceParent: dt.getData(DRAG_SOURCE_PARENT) || null,
-    };
-  }
-  const folderId = dt.getData(DRAG_FOLDER);
-  if (folderId) {
-    return {
-      kind: "folder",
-      id: folderId,
-      sourceParent: dt.getData(DRAG_SOURCE_PARENT) || null,
-    };
-  }
-  return null;
-}
-
-function dragHasItem(dt: DataTransfer): boolean {
-  const types = Array.from(dt.types || []);
-  return types.includes(DRAG_FILE) || types.includes(DRAG_FOLDER);
-}
-
 interface MoveModalState {
   open: boolean;
   kind: "file" | "folder";
   id: string;
   name: string;
   currentParentId: string | null;
-}
-
-interface DropOutcome {
-  ok: boolean;
-  error?: string;
 }
 
 interface FilesPageProps {
@@ -206,16 +183,28 @@ export function FilesPage({
   const navigate = useNavigate();
   const routeParams = useParams<{ folderId?: string }>();
   const routeFolderId = routeParams.folderId ?? null;
+  const [searchParams, setSearchParams] = useSearchParams();
+  // A folder reached from Shared keeps its scope in the URL
+  // (``/files/folder/:id?scope=shared``) — it used to land in My files
+  // and fail (R-023, defect 13).
+  const urlScope: FileScope | undefined = searchParams.get("scope") === "shared" ? "shared" : undefined;
+  const sharedView: SharedView = searchParams.get("view") === "by_me" ? "by_me" : "with_me";
 
-  const [scope, setScope] = useState<FileScope>(forcedScope ?? "mine");
+  // Files shared into the installed Files app ("Share → Promptly Files")
+  // wait in the worker's stash; upload them to My files (R-211).
+  useSharedFilesPickup();
+
+  const effectiveForced = forcedScope ?? urlScope;
+  const [scope, setScope] = useState<FileScope>(effectiveForced ?? "mine");
   const [folderId, setFolderId] = useState<string | null>(routeFolderId);
 
   // Sync scope + folderId whenever the caller's ``forcedScope`` prop
   // or the URL route param changes. Without this, clicking a sidebar
   // link after navigating into a subfolder wouldn't reset the view.
   useEffect(() => {
-    if (forcedScope && scope !== forcedScope) setScope(forcedScope);
-  }, [forcedScope, scope]);
+    const want = effectiveForced ?? "mine";
+    if (scope !== want) setScope(want);
+  }, [effectiveForced, scope]);
   useEffect(() => {
     setFolderId(routeFolderId);
   }, [routeFolderId]);
@@ -239,11 +228,18 @@ export function FilesPage({
   }, [gridTile]);
 
   const qc = useQueryClient();
-  const { data, isLoading, isError, error, refetch } = useBrowseFiles(
-    scope,
-    folderId,
-    sort
-  );
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useBrowsePaged(scope, folderId, sort, scope === "shared" && !folderId ? sharedView : undefined);
+  const listRef = useRef<DriveItemListHandle>(null);
+  const loadMore = useCallback(() => void fetchNextPage(), [fetchNextPage]);
 
   const crumbs = data?.breadcrumbs ?? [];
   const writable = data?.writable ?? false;
@@ -262,6 +258,8 @@ export function FilesPage({
 
   // Drive stage 1 — preview / share / star state.
   const [preview, setPreview] = useState<FileItem | null>(null);
+  // A file's earlier versions (WP-8.1), over the page.
+  const [historyFor, setHistoryFor] = useState<FileItem | null>(null);
   // List vs. grid layout for the browse view. Persisted so the
   // choice sticks across navigations and reloads.
   const [viewMode, setViewMode] = useState<ViewMode>(() => readStoredViewMode());
@@ -272,13 +270,12 @@ export function FilesPage({
       /* storage unavailable (private mode) — non-fatal */
     }
   }, [viewMode]);
-  // Bumped after a folder mutation so the persistent folder-tree rail
-  // reloads its top level. ``refreshAll`` pairs it with the browse refetch.
-  const [treeVersion, setTreeVersion] = useState(0);
+  // A folder change reloads the rail's folder tree too (WP-3.5).
+  const bumpTree = useFilesShellStore((s) => s.bumpTree);
   const refreshAll = useCallback(() => {
     void refetch();
-    setTreeVersion((v) => v + 1);
-  }, [refetch]);
+    bumpTree();
+  }, [refetch, bumpTree]);
 
   // Right-click-empty-space menu (New folder / Upload) — the drive-native
   // way to act on the current folder without aiming at a row.
@@ -299,9 +296,10 @@ export function FilesPage({
       /** Stage 5.1 — only Drive Documents accept ``can_edit`` grants;
        *  everything else hides the Editor option in the role picker. */
       supportsEdit?: boolean;
+      /** WP-6.6 — roles a link / person can have (``shareRolesFor``). */
+      roles?: ShareLinkRole[];
     } | null
   >(null);
-  const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
 
   // Multi-select for bulk actions. Kept as separate file / folder id sets
   // so a bulk delete routes each id to the right trash mutation. Cleared
@@ -343,6 +341,14 @@ export function FilesPage({
     setSelFolders(new Set());
     selAnchorRef.current = null;
   }, [folderId, scope]);
+
+  // Keyboard order: folders then files, as displayed (WP-3.5).
+  const keyItemsRef = useRef<{ kind: "file" | "folder"; id: string; name: string }[]>([]);
+  keyItemsRef.current = [
+    ...(data?.folders ?? []).filter((f) => !f.system_kind).map((f) => ({ kind: "folder" as const, id: f.id, name: f.name })),
+    ...(data?.files ?? []).map((f) => ({ kind: "file" as const, id: f.id, name: displayFileName(f) })),
+  ];
+  const typeAheadRef = useRef({ buffer: "", at: 0 });
 
   // The user-selectable items in display order (system folders aren't
   // selectable). Drives shift-click range math.
@@ -415,6 +421,62 @@ export function FilesPage({
     setSelFolders(new Set());
   }, []);
 
+  // Drive click model (WP-3.5): a plain click selects just this item and
+  // fills the details pane; ⌘/Ctrl-click adds, Shift-click extends.
+  const selectOnly = useCallback((kind: "file" | "folder", id: string) => {
+    selAnchorRef.current = { kind, id };
+    setSelFiles(new Set(kind === "file" ? [id] : []));
+    setSelFolders(new Set(kind === "folder" ? [id] : []));
+  }, []);
+  const handleSelectItem = useCallback(
+    (kind: "file" | "folder", id: string, e: React.MouseEvent) => {
+      if (e.shiftKey) {
+        if (kind === "file") toggleFile(id, true);
+        else toggleFolder(id, true);
+      } else if (e.metaKey || e.ctrlKey) {
+        if (kind === "file") toggleFile(id);
+        else toggleFolder(id);
+      } else {
+        selectOnly(kind, id);
+      }
+    },
+    [toggleFile, toggleFolder, selectOnly]
+  );
+  // Something just made here (a new folder, a lone upload): scroll it into
+  // view and focus it once it's listed (WP-7.6 — the list is virtualised,
+  // so it may land far below what's on screen).
+  const revealKey = useFilesShellStore((s) => s.revealKey);
+  useEffect(() => {
+    if (!revealKey || !data) return;
+    const [kind, id] = revealKey.split(":") as ["file" | "folder", string];
+    const listed = kind === "folder" ? data.folders.some((f) => f.id === id) : data.files.some((f) => f.id === id);
+    if (!listed) return; // wait for the refetch
+    useFilesShellStore.getState().reveal(null);
+    requestAnimationFrame(() => listRef.current?.reveal(revealKey));
+  }, [revealKey, data]);
+
+  // F2 → rename the single selected item in place.
+  const [renameKey, setRenameKey] = useState<string | null>(null);
+
+  // "Ask about this / these": a chat with the selected files — a folder
+  // contributes the files directly inside it.
+  const handleAsk = useCallback(async () => {
+    const files = (data?.files ?? []).filter((f) => selFiles.has(f.id));
+    for (const folderId of selFolders) {
+      try {
+        const inside = await filesApi.browse(scope, folderId);
+        files.push(...inside.files);
+      } catch {
+        /* a folder we can't list just adds nothing */
+      }
+    }
+    if (files.length === 0) {
+      toast.info("There are no files to ask about in that selection.");
+      return;
+    }
+    askAboutFiles(files, navigate);
+  }, [data, selFiles, selFolders, scope, navigate]);
+
   const handleBulkTrash = useCallback(async () => {
     const count = selFiles.size + selFolders.size;
     if (count === 0) return;
@@ -427,8 +489,14 @@ export function FilesPage({
     if (!ok) return;
     setBulkBusy(true);
     try {
-      await bulkTrash.mutateAsync(bulkIds());
-      toast.success(`Moved ${count} item${count === 1 ? "" : "s"} to trash`);
+      const ids = bulkIds();
+      const res = await bulkTrash.mutateAsync(ids);
+      const moved = res.files + res.folders;
+      undoToast(`Moved ${moved} item${moved === 1 ? "" : "s"} to trash`, async () => {
+        await filesApi.bulkRestore(ids);
+        refreshAll();
+      });
+      if (res.skipped) toast.info(workspaceSkipNote(res.skipped));
       clearSelection();
     } catch (e) {
       toast.error(extractError(e));
@@ -470,18 +538,28 @@ export function FilesPage({
 
   const handleBulkMove = useCallback(
     async (target: string | null) => {
-      const count = selFiles.size + selFolders.size;
-      await bulkMove.mutateAsync({
+      // Where everything was, so Undo can put it back.
+      const fromFiles = (data?.files ?? []).filter((f) => selFiles.has(f.id)).map((f) => [f.id, f.folder_id] as const);
+      const fromFolders = (data?.folders ?? [])
+        .filter((f) => selFolders.has(f.id))
+        .map((f) => [f.id, f.parent_id] as const);
+      const res = await bulkMove.mutateAsync({
         ...bulkIds(),
         target_folder_id: target,
         move_to_root: target === null,
       });
-      toast.success(`Moved ${count} item${count === 1 ? "" : "s"}`);
+      const count = res.files + res.folders;
+      undoToast(`Moved ${count} item${count === 1 ? "" : "s"}`, async () => {
+        for (const [id, parent] of fromFiles) await filesApi.moveFile(id, parent ?? null);
+        for (const [id, parent] of fromFolders) await filesApi.moveFolder(id, parent ?? null);
+        refreshAll();
+      });
+      if (res.skipped) toast.info(workspaceSkipNote(res.skipped));
       setBulkMoveOpen(false);
       clearSelection();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selFiles, selFolders, bulkMove, clearSelection]
+    [selFiles, selFolders, bulkMove, clearSelection, data]
   );
 
   // Drive-style keyboard shortcuts: Ctrl/Cmd+A select all, Esc clear,
@@ -491,8 +569,68 @@ export function FilesPage({
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       const tag = t?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || t?.isContentEditable) return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || t?.isContentEditable) return;
+      // A dialog (preview, move, share…) owns the keyboard.
+      if (document.querySelector('[role="dialog"], [aria-modal="true"]')) return;
       const mod = e.ctrlKey || e.metaKey;
+      const items = keyItemsRef.current;
+      const current =
+        selFiles.size + selFolders.size === 1
+          ? items.findIndex((it) =>
+              it.kind === "file" ? selFiles.has(it.id) : selFolders.has(it.id)
+            )
+          : -1;
+      const focusItem = (i: number) => {
+        const it = items[i];
+        if (!it) return;
+        selectOnly(it.kind, it.id);
+        // The row may be off screen (the list is virtualised).
+        listRef.current?.reveal(`${it.kind}:${it.id}`);
+      };
+      if (!mod && ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key)) {
+        if (!items.length) return;
+        // In the grid, Left/Right step and Up/Down jump a row of tiles.
+        const perRow = viewMode === "grid" ? listRef.current?.columns() ?? 1 : 1;
+        const step =
+          e.key === "ArrowDown"
+            ? perRow
+            : e.key === "ArrowUp"
+              ? -perRow
+              : e.key === "ArrowRight"
+                ? viewMode === "grid" ? 1 : 0
+                : e.key === "ArrowLeft"
+                  ? viewMode === "grid" ? -1 : 0
+                  : 0;
+        if (!step && e.key !== "Home" && e.key !== "End") return;
+        e.preventDefault();
+        const next =
+          e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : current < 0 ? 0 : current + step;
+        focusItem(Math.max(0, Math.min(items.length - 1, next)));
+        return;
+      }
+      if (e.key === "F2" && current >= 0 && writable) {
+        e.preventDefault();
+        setRenameKey(`${items[current].kind}:${items[current].id}`);
+        return;
+      }
+      // Quick Look: Space previews the focused file (folders open with Enter).
+      if (e.key === " " && !mod && current >= 0 && items[current].kind === "file") {
+        const f = (data?.files ?? []).find((x) => x.id === items[current].id);
+        if (f) {
+          e.preventDefault();
+          setPreview(f);
+        }
+        return;
+      }
+      // Type-ahead: letters jump to the first name that starts with them.
+      if (!mod && !e.altKey && e.key.length === 1 && /\S/.test(e.key)) {
+        const ta = typeAheadRef.current;
+        ta.buffer = (Date.now() - ta.at < 800 ? ta.buffer : "") + e.key.toLowerCase();
+        ta.at = Date.now();
+        const hit = items.findIndex((it) => it.name.toLowerCase().startsWith(ta.buffer));
+        if (hit >= 0) focusItem(hit);
+        return;
+      }
       if (mod && (e.key === "a" || e.key === "A")) {
         const allFiles = (data?.files ?? []).map((f) => f.id);
         const allFolders = (data?.folders ?? []).map((f) => f.id);
@@ -516,17 +654,19 @@ export function FilesPage({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [data, selFiles, selFolders, clearSelection, handleBulkTrash]);
+  }, [data, selFiles, selFolders, clearSelection, handleBulkTrash, selectOnly, viewMode, writable]);
 
   const navigateToFolder = useCallback(
     (id: string | null) => {
       // Keep URLs deep-linkable: sidebar / Drive PWA start_url both
       // depend on every folder having its own path. Within the same
       // top-level view we just swap the route so history works.
-      if (id) navigate(`/files/folder/${id}`);
+      if (scope === "shared") {
+        navigate(id ? `/files/folder/${id}?scope=shared` : "/files/shared");
+      } else if (id) navigate(`/files/folder/${id}`);
       else navigate("/files");
     },
-    [navigate]
+    [navigate, scope]
   );
 
   const handleDropOnto = useCallback(
@@ -542,17 +682,22 @@ export function FilesPage({
         return { ok: false };
       }
       try {
+        const from = payload.sourceParent || null;
         if (payload.kind === "file") {
           await moveFile.mutateAsync({
             id: payload.id,
             folderId: targetFolderId,
             scope,
+            from,
+            name: data?.files.find((f) => f.id === payload.id)?.filename,
           });
         } else {
           await moveFolder.mutateAsync({
             id: payload.id,
             parentId: targetFolderId,
             scope,
+            from,
+            name: data?.folders.find((f) => f.id === payload.id)?.name,
           });
         }
         return { ok: true };
@@ -562,7 +707,7 @@ export function FilesPage({
         return { ok: false, error: msg };
       }
     },
-    [moveFile, moveFolder, scope, writable]
+    [moveFile, moveFolder, scope, writable, data]
   );
 
   const openMoveModal = useCallback((s: MoveModalState) => {
@@ -598,13 +743,21 @@ export function FilesPage({
     if (!writable || !isExternalFileDrag(e)) return;
     e.preventDefault();
     setExternalDragOver(false);
-    const dropped = Array.from(e.dataTransfer.files || []);
-    if (dropped.length === 0) return;
-    startUploads({ files: dropped, scope, folderId });
-    toast.info(
-      `Uploading ${dropped.length} file${dropped.length === 1 ? "" : "s"}…`
-    );
-    void refetch();
+    // Folders dragged in keep their structure (WP-8.2). The entries must be
+    // read now, inside the event.
+    const reading = treeFromDrop(e.dataTransfer);
+    void reading.then(async ({ files: tree, hasFolders }) => {
+      if (tree.length === 0) return;
+      try {
+        if (hasFolders) await uploadTree(tree, folderId, scope, startUploads);
+        else startUploads({ files: tree.map((t) => t.file), scope, folderId, onConflict: "ask" });
+        toast.info(`Uploading ${tree.length} file${tree.length === 1 ? "" : "s"}…`);
+        if (hasFolders) bumpTree();
+        void refetch();
+      } catch (err) {
+        toast.error(extractError(err));
+      }
+    });
   };
 
   // Right-click anywhere in the content pane that isn't a row → offer the
@@ -621,7 +774,7 @@ export function FilesPage({
     const files = Array.from(e.target.files || []);
     e.target.value = "";
     if (files.length === 0) return;
-    startUploads({ files, scope, folderId });
+    startUploads({ files, scope, folderId, onConflict: "ask" });
     toast.info(
       `Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`
     );
@@ -636,22 +789,41 @@ export function FilesPage({
         actions={<FilesTopNavSearch />}
       />
       <DriveSubNav />
+      {scope === "shared" && !folderId && (
+        <div role="tablist" aria-label="Shared" className="flex items-center gap-1.5 border-b border-[var(--border)] px-4 py-2 md:px-6">
+          {(
+            [
+              ["with_me", "With me"],
+              ["by_me", "By me"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={sharedView === key}
+              onClick={() => setSearchParams(key === "with_me" ? {} : { view: key })}
+              className={cn(
+                "rounded-full border px-3 py-1 text-xs font-medium transition",
+                sharedView === key
+                  ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]"
+                  : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]"
+              )}
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={() => navigate("/files/links")}
+            className="rounded-full border border-[var(--border)] px-3 py-1 text-xs font-medium text-[var(--text-muted)] hover:bg-[var(--hover)]"
+          >
+            Links
+          </button>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
-        {/* Persistent folder-tree rail — the two-pane "navigate the
-            hierarchy without drilling through breadcrumbs" affordance that
-            makes Files read like a real drive. Desktop-only; on mobile the
-            breadcrumb + sub-nav carry navigation. */}
-        <aside className="promptly-scroll hidden w-60 shrink-0 overflow-y-auto border-r border-[var(--border)] bg-[var(--surface)]/30 lg:block">
-          <DriveFolderTree
-            scope={scope}
-            currentFolderId={folderId}
-            onNavigate={navigateToFolder}
-            onNewFolder={() => setShowNewFolderPage(true)}
-            version={treeVersion}
-          />
-        </aside>
-
         <div
           className="promptly-scroll relative min-w-0 flex-1 overflow-y-auto"
           onDragEnter={handlePageDragOver}
@@ -663,7 +835,7 @@ export function FilesPage({
         {externalDragOver && (
           <div className="pointer-events-none fixed inset-0 z-30 flex items-center justify-center bg-[var(--accent)]/10 backdrop-blur-[1px]">
             <div className="flex flex-col items-center gap-2 rounded-card border-2 border-dashed border-[var(--accent)] bg-[var(--surface)] px-8 py-6 shadow-lg">
-              <Upload className="h-7 w-7 text-[var(--accent)]" />
+              <Upload className="h-7 w-7 text-[var(--accent-text)]" />
               <span className="text-sm font-medium text-[var(--text)]">
                 Drop files to upload
               </span>
@@ -755,7 +927,29 @@ export function FilesPage({
             </div>
           )}
 
-          {quotaPct >= 0.8 && quota?.cap_bytes != null && (
+          {data?.workspace_id && (
+            <div
+              role="status"
+              className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]"
+            >
+              <span>
+                These files belong to the workspace{" "}
+                <span className="font-medium text-[var(--text)]">
+                  {data.workspace_title}
+                </span>
+                . Rename, move or delete them from the workspace.
+              </span>
+              <button
+                type="button"
+                onClick={() => navigate(`/workspaces/${data.workspace_id}`)}
+                className="font-medium text-[var(--accent-text)] hover:underline"
+              >
+                Open workspace
+              </button>
+            </div>
+          )}
+
+                    {quotaPct >= 0.8 && quota?.cap_bytes != null && (
             <div
               role="status"
               className={cn(
@@ -779,17 +973,20 @@ export function FilesPage({
 
           {/* Multi-select uses the top action bar; a single selection
               uses the right-hand details pane instead. */}
-          {selectionCount > 1 && (
+          {selectionCount > 0 && (
+            <div className={cn(selectionCount === 1 && "lg:hidden")}>
             <DriveSelectionBar
               count={selectionCount}
               busy={bulkBusy}
               onClear={clearSelection}
               onDownload={() => void handleBulkDownload()}
-              onStar={() => void handleBulkStar(true)}
-              onUnstar={() => void handleBulkStar(false)}
+              onStar={writable ? () => void handleBulkStar(true) : undefined}
+              onUnstar={writable ? () => void handleBulkStar(false) : undefined}
               onMove={writable ? () => setBulkMoveOpen(true) : undefined}
-              onTrash={() => void handleBulkTrash()}
+              onTrash={writable ? () => void handleBulkTrash() : undefined}
+              onAsk={() => void handleAsk()}
             />
+            </div>
           )}
 
           {data && (
@@ -815,13 +1012,16 @@ export function FilesPage({
               // preview because the editor would 404 on the read
               // path anyway.
               onPreview={(f) => {
-                if (isDocumentFile(f) && !f.trashed_at) {
-                  setEditingDoc(f);
-                } else {
-                  setPreview(f);
-                }
+                if (!openInEditor(f, navigate)) setPreview(f);
               }}
               onShare={setShareGrantsFor}
+              onSelectItem={handleSelectItem}
+              renameKey={renameKey}
+              onRenameStarted={() => setRenameKey(null)}
+              listRef={listRef}
+              hasMore={!!hasNextPage}
+              loadingMore={isFetchingNextPage}
+              onLoadMore={loadMore}
             />
           )}
         </div>
@@ -840,11 +1040,7 @@ export function FilesPage({
                 if (detailFolder) {
                   navigateToFolder(detailFolder.id);
                 } else if (detailFile) {
-                  if (isDocumentFile(detailFile) && !detailFile.trashed_at) {
-                    setEditingDoc(detailFile);
-                  } else {
-                    setPreview(detailFile);
-                  }
+                  if (!openInEditor(detailFile, navigate)) setPreview(detailFile);
                 }
               }}
               onDownload={
@@ -862,7 +1058,8 @@ export function FilesPage({
                     kind: "file",
                     id: detailFile.id,
                     name: detailFile.filename,
-                    supportsEdit: isDocumentFile(detailFile),
+                    supportsEdit: supportsEditGrant(detailFile),
+                    roles: shareRolesFor(detailFile),
                   });
                 }
               }}
@@ -888,6 +1085,18 @@ export function FilesPage({
               onStar={() => void handleBulkStar(true)}
               onUnstar={() => void handleBulkStar(false)}
               onTrash={() => void handleBulkTrash()}
+              onAsk={() => void handleAsk()}
+              onOpenAsDocument={
+                detailFile && isWordFile(detailFile) && !detailFile.trashed_at
+                  ? () => void openWordAsDocument(detailFile, navigate).then((d) => d && refreshAll())
+                  : undefined
+              }
+              onHistory={detailFile && !detailFile.trashed_at ? () => setHistoryFor(detailFile) : undefined}
+              onOpenAsSheet={
+                detailFile && isSpreadsheetFile(detailFile) && !detailFile.trashed_at
+                  ? () => void openSpreadsheetAsSheet(detailFile, navigate).then((d) => d && refreshAll())
+                  : undefined
+              }
             />
           </aside>
         )}
@@ -924,7 +1133,8 @@ export function FilesPage({
         open={showNewFolderPage}
         onClose={() => setShowNewFolderPage(false)}
         onSubmit={async (name) => {
-          await createFolderPage.mutateAsync({ scope, name, parentId: folderId });
+          const made = await createFolderPage.mutateAsync({ scope, name, parentId: folderId });
+          useFilesShellStore.getState().reveal(`folder:${made.id}`);
           refreshAll();
           setShowNewFolderPage(false);
         }}
@@ -945,12 +1155,16 @@ export function FilesPage({
                 id: moveModal.id,
                 folderId: target,
                 scope,
+                from: moveModal.currentParentId ?? null,
+                name: moveModal.name,
               });
             } else {
               await moveFolder.mutateAsync({
                 id: moveModal.id,
                 parentId: target,
                 scope,
+                from: moveModal.currentParentId ?? null,
+                name: moveModal.name,
               });
             }
             setMoveModal(null);
@@ -985,12 +1199,13 @@ export function FilesPage({
             kind: "file",
             id: f.id,
             name: f.filename,
-            supportsEdit: isDocumentFile(f),
+            supportsEdit: supportsEditGrant(f),
+            roles: shareRolesFor(f),
           })
         }
         onEdit={(f) => {
-          setEditingDoc(f);
           setPreview(null);
+          openInEditor({ ...f, trashed_at: null }, navigate);
         }}
         onCopyToMine={async (f) => {
           // Drive stage 5 — recipient with ``can_copy`` clones a
@@ -999,8 +1214,7 @@ export function FilesPage({
           // immediately.
           try {
             await filesApi.copyFileToMine(f.id);
-            void qc.invalidateQueries({ queryKey: ["files"] });
-            void qc.invalidateQueries({ queryKey: ["quota"] });
+            void invalidateFileQueries(qc);
             setPreview(null);
           } catch (e) {
             // Surface the message via a transient banner-style
@@ -1013,6 +1227,20 @@ export function FilesPage({
         onToggleStar={undefined}
       />
 
+      {historyFor && (
+        <div className="fixed inset-y-0 right-0 z-40 w-full sm:w-96">
+          <div className="relative h-full">
+            <VersionHistoryPanel
+              fileId={historyFor.id}
+              onClose={() => setHistoryFor(null)}
+              onRestored={() => {
+                void invalidateFileQueries(qc);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       <ShareGrantsModal
         open={!!shareGrantsFor}
         resource={
@@ -1022,6 +1250,7 @@ export function FilesPage({
                 id: shareGrantsFor.id,
                 name: shareGrantsFor.name,
                 supports_edit: shareGrantsFor.supportsEdit ?? false,
+                roles: shareGrantsFor.roles,
               }
             : null
         }
@@ -1029,18 +1258,11 @@ export function FilesPage({
         onChanged={() => {
           // Pill data lives on file/folder rows; refetch the active
           // browse view so the chips reflect the latest grants.
-          void qc.invalidateQueries({ queryKey: ["files"] });
-          void qc.invalidateQueries({ queryKey: ["workspace-files"] });
+          void invalidateFileQueries(qc);
+          void qc.invalidateQueries({ queryKey: ["workspaces"] });
         }}
       />
 
-      {editingDoc && (
-        <DocumentEditorModal
-          file={editingDoc}
-          onClose={() => setEditingDoc(null)}
-          onFileUpdated={(f) => setEditingDoc(f)}
-        />
-      )}
     </>
   );
 }
@@ -1061,7 +1283,7 @@ function Breadcrumbs({
     payload: DragPayload
   ) => Promise<DropOutcome>;
 }) {
-  const rootLabel = scope === "mine" ? "Drive" : "Shared";
+  const rootLabel = scope === "mine" ? "My files" : "Shared";
   return (
     <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto text-sm text-[var(--text-muted)]">
       <CrumbButton
@@ -1161,6 +1383,7 @@ function CrumbButton({
   );
 }
 
+/** The page's New menu — below 1024 px; the Files rail has it above. */
 function FolderActions({
   scope,
   parentId,
@@ -1170,228 +1393,18 @@ function FolderActions({
   parentId: string | null;
   onChanged: () => void;
 }) {
-  const [showNewFolder, setShowNewFolder] = useState(false);
-  const [creatingDoc, setCreatingDoc] = useState(false);
-  const [activeDocument, setActiveDocument] = useState<FileItem | null>(null);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  usePopoverDismiss(menuOpen, menuRef, () => setMenuOpen(false));
-  const createFolder = useCreateFolder();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const startUploads = useUploadStore((s) => s.startUploads);
-
-  const handleNewDocument = async () => {
-    if (creatingDoc) return;
-    setCreatingDoc(true);
-    try {
-      const doc = await documentsApi.create({
-        scope,
-        folder_id: parentId,
-      });
-      setActiveDocument(doc);
-      onChanged();
-    } catch (e) {
-      toast.error(extractError(e));
-    } finally {
-      setCreatingDoc(false);
-    }
-  };
-
-  // Multi-file: picking five files kicks off five uploads that
-  // progress in parallel in the background panel. We intentionally
-  // don't ``await`` anything here — the store owns the lifetime now,
-  // so the Upload button stays snappy even on very large batches.
-  const handlePickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = e.target.files;
-    if (!selected || selected.length === 0) {
-      e.target.value = "";
-      return;
-    }
-    // IMPORTANT: materialise the FileList into a plain array BEFORE
-    // resetting ``e.target.value``. The ``files`` collection is live —
-    // setting ``value = ""`` drains it in place (per the HTML spec),
-    // which previously left ``startUploads`` with a zero-length array
-    // and silently dropped every upload on the floor.
-    const fileArray = Array.from(selected);
-    e.target.value = "";
-    startUploads({
-      files: fileArray,
-      scope,
-      folderId: parentId,
-    });
-    // ``onChanged`` still fires so the current folder view refetches
-    // immediately; completed uploads will pop in as the queue drains.
-    onChanged();
-  };
-
   return (
-    // One primary "+ New" affordance (upload / new folder / new document)
-    // — clean on desktop and on mobile, where three stacked buttons used
-    // to chew up a third of the screen.
-    <div ref={menuRef} className="relative shrink-0">
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={handlePickFiles}
-      />
-      <Button
-        size="sm"
-        variant="primary"
-        leftIcon={<Plus className="h-3.5 w-3.5" />}
-        onClick={() => setMenuOpen((o) => !o)}
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
-      >
-        New
-      </Button>
-      {menuOpen && (
-        <div
-          role="menu"
-          className="absolute right-0 top-9 z-30 w-48 overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] py-1 text-sm shadow-lg"
-        >
-          <NewMenuItem
-            icon={<Upload className="h-4 w-4" />}
-            label="Upload files"
-            onClick={() => {
-              setMenuOpen(false);
-              fileInputRef.current?.click();
-            }}
-          />
-          <NewMenuItem
-            icon={<FolderPlus className="h-4 w-4" />}
-            label="New folder"
-            onClick={() => {
-              setMenuOpen(false);
-              setShowNewFolder(true);
-            }}
-          />
-          <NewMenuItem
-            icon={<FileText className="h-4 w-4" />}
-            label="New document"
-            onClick={() => {
-              setMenuOpen(false);
-              void handleNewDocument();
-            }}
-          />
-        </div>
-      )}
-
-      <NewFolderModal
-        open={showNewFolder}
-        onClose={() => setShowNewFolder(false)}
-        onSubmit={async (name) => {
-          await createFolder.mutateAsync({ scope, name, parentId });
-          onChanged();
-          setShowNewFolder(false);
-        }}
-      />
-
-      {activeDocument && (
-        <DocumentEditorModal
-          file={activeDocument}
-          onClose={() => {
-            setActiveDocument(null);
-            onChanged();
-          }}
-          onFileUpdated={(updated) => setActiveDocument(updated)}
-        />
-      )}
+    <div className="hidden md:block lg:hidden">
+      <NewMenu scope={scope} folderId={parentId} onChanged={onChanged} />
     </div>
   );
 }
 
-function NewMenuItem({
-  icon,
-  label,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-[var(--hover)]"
-    >
-      <span className="text-[var(--text-muted)]">{icon}</span>
-      {label}
-    </button>
-  );
-}
-
-function NewFolderModal({
-  open,
-  onClose,
-  onSubmit,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onSubmit: (name: string) => Promise<void>;
-}) {
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await onSubmit(trimmed);
-      setName("");
-    } catch (e) {
-      setErr(extractError(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal
-      open={open}
-      onClose={onClose}
-      title="New folder"
-      footer={
-        <>
-          <Button variant="ghost" onClick={onClose} size="sm">
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleSubmit}
-            loading={busy}
-            disabled={!name.trim()}
-          >
-            Create
-          </Button>
-        </>
-      }
-    >
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <label className="block text-sm">
-          <span className="mb-1 block text-[var(--text-muted)]">Folder name</span>
-          <input
-            autoFocus
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-input border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)] focus:border-[var(--accent)] focus:outline-none"
-            placeholder="Research papers"
-          />
-        </label>
-        {err && <p className="text-sm text-red-600 dark:text-red-400">{err}</p>}
-      </form>
-    </Modal>
-  );
-}
+const RAIL_SYSTEM_KINDS = new Set<string>([
+  "chat_uploads",
+  "generated_root",
+  "workspaces_root",
+]);
 
 function ContentGrid({
   data,
@@ -1410,6 +1423,13 @@ function ContentGrid({
   onOpenMove,
   onPreview,
   onShare,
+  onSelectItem,
+  renameKey,
+  onRenameStarted,
+  listRef,
+  hasMore,
+  loadingMore,
+  onLoadMore,
 }: {
   data: { folders: FolderItem[]; files: FileItem[]; writable: boolean };
   scope: FileScope;
@@ -1423,26 +1443,212 @@ function ContentGrid({
   onToggleFile: (id: string, shift: boolean) => void;
   onToggleFolder: (id: string, shift: boolean) => void;
   onOpenFolder: (id: string | null) => void;
-  onDropOnFolder: (
-    targetFolderId: string | null,
-    payload: DragPayload
-  ) => Promise<DropOutcome>;
+  onDropOnFolder: (targetFolderId: string | null, payload: DragPayload) => Promise<DropOutcome>;
   onOpenMove: (s: MoveModalState) => void;
   onPreview: (file: FileItem) => void;
-  /** Share action — opens the peer-to-peer grants modal.
-   *  ``supportsEdit`` is forwarded so the modal knows whether to
-   *  surface the "Editor" tier; only Drive Documents accept it. */
+  /** Share action — opens the peer-to-peer grants modal. */
   onShare: (r: {
     kind: "file" | "folder";
     id: string;
     name: string;
     supportsEdit?: boolean;
+    roles?: ShareLinkRole[];
   }) => void;
+  onSelectItem?: (kind: "file" | "folder", id: string, e: React.MouseEvent) => void;
+  /** "file:<id>" / "folder:<id>" whose rename F2 asked for. */
+  renameKey?: string | null;
+  onRenameStarted?: () => void;
+  listRef: React.RefObject<DriveItemListHandle>;
+  hasMore?: boolean;
+  loadingMore?: boolean;
+  onLoadMore?: () => void;
 }) {
-  // System folders are grouped into a collapsible section pinned at the
-  // bottom. Collapsed by default so they don't crowd the user's own
-  // content — they're rarely the thing the user came here to find.
+  // System folders are grouped into a collapsible section at the bottom,
+  // collapsed by default — they're rarely what the user came to find.
   const [systemOpen, setSystemOpen] = useState(false);
+
+  // One set of mutations and one menu / rename / trash dialog for the
+  // whole page (WP-7.6) — rows don't carry their own.
+  const renameFile = useRenameFile();
+  const renameFolder = useRenameFolder();
+  const trashFile = useTrashFile();
+  const trashFolder = useTrashFolder();
+  const starFile = useStarFile();
+  const unstarFile = useUnstarFile();
+  const starFolder = useStarFolder();
+  const unstarFolder = useUnstarFolder();
+  const driveAi = useDriveAi();
+  const qcList = useQueryClient();
+  const [menu, setMenu] = useState<{ entry: DriveEntry; x: number; y: number } | null>(null);
+  const [renameDialog, setRenameDialog] = useState<{ entry: DriveEntry; value: string } | null>(null);
+  const [trashAsk, setTrashAsk] = useState<DriveEntry | null>(null);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+
+  // The latest props for the controller's callbacks, so the controller
+  // itself (and with it every memoised row) stays the same object.
+  const latest = useRef({ data, scope, onOpenFolder, onPreview, onSelectItem, onToggleFile, onToggleFolder, onShare, onOpenMove, onDropOnFolder, driveAi });
+  latest.current = { data, scope, onOpenFolder, onPreview, onSelectItem, onToggleFile, onToggleFolder, onShare, onOpenMove, onDropOnFolder, driveAi };
+  const mut = useRef({ renameFile, renameFolder, trashFile, trashFolder, starFile, unstarFile, starFolder, unstarFolder });
+  mut.current = { renameFile, renameFolder, trashFile, trashFolder, starFile, unstarFile, starFolder, unstarFolder };
+
+  const startRename = useCallback(
+    (entry: DriveEntry) => {
+      if (layout === "grid")
+        setRenameDialog({ entry, value: entry.kind === "file" ? splitFileExt(entry.file.filename).base : entry.folder.name });
+      else setEditingKey(entry.key);
+    },
+    [layout]
+  );
+
+  // F2 on the selected item.
+  useEffect(() => {
+    if (!renameKey) return;
+    const [kind, id] = renameKey.split(":");
+    const entry =
+      kind === "file"
+        ? (() => {
+            const f = data.files.find((x) => x.id === id);
+            return f ? fileEntry(f) : null;
+          })()
+        : (() => {
+            const f = data.folders.find((x) => x.id === id);
+            return f && !f.system_kind ? folderEntry(f) : null;
+          })();
+    if (entry && data.writable) startRename(entry);
+    onRenameStarted?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [renameKey]);
+
+  const controller = useMemo<DriveListController>(() => {
+    const share = (entry: DriveEntry) => {
+      const L = latest.current;
+      if (entry.kind === "folder") L.onShare({ kind: "folder", id: entry.folder.id, name: entry.folder.name });
+      else
+        L.onShare({
+          kind: "file",
+          id: entry.file.id,
+          name: entry.file.filename,
+          supportsEdit: supportsEditGrant(entry.file),
+          roles: shareRolesFor(entry.file),
+        });
+    };
+    const toggleStar = (entry: DriveEntry) => {
+      const M = mut.current;
+      const s = latest.current.scope;
+      if (entry.kind === "file") (entry.file.starred_at ? M.unstarFile : M.starFile).mutate({ id: entry.file.id, scope: s });
+      else (entry.folder.starred_at ? M.unstarFolder : M.starFolder).mutate({ id: entry.folder.id, scope: s });
+    };
+    const open = (entry: DriveEntry) =>
+      entry.kind === "folder" ? latest.current.onOpenFolder(entry.folder.id) : latest.current.onPreview(entry.file);
+    return {
+      layout,
+      currentFolderId,
+      open,
+      select: (entry, e) => latest.current.onSelectItem?.(entry.kind, entryId(entry), e),
+      toggleSelect: (entry, shift) =>
+        entry.kind === "file" ? latest.current.onToggleFile(entry.file.id, shift) : latest.current.onToggleFolder(entry.folder.id, shift),
+      canChange: (entry) => latest.current.data.writable && !(entry.kind === "folder" && entry.folder.system_kind),
+      showMenu: (entry, x, y) => setMenu({ entry, x, y }),
+      share,
+      download: (file) => void downloadAuthed(file),
+      toggleStar,
+      rename: (entry, name) => {
+        setEditingKey(null);
+        const s = latest.current.scope;
+        if (entry.kind === "file") {
+          if (name !== entry.file.filename) void mut.current.renameFile.mutateAsync({ id: entry.file.id, filename: name, scope: s });
+        } else if (name !== entry.folder.name) {
+          void mut.current.renameFolder.mutateAsync({ id: entry.folder.id, name, scope: s });
+        }
+      },
+      cancelRename: () => setEditingKey(null),
+      dropOnFolder: (folderId, payload) => latest.current.onDropOnFolder(folderId, payload),
+      menu: (entry) => {
+        const L = latest.current;
+        const writable = L.data.writable;
+        const move: ContextMenuItem = {
+          icon: <FolderInput className="h-3.5 w-3.5" />,
+          label: "Move to…",
+          onClick: () =>
+            L.onOpenMove(
+              entry.kind === "file"
+                ? { open: true, kind: "file", id: entry.file.id, name: entry.file.filename, currentParentId: entry.file.folder_id }
+                : { open: true, kind: "folder", id: entry.folder.id, name: entry.folder.name, currentParentId: entry.folder.parent_id }
+            ),
+          disabled: !writable,
+        };
+        const starItem: ContextMenuItem = {
+          icon: <Star className="h-3.5 w-3.5" />,
+          label: (entry.kind === "file" ? entry.file.starred_at : entry.folder.starred_at) ? "Unstar" : "Star",
+          onClick: () => toggleStar(entry),
+          disabled: !writable,
+        };
+        const common: ContextMenuItem[] = [
+          starItem,
+          { icon: <Share2 className="h-3.5 w-3.5" />, label: "Share", onClick: () => share(entry), disabled: !writable },
+          { icon: <Pencil className="h-3.5 w-3.5" />, label: "Rename", onClick: () => startRename(entry), disabled: !writable },
+          move,
+        ];
+        const trash: ContextMenuItem = {
+          icon: <Trash2 className="h-3.5 w-3.5" />,
+          label: "Trash",
+          destructive: true,
+          onClick: () => setTrashAsk(entry),
+          disabled: !writable,
+        };
+        if (entry.kind === "file") {
+          return [
+            { icon: <Eye className="h-3.5 w-3.5" />, label: "Preview", onClick: () => open(entry) },
+            { icon: <Download className="h-3.5 w-3.5" />, label: "Download", onClick: () => void downloadAuthed(entry.file) },
+            ...common,
+            trash,
+          ];
+        }
+        const folder = entry.folder;
+        // Leave a folder out of AI search (WP-5.1) — your own folders.
+        const ai: ContextMenuItem[] =
+          L.driveAi.data?.enabled && L.scope === "mine" && writable && !folder.system_kind
+            ? [
+                {
+                  icon: <Sparkles className="h-3.5 w-3.5" />,
+                  label: L.driveAi.isExcluded(folder.id) ? "Include in AI search" : "Leave out of AI search",
+                  onClick: () => L.driveAi.setExcluded(folder.id, !L.driveAi.isExcluded(folder.id)),
+                },
+              ]
+            : [];
+        // Leave a folder (scans, work, receipts) out of Photos (WP-9.1).
+        const photos: ContextMenuItem[] =
+          L.scope === "mine" && writable && !folder.system_kind
+            ? [
+                {
+                  icon: <Images className="h-3.5 w-3.5" />,
+                  label: folder.hide_from_photos ? "Show in Photos" : "Hide from Photos",
+                  onClick: () =>
+                    void filesApi
+                      .setHideFromPhotos(folder.id, !folder.hide_from_photos)
+                      .then(() => {
+                        toast.success(folder.hide_from_photos ? "Its photos are back in Photos." : "Its photos are left out of Photos.");
+                        void qcList.invalidateQueries({ queryKey: ["files-browse"] });
+                        void qcList.invalidateQueries({ queryKey: ["photos"] });
+                      })
+                      .catch((e) => toast.error(extractError(e))),
+                },
+              ]
+            : [];
+        return [
+          { icon: <FolderClosedIcon className="h-3.5 w-3.5" />, label: "Open", onClick: () => open(entry) },
+          // A whole folder as a zip (R-210).
+          {
+            icon: <Download className="h-3.5 w-3.5" />,
+            label: "Download",
+            onClick: () =>
+              void filesApi.bulkZipDownload({ file_ids: [], folder_ids: [folder.id] }).catch((e) => toast.error(extractError(e))),
+          },
+          ...(folder.system_kind ? [] : [...common, ...ai, ...photos, trash]),
+        ];
+      },
+    };
+  }, [layout, currentFolderId, startRename]);
 
   const empty = data.folders.length === 0 && data.files.length === 0;
   if (empty) {
@@ -1458,170 +1664,113 @@ function ContentGrid({
     );
   }
 
-  // User-created folders respect the active sort; system-managed folders
-  // are pinned to a separate "System" section at the bottom so they don't
-  // crowd the user's own content or imply they can be renamed / trashed.
+  // User folders, then files, then (collapsed) the system folders. At the
+  // top of My files the chat buckets live under the rail's "From chats" and
+  // workspaces under its Workspaces (WP-3.5) — only Templates stays here.
   const userFolders = data.folders.filter((f) => !f.system_kind);
-  const systemFolders = data.folders.filter((f) => !!f.system_kind);
-
-  const renderFolderRow = (f: (typeof data.folders)[number]) => (
-    <FolderRow
-      key={f.id}
-      folder={f}
-      scope={scope}
-      layout={layout}
-      writable={data.writable}
-      currentFolderId={currentFolderId}
-      selected={selFolders.has(f.id)}
-      selectionActive={selFiles.size + selFolders.size > 0}
-      onToggleSelect={(shift) => onToggleFolder(f.id, shift)}
-      onOpen={() => onOpenFolder(f.id)}
-      onDropOnFolder={onDropOnFolder}
-      onOpenMove={onOpenMove}
-      onShare={() => onShare({ kind: "folder", id: f.id, name: f.name })}
-    />
+  const systemFolders = data.folders.filter(
+    (f) => !!f.system_kind && !(currentFolderId === null && RAIL_SYSTEM_KINDS.has(f.system_kind))
   );
-
-  const userFolderRows = userFolders.map(renderFolderRow);
-  const systemFolderRows = systemFolders.map(renderFolderRow);
-  const fileRows = data.files.map((f) => (
-    <FileRow
-      key={f.id}
-      file={f}
-      scope={scope}
-      layout={layout}
-      writable={data.writable}
-      selected={selFiles.has(f.id)}
-      selectionActive={selFiles.size + selFolders.size > 0}
-      onToggleSelect={(shift) => onToggleFile(f.id, shift)}
-      onOpenMove={onOpenMove}
-      onPreview={() => onPreview(f)}
-      onShare={() =>
-        onShare({
-          kind: "file",
-          id: f.id,
-          name: f.filename,
-          supportsEdit: isDocumentFile(f),
-        })
-      }
-    />
-  ));
-
-  if (layout === "grid") {
-    return (
-      <ul
-        className="grid gap-3"
-        style={{
-          gridTemplateColumns: `repeat(auto-fill, minmax(${gridTile}px, 1fr))`,
-        }}
-      >
-        {userFolderRows}
-        {fileRows}
-        {systemFolderRows.length > 0 && (
-          <>
-            {/* Full-width collapsible divider before system folders. */}
-            <li className="col-span-full">
-              <button
-                type="button"
-                onClick={() => setSystemOpen((o) => !o)}
-                aria-expanded={systemOpen}
-                className="flex w-full items-center gap-2 pt-1 text-left"
-              >
-                <ChevronRight
-                  className={cn(
-                    "h-3 w-3 shrink-0 text-[var(--text-muted)] transition-transform",
-                    systemOpen && "rotate-90"
-                  )}
-                />
-                <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                  System
-                </span>
-                <span className="text-[10px] tabular-nums text-[var(--text-muted)]/70">
-                  {systemFolderRows.length}
-                </span>
-                <span className="flex-1 border-t border-[var(--border)]" />
-              </button>
-            </li>
-            {systemOpen && systemFolderRows}
-          </>
-        )}
-      </ul>
-    );
+  const items: DriveListItem[] = [...userFolders.map(folderEntry), ...data.files.map(fileEntry)];
+  if (systemFolders.length > 0) {
+    items.push({
+      kind: "section",
+      key: "section:system",
+      node: (
+        <button
+          type="button"
+          onClick={() => setSystemOpen((o) => !o)}
+          aria-expanded={systemOpen}
+          className={cn(
+            "flex w-full items-center gap-1.5 text-left transition",
+            layout === "grid" ? "pt-1" : "bg-[var(--bg)] px-3 py-1.5 hover:bg-[var(--hover)]"
+          )}
+        >
+          <ChevronRight
+            className={cn("h-3 w-3 shrink-0 text-[var(--text-muted)] transition-transform", systemOpen && "rotate-90")}
+          />
+          <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">System</span>
+          <span className="text-[10px] tabular-nums text-[var(--text-muted)]/70">{systemFolders.length}</span>
+          {layout === "grid" && <span className="flex-1 border-t border-[var(--border)]" />}
+        </button>
+      ),
+    });
+    if (systemOpen) items.push(...systemFolders.map(folderEntry));
   }
 
+  const menuItems = menu ? controller.menu(menu.entry) : [];
+  const renaming = renameDialog?.entry;
+
   return (
-    <div className="rounded-card border border-[var(--border)] bg-[var(--surface)]">
-      {/* Column header — clickable to sort, giving the list a tabular,
-          drive-like read. ``sticky`` pins it to the top of the scroll
-          viewport so rows scroll under it (Finder/Drive behaviour); the
-          parent card therefore must NOT set ``overflow-hidden`` (it would
-          clip the sticky positioning). Columns hide on small screens so
-          the row collapses to name-only. */}
-      <div className="sticky top-0 z-10 flex items-center gap-3 rounded-t-card border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-        {/* Spacer matching the checkbox on user-folder rows. */}
-        <span className="w-5 shrink-0" aria-hidden />
-        <SortHeader
-          className="flex-1"
-          label="Name"
-          col="name"
-          sort={sort}
-          onSort={onSort}
-        />
-        {/* Kind isn't a sort key, so it's a static label. */}
-        <span className="hidden w-24 shrink-0 lg:block">Kind</span>
-        <SortHeader
-          className="hidden w-28 shrink-0 lg:block"
-          label="Modified"
-          col="modified"
-          sort={sort}
-          onSort={onSort}
-        />
-        <SortHeader
-          className="hidden w-16 shrink-0 sm:block"
-          align="right"
-          label="Size"
-          col="size"
-          sort={sort}
-          onSort={onSort}
-        />
-        {/* Spacer matching the row's fixed-width trailing action slot. */}
-        <span className="w-16 shrink-0" aria-hidden />
-      </div>
-      <ul className="divide-y divide-[var(--border)]">
-        {userFolderRows}
-        {fileRows}
-        {systemFolderRows.length > 0 && (
-          <>
-            {/* Collapsible section header separating system-managed folders
-                (Chat Uploads, Generated Files, etc.) from the user's own
-                content. Collapsed by default — these can't be renamed or
-                trashed, and are rarely what the user came to find. */}
-            <li>
-              <button
-                type="button"
-                onClick={() => setSystemOpen((o) => !o)}
-                aria-expanded={systemOpen}
-                className="flex w-full items-center gap-1.5 bg-[var(--bg)] px-3 py-1.5 text-left transition hover:bg-[var(--hover)]"
-              >
-                <ChevronRight
-                  className={cn(
-                    "h-3 w-3 shrink-0 text-[var(--text-muted)] transition-transform",
-                    systemOpen && "rotate-90"
-                  )}
-                />
-                <span className="text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-                  System
-                </span>
-                <span className="text-[10px] tabular-nums text-[var(--text-muted)]/70">
-                  {systemFolderRows.length}
-                </span>
-              </button>
-            </li>
-            {systemOpen && systemFolderRows}
-          </>
-        )}
-      </ul>
-    </div>
+    <DriveListProvider value={controller}>
+      <DriveItemList
+        ref={listRef}
+        items={items}
+        layout={layout}
+        gridTile={gridTile}
+        isSelected={(e) => (e.kind === "file" ? selFiles.has(e.file.id) : selFolders.has(e.folder.id))}
+        selectionActive={selFiles.size + selFolders.size > 0}
+        editingKey={editingKey}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
+        onLoadMore={onLoadMore}
+        header={
+          <DriveListHeader>
+            <SortHeader className="flex-1" label="Name" col="name" sort={sort} onSort={onSort} />
+            {/* Kind isn't a sort key, so it's a static label. */}
+            <span className="hidden w-24 shrink-0 lg:block">Kind</span>
+            <SortHeader className="hidden w-28 shrink-0 lg:block" label="Modified" col="modified" sort={sort} onSort={onSort} />
+            <SortHeader className="hidden w-16 shrink-0 sm:block" align="right" label="Size" col="size" sort={sort} onSort={onSort} />
+          </DriveListHeader>
+        }
+      />
+
+      <ContextMenu
+        open={menu !== null}
+        x={menu?.x ?? 0}
+        y={menu?.y ?? 0}
+        items={menuItems}
+        onClose={() => setMenu(null)}
+      />
+
+      <InlinePromptModal
+        open={!!renameDialog}
+        title={renaming?.kind === "folder" ? "Rename folder" : "Rename file"}
+        value={renameDialog?.value ?? ""}
+        onChange={(v) => setRenameDialog((r) => (r ? { ...r, value: v } : r))}
+        onClose={() => setRenameDialog(null)}
+        onSubmit={async (v) => {
+          if (!renaming) return;
+          if (renaming.kind === "file") {
+            await renameFile.mutateAsync({ id: renaming.file.id, filename: withFileExt(v, renaming.file.filename), scope });
+          } else {
+            await renameFolder.mutateAsync({ id: renaming.folder.id, name: v, scope });
+          }
+          setRenameDialog(null);
+        }}
+      />
+
+      <ConfirmModal
+        open={!!trashAsk}
+        title={trashAsk?.kind === "folder" ? "Move folder to trash?" : "Move file to trash?"}
+        description={
+          trashAsk?.kind === "folder"
+            ? `"${trashAsk.folder.name}" and everything inside it will be moved to the trash. You can restore it from the Trash view.`
+            : trashAsk
+              ? `"${trashAsk.file.filename}" will be moved to the trash. You can restore it from the Trash view.`
+              : ""
+        }
+        confirmLabel="Move to trash"
+        confirmIcon={<Trash2 className="h-3.5 w-3.5" />}
+        onClose={() => setTrashAsk(null)}
+        onConfirm={async () => {
+          if (!trashAsk) return;
+          if (trashAsk.kind === "folder") await trashFolder.mutateAsync({ id: trashAsk.folder.id, scope });
+          else await trashFile.mutateAsync({ id: trashAsk.file.id, scope });
+          setTrashAsk(null);
+        }}
+      />
+    </DriveListProvider>
   );
 }
 
@@ -1674,939 +1823,6 @@ function SortHeader({
 /** In-place filename editor for a Drive list row. Enter or blur commits a
  *  changed name; Escape cancels. A guard ref stops Enter→blur double-firing
  *  the commit. */
-function InlineRenameField({
-  initial,
-  onCommit,
-  onCancel,
-}: {
-  initial: string;
-  onCommit: (name: string) => void;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(initial);
-  const doneRef = useRef(false);
-  const commit = () => {
-    if (doneRef.current) return;
-    doneRef.current = true;
-    const t = value.trim();
-    if (t && t !== initial) onCommit(t);
-    else onCancel();
-  };
-  return (
-    <input
-      // eslint-disable-next-line jsx-a11y/no-autofocus
-      autoFocus
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
-      onFocus={(e) => e.currentTarget.select()}
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => {
-        e.stopPropagation();
-        if (e.key === "Enter") {
-          e.preventDefault();
-          commit();
-        } else if (e.key === "Escape") {
-          e.preventDefault();
-          doneRef.current = true;
-          onCancel();
-        }
-      }}
-      onBlur={commit}
-      className="min-w-0 flex-1 rounded border border-[var(--accent)] bg-[var(--bg)] px-1.5 py-0.5 text-sm text-[var(--text)] outline-none"
-    />
-  );
-}
-
-function FolderRow({
-  folder,
-  scope,
-  layout,
-  writable,
-  currentFolderId,
-  selected,
-  selectionActive,
-  onToggleSelect,
-  onOpen,
-  onDropOnFolder,
-  onOpenMove,
-  onShare,
-}: {
-  folder: FolderItem;
-  scope: FileScope;
-  layout: ViewMode;
-  writable: boolean;
-  currentFolderId: string | null;
-  selected: boolean;
-  selectionActive: boolean;
-  onToggleSelect: (shift: boolean) => void;
-  onOpen: () => void;
-  onDropOnFolder: (
-    targetFolderId: string | null,
-    payload: DragPayload
-  ) => Promise<DropOutcome>;
-  onOpenMove: (s: MoveModalState) => void;
-  onShare: () => void;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
-  const [rename, setRename] = useState<{ open: boolean; value: string }>({
-    open: false,
-    value: folder.name,
-  });
-  const [trashOpen, setTrashOpen] = useState(false);
-  const [over, setOver] = useState(false);
-  const renameFolder = useRenameFolder();
-  const trashFolder = useTrashFolder();
-  const starFolder = useStarFolder();
-  const unstarFolder = useUnstarFolder();
-  // List view renames in place; grid keeps the modal (tiles are too small
-  // for a comfortable inline field).
-  const [editing, setEditing] = useState(false);
-  const commitRename = (name: string) => {
-    setEditing(false);
-    if (name !== folder.name)
-      void renameFolder.mutateAsync({ id: folder.id, name, scope });
-  };
-
-  const isSystem = folder.system_kind != null;
-  const userCanMutate = writable && !isSystem;
-
-  const mutationItems: ContextMenuItem[] = isSystem
-    ? []
-    : [
-        folder.starred_at
-          ? {
-              icon: <Star className="h-3.5 w-3.5" />,
-              label: "Unstar",
-              onClick: () => unstarFolder.mutate({ id: folder.id, scope }),
-              disabled: !writable,
-            }
-          : {
-              icon: <Star className="h-3.5 w-3.5" />,
-              label: "Star",
-              onClick: () => starFolder.mutate({ id: folder.id, scope }),
-              disabled: !writable,
-            },
-        {
-          icon: <Share2 className="h-3.5 w-3.5" />,
-          label: "Share",
-          onClick: onShare,
-          disabled: !writable,
-        },
-        {
-          icon: <Pencil className="h-3.5 w-3.5" />,
-          label: "Rename",
-          onClick: () =>
-            layout === "grid"
-              ? setRename({ open: true, value: folder.name })
-              : setEditing(true),
-          disabled: !writable,
-        },
-        {
-          icon: <FolderInput className="h-3.5 w-3.5" />,
-          label: "Move to…",
-          onClick: () =>
-            onOpenMove({
-              open: true,
-              kind: "folder",
-              id: folder.id,
-              name: folder.name,
-              currentParentId: folder.parent_id,
-            }),
-          disabled: !writable,
-        },
-        {
-          icon: <Trash2 className="h-3.5 w-3.5" />,
-          label: "Trash",
-          destructive: true,
-          onClick: () => setTrashOpen(true),
-          disabled: !writable,
-        },
-      ];
-  const items: ContextMenuItem[] = [
-    {
-      icon: <FolderClosedIcon className="h-3.5 w-3.5" />,
-      label: "Open",
-      onClick: onOpen,
-    },
-    ...mutationItems,
-  ];
-
-  const allowDrop = (e: React.DragEvent) => {
-    if (!writable) return false;
-    return dragHasItem(e.dataTransfer);
-  };
-
-  const dragProps = {
-    draggable: userCanMutate,
-    onDragStart: (e: React.DragEvent) => {
-      if (!userCanMutate) return;
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData(DRAG_FOLDER, folder.id);
-      e.dataTransfer.setData(DRAG_SOURCE_PARENT, folder.parent_id ?? "");
-    },
-    onDragEnter: (e: React.DragEvent) => {
-      if (allowDrop(e)) setOver(true);
-    },
-    onDragOver: (e: React.DragEvent) => {
-      if (allowDrop(e)) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-      }
-    },
-    onDragLeave: (e: React.DragEvent) => {
-      if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-      setOver(false);
-    },
-    onDrop: async (e: React.DragEvent) => {
-      if (!allowDrop(e)) return;
-      e.preventDefault();
-      setOver(false);
-      const payload = readDragPayload(e.dataTransfer);
-      if (!payload) return;
-      await onDropOnFolder(folder.id, payload);
-    },
-    onContextMenu: (e: React.MouseEvent) => {
-      e.preventDefault();
-      setCtx({ x: e.clientX, y: e.clientY });
-    },
-  };
-
-  const overlays = (
-    <>
-      <ContextMenu
-        open={ctx !== null}
-        x={ctx?.x ?? 0}
-        y={ctx?.y ?? 0}
-        items={items}
-        onClose={() => setCtx(null)}
-      />
-
-      <InlinePromptModal
-        open={rename.open}
-        title="Rename folder"
-        value={rename.value}
-        onChange={(v) => setRename((r) => ({ ...r, value: v }))}
-        onClose={() => setRename({ open: false, value: folder.name })}
-        onSubmit={async (v) => {
-          await renameFolder.mutateAsync({ id: folder.id, name: v, scope });
-          setRename({ open: false, value: v });
-        }}
-      />
-
-      <ConfirmModal
-        open={trashOpen}
-        title="Move folder to trash?"
-        description={`"${folder.name}" and everything inside it will be moved to the trash. You can restore it from the Trash view.`}
-        confirmLabel="Move to trash"
-        confirmIcon={<Trash2 className="h-3.5 w-3.5" />}
-        onClose={() => setTrashOpen(false)}
-        onConfirm={async () => {
-          await trashFolder.mutateAsync({ id: folder.id, scope });
-          setTrashOpen(false);
-        }}
-      />
-    </>
-  );
-
-  if (layout === "grid") {
-    return (
-      <li
-        {...dragProps}
-        onDoubleClick={onOpen}
-        className={cn(
-          "group relative flex flex-col rounded-card border bg-[var(--surface)] p-3 transition",
-          "hover:border-[var(--accent)]/60 hover:shadow-sm",
-          selected
-            ? "border-[var(--accent)] ring-1 ring-inset ring-[var(--accent)]/40"
-            : "border-[var(--border)]",
-          userCanMutate && "cursor-grab",
-          over &&
-            "border-[var(--accent)]/60 bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/40"
-        )}
-      >
-        {userCanMutate && (
-          <SelectCheckbox
-            checked={selected}
-            active={selectionActive}
-            onToggle={onToggleSelect}
-            className="absolute left-1.5 top-1.5"
-          />
-        )}
-        {userCanMutate && (
-          <div className="absolute right-1 top-1 opacity-0 transition group-hover:opacity-100">
-            <RowMenu
-              open={menuOpen}
-              onOpenChange={setMenuOpen}
-              items={mutationItems}
-            />
-          </div>
-        )}
-        <button
-          onClick={onOpen}
-          className="flex w-full flex-1 flex-col gap-2 text-left"
-          title={isSystem ? systemFolderTooltip(folder.system_kind!) : undefined}
-        >
-          <div className="flex aspect-square w-full items-center justify-center rounded-md bg-[var(--accent-soft)]">
-            <DriveItemIcon
-              folder={folder}
-              className="h-12 w-12"
-            />
-          </div>
-          <span className="line-clamp-2 w-full break-words text-sm font-medium">
-            {folder.name}
-          </span>
-        </button>
-        <div className="mt-1.5 flex min-h-[18px] items-center justify-center gap-1">
-          {folder.starred_at && (
-            <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" />
-          )}
-          {isSystem && (
-            <span className="rounded bg-[var(--text-muted)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-              system
-            </span>
-          )}
-          {currentFolderId !== null && currentFolderId === folder.id && (
-            <span className="rounded bg-[var(--text-muted)]/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-              current
-            </span>
-          )}
-          {folder.sharing && (
-            <GranteesPill
-              sharing={folder.sharing}
-              variant="compact"
-              className="shrink-0"
-              onClick={
-                folder.sharing.role === "owner"
-                  ? (e) => {
-                      e.stopPropagation();
-                      onShare();
-                    }
-                  : undefined
-              }
-            />
-          )}
-        </div>
-        {overlays}
-      </li>
-    );
-  }
-
-  return (
-    <li
-      {...dragProps}
-      className={cn(
-        "group flex items-center gap-3 px-3 py-2 transition",
-        selected ? "bg-[var(--accent)]/10" : "hover:bg-[var(--hover)]",
-        userCanMutate && "cursor-grab",
-        over && "bg-[var(--accent)]/10 ring-1 ring-inset ring-[var(--accent)]/40"
-      )}
-    >
-      {/* Checkbox — only for user-owned folders. A spacer keeps the
-          name column aligned with file rows and user folder rows. */}
-      {userCanMutate ? (
-        <SelectCheckbox
-          checked={selected}
-          active={selectionActive}
-          onToggle={onToggleSelect}
-        />
-      ) : (
-        <span className="w-5 shrink-0" aria-hidden />
-      )}
-      {editing ? (
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <DriveItemIcon folder={folder} tile />
-          <InlineRenameField
-            initial={folder.name}
-            onCommit={commitRename}
-            onCancel={() => setEditing(false)}
-          />
-        </div>
-      ) : (
-      <button
-        onClick={onOpen}
-        className="flex min-w-0 flex-1 items-center gap-3 text-left"
-        title={isSystem ? systemFolderTooltip(folder.system_kind!) : undefined}
-      >
-        <DriveItemIcon folder={folder} tile />
-        <span className="truncate text-sm font-medium">{folder.name}</span>
-        {folder.starred_at && (
-          <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" />
-        )}
-        {isSystem && (
-          /* Muted badge — system is informational, not interactive,
-             so avoid using the accent colour that implies clickability. */
-          <span className="rounded bg-[var(--text-muted)]/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
-            system
-          </span>
-        )}
-        {currentFolderId !== null && currentFolderId === folder.id && (
-          <span className="rounded bg-[var(--text-muted)]/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
-            current
-          </span>
-        )}
-      </button>
-      )}
-
-      {/* Kind / Modified columns line up with file rows; folders have
-          no size so that column stays blank. */}
-      <span className="hidden w-24 shrink-0 truncate text-xs text-[var(--text-muted)] lg:block">
-        Folder
-      </span>
-      <span className="hidden w-28 shrink-0 text-xs text-[var(--text-muted)] lg:block">
-        {folder.updated_at ? formatRelativeTime(folder.updated_at) : ""}
-      </span>
-      <span className="hidden w-16 shrink-0 sm:block" aria-hidden />
-
-      {/* Drive stage 5 — peer-to-peer share grants. Sits inline at
-          the right edge (just left of the row menu). Owners get a
-          clickable pill so "manage sharing" is one tap away;
-          grantees see the same pill but non-interactive (they can't
-          change grants they're a recipient of — only the owner can).
-          Clicking deliberately stops propagation so the row's
-          folder-open doesn't also fire. */}
-      {folder.sharing && (
-        <GranteesPill
-          sharing={folder.sharing}
-          variant="compact"
-          className="ml-auto shrink-0"
-          onClick={
-            folder.sharing.role === "owner"
-              ? (e) => {
-                  e.stopPropagation();
-                  onShare();
-                }
-              : undefined
-          }
-        />
-      )}
-
-      {/* Fixed-width action slot — only user-owned folders get a menu, but
-          the slot is always reserved so Kind/Modified/Size stay aligned
-          with file rows (which carry a download button here) and the
-          column header. */}
-      <div className="flex w-16 shrink-0 items-center justify-end">
-        {userCanMutate && (
-          <RowMenu
-            open={menuOpen}
-            onOpenChange={setMenuOpen}
-            items={mutationItems}
-          />
-        )}
-      </div>
-
-      {overlays}
-    </li>
-  );
-}
-
-function FileRow({
-  file,
-  scope,
-  layout,
-  writable,
-  selected,
-  selectionActive,
-  onToggleSelect,
-  onOpenMove,
-  onPreview,
-  onShare,
-}: {
-  file: FileItem;
-  scope: FileScope;
-  layout: ViewMode;
-  writable: boolean;
-  selected: boolean;
-  selectionActive: boolean;
-  onToggleSelect: (shift: boolean) => void;
-  onOpenMove: (s: MoveModalState) => void;
-  onPreview: () => void;
-  onShare: () => void;
-}) {
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [ctx, setCtx] = useState<{ x: number; y: number } | null>(null);
-  // Rename edits the base name only (no extension); the real extension is
-  // re-attached on commit so the user never types ".pdf".
-  const [rename, setRename] = useState<{ open: boolean; value: string }>({
-    open: false,
-    value: splitFileExt(file.filename).base,
-  });
-  const [trashOpen, setTrashOpen] = useState(false);
-  const renameFile = useRenameFile();
-  const trashFile = useTrashFile();
-  const starFile = useStarFile();
-  const unstarFile = useUnstarFile();
-  // List view renames in place; grid keeps the modal.
-  const [editing, setEditing] = useState(false);
-  const commitRename = (base: string) => {
-    setEditing(false);
-    const full = withFileExt(base, file.filename);
-    if (full && full !== file.filename)
-      void renameFile.mutateAsync({ id: file.id, filename: full, scope });
-  };
-
-  const mutationItems: ContextMenuItem[] = [
-    {
-      icon: <Eye className="h-3.5 w-3.5" />,
-      label: "Preview",
-      onClick: onPreview,
-    },
-    {
-      icon: <Download className="h-3.5 w-3.5" />,
-      label: "Download",
-      onClick: () => downloadAuthed(file),
-    },
-    file.starred_at
-      ? {
-          icon: <Star className="h-3.5 w-3.5" />,
-          label: "Unstar",
-          onClick: () => unstarFile.mutate({ id: file.id, scope }),
-          disabled: !writable,
-        }
-      : {
-          icon: <Star className="h-3.5 w-3.5" />,
-          label: "Star",
-          onClick: () => starFile.mutate({ id: file.id, scope }),
-          disabled: !writable,
-        },
-    {
-      icon: <Share2 className="h-3.5 w-3.5" />,
-      label: "Share",
-      onClick: onShare,
-      disabled: !writable,
-    },
-    {
-      icon: <Pencil className="h-3.5 w-3.5" />,
-      label: "Rename",
-      onClick: () =>
-        layout === "grid"
-          ? setRename({ open: true, value: splitFileExt(file.filename).base })
-          : setEditing(true),
-      disabled: !writable,
-    },
-    {
-      icon: <FolderInput className="h-3.5 w-3.5" />,
-      label: "Move to…",
-      onClick: () =>
-        onOpenMove({
-          open: true,
-          kind: "file",
-          id: file.id,
-          name: file.filename,
-          currentParentId: file.folder_id,
-        }),
-      disabled: !writable,
-    },
-    {
-      icon: <Trash2 className="h-3.5 w-3.5" />,
-      label: "Trash",
-      destructive: true,
-      onClick: () => setTrashOpen(true),
-      disabled: !writable,
-    },
-  ];
-
-  const dragProps = {
-    draggable: writable,
-    onDragStart: (e: React.DragEvent) => {
-      if (!writable) return;
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData(DRAG_FILE, file.id);
-      e.dataTransfer.setData(DRAG_SOURCE_PARENT, file.folder_id ?? "");
-    },
-    onContextMenu: (e: React.MouseEvent) => {
-      e.preventDefault();
-      setCtx({ x: e.clientX, y: e.clientY });
-    },
-    onDoubleClick: onPreview,
-  };
-
-  const overlays = (
-    <>
-      <ContextMenu
-        open={ctx !== null}
-        x={ctx?.x ?? 0}
-        y={ctx?.y ?? 0}
-        items={mutationItems}
-        onClose={() => setCtx(null)}
-      />
-
-      <InlinePromptModal
-        open={rename.open}
-        title="Rename file"
-        value={rename.value}
-        onChange={(v) => setRename((r) => ({ ...r, value: v }))}
-        onClose={() =>
-          setRename({ open: false, value: splitFileExt(file.filename).base })
-        }
-        onSubmit={async (v) => {
-          const full = withFileExt(v, file.filename);
-          await renameFile.mutateAsync({ id: file.id, filename: full, scope });
-          setRename({ open: false, value: splitFileExt(full).base });
-        }}
-      />
-
-      <ConfirmModal
-        open={trashOpen}
-        title="Move file to trash?"
-        description={`"${file.filename}" will be moved to the trash. You can restore it from the Trash view.`}
-        confirmLabel="Move to trash"
-        confirmIcon={<Trash2 className="h-3.5 w-3.5" />}
-        onClose={() => setTrashOpen(false)}
-        onConfirm={async () => {
-          await trashFile.mutateAsync({ id: file.id, scope });
-          setTrashOpen(false);
-        }}
-      />
-    </>
-  );
-
-  if (layout === "grid") {
-    return (
-      <li
-        {...dragProps}
-        className={cn(
-          "group relative flex flex-col rounded-card border bg-[var(--surface)] p-3 transition",
-          "hover:border-[var(--accent)]/60 hover:shadow-sm",
-          selected
-            ? "border-[var(--accent)] ring-1 ring-inset ring-[var(--accent)]/40"
-            : "border-[var(--border)]",
-          writable && "cursor-grab"
-        )}
-      >
-        {writable && (
-          <SelectCheckbox
-            checked={selected}
-            active={selectionActive}
-            onToggle={onToggleSelect}
-            className="absolute left-1.5 top-1.5"
-          />
-        )}
-        {writable && (
-          <div className="absolute right-1 top-1 opacity-0 transition group-hover:opacity-100">
-            <RowMenu
-              open={menuOpen}
-              onOpenChange={setMenuOpen}
-              items={mutationItems.filter((it) => !it.disabled)}
-            />
-          </div>
-        )}
-        <button
-          onClick={onPreview}
-          className="flex w-full flex-1 flex-col gap-2 text-left"
-          title={displayFileName(file)}
-        >
-          <div className="relative w-full">
-            <DriveThumb
-              file={file}
-              className={cn(
-                "aspect-square w-full rounded-md border border-[var(--border)]",
-                // Kind-tinted backing shows behind the fallback icon (and
-                // around transparent thumbnails), matching the list tiles.
-                fileKindTint(file).tile
-              )}
-            />
-            {/* Hover quick-actions — Preview is the card click; surface the
-                next two so they don't require the ⋯ menu. */}
-            <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1 rounded-b-md bg-gradient-to-t from-black/55 to-transparent p-1.5 opacity-0 transition group-hover:opacity-100">
-              <QuickAction
-                title="Preview"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onPreview();
-                }}
-              >
-                <Eye className="h-3.5 w-3.5" />
-              </QuickAction>
-              <QuickAction
-                title="Download"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  void downloadAuthed(file);
-                }}
-              >
-                <Download className="h-3.5 w-3.5" />
-              </QuickAction>
-              {writable && (
-                <QuickAction
-                  title={file.starred_at ? "Unstar" : "Star"}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    (file.starred_at ? unstarFile : starFile).mutate({
-                      id: file.id,
-                      scope,
-                    });
-                  }}
-                >
-                  <Star
-                    className={cn(
-                      "h-3.5 w-3.5",
-                      file.starred_at && "fill-yellow-400 text-yellow-400"
-                    )}
-                  />
-                </QuickAction>
-              )}
-            </div>
-          </div>
-          <span className="line-clamp-2 w-full break-words text-sm font-medium">
-            {displayFileName(file)}
-          </span>
-          <span className="flex w-full items-center gap-1.5 text-[10px] text-[var(--text-muted)]">
-            <span
-              className={cn(
-                "shrink-0 rounded px-1.5 py-0.5 font-medium",
-                fileKindTint(file).tile,
-                fileKindTint(file).text
-              )}
-            >
-              {kindLabel(file)}
-            </span>
-            <span className="truncate">
-              {humanSize(file.size_bytes)}
-              {(file.updated_at ?? file.created_at) &&
-                ` · ${formatRelativeTime(file.updated_at ?? file.created_at)}`}
-            </span>
-          </span>
-        </button>
-        <div className="mt-1.5 flex min-h-[18px] items-center justify-center gap-1">
-          {file.starred_at && (
-            <Star className="h-3.5 w-3.5 shrink-0 fill-yellow-400 text-yellow-400" />
-          )}
-          {file.sharing && (
-            <GranteesPill
-              sharing={file.sharing}
-              variant="compact"
-              className="shrink-0"
-              onClick={
-                file.sharing.role === "owner"
-                  ? (e) => {
-                      e.stopPropagation();
-                      onShare();
-                    }
-                  : undefined
-              }
-            />
-          )}
-        </div>
-        {overlays}
-      </li>
-    );
-  }
-
-  return (
-    <li
-      {...dragProps}
-      className={cn(
-        "group flex items-center gap-3 px-3 py-2 transition",
-        selected ? "bg-[var(--accent)]/10" : "hover:bg-[var(--hover)]",
-        writable && "cursor-grab"
-      )}
-    >
-      {writable ? (
-        <SelectCheckbox
-          checked={selected}
-          active={selectionActive}
-          onToggle={onToggleSelect}
-        />
-      ) : (
-        <span className="w-5 shrink-0" aria-hidden />
-      )}
-      {editing ? (
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <DriveItemIcon file={file} tile />
-          <InlineRenameField
-            initial={splitFileExt(file.filename).base}
-            onCommit={commitRename}
-            onCancel={() => setEditing(false)}
-          />
-        </div>
-      ) : (
-        <button
-          onClick={onPreview}
-          className="flex min-w-0 flex-1 items-center gap-3 text-left"
-        >
-          <DriveItemIcon file={file} tile />
-          <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
-            <span className="truncate">{displayFileName(file)}</span>
-            {file.starred_at && (
-              <Star className="h-3 w-3 shrink-0 fill-yellow-400 text-yellow-400" />
-            )}
-          </span>
-        </button>
-      )}
-
-      {/* Tabular columns — desktop only; on mobile the name carries
-          the row and the metadata is reachable via preview. */}
-      <span className="hidden w-24 shrink-0 truncate text-xs text-[var(--text-muted)] lg:block">
-        {kindLabel(file)}
-      </span>
-      <span className="hidden w-28 shrink-0 text-xs text-[var(--text-muted)] lg:block">
-        {file.updated_at ? formatRelativeTime(file.updated_at) : ""}
-      </span>
-      <span className="hidden w-16 shrink-0 text-right text-xs tabular-nums text-[var(--text-muted)] sm:block">
-        {humanSize(file.size_bytes)}
-      </span>
-
-      {/* Drive stage 5 — share-grants pill. Sits just left of the fixed
-          action slot so it lines up with the same indicator on folder
-          rows. Owner → pill opens the grants modal; grantee → read-
-          only (same reason as FolderRow above). */}
-      {file.sharing && (
-        <GranteesPill
-          sharing={file.sharing}
-          variant="compact"
-          className="shrink-0"
-          onClick={
-            file.sharing.role === "owner"
-              ? (e) => {
-                  e.stopPropagation();
-                  onShare();
-                }
-              : undefined
-          }
-        />
-      )}
-
-      {/* Fixed-width action slot — download + menu. Matches the folder
-          row + header width so Kind/Modified/Size line up across rows. */}
-      <div className="flex w-16 shrink-0 items-center justify-end gap-1">
-        <button
-          onClick={() => downloadAuthed(file)}
-          title="Download"
-          aria-label={`Download ${file.filename}`}
-          className="rounded-md p-1.5 text-[var(--text-muted)] opacity-0 transition hover:bg-[var(--hover)] hover:text-[var(--text)] group-hover:opacity-100"
-        >
-          <Download className="h-4 w-4" />
-        </button>
-        {writable && (
-          <RowMenu
-            open={menuOpen}
-            onOpenChange={setMenuOpen}
-            items={mutationItems.filter((it) => !it.disabled)}
-          />
-        )}
-      </div>
-
-      {overlays}
-    </li>
-  );
-}
-
-/** Selection checkbox for a file/folder row. Hidden until the row is
- *  hovered (desktop) or selection mode is active, so it doesn't clutter
- *  the default browse view; always visible once checked. */
-/** A single hover quick-action button over a grid thumbnail. */
-function QuickAction({
-  title,
-  onClick,
-  children,
-}: {
-  title: string;
-  onClick: (e: React.MouseEvent) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      aria-label={title}
-      onClick={onClick}
-      className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-white/15 text-white backdrop-blur-sm transition hover:bg-white/30"
-    >
-      {children}
-    </button>
-  );
-}
-
-function SelectCheckbox({
-  checked,
-  active,
-  onToggle,
-  className,
-}: {
-  checked: boolean;
-  active: boolean;
-  onToggle: (shift: boolean) => void;
-  className?: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked}
-      aria-label={checked ? "Deselect item" : "Select item"}
-      onClick={(e) => {
-        e.stopPropagation();
-        onToggle(e.shiftKey);
-      }}
-      className={cn(
-        "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border transition",
-        checked
-          ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-          : "border-[var(--border)] bg-[var(--surface)] text-transparent hover:border-[var(--accent)]/60",
-        !checked && !active && "opacity-0 group-hover:opacity-100",
-        className
-      )}
-    >
-      <Check className="h-3.5 w-3.5" />
-    </button>
-  );
-}
-
-function systemFolderTooltip(kind: SystemFolderKind): string {
-  switch (kind) {
-    case "chat_uploads":
-      return "Files attached from chats land here automatically.";
-    case "generated_root":
-      return "Files generated by the assistant land in here.";
-    case "generated_files":
-      return "Generated documents (text, PDFs, code, etc.).";
-    case "generated_media":
-      return "Generated images, audio, and video.";
-  }
-}
-
-function ViewToggle({
-  mode,
-  onChange,
-}: {
-  mode: ViewMode;
-  onChange: (m: ViewMode) => void;
-}) {
-  const btn = (active: boolean, leading: boolean) =>
-    cn(
-      "px-2 py-1.5 transition",
-      leading && "border-l border-[var(--border)]",
-      active
-        ? "bg-[var(--accent)]/15 text-[var(--accent)]"
-        : "text-[var(--text-muted)] hover:bg-[var(--hover)]"
-    );
-  return (
-    <div className="inline-flex shrink-0 items-stretch overflow-hidden rounded-md border border-[var(--border)] bg-[var(--surface)]">
-      <button
-        type="button"
-        aria-label="List view"
-        aria-pressed={mode === "list"}
-        title="List view"
-        onClick={() => onChange("list")}
-        className={btn(mode === "list", false)}
-      >
-        <ListIcon className="h-4 w-4" />
-      </button>
-      <button
-        type="button"
-        aria-label="Grid view"
-        aria-pressed={mode === "grid"}
-        title="Grid view"
-        onClick={() => onChange("grid")}
-        className={btn(mode === "grid", true)}
-      >
-        <LayoutGrid className="h-4 w-4" />
-      </button>
-    </div>
-  );
-}
-
 const SORT_LABELS: Record<DriveSortKey, string> = {
   name: "Name",
   modified: "Last modified",
@@ -2662,7 +1878,7 @@ function SortControl({
                 }
                 className={cn(
                   "flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left transition hover:bg-[var(--hover)]",
-                  active && "text-[var(--accent)]"
+                  active && "text-[var(--accent-text)]"
                 )}
               >
                 <span>{SORT_LABELS[key]}</span>
@@ -2707,56 +1923,6 @@ function GridSizeSlider({
         className="h-8 w-20 cursor-ew-resize accent-[var(--accent)]"
       />
     </label>
-  );
-}
-
-function RowMenu({
-  open,
-  onOpenChange,
-  items,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  items: ContextMenuItem[];
-}) {
-  return (
-    <div className="relative shrink-0">
-      <button
-        onClick={() => onOpenChange(!open)}
-        className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-        aria-label="More actions"
-      >
-        <MoreVertical className="h-4 w-4" />
-      </button>
-      {open && (
-        <>
-          <div
-            className="fixed inset-0 z-10"
-            onClick={() => onOpenChange(false)}
-          />
-          <div className="absolute right-0 top-9 z-20 w-44 overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-lg">
-            {items.map((it, i) => (
-              <button
-                key={`${it.label}-${i}`}
-                onClick={() => {
-                  onOpenChange(false);
-                  it.onClick();
-                }}
-                className={cn(
-                  "flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition",
-                  it.destructive
-                    ? "text-red-600 hover:bg-red-500/10 dark:text-red-400"
-                    : "hover:bg-[var(--hover)]"
-                )}
-              >
-                {it.icon}
-                {it.label}
-              </button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
   );
 }
 
@@ -2905,4 +2071,41 @@ export function SharedWithMePage() {
       subtitle="Folders and files shared with you, or by you, with other Promptly users."
     />
   );
+}
+
+function useSharedFilesPickup() {
+  const navigate = useNavigate();
+  const startUploads = useUploadStore((s) => s.startUploads);
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has("shared")) return;
+    let cancelled = false;
+    void (async () => {
+      const { takeSharedFiles } = await import("@/lib/shareTargetStash");
+      const files = await takeSharedFiles();
+      if (cancelled) return;
+      navigate("/files", { replace: true });
+      if (!files.length) return;
+      // Photos and videos go where the phone's backups do — Camera Uploads,
+      // by month taken, not twice (WP-8.5); anything else to My files.
+      const isMedia = (f: File) => /^(image|video)\//.test(f.type) || /\.(heic|heif|mov)$/i.test(f.name);
+      const media = files.filter(isMedia);
+      const other = files.filter((f) => !isMedia(f));
+      if (media.length) startUploads({ files: media, scope: "mine", folderId: null, route: "camera" });
+      if (other.length) startUploads({ files: other, scope: "mine", folderId: null });
+      const n = files.length;
+      toast.info(
+        other.length === 0
+          ? `Uploading ${n} shared photo${n === 1 ? "" : "s"} to Camera Uploads…`
+          : `Uploading ${n} shared file${n === 1 ? "" : "s"}…`,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
+function workspaceSkipNote(n: number): string {
+  return `${n} item${n === 1 ? " belongs" : "s belong"} to a workspace and ${n === 1 ? "was" : "were"} left alone — manage ${n === 1 ? "it" : "them"} from the workspace.`;
 }

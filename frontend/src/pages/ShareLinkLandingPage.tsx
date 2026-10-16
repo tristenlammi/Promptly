@@ -31,6 +31,9 @@ import { cn } from "@/utils/cn";
 import { normalizeApiDetail } from "@/utils/apiError";
 
 import { humanSize } from "@/components/files/helpers";
+import { isOfficeShellMime, PublicOfficePreview } from "@/components/files/SharedOfficeView";
+import { PublicAlbum } from "@/components/photos/PublicAlbum";
+
 
 /**
  * Anonymous-friendly landing page mounted at ``/s/:token`` (OUTSIDE
@@ -73,6 +76,12 @@ export function ShareLinkLandingPage() {
       setError(null);
       try {
         const m = await shareApi.meta(token, currentUnlock);
+        // A comment / edit link, opened signed in (WP-6.6): the server has
+        // given this person that role — open the file in its editor.
+        if (m.open_path) {
+          navigate(m.open_path, { replace: true });
+          return;
+        }
         setMeta(m);
         if (m.requires_auth && !isAuthed) {
           setStatus("login_required");
@@ -86,7 +95,7 @@ export function ShareLinkLandingPage() {
         setStatus("error");
       }
     },
-    [token, isAuthed]
+    [token, isAuthed, navigate]
   );
 
   useEffect(() => {
@@ -147,7 +156,7 @@ export function ShareLinkLandingPage() {
     return (
       <Chrome>
         <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] p-6 text-center shadow-sm">
-          <LogIn className="mx-auto mb-3 h-6 w-6 text-[var(--accent)]" />
+          <LogIn className="mx-auto mb-3 h-6 w-6 text-[var(--accent-text)]" />
           <h1 className="text-base font-semibold">Sign in to continue</h1>
           <p className="mt-1 text-sm text-[var(--text-muted)]">
             This link requires a Promptly account. Sign in to access it.
@@ -173,6 +182,11 @@ export function ShareLinkLandingPage() {
         <PasswordForm meta={meta!} onSubmit={handleUnlock} />
       </Chrome>
     );
+  }
+
+  if (meta?.resource_type === "album") {
+    // A shared photo album (WP-9.5): its own full-width gallery.
+    return <PublicAlbum token={token} unlockToken={unlockToken} />;
   }
 
   if (meta?.resource_type === "folder") {
@@ -230,7 +244,7 @@ function PasswordForm({
       onSubmit={submit}
       className="w-full max-w-sm rounded-card border border-[var(--border)] bg-[var(--surface)] p-6 shadow-sm"
     >
-      <Lock className="mx-auto mb-3 h-6 w-6 text-[var(--accent)]" />
+      <Lock className="mx-auto mb-3 h-6 w-6 text-[var(--accent-text)]" />
       <h1 className="text-center text-base font-semibold">Password required</h1>
       <p className="mt-1 text-center text-sm text-[var(--text-muted)]">
         This {meta.resource_type} is protected by a password.
@@ -353,14 +367,19 @@ function FileCard({
           the modal mounts. Since the share landing page isn't the
           same authenticated scope, we wrap the preview in our own
           blob bootstrap. */}
-      {previewOpen && (
-        <PublicFilePreview
-          token={token}
-          meta={meta}
-          unlockToken={unlockToken}
-          onClose={() => setPreviewOpen(false)}
-        />
-      )}
+      {previewOpen &&
+        (isOfficeShellMime(meta.mime_type) ? (
+          // A spreadsheet or whiteboard has no file of its own to show —
+          // render its contents read-only (WP-3.4).
+          <PublicOfficePreview token={token} unlockToken={unlockToken} onClose={() => setPreviewOpen(false)} />
+        ) : (
+          <PublicFilePreview
+            token={token}
+            meta={meta}
+            unlockToken={unlockToken}
+            onClose={() => setPreviewOpen(false)}
+          />
+        ))}
     </>
   );
 }
@@ -386,6 +405,7 @@ function PublicFilePreview({
   // the authenticated ``apiClient`` and the public share endpoints
   // don't live under ``/api/files``.
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [blob, setBlob] = useState<Blob | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -396,6 +416,7 @@ function PublicFilePreview({
         const blob = await shareApi.downloadBlob(token, { unlockToken });
         if (revoked) return;
         url = URL.createObjectURL(blob);
+        setBlob(blob);
         setBlobUrl(url);
       } catch (e) {
         if (!revoked) setErr(extractHttpError(e));
@@ -423,7 +444,7 @@ function PublicFilePreview({
     );
   }
 
-  if (!blobUrl) {
+  if (!blobUrl || !blob) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 text-sm text-white/70">
         <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading preview…
@@ -436,6 +457,7 @@ function PublicFilePreview({
       filename={meta.filename ?? "file"}
       mime={meta.mime_type ?? ""}
       blobUrl={blobUrl}
+      blob={blob}
       onClose={onClose}
     />
   );
@@ -452,26 +474,35 @@ const PdfCanvasPreview = lazy(() =>
 );
 
 function PublicPdf({
-  blobUrl,
+  blob,
   filename,
 }: {
-  blobUrl: string;
+  blob: Blob;
   filename: string;
 }) {
   const [data, setData] = useState<ArrayBuffer | null>(null);
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      // Same-origin blob: fetch — no auth involved, the link itself was
-      // already exchanged for these bytes upstream.
-      const buf = await (await fetch(blobUrl)).arrayBuffer();
-      if (!cancelled) setData(buf);
-    })();
+    // Read the bytes we already downloaded. Never fetch(blob:…): the
+    // app's CSP (connect-src) refuses blob: URLs, which used to leave
+    // every shared PDF on "Loading…" for good.
+    blob
+      .arrayBuffer()
+      .then((buf) => {
+        if (!cancelled) setData(buf);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [blobUrl]);
+  }, [blob]);
 
+  if (failed) {
+    return <p className="text-sm text-white/80">This file couldn't be shown — use Download instead.</p>;
+  }
   if (!data) {
     return (
       <p className="flex items-center gap-2 text-sm text-white/80">
@@ -500,14 +531,17 @@ function PublicBlobPreview({
   filename,
   mime,
   blobUrl,
+  blob,
   onClose,
 }: {
   filename: string;
   mime: string;
   blobUrl: string;
+  blob: Blob;
   onClose: () => void;
 }) {
   const [text, setText] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   const isImage = mime.startsWith("image/");
   const isPdf = mime === "application/pdf" || filename.toLowerCase().endsWith(".pdf");
@@ -527,16 +561,19 @@ function PublicBlobPreview({
   useEffect(() => {
     if (!isText && !isHtmlDoc) return;
     let cancelled = false;
-    fetch(blobUrl)
-      .then((r) => r.text())
+    // From the Blob, not fetch(blobUrl) — see PublicPdf (CSP refuses blob:).
+    blob
+      .text()
       .then((t) => {
         if (!cancelled) setText(t.length > 512 * 1024 ? t.slice(0, 512 * 1024) : t);
       })
-      .catch(() => setText(null));
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [blobUrl, isText, isHtmlDoc]);
+  }, [blob, isText, isHtmlDoc]);
 
   return (
     <div
@@ -572,10 +609,14 @@ function PublicBlobPreview({
             draggable={false}
           />
         )}
-        {isPdf && <PublicPdf blobUrl={blobUrl} filename={filename} />}
+        {isPdf && <PublicPdf blob={blob} filename={filename} />}
         {isHtmlDoc && (
           <div className="h-full w-full max-w-4xl overflow-y-auto rounded-md bg-[var(--bg)] px-6 py-6 text-[var(--text)] shadow-2xl">
-            {text === null ? (
+            {failed ? (
+              <p className="text-sm text-[var(--text-muted)]">
+                This file couldn't be shown — use Download instead.
+              </p>
+            ) : text === null ? (
               <p className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading…
               </p>
@@ -596,7 +637,7 @@ function PublicBlobPreview({
         {isText && (
           <div className="h-full w-full max-w-4xl overflow-y-auto rounded-md bg-[var(--bg)] px-5 py-4 text-[var(--text)] shadow-2xl">
             <pre className="whitespace-pre-wrap break-words text-sm">
-              {text ?? ""}
+              {failed ? "This file couldn't be shown — use Download instead." : text ?? ""}
             </pre>
           </div>
         )}
@@ -686,7 +727,7 @@ function FolderViewer({
   return (
     <div className="w-full max-w-5xl">
       <div className="mb-3 flex items-center gap-2">
-        <FolderIcon className="h-5 w-5 text-[var(--accent)]" />
+        <FolderIcon className="h-5 w-5 text-[var(--accent-text)]" />
         <h1 className="truncate text-base font-semibold">{meta.filename}</h1>
       </div>
 
@@ -736,14 +777,22 @@ function FolderViewer({
         </div>
       )}
 
-      {preview && (
-        <SharedFilePreviewModal
-          token={token}
-          file={preview}
-          unlockToken={unlockToken}
-          onClose={() => setPreview(null)}
-        />
-      )}
+      {preview &&
+        (isOfficeShellMime(preview.mime_type) ? (
+          <PublicOfficePreview
+            token={token}
+            fileId={preview.id}
+            unlockToken={unlockToken}
+            onClose={() => setPreview(null)}
+          />
+        ) : (
+          <SharedFilePreviewModal
+            token={token}
+            file={preview}
+            unlockToken={unlockToken}
+            onClose={() => setPreview(null)}
+          />
+        ))}
     </div>
   );
 }
@@ -790,7 +839,7 @@ function SharedFolderRow({
         onClick={onOpen}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
-        <FolderIcon className="h-5 w-5 shrink-0 text-[var(--accent)]" />
+        <FolderIcon className="h-5 w-5 shrink-0 text-[var(--accent-text)]" />
         <span className="truncate text-sm font-medium">{folder.name}</span>
       </button>
     </li>
@@ -847,6 +896,7 @@ function SharedFilePreviewModal({
   onClose: () => void;
 }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [blob, setBlob] = useState<Blob | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
   useEffect(() => {
@@ -860,6 +910,7 @@ function SharedFilePreviewModal({
         });
         if (cancelled) return;
         url = URL.createObjectURL(blob);
+        setBlob(blob);
         setBlobUrl(url);
       } catch (e) {
         if (!cancelled) setErr(extractHttpError(e));
@@ -887,7 +938,7 @@ function SharedFilePreviewModal({
     );
   }
 
-  if (!blobUrl) {
+  if (!blobUrl || !blob) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 text-sm text-white/70">
         <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading preview…
@@ -900,6 +951,7 @@ function SharedFilePreviewModal({
       filename={file.filename}
       mime={file.mime_type}
       blobUrl={blobUrl}
+      blob={blob}
       onClose={onClose}
     />
   );

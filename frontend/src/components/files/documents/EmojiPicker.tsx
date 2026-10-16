@@ -84,6 +84,7 @@ export function EmojiPicker({ onSelect, onClose, anchor }: EmojiPickerProps) {
 
   return (
     <div
+      data-esc-layer=""
       ref={panelRef}
       style={style}
       className="z-[60] w-80 max-w-[95vw] rounded-lg border border-black/10 bg-white p-3 shadow-xl dark:border-white/10 dark:bg-neutral-900"

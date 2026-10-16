@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -20,6 +22,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
 from app.memory.constants import (
+    MAX_CONTENT_CHARS,
     MAX_MEMORIES,
     MAX_PINNED_MEMORIES,
     MEMORY_CATEGORIES,
@@ -267,10 +270,11 @@ async def export_memories(
     """Download all memories as a JSON file.
 
     The export schema is stable: each entry has ``content``, ``category``,
-    ``pinned``, ``source``, ``created_at``, and ``updated_at``.
-    ``id`` and ``source_conversation_id`` are intentionally omitted —
-    they reference internal DB state that won't be valid after an import
-    to a different instance.
+    ``pinned``, ``source``, ``times_used``, ``last_used_at``,
+    ``created_at``, and ``updated_at``. ``id`` and
+    ``source_conversation_id`` are intentionally omitted — they reference
+    internal DB state that won't be valid after an import to a different
+    instance. Everything else round-trips through ``/import`` (R-329).
     """
     memories = await load_memories(db, user.id)
     payload = [
@@ -280,6 +284,7 @@ async def export_memories(
             "pinned": m.pinned,
             "source": m.source,
             "times_used": m.times_used,
+            "last_used_at": m.last_used_at.isoformat() if m.last_used_at else None,
             "created_at": m.created_at.isoformat() if m.created_at else None,
             "updated_at": m.updated_at.isoformat() if m.updated_at else None,
         }
@@ -297,8 +302,133 @@ async def export_memories(
 
 class MemoryImportResponse(BaseModel):
     imported: int
+    # Existing facts replaced by a richer imported version of themselves.
+    updated: int = 0
     skipped: int
     errors: int
+
+
+# The values ``UserMemory.source`` takes (no DB CHECK — the model comment
+# and every writer agree on these two). ``manual`` renders as "stated" in
+# the prompt and is never evicted; ``auto`` is "inferred". An import keeps
+# whichever the export recorded, so an inferred fact doesn't come back
+# with the authority of something the user typed.
+_IMPORT_SOURCES = frozenset({"auto", "manual"})
+# A restored usage counter feeds the retrieval re-rank and eviction order.
+# Clamped so a hand-edited file can't make one fact permanently dominant.
+_MAX_IMPORTED_TIMES_USED = 1000
+# Generous for the 200-fact cap (a full export with metadata is ~200 KB);
+# just stops someone posting a novel into the parser.
+_MAX_IMPORT_BYTES = 2_000_000
+# Clock-skew allowance before an imported timestamp counts as "future".
+_IMPORT_FUTURE_SLACK = timedelta(minutes=5)
+_IMPORT_MIN_YEAR = 2000
+
+# Plain-text import: one fact per line. Leading list markers are noise
+# from wherever the facts were copied (another assistant's memory page,
+# a markdown note). Bullets need trailing whitespace so "*emphasis*" and
+# "-5 degrees" aren't mangled; numbering needs it so "1.5 kg" survives.
+_LIST_MARKER_RE = re.compile(
+    r"^(?:[-*+]\s+|[•·◦▪‣●]\s*|\d{1,3}[.)]\s+|\[[ xX]\]\s+)"
+)
+# Structural markdown lines that are never facts.
+_NON_FACT_LINE_RE = re.compile(r"^(?:#{1,6}(?:\s|$)|```|~~~|[-*_]{3,}$)")
+
+
+def _facts_from_text(text: str) -> list[dict]:
+    """Split pasted / uploaded plain text into import items, one per line."""
+    out: list[dict] = []
+    for line in text.lstrip("﻿").splitlines():
+        s = line.strip()
+        if not s or _NON_FACT_LINE_RE.match(s):
+            continue
+        # Twice covers "- [ ] fact" and "1. - fact"; more is a pathological
+        # input, not a list.
+        for _ in range(2):
+            stripped = _LIST_MARKER_RE.sub("", s, count=1).strip()
+            if stripped == s:
+                break
+            s = stripped
+        if s:
+            out.append({"content": s})
+    return out
+
+
+def _parse_import_ts(value, now: datetime) -> datetime | None:
+    """ISO-8601 → aware datetime, or ``None`` for anything implausible.
+
+    Garbage, future dates and pre-2000 dates are dropped rather than
+    rejected: a bad timestamp shouldn't cost the user the fact, it just
+    falls back to "learned now".
+    """
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    if dt > now + _IMPORT_FUTURE_SLACK or dt.year < _IMPORT_MIN_YEAR:
+        return None
+    return dt
+
+
+def _coerce_times_used(value) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, (int, float)):
+        try:
+            n = int(value)
+        except (ValueError, OverflowError):  # NaN / inf
+            return 0
+    elif isinstance(value, str) and value.strip().isdigit():
+        n = int(value.strip())
+    else:
+        return 0
+    return max(0, min(n, _MAX_IMPORTED_TIMES_USED))
+
+
+async def _read_import_items(request: Request) -> list:
+    """Normalise the accepted body shapes into a list of items.
+
+    * ``application/json`` array — a Promptly export (or any list of
+      ``{"content": ...}`` objects / bare strings).
+    * ``application/json`` object ``{"text": "..."}`` — pasted facts,
+      one per line (``{"memories": [...]}`` is also accepted).
+    * ``text/plain`` / ``text/markdown`` body — an uploaded .txt / .md,
+      one fact per line.
+    """
+    raw = await request.body()
+    if len(raw) > _MAX_IMPORT_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Import is too large.",
+        )
+    ctype = (request.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if ctype.startswith("text/"):
+        return _facts_from_text(raw.decode("utf-8", errors="replace"))
+
+    try:
+        body = json.loads(raw)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "Request body must be a JSON array of memories, "
+                '{"text": "..."}, or plain text with one fact per line.'
+            ),
+        )
+    if isinstance(body, dict) and isinstance(body.get("text"), str):
+        return _facts_from_text(body["text"])
+    if isinstance(body, dict) and isinstance(body.get("memories"), list):
+        return body["memories"]
+    if isinstance(body, list):
+        return body
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail='Expected a JSON array at the top level, or {"text": "..."}.',
+    )
 
 
 @router.post("/import", response_model=MemoryImportResponse)
@@ -307,67 +437,122 @@ async def import_memories(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MemoryImportResponse:
-    """Merge an exported memory JSON file into the caller's memory store.
+    """Merge memories into the caller's store.
 
-    Accepts a JSON array of objects with at minimum a ``content`` field.
-    Duplicate content (substring match) and items exceeding the per-user
-    cap are silently skipped. Malformed items count as errors.
-    Returns a summary of the operation.
+    Accepts a Promptly export (JSON array), pasted facts as
+    ``{"text": "..."}``, or a ``text/plain`` body with one fact per line —
+    see ``_read_import_items``. Export metadata (source, times_used,
+    last_used_at, created_at, updated_at) is restored when present and
+    plausible, so a round trip doesn't reset usage re-rank, staleness, or
+    the stated/inferred label (R-329).
+
+    Dedupe uses the shared substring rule with one import-only twist: an
+    imported fact that strictly *contains* an existing one is the richer
+    version, so it replaces that row's text ("updated") instead of being
+    dropped. One contained by (or equal to) an existing fact is skipped.
+    Items past the per-user cap are skipped; malformed items are errors.
     """
-    try:
-        body = await request.json()
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Request body must be a JSON array.",
-        )
-    if not isinstance(body, list):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Expected a JSON array at the top level.",
-        )
+    items = await _read_import_items(request)
 
     existing = await load_memories(db, user.id)
-    existing_keys = [_normalise(m.content) for m in existing]
+    # (normalised key, row, created-by-this-import)
+    entries: list[tuple[str, UserMemory, bool]] = [
+        (_normalise(m.content), m, False) for m in existing
+    ]
     total = len(existing)
+    pinned_count = sum(1 for m in existing if m.pinned)
+    now = datetime.now(timezone.utc)
+    enriched: set[uuid.UUID] = set()
 
-    imported = skipped = errors = 0
+    imported = updated = skipped = errors = 0
 
-    for item in body:
+    for item in items:
+        if isinstance(item, str):
+            item = {"content": item}
         if not isinstance(item, dict):
             errors += 1
             continue
-        content = (item.get("content") or "").strip()
-        if not content or len(content) > 600:
+        raw_content = item.get("content")
+        content = raw_content.strip() if isinstance(raw_content, str) else ""
+        if not content or len(content) > MAX_CONTENT_CHARS:
             errors += 1
             continue
+
+        raw_cat = item.get("category")
+        raw_cat = raw_cat.strip().lower() if isinstance(raw_cat, str) else ""
+        category = raw_cat if raw_cat in _VALID_CATEGORIES else None
+
+        key = _normalise(content)
+        if _is_duplicate(content, [k for k, _, _ in entries]):
+            if not key or any(k and (key == k or key in k) for k, _, _ in entries):
+                # Equal to, or contained by, something already held.
+                skipped += 1
+                continue
+            # Strictly richer than an existing fact: enrich it in place.
+            idx = next(i for i, (k, _, _) in enumerate(entries) if k and k in key)
+            _, row, is_new = entries[idx]
+            row.content = content
+            if row.category is None and category:
+                row.category = category
+            entries[idx] = (key, row, is_new)
+            if is_new or row.id in enriched:
+                # Merged into a row this import already counted (as
+                # imported, or as updated).
+                skipped += 1
+            else:
+                # Text changed → the stored vector no longer matches.
+                # Clearing the bookkeeping drops it from similarity search
+                # (which filters on embed_model) until the re-embed below.
+                row.embed_dim = None
+                row.embed_model = None
+                row.content_hash = None
+                enriched.add(row.id)
+                updated += 1
+            continue
+
         if total >= MAX_MEMORIES:
             skipped += 1
             continue
-        if _is_duplicate(content, existing_keys):
-            skipped += 1
-            continue
 
-        raw_cat = (item.get("category") or "").strip().lower()
-        category = raw_cat if raw_cat in _VALID_CATEGORIES else None
-        pinned = bool(item.get("pinned", False))
-        source = "manual"  # imports are always treated as manual
+        raw_source = item.get("source")
+        source = raw_source if raw_source in _IMPORT_SOURCES else "manual"
 
-        row = UserMemory(
-            user_id=user.id,
-            content=content,
-            source=source,
-            category=category,
-            pinned=pinned,
-        )
+        # Pinning is capped (see _guard_pin_cap); past it, import unpinned
+        # rather than refuse the fact.
+        pinned = item.get("pinned") is True and pinned_count < MAX_PINNED_MEMORIES
+        if pinned:
+            pinned_count += 1
+
+        created_at = _parse_import_ts(item.get("created_at"), now)
+        updated_at = _parse_import_ts(item.get("updated_at"), now)
+        if created_at and updated_at and updated_at < created_at:
+            updated_at = created_at
+        created_at = created_at or updated_at
+        updated_at = updated_at or created_at
+        last_used_at = _parse_import_ts(item.get("last_used_at"), now)
+
+        kwargs: dict = {
+            "user_id": user.id,
+            "content": content,
+            "source": source,
+            "category": category,
+            "pinned": pinned,
+            "times_used": _coerce_times_used(item.get("times_used")),
+            "last_used_at": last_used_at,
+        }
+        # Omit rather than pass None, so the server default (now) applies.
+        if created_at:
+            kwargs["created_at"] = created_at
+            kwargs["updated_at"] = updated_at
+        row = UserMemory(**kwargs)
         db.add(row)
-        existing_keys.append(_normalise(content))
+        entries.append((key, row, True))
         total += 1
         imported += 1
 
-    if imported:
+    if imported or updated:
         await db.commit()
-        # Best-effort embed the newly imported rows.
+        # Best-effort embed the new and enriched rows.
         try:
             from app.chat.semantic_search import get_embedding_config  # noqa: PLC0415
             cfg = await get_embedding_config(db)
@@ -375,13 +560,15 @@ async def import_memories(
                 # Re-embed everything currently un-embedded for this user.
                 fresh = await load_memories(db, user.id)
                 for m in fresh:
-                    if m.embed_dim is None:
+                    if m.embed_dim != cfg.dim or m.embed_model != cfg.model_id:
                         await embed_memory_row(db, m, cfg)
                 await db.commit()
         except Exception:  # noqa: BLE001
             pass
 
-    return MemoryImportResponse(imported=imported, skipped=skipped, errors=errors)
+    return MemoryImportResponse(
+        imported=imported, updated=updated, skipped=skipped, errors=errors
+    )
 
 
 class MemoryInstructRequest(BaseModel):
@@ -438,6 +625,16 @@ async def instruct_memory(
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+    except Exception as exc:
+        # A provider failure surfaced as a bare 500 (R-289).
+        logger.exception("Memory instruct failed user=%s", user.id)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "The AI couldn't work that out — the model call failed. "
+                "Nothing was changed; try again in a moment."
+            ),
         ) from exc
     return MemoryInstructPlan(
         changes=[MemoryEditOp(**c) for c in changes]

@@ -179,9 +179,9 @@ export function UserPicker({
           )}
         >
           {value.kind === "user" ? (
-            <UserCheck className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+            <UserCheck className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
           ) : (
-            <Mail className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+            <Mail className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
           )}
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-medium">

@@ -1,10 +1,14 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Check,
   Copy,
+  Eye,
   ExternalLink,
   Globe,
   Lock,
+  MapPin,
+  MessageSquare,
+  Pencil,
   Trash2,
   UserCheck,
 } from "lucide-react";
@@ -13,6 +17,7 @@ import type {
   ShareAccessMode,
   ShareLink,
   ShareLinkCreatePayload,
+  ShareLinkRole,
 } from "@/api/files";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
@@ -28,8 +33,19 @@ import { cn } from "@/utils/cn";
 import { extractError, formatRelativeTime } from "./helpers";
 
 type Resource =
-  | { kind: "file"; id: string; name: string }
-  | { kind: "folder"; id: string; name: string };
+  | { kind: "file"; id: string; name: string; roles?: ShareLinkRole[] }
+  | { kind: "folder"; id: string; name: string; roles?: ShareLinkRole[] };
+
+const ROLE_LABEL: Record<ShareLinkRole, string> = {
+  view: "View",
+  comment: "Comment",
+  edit: "Edit",
+};
+const ROLE_HINT: Record<ShareLinkRole, string> = {
+  view: "Open and download it.",
+  comment: "Read it and add comments — they sign in first.",
+  edit: "Change it with you, live — they sign in first.",
+};
 
 interface ShareLinkDialogProps {
   open: boolean;
@@ -80,9 +96,21 @@ export function ShareLinkDialog({ open, resource, onClose }: ShareLinkDialogProp
   const revoke = useRevokeShareLink();
 
   const [mode, setMode] = useState<ShareAccessMode>("public");
+  // What people with the link can do (WP-6.6). Comment and edit are only for
+  // signed-in people — editing is never anonymous.
+  const roles: ShareLinkRole[] = resource?.roles?.length ? resource.roles : ["view"];
+  const [role, setRole] = useState<ShareLinkRole>("view");
+  const signedInOnly = role !== "view";
+  useEffect(() => setRole("view"), [resource?.id]);
+  const pickRole = (r: ShareLinkRole) => {
+    setRole(r);
+    if (r !== "view") setMode("invite");
+  };
   const [expiry, setExpiry] = useState<ExpiryChoice>("7d");
   const [password, setPassword] = useState("");
   const [passwordOn, setPasswordOn] = useState(false);
+  // Off by default: photos are shared without location (decision D13).
+  const [keepLocation, setKeepLocation] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
 
   const activeLinks = useMemo(
@@ -94,9 +122,11 @@ export function ShareLinkDialog({ open, resource, onClose }: ShareLinkDialogProp
     if (!resource) return;
     setCreateError(null);
     const payload: ShareLinkCreatePayload = {
-      access_mode: mode,
+      access_mode: signedInOnly ? "invite" : mode,
+      role,
       password: passwordOn && password.trim() ? password : null,
       expires_in_days: EXPIRY_DAYS[expiry],
+      keep_location: keepLocation,
     };
     try {
       if (resource.kind === "file") {
@@ -129,18 +159,49 @@ export function ShareLinkDialog({ open, resource, onClose }: ShareLinkDialogProp
       }
     >
       <div className="space-y-5">
+        {roles.length > 1 && (
+          <div>
+            <label className="mb-1.5 block text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
+              People with the link can
+            </label>
+            <div role="radiogroup" aria-label="People with the link can" className="grid grid-cols-3 gap-1.5">
+              {roles.map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  role="radio"
+                  aria-checked={role === r}
+                  onClick={() => pickRole(r)}
+                  title={ROLE_HINT[r]}
+                  className={cn(
+                    "inline-flex items-center justify-center gap-1.5 rounded-md border px-2 py-2 text-xs font-medium transition",
+                    role === r
+                      ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--text)]"
+                      : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
+                  )}
+                >
+                  {r === "view" ? <Eye className="h-3.5 w-3.5" /> : r === "comment" ? <MessageSquare className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+                  {ROLE_LABEL[r]}
+                </button>
+              ))}
+            </div>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">{ROLE_HINT[role]}</p>
+          </div>
+        )}
+
         {/* Mode toggle — stacks on narrow viewports so each card's
             description stays readable. */}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <ModeButton
-            active={mode === "public"}
+            active={mode === "public" && !signedInOnly}
             onClick={() => setMode("public")}
+            disabled={signedInOnly}
             icon={<Globe className="h-4 w-4" />}
             title="Anyone with the link"
-            description="Anonymous visitors can open the file."
+            description={signedInOnly ? "Not for commenting or editing — those need a sign-in." : "Anonymous visitors can open the file."}
           />
           <ModeButton
-            active={mode === "invite"}
+            active={mode === "invite" || signedInOnly}
             onClick={() => setMode("invite")}
             icon={<UserCheck className="h-4 w-4" />}
             title="Specific people"
@@ -194,6 +255,26 @@ export function ShareLinkDialog({ open, resource, onClose }: ShareLinkDialogProp
               autoComplete="new-password"
             />
           )}
+        </div>
+
+        {/* Photo location */}
+        <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] p-3">
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={keepLocation}
+              onChange={(e) => setKeepLocation(e.target.checked)}
+              className="mt-0.5 h-3.5 w-3.5"
+            />
+            <MapPin className="mt-0.5 h-3.5 w-3.5 text-[var(--text-muted)]" />
+            <span>
+              Include photo location
+              <span className="block text-xs text-[var(--text-muted)]">
+                Off: people with this link get photos without where they were
+                taken or camera details. Your copies always keep them.
+              </span>
+            </span>
+          </label>
         </div>
 
         {createError && (
@@ -251,19 +332,22 @@ function ModeButton({
   icon,
   title,
   description,
+  disabled = false,
 }: {
   active: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   title: string;
   description: string;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={cn(
-        "flex items-start gap-2 rounded-md border p-3 text-left transition",
+        "flex items-start gap-2 rounded-md border p-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50",
         active
           ? "border-[var(--accent)] bg-[var(--accent)]/10"
           : "border-[var(--border)] hover:bg-[var(--hover)]"
@@ -273,7 +357,7 @@ function ModeButton({
         className={cn(
           "mt-0.5 shrink-0 rounded-md p-1.5",
           active
-            ? "bg-[var(--accent)]/20 text-[var(--accent)]"
+            ? "bg-[var(--accent)]/20 text-[var(--accent-text)]"
             : "bg-[var(--surface)] text-[var(--text-muted)]"
         )}
       >
@@ -331,9 +415,20 @@ function ShareLinkRow({
         <span className="text-xs font-medium text-[var(--text)]">
           {link.access_mode === "public" ? "Anyone with link" : "Specific people"}
         </span>
+        {link.role && link.role !== "view" && (
+          <span className="inline-flex items-center gap-1 rounded bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent-text)]">
+            {link.role === "edit" ? <Pencil className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
+            Can {link.role}
+          </span>
+        )}
         {link.has_password && (
           <span className="inline-flex items-center gap-1 rounded bg-[var(--surface)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
             <Lock className="h-3 w-3" /> Password
+          </span>
+        )}
+        {link.keep_location && (
+          <span className="inline-flex items-center gap-1 rounded bg-[var(--surface)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
+            <MapPin className="h-3 w-3" /> Location
           </span>
         )}
         {expired && (

@@ -62,7 +62,7 @@ async def _user_from_typed_token(
         ) from e
 
     user = await db.get(User, user_id)
-    if user is None or user.disabled or user.is_locked:
+    if user is None or user.disabled:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
@@ -78,15 +78,23 @@ async def _user_from_typed_token(
 
 
 async def get_user_from_challenge_token(
-    request: Request,  # noqa: ARG001 — kept for parity with get_current_user
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    return await _user_from_typed_token(
+    user = await _user_from_typed_token(
         expected_type="mfa_challenge",
         credentials=credentials,
         db=db,
     )
+    # The challenge's id, so verify can cap guesses per challenge and burn
+    # it once used (R-003).
+    try:
+        payload = decode_token(credentials.credentials, expected_type="mfa_challenge")
+        request.state.mfa_jti = payload.get("jti")
+    except Exception:  # noqa: BLE001 — already validated above
+        request.state.mfa_jti = None
+    return user
 
 
 async def get_user_from_enrollment_token(

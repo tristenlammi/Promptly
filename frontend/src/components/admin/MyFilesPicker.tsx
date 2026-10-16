@@ -20,6 +20,10 @@ export interface MyFilesPickerProps {
   onConfirm: (fileIds: string[]) => void;
   /** File ids to hide (already attached to the current custom model). */
   excludeIds?: Set<string>;
+  /** Wording for other uses (a deck's sources, Stage 12). */
+  title?: string;
+  description?: string;
+  verb?: string;
 }
 
 export function MyFilesPicker({
@@ -27,6 +31,9 @@ export function MyFilesPicker({
   onClose,
   onConfirm,
   excludeIds,
+  title = "Add files to knowledge library",
+  description = "Pick files from your personal library. Folders can be opened to drill in; each file you check will be chunked and embedded.",
+  verb = "Add",
 }: MyFilesPickerProps) {
   // Folder navigation state. ``null`` => root of "mine" scope.
   const [folderId, setFolderId] = useState<string | null>(null);
@@ -70,8 +77,8 @@ export function MyFilesPicker({
     <Modal
       open={open}
       onClose={handleClose}
-      title="Add files to knowledge library"
-      description="Pick files from your personal library. Folders can be opened to drill in; each file you check will be chunked and embedded."
+      title={title}
+      description={description}
       widthClass="max-w-2xl"
       footer={
         <>
@@ -84,7 +91,7 @@ export function MyFilesPicker({
             disabled={selected.size === 0}
             onClick={handleConfirm}
           >
-            Add {selected.size > 0 ? `${selected.size} file${selected.size > 1 ? "s" : ""}` : "files"}
+            {verb} {selected.size > 0 ? `${selected.size} file${selected.size > 1 ? "s" : ""}` : "files"}
           </Button>
         </>
       }
@@ -130,7 +137,7 @@ export function MyFilesPicker({
             {[...selected.values()].map((f) => (
               <span
                 key={f.id}
-                className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-xs text-[var(--accent)]"
+                className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-xs text-[var(--accent-text)]"
               >
                 {f.filename}
                 <button

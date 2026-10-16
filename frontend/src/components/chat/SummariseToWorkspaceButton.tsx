@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { invalidateFileQueries } from "@/hooks/useFiles";
 import { useNavigate } from "react-router-dom";
 import {
   BookmarkPlus,
@@ -113,13 +114,8 @@ function SummariseToWorkspaceModal({
       // Refresh workspace file list + file tree so the new pinned
       // summary shows up without a hard reload.
       await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ["workspace", res.workspace_id],
-        }),
-        queryClient.invalidateQueries({
-          queryKey: ["workspace-files", res.workspace_id],
-        }),
-        queryClient.invalidateQueries({ queryKey: ["files"] }),
+        queryClient.invalidateQueries({ queryKey: ["workspaces"] }),
+        invalidateFileQueries(queryClient),
       ]);
       setStatus({ kind: "success", result: res });
     } catch (err) {
@@ -181,7 +177,7 @@ function ConfirmBody() {
       <div
         className={cn(
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-full",
-          "bg-[var(--accent)]/10 text-[var(--accent)]"
+          "bg-[var(--accent)]/10 text-[var(--accent-text)]"
         )}
         aria-hidden
       >

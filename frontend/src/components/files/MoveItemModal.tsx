@@ -72,7 +72,7 @@ export function MoveItemModal({
     setRootError(null);
     setRootLoading(true);
     filesApi
-      .browse(scope, null)
+      .subfolders(scope, null)
       .then((res) => {
         if (cancelled) return;
         setRoots(
@@ -114,7 +114,7 @@ export function MoveItemModal({
     });
     setRoots((r) => [...r]);
     try {
-      const res = await filesApi.browse(scope, node.folder.id);
+      const res = await filesApi.subfolders(scope, node.folder.id);
       mutateNode(node, (n) => {
         n.children = res.folders
           .filter((f) => !(kind === "folder" && f.id === itemId))
@@ -190,7 +190,7 @@ export function MoveItemModal({
         >
           <Home className="h-4 w-4 text-[var(--text-muted)]" />
           <span className="font-medium">
-            {scope === "mine" ? "Drive" : "Shared"} (root)
+            {scope === "mine" ? "My files" : "Shared"} (root)
           </span>
           {rootIsCurrent && (
             <span className="ml-auto text-xs text-[var(--text-muted)]">
@@ -288,7 +288,7 @@ function TreeRow({
               : "hover:bg-[var(--hover)]"
           )}
         >
-          <FolderIcon className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+          <FolderIcon className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />
           <span className="truncate">{node.folder.name}</span>
           {isCurrent && (
             <span className="ml-auto text-xs text-[var(--text-muted)]">

@@ -40,6 +40,10 @@ class StreamContext(TypedDict):
     # spoken replies stay short and conversational. ``NotRequired`` so
     # in-flight contexts enqueued before this field existed still parse.
     voice: NotRequired[bool]
+    # Regenerate: the answer that was showing before. If the new attempt
+    # fails or is stopped before writing anything, it's put back rather
+    # than leaving the question looking unanswered (R-060).
+    restore_leaf_id: NotRequired[str]
     # DeepSeek-only reasoning knob. ``None`` (the default for every
     # non-DeepSeek conversation, and for fresh DeepSeek chats that
     # haven't explicitly picked a value yet) means "don't attach the

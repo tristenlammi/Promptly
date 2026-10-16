@@ -75,6 +75,13 @@ class MessageCreate(BaseModel):
     body: str = Field(min_length=1, max_length=_MAX_BODY)
 
 
+class MessageUpdate(BaseModel):
+    body: str = Field(min_length=1, max_length=_MAX_BODY)
+
+
+_PAGE = 200
+
+
 class MessageResponse(BaseModel):
     id: uuid.UUID
     thread_id: uuid.UUID
@@ -184,12 +191,12 @@ async def _reindex_if_opted_in(item: WorkspaceItem) -> None:
     """
     if not item.context_enabled:
         return
-    try:
-        from app.workspaces.knowledge import index_discussion_for_workspace
+    from app.workspaces.knowledge import index_discussion_for_workspace
+    from app.workspaces.reindex import schedule
 
-        await index_discussion_for_workspace(item.workspace_id, item.id)
-    except Exception:  # noqa: BLE001 — indexing must never fail a post
-        logger.warning("discussion index failed", exc_info=True)
+    # In the background and coalesced: a post used to wait for the whole
+    # transcript to re-embed before it returned (R-176).
+    schedule(index_discussion_for_workspace, item.workspace_id, item.id)
 
 
 # ---------------------------------------------------------------------
@@ -437,21 +444,77 @@ async def delete_thread(
 async def list_messages(
     workspace_id: uuid.UUID,
     thread_id: uuid.UUID,
+    before: datetime | None = None,
+    limit: int = _PAGE,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[MessageResponse]:
+    """The newest ``limit`` messages (before ``before``, for "load earlier"),
+    oldest first. It used to return the whole thread every time (R-176)."""
     await get_accessible_workspace(workspace_id, user, db)
     await _require_thread(workspace_id, thread_id, db, user)
 
+    limit = max(1, min(_PAGE, limit))
+    stmt = (
+        select(DiscussionMessage, User)
+        .outerjoin(User, User.id == DiscussionMessage.author_user_id)
+        .where(DiscussionMessage.thread_id == thread_id)
+    )
+    if before is not None:
+        stmt = stmt.where(DiscussionMessage.created_at < before)
     rows = (
         await db.execute(
-            select(DiscussionMessage, User)
-            .outerjoin(User, User.id == DiscussionMessage.author_user_id)
-            .where(DiscussionMessage.thread_id == thread_id)
-            .order_by(DiscussionMessage.created_at.asc())
+            stmt.order_by(DiscussionMessage.created_at.desc()).limit(limit)
         )
     ).all()
-    return [_msg_response(m, author) for m, author in rows]
+    return [_msg_response(m, author) for m, author in reversed(rows)]
+
+
+@router.patch(
+    "/{workspace_id}/messages/{message_id}",
+    response_model=MessageResponse,
+)
+async def edit_message(
+    workspace_id: uuid.UUID,
+    message_id: uuid.UUID,
+    payload: MessageUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> MessageResponse:
+    """Edit your own message (R-176 — the UI showed "(edited)" but nothing
+    could edit)."""
+    _ws, role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(role)
+    message = await db.get(DiscussionMessage, message_id)
+    if message is None or message.workspace_id != workspace_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Message not found"
+        )
+    if message.author_user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the author can edit a message.",
+        )
+    _thread, item = await _require_thread(workspace_id, message.thread_id, db, user)
+    body = payload.body.strip()
+    if body != message.body:
+        message.body = body
+        message.edited_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(message)
+        await _reindex_if_opted_in(item)
+    response = _msg_response(message, user)
+    await _publish(
+        item.id,
+        {
+            "type": "message_updated",
+            "item_id": str(item.id),
+            "thread_id": str(message.thread_id),
+            "actor_id": str(user.id),
+            "message": response.model_dump(mode="json"),
+        },
+    )
+    return response
 
 
 @router.post(

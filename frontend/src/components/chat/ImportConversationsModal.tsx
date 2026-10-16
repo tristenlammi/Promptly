@@ -111,7 +111,7 @@ export function ImportConversationsModal({
                 )
               }
             >
-              {busy ? "Importing..." : "Import"}
+              {busy ? "Importing… (a big history can take a few minutes)" : "Import"}
             </Button>
           </>
         )
@@ -214,9 +214,33 @@ function ImportSummary({ result }: { result: ImportConversationsResponse }) {
             {result.total_messages} message
             {result.total_messages === 1 ? "" : "s"}
             {result.skipped > 0 ? ` · ${result.skipped} skipped (empty)` : ""}
+            {result.duplicates
+              ? ` · ${result.duplicates} already imported`
+              : ""}
           </div>
         </div>
       </div>
+
+      {(result.failed?.length ?? 0) + (result.truncated?.length ?? 0) > 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div className="min-w-0 space-y-0.5">
+            {(result.failed?.length ?? 0) > 0 && (
+              <div>
+                Couldn't import {result.failed!.length}:{" "}
+                {result.failed!.slice(0, 5).join(", ")}
+                {result.failed!.length > 5 ? "…" : ""}
+              </div>
+            )}
+            {(result.truncated?.length ?? 0) > 0 && (
+              <div>
+                Cut at 5,000 messages: {result.truncated!.slice(0, 5).join(", ")}
+                {result.truncated!.length > 5 ? "…" : ""}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {result.conversations.length > 0 && (
         <div className="max-h-64 overflow-y-auto rounded-md border border-[var(--border)]">
@@ -228,7 +252,7 @@ function ImportSummary({ result }: { result: ImportConversationsResponse }) {
               >
                 <a
                   href={`/chat/${c.id}`}
-                  className="truncate font-medium text-[var(--accent)] hover:underline"
+                  className="truncate font-medium text-[var(--accent-text)] hover:underline"
                 >
                   {c.title}
                 </a>

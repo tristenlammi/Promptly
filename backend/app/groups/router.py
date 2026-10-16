@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -92,6 +92,7 @@ async def list_groups(
 @router.post("", response_model=GroupResponse, status_code=status.HTTP_201_CREATED)
 async def create_group(
     payload: GroupCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ) -> GroupResponse:
@@ -107,6 +108,7 @@ async def create_group(
         await db.rollback()
         raise HTTPException(status_code=409, detail="A group with that name exists") from e
     await db.refresh(g)
+    await _audit_group(db, request, admin, "created", g)
     return await _to_response(db, g)
 
 
@@ -114,6 +116,7 @@ async def create_group(
 async def update_group(
     group_id: uuid.UUID,
     payload: GroupUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> GroupResponse:
@@ -128,16 +131,19 @@ async def update_group(
         await db.rollback()
         raise HTTPException(status_code=409, detail="A group with that name exists") from e
     await db.refresh(g)
+    await _audit_group(db, request, user, "updated", g)
     return await _to_response(db, g)
 
 
 @router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_group(
     group_id: uuid.UUID,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ):
     g = await _get_owned_group(group_id, user, db)
+    await _audit_group(db, request, user, "deleted", g, commit=False)
     await db.delete(g)
     await db.commit()
 
@@ -146,6 +152,7 @@ async def delete_group(
 async def set_members(
     group_id: uuid.UUID,
     payload: SetMembersRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> GroupResponse:
@@ -159,4 +166,19 @@ async def set_members(
     for uid in valid:
         db.add(UserGroupMember(group_id=group_id, user_id=uid))
     await db.commit()
+    await _audit_group(db, request, user, "members", g, members=len(valid))
     return await _to_response(db, g)
+
+
+async def _audit_group(db, request, admin: User, action: str, g, *, commit: bool = True, **extra) -> None:
+    """A group change in the audit trail — groups decide who can use which
+    models and connectors (R-145)."""
+    from app.auth.audit import EVENT_GROUP_CHANGED, record_event, safe_dict
+
+    await record_event(
+        db, request=request, event_type=EVENT_GROUP_CHANGED, user_id=admin.id,
+        identifier=admin.username,
+        detail=safe_dict({"action": action, "group": g.name, "group_id": str(g.id), **extra}),
+    )
+    if commit:
+        await db.commit()

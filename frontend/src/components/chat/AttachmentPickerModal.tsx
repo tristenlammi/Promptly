@@ -462,7 +462,7 @@ function FolderRowCompact({
         onClick={onOpen}
         className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm transition hover:bg-[var(--hover)]"
       >
-        <FolderIcon className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+        <FolderIcon className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />
         <span className="flex-1 truncate">{folder.name}</span>
         <ChevronRight className="h-3 w-3 text-[var(--text-muted)]" />
       </button>
@@ -687,7 +687,7 @@ function MobileActionRow({
         "disabled:cursor-not-allowed disabled:opacity-60"
       )}
     >
-      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/10 text-[var(--accent)]">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/10 text-[var(--accent-text)]">
         {busy ? <Loader2 className="h-5 w-5 animate-spin" /> : icon}
       </span>
       <span className="min-w-0 flex-1">
@@ -762,7 +762,7 @@ function UploadTab({
         )}
       >
         {upload.isPending ? (
-          <Loader2 className="h-6 w-6 animate-spin text-[var(--accent)]" />
+          <Loader2 className="h-6 w-6 animate-spin text-[var(--accent-text)]" />
         ) : (
           <Upload className="h-6 w-6 text-[var(--text-muted)]" />
         )}

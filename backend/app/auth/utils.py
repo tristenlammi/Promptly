@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
@@ -41,6 +41,28 @@ def verify_password(plain: str, hashed: str) -> bool:
 DUMMY_PASSWORD_HASH: str = _pwd_context.hash(
     "promptly:enumeration-defense:" + uuid.uuid4().hex
 )
+
+
+# Async wrappers: bcrypt costs ~160 ms of CPU per call, and on this
+# deliberately single-worker backend a sync call stalls every user's
+# stream for that long — a login or share-unlock flood could freeze the
+# app (R-016). Use these from async code.
+async def ahash_password(plain: str) -> str:
+    import asyncio
+
+    return await asyncio.to_thread(hash_password, plain)
+
+
+async def averify_password(plain: str, hashed: str) -> bool:
+    import asyncio
+
+    return await asyncio.to_thread(verify_password, plain, hashed)
+
+
+async def awaste_a_verify() -> None:
+    import asyncio
+
+    await asyncio.to_thread(waste_a_verify)
 
 
 def waste_a_verify() -> None:
@@ -92,6 +114,7 @@ def _create_token(
     token_type: TokenType,
     expires_delta: timedelta,
     token_version: int,
+    session_id: str | None = None,
 ) -> str:
     expire = _now() + expires_delta
     payload: dict[str, Any] = {
@@ -107,24 +130,39 @@ def _create_token(
         # invalidates outstanding sessions.
         "tv": int(token_version),
     }
+    if session_id:
+        # "sid" = the sign-in session this token belongs to (WP-7.2): minted
+        # at sign-in, carried by every refresh — which device did something
+        # (the mass-delete guard), across token rotations.
+        payload["sid"] = session_id
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=JWT_ALGORITHM)
 
 
-def create_access_token(subject: str | uuid.UUID, *, token_version: int = 0) -> str:
+def new_session_id() -> str:
+    return uuid.uuid4().hex[:16]
+
+
+def create_access_token(
+    subject: str | uuid.UUID, *, token_version: int = 0, session_id: str | None = None
+) -> str:
     return _create_token(
         subject=str(subject),
         token_type="access",
         expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES),
         token_version=token_version,
+        session_id=session_id,
     )
 
 
-def create_refresh_token(subject: str | uuid.UUID, *, token_version: int = 0) -> str:
+def create_refresh_token(
+    subject: str | uuid.UUID, *, token_version: int = 0, session_id: str | None = None
+) -> str:
     return _create_token(
         subject=str(subject),
         token_type="refresh",
         expires_delta=timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
         token_version=token_version,
+        session_id=session_id,
     )
 
 
@@ -188,7 +226,16 @@ def _derive_fernet_key(secret: str) -> bytes:
     return base64.urlsafe_b64encode(digest)
 
 
-_fernet = Fernet(_derive_fernet_key(settings.SECRET_KEY))
+# New values are encrypted with SECRET_KEY; values made under the previous
+# key (SECRET_KEY_PREVIOUS) still decrypt.
+_fernet = MultiFernet(
+    [Fernet(_derive_fernet_key(settings.SECRET_KEY))]
+    + (
+        [Fernet(_derive_fernet_key(settings.SECRET_KEY_PREVIOUS))]
+        if settings.SECRET_KEY_PREVIOUS
+        else []
+    )
+)
 
 
 def encrypt_secret(plaintext: str) -> str:
@@ -200,6 +247,11 @@ def decrypt_secret(ciphertext: str) -> str:
         return _fernet.decrypt(ciphertext.encode("utf-8")).decode("utf-8")
     except InvalidToken as e:
         raise ValueError("Ciphertext is invalid or SECRET_KEY has changed") from e
+
+
+def reencrypt_secret(ciphertext: str) -> str:
+    """The same value encrypted under the current key (for rotation)."""
+    return _fernet.rotate(ciphertext.encode("utf-8")).decode("utf-8")
 
 
 # --------------------------------------------------------------------

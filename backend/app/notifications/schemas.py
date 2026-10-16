@@ -96,4 +96,8 @@ class PublicKeyResponse(BaseModel):
 
 
 class TestPushResponse(BaseModel):
+    # Accepted by the push service (it will deliver when the device is on).
     sent: int
+    failed: int = 0
+    # Devices whose browser had unsubscribed; dropped from the list.
+    removed: int = 0

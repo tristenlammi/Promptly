@@ -26,9 +26,12 @@ import {
 } from "@/api/workspaces";
 import { useWorkspace } from "@/hooks/useWorkspaces";
 import { cn } from "@/utils/cn";
+import { ErrorState } from "@/components/shared/Callout";
+import { apiErrorMessage } from "@/utils/apiError";
+import { toast } from "@/store/toastStore";
 import { ItemPaneHeader } from "./ItemPaneHeader";
 
-type SaveState = "idle" | "saving" | "saved" | "error";
+type SaveState = "idle" | "saving" | "saved" | "error" | "conflict";
 type View = "week" | "month";
 
 const SAVE_DEBOUNCE_MS = 700;
@@ -172,21 +175,23 @@ export function WorkspaceRosterPane({
   const [manageTagsOpen, setManageTagsOpen] = useState(false);
   const [personEditing, setPersonEditing] = useState<string | null>(null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
   const aliveRef = useRef(true);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const dirtyRef = useRef(false);
+  // The edit waiting out the debounce, and the revision our copy is based
+  // on. Saves send the revision so a stale copy can't overwrite newer work.
+  const pendingRef = useRef<RosterDoc | null>(null);
+  const revisionRef = useRef<number | null>(null);
+  const flattenRef = useRef<(d: RosterDoc) => string>(() => "");
 
-  useEffect(() => {
-    aliveRef.current = true;
-    return () => {
-      aliveRef.current = false;
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-    };
-  }, []);
-
-  // Load (seed an empty roster when never saved).
+  // Load. Only a roster that has genuinely never been saved starts empty: a
+  // failed load used to fall back to an *editable* empty roster, and the
+  // next drag saved it over the real schedule (R-035).
   useEffect(() => {
     let cancelled = false;
+    setLoadError(null);
     workspacesApi
       .getRoster(workspaceId, rosterId)
       .then((r) => {
@@ -196,15 +201,18 @@ export function WorkspaceRosterPane({
         if (!d.settings.tags?.length) d.settings.tags = DEFAULT_TAGS;
         if (!Array.isArray(d.settings.templates)) d.settings.templates = [];
         if (!Array.isArray(d.shifts)) d.shifts = [];
+        revisionRef.current = r.revision ?? 0;
         setDoc(d);
       })
-      .catch(() => {
-        if (!cancelled) setDoc(emptyDoc());
+      .catch((err) => {
+        if (!cancelled) {
+          setLoadError(apiErrorMessage(err, "Couldn't open this roster."));
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [workspaceId, rosterId]);
+  }, [workspaceId, rosterId, loadAttempt]);
 
   const flatten = useCallback(
     (d: RosterDoc): string => {
@@ -234,26 +242,64 @@ export function WorkspaceRosterPane({
     [memberById, node.title]
   );
 
-  // Persist a mutated doc (debounced).
+  flattenRef.current = flatten;
+
+  // Send the pending edit now. Safe to call from teardown: it reads refs only.
+  const flush = useCallback(() => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    const next = pendingRef.current;
+    if (!next || revisionRef.current === null) return;
+    pendingRef.current = null;
+    if (aliveRef.current) setSaveState("saving");
+    workspacesApi
+      .saveRoster(workspaceId, rosterId, {
+        data: next,
+        content_text: flattenRef.current(next),
+        base_revision: revisionRef.current,
+      })
+      .then((r) => {
+        revisionRef.current = r.revision ?? revisionRef.current;
+        if (aliveRef.current) setSaveState("saved");
+      })
+      .catch((err) => {
+        if (!aliveRef.current) return;
+        const status = (err as { response?: { status?: number } })?.response?.status;
+        setSaveState(status === 409 ? "conflict" : "error");
+      });
+  }, [workspaceId, rosterId]);
+
+  // Persist a mutated doc (debounced). After a conflict, edits stay local
+  // until a reload — saving them would overwrite someone else's work.
   const commit = useCallback(
     (next: RosterDoc) => {
       setDoc(next);
-      if (!canEdit) return;
-      dirtyRef.current = true;
+      if (!canEdit || saveState === "conflict") return;
+      pendingRef.current = next;
       if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        setSaveState("saving");
-        workspacesApi
-          .saveRoster(workspaceId, rosterId, {
-            data: next,
-            content_text: flatten(next),
-          })
-          .then(() => aliveRef.current && setSaveState("saved"))
-          .catch(() => aliveRef.current && setSaveState("error"));
-      }, SAVE_DEBOUNCE_MS);
+      saveTimer.current = setTimeout(flush, SAVE_DEBOUNCE_MS);
     },
-    [canEdit, workspaceId, rosterId, flatten]
+    [canEdit, saveState, flush]
   );
+
+  // Never drop the last edit: flush when leaving the item (the pane
+  // remounts per item) and warn before closing the tab with one pending.
+  useEffect(() => {
+    aliveRef.current = true;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!pendingRef.current) return;
+      flush();
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      aliveRef.current = false;
+      flush();
+    };
+  }, [flush]);
 
   const colorOf = useCallback(
     (personId: string): string => {
@@ -482,9 +528,17 @@ export function WorkspaceRosterPane({
     if (copies.length) commit({ ...doc, shifts: [...doc.shifts, ...copies] });
   }, [doc, view, anchor, commit]);
 
-  const publishNow = useCallback(() => {
-    if (!doc) return;
-    commit({
+  // Publish for real: the server saves this version as the one staff see
+  // and tells the people whose shifts changed. It used to only set a flag
+  // nobody else could see (R-174).
+  const publishNow = useCallback(async () => {
+    if (!doc || revisionRef.current === null) return;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    pendingRef.current = null;
+    const next: RosterDoc = {
       ...doc,
       settings: {
         ...doc.settings,
@@ -492,8 +546,23 @@ export function WorkspaceRosterPane({
         publishedAt: new Date().toISOString(),
         publishedHash: shiftsHash(doc.shifts),
       },
-    });
-  }, [doc, commit]);
+    };
+    setDoc(next);
+    setSaveState("saving");
+    try {
+      const r = await workspacesApi.publishRoster(workspaceId, rosterId, {
+        data: next,
+        base_revision: revisionRef.current,
+      });
+      revisionRef.current = r.revision ?? revisionRef.current;
+      if (aliveRef.current) setSaveState("saved");
+      toast.success("Published — everyone whose shifts changed has been told.");
+    } catch (err) {
+      const status = (err as { response?: { status?: number } })?.response?.status;
+      if (aliveRef.current) setSaveState(status === 409 ? "conflict" : "error");
+      toast.error(apiErrorMessage(err, "Couldn't publish the roster."));
+    }
+  }, [doc, workspaceId, rosterId]);
 
   // Published, but the schedule has changed since — the operator has unpublished
   // edits to push out.
@@ -689,6 +758,21 @@ export function WorkspaceRosterPane({
   );
 
   /* ------------------------- render -------------------------------- */
+  if (loadError) {
+    return (
+      <ErrorState>
+        <span>{loadError}</span>{" "}
+        <button
+          type="button"
+          onClick={() => setLoadAttempt((n) => n + 1)}
+          className="font-medium underline underline-offset-2"
+        >
+          Try again
+        </button>
+      </ErrorState>
+    );
+  }
+
   if (!doc) {
     return (
       <div className="flex flex-1 items-center justify-center px-6 py-10 text-sm text-[var(--text-muted)]">
@@ -884,7 +968,7 @@ export function WorkspaceRosterPane({
                 type="button"
                 disabled={!canEdit}
                 onClick={() => setManageTemplatesOpen(true)}
-                className="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--accent)]/60 px-2.5 py-1 text-[11px] font-semibold text-[var(--accent)] transition hover:bg-[var(--accent-soft)] disabled:opacity-50"
+                className="inline-flex items-center gap-1 rounded-full border border-dashed border-[var(--accent)]/60 px-2.5 py-1 text-[11px] font-semibold text-[var(--accent-text)] transition hover:bg-[var(--accent-soft)] disabled:opacity-50"
               >
                 <Plus className="h-3 w-3" /> New template
               </button>
@@ -911,7 +995,7 @@ export function WorkspaceRosterPane({
             })}
           </div>
           {activeTemplate && (
-            <p className="px-1 text-[11px] leading-snug text-[var(--accent)]">
+            <p className="px-1 text-[11px] leading-snug text-[var(--accent-text)]">
               Template on — new shifts use it. Click the pill again to turn off.
             </p>
           )}
@@ -1046,12 +1130,12 @@ export function WorkspaceRosterPane({
                         <div className="text-[10.5px] font-bold uppercase tracking-wider text-[var(--text-faint)]">
                           {DOW[(d.getDay() + 6) % 7]}
                         </div>
-                        <div className={cn("text-[15px] font-bold", isToday && "text-[var(--accent)]")}>
+                        <div className={cn("text-[15px] font-bold", isToday && "text-[var(--accent-text)]")}>
                           {d.getDate()}
                         </div>
                       </div>
                     ) : (
-                      <div className={cn("text-xs font-semibold", isToday && "text-[var(--accent)]")}>
+                      <div className={cn("text-xs font-semibold", isToday && "text-[var(--accent-text)]")}>
                         {d.getDate()}
                       </div>
                     )}
@@ -1357,7 +1441,7 @@ function ShiftEditor({
                     : { timed: true }
                 )
               }
-              className="text-[11px] font-semibold text-[var(--accent)] hover:underline disabled:opacity-50"
+              className="text-[11px] font-semibold text-[var(--accent-text)] hover:underline disabled:opacity-50"
             >
               {shift.timed ? "Use hours" : "Set times"}
             </button>
@@ -1501,7 +1585,7 @@ function ShiftEditor({
             className={cn(
               "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11.5px] font-semibold transition disabled:opacity-50",
               shift.recurGroup
-                ? "bg-[var(--accent-soft)] text-[var(--accent)]"
+                ? "bg-[var(--accent-soft)] text-[var(--accent-text)]"
                 : "border border-[var(--border-strong)] text-[var(--text-muted)] hover:text-[var(--text)]"
             )}
           >
@@ -1565,13 +1649,19 @@ function SaveChip({ state }: { state: SaveState }) {
     saving: { icon: <Loader2 className="h-3 w-3 animate-spin" />, text: "Saving…" },
     saved: { icon: <Check className="h-3 w-3" />, text: "Saved" },
     error: { icon: <TriangleAlert className="h-3 w-3" />, text: "Save failed" },
+    conflict: {
+      icon: <TriangleAlert className="h-3 w-3" />,
+      text: "Changed elsewhere — reload to keep editing",
+    },
   } as const;
   const m = map[state];
   return (
     <span
       className={cn(
         "inline-flex items-center gap-1 text-[11px]",
-        state === "error" ? "text-[var(--danger)]" : "text-[var(--text-muted)]"
+        state === "error" || state === "conflict"
+          ? "text-[var(--danger)]"
+          : "text-[var(--text-muted)]"
       )}
     >
       {m.icon}
@@ -1670,7 +1760,7 @@ function TemplateManagerPopover({
             note: "",
           })
         }
-        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--accent)]/60 py-2 text-xs font-semibold text-[var(--accent)] transition hover:bg-[var(--accent-soft)]"
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-[var(--accent)]/60 py-2 text-xs font-semibold text-[var(--accent-text)] transition hover:bg-[var(--accent-soft)]"
       >
         <Plus className="h-3.5 w-3.5" /> Add template
       </button>

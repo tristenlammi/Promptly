@@ -116,7 +116,7 @@ export function ResearchDialog({
               "Writes a structured report with inline citations",
             ].map((step, i) => (
               <li key={i} className="flex items-start gap-2">
-                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/10 text-[10px] font-semibold text-[var(--accent)]">
+                <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--accent)]/10 text-[10px] font-semibold text-[var(--accent-text)]">
                   {i + 1}
                 </span>
                 {step}

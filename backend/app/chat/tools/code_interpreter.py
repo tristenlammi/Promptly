@@ -104,17 +104,6 @@ class CodeInterpreterTool(Tool):
         "conversational answers, or anything you can answer directly in text "
         "— even if the topic involves numbers or health/fitness."
     )
-    prompt_hint = (
-        "Run Python in a secure sandbox (pandas/numpy/matplotlib/seaborn/"
-        "plotly/altair available, no internet). Call this only when the user "
-        "explicitly asks to run code, crunch a specific dataset they uploaded, "
-        "or generate a chart from data. Do NOT use it to answer conversational "
-        "questions, give advice, or perform simple mental-math estimates — "
-        "reply in text for those. Uploaded files are in the working directory "
-        "by filename; files you create persist across calls in this "
-        "conversation. Save plots with plt.savefig('name.png') (or "
-        "fig.write_html('name.html') for interactive plotly/altair) to attach."
-    )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {

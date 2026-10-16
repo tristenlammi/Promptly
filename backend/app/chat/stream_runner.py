@@ -27,6 +27,7 @@ ever ship a clustered deployment.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 import uuid
@@ -66,6 +67,10 @@ class StreamSession:
     stream_id: uuid.UUID
     user_id: uuid.UUID
     conversation_id: uuid.UUID
+    # "chat" (a reply) or "research" (a Deep Research run). A reload uses
+    # it to reattach with the right view; ``label`` is what's running.
+    kind: str = "chat"
+    label: str | None = None
     events: list[str] = field(default_factory=list)
     done: bool = False
     error: str | None = None
@@ -86,6 +91,11 @@ class StreamSession:
     # Guards against double-writing if shutdown races the generator's own
     # persist step.
     flushed: bool = False
+    # The reply's ``done`` has gone out. The session stays open a little
+    # longer for the extras that follow it (title, memory), but the turn is
+    # over: a reload mustn't reattach to it as if the answer were still
+    # being written.
+    reply_done: bool = False
     # Recreated every push so previously-waiting subscribers can be
     # released without missing the new chunk. ``asyncio.Event`` is the
     # right primitive here over Condition because we don't need a lock —
@@ -100,6 +110,8 @@ class StreamSession:
         on the read path.
         """
         self.events.append(sse_chunk)
+        if '"done": true' in sse_chunk:
+            self.reply_done = True
         old = self._wakeup
         self._wakeup = asyncio.Event()
         old.set()
@@ -157,6 +169,8 @@ async def get_or_create_session(
     user_id: uuid.UUID,
     conversation_id: uuid.UUID,
     runner: Callable[[StreamSession], Awaitable[None]],
+    kind: str = "chat",
+    label: str | None = None,
 ) -> StreamSession:
     """Return an existing session or start a new background runner.
 
@@ -175,6 +189,8 @@ async def get_or_create_session(
             stream_id=stream_id,
             user_id=user_id,
             conversation_id=conversation_id,
+            kind=kind,
+            label=label,
         )
         _sessions[stream_id] = session
 
@@ -190,7 +206,24 @@ async def get_or_create_session(
                 raise
             except Exception as exc:  # noqa: BLE001 — must never crash the worker
                 logger.exception("Background stream %s crashed", stream_id)
-                session.finish(error=str(exc))
+                # Keep what was written and tell whoever is watching. This
+                # used to end the stream with a clean EOF: no reply, no
+                # error, just a question with nothing under it (R-043).
+                if session.flush_partial is not None and not session.flushed:
+                    session.flushed = True
+                    try:
+                        await session.flush_partial("error")
+                    except Exception:  # noqa: BLE001
+                        logger.exception("Failed to keep partial reply for %s", stream_id)
+                session.push(
+                    "data: "
+                    + json.dumps(
+                        {"error": "Something went wrong while writing this reply."}
+                    )
+                    + "\n\n"
+                )
+                session.push('data: {"done": true}\n\n')
+                session.finish(error=str(exc) or type(exc).__name__)
             else:
                 session.finish()
             finally:
@@ -335,6 +368,10 @@ def find_active_for_conversation(
     Postgres is the canonical record once generation is done.
     """
     for session in _sessions.values():
-        if session.conversation_id == conversation_id and not session.done:
+        if (
+            session.conversation_id == conversation_id
+            and not session.done
+            and not session.reply_done
+        ):
             return session
     return None

@@ -23,6 +23,7 @@ Design notes
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -57,7 +58,16 @@ model = WhisperModel(
     device=DEVICE,
     compute_type=COMPUTE_TYPE,
     cpu_threads=CPU_THREADS,
+    # Two transcriptions can run at once: one per lane below.
+    num_workers=2,
 )
+
+# Two lanes (R-197). A meeting is transcribed in long chunks that take
+# minutes each; dictation and voice mode used to queue behind them on this
+# single process and time out. Batch work (meetings) goes one chunk at a
+# time in its own lane; short interactive clips have the other.
+_LANES = {"interactive": asyncio.Semaphore(1), "batch": asyncio.Semaphore(1)}
+_waiting = {"interactive": 0, "batch": 0}
 logger.info("Model ready in %.1fs", time.monotonic() - _t0)
 
 app = FastAPI(title="Promptly Whisper", docs_url=None, redoc_url=None)
@@ -65,7 +75,27 @@ app = FastAPI(title="Promptly Whisper", docs_url=None, redoc_url=None)
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "model": MODEL_NAME, "device": DEVICE}
+    return {
+        "status": "ok",
+        "model": MODEL_NAME,
+        "device": DEVICE,
+        # Clips waiting for each lane — shown in Admin → Health.
+        "queued": dict(_waiting),
+    }
+
+
+def _run(path: str, lang: str | None):
+    segments, info = model.transcribe(
+        path,
+        language=lang,
+        vad_filter=True,
+        # ``condition_on_previous_text=False`` stops Whisper from
+        # looping/repeating on short clips with little context.
+        condition_on_previous_text=False,
+    )
+    # ``segments`` is a lazy generator — transcription actually runs as
+    # we iterate it, so iterate here, off the event loop.
+    return "".join(seg.text for seg in segments).strip(), info
 
 
 @app.post("/transcribe")
@@ -73,7 +103,10 @@ async def transcribe(
     file: UploadFile = File(...),
     # BCP-47 / ISO-639 language hint. Empty / "auto" lets Whisper detect.
     language: str | None = Form(default=None),
+    # "batch" for meeting chunks; anything else is an interactive clip.
+    lane: str | None = Form(default=None),
 ) -> dict:
+    lane_name = "batch" if (lane or "").strip().lower() == "batch" else "interactive"
     data = await file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty audio upload.")
@@ -100,18 +133,19 @@ async def transcribe(
             tmp.write(data)
             tmp_path = tmp.name
 
-        t0 = time.monotonic()
-        segments, info = model.transcribe(
-            tmp_path,
-            language=lang,
-            vad_filter=True,
-            # ``condition_on_previous_text=False`` stops Whisper from
-            # looping/repeating on short clips with little context.
-            condition_on_previous_text=False,
-        )
-        # ``segments`` is a lazy generator — transcription actually runs
-        # as we iterate it.
-        text = "".join(seg.text for seg in segments).strip()
+        _waiting[lane_name] += 1
+        started = False
+        try:
+            async with _LANES[lane_name]:
+                _waiting[lane_name] -= 1
+                started = True
+                t0 = time.monotonic()
+                # Off the event loop, so /health and the other lane keep
+                # answering while this one works.
+                text, info = await asyncio.to_thread(_run, tmp_path, lang)
+        finally:
+            if not started:  # cancelled while waiting
+                _waiting[lane_name] -= 1
         elapsed = time.monotonic() - t0
         logger.info(
             "transcribed %d bytes in %.2fs (lang=%s) -> %d chars",

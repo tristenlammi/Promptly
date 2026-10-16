@@ -50,13 +50,28 @@ class SearchError(Exception):
     search.
     """
 
-    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retry_after: float | None = None,
+        quota_exhausted: bool = False,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.retry_after = retry_after
+        self.quota_exhausted = quota_exhausted
 
     @property
     def permanent(self) -> bool:
-        return self.status_code in (401, 402, 403, 429)
+        # A 429 is usually "slow down" (Brave allows 1 request a second, and
+        # research fires several at once) — pausing the provider for a week
+        # over it took search offline. Only a 429 that says the quota or plan
+        # is used up is permanent (R-274).
+        if self.status_code == 429:
+            return self.quota_exhausted
+        return self.status_code in (401, 402, 403)
 
 
 def _api_key(provider: SearchProvider) -> str | None:
@@ -129,9 +144,21 @@ def _check_status(provider_label: str, resp: httpx.Response) -> None:
     if resp.is_success:
         return
     body_preview = resp.text[:200]
+    retry_after: float | None = None
+    try:
+        retry_after = float(resp.headers.get("Retry-After", ""))
+    except ValueError:
+        pass
+    lowered = resp.text[:2000].lower()
+    quota = any(
+        w in lowered
+        for w in ("quota", "usage limit", "exceeded your", "plan limit", "monthly limit", "credits")
+    )
     raise SearchError(
         f"{provider_label} error {resp.status_code}: {body_preview}",
         status_code=resp.status_code,
+        retry_after=retry_after,
+        quota_exhausted=quota,
     )
 
 

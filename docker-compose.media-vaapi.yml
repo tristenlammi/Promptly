@@ -1,0 +1,14 @@
+# GPU video encoding for the media worker — VAAPI (Intel / AMD on Linux) (WP-7.4).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.media-vaapi.yml up -d
+#
+# Passes the host's /dev/dri through. If your render node isn't
+# renderD128, set MEDIA_VAAPI_DEVICE. Anything VAAPI can't encode falls back
+# to the CPU encoder. Not available under Docker Desktop (Windows / macOS).
+services:
+  media-worker:
+    environment:
+      MEDIA_HWACCEL: vaapi
+      MEDIA_VAAPI_DEVICE: ${MEDIA_VAAPI_DEVICE:-/dev/dri/renderD128}
+    devices:
+      - /dev/dri:/dev/dri

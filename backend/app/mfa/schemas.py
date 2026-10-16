@@ -5,7 +5,9 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.auth.email_address import EmailAddress
 
 from app.auth.schemas import UserResponse
 
@@ -110,8 +112,16 @@ class MfaTotpEnrollVerifyRequest(BaseModel):
 class MfaEmailEnrollRequest(BaseModel):
     """Sent to POST /auth/mfa/setup/email — the user picks the inbox."""
 
-    email_address: EmailStr | None = None
+    email_address: EmailAddress | None = None
     """If omitted, the user's account email is used."""
+    password: str | None = Field(default=None, max_length=1024)
+    """Required when MFA is already on — changing it is a sensitive act."""
+
+
+class MfaReauthRequest(BaseModel):
+    """The account password, for MFA changes made while MFA is on (R-141)."""
+
+    password: str | None = Field(default=None, max_length=1024)
 
 
 class MfaEmailEnrollResponse(BaseModel):

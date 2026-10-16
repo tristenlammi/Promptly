@@ -1,4 +1,4 @@
-"""Workspace write-back proposals API (Batch 4.1).
+"""Write-back proposals API (Batch 4.1; Drive changes WP-5.3).
 
     GET  /chat/conversations/{id}/proposals   pending + recent proposals
     POST /chat/proposals/{id}/apply           execute the change
@@ -40,7 +40,8 @@ router = APIRouter()
 class ProposalRow(BaseModel):
     id: uuid.UUID
     conversation_id: uuid.UUID
-    workspace_id: uuid.UUID
+    # None for a Drive proposal (``file_changes``).
+    workspace_id: uuid.UUID | None = None
     kind: str
     payload: dict[str, Any]
     status: str
@@ -134,6 +135,26 @@ async def dismiss_proposal(
     return _to_row(p)
 
 
+
+def _parse_ai_due(raw: str, user) -> datetime | None:
+    """An AI-proposed due date in the user's timezone. A bare
+    ``YYYY-MM-DD`` means 09:00 local on that day (what the board gives a
+    card dropped on a day) — it used to be UTC midnight, the previous day
+    for anyone west of Greenwich (R-173)."""
+    from app.workspaces.localtime import local_day_at, zone_of
+
+    raw = raw.strip()
+    zone = zone_of(user)
+    try:
+        if len(raw) == 10:
+            return local_day_at(raw, zone)
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=zone)
+    return dt.astimezone(timezone.utc)
+
 @router.post("/proposals/{proposal_id}/apply", response_model=ProposalRow)
 async def apply_proposal(
     proposal_id: uuid.UUID,
@@ -142,12 +163,26 @@ async def apply_proposal(
     user: User = Depends(get_current_user),
 ) -> ProposalRow:
     p = await _load_owned_pending(db, proposal_id, user)
+    if p.kind == "file_changes":
+        return await _apply_file_changes(db, p, user)
+    if p.kind in ("photo_album", "photo_share", "photo_relationship"):
+        return await _apply_photo_action(db, p, user)
     ws = await db.get(Workspace, p.workspace_id)
     if ws is None:
         raise HTTPException(
             status_code=status.HTTP_410_GONE,
             detail="The workspace no longer exists.",
         )
+    # Re-check *current* access at the moment of applying. A proposal can
+    # be filed while you're an editor and applied after you've been removed
+    # or made a viewer — it must not write anything then (roadmap R-032).
+    from app.workspaces.shares import (
+        get_accessible_workspace,
+        require_workspace_write,
+    )
+
+    _ws, role = await get_accessible_workspace(p.workspace_id, user, db)
+    require_workspace_write(role)
     if p.kind == "create_note":
         item_id = await _apply_create_note(db, ws=ws, user=user, payload=p.payload)
     elif p.kind == "add_cards":
@@ -167,6 +202,48 @@ async def apply_proposal(
     p.applied_item_id = item_id
     p.resolved_at = datetime.now(timezone.utc)
     ws.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(p)
+    return _to_row(p)
+
+
+async def _apply_file_changes(db: AsyncSession, p: WorkspaceProposal, user: User) -> ProposalRow:
+    """Moves / renames / new folders in the person's own Drive (WP-5.3).
+    Everything is re-checked now and done in one go, or not at all."""
+    from app.files.organize import OrganizeError, apply
+
+    try:
+        result = await apply(db, user, p.payload)
+    except OrganizeError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    p = await db.get(WorkspaceProposal, p.id, populate_existing=True)
+    p.status = "applied"
+    if result.get("folder_id"):
+        p.applied_item_id = uuid.UUID(result["folder_id"])
+    p.resolved_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(p)
+    return _to_row(p)
+
+
+async def _apply_photo_action(db: AsyncSession, p: WorkspaceProposal, user: User) -> ProposalRow:
+    """An album, a share or a relationship proposed in a chat — checked
+    again now (app.photos.chat_actions)."""
+    from app.photos import chat_actions as ca
+
+    run = {"photo_album": ca.apply_album, "photo_share": ca.apply_share, "photo_relationship": ca.apply_relationship}[p.kind]
+    try:
+        made = await run(db, user, p.payload)
+    except ca.ActionError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except HTTPException:
+        await db.rollback()
+        raise
+    p = await db.get(WorkspaceProposal, p.id, populate_existing=True)
+    p.status = "applied"
+    p.applied_item_id = made
+    p.resolved_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(p)
     return _to_row(p)
@@ -243,24 +320,24 @@ async def _apply_add_cards(
         )
     )
     pos = float(max_pos or 0.0)
+    from app.workspaces.board_columns import board_columns
+
+    first_column = board_columns(board.config)[0][0]
     for card in payload.get("cards") or []:
         pos += 1.0
         due_at = None
         raw_due = str(card.get("due_date") or "").strip()
         if raw_due:
-            try:
-                due_at = datetime.fromisoformat(raw_due).replace(
-                    tzinfo=timezone.utc
-                )
-            except ValueError:
-                due_at = None
+            due_at = _parse_ai_due(raw_due, user)
         db.add(
             WorkspaceTask(
                 workspace_id=ws.id,
                 board_item_id=board.id,
                 title=str(card.get("title") or "Untitled")[:200],
                 description=str(card.get("description") or "") or None,
-                status="todo",
+                # The board's first column — a custom board may have no
+                # "todo" column at all (R-201).
+                status=first_column,
                 priority=(
                     card.get("priority")
                     if card.get("priority") in ("low", "medium", "high")
@@ -324,12 +401,9 @@ async def _apply_update_cards(
             if raw_due is None:
                 task.due_at = None
             else:
-                try:
-                    task.due_at = datetime.fromisoformat(str(raw_due)).replace(
-                        tzinfo=timezone.utc
-                    )
-                except ValueError:
-                    pass  # leave the existing due date untouched
+                parsed = _parse_ai_due(str(raw_due), user)
+                if parsed is not None:  # unparseable: leave it untouched
+                    task.due_at = parsed
     await db.flush()
     try:
         from app.workspaces.knowledge import index_board_for_workspace

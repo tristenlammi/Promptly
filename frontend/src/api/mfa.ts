@@ -47,9 +47,11 @@ export const mfaApi = {
     await apiClient.delete("/auth/mfa/trusted-devices");
   },
 
-  async regenerateBackupCodes(): Promise<MfaBackupCodesPayload> {
+  /** Needs the account password — new codes are a way in (R-141). */
+  async regenerateBackupCodes(password: string): Promise<MfaBackupCodesPayload> {
     const { data } = await apiClient.post<MfaBackupCodesPayload>(
-      "/auth/mfa/backup-codes/regenerate"
+      "/auth/mfa/backup-codes/regenerate",
+      { password }
     );
     return data;
   },

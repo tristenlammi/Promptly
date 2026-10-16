@@ -86,12 +86,6 @@ class RunAgentsTool(Tool):
         "web_search directly) or for tasks that depend on each other's "
         "results (do those in sequence yourself)."
     )
-    prompt_hint = (
-        "Fan out 2–4 independent research tasks to parallel sub-agents "
-        "(each with web search) and get back a merged, cited brief. Best "
-        "for comparisons or multi-part research where the parts are "
-        "independent. For one simple fact, just call web_search."
-    )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {
@@ -155,6 +149,17 @@ class RunAgentsTool(Tool):
         # itself (different category), so depth-1 is structural. Bail
         # early if search isn't actually configured; agents with no
         # tools are pointless.
+        # The chat's real model: a Custom Model chat stores ``custom:<uuid>``,
+        # which no provider accepts (R-079).
+        agent_provider_id, agent_model_id = conv.provider_id, conv.model_id
+        from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+
+        if is_custom_model_id(conv.model_id):
+            resolved = await resolve_custom_model(conv.model_id, ctx.db)
+            if resolved is None:
+                raise ToolError("Can't run sub-agents: this chat's assistant is unavailable.")
+            agent_provider_id, agent_model_id = resolved.base_provider.id, resolved.base_model_id
+
         provider = await pick_search_provider(ctx.db, ctx.user)
         if provider is None:
             raise ToolError(
@@ -231,8 +236,8 @@ class RunAgentsTool(Tool):
                 conversation_id=ctx.conversation_id,
                 user_message_id=ctx.user_message_id,
                 task=task,
-                provider_id=conv.provider_id,
-                model_id=conv.model_id,
+                provider_id=agent_provider_id,
+                model_id=agent_model_id,
                 tools_payload=agent_tools,
                 per_tool_caps=dict(_AGENT_TOOL_CAPS),
                 on_progress=_agent_progress(index),
@@ -244,14 +249,23 @@ class RunAgentsTool(Tool):
             for i, task in enumerate(tasks)
         ]
         ordered: list[AgentResult | None] = [None] * total
-        for fut in asyncio.as_completed(launched):
-            idx, res = await fut
-            ordered[idx] = res
-            states[idx]["status"] = "failed" if res.error else "done"
-            states[idx]["detail"] = (
-                "couldn't complete" if res.error else "brief returned"
-            )
-            _emit()
+        try:
+            for fut in asyncio.as_completed(launched):
+                idx, res = await fut
+                ordered[idx] = res
+                states[idx]["status"] = "failed" if res.error else "done"
+                states[idx]["detail"] = (
+                    "couldn't complete" if res.error else "brief returned"
+                )
+                _emit()
+        except BaseException:
+            # Stop, a tool timeout or an error: take every sub-agent down
+            # with us. They're separate tasks, so cancelling this one left
+            # them all searching and spending on the chat model (R-076).
+            for t in launched:
+                t.cancel()
+            await asyncio.gather(*launched, return_exceptions=True)
+            raise
         results: list[AgentResult] = [r for r in ordered if r is not None]
 
         # ---- Merge sources FIRST, then build the briefs around them ----

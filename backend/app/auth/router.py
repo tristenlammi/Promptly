@@ -7,7 +7,9 @@ in memory (Zustand). This mirrors Claude.ai's flow and the spec in §12.
 Phase 1 hardening (2026-04-19):
 
 * Failed-login lockout via ``User.failed_login_attempts`` /
-  ``LOCKOUT_THRESHOLD``. Lockout is permanent until an admin unlocks.
+  ``LOCKOUT_THRESHOLD`` per account *and* IP (``app.auth.lockout``), plus an
+  account-wide backstop. Locks expire after the cooldown and never end a
+  live session.
 * Constant-time username enumeration defense via
   ``waste_a_verify`` on the user-not-found branch.
 * Token revocation: every JWT now carries a ``tv`` claim. Bumping
@@ -18,6 +20,8 @@ Phase 1 hardening (2026-04-19):
 """
 from __future__ import annotations
 
+import logging
+
 import re
 import secrets
 import uuid
@@ -26,6 +30,7 @@ from urllib.parse import quote
 
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     HTTPException,
     Request,
@@ -35,17 +40,20 @@ from fastapi import (
 )
 from fastapi.responses import RedirectResponse
 from jose import jwt as jose_jwt
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.cookies import cookie_secure
 from app.auth.audit import (
     EVENT_LOGIN_FAIL,
     EVENT_LOGIN_SUCCESS,
     EVENT_LOCKOUT,
     EVENT_LOGOUT,
+    EVENT_FORCE_LOGOUT_ALL,
     EVENT_PASSWORD_CHANGE,
+    EVENT_PASSWORD_RESET_REQUESTED,
     EVENT_REFRESH_REJECTED,
     EVENT_TOKEN_REFRESH,
     EVENT_UNLOCK,
@@ -83,9 +91,9 @@ from app.auth.utils import (
     create_mfa_enrollment_token,
     create_refresh_token,
     decode_token,
-    hash_password,
-    verify_password,
-    waste_a_verify,
+    ahash_password,
+    averify_password,
+    awaste_a_verify,
 )
 from app.config import get_settings
 from app.database import get_db
@@ -107,6 +115,7 @@ from app.rate_limit import (
 )
 
 router = APIRouter()
+logger = logging.getLogger("promptly.auth")
 settings = get_settings()
 
 REFRESH_COOKIE_NAME = "promptly_refresh"
@@ -131,7 +140,7 @@ def _set_refresh_cookie(response: Response, token: str) -> None:
         value=token,
         max_age=REFRESH_TOKEN_EXPIRE_SECONDS,
         httponly=True,
-        secure=settings.COOKIE_SECURE,
+        secure=cookie_secure(),
         samesite=settings.COOKIE_SAMESITE,
         path="/api/auth",
     )
@@ -142,8 +151,11 @@ def _clear_refresh_cookie(response: Response) -> None:
 
 
 def _issue_tokens_for(user: User, response: Response) -> AuthResponse:
-    access = create_access_token(user.id, token_version=user.token_version)
-    refresh = create_refresh_token(user.id, token_version=user.token_version)
+    from app.auth.utils import new_session_id
+
+    sid = new_session_id()
+    access = create_access_token(user.id, token_version=user.token_version, session_id=sid)
+    refresh = create_refresh_token(user.id, token_version=user.token_version, session_id=sid)
     _set_refresh_cookie(response, refresh)
     return AuthResponse(
         status="ok",
@@ -216,7 +228,44 @@ async def setup_status(db: AsyncSession = Depends(get_db)) -> SetupStatusRespons
     if settings.SINGLE_USER_MODE:
         # Legacy mode provisions its own admin unconditionally.
         return SetupStatusResponse(requires_setup=False)
-    return SetupStatusResponse(requires_setup=not await _admin_exists(db))
+    return SetupStatusResponse(
+        requires_setup=not await _admin_exists(db),
+        setup_code_required=_setup_token() is not None,
+    )
+
+
+def _setup_token() -> str | None:
+    token = (settings.SETUP_TOKEN or "").strip()
+    return token if token and not token.startswith("change-me") else None
+
+
+def _check_setup_allowed(payload_code: str | None, request: Request) -> None:
+    """Who may create the first admin (R-263).
+
+    Setup is open to anyone who reaches the port before the owner does —
+    and the port is published on every interface. With the installer's
+    one-time code, the caller must present it. Without one (a hand-rolled
+    compose install), only the local network may claim the account."""
+    import hmac
+
+    from app.auth.cookies import is_local_ip
+    from app.rate_limit import _client_ip
+
+    token = _setup_token()
+    if token is not None:
+        if not payload_code or not hmac.compare_digest(payload_code.strip(), token):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="That setup code isn't right. It was printed when Promptly was installed "
+                "(and is in the .env file as SETUP_TOKEN).",
+            )
+        return
+    if not is_local_ip(_client_ip(request)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Finish setting up Promptly from the same network it runs on, or add a "
+            "SETUP_TOKEN to .env and enter it here.",
+        )
 
 
 # --------------------------------------------------------------------
@@ -226,6 +275,7 @@ async def setup_status(db: AsyncSession = Depends(get_db)) -> SetupStatusRespons
 # unaffected whether or not SSO is configured.
 # --------------------------------------------------------------------
 _OIDC_TX_COOKIE = "promptly_oidc_tx"
+_SSO_PENDING_COOKIE = "promptly_sso_pending"
 _OIDC_TX_TTL_MINUTES = 10
 
 
@@ -313,7 +363,7 @@ async def oidc_login(
         value=_sign_oidc_tx(state, nonce, _safe_next(next)),
         max_age=_OIDC_TX_TTL_MINUTES * 60,
         httponly=True,
-        secure=settings.COOKIE_SECURE,
+        secure=cookie_secure(),
         # Lax (not Strict) so the cookie survives the top-level redirect back
         # from the IdP; the callback needs it to check state/nonce.
         samesite="lax",
@@ -352,17 +402,97 @@ async def oidc_callback(
     except OidcError:
         return _sso_fail("verify_failed")
 
-    email = verified_email_from_claims(claims)
-    if not email:
-        return _sso_fail("no_verified_email")
+    issuer = str(claims.get("iss") or "")
+    subject = str(claims.get("sub") or "")
+    if not issuer or not subject:
+        return _sso_fail("verify_failed")
 
+    # The account bound to this exact provider identity, if any.
     user = (
-        await db.execute(select(User).where(func.lower(User.email) == email))
+        await db.execute(
+            select(User).where(User.oidc_issuer == issuer, User.oidc_subject == subject)
+        )
     ).scalar_one_or_none()
+    email = verified_email_from_claims(claims, trust_unverified=cfg.trust_unverified_email)
+    if user is None:
+        # First SSO sign-in: match the invited account by a verified email,
+        # then bind it, so later sign-ins don't depend on the email at all.
+        if not email:
+            return _sso_fail("no_verified_email")
+        user = (
+            await db.execute(select(User).where(func.lower(User.email) == email))
+        ).scalar_one_or_none()
+        if user is not None and user.oidc_subject and (
+            user.oidc_issuer != issuer or user.oidc_subject != subject
+        ):
+            # Already bound to a different identity — someone else holding
+            # the same address at the provider doesn't get this account.
+            return _sso_fail("linked_elsewhere")
+        if user is not None:
+            user.oidc_issuer, user.oidc_subject = issuer, subject
     # Invite-only: SSO logs in EXISTING, active accounts only. An unknown or
     # disabled email is refused — SSO never creates or re-enables an account.
     if user is None or user.disabled:
         return _sso_fail("no_account")
+
+    # Promptly's own second factor and "Require MFA" apply to SSO too,
+    # unless the admin has said the provider's sign-in is enough.
+    if not cfg.satisfies_mfa:
+        decision = await mfa_service.mfa_decision_for(
+            db, user=user, trusted_token=trusted_devices.cookie_token(request)
+        )
+        if decision.outcome is not MfaOutcome.ALLOW:
+            if decision.outcome is MfaOutcome.CHALLENGE:
+                if decision.challenge_method == METHOD_EMAIL and decision.challenge_email_to:
+                    try:
+                        await issue_and_send_email_otp(
+                            db,
+                            user_id=user.id,
+                            to_address=decision.challenge_email_to,
+                            purpose=OTP_PURPOSE_LOGIN,
+                            request=request,
+                        )
+                    except (EmailOtpRateLimited, SmtpNotConfiguredError, SmtpSendError):
+                        pass
+                pending = _issue_mfa_challenge(
+                    user,
+                    method=decision.challenge_method or "totp",
+                    email_hint=(
+                        mfa_service.mask_email(decision.challenge_email_to)
+                        if decision.challenge_email_to
+                        else None
+                    ),
+                )
+            else:
+                pending = _issue_mfa_enrollment(user)
+            await record_event(
+                db, request=request, event_type=EVENT_LOGIN_SUCCESS,
+                user_id=user.id, identifier=email or user.email, detail="sso_awaiting_mfa",
+            )
+            await db.commit()
+            # The SPA can't receive JSON on a redirect, and a challenge
+            # token doesn't belong in a URL: hand it over in a short-lived
+            # cookie that /oidc/pending reads once.
+            redirect = RedirectResponse("/login?sso=continue", status_code=302)
+            redirect.set_cookie(
+                _SSO_PENDING_COOKIE,
+                jose_jwt.encode(
+                    {
+                        "auth": pending.model_dump(mode="json"),
+                        "next": _safe_next(tx.get("next")),
+                        "exp": datetime.now(timezone.utc) + timedelta(minutes=5),
+                    },
+                    settings.SECRET_KEY,
+                    algorithm="HS256",
+                ),
+                max_age=300,
+                httponly=True,
+                samesite="lax",
+                secure=cookie_secure(),
+                path="/api/auth",
+            )
+            redirect.delete_cookie(_OIDC_TX_COOKIE, path="/api/auth")
+            return redirect
 
     user.last_login_at = datetime.now(timezone.utc)
     await record_event(
@@ -378,12 +508,27 @@ async def oidc_callback(
     # Set the refresh cookie on the redirect and bounce into the app; the SPA
     # exchanges it for an access token on load (same as a normal page refresh).
     redirect = RedirectResponse(_safe_next(tx.get("next")), status_code=302)
+    from app.auth.utils import new_session_id
+
     _set_refresh_cookie(
         redirect,
-        create_refresh_token(user.id, token_version=user.token_version),
+        create_refresh_token(user.id, token_version=user.token_version, session_id=new_session_id()),
     )
     redirect.delete_cookie(_OIDC_TX_COOKIE, path="/api/auth")
     return redirect
+
+
+@router.post("/oidc/pending", response_model=AuthResponse)
+async def oidc_pending(request: Request, response: Response) -> AuthResponse:
+    """The MFA step an SSO sign-in still needs (challenge or forced
+    enrollment), handed over once from the cookie the callback set."""
+    raw = request.cookies.get(_SSO_PENDING_COOKIE)
+    response.delete_cookie(_SSO_PENDING_COOKIE, path="/api/auth")
+    try:
+        data = jose_jwt.decode(raw or "", settings.SECRET_KEY, algorithms=["HS256"])
+    except Exception as e:  # noqa: BLE001 — expired/tampered/absent
+        raise HTTPException(status_code=401, detail="That sign-in expired — try again.") from e
+    return AuthResponse(**data["auth"])
 
 
 @router.post("/setup", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
@@ -411,6 +556,8 @@ async def setup(
     # commit/rollback) forces the second caller to wait, after which it sees
     # the admin the first created and 409s. The key is an arbitrary fixed
     # 64-bit constant shared by all setup callers.
+    _check_setup_allowed(payload.setup_code, request)
+
     from sqlalchemy import text as _sa_text
 
     await db.execute(_sa_text("SELECT pg_advisory_xact_lock(918273645)"))
@@ -423,7 +570,7 @@ async def setup(
     user = User(
         email=payload.email.lower(),
         username=payload.username,
-        password_hash=hash_password(payload.password),
+        password_hash=await ahash_password(payload.password),
         role="admin",
         allowed_models=None,
         settings={},
@@ -495,10 +642,26 @@ async def _record_login_failure(
     responsible for committing.
     """
     if user is not None:
+        from app.auth import lockout
+
+        ip, _ = request_meta(request)
+        if await lockout.record_ip_failure(user.id, ip) == settings.LOCKOUT_THRESHOLD:
+            await record_event(
+                db,
+                request=request,
+                event_type=EVENT_LOCKOUT,
+                user_id=user.id,
+                identifier=identifier,
+                detail=(
+                    f"password logins from {ip} paused for "
+                    f"{settings.LOCKOUT_COOLDOWN_MINUTES} min after "
+                    f"{settings.LOCKOUT_THRESHOLD} failures"
+                ),
+            )
         user.failed_login_attempts = (user.failed_login_attempts or 0) + 1
         if (
             user.locked_at is None
-            and user.failed_login_attempts >= settings.LOCKOUT_THRESHOLD
+            and user.failed_login_attempts >= settings.ACCOUNT_LOCKOUT_THRESHOLD
         ):
             user.locked_at = datetime.now(timezone.utc)
             await record_event(
@@ -508,7 +671,7 @@ async def _record_login_failure(
                 user_id=user.id,
                 identifier=identifier,
                 detail=(
-                    f"automatic after {user.failed_login_attempts} "
+                    f"account-wide after {user.failed_login_attempts} "
                     "consecutive failures"
                 ),
             )
@@ -562,7 +725,7 @@ async def login(
     # can spot enumeration attacks. Always raise the generic error.
     # ----------------------------------------------------------------
     if user is None:
-        waste_a_verify()
+        await awaste_a_verify()
         await _record_login_failure(
             db,
             request,
@@ -583,7 +746,7 @@ async def login(
     # rejecting, otherwise an attacker could distinguish locked accounts
     # by response timing. The audit log captures the real reason.
     # ----------------------------------------------------------------
-    password_ok = verify_password(payload.password, user.password_hash)
+    password_ok = await averify_password(payload.password, user.password_hash)
 
     # A brute-force lockout whose cooldown has elapsed is auto-cleared here
     # so the user (or anyone whose account was frozen by a malicious
@@ -616,7 +779,19 @@ async def login(
             detail=GENERIC_AUTH_FAIL_DETAIL,
         )
 
-    if user.is_locked:
+    # Locks are per address (plus an account-wide spray backstop), and a
+    # device the owner already trusted gets past them — so a stranger's
+    # failed guesses can't keep the owner out (R-002).
+    from app.auth import lockout
+
+    login_ip, _ = request_meta(request)
+    trusted_here = (
+        await trusted_devices.lookup_active(
+            db, user_id=user.id, plaintext_token=trusted_devices.cookie_token(request) or ""
+        )
+        is not None
+    )
+    if not trusted_here and (user.is_locked or await lockout.ip_locked(user.id, login_ip)):
         await _record_login_failure(
             db,
             request,
@@ -648,6 +823,10 @@ async def login(
     # Password OK.
     # ----------------------------------------------------------------
     user.failed_login_attempts = 0
+    if user.locked_at is not None:
+        # A trusted device got in past the backstop lock: it's the owner.
+        user.locked_at = None
+    await lockout.clear(user.id, login_ip)
     ip, _ = request_meta(request)
 
     # Decide whether MFA gates this session. ``mfa_decision_for``
@@ -752,6 +931,8 @@ async def refresh(
         payload = decode_token(token, expected_type="refresh")
         user_id = uuid.UUID(payload["sub"])
         token_tv = int(payload.get("tv", 0))
+        if await _refresh_revoked(payload.get("jti")):
+            raise TokenError("signed out")
     except (TokenError, ValueError, KeyError) as e:
         _clear_refresh_cookie(response)
         await record_event(
@@ -787,9 +968,10 @@ async def refresh(
     # Mirror the same revocation rules ``get_current_user`` enforces so a
     # locked / disabled / token-versioned-out user can't quietly mint
     # fresh access tokens.
+    # A brute-force lock stops new password logins only — it never ends a
+    # session (that let anyone log the owner out, R-002). ``disabled`` does.
     if (
         user.disabled
-        or user.is_locked
         or token_tv != user.token_version
     ):
         _clear_refresh_cookie(response)
@@ -801,8 +983,6 @@ async def refresh(
             detail=(
                 "disabled"
                 if user.disabled
-                else "locked"
-                if user.is_locked
                 else "token_version_mismatch"
             ),
         )
@@ -812,17 +992,19 @@ async def refresh(
             detail="Session is no longer valid",
         )
 
-    new_refresh = create_refresh_token(user.id, token_version=user.token_version)
+    # The session carries on across rotations (WP-7.2); a token from before
+    # sessions had ids starts one now.
+    from app.auth.utils import new_session_id
+
+    sid = payload.get("sid") or new_session_id()
+    new_refresh = create_refresh_token(user.id, token_version=user.token_version, session_id=sid)
     _set_refresh_cookie(response, new_refresh)
-    await record_event(
-        db,
-        request=request,
-        event_type=EVENT_TOKEN_REFRESH,
-        user_id=user.id,
-    )
+    user.last_seen_at = datetime.now(timezone.utc)
+    # Not audited: a row per tab every few minutes buried the events that
+    # matter (R-145). Refused refreshes are still logged.
     await db.commit()
     return TokenResponse(
-        access_token=create_access_token(user.id, token_version=user.token_version),
+        access_token=create_access_token(user.id, token_version=user.token_version, session_id=sid),
         expires_in=ACCESS_TOKEN_EXPIRE_SECONDS,
     )
 
@@ -830,10 +1012,17 @@ async def refresh(
 # --------------------------------------------------------------------
 # Logout
 # --------------------------------------------------------------------
+class _LogoutRequest(BaseModel):
+    # This browser's push endpoint, so it stops receiving the user's
+    # notifications (with message previews) after they sign out (R-030).
+    push_endpoint: str | None = None
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     request: Request,
     response: Response,
+    body: _LogoutRequest = Body(default_factory=_LogoutRequest),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
     # Best-effort audit: if the refresh cookie is still valid we know
@@ -845,9 +1034,23 @@ async def logout(
         try:
             payload = decode_token(token, expected_type="refresh")
             user_id = uuid.UUID(payload["sub"])
+            # Signing out used to only clear the cookie — a copy of it
+            # stayed usable for 30 days (R-191).
+            await _revoke_refresh(payload.get("jti"), payload.get("exp"))
         except (TokenError, ValueError, KeyError):
             user_id = None
     if user_id is not None:
+        if body.push_endpoint:
+            from sqlalchemy import delete as sa_delete
+
+            from app.notifications.models import PushSubscription
+
+            await db.execute(
+                sa_delete(PushSubscription).where(
+                    PushSubscription.user_id == user_id,
+                    PushSubscription.endpoint == body.push_endpoint,
+                )
+            )
         await record_event(
             db,
             request=request,
@@ -856,6 +1059,191 @@ async def logout(
         )
         await db.commit()
 
+    _clear_refresh_cookie(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+def _revoked_key(jti: str) -> str:
+    return f"promptly:revoked-refresh:{jti}"
+
+
+async def _revoke_refresh(jti: str | None, exp: int | None) -> None:
+    """Remember a signed-out refresh token until it would have expired."""
+    if not jti:
+        return
+    from app.redis_client import redis
+
+    ttl = max(60, int(exp or 0) - int(datetime.now(timezone.utc).timestamp()))
+    try:
+        await redis.set(_revoked_key(jti), "1", ex=ttl)
+    except Exception:  # noqa: BLE001 — Redis down: the cookie is still cleared
+        logger.warning("couldn't record a signed-out session")
+
+
+async def _refresh_revoked(jti: str | None) -> bool:
+    if not jti:
+        return False
+    from app.redis_client import redis
+
+    try:
+        return bool(await redis.exists(_revoked_key(jti)))
+    except Exception:  # noqa: BLE001 — fail open, as before this existed
+        return False
+
+
+@router.post("/logout-everywhere", status_code=status.HTTP_204_NO_CONTENT)
+async def logout_everywhere(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    """Sign this account out of every device, this one included — for a
+    lost phone or a shared computer. Only an admin could do it before
+    (R-191)."""
+    current_user.token_version = (current_user.token_version or 0) + 1
+    await record_event(
+        db, request=request, event_type=EVENT_FORCE_LOGOUT_ALL,
+        user_id=current_user.id, identifier=current_user.username, detail="self",
+    )
+    await db.commit()
+    _clear_refresh_cookie(response)
+    response.status_code = status.HTTP_204_NO_CONTENT
+    return response
+
+
+@router.get("/password-policy")
+async def password_policy() -> dict:
+    """The rules a new password has to meet, and the session lengths the
+    UI mentions — read from here so the screens can't disagree with the
+    server. They had four different minimums between them (R-194)."""
+    from app.auth.password_policy import MAX_PASSWORD_LENGTH, MIN_PASSWORD_LENGTH
+
+    return {
+        "min_length": MIN_PASSWORD_LENGTH,
+        "max_length": MAX_PASSWORD_LENGTH,
+        "summary": (
+            f"At least {MIN_PASSWORD_LENGTH} characters, with a number and a symbol "
+            "(like ! @ # or -). Avoid common or repetitive passwords."
+        ),
+        "trusted_device_days": settings.MFA_TRUSTED_DEVICE_DAYS,
+    }
+
+
+# --------------------------------------------------------------------
+# Forgot password (R-191)
+# --------------------------------------------------------------------
+_RESET_TTL_S = 30 * 60
+_RESET_SENDS_PER_HOUR = 3
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=320)
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+    new_password: str = Field(min_length=1, max_length=128)
+
+
+def _reset_key(token: str) -> str:
+    import hashlib
+
+    return "promptly:pw-reset:" + hashlib.sha256(token.encode()).hexdigest()
+
+
+@router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+async def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    _rl: RateLimitLogin,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Email a single-use, 30-minute reset link. Always answers the same
+    way, so it can't be used to find out which addresses have accounts."""
+    import secrets as _secrets
+
+    from app.redis_client import redis
+
+    email = payload.email.strip().lower()
+    user = (
+        await db.execute(select(User).where(func.lower(User.email) == email))
+    ).scalar_one_or_none()
+    sends_key = f"promptly:pw-reset-sends:{email}"
+    if user is not None and not user.disabled:
+        sends = await redis.incr(sends_key)
+        if sends == 1:
+            await redis.expire(sends_key, 3600)
+        if sends <= _RESET_SENDS_PER_HOUR:
+            token = _secrets.token_urlsafe(32)
+            await redis.set(
+                _reset_key(token), f"{user.id}:{user.token_version}", ex=_RESET_TTL_S
+            )
+            proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+            host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+            link = f"{proto}://{host}/reset-password?token={token}"
+            try:
+                from app.mfa.smtp import send_message
+
+                await send_message(
+                    db,
+                    to=user.email,
+                    subject="Promptly: reset your password",
+                    text_body=(
+                        f"Hi {user.username},\n\nSomeone asked to reset the password for "
+                        f"this account. To choose a new one, open this link within 30 "
+                        f"minutes:\n\n{link}\n\nIf it wasn't you, you can ignore this email."
+                    ),
+                )
+            except Exception:  # noqa: BLE001 — SMTP missing or failing: same answer
+                logger.info("password reset email not sent for user %s", user.id)
+            await record_event(
+                db, request=request, event_type=EVENT_PASSWORD_RESET_REQUESTED,
+                user_id=user.id, identifier=email,
+            )
+            await db.commit()
+    return {"sent": True}
+
+
+@router.post("/reset-password", status_code=status.HTTP_204_NO_CONTENT)
+async def reset_password_with_token(
+    payload: ResetPasswordRequest,
+    request: Request,
+    response: Response,
+    _rl: RateLimitLogin,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Set a new password from an emailed link. Single use, and every
+    session the account had is ended."""
+    from app.auth.password_policy import validate_password_strength
+    from app.redis_client import redis
+
+    key = _reset_key(payload.token)
+    stored = await redis.get(key)
+    if stored is None:
+        raise HTTPException(status_code=400, detail="That link has expired or was already used — ask for a new one.")
+    stored = stored if isinstance(stored, str) else stored.decode()
+    raw_id, _, tv = stored.partition(":")
+    user = await db.get(User, uuid.UUID(raw_id))
+    if user is None or user.disabled or str(user.token_version) != tv:
+        await redis.delete(key)
+        raise HTTPException(status_code=400, detail="That link has expired or was already used — ask for a new one.")
+    try:
+        validate_password_strength(payload.new_password)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
+    await redis.delete(key)
+    user.password_hash = await ahash_password(payload.new_password)
+    user.must_change_password = False
+    user.token_version = (user.token_version or 0) + 1
+    user.failed_login_attempts = 0
+    user.locked_at = None
+    await record_event(
+        db, request=request, event_type=EVENT_PASSWORD_CHANGE,
+        user_id=user.id, identifier=user.username, detail="reset_link",
+    )
+    await db.commit()
     _clear_refresh_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
@@ -886,19 +1274,19 @@ async def change_own_password(
     ``token_version`` (logging out every OTHER session), clears the
     force-change flag, and returns fresh tokens so THIS session stays live.
     """
-    if not verify_password(payload.current_password, current_user.password_hash):
+    if not await averify_password(payload.current_password, current_user.password_hash):
         # Generic 400 (no "user exists" signal needed — they're authenticated).
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Current password is incorrect.",
         )
-    if verify_password(payload.new_password, current_user.password_hash):
+    if await averify_password(payload.new_password, current_user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="New password must be different from the current one.",
         )
 
-    current_user.password_hash = hash_password(payload.new_password)
+    current_user.password_hash = await ahash_password(payload.new_password)
     # Invalidate every outstanding session (incl. a possible attacker's) —
     # ``_issue_tokens_for`` below re-issues this session against the new value.
     current_user.token_version = (current_user.token_version or 0) + 1
@@ -1012,7 +1400,13 @@ async def update_preferences(
             merged.pop(key, None)
         else:
             merged[key] = value
+    before_tz = (current_user.settings or {}).get("timezone")
     current_user.settings = merged
+    if "timezone" in updates and merged.get("timezone") != before_tz:
+        # Photos without a time zone of their own follow yours (WP-9.3).
+        from app.photos.library import refile_zoneless
+
+        await refile_zoneless(db, current_user.id, merged.get("timezone"), before_tz)
 
     await db.commit()
     await db.refresh(current_user)

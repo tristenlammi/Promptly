@@ -186,7 +186,7 @@ export function ConversationExportMenu({
                     <span
                       className={cn(
                         "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded",
-                        "bg-[var(--accent)]/10 text-[var(--accent)]"
+                        "bg-[var(--accent)]/10 text-[var(--accent-text)]"
                       )}
                     >
                       {isBusy ? (

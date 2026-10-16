@@ -59,7 +59,9 @@ async def get_embedding_config(db: AsyncSession) -> EmbeddingConfig | None:
     if dim not in SUPPORTED_DIMS:
         return None
     provider = await db.get(ModelProvider, settings.embedding_provider_id)
-    if provider is None:
+    # A disabled provider is "no embedder" everywhere — it used to keep
+    # being called by search, memory and the indexers (R-336).
+    if provider is None or not provider.enabled:
         return None
     return EmbeddingConfig(
         provider=provider, model_id=settings.embedding_model_id, dim=dim
@@ -73,6 +75,7 @@ async def embed_query(cfg: EmbeddingConfig, q: str) -> list[float] | None:
         return None
     try:
         vectors = await embed_texts(
+            fast=True,
             provider=cfg.provider,
             model_id=cfg.model_id,
             texts=[cleaned],
@@ -143,6 +146,9 @@ async def semantic_search_messages(
         JOIN conversations c ON c.id = m.conversation_id
         WHERE e.conversation_id = ANY(:conv_ids)
           AND e.{column} IS NOT NULL
+          -- Current model only: a same-dimension switch would otherwise
+          -- compare two models' vectors (R-317).
+          AND e.embed_model = :em
           AND c.archived_at IS NULL
           {date_sql}
         ORDER BY e.{column} <=> CAST(:qvec AS vector({cfg.dim}))
@@ -157,6 +163,7 @@ async def semantic_search_messages(
                 "conv_ids": conv_ids,
                 "user_id": user_id,
                 "limit": limit,
+                "em": cfg.model_id,
                 **date_params,
             },
         )

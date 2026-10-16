@@ -111,12 +111,14 @@ export function useRunCommand() {
       slots,
       confirmed,
       conversationId,
+      source,
     }: {
       id: string;
       slots?: Record<string, string>;
       confirmed?: boolean;
       conversationId?: string | null;
-    }) => commandsApi.run(id, { slots, confirmed, conversationId }),
+      source?: string;
+    }) => commandsApi.run(id, { slots, confirmed, conversationId, source }),
     // A run the History tab doesn't show reads as a run that didn't
     // happen, which is the exact confusion history exists to remove.
     onSettled: () =>
@@ -143,7 +145,11 @@ export function useRunCommandWithConfirm() {
       command: Command,
       /** When run from inside a chat, the run is recorded there as a
        *  Tool Activity Card so the transcript shows what happened. */
-      opts: { conversationId?: string | null } = {}
+      opts: {
+        conversationId?: string | null;
+        /** Where it was run from, for History: "menu" or "library". */
+        source?: string;
+      } = {}
     ): Promise<boolean> => {
       if (command.confirm_before_run) {
         const ok = await confirm({
@@ -163,6 +169,7 @@ export function useRunCommandWithConfirm() {
           id: command.id,
           confirmed: true,
           conversationId: opts.conversationId ?? null,
+          source: opts.source,
         });
         if (result.message) {
           // Land it in the open thread immediately. Refetching would

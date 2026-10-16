@@ -139,6 +139,11 @@ def _ip_is_blocked(ip: ipaddress._BaseAddress) -> tuple[bool, str]:
     if isinstance(ip, ipaddress.IPv4Address):
         if int(ip) >> 16 == (169 << 8) | 254:
             return True, "link_local"
+    # Anything else that isn't public internet. Enumerating categories
+    # missed 100.64.0.0/10 (carrier-grade NAT — where Tailscale puts every
+    # device), 192.0.0.0/24 and future special ranges (R-015).
+    if not ip.is_global:
+        return True, "non_public"
 
     return False, "ok"
 
@@ -179,7 +184,27 @@ def _resolve_all(hostname: str) -> list[ipaddress._BaseAddress]:
     return out
 
 
-def assert_url_is_safe(url: str, *, allow_private: bool = False) -> str:
+def _deny_check(hostname: str, addresses, deny_hosts: frozenset[str]) -> None:
+    """Refuse a name on the deny list, or any address one of those names
+    resolves to — so a raw container IP can't get around the name check."""
+    if not deny_hosts:
+        return
+    if hostname in deny_hosts:
+        raise UnsafeURLError("blocked_internal", f"Refusing to fetch {hostname!r} — an internal Promptly service")
+    denied: set = set()
+    for name in deny_hosts:
+        try:
+            denied.update(_resolve_all(name))
+        except Exception:  # noqa: BLE001 — not resolvable here = nothing to block
+            continue
+    for ip in addresses:
+        if ip in denied:
+            raise UnsafeURLError("blocked_internal", f"Refusing to fetch {hostname!r} — an internal Promptly service")
+
+
+def assert_url_is_safe(
+    url: str, *, allow_private: bool = False, deny_hosts: frozenset[str] = frozenset()
+) -> str:
     """Return the validated URL, raise ``UnsafeURLError`` if not safe.
 
     Public API for callers that want to do the validation up front
@@ -195,6 +220,10 @@ def assert_url_is_safe(url: str, *, allow_private: bool = False) -> str:
     loopback block, but the cloud instance-metadata range (169.254/16,
     fe80::/10, known IMDS hostnames) stays refused unconditionally —
     it's never a legitimate automation target, only credential theft.
+
+    ``deny_hosts`` are refused by name and by every address they resolve
+    to, whatever ``allow_private`` says — used to keep automations away
+    from Promptly's own internal services.
     """
     parsed = urlparse(url)
     if parsed.scheme.lower() not in _ALLOWED_SCHEMES:
@@ -246,17 +275,23 @@ def assert_url_is_safe(url: str, *, allow_private: bool = False) -> str:
         literal = None
 
     if literal is not None:
+        _deny_check(hostname, [literal], deny_hosts)
         if explicit_allow and not _ip_is_metadata(literal):
             return url
         _check_ip(literal)
         return url
 
+    # A denied name is refused before any lookup — whether or not it
+    # resolves from here.
+    if deny_hosts and hostname in deny_hosts:
+        _deny_check(hostname, [], deny_hosts)
     addresses = _resolve_all(hostname)
     if not addresses:
         raise UnsafeURLError(
             "dns_failure",
             f"No IP addresses returned for {hostname!r}",
         )
+    _deny_check(hostname, addresses, deny_hosts)
 
     if explicit_allow:
         # Allowlisted name — we still ran DNS so that a typo or
@@ -406,6 +441,7 @@ async def safe_fetch(
     client: httpx.AsyncClient | None = None,
     follow_redirects: bool = True,
     allow_private: bool = False,
+    deny_hosts: frozenset[str] = frozenset(),
 ) -> httpx.Response:
     """Issue an SSRF-safe HTTP request.
 
@@ -429,7 +465,7 @@ async def safe_fetch(
     # validation (here and on every redirect hop) runs in a worker
     # thread. ``assert_provider_url_safe`` documents the same hazard.
     await asyncio.to_thread(
-        assert_url_is_safe, current_url, allow_private=allow_private
+        assert_url_is_safe, current_url, allow_private=allow_private, deny_hosts=deny_hosts
     )
 
     own_client = client is None
@@ -477,8 +513,14 @@ async def safe_fetch(
             await response.aclose()
             response = None
             await asyncio.to_thread(
-                assert_url_is_safe, next_url, allow_private=allow_private
+                assert_url_is_safe, next_url, allow_private=allow_private, deny_hosts=deny_hosts
             )
+            # Never carry the caller's headers to another origin — they're
+            # where credentials live (Authorization, X-API-Key…), and a
+            # redirect would otherwise hand them to whoever it points at.
+            a, b = httpx.URL(current_url), httpx.URL(next_url)
+            if (a.scheme, a.host, a.port) != (b.scheme, b.host, b.port):
+                headers = None
             current_url = next_url
             # On a redirect the body is not re-sent — drop ``json``.
             body_kwargs.clear()

@@ -71,6 +71,11 @@ export interface ExcalidrawCanvasBinding {
   ready: boolean;
 }
 
+// Unused-image clean-up: at most once a minute, sparing images deleted in
+// the last day (R-175).
+const GC_EVERY_MS = 60_000;
+const UNDO_GRACE_MS = 24 * 3600_000;
+
 export function useExcalidrawCanvas({
   excalidrawAPI,
   ydoc,
@@ -89,6 +94,8 @@ export function useExcalidrawCanvas({
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const yElementsRef = useRef<Y.Map<SceneElement> | null>(null);
   const yFilesRef = useRef<Y.Map<BinaryFileData> | null>(null);
+  const lastGcRef = useRef(0);
+  const prunedRef = useRef<Set<string>>(new Set());
   const ydocRef = useRef<Y.Doc | null>(null);
   const awarenessRef = useRef<HocuspocusProvider["awareness"] | null>(null);
   const readyRef = useRef(false);
@@ -279,11 +286,38 @@ export function useExcalidrawCanvas({
       const all = api.getSceneElementsIncludingDeleted();
       const changed = all.filter((el) => snapshot.get(el.id) !== sig(el));
 
+      // A pruned image is still in Excalidraw's own file store — don't put
+      // it straight back.
+      const inUse = new Set(
+        all
+          .filter((el) => !el.isDeleted)
+          .map((el) => (el as { fileId?: string | null }).fileId)
+          .filter((f): f is string => !!f)
+      );
+      for (const id of inUse) prunedRef.current.delete(id); // re-added
       const newFileIds = yFiles
-        ? Object.keys(files).filter((id) => !yFiles.get(id))
+        ? Object.keys(files).filter((id) => !yFiles.get(id) && !prunedRef.current.has(id))
         : [];
 
-      if (changed.length === 0 && newFileIds.length === 0) return;
+      // Image bytes no element uses any more — deleted images, and the
+      // originals "Remove background" replaced — were kept in the doc for
+      // ever, so image-heavy canvases only grew (R-175). Images used by
+      // something deleted in the last day stay, so undo still works.
+      const now = Date.now();
+      let orphanIds: string[] = [];
+      if (yFiles && now - lastGcRef.current > GC_EVERY_MS) {
+        lastGcRef.current = now;
+        const keep = new Set<string>();
+        for (const el of all) {
+          const fid = (el as { fileId?: string | null }).fileId;
+          if (!fid) continue;
+          const updated = (el as { updated?: number }).updated ?? now;
+          if (!el.isDeleted || now - updated < UNDO_GRACE_MS) keep.add(fid);
+        }
+        orphanIds = [...yFiles.keys()].filter((id) => !keep.has(id));
+      }
+
+      if (changed.length === 0 && newFileIds.length === 0 && orphanIds.length === 0) return;
 
       ydoc.transact(() => {
         for (const el of changed) {
@@ -292,6 +326,10 @@ export function useExcalidrawCanvas({
         }
         if (yFiles) {
           for (const id of newFileIds) yFiles.set(id, clone(files[id]));
+          for (const id of orphanIds) {
+            yFiles.delete(id);
+            prunedRef.current.add(id);
+          }
         }
       }, LOCAL_ORIGIN);
     },

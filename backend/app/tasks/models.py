@@ -106,6 +106,14 @@ class Task(UUIDPKMixin, TimestampMixin, Base):
 
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notify: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # When to notify (0185, R-152): never | failures (and the first success,
+    # and a recovery) | every | changes (only when the result differs).
+    # A half-built flow saved as a draft (0185, R-149). The scheduler and
+    # runner only ever use ``flow_graph``, the last complete version.
+    draft_graph: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    notify_mode: Mapped[str] = mapped_column(
+        String(12), nullable=False, default="failures", server_default="failures"
+    )
     # Overlap policy (A3). ``allow`` (default) keeps today's behaviour — a new
     # scheduled fire starts even if the previous run is still going. ``skip``
     # makes the scheduler pass on a fire while a run for this task is still
@@ -246,6 +254,8 @@ class TaskRun(UUIDPKMixin, CreatedAtMixin, Base):
     # Inbound request body for webhook-triggered runs (0136) — exposed to
     # the flow as ``{{trigger.payload}}``. NULL for schedule/manual runs.
     trigger_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Inbound webhook headers (allow-listed) + query (0185, R-195).
+    trigger_meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     started_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

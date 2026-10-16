@@ -107,9 +107,9 @@ export function ReasoningEffortToggle({
             ? "h-9 w-9 justify-center"
             : "h-8 gap-1.5 px-2.5 text-xs",
           displayEffort === "high"
-            ? "border-[var(--accent)] bg-[var(--accent)]/20 text-[var(--accent)]"
+            ? "border-[var(--accent)] bg-[var(--accent)]/20 text-[var(--accent-text)]"
             : active
-              ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+              ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent-text)]"
               : "border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:text-[var(--text)]"
         )}
       >
@@ -121,7 +121,7 @@ export function ReasoningEffortToggle({
               className={cn(
                 "rounded-full px-1.5 py-px text-[10px] uppercase tracking-wide",
                 active
-                  ? "bg-[var(--accent)]/20 text-[var(--accent)]"
+                  ? "bg-[var(--accent)]/20 text-[var(--accent-text)]"
                   : "bg-black/[0.04] text-[var(--text-muted)] dark:bg-white/[0.06]"
               )}
             >
@@ -162,7 +162,7 @@ export function ReasoningEffortToggle({
                 <span
                   className={cn(
                     "mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center",
-                    selected ? "text-[var(--accent)]" : "text-transparent"
+                    selected ? "text-[var(--accent-text)]" : "text-transparent"
                   )}
                   aria-hidden
                 >
@@ -173,7 +173,7 @@ export function ReasoningEffortToggle({
                     className={cn(
                       "block text-sm font-semibold",
                       selected
-                        ? "text-[var(--accent)]"
+                        ? "text-[var(--accent-text)]"
                         : "text-[var(--text)]"
                     )}
                   >

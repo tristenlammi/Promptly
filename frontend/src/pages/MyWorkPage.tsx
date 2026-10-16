@@ -3,13 +3,17 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   CalendarClock,
+  CalendarDays,
   CircleDot,
   Clock,
   LayoutGrid,
+  Link2,
   Inbox as InboxIcon,
 } from "lucide-react";
 
-import { workspacesApi, type MyWorkCard } from "@/api/workspaces";
+import { workspacesApi, type MyShift, type MyWorkCard } from "@/api/workspaces";
+import { toast } from "@/store/toastStore";
+import { apiErrorMessage } from "@/utils/apiError";
 import { useWorkspaceInvites } from "@/hooks/useWorkspaces";
 import { TopNav } from "@/components/layout/TopNav";
 import { EmptyState } from "@/components/shared/EmptyState";
@@ -55,6 +59,11 @@ export function MyWorkPage() {
     refetchInterval: 60_000,
   });
   const { data: invites } = useWorkspaceInvites();
+  const { data: shifts } = useQuery({
+    queryKey: ["my-shifts"],
+    queryFn: () => workspacesApi.myShifts(),
+    refetchInterval: 5 * 60_000,
+  });
 
   const buckets = useMemo(() => {
     const out: Record<Bucket, MyWorkCard[]> = {
@@ -79,12 +88,14 @@ export function MyWorkPage() {
         <div className="mx-auto w-full max-w-3xl px-4 py-6">
           {(invites?.length ?? 0) > 0 && (
             <div className="mb-5 flex items-center gap-2 rounded-card border border-[var(--accent)]/40 bg-[var(--accent)]/5 px-3 py-2 text-sm text-[var(--text)]">
-              <InboxIcon className="h-4 w-4 text-[var(--accent)]" />
+              <InboxIcon className="h-4 w-4 text-[var(--accent-text)]" />
               {invites!.length} pending workspace invite
               {invites!.length === 1 ? "" : "s"} — accept them from the
               sidebar's Invites button.
             </div>
           )}
+
+          {(shifts?.length ?? 0) > 0 && <MyShifts shifts={shifts!} />}
 
           {isLoading ? (
             <div className="space-y-3">
@@ -121,7 +132,7 @@ export function MyWorkPage() {
                           onClick={() =>
                             navigate(
                               c.board_item_id
-                                ? `/workspaces/${c.workspace_id}?item=${c.board_item_id}`
+                                ? `/workspaces/${c.workspace_id}?item=${c.board_item_id}&card=${c.id}`
                                 : `/workspaces/${c.workspace_id}`
                             )
                           }
@@ -171,5 +182,65 @@ export function MyWorkPage() {
         </div>
       </div>
     </>
+  );
+}
+
+/** Upcoming shifts from every roster you're on (R-174), with a calendar
+ *  feed to subscribe to from a phone. */
+function MyShifts({ shifts }: { shifts: MyShift[] }) {
+  const navigate = useNavigate();
+  const copyFeed = async () => {
+    try {
+      const url = await workspacesApi.shiftsCalendarLink();
+      await navigator.clipboard.writeText(url);
+      toast.success("Calendar link copied — add it to your calendar app as a subscription.");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't get the calendar link."));
+    }
+  };
+  const shown = shifts.slice(0, 14);
+  return (
+    <section className="mb-6">
+      <div className="mb-2 flex items-center justify-between">
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+          My shifts · {shifts.length}
+        </h2>
+        <button
+          type="button"
+          onClick={() => void copyFeed()}
+          className="inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-text)]"
+        >
+          <Link2 className="h-3 w-3" />
+          Calendar link
+        </button>
+      </div>
+      <ul className="divide-y divide-[var(--border)] rounded-card border border-[var(--border)] bg-[var(--surface)]">
+        {shown.map((s, i) => (
+          <li key={`${s.roster_item_id}-${s.date}-${s.start}-${i}`}>
+            <button
+              type="button"
+              onClick={() => navigate(`/workspaces/${s.workspace_id}?item=${s.roster_item_id}`)}
+              className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-[var(--hover)]"
+            >
+              <CalendarDays className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-[var(--text)]">
+                  {new Date(s.date + "T00:00:00").toLocaleDateString([], {
+                    weekday: "short",
+                    day: "numeric",
+                    month: "short",
+                  })}
+                  {s.start && s.end ? ` · ${s.start}–${s.end}` : s.hours ? ` · ${s.hours}h` : ""}
+                </span>
+                <span className="mt-0.5 block truncate text-[11px] text-[var(--text-muted)]">
+                  {s.workspace_title} · {s.roster_title}
+                  {s.note ? ` · ${s.note}` : ""}
+                </span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

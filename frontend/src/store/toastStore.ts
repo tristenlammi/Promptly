@@ -20,6 +20,8 @@ interface ToastState {
     t: Omit<Toast, "id" | "duration"> & { duration?: number },
   ) => string;
   dismiss: (id: string) => void;
+  /** Change a toast that's showing (a progress message). */
+  update: (id: string, patch: Partial<Omit<Toast, "id">>) => void;
   clear: () => void;
 }
 
@@ -33,13 +35,21 @@ const DEFAULT_DURATION: Record<ToastType, number> = {
 };
 
 let counter = 0;
+/** When the last error toast went up — lets the global "that didn't work"
+ *  fallback stay quiet when the caller already said something. */
+let lastErrorToastAt = 0;
+export const lastErrorToast = () => lastErrorToastAt;
 const nextId = () => `toast-${++counter}`;
 
 export const useToastStore = create<ToastState>((set) => ({
   toasts: [],
   push: (t) => {
     const id = nextId();
-    const duration = t.duration ?? DEFAULT_DURATION[t.type];
+    // A toast with an action ("Undo", "Save") needs time to reach — at
+    // least 10 s (R-122).
+    const base = t.duration ?? DEFAULT_DURATION[t.type];
+    const duration = t.action && base > 0 ? Math.max(base, 10_000) : base;
+    if (t.type === "error") lastErrorToastAt = Date.now();
     // Cap the on-screen stack so a burst of errors can't bury the UI;
     // keep the most recent few.
     set((s) => ({ toasts: [...s.toasts, { ...t, id, duration }].slice(-4) }));
@@ -47,6 +57,8 @@ export const useToastStore = create<ToastState>((set) => ({
   },
   dismiss: (id) =>
     set((s) => ({ toasts: s.toasts.filter((x) => x.id !== id) })),
+  update: (id, patch) =>
+    set((s) => ({ toasts: s.toasts.map((x) => (x.id === id ? { ...x, ...patch } : x)) })),
   clear: () => set({ toasts: [] }),
 }));
 
@@ -75,4 +87,5 @@ export const toast = {
   info: make("info"),
   warning: make("warning"),
   dismiss: (id: string) => useToastStore.getState().dismiss(id),
+  update: (id: string, patch: Partial<Omit<Toast, "id">>) => useToastStore.getState().update(id, patch),
 };

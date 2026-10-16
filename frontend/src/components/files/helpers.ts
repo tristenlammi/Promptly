@@ -33,6 +33,8 @@ export function kindLabel(file: FileItem): string {
   const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : "";
 
   if (file.source_kind === "document") return "Doc";
+  if (file.source_kind === "sheet") return "Sheet";
+  if (file.source_kind === "whiteboard") return "Whiteboard";
   if (mime.startsWith("image/")) return "Image";
   if (mime === "application/pdf" || ext === "pdf") return "PDF";
   if (mime.startsWith("video/")) return "Video";
@@ -88,9 +90,50 @@ export function extractError(e: unknown): string {
   return apiErrorMessage(e);
 }
 
+/** The filename in a ``Content-Disposition`` header (RFC 6266, the UTF-8
+ *  ``filename*`` form first), else ``fallback``. */
+export function filenameFromDisposition(dispo: string, fallback: string): string {
+  const utf8 = dispo.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1].trim().replace(/^"|"$/g, ""));
+    } catch {
+      /* fall through to the plain form */
+    }
+  }
+  const plain = dispo.match(/filename="([^"]+)"/i) ?? dispo.match(/filename=([^;]+)/i);
+  return plain ? plain[1].trim() : fallback;
+}
+
 /** Authenticated download helper — Axios adds the Bearer token, we
  *  turn the blob into a temporary object URL the browser can save. */
-export async function downloadAuthed(file: FileItem): Promise<void> {
+export async function downloadAuthed(
+  file: Pick<FileItem, "id" | "filename">
+): Promise<void> {
+  // A Promptly document downloads as Word, not its HTML snapshot
+  // (WP-4.3, Part C §3.7). Other formats are in the editor's menu.
+  if ((file as { source_kind?: string | null }).source_kind === "document") {
+    const { downloadDocx } = await import("@/lib/office/wordActions");
+    return downloadDocx(file);
+  }
+  // A file's own bytes: the browser downloads them itself from a signed
+  // link — its own progress and resume, no size or time limit (WP-7.5,
+  // R-048). Sheets and whiteboards (exported on the fly) have no such
+  // link and come through the API below.
+  try {
+    const { original } = await filesApi.signedUrls(file.id);
+    if (original) {
+      const a = document.createElement("a");
+      a.href = original;
+      a.download = file.filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      return;
+    }
+  } catch {
+    /* the API path below says what's wrong */
+  }
   const res = await apiClient.get<Blob>(
     filesApi.downloadUrl(file.id).replace(/^\/api/, ""),
     {
@@ -100,7 +143,9 @@ export async function downloadAuthed(file: FileItem): Promise<void> {
   const url = window.URL.createObjectURL(res.data);
   const a = document.createElement("a");
   a.href = url;
-  a.download = file.filename;
+  // The server names exports (a sheet → .xlsx, a whiteboard → .excalidraw);
+  // the row's own filename is only right for plain uploads.
+  a.download = filenameFromDisposition(String(res.headers?.["content-disposition"] ?? ""), file.filename);
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -109,12 +154,20 @@ export async function downloadAuthed(file: FileItem): Promise<void> {
 
 export type PreviewKind =
   | "image"
+  /** Played from a signed link (WP-7.5). */
+  | "video"
   | "pdf"
   | "document"
   | "code_artifact"
   | "markdown"
   | "text"
   | "code"
+  /** An uploaded .docx — rendered by docx-preview (WP-4.3). */
+  | "word"
+  /** PowerPoint / OpenDocument text & slides / RTF — a text outline. */
+  | "office"
+  /** An uploaded .xlsx / .xlsm / .ods — a read-only grid (WP-4.4). */
+  | "spreadsheet"
   | "binary";
 
 export function classifyMime(
@@ -128,6 +181,11 @@ export function classifyMime(
   if (sourceKind === "document") return "document";
   const lower = (filename ?? "").toLowerCase();
   const m = (mime ?? "").toLowerCase();
+  if (lower.endsWith(".docx")) return "word";
+  if (/\.(xlsx|xlsm|ods)$/.test(lower)) return "spreadsheet";
+  // Legacy Office and PowerPoint: a faithful PDF with the ``convert``
+  // profile (Stage 12), else the text outline.
+  if (/\.(pptx|ppt|pps|ppsx|odt|odp|rtf|doc|xls)$/.test(lower)) return "office";
 
   // Code artifact types get the Preview/Code tabbed view —
   // identical UX to the chat side panel. Classify these *before*
@@ -147,6 +205,7 @@ export function classifyMime(
   if (m === "text/csv" || lower.endsWith(".csv")) return "code_artifact";
 
   if (m.startsWith("image/")) return "image";
+  if (m.startsWith("video/")) return "video";
   if (m === "application/pdf" || lower.endsWith(".pdf")) return "pdf";
   if (m === "text/markdown" || lower.endsWith(".md") || lower.endsWith(".markdown"))
     return "code_artifact";
@@ -238,4 +297,26 @@ export function formatRelativeTime(iso: string | null | undefined): string {
   if (mo < 12) return `${mo}mo ago`;
   const y = Math.floor(d / 365);
   return `${y}y ago`;
+}
+
+/** Open a file from anywhere in Files (WP-3.4): a Document, Spreadsheet
+ *  or Whiteboard goes to its editor page (``/files/doc|sheet|whiteboard/:id``)
+ *  and this returns true; anything else returns false so the caller shows
+ *  its preview. Trashed files always preview. */
+export function openFile(
+  file: Pick<FileItem, "id" | "source_kind" | "trashed_at">,
+  navigate: (to: string) => void
+): boolean {
+  if (file.trashed_at) return false;
+  const seg =
+    file.source_kind === "document"
+      ? "doc"
+      : file.source_kind === "sheet"
+        ? "sheet"
+        : file.source_kind === "whiteboard"
+          ? "whiteboard"
+          : null;
+  if (!seg) return false;
+  navigate(`/files/${seg}/${file.id}`);
+  return true;
 }

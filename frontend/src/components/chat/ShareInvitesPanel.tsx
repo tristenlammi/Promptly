@@ -34,7 +34,7 @@ export function ShareInvitesPanel({ open, onClose }: Props) {
       open={open}
       onClose={onClose}
       title="Invites"
-      description="Teammates have invited you to collaborate. Accepting a workspace opens up every chat inside it."
+      description="Teammates have invited you to collaborate. Accepting a workspace gives you its notes, boards, files and the chats people share with it."
       widthClass="max-w-xl"
     >
       {isLoading ? (
@@ -61,7 +61,7 @@ export function ShareInvitesPanel({ open, onClose }: Props) {
                     <span className="font-medium text-[var(--text)]">
                       {row.inviter.username}
                     </span>
-                    . You'll get full access to every chat in this workspace.
+                    . You&apos;ll see its notes, boards, files and shared chats.
                   </div>
                   <div className="flex items-center gap-2">
                     <button

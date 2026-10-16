@@ -178,7 +178,7 @@ export function SlashCommandAutocomplete({
                   type="button"
                   onMouseDown={keepFocus}
                   onClick={() => navigate("/tasks")}
-                  className="font-medium text-[var(--accent)] underline-offset-2 hover:underline"
+                  className="font-medium text-[var(--accent-text)] underline-offset-2 hover:underline"
                 >
                   Automations
                 </button>
@@ -213,9 +213,9 @@ export function SlashCommandAutocomplete({
                     className={cn(
                       "mt-0.5 h-3.5 w-3.5 shrink-0",
                       doesSomething
-                        ? "text-[var(--accent)]"
+                        ? "text-[var(--accent-text)]"
                         : active
-                          ? "text-[var(--accent)]"
+                          ? "text-[var(--accent-text)]"
                           : "text-[var(--text-muted)]"
                     )}
                   />
@@ -228,7 +228,7 @@ export function SlashCommandAutocomplete({
                         // Says what picking this will DO, before it's
                         // picked. The whole risk of one menu holding both
                         // is someone expecting text and getting an action.
-                        <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--accent)]">
+                        <span className="shrink-0 rounded-full bg-[var(--accent)]/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--accent-text)]">
                           Runs
                         </span>
                       )}

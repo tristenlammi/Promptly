@@ -45,6 +45,7 @@ export function ContextWarningBanner({ conversationId, onCompact }: Props) {
       content: m.content,
       promptTokens: m.prompt_tokens,
       completionTokens: m.completion_tokens,
+      contextUsage: m.context_usage,
     }));
     return computeContextBudget({ messages: msgs });
   }, [messages]);

@@ -274,11 +274,6 @@ class FetchUrlTool(Tool):
         "one of those to follow a source deeper when the page cites or links "
         "the detail you actually need."
     )
-    prompt_hint = (
-        "Read a single web page and get its cleaned-up main text back. "
-        "Best paired with `web_search` — search first, fetch only the "
-        "URL(s) you actually need to read in full."
-    )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {

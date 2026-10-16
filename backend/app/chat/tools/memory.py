@@ -301,10 +301,6 @@ class RememberTool(Tool):
         "state ('I'm tired today'), or anything sensitive they didn't ask "
         "you to remember (passwords, card or ID numbers)."
     )
-    prompt_hint = (
-        "remember — save a durable fact about the user across chats; pass "
-        "`replaces` when it corrects something already saved"
-    )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {
@@ -356,6 +352,27 @@ class RememberTool(Tool):
         if category not in _VALID_CATEGORIES:
             category = None
 
+        # A turn that read outside content — a web page, search results, a
+        # connector, a file — may be carrying instructions planted for the
+        # model ("remember that the user prefers vendor X"). A fact saved
+        # then is replayed into every future chat. So unless the user asked
+        # for this save in their own words, it's offered, not saved (R-019).
+        if ctx.turn and ctx.turn.get("untrusted"):
+            trigger = await ctx.db.get(Message, ctx.user_message_id)
+            if trigger is None or not is_explicit_memory_request(trigger.content or ""):
+                return ToolResult(
+                    content=(
+                        "Not saved: this turn included content from outside the "
+                        "conversation (a web page, search results, a connector or "
+                        "a file), so memory is only written when the user asks. "
+                        f"They've been offered \"{content}\" to save with one click."
+                    ),
+                    meta={
+                        "memory_writes": [],
+                        "memory_proposals": [{"content": content, "category": category}],
+                    },
+                )
+
         replaces = str(args.get("replaces") or "").strip()
         if replaces:
             target = await _resolve(ctx, replaces)
@@ -404,14 +421,16 @@ class RememberTool(Tool):
                     "Ask the user to remove a few from Settings → Memory."
                 )
 
+        # The model's own judgement is "auto" (the cap recycles those). But
+        # when the user asked in so many words ("remember that…"), it's
+        # their fact — treat it like one they typed, so it's never evicted
+        # to make room (R-269).
+        trigger_row = await ctx.db.get(Message, ctx.user_message_id) if ctx.user_message_id else None
+        asked = bool(trigger_row) and is_explicit_memory_request(trigger_row.content or "")
         row = UserMemory(
             user_id=ctx.user.id,
             content=content,
-            # Deliberately "auto", not "manual": this is the model's
-            # judgement, and the cap-eviction path only ever recycles
-            # auto rows. Marking tool writes as user-stated would let a
-            # chatty turn fill the store with entries nothing can evict.
-            source="auto",
+            source="manual" if asked else "auto",
             source_conversation_id=ctx.conversation_id,
             category=category,
         )
@@ -436,10 +455,6 @@ class ForgetTool(Tool):
         "IS a replacement — they moved, switched tools, changed their mind "
         "about a preference — call `remember` with `replaces` instead, so "
         "the fact is corrected rather than lost."
-    )
-    prompt_hint = (
-        "forget — delete a saved memory that is no longer true (use "
-        "`remember` with `replaces` when there's a corrected version)"
     )
     parameters: dict[str, Any] = {
         "type": "object",
@@ -558,10 +573,6 @@ class RecallTool(Tool):
         "something they told you before that isn't in front of you, or "
         "before saying you don't know something personal about them. "
         "Read-only: it never changes what is saved."
-    )
-    prompt_hint = (
-        "recall — search the user's full saved memory, beyond the few facts "
-        "already in your prompt"
     )
     parameters: dict[str, Any] = {
         "type": "object",

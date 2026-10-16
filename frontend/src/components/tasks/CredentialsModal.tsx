@@ -7,7 +7,7 @@
  */
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Globe, KeyRound, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 
 import { secretsApi } from "@/api/secrets";
 import { Modal } from "@/components/shared/Modal";
@@ -16,6 +16,14 @@ import { formatRelativeTime } from "@/components/files/helpers";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 import { apiErrorMessage } from "@/utils/apiError";
+
+/** "api.github.com, *.example.com" → ["api.github.com", "*.example.com"] */
+function parseHosts(raw: string): string[] {
+  return raw
+    .split(/[\s,]+/)
+    .map((h) => h.trim())
+    .filter(Boolean);
+}
 
 export function CredentialsModal({
   open,
@@ -34,7 +42,11 @@ export function CredentialsModal({
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
+  const [hosts, setHosts] = useState("");
   const [busy, setBusy] = useState(false);
+  // id of the secret whose allowed hosts are being edited (inline).
+  const [editingHosts, setEditingHosts] = useState<string | null>(null);
+  const [hostsValue, setHostsValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   // id of the secret whose value is being replaced (inline).
   const [replacing, setReplacing] = useState<string | null>(null);
@@ -46,6 +58,7 @@ export function CredentialsModal({
   const reset = () => {
     setName("");
     setValue("");
+    setHosts("");
     setError(null);
     setAdding(false);
   };
@@ -55,7 +68,7 @@ export function CredentialsModal({
     setBusy(true);
     setError(null);
     try {
-      await secretsApi.create(name.trim(), value);
+      await secretsApi.create(name.trim(), value, parseHosts(hosts));
       invalidate();
       reset();
       toast.success("Credential saved");
@@ -75,6 +88,21 @@ export function CredentialsModal({
       setReplacing(null);
       setReplaceValue("");
       toast.success("Credential updated");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveHosts = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await secretsApi.setHosts(id, parseHosts(hostsValue));
+      invalidate();
+      setEditingHosts(null);
+      toast.success("Allowed hosts updated");
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't save the hosts."));
     } finally {
       setBusy(false);
     }
@@ -125,9 +153,24 @@ export function CredentialsModal({
                     {s.name}
                   </code>
                   <span className="ml-1 truncate text-[11px] text-[var(--text-muted)]">
-                    updated {formatRelativeTime(s.updated_at)}
+                    {s.allowed_hosts?.length
+                      ? `only ${s.allowed_hosts.join(", ")}`
+                      : "any host"}{" "}
+                    · updated {formatRelativeTime(s.updated_at)}
                   </span>
                   <div className="ml-auto flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      title="Where it may be sent"
+                      aria-label={`Allowed hosts for ${s.name}`}
+                      onClick={() => {
+                        setEditingHosts(editingHosts === s.id ? null : s.id);
+                        setHostsValue((s.allowed_hosts ?? []).join(", "));
+                      }}
+                      className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                    >
+                      <Globe className="h-3.5 w-3.5" />
+                    </button>
                     <button
                       type="button"
                       title="Replace value"
@@ -151,6 +194,29 @@ export function CredentialsModal({
                     </button>
                   </div>
                 </div>
+                {editingHosts === s.id && (
+                  <div className="mt-2 flex items-center gap-1.5">
+                    <input
+                      autoFocus
+                      value={hostsValue}
+                      onChange={(e) => setHostsValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") void saveHosts(s.id);
+                        if (e.key === "Escape") setEditingHosts(null);
+                      }}
+                      placeholder="api.example.com, *.example.org — empty = any host"
+                      className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+                    />
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void saveHosts(s.id)}
+                      className="shrink-0 rounded-md bg-[var(--accent)] px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                  </div>
+                )}
                 {replacing === s.id && (
                   <div className="mt-2 flex items-center gap-1.5">
                     <input
@@ -208,6 +274,19 @@ export function CredentialsModal({
                 placeholder="sk_live_…"
                 className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
               />
+            </label>
+            <label className="block text-xs font-medium text-[var(--text-muted)]">
+              Only send to (recommended)
+              <input
+                value={hosts}
+                onChange={(e) => setHosts(e.target.value)}
+                placeholder="api.stripe.com — empty = any host"
+                className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
+              />
+              <span className="mt-1 block text-[10px] font-normal">
+                A step that would send this credential anywhere else fails
+                instead.
+              </span>
             </label>
             {error && <p className="text-xs text-[var(--danger)]">{error}</p>}
             <div className="flex justify-end gap-2">

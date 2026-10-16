@@ -20,6 +20,8 @@ export interface Memory {
 
 export interface MemoryImportResult {
   imported: number;
+  /** Existing facts replaced by a richer imported version (R-329). */
+  updated: number;
   skipped: number;
   errors: number;
 }
@@ -88,13 +90,29 @@ export const memoryApi = {
   async clear(): Promise<void> {
     await apiClient.delete("/memory");
   },
-  /** Download all memories as a JSON file (Phase 3.5). */
-  exportUrl(): string {
-    return "/api/memory/export";
+  /** Download all memories as a JSON file (Phase 3.5). Fetched through
+   *  the API client: a plain link carries no sign-in token, so it saved a
+   *  401 error as the "backup" (R-264). */
+  async exportFile(): Promise<void> {
+    const { data } = await apiClient.get<Blob>("/memory/export", { responseType: "blob" });
+    const url = URL.createObjectURL(data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "promptly-memories.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   },
   /** Import memories from a parsed JSON array (Phase 3.5). */
   async import(items: unknown[]): Promise<MemoryImportResult> {
     const { data } = await apiClient.post<MemoryImportResult>("/memory/import", items);
+    return data;
+  },
+  /** Import plain-text facts, one per line — pasted, or read from a
+   *  .txt / .md file. List markers are stripped server-side (R-329). */
+  async importText(text: string): Promise<MemoryImportResult> {
+    const { data } = await apiClient.post<MemoryImportResult>("/memory/import", { text });
     return data;
   },
   /** Ask what a plain-English instruction would change. Read-only —

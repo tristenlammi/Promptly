@@ -76,14 +76,21 @@ export function ConfirmHost() {
       widthClass="max-w-sm"
       footer={
         <>
-          <Button variant="ghost" size="sm" onClick={() => settle(false)}>
+          {/* A destructive confirm starts on Cancel, so a stray Enter can't
+              delete anything (R-124). */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => settle(false)}
+            autoFocus={!!current?.danger}
+          >
             {current?.cancelLabel ?? "Cancel"}
           </Button>
           <Button
             variant={current?.danger ? "danger" : "primary"}
             size="sm"
             onClick={() => settle(true)}
-            autoFocus
+            autoFocus={!current?.danger}
           >
             {current?.confirmLabel ?? "Confirm"}
           </Button>

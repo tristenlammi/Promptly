@@ -60,6 +60,7 @@ _SCOPE_COLUMN = {
     "custom_model": "custom_model_id",
     "workspace": "workspace_id",
     "conversation": "conversation_id",
+    "drive": "drive_user_id",  # WP-5.1 — Ask your Drive
 }
 
 
@@ -94,8 +95,13 @@ async def delete_existing_chunks(
     scope_kind: str,
     scope_id: uuid.UUID,
     user_file_id: uuid.UUID,
+    commit: bool = True,
 ) -> None:
     """Drop any prior chunks for this (scope, file) pair before re-embedding.
+
+    Before an ``insert_chunks`` pass ``commit=False``: the delete and the
+    insert then land in one commit, so retrieval never sees the file with
+    no chunks and a crash in between can't leave it empty (R-334).
 
     ``scope_kind`` is ``"custom_model"`` or ``"workspace"`` — it selects
     which owner column to filter on. Cheaper than a per-chunk MERGE, and
@@ -103,6 +109,13 @@ async def delete_existing_chunks(
     refuse a plain re-insert anyway.
     """
     col = _SCOPE_COLUMN[scope_kind]
+    # One indexer at a time per (scope, file): two overlapping re-indexes
+    # used to interleave and one would hit the unique guard and mark an
+    # indexed file "failed" (R-334). Held to the end of the transaction.
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:k))"),
+        {"k": f"chunks:{scope_kind}:{scope_id}:{user_file_id}"},
+    )
     await db.execute(
         text(
             f"""
@@ -112,7 +125,8 @@ async def delete_existing_chunks(
         ),
         {"sid": str(scope_id), "uf": str(user_file_id)},
     )
-    await db.commit()
+    if commit:
+        await db.commit()
 
 
 async def insert_chunks(
@@ -185,6 +199,7 @@ async def embed_file_to_chunks(
     provider: ModelProvider,
     model_id: str,
     dim: int,
+    interactive: bool = False,
 ) -> tuple[list[Chunk], list[list[float]]]:
     """Pure extract → normalise → chunk → embed pipeline, scope-agnostic.
 
@@ -198,7 +213,7 @@ async def embed_file_to_chunks(
     # stall every other request, including chat streaming).
     raw_text = await run_in_threadpool(extract_text_for_embedding, file)
     return await embed_text_to_chunks(
-        raw_text, provider=provider, model_id=model_id, dim=dim
+        raw_text, provider=provider, model_id=model_id, dim=dim, interactive=interactive
     )
 
 
@@ -208,8 +223,13 @@ async def embed_text_to_chunks(
     provider: ModelProvider,
     model_id: str,
     dim: int,
+    interactive: bool = False,
 ) -> tuple[list[Chunk], list[list[float]]]:
     """Normalise → chunk → embed an already-extracted string.
+
+    ``interactive=True`` when a person is waiting on it (a chat attachment
+    indexed as the message is sent) — it then doesn't queue behind bulk
+    background indexing (R-320).
 
     The text-source variant of :func:`embed_file_to_chunks` — used when
     the text didn't come straight off disk (e.g. a vision-model
@@ -222,7 +242,8 @@ async def embed_text_to_chunks(
     # the fairness gate yields the embedder to interactive query embeds.
     from app.custom_models import embedding_gate
 
-    embedding_gate.mark_background()
+    if not interactive:
+        embedding_gate.mark_background()
 
     normalised = normalise_for_embedding(raw_text)
     if not normalised:
@@ -368,6 +389,7 @@ async def index_file_for_custom_model(
                 scope_kind="custom_model",
                 scope_id=custom_model_id,
                 user_file_id=user_file_id,
+                commit=False,
             )
             await insert_chunks(
                 db,

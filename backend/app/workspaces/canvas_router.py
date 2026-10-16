@@ -20,7 +20,9 @@ decode the Excalidraw Yjs schema.
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -30,6 +32,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
+    Form,
     HTTPException,
     Response,
     UploadFile,
@@ -80,7 +83,7 @@ def _color_for_user(user_id: uuid.UUID) -> str:
 
 
 def _mint_canvas_token(
-    *, canvas_id: uuid.UUID, user: User, perm: str
+    *, canvas_id: uuid.UUID, user: User, perm: str, epoch: int = 0
 ) -> tuple[str, int]:
     now = int(time.time())
     exp = now + CANVAS_TOKEN_TTL_SECONDS
@@ -91,6 +94,7 @@ def _mint_canvas_token(
         "type": "canvas",
         "canvas_id": str(canvas_id),
         "perm": perm,
+        "epoch": epoch,
         "name": user.username,
         # Chosen profile colour wins; palette hash is the fallback.
         "color": user.avatar_color or _color_for_user(user.id),
@@ -156,8 +160,10 @@ async def create_canvas_with_item(
         yjs_update=b"",
         text_file_id=text_file.id,
     )
-    db.add(canvas)
-    await db.flush()
+    # With its Drive shell — the whiteboard as a file (WP-3.2).
+    from app.files.office import add_with_shell
+
+    await add_with_shell(db, canvas, kind=GeneratedKind.WHITEBOARD.value)
 
     # 3) Navigator item.
     item = WorkspaceItem(
@@ -185,26 +191,24 @@ async def create_canvas_with_item(
 async def _load_canvas_with_access(
     canvas_id: uuid.UUID, user: User, db: AsyncSession
 ) -> tuple[WorkspaceCanvas, str]:
+    """The canvas and the caller's role on it — ``"editor"`` or
+    ``"viewer"``. Answered by the one office-file access rule (WP-3.4):
+    workspace role, private drafts and trash as before, plus Drive grants
+    and personal whiteboards made from Files. 404 without access."""
+    from app.files.office import get_office_access
+
     canvas = await db.get(WorkspaceCanvas, canvas_id)
-    if canvas is None:
+    shell = await db.get(UserFile, canvas.file_id) if canvas is not None else None
+    if canvas is None or shell is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Canvas not found"
         )
-    _ws, role = await get_accessible_workspace(canvas.workspace_id, user, db)
-    # Private drafts (0134): the flag lives on the backing navigator item.
-    item = (
-        await db.execute(
-            select(WorkspaceItem).where(
-                WorkspaceItem.ref_id == canvas.id,
-                WorkspaceItem.kind == "canvas",
-            )
+    access = await get_office_access(db, shell, user)
+    if access == "none":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Canvas not found"
         )
-    ).scalars().first()
-    if item is not None:
-        from app.workspaces.items_router import require_item_visible
-
-        require_item_visible(item, user)
-    return canvas, role
+    return canvas, ("editor" if access == "edit" else "viewer")
 
 
 # ---------------------------------------------------------------------
@@ -212,8 +216,11 @@ async def _load_canvas_with_access(
 # ---------------------------------------------------------------------
 class CanvasMeta(BaseModel):
     id: uuid.UUID
-    workspace_id: uuid.UUID
+    # None for a personal whiteboard (made from Files).
+    workspace_id: uuid.UUID | None
     title: str
+    file_id: uuid.UUID | None = None
+    can_edit: bool = True
 
 
 @router.get("/{canvas_id}", response_model=CanvasMeta)
@@ -222,9 +229,13 @@ async def get_canvas(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CanvasMeta:
-    canvas, _role = await _load_canvas_with_access(canvas_id, user, db)
+    canvas, role = await _load_canvas_with_access(canvas_id, user, db)
     return CanvasMeta(
-        id=canvas.id, workspace_id=canvas.workspace_id, title=canvas.title
+        id=canvas.id,
+        workspace_id=canvas.workspace_id,
+        title=canvas.title,
+        file_id=canvas.file_id,
+        can_edit=role != "viewer",
     )
 
 
@@ -234,19 +245,15 @@ async def get_canvas_collab_token(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> CollabTokenResponse:
-    canvas, role = await _load_canvas_with_access(canvas_id, user, db)
-    perm = "read" if role == "viewer" else "write"
-    token, exp = _mint_canvas_token(canvas_id=canvas.id, user=user, perm=perm)
-    return CollabTokenResponse(
-        token=token,
-        expires_at=exp,
-        user=CollabTokenUser(
-            id=user.id,
-            name=user.username,
-            color=user.avatar_color or _color_for_user(user.id),
-            avatar=user.avatar_url,
-        ),
-    )
+    # One access answer for every office file (WP-3.2): delegates to the
+    # unified token endpoint's logic via the whiteboard's Drive shell.
+    from app.files.office_router import office_token_response
+
+    canvas = await db.get(WorkspaceCanvas, canvas_id)
+    shell = await db.get(UserFile, canvas.file_id) if canvas is not None else None
+    if shell is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Canvas not found")
+    return await office_token_response(db, shell, user)
 
 
 class CanvasTextUpdate(BaseModel):
@@ -330,27 +337,88 @@ _MODEL_NAME = os.environ.get("REMBG_MODEL", "isnet-general-use")
 
 # Built once on first request (loads the model into memory), then reused.
 _rembg_session = None
+_rembg_init = threading.Lock()
+
+# One inference at a time across the process, a per-user rate, and images
+# scaled down before the model sees them. Two concurrent 79-MP requests
+# peaked at ~4.6 GB — past the backend's memory limit, so it was killed
+# and restarted, dropping every in-flight chat (R-172).
+_REMBG_SLOT = asyncio.Semaphore(1)
+_MAX_BG_PIXELS = 4_000_000  # the model works at ~1024 px; more is waste
+_BG_PER_USER_PER_MINUTE = 6
+
+
+def _downscale(data: bytes) -> bytes:
+    """Bytes of a copy no larger than ``_MAX_BG_PIXELS``. Refuses anything
+    Pillow won't open or that claims more than 100 MP."""
+    import io
+
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(data))
+    w, h = img.size
+    if w * h > 100_000_000:
+        raise ValueError("too many pixels")
+    if w * h <= _MAX_BG_PIXELS:
+        return data
+    scale = (_MAX_BG_PIXELS / (w * h)) ** 0.5
+    img = img.convert("RGBA").resize((max(1, int(w * scale)), max(1, int(h * scale))))
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
 
 
 def _run_rembg(data: bytes) -> bytes:
     global _rembg_session
     from rembg import new_session, remove
 
-    if _rembg_session is None:
-        _rembg_session = new_session(_MODEL_NAME)
+    data = _downscale(data)
+    with _rembg_init:
+        if _rembg_session is None:
+            _rembg_session = new_session(_MODEL_NAME)
     return remove(data, session=_rembg_session)
+
+
+async def _bg_rate_ok(user_id) -> bool:
+    from app.redis_client import redis
+
+    key = f"rembg:{user_id}"
+    try:
+        n = await redis.incr(key)
+        if n == 1:
+            await redis.expire(key, 60)
+        return n <= _BG_PER_USER_PER_MINUTE
+    except Exception:  # noqa: BLE001 — no Redis, no limit (the slot still holds)
+        return True
 
 
 @router.post("/remove-background")
 async def remove_background(
     file: UploadFile = File(...),
-    _user: User = Depends(get_current_user),
+    workspace_id: uuid.UUID = Form(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> Response:
     """Return a transparent-background PNG cut-out of the uploaded image.
 
-    Inference is CPU-bound, so it runs in a worker thread to avoid blocking
-    the event loop."""
-    data = await file.read()
+    For people who can edit a canvas in ``workspace_id`` (it used to need
+    only a login). Inference is CPU-bound, so it runs in a worker thread,
+    one request at a time."""
+    from app.workspaces.shares import get_accessible_workspace, require_workspace_write
+
+    _ws, role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(role)
+    if not await _bg_rate_ok(user.id):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="That's a lot of background removals — wait a minute and try again.",
+        )
+    if file.size is not None and file.size > _MAX_BG_IMAGE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Image too large",
+        )
+    data = await file.read(_MAX_BG_IMAGE_BYTES + 1)
     if not data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Empty image"
@@ -361,7 +429,13 @@ async def remove_background(
             detail="Image too large",
         )
     try:
-        out = await run_in_threadpool(_run_rembg, data)
+        async with _REMBG_SLOT:
+            out = await run_in_threadpool(_run_rembg, data)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="That image can't be processed (unreadable or far too large).",
+        ) from exc
     except Exception as exc:  # pragma: no cover - defensive
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

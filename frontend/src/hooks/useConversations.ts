@@ -1,7 +1,18 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { authApi } from "@/api/auth";
-import { chatApi, type UpdateConversationPayload } from "@/api/chat";
+import {
+  chatApi,
+  CONVERSATION_PAGE_SIZE,
+  conversationCursor,
+  type UpdateConversationPayload,
+} from "@/api/chat";
 import { useAuthStore } from "@/store/authStore";
 import { useChatStore } from "@/store/chatStore";
 import { toast } from "@/store/toastStore";
@@ -42,15 +53,41 @@ export function hideConversationFromHistory(id: string): Promise<void> {
   return _hideChain;
 }
 
+/** The sidebar's own chats (not in a workspace or a folder), newest first,
+ *  a page at a time. It used to load the 50 most recent once and stop, so
+ *  older chats vanished — and workspace chats, filtered out afterwards,
+ *  used up those 50 (R-047). Feeds the chat store the sidebar renders. */
 export function useConversationsQuery() {
   const setConversations = useChatStore((s) => s.setConversations);
-  return useQuery({
+  const query = useInfiniteQuery({
     queryKey: CONVERSATIONS_KEY,
-    queryFn: async () => {
-      const list = await chatApi.list();
-      setConversations(list);
-      return list;
-    },
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      chatApi.listPage({ scope: "personal", folder: "none", cursor: pageParam }),
+    getNextPageParam: (last) =>
+      last.length < CONVERSATION_PAGE_SIZE
+        ? undefined
+        : conversationCursor(last[last.length - 1]),
+  });
+  useEffect(() => {
+    if (query.data) setConversations(query.data.pages.flat());
+  }, [query.data, setConversations]);
+  return query;
+}
+
+/** One folder's chats, loaded when the folder is opened (they used to come
+ *  from the sidebar's first 50, so folders looked empty). */
+export function useFolderConversations(folderId: string, enabled: boolean) {
+  return useInfiniteQuery({
+    queryKey: [...CONVERSATIONS_KEY, "folder", folderId],
+    enabled,
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      chatApi.listPage({ scope: "personal", folder: folderId, cursor: pageParam }),
+    getNextPageParam: (last) =>
+      last.length < CONVERSATION_PAGE_SIZE
+        ? undefined
+        : conversationCursor(last[last.length - 1]),
   });
 }
 
@@ -94,10 +131,18 @@ const ARCHIVED_KEY = ["conversations", "archived"] as const;
 /** Archived chats for the dedicated Archive page. Kept separate from the
  *  sidebar store (``CONVERSATIONS_KEY``) so archived rows never leak into
  *  the active list. */
-export function useArchivedConversationsQuery() {
-  return useQuery({
-    queryKey: ARCHIVED_KEY,
-    queryFn: () => chatApi.list(200, 0, true),
+/** The Archive, a page at a time, searched by title on the server (it
+ *  stopped at 200 and searched only what had loaded). */
+export function useArchivedConversationsQuery(search = "") {
+  return useInfiniteQuery({
+    queryKey: [...ARCHIVED_KEY, search],
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      chatApi.listPage({ archived: true, cursor: pageParam, q: search }),
+    getNextPageParam: (last) =>
+      last.length < CONVERSATION_PAGE_SIZE
+        ? undefined
+        : conversationCursor(last[last.length - 1], true),
   });
 }
 

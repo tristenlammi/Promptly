@@ -123,6 +123,10 @@ class EmbeddingConfig(BaseModel):
     # Convenience: human label assembled from the FK so the UI doesn't
     # have to re-resolve the provider just to render a banner.
     embedding_provider_name: str | None = None
+    # R-322: last success / last error / skipping, from this process.
+    health: dict | None = None
+    # R-321: what's still waiting to be (re)embedded.
+    pending: dict[str, int] | None = None
 
 
 class EmbeddingConfigUpdate(BaseModel):

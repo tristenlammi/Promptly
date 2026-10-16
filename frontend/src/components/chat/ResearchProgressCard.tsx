@@ -24,7 +24,7 @@ function StepIndicator({
         className={cn(
           "flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
           status === "done" && "bg-emerald-500 text-white",
-          status === "active" && "bg-[var(--accent)]/20 text-[var(--accent)]",
+          status === "active" && "bg-[var(--accent)]/20 text-[var(--accent-text)]",
           status === "pending" && "bg-[var(--border)] text-[var(--text-muted)]"
         )}
       >
@@ -103,7 +103,7 @@ export function ResearchProgressCard({ conversationId, onCancel }: Props) {
                   question and cost real time and search credits. */}
               {streamingReport?.trim() && (
                 <details className="mt-2">
-                  <summary className="cursor-pointer text-xs text-[var(--accent)]">
+                  <summary className="cursor-pointer text-xs text-[var(--accent-text)]">
                     Show what was written before it stopped
                   </summary>
                   <div className="mt-1.5 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-md bg-[var(--bg)] p-2 text-xs text-[var(--text-muted)]">
@@ -140,7 +140,7 @@ export function ResearchProgressCard({ conversationId, onCancel }: Props) {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-2.5">
           <div className="flex items-center gap-2">
-            <FlaskConical className="h-4 w-4 text-[var(--accent)]" />
+            <FlaskConical className="h-4 w-4 text-[var(--accent-text)]" />
             <span className="text-sm font-semibold text-[var(--text)]">Deep Research</span>
             <span className="ml-1 max-w-[40ch] truncate text-xs text-[var(--text-muted)]">
               {query}
@@ -159,7 +159,7 @@ export function ResearchProgressCard({ conversationId, onCancel }: Props) {
         {isSynthesizing ? (
           /* Synthesis view — streaming markdown */
           <div className="px-4 py-3">
-            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-[var(--accent)]">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-[var(--accent-text)]">
               <Loader2 className="h-3 w-3 animate-spin" />
               Writing report…
             </div>
@@ -186,7 +186,7 @@ export function ResearchProgressCard({ conversationId, onCancel }: Props) {
                       className={cn(
                         "mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full",
                         sq.status === "done" && "bg-emerald-500 text-white",
-                        sq.status === "searching" && "bg-[var(--accent)]/20 text-[var(--accent)]",
+                        sq.status === "searching" && "bg-[var(--accent)]/20 text-[var(--accent-text)]",
                         sq.status === "reading" && "bg-amber-500/20 text-amber-600",
                         sq.status === "queued" && "border border-[var(--border)] text-[var(--text-muted)]"
                       )}

@@ -165,6 +165,15 @@ class ProviderError(Exception):
         self.retry_after = retry_after
 
 
+def _transport_error_message(exc: Exception) -> str:
+    """A readable message for a network-level failure. Phrased so the chat
+    layer's classifier files it as a provider hiccup (retry), not a bug."""
+    if isinstance(exc, httpx.TimeoutException):
+        return "The model timed out before finishing."
+    detail = str(exc) or type(exc).__name__
+    return f"Connection error talking to the model: {detail}"
+
+
 def _openai_error_meta(exc: Exception) -> dict[str, Any]:
     """Extract ``status_code`` + ``retry_after`` from an OpenAI SDK error.
 
@@ -510,6 +519,14 @@ def _resolve_base_url(provider: ModelProvider) -> str:
                 f"Provider {provider.name!r} has an unsafe base_url: {e}"
             ) from e
         return url
+    if provider.type == "ollama":
+        # The Ollama this stack is wired to (bundled container, or the
+        # host's). "localhost" inside the backend container is the
+        # container itself, so the wizard's "Local (Ollama)" tile — which
+        # leaves base_url empty — never reached anything (R-258).
+        import os
+
+        return os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/") + "/v1"
     default = DEFAULT_BASE_URLS.get(provider.type)
     if not default:
         raise ProviderError(
@@ -633,6 +650,13 @@ def _detect_reasoning_by_id(provider_type: str, model_id: str) -> bool:
     carry the vendor prefix (``openai/o3``), so stripping it first lets the
     same heuristics serve both direct providers and OpenRouter.
     """
+    # Only where an effort knob is actually wired (below, in
+    # ``stream_chat_events``). Elsewhere — direct Anthropic (its
+    # OpenAI-compatible endpoint ignores ``reasoning_effort``), Ollama, any
+    # OpenAI-compatible server — the Effort control was shown and did
+    # nothing (R-275); reporting False hides it.
+    if provider_type not in ("deepseek", "openrouter", "openai", "gemini"):
+        return False
     if provider_type == "deepseek":
         # The hosted DeepSeek API exposes thinking / reasoning_effort for
         # its chat models (handled via ``extra_body``).
@@ -698,26 +722,19 @@ def _known_context_window(provider_type: str, model_id: str) -> int | None:
     number. The pill treats ``None`` as "no indicator"."""
     mid = model_id.lower()
     if provider_type == "anthropic":
-        # Claude 4.x (opus/sonnet/haiku 4 + point releases like 4.6 / 4.8)
-        # ship a 1M-token context window at standard pricing as of 2026.
-        # Verified against anthropic.com/news/1m-context + the models docs.
-        if (
-            "claude-opus-4" in mid
-            or "claude-sonnet-4" in mid
-            or "claude-haiku-4" in mid
-            or "claude-4" in mid
-        ):
-            return 1_000_000
-        # Claude 3.x (and bare family ids) — 200k. Bare names default low
-        # so we never over-state a window and risk silent truncation.
-        if (
-            "claude-3" in mid
-            or "claude-sonnet" in mid
-            or "claude-opus" in mid
-            or "claude-haiku" in mid
-        ):
-            return 200_000
-        return None
+        # Fallback only — the Models API reports ``max_input_tokens`` and
+        # listing uses that. Per Anthropic's context-windows docs (checked
+        # 2026-10-08): these lines have 1M tokens, no beta header; every
+        # other Claude model has 200k. "Any Claude 4 is 1M" overstated Opus
+        # 4.5/4.1/4, Sonnet 4.5/4 and Haiku 4.5 (R-277).
+        if "claude" not in mid:
+            return None
+        norm = mid.replace(".", "-")
+        one_million = (
+            "fable", "mythos", "opus-5", "sonnet-5", "haiku-5",
+            "opus-4-8", "opus-4-7", "opus-4-6", "sonnet-4-6",
+        )
+        return 1_000_000 if any(t in norm for t in one_million) else 200_000
     if provider_type == "openai":
         # Order matters — check the most specific ids first.
         if "gpt-4.1" in mid:
@@ -1001,7 +1018,85 @@ def _client_for(provider: ModelProvider) -> AsyncOpenAI:
         api_key=_api_key_for(provider),
         base_url=_resolve_base_url(provider),
         default_headers=_headers_for(provider),
+        # The SDK default (600 s read, 2 retries) let one stalled upstream
+        # hold a turn for about 30 minutes (R-273). ``read`` is the longest
+        # silence between bytes, not the whole reply: generous, because a
+        # CPU-only local model can take minutes to its first token.
+        timeout=_PROVIDER_TIMEOUT,
+        max_retries=1,
     )
+
+
+_PROVIDER_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=60.0, pool=10.0)
+
+
+def _bill_side_call(ev: "UsageEvent") -> None:
+    """Record a utility call's usage against the user the work is for, in
+    the background with its own session (R-276)."""
+    from app.billing.usage_context import billed_user
+
+    user_id = billed_user()
+    if user_id is None:
+        return
+
+    async def _record() -> None:
+        from app.billing.usage import record_usage
+        from app.database import SessionLocal
+
+        try:
+            async with SessionLocal() as db:
+                await record_usage(
+                    db,
+                    user_id=user_id,
+                    prompt_tokens=ev.prompt_tokens,
+                    completion_tokens=ev.completion_tokens,
+                    cost_usd=ev.cost_usd,
+                    count_message=False,
+                )
+                await db.commit()
+        except Exception:  # noqa: BLE001 — metering must never break a call
+            logger.exception("Recording side-call usage failed for user=%s", user_id)
+
+    from app.background import spawn
+
+    spawn(_record(), name=f"bill-side-call-{user_id}")
+
+
+async def _fill_ollama_context_windows(
+    provider: ModelProvider, rows: list[dict[str, Any]]
+) -> None:
+    """Fill ``context_window`` for Ollama models, which ``/v1/models``
+    doesn't report (R-303): the model's own window from ``/api/show``,
+    capped at ``OLLAMA_CONTEXT_LENGTH`` for the Ollama this stack runs —
+    that's what a request actually gets. Best effort."""
+    import os
+
+    base = _resolve_base_url(provider)
+    native = base[:-3] if base.endswith("/v1") else base
+    stack_ollama = os.environ.get("OLLAMA_URL", "http://ollama:11434").rstrip("/")
+    try:
+        configured = int(os.environ.get("OLLAMA_CONTEXT_LENGTH", "") or 0) or None
+    except ValueError:
+        configured = None
+    cap = configured if native.rstrip("/") == stack_ollama else None
+
+    async def _one(client: httpx.AsyncClient, row: dict[str, Any]) -> None:
+        try:
+            r = await client.post(f"{native}/api/show", json={"model": row["id"]})
+            r.raise_for_status()
+            info = r.json().get("model_info") or {}
+            window = next(
+                (int(v) for k, v in info.items() if k.endswith(".context_length") and v),
+                None,
+            )
+        except Exception:  # noqa: BLE001 — unknown stays unknown
+            window = None
+        if window and cap:
+            window = min(window, cap)
+        row["context_window"] = window or cap
+
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        await asyncio.gather(*(_one(client, r) for r in rows[:50]))
 
 
 class ModelRouter:
@@ -1115,6 +1210,16 @@ class ModelRouter:
         if include_usage:
             create_kwargs["stream_options"] = {"include_usage": True}
 
+        # Direct OpenAI: ``max_tokens`` is deprecated in favour of
+        # ``max_completion_tokens``, and the reasoning families (o-series,
+        # gpt-5) reject both ``max_tokens`` and any non-default
+        # ``temperature`` with a 400 — so every chat with them failed (R-256).
+        if provider.type == "openai":
+            if "max_tokens" in create_kwargs:
+                create_kwargs["max_completion_tokens"] = create_kwargs.pop("max_tokens")
+            if _detect_reasoning_by_id("openai", model_id):
+                create_kwargs.pop("temperature", None)
+
         # DeepSeek-specific request shaping. ``thinking`` and
         # ``reasoning_effort`` are non-OpenAI fields that the DeepSeek
         # API merges into ``/chat/completions``; the OpenAI SDK passes
@@ -1161,6 +1266,15 @@ class ModelRouter:
             # Direct OpenAI reasoning models take a first-class
             # ``reasoning_effort`` param (o-series / gpt-5 thinking).
             create_kwargs["reasoning_effort"] = reasoning_effort
+        elif (
+            native_reasoning
+            and provider.type == "gemini"
+            and reasoning_effort in {"low", "medium", "high"}
+        ):
+            # Gemini's OpenAI-compatible endpoint takes ``reasoning_effort``
+            # too (ai.google.dev/gemini-api/docs/openai). "off" isn't sent:
+            # most Gemini models can't turn thinking off.
+            create_kwargs["reasoning_effort"] = reasoning_effort
         # Native reasoning models on providers we don't have a param for
         # just use their built-in default; non-native models were already
         # handled via the system-prompt directive above.
@@ -1184,6 +1298,8 @@ class ModelRouter:
             raise ProviderError(
                 f"Upstream error starting stream: {e}", **_openai_error_meta(e)
             ) from e
+        except httpx.HTTPError as e:
+            raise ProviderError(_transport_error_message(e)) from e
 
         try:
             async for chunk in stream:
@@ -1261,6 +1377,12 @@ class ModelRouter:
             raise ProviderError(
                 f"Upstream error during stream: {e}", **_openai_error_meta(e)
             ) from e
+        except httpx.HTTPError as e:
+            # The SDK iterates the response body unwrapped, so a read
+            # timeout or a connection the upstream dropped arrives as a raw
+            # httpx error that nothing downstream caught: the partial
+            # reply vanished with no error at all (R-255).
+            raise ProviderError(_transport_error_message(e)) from e
         finally:
             await client.close()
 
@@ -1275,8 +1397,14 @@ class ModelRouter:
         max_tokens: int | None = 4096,
         usage_out: dict[str, Any] | None = None,
         reasoning_effort: str | None = None,
+        bill: bool = True,
     ) -> AsyncGenerator[str, None]:
         """Yield content tokens from the provider's streaming endpoint.
+
+        Utility calls (titles, memory, captions, compaction, Ask…) are
+        charged to the user the request is for — see
+        ``app.billing.usage_context``. ``bill=False`` when the caller
+        records the usage itself.
 
         Backwards-compatible wrapper around :meth:`stream_chat_events` so
         the titler / search distiller keep their text-only
@@ -1289,6 +1417,7 @@ class ModelRouter:
         thinking-capable model doesn't burn the whole budget reasoning
         about a two-word label.
         """
+        seen_usage: UsageEvent | None = None
         async for ev in self.stream_chat_events(
             provider=provider,
             model_id=model_id,
@@ -1296,18 +1425,22 @@ class ModelRouter:
             system=system,
             temperature=temperature,
             max_tokens=max_tokens,
-            include_usage=usage_out is not None,
+            include_usage=True,
             reasoning_effort=reasoning_effort,
         ):
             if isinstance(ev, TextDelta):
                 yield ev.text
-            elif isinstance(ev, UsageEvent) and usage_out is not None:
-                if ev.prompt_tokens is not None:
-                    usage_out["prompt_tokens"] = ev.prompt_tokens
-                if ev.completion_tokens is not None:
-                    usage_out["completion_tokens"] = ev.completion_tokens
-                if ev.total_tokens is not None:
-                    usage_out["total_tokens"] = ev.total_tokens
+            elif isinstance(ev, UsageEvent):
+                seen_usage = ev
+                if usage_out is not None:
+                    if ev.prompt_tokens is not None:
+                        usage_out["prompt_tokens"] = ev.prompt_tokens
+                    if ev.completion_tokens is not None:
+                        usage_out["completion_tokens"] = ev.completion_tokens
+                    if ev.total_tokens is not None:
+                        usage_out["total_tokens"] = ev.total_tokens
+        if bill and seen_usage is not None:
+            _bill_side_call(seen_usage)
             # ToolCallDelta / FinishEvent are intentionally swallowed:
             # legacy callers don't pass tools and don't care about the
             # finish reason. If a misconfigured provider ever emits a
@@ -1727,6 +1860,7 @@ class ModelRouter:
         # a deterministic display order in the admin UI.
         if provider.type == "ollama":
             out.sort(key=lambda r: r["id"])
+            await _fill_ollama_context_windows(provider, out)
         return out
 
     async def _list_models_anthropic(
@@ -1747,21 +1881,31 @@ class ModelRouter:
             "anthropic-version": "2023-06-01",
         }
 
+        # Paged: the endpoint returns 20 per page by default, so the catalog
+        # used to stop at the first 20 models (R-277).
+        data: list[Any] = []
+        after: str | None = None
         async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                resp = await client.get(url, headers=headers)
-                resp.raise_for_status()
-            except httpx.HTTPError as e:
-                raise ProviderError(f"Failed to fetch model list: {e}") from e
-
-        try:
-            body = resp.json()
-        except ValueError as e:
-            raise ProviderError(f"Model list returned non-JSON: {e}") from e
-
-        data = body.get("data") if isinstance(body, dict) else None
-        if not isinstance(data, list):
-            raise ProviderError("Model list response missing 'data' array")
+            for _ in range(20):
+                params: dict[str, Any] = {"limit": 1000}
+                if after:
+                    params["after_id"] = after
+                try:
+                    resp = await client.get(url, headers=headers, params=params)
+                    resp.raise_for_status()
+                except httpx.HTTPError as e:
+                    raise ProviderError(f"Failed to fetch model list: {e}") from e
+                try:
+                    body = resp.json()
+                except ValueError as e:
+                    raise ProviderError(f"Model list returned non-JSON: {e}") from e
+                page = body.get("data") if isinstance(body, dict) else None
+                if not isinstance(page, list):
+                    raise ProviderError("Model list response missing 'data' array")
+                data.extend(page)
+                after = body.get("last_id") if body.get("has_more") else None
+                if not after:
+                    break
 
         out: list[dict[str, Any]] = []
         for m in data:
@@ -1774,8 +1918,11 @@ class ModelRouter:
                 {
                     "id": model_id,
                     "display_name": m.get("display_name") or model_id,
-                    "context_window": _known_context_window(
-                        "anthropic", model_id
+                    # The API's own figure when it gives one.
+                    "context_window": (
+                        m.get("max_input_tokens")
+                        if isinstance(m.get("max_input_tokens"), int)
+                        else _known_context_window("anthropic", model_id)
                     ),
                     "pricing": None,
                     "description": None,
@@ -1837,10 +1984,16 @@ class ModelRouter:
         if resp.status_code >= 400:
             return {"ok": False, "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
 
+        # Count the catalog with one plain /models read. The full refresh
+        # (300+ per-model /endpoints privacy calls) ran here and was thrown
+        # away, making Test slow and noisy (R-302).
         try:
-            models = await self.list_models(provider)
-            return {"ok": True, "model_count": len(models)}
-        except ProviderError:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get(f"{_resolve_base_url(provider)}/models", headers=headers)
+                r.raise_for_status()
+                data = r.json().get("data")
+            return {"ok": True, "model_count": len(data) if isinstance(data, list) else None}
+        except Exception:  # noqa: BLE001 — the key is fine; the count is a bonus
             return {"ok": True, "model_count": None}
 
 

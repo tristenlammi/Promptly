@@ -286,7 +286,7 @@ export function SubchatModal({
         style={{ touchAction: "none" }}
         className="flex shrink-0 cursor-grab items-center gap-2 border-b border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2 active:cursor-grabbing"
       >
-        <MessagesSquare className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+        <MessagesSquare className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text)]">
             Subchat
@@ -309,7 +309,7 @@ export function SubchatModal({
         <button
           type="button"
           onClick={onKeep}
-          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-[var(--border)] px-2 text-[11px] font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/60 hover:text-[var(--accent)]"
+          className="inline-flex h-7 shrink-0 items-center gap-1 rounded-full border border-[var(--border)] px-2 text-[11px] font-medium text-[var(--text-muted)] transition hover:border-[var(--accent)]/60 hover:text-[var(--accent-text)]"
           title="Keep this subchat as a permanent chat"
         >
           <Save className="h-3 w-3" />
@@ -358,7 +358,7 @@ export function SubchatModal({
               <button
                 type="button"
                 onClick={() => onInsert(m.content)}
-                className="self-start text-[10px] text-[var(--text-muted)] opacity-0 transition hover:text-[var(--accent)] group-hover:opacity-100"
+                className="self-start text-[10px] text-[var(--text-muted)] opacity-0 transition hover:text-[var(--accent-text)] group-hover:opacity-100"
                 title="Insert this answer into the main composer"
               >
                 <span className="inline-flex items-center gap-1">

@@ -32,6 +32,7 @@ from fastapi import Request, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.cookies import cookie_secure
 from app.auth.audit import request_meta
 from app.auth.utils import sha256_token
 from app.config import get_settings
@@ -58,7 +59,7 @@ def set_trusted_cookie(response: Response, plaintext_token: str) -> None:
         value=plaintext_token,
         max_age=_max_age_seconds(),
         httponly=True,
-        secure=_settings.COOKIE_SECURE,
+        secure=cookie_secure(),
         samesite=_settings.COOKIE_SAMESITE,
         # Scope to /api so it never accompanies an SPA static asset
         # request — there's no JS that needs to read it.

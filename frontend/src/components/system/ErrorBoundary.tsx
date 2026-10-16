@@ -7,6 +7,9 @@ interface ErrorBoundaryProps {
   /** Optional override for the rendered fallback. Receives the error
    *  and a ``reset`` callback that re-renders the children. */
   fallback?: (args: { error: Error; reset: () => void }) => ReactNode;
+  /** When this changes, a caught error is cleared (e.g. the route path, so
+   *  navigating away from a crashed page recovers). */
+  resetKey?: unknown;
 }
 
 interface ErrorBoundaryState {
@@ -61,6 +64,12 @@ export class ErrorBoundary extends Component<
     console.error("Promptly UI crash:", error, info.componentStack);
   }
 
+  componentDidUpdate(prev: ErrorBoundaryProps): void {
+    if (this.state.error && prev.resetKey !== this.props.resetKey) {
+      this.setState({ error: null });
+    }
+  }
+
   reset = (): void => {
     this.setState({ error: null });
   };
@@ -110,7 +119,7 @@ export class ErrorBoundary extends Component<
     return (
       <div className="flex min-h-screen w-screen items-center justify-center bg-[var(--bg)] px-4 py-8 text-[var(--text)]">
         <div className="w-full max-w-md rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 shadow-lg">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-[var(--accent)]">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-[var(--accent-text)]">
             Promptly
           </div>
           <h1 className="mb-2 text-lg font-semibold">Something went wrong</h1>
@@ -129,6 +138,13 @@ export class ErrorBoundary extends Component<
               className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white transition hover:opacity-90"
             >
               Try again
+            </button>
+            <button
+              type="button"
+              onClick={() => window.location.assign("/chat")}
+              className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--border)] bg-transparent px-3 text-sm font-medium transition hover:bg-[var(--hover)]"
+            >
+              Go to chats
             </button>
             <button
               type="button"

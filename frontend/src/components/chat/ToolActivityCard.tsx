@@ -5,17 +5,23 @@ import {
   Check,
   ChevronRight,
   Code2,
+  FileSearch,
   FileText,
+  FolderInput,
+  FolderOpen,
   Globe,
   Image as ImageIcon,
+  Images,
   LayoutGrid,
   Loader2,
   PenLine,
+  Plug,
   Search,
   Table,
   Users,
   Wrench,
   X,
+  Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -27,7 +33,7 @@ import type {
 } from "@/api/types";
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import { useItemPreview } from "@/components/workspaces/itemPreviewContext";
-import { buildWikiHref } from "@/components/files/documents/WikiLinkExtension";
+import { buildWikiHref } from "@/components/files/documents/wikiLinks";
 import { cn } from "@/utils/cn";
 
 /**
@@ -51,7 +57,7 @@ import { cn } from "@/utils/cn";
 
 type StepStatus = "pending" | "ok" | "error";
 
-interface ActivityStep {
+export interface ActivityStep {
   id: string;
   name: string;
   status: StepStatus;
@@ -72,7 +78,15 @@ interface ActivityStep {
  *  wrench so a newly-shipped tool still renders without a code change. */
 const TOOL_INFO: Record<
   string,
-  { verb: string; noun: (n: number) => string; icon: typeof Search }
+  {
+    verb: string;
+    noun: (n: number) => string;
+    icon: typeof Search;
+    /** Past-tense headline verb, when the generic mapping doesn't fit. */
+    past?: string;
+    /** Headline says it once ("Searched your files"), not "… 2 searches". */
+    once?: boolean;
+  }
 > = {
   web_search: {
     verb: "Searching the web",
@@ -104,6 +118,53 @@ const TOOL_INFO: Record<
     noun: (n) => (n === 1 ? "agent fan-out" : "agent fan-outs"),
     icon: Users,
   },
+  // Your files (WP-5.2 / 5.3).
+  search_my_files: {
+    verb: "Searching your files",
+    past: "Searched your files",
+    once: true,
+    noun: (n) => (n === 1 ? "file search" : "file searches"),
+    icon: FileSearch,
+  },
+  list_my_files: {
+    verb: "Looking through your files",
+    past: "looked through your files",
+    once: true,
+    noun: (n) => (n === 1 ? "file list" : "file lists"),
+    icon: FolderOpen,
+  },
+  read_file: {
+    verb: "Reading file",
+    past: "read",
+    noun: (n) => (n === 1 ? "file" : "files"),
+    icon: FileText,
+  },
+  propose_file_changes: {
+    verb: "Proposing file changes",
+    past: "proposed file changes",
+    once: true,
+    noun: (n) => (n === 1 ? "proposal" : "proposals"),
+    icon: FolderInput,
+  },
+  search_photos: {
+    verb: "Searching your photos",
+    past: "searched your photos",
+    noun: (n) => (n === 1 ? "search" : "searches"),
+    icon: Images,
+  },
+  refine_photo_results: {
+    verb: "Narrowing the photos",
+    past: "narrowed the photos",
+    noun: (n) => (n === 1 ? "follow-up" : "follow-ups"),
+    icon: Images,
+  },
+  propose_photo_action: {
+    verb: "Preparing a photo change",
+    past: "proposed",
+    once: true,
+    noun: (n) => (n === 1 ? "photo change" : "photo changes"),
+    icon: Images,
+  },
 };
 
 const GENERIC_INFO = {
@@ -116,11 +177,63 @@ function infoFor(name: string) {
   return TOOL_INFO[name] ?? GENERIC_INFO;
 }
 
+/** A search that ran but found nothing — every provider was tried and
+ *  came back empty (often a rate limit). It used to count as a success: a
+ *  ✓ "Searched the web" over an answer written from stale memory (V1). */
+function isEmptySearch(step: ActivityStep): boolean {
+  return (
+    step.status === "ok" &&
+    step.name === "web_search" &&
+    step.meta?.result_count === 0
+  );
+}
+
+/** An action waiting on (or refused at) the approval card — not run. */
+function notRun(step: ActivityStep): boolean {
+  const a = step.meta?.approval;
+  return a === "pending" || a === "declined";
+}
+
+/** Did this step produce something the answer could use? */
+function isUseful(step: ActivityStep): boolean {
+  return step.status === "ok" && !isEmptySearch(step) && !notRun(step);
+}
+
+/** The outside service a step acted on (an MCP connector), if any. Those
+ *  calls used to read "ran 1 tool call" — no sign the garage door was
+ *  involved (R-166). */
+function connectorOf(step: ActivityStep): string | null {
+  return typeof step.meta?.connector === "string" ? step.meta.connector : null;
+}
+
+/** A Promptly command run recorded into the chat ("Garage lights off"). */
+function isCommandRun(step: ActivityStep): boolean {
+  return step.meta?.source === "command";
+}
+
+/** Did this step change something outside Promptly? */
+function actsOutside(step: ActivityStep): boolean {
+  return (connectorOf(step) !== null && step.meta?.acts === true) || isCommandRun(step);
+}
+
+/** How a step is named on its row: the connector or command, else the
+ *  tool's past-tense verb. */
+function stepVerb(step: ActivityStep): string {
+  const connector = connectorOf(step);
+  if (connector) return connector;
+  if (isCommandRun(step)) return `Ran “${step.name}”`;
+  return pastVerb(infoFor(step.name).verb);
+}
+
 /** The badge argument for a step — the search query or the fetched
  *  host — so two calls of the same tool read as distinct work. */
 function stepArg(step: ActivityStep): string | null {
   const meta = step.meta;
   if (!meta) return null;
+  if (connectorOf(step)) {
+    const title = typeof meta.title === "string" ? meta.title : String(meta.tool ?? "");
+    return typeof meta.target === "string" ? `${title} · ${meta.target}` : title;
+  }
   if (step.name === "web_search" && typeof meta.query === "string") {
     return meta.query;
   }
@@ -143,6 +256,9 @@ function stepDetail(step: ActivityStep): string | null {
     if (step.name === "fetch_url") return "unreachable";
     return "failed";
   }
+  if (isEmptySearch(step)) return "no results";
+  if (step.meta?.approval === "pending") return "waiting for your approval";
+  if (step.meta?.approval === "declined") return "not run";
   const meta = step.meta;
   const bits: string[] = [];
   if (meta) {
@@ -200,8 +316,15 @@ function summarise(steps: ActivityStep[]): string {
   const okByTool = new Map<string, number>();
   // Sum of agents fanned out across any run_agents calls, from meta.
   let agentTotal = 0;
+  const outside: string[] = [];
   for (const s of steps) {
-    if (s.status === "error") continue;
+    if (!isUseful(s)) continue;
+    const connector = connectorOf(s);
+    if (connector || isCommandRun(s)) {
+      const label = connector ? `used ${connector}` : `ran “${s.name}”`;
+      if (!outside.includes(label)) outside.push(label);
+      continue;
+    }
     okByTool.set(s.name, (okByTool.get(s.name) ?? 0) + 1);
     if (s.name === "run_agents" && typeof s.meta?.agent_count === "number") {
       agentTotal += s.meta.agent_count;
@@ -212,17 +335,20 @@ function summarise(steps: ActivityStep[]): string {
     const info = infoFor(name);
     // "Searched the web", "read 2 pages" — first clause carries the
     // verb capitalised, later ones lower-case for the "and" join.
-    const past = pastVerb(info.verb);
+    const past = "past" in info && info.past ? info.past : pastVerb(info.verb);
     if (name === "run_agents") {
       const n = agentTotal || count;
       clauses.push(`Ran ${n} agent${n === 1 ? "" : "s"} in parallel`);
-    } else if (name === "web_search") {
+    } else if (name === "web_search" || ("once" in info && info.once)) {
       clauses.push(count === 1 ? past : `${past} (${count}×)`);
     } else {
       clauses.push(`${past} ${count} ${info.noun(count)}`);
     }
   }
-  return clauses.length ? joinClauses(clauses) : "";
+  clauses.push(...outside);
+  if (!clauses.length) return "";
+  const sentence = joinClauses(clauses);
+  return sentence.charAt(0).toUpperCase() + sentence.slice(1);
 }
 
 /** Headline for the rare case where EVERY step errored — the only
@@ -231,9 +357,18 @@ function failureSummary(steps: ActivityStep[]): string {
   const names = new Set(steps.map((s) => s.name));
   if (names.size === 1) {
     const only = [...names][0];
-    if (only === "web_search") return "Web search failed";
+    if (only === "web_search") {
+      return steps.some(isEmptySearch)
+        ? "Web search found nothing — answered without it"
+        : "Web search failed — answered without it";
+    }
     if (only === "fetch_url") return "Couldn't read the page";
     if (only === "run_agents") return "Agents couldn't complete";
+  }
+  if (steps.every(notRun)) {
+    return steps.some((s) => s.meta?.approval === "pending")
+      ? "Waiting for your approval"
+      : "Not run";
   }
   return "Tool calls didn't complete";
 }
@@ -320,14 +455,14 @@ function AgentRow({ agent }: { agent: AgentProgress }) {
   return (
     <div className="rounded-md border border-[var(--border)] border-l-2 border-l-[var(--accent)] bg-[var(--bg)] px-3 py-2">
       <div className="flex items-center gap-2">
-        <span className="shrink-0 text-[11px] font-medium text-[var(--accent)]">
+        <span className="shrink-0 text-[11px] font-medium text-[var(--accent-text)]">
           {agent.label}
         </span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-[var(--text)]">
           {agent.task}
         </span>
         {running ? (
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent)]" />
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent-text)]" />
         ) : failed ? (
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[var(--warning)]" />
         ) : (
@@ -362,7 +497,7 @@ function AgentFanout({ agents }: { agents: AgentProgress[] }) {
   return (
     <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
       <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2.5">
-        <span className="shrink-0 rounded-md bg-[var(--accent)]/10 px-2 py-0.5 font-mono text-[11px] text-[var(--accent)]">
+        <span className="shrink-0 rounded-md bg-[var(--accent)]/10 px-2 py-0.5 font-mono text-[11px] text-[var(--accent-text)]">
           run_agents
         </span>
         <span className="text-[13px] text-[var(--text-muted)]">
@@ -470,7 +605,7 @@ export function ToolActivityCard({
       <>
       <div className="mt-2 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--surface)]">
         <div className="flex items-center gap-2 px-3 py-2 text-[13px] text-[var(--text-muted)]">
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent)]" />
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--accent-text)]" />
           <span className="truncate">
             {info ? (
               <>
@@ -523,12 +658,17 @@ export function ToolActivityCard({
   // The card reads as a failure ONLY when nothing succeeded. A turn
   // with any successful work is a success, even if a blocked page or
   // two failed along the way (those failures stay visible on expand).
-  const okCount = steps.filter((s) => s.status === "ok").length;
+  const okCount = steps.filter(isUseful).length;
   const allFailed = okCount === 0;
   const summary = allFailed ? failureSummary(steps) : summarise(steps);
   const metaBits: string[] = [];
   if (sourceCount > 0)
     metaBits.push(`${sourceCount} source${sourceCount === 1 ? "" : "s"}`);
+  const emptySearches = steps.filter(isEmptySearch).length;
+  if (emptySearches > 0 && !allFailed)
+    metaBits.push(
+      `${emptySearches} search${emptySearches === 1 ? "" : "es"} found nothing`,
+    );
   const totalT = formatElapsed(totalMs);
   if (totalT) metaBits.push(totalT);
 
@@ -683,7 +823,7 @@ function ItemPillRow({
             title={`Open "${item.title}"`}
             className={cn(
               "inline-flex max-w-[16rem] items-center gap-1.5 rounded-full border px-2.5 py-1",
-              "border-[var(--accent)]/30 bg-[var(--accent)]/10 text-[12px] font-medium text-[var(--accent)]",
+              "border-[var(--accent)]/30 bg-[var(--accent)]/10 text-[12px] font-medium text-[var(--accent-text)]",
               "transition hover:border-[var(--accent)]/50 hover:bg-[var(--accent)]/15",
             )}
           >
@@ -745,10 +885,11 @@ function AgentsExpanded({
 /** One row in the expanded / streaming timeline. */
 function StepRow({ step }: { step: ActivityStep }) {
   const info = infoFor(step.name);
-  const Icon = info.icon;
+  const Icon = actsOutside(step) ? Zap : connectorOf(step) ? Plug : info.icon;
   const arg = stepArg(step);
   const detail = stepDetail(step);
   const isError = step.status === "error";
+  const empty = isEmptySearch(step);
 
   // A hard failure tints the accent rail amber; everything else keeps
   // the terracotta rail so the whole card reads as one cohesive family.
@@ -767,18 +908,23 @@ function StepRow({ step }: { step: ActivityStep }) {
           ) : (
             <X className="h-3 w-3 shrink-0 text-[var(--danger)]" />
           )
+        ) : empty ? (
+          <AlertTriangle className="h-3 w-3 shrink-0 text-[var(--warning)]" />
         ) : (
           <Icon className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />
         )}
         <span className="min-w-0 flex-1 truncate text-[var(--text-muted)]">
-          <span className="text-[var(--text)]">{pastVerb(info.verb)}</span>
+          <span className="text-[var(--text)]">{stepVerb(step)}</span>
           {arg && <span> {arg}</span>}
+          {actsOutside(step) && step.status === "ok" && (
+            <span className="sr-only"> (changed something outside Promptly)</span>
+          )}
         </span>
         {detail && (
           <span
             className={cn(
               "shrink-0 tabular-nums",
-              hardError ? "text-[var(--warning)]" : "text-[var(--text-muted)]",
+              hardError || empty ? "text-[var(--warning)]" : "text-[var(--text-muted)]",
             )}
           >
             {detail}

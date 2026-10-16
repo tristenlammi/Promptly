@@ -30,6 +30,8 @@ export interface WorkspaceParticipant {
   avatar_url?: string | null;
   /** Chosen chip colour; null = deterministic palette hash. */
   avatar_color?: string | null;
+  /** A collaborator's role; absent on the owner row. */
+  role?: WorkspaceShareRole | null;
 }
 
 export interface WorkspaceSummary {
@@ -41,6 +43,10 @@ export interface WorkspaceSummary {
   memory_model_id?: string | null;
   memory_provider_id?: string | null;
   archived_at: string | null;
+  /** Set while the workspace is in its owner's trash (restorable). */
+  trashed_at?: string | null;
+  /** Offered in the new-workspace picker as a template. */
+  is_template?: boolean;
   created_at: string;
   updated_at: string;
   conversation_count: number;
@@ -73,6 +79,8 @@ export interface WorkspaceDetail extends WorkspaceSummary {
   owner: WorkspaceParticipant | null;
   /** Every user with an accepted workspace share, sorted by username. */
   collaborators: WorkspaceParticipant[];
+  /** The caller's own share (null for the owner) — what Leave revokes. */
+  my_share_id?: string | null;
   /** Per-turn context budget (Phase P2). ``per_turn_tokens`` is what
    *  every chat in the workspace actually pays: instructions + full pinned
    *  text in full-dump mode, or instructions + a top-k retrieval slice
@@ -155,6 +163,8 @@ export interface SpreadsheetData {
   workspace_id: string;
   title: string;
   data: unknown[] | null;
+  /** The save counter the next save is based on (WP-3.3). */
+  data_version?: number;
 }
 
 // --- Roster (shift schedule) -----------------------------------------
@@ -222,11 +232,33 @@ export interface RosterDoc {
   shifts: RosterShift[];
 }
 
+export interface SheetVersion {
+  id: string;
+  created_at: string;
+  cell_count: number;
+  reason: "autosave" | "import" | "restore" | "clear";
+  author: string | null;
+}
+
+export interface MyShift {
+  workspace_id: string;
+  workspace_title: string;
+  roster_item_id: string;
+  roster_title: string;
+  date: string;
+  start: string | null;
+  end: string | null;
+  hours: number | null;
+  note: string | null;
+}
+
 export interface RosterData {
   id: string;
   workspace_id: string;
   title: string;
   data: RosterDoc | null;
+  /** Bumped on every save; send it back as ``base_revision``. */
+  revision?: number;
 }
 
 // ---------------------------------------------------------------------
@@ -350,6 +382,8 @@ export interface WorkspaceAskCitation {
 export interface WorkspaceAskResponse {
   answer: string;
   citations: WorkspaceAskCitation[];
+  /** Set when the embedding model is set up but didn't answer (R-322). */
+  degraded?: "embedder_unavailable" | null;
 }
 
 /** One open card assigned to the caller (the "My work" page). */
@@ -387,6 +421,8 @@ export interface WorkspaceOverview {
     sheets: number;
     chats: number;
     files: number;
+    rosters?: number;
+    discussions?: number;
   };
   tasks: WorkspaceTaskItem[];
   open_task_count: number;
@@ -619,6 +655,9 @@ export interface UpdateWorkspacePayload {
   memory_provider_id?: string | null;
   /** Drive storage cap in bytes (owner-only); null clears it. */
   storage_quota_bytes?: number | null;
+  /** The instructions this edit started from — a mismatch is a 409. */
+  expected_system_prompt?: string | null;
+  is_template?: boolean;
 }
 
 export interface WorkspaceItemComment {
@@ -632,6 +671,7 @@ export interface WorkspaceItemComment {
   /** Non-null = resolved; resolved comments collapse in the panel. */
   resolved_at?: string | null;
   created_at: string;
+  edited_at?: string | null;
 }
 
 /** One workspace search hit. ``snippet`` for 'text' hits is a Postgres
@@ -649,6 +689,7 @@ export interface WorkspaceSearchHit {
 export interface WorkspaceSearchResponse {
   hits: WorkspaceSearchHit[];
   semantic_available: boolean;
+  degraded?: "embedder_unavailable" | null;
 }
 
 /** One workspace activity-feed row ("what changed since I was here"). */
@@ -680,13 +721,21 @@ export interface MeetingJob {
   /** The seeded note's tree item, once status is "done". */
   note_item_id: string | null;
   created_at: string;
+  /** A failed summary keeps the transcript (download / retry). */
+  has_transcript?: boolean;
 }
 
 export const workspacesApi = {
-  async list(opts: { archived?: boolean } = {}): Promise<WorkspaceSummary[]> {
+  async list(
+    opts: { archived?: boolean; trashed?: boolean } = {}
+  ): Promise<WorkspaceSummary[]> {
     const { data } = await apiClient.get<WorkspaceSummary[]>(
       "/workspaces",
-      { params: { archived: opts.archived ?? false } }
+      {
+        params: opts.trashed
+          ? { trashed: true }
+          : { archived: opts.archived ?? false },
+      }
     );
     return data;
   },
@@ -719,8 +768,31 @@ export const workspacesApi = {
     return data;
   },
 
-  async remove(id: string): Promise<void> {
-    await apiClient.delete(`/workspaces/${id}`);
+  /** Moves the workspace to the trash; ``permanent`` on a trashed one
+   *  deletes it for good. */
+  async remove(id: string, opts: { permanent?: boolean } = {}): Promise<void> {
+    await apiClient.delete(`/workspaces/${id}`, {
+      params: opts.permanent ? { permanent: true } : undefined,
+    });
+  },
+
+  async restore(id: string): Promise<WorkspaceSummary> {
+    const { data } = await apiClient.post<WorkspaceSummary>(
+      `/workspaces/${id}/restore`
+    );
+    return data;
+  },
+
+  async transfer(
+    id: string,
+    userId: string,
+    keepAccess = true
+  ): Promise<WorkspaceSummary> {
+    const { data } = await apiClient.post<WorkspaceSummary>(
+      `/workspaces/${id}/transfer`,
+      { user_id: userId, keep_access: keepAccess }
+    );
+    return data;
   },
 
   async archive(id: string): Promise<WorkspaceSummary> {
@@ -751,8 +823,10 @@ export const workspacesApi = {
     return data;
   },
 
-  async reindex(id: string): Promise<void> {
-    await apiClient.post(`/workspaces/${id}/reindex`);
+  async reindex(id: string, opts?: { failedOnly?: boolean }): Promise<void> {
+    await apiClient.post(`/workspaces/${id}/reindex`, null, {
+      params: opts?.failedOnly ? { failed_only: true } : undefined,
+    });
   },
 
   /** Bulk-detach every conversation from this workspace (workspace_id → null).
@@ -819,22 +893,6 @@ export const workspacesApi = {
   },
 
   /** Upload straight into the drive (workspace-owned + auto-pinned). */
-  async uploadDriveFile(
-    id: string,
-    file: File,
-    folderId: string | null
-  ): Promise<WorkspaceDriveFile> {
-    const form = new FormData();
-    form.append("file", file);
-    if (folderId) form.append("folder_id", folderId);
-    const { data } = await apiClient.post<WorkspaceDriveFile>(
-      `/workspaces/${id}/drive/files`,
-      form,
-      { headers: { "Content-Type": "multipart/form-data" }, timeout: 120_000 }
-    );
-    return data;
-  },
-
   async createDriveFolder(
     id: string,
     name: string,
@@ -956,6 +1014,59 @@ export const workspacesApi = {
   },
 
   // --- Spreadsheet pages (single-user persistence) ---------------------
+  /** .xlsx (all tabs, formulas kept) or .csv (one tab) of a sheet. */
+  async exportSpreadsheet(
+    id: string,
+    sheetId: string,
+    format: "xlsx" | "csv",
+    tab = 0
+  ): Promise<{ blob: Blob; filename: string }> {
+    const res = await apiClient.get(`/workspaces/${id}/spreadsheets/${sheetId}/export`, {
+      params: { format, tab },
+      responseType: "blob",
+    });
+    const cd = String(res.headers["content-disposition"] ?? "");
+    const m = /filename="([^"]+)"/.exec(cd);
+    return { blob: res.data as Blob, filename: m?.[1] ?? `sheet.${format}` };
+  },
+
+  /** Convert an .xlsx / .csv into this sheet's format (current contents
+   *  are kept as a version first). */
+  async importIntoSpreadsheet(
+    id: string,
+    sheetId: string,
+    file: File
+  ): Promise<{ data: unknown[]; notes: string[] }> {
+    const form = new FormData();
+    form.append("file", file);
+    const { data } = await apiClient.post<{ data: unknown[]; notes?: string[] }>(
+      `/workspaces/${id}/spreadsheets/${sheetId}/import`,
+      form,
+      { headers: { "Content-Type": "multipart/form-data" }, timeout: 120_000 }
+    );
+    return { data: data.data, notes: data.notes ?? [] };
+  },
+
+  async spreadsheetVersions(id: string, sheetId: string): Promise<SheetVersion[]> {
+    const { data } = await apiClient.get<SheetVersion[]>(
+      `/workspaces/${id}/spreadsheets/${sheetId}/versions`
+    );
+    return data;
+  },
+
+  async spreadsheetVersion(id: string, sheetId: string, versionId: string): Promise<unknown[]> {
+    const { data } = await apiClient.get<{ data: unknown[] }>(
+      `/workspaces/${id}/spreadsheets/${sheetId}/versions/${versionId}`
+    );
+    return data.data;
+  },
+
+  async checkpointSpreadsheet(id: string, sheetId: string, reason: "restore" | "clear"): Promise<void> {
+    await apiClient.post(`/workspaces/${id}/spreadsheets/${sheetId}/versions/checkpoint`, null, {
+      params: { reason },
+    });
+  },
+
   async getSpreadsheet(
     id: string,
     sheetId: string
@@ -969,7 +1080,12 @@ export const workspacesApi = {
   async saveSpreadsheet(
     id: string,
     sheetId: string,
-    payload: { data: unknown; content_text?: string; title?: string }
+    payload: {
+      data: unknown;
+      content_text?: string;
+      title?: string;
+      data_version?: number;
+    }
   ): Promise<SpreadsheetData> {
     const { data } = await apiClient.put<SpreadsheetData>(
       `/workspaces/${id}/spreadsheets/${sheetId}`,
@@ -986,10 +1102,43 @@ export const workspacesApi = {
     return data;
   },
 
+  /** Save and publish: staff see this version and affected people are
+   *  notified (R-174). */
+  async publishRoster(
+    id: string,
+    rosterId: string,
+    payload: { data: unknown; base_revision?: number }
+  ): Promise<RosterData> {
+    const { data } = await apiClient.post<RosterData>(
+      `/workspaces/${id}/rosters/${rosterId}/publish`,
+      payload
+    );
+    return data;
+  },
+
+  /** The caller's upcoming shifts across every roster. */
+  async myShifts(): Promise<MyShift[]> {
+    const { data } = await apiClient.get<MyShift[]>("/workspaces/my-shifts");
+    return data;
+  },
+
+  /** A private calendar-feed (ICS) URL for those shifts. */
+  async shiftsCalendarLink(): Promise<string> {
+    const { data } = await apiClient.post<{ url: string }>(
+      "/workspaces/my-shifts/calendar-link"
+    );
+    return data.url;
+  },
+
   async saveRoster(
     id: string,
     rosterId: string,
-    payload: { data: unknown; content_text?: string; title?: string }
+    payload: {
+      data: unknown;
+      content_text?: string;
+      title?: string;
+      base_revision?: number;
+    }
   ): Promise<RosterData> {
     const { data } = await apiClient.put<RosterData>(
       `/workspaces/${id}/rosters/${rosterId}`,
@@ -1018,6 +1167,19 @@ export const workspacesApi = {
   },
 
   /** List comments on a workspace item (chronological). */
+  async editComment(
+    id: string,
+    itemId: string,
+    commentId: string,
+    body: string
+  ): Promise<WorkspaceItemComment> {
+    const { data } = await apiClient.patch<WorkspaceItemComment>(
+      `/workspaces/${id}/items/${itemId}/comments/${commentId}`,
+      { body }
+    );
+    return data;
+  },
+
   async listComments(
     id: string,
     itemId: string
@@ -1087,7 +1249,7 @@ export const workspacesApi = {
 
   /** Cross-workspace search (9.2): one query over every workspace the
    *  caller can see, grouped per workspace, best group first. */
-  async searchAll(q: string): Promise<{
+  async searchAll(q: string, signal?: AbortSignal): Promise<{
     groups: {
       workspace_id: string;
       workspace_title: string;
@@ -1096,6 +1258,7 @@ export const workspacesApi = {
   }> {
     const { data } = await apiClient.get("/workspace-search", {
       params: { q },
+      signal,
     });
     return data;
   },
@@ -1150,15 +1313,36 @@ export const workspacesApi = {
   },
 
   /** Download the full workspace bundle (zip). Owner only. */
-  async exportZip(id: string): Promise<Blob> {
-    const { data } = await apiClient.get(`/workspaces/${id}/export`, {
-      responseType: "blob",
-      timeout: 300_000,
-    });
-    return data as Blob;
+  /** The new-workspace picker's catalog: built-in starters plus workspaces
+   *  saved as templates (``key`` ``ws:<id>``). */
+  async templates(): Promise<
+    { key: string; name: string; description: string; group: string }[]
+  > {
+    const { data } = await apiClient.get("/workspaces/templates");
+    return data;
   },
 
-  /** Build a new workspace from a zip of Markdown files. */
+  /** Copy a workspace's setup into a new one owned by the caller. */
+  async duplicate(id: string, title?: string): Promise<WorkspaceSummary> {
+    const { data } = await apiClient.post<WorkspaceSummary>(
+      `/workspaces/${id}/duplicate`,
+      { title: title ?? null }
+    );
+    return data;
+  },
+
+  /** A five-minute signed download URL for the export bundle. The browser
+   *  downloads it itself (streamed to disk) — fetching it as a blob held the
+   *  whole zip in memory and gave up after five minutes (R-188). */
+  async exportLink(id: string): Promise<string> {
+    const { data } = await apiClient.post<{ url: string }>(
+      `/workspaces/${id}/export-link`
+    );
+    return data.url;
+  },
+
+  /** Build a new workspace from a zip of Markdown files. ``skipped`` maps
+   *  a human-readable reason to how many archive entries it covered (R-315). */
   async importZip(
     file: File,
     title?: string
@@ -1166,7 +1350,9 @@ export const workspacesApi = {
     id: string;
     title: string;
     notes: number;
-    skipped: number;
+    notebooks: number;
+    skipped: Record<string, number>;
+    skipped_total: number;
   }> {
     const form = new FormData();
     form.append("file", file);
@@ -1182,7 +1368,11 @@ export const workspacesApi = {
   async createMeetingJob(
     id: string,
     file: File,
-    opts: { title?: string; language?: string } = {}
+    opts: {
+      title?: string;
+      language?: string;
+      onProgress?: (fraction: number) => void;
+    } = {}
   ): Promise<MeetingJob> {
     const form = new FormData();
     form.append("file", file);
@@ -1191,9 +1381,40 @@ export const workspacesApi = {
     const { data } = await apiClient.post<MeetingJob>(
       `/workspaces/${id}/meetings`,
       form,
-      { headers: { "Content-Type": "multipart/form-data" }, timeout: 300_000 }
+      {
+        headers: { "Content-Type": "multipart/form-data" },
+        // A 100 MB recording on a slow uplink takes a while; the progress
+        // bar shows it's moving rather than a bare spinner (R-133).
+        timeout: 30 * 60_000,
+        onUploadProgress: (e) => {
+          if (opts.onProgress && e.total) opts.onProgress(e.loaded / e.total);
+        },
+      }
     );
     return data;
+  },
+
+  async cancelMeetingJob(id: string, jobId: string): Promise<MeetingJob> {
+    const { data } = await apiClient.post<MeetingJob>(
+      `/workspaces/${id}/meetings/${jobId}/cancel`
+    );
+    return data;
+  },
+
+  /** Summarise a failed job's saved transcript again. */
+  async retryMeetingJob(id: string, jobId: string): Promise<MeetingJob> {
+    const { data } = await apiClient.post<MeetingJob>(
+      `/workspaces/${id}/meetings/${jobId}/retry`
+    );
+    return data;
+  },
+
+  async meetingTranscript(id: string, jobId: string): Promise<Blob> {
+    const { data } = await apiClient.get(
+      `/workspaces/${id}/meetings/${jobId}/transcript`,
+      { responseType: "blob" }
+    );
+    return data as Blob;
   },
 
   /** Recent meeting jobs, newest first (resume an in-flight one). */
@@ -1510,6 +1731,18 @@ export const workspacesApi = {
     const { data } = await apiClient.post<WorkspaceShareRow>(
       `/workspaces/${workspaceId}/shares`,
       payload
+    );
+    return data;
+  },
+
+  async updateShare(
+    workspaceId: string,
+    shareId: string,
+    role: WorkspaceShareRole
+  ): Promise<WorkspaceShareRow> {
+    const { data } = await apiClient.patch<WorkspaceShareRow>(
+      `/workspaces/${workspaceId}/shares/${shareId}`,
+      { role }
     );
     return data;
   },

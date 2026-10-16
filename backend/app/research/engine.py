@@ -11,6 +11,7 @@ Multi-step agentic loop:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -32,6 +33,7 @@ from app.database import SessionLocal
 from app.files.generated import GeneratedFileError, persist_generated_file
 from app.files.generated_kinds import GeneratedKind
 from app.models_config.models import ModelProvider
+from app.billing.usage import record_usage
 from app.models_config.provider import ChatMessage, TextDelta, UsageEvent, model_router
 from app.search.service import pick_search_provider, run_search_with_failover
 
@@ -147,6 +149,25 @@ Write the full updated report now, going deeper on the requested refinement."""
 # ---------------------------------------------------------------------------
 # SSE helper
 # ---------------------------------------------------------------------------
+# Tokens and cost of every model call in one research run — decompose, gap
+# check and synthesis — so the run's cost is shown and counted against the
+# budget in full. Only synthesis used to be counted, and only for display:
+# research never reached the budget at all (R-084). A context variable, so
+# the evidence-gathering task (created inside the run) adds to the same total.
+_run_usage: contextvars.ContextVar[dict[str, float] | None] = contextvars.ContextVar(
+    "research_run_usage", default=None
+)
+
+
+def _note_usage(event: UsageEvent) -> None:
+    acc = _run_usage.get()
+    if acc is None:
+        return
+    acc["prompt"] += event.prompt_tokens or 0
+    acc["completion"] += event.completion_tokens or 0
+    acc["cost"] += event.cost_usd or 0.0
+
+
 def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
@@ -169,9 +190,12 @@ async def _decompose(
             messages=[ChatMessage(role="user", content=prompt)],
             temperature=0.3,
             max_tokens=_FAST_MAX_TOKENS,
+            include_usage=True,
         ):
             if isinstance(event, TextDelta):
                 chunks.append(event.text)
+            elif isinstance(event, UsageEvent):
+                _note_usage(event)
     except Exception:
         logger.exception("Decompose model call failed")
         # Fallback: use the query itself as a single "sub-question"
@@ -215,9 +239,12 @@ async def _decompose_refine(
             messages=[ChatMessage(role="user", content=prompt)],
             temperature=0.3,
             max_tokens=_FAST_MAX_TOKENS,
+            include_usage=True,
         ):
             if isinstance(event, TextDelta):
                 chunks.append(event.text)
+            elif isinstance(event, UsageEvent):
+                _note_usage(event)
     except Exception:
         logger.exception("Refine decompose failed")
         return [{"question": refinement, "search_query": refinement}]
@@ -267,9 +294,12 @@ async def _gap_check(
             messages=[ChatMessage(role="user", content=prompt)],
             temperature=0.3,
             max_tokens=_FAST_MAX_TOKENS,
+            include_usage=True,
         ):
             if isinstance(event, TextDelta):
                 chunks.append(event.text)
+            elif isinstance(event, UsageEvent):
+                _note_usage(event)
     except Exception:
         return []
 
@@ -678,6 +708,8 @@ async def run_research(
     is_refine = bool(refinement and prior_report)
 
     async def _gen() -> AsyncGenerator[str, None]:  # noqa: C901 (complexity OK here)
+        run_usage = {"prompt": 0.0, "completion": 0.0, "cost": 0.0}
+        _run_usage.set(run_usage)
         try:
             # --- Steps 1-3: gather evidence via the shared core ---
             # ``gather_research_evidence`` runs decompose → parallel
@@ -717,6 +749,12 @@ async def run_research(
                     if ev is None:
                         break
                     yield _sse(ev)
+            except BaseException:
+                # Cancelled (Stop) or failed: the evidence gathering is its
+                # own task — take it down too, or it keeps searching and
+                # spending after the user cancelled (R-084).
+                gather_task.cancel()
+                raise
             finally:
                 drain_sentinel.cancel()
 
@@ -782,6 +820,10 @@ async def run_research(
                     cost_usd = event.cost_usd or 0.0
 
             report_content = "".join(report_chunks)
+            # The whole run, not just the synthesis call.
+            prompt_tokens += int(run_usage["prompt"])
+            completion_tokens += int(run_usage["completion"])
+            cost_usd += run_usage["cost"]
 
             # ------------------------------------------------------------------
             # Step 5: Generate PDF attachment
@@ -904,6 +946,16 @@ async def run_research(
             await db.flush()
             conv.active_leaf_message_id = asst_msg.id
             conv.updated_at = datetime.now(timezone.utc)
+            try:
+                await record_usage(
+                    db,
+                    user_id=user.id,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    cost_usd=cost_usd,
+                )
+            except Exception:  # noqa: BLE001 — billing must never lose the report
+                logger.exception("Failed to record research usage for user=%s", user.id)
             await db.commit()
             await db.refresh(user_msg)
             await db.refresh(asst_msg)

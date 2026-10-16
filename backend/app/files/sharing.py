@@ -118,11 +118,16 @@ async def caller_grants_for_file(
     individually — the ``effective_*`` helpers below collapse the
     list when callers just want a yes/no.
     """
+    from app.files.link_roles import alive_link_filter
+
     folder_ids = await ancestor_folder_ids(db, row.folder_id)
     rows = (
         await db.execute(
             select(ResourceGrant).where(
                 ResourceGrant.grantee_user_id == user.id,
+                # A grant from a comment / edit link lasts while the link
+                # does (WP-6.6).
+                alive_link_filter(),
                 (
                     (
                         (ResourceGrant.resource_type == "file")
@@ -163,6 +168,12 @@ async def caller_grants_for_folder(
 def effective_can_copy(grants: Iterable[ResourceGrant]) -> bool:
     """True if any grant in the iterable carries ``can_copy=true``."""
     return any(g.can_copy for g in grants)
+
+
+def effective_can_comment(grants: Iterable[ResourceGrant]) -> bool:
+    """True if any grant lets the holder comment (WP-6.6) — a comment-only
+    grant, or an edit one."""
+    return any(g.can_comment or g.can_edit for g in grants)
 
 
 def effective_can_edit(grants: Iterable[ResourceGrant]) -> bool:
@@ -209,7 +220,7 @@ async def file_is_accessible_via_workspace(
 ) -> bool:
     """Does ``user`` reach ``file_id`` through a shared workspace?
 
-    A file backs a workspace three ways, all of which grant access —
+    A file backs a workspace four ways, all of which grant access —
     otherwise a note / canvas created by one member is invisible to the
     others (the backing ``UserFile`` is owned by its creator and carries
     no peer-to-peer grant):
@@ -217,6 +228,7 @@ async def file_is_accessible_via_workspace(
       * a pinned file               (``WorkspaceFile.file_id``)
       * a note / file tree item     (``WorkspaceItem.ref_id``)
       * a canvas's backing text     (``WorkspaceCanvas.text_file_id``)
+      * a board card's attachment   (``WorkspaceTask.attachments``)
 
     "Access" means the caller owns the workspace or holds an accepted
     share on it. Workspace shares are full-collaborator (there's no
@@ -231,8 +243,10 @@ async def file_is_accessible_via_workspace(
         WorkspaceCanvas,
         WorkspaceFile,
         WorkspaceItem,
+        WorkspaceTask,
     )
     from app.chat.shares import list_accessible_workspace_ids
+    from app.workspaces.visibility import item_visible_to
 
     workspace_ids = await list_accessible_workspace_ids(user, db)
     if not workspace_ids:
@@ -261,6 +275,10 @@ async def file_is_accessible_via_workspace(
                 WorkspaceItem.ref_id == file_id,
                 WorkspaceItem.kind.in_(("note", "file")),
                 WorkspaceItem.workspace_id.in_(workspace_ids),
+                # Never another member's private draft, and never a trashed
+                # item — the side door used to ignore both (roadmap 0.4 #3).
+                WorkspaceItem.trashed_at.is_(None),
+                item_visible_to(user.id),
             )
             .limit(1)
         )
@@ -280,7 +298,39 @@ async def file_is_accessible_via_workspace(
     ).first() is not None:
         return True
 
+    # Board-card attachment on a live board the caller can see. Uploaded
+    # into the uploader's own Drive, so without this teammates got 404s on
+    # every thumbnail, cover and download (R-034).
+    if (
+        await db.execute(
+            select(WorkspaceTask.id)
+            .join(WorkspaceItem, WorkspaceItem.id == WorkspaceTask.board_item_id)
+            .where(
+                WorkspaceItem.workspace_id.in_(workspace_ids),
+                WorkspaceItem.trashed_at.is_(None),
+                item_visible_to(user.id),
+                WorkspaceTask.attachments.contains([{"file_id": str(file_id)}]),
+            )
+            .limit(1)
+        )
+    ).first() is not None:
+        return True
+
     return False
+
+
+async def can_write_document(db: AsyncSession, file, user: User) -> bool:
+    """May ``user`` edit this document's content? The one answer.
+
+    Owner, a grant with ``can_edit``, or owner/admin/editor of a workspace
+    the document belongs to (as a live, non-private-to-someone-else note).
+    The collab token, manual save, image upload and the editor UI all ask
+    this — they used to disagree, so workspace viewers got an editable
+    editor while workspace editors couldn't save (roadmap R-218).
+    """
+    return await caller_can_write_file(
+        db, file, user
+    ) or await workspace_write_access_for_file(db, file.id, user)
 
 
 async def workspace_write_access_for_file(
@@ -293,8 +343,9 @@ async def workspace_write_access_for_file(
     which is true for a workspace **viewer** too — but a viewer must not be
     handed a write-scoped collab token. This role-aware variant resolves the
     caller's role on whichever workspace backs the file (note item, pinned
-    file, or canvas text) and returns True only for owner/editor. Viewers,
-    and non-members, get False.
+    file, or canvas text) and returns True for owner/admin/editor — the
+    same set :func:`require_workspace_write` lets through. Viewers, and
+    non-members, get False.
     """
     from app.chat.models import (
         WorkspaceCanvas,
@@ -302,6 +353,7 @@ async def workspace_write_access_for_file(
         WorkspaceItem,
     )
     from app.workspaces.shares import get_accessible_workspace
+    from app.workspaces.visibility import item_visible_to
 
     ws_ids: set[uuid.UUID] = set()
     for (wid,) in (
@@ -309,6 +361,8 @@ async def workspace_write_access_for_file(
             select(WorkspaceItem.workspace_id).where(
                 WorkspaceItem.ref_id == file_id,
                 WorkspaceItem.kind.in_(("note", "file")),
+                WorkspaceItem.trashed_at.is_(None),
+                item_visible_to(user.id),
             )
         )
     ).all():
@@ -335,7 +389,7 @@ async def workspace_write_access_for_file(
             _ws, role = await get_accessible_workspace(wid, user, db)
         except Exception:  # noqa: BLE001 — no access to this workspace
             continue
-        if role in ("owner", "editor"):
+        if role in ("owner", "admin", "editor"):
             return True
     return False
 
@@ -356,6 +410,8 @@ def _user_brief(
         email=email,
         can_copy=grant.can_copy,
         can_edit=grant.can_edit,
+        can_comment=bool(grant.can_comment or grant.can_edit),
+        via_link=grant.via_link_id is not None,
     )
 
 
@@ -377,11 +433,14 @@ async def grants_for_resource(
     resource_type: str,
     resource_id: uuid.UUID,
 ) -> list[ResourceGrant]:
+    from app.files.link_roles import alive_link_filter
+
     rows = (
         await db.execute(
             select(ResourceGrant).where(
                 ResourceGrant.resource_type == resource_type,
                 ResourceGrant.resource_id == resource_id,
+                alive_link_filter(),
             )
         )
     ).scalars().all()
@@ -423,10 +482,12 @@ async def build_summary_for_resource(
     grantees: list[GranteeBrief] = []
     caller_can_copy = False
     caller_can_edit = False
+    caller_can_comment = False
     for g in grants:
         if g.grantee_user_id == caller.id:
             caller_can_copy = g.can_copy
             caller_can_edit = g.can_edit
+            caller_can_comment = bool(g.can_comment or g.can_edit)
             continue
         u = users.get(g.grantee_user_id)
         if u is None:
@@ -458,6 +519,7 @@ async def build_summary_for_resource(
         grantees=grantees,
         can_copy=caller_can_copy if role == "grantee" else False,
         can_edit=caller_can_edit if role == "grantee" else False,
+        can_comment=caller_can_comment if role == "grantee" else False,
         owner=owner_brief,
     )
 
@@ -521,6 +583,12 @@ async def bulk_summaries(
             user_ids.add(f.user_id)
     users = await _users_by_id(db, user_ids)
 
+    links = await live_link_counts(
+        db,
+        file_ids=[f.id for f in files if f.user_id == caller.id],
+        folder_ids=[f.id for f in folders if f.user_id == caller.id],
+    )
+
     file_summaries: dict[uuid.UUID, GrantSummary] = {}
     folder_summaries: dict[uuid.UUID, GrantSummary] = {}
     for resource in files:
@@ -529,6 +597,7 @@ async def bulk_summaries(
             owner_user_id=resource.user_id,
             caller=caller,
             users=users,
+            public_links=links.get(("file", resource.id), 0),
         )
         if summary is not None:
             file_summaries[resource.id] = summary
@@ -538,10 +607,43 @@ async def bulk_summaries(
             owner_user_id=resource.user_id,
             caller=caller,
             users=users,
+            public_links=links.get(("folder", resource.id), 0),
         )
         if summary is not None:
             folder_summaries[resource.id] = summary
     return file_summaries, folder_summaries
+
+
+async def live_link_counts(
+    db: AsyncSession, *, file_ids: list[uuid.UUID], folder_ids: list[uuid.UUID]
+) -> dict[tuple[str, uuid.UUID], int]:
+    """Live (not revoked, not expired) share links per resource."""
+    from datetime import datetime, timezone
+
+    from sqlalchemy import func, or_
+
+    from app.files.models import FileShareLink
+
+    out: dict[tuple[str, uuid.UUID], int] = {}
+    now = datetime.now(timezone.utc)
+    for kind, ids in (("file", file_ids), ("folder", folder_ids)):
+        if not ids:
+            continue
+        rows = (
+            await db.execute(
+                select(FileShareLink.resource_id, func.count())
+                .where(
+                    FileShareLink.resource_type == kind,
+                    FileShareLink.resource_id.in_(ids),
+                    FileShareLink.revoked_at.is_(None),
+                    or_(FileShareLink.expires_at.is_(None), FileShareLink.expires_at > now),
+                )
+                .group_by(FileShareLink.resource_id)
+            )
+        ).all()
+        for rid, n in rows:
+            out[(kind, rid)] = int(n)
+    return out
 
 
 def _summary_from_cache(
@@ -550,8 +652,9 @@ def _summary_from_cache(
     owner_user_id: uuid.UUID | None,
     caller: User,
     users: dict[uuid.UUID, User],
+    public_links: int = 0,
 ) -> GrantSummary | None:
-    if not grants:
+    if not grants and not public_links:
         return None
     role: str = (
         "owner"
@@ -561,10 +664,12 @@ def _summary_from_cache(
     grantees: list[GranteeBrief] = []
     caller_can_copy = False
     caller_can_edit = False
+    caller_can_comment = False
     for g in grants:
         if g.grantee_user_id == caller.id:
             caller_can_copy = g.can_copy
             caller_can_edit = g.can_edit
+            caller_can_comment = bool(g.can_comment or g.can_edit)
             continue
         u = users.get(g.grantee_user_id)
         if u is None:
@@ -587,7 +692,9 @@ def _summary_from_cache(
         grantees=grantees,
         can_copy=caller_can_copy if role == "grantee" else False,
         can_edit=caller_can_edit if role == "grantee" else False,
+        can_comment=caller_can_comment if role == "grantee" else False,
         owner=owner_brief,
+        public_links=public_links if role == "owner" else 0,
     )
 
 

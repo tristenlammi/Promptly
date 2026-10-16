@@ -206,7 +206,7 @@ export function ItemContextToggle({
       className={cn(
         "shrink-0 rounded p-1 transition disabled:cursor-default disabled:opacity-60",
         contextOn
-          ? "text-[var(--accent)] hover:bg-[var(--accent)]/10"
+          ? "text-[var(--accent-text)] hover:bg-[var(--accent)]/10"
           : "text-[var(--text-muted)]/70 hover:bg-[var(--hover)]"
       )}
     >

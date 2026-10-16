@@ -243,13 +243,20 @@ def _from_lines(text: str) -> list[dict]:
     return out
 
 
+# Entities whose actions are hard to take back. A command built on one
+# asks before running unless the user turns that off (R-164).
+CONFIRM_DOMAINS = frozenset({"lock", "cover", "alarm_control_panel", "valve", "garage_door"})
+
+
 def _dedupe(devices: list[dict]) -> list[dict]:
-    seen: set[tuple[str, str]] = set()
+    # Two "Light"s in different rooms are two devices; keying on the name
+    # alone made one of them unpickable (R-164).
+    seen: set[tuple[str, str, str]] = set()
     out: list[dict] = []
     for d in devices:
         if not d["name"]:
             continue
-        key = (d["name"].lower(), d["domain"])
+        key = (d["name"].lower(), d["domain"], d["area"].lower())
         if key in seen:
             continue
         seen.add(key)

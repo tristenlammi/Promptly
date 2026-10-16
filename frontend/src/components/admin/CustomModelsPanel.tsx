@@ -291,6 +291,8 @@ export function EmbeddingConfigCard() {
           />
         )}
 
+        {configured && data && <EmbedderStatus config={data} />}
+
         {missingLocalEmbed && data?.embedding_model_id && (
           <MissingLocalEmbeddingBanner modelName={data.embedding_model_id} />
         )}
@@ -369,6 +371,55 @@ function MissingLocalEmbeddingBanner({ modelName }: { modelName: string }) {
           {isPulling ? "Downloading…" : "Re-download"}
         </Button>
       </div>
+    </div>
+  );
+}
+
+/** Health + re-index progress under the card (R-321, R-322): an outage
+ * used to look exactly like "no results". */
+function EmbedderStatus({ config }: { config: EmbeddingConfig }) {
+  const h = config.health;
+  const p = config.pending;
+  const failing = !!h && ((h.consecutive_failures ?? 0) > 0 || !!h.skipping);
+  const waiting = p ? p.files + p.items + p.memories : 0;
+  if (!failing && !waiting && !(p?.failed ?? 0)) return null;
+  return (
+    <div className="mt-3 space-y-1.5 text-xs">
+      {failing && (
+        <div className="rounded-card border border-[var(--danger-border)] bg-[var(--danger-bg)] px-3 py-2 text-[var(--danger)]">
+          <div className="font-medium">
+            {h?.skipping
+              ? "The embedding model isn't responding — calls are paused for a minute"
+              : `The last ${h?.consecutive_failures} embedding call(s) failed`}
+          </div>
+          {h?.last_error && (
+            <div className="mt-0.5 break-words font-mono text-[11px] opacity-80">
+              {h.last_error}
+            </div>
+          )}
+          <div className="mt-0.5 opacity-80">
+            Search, Ask and memory fall back to keyword matching until it
+            recovers.
+          </div>
+        </div>
+      )}
+      {waiting > 0 && (
+        <div className="flex items-center gap-2 text-[var(--text-muted)]">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          <span>
+            Re-indexing: {p!.files} file{p!.files === 1 ? "" : "s"}, {p!.items}{" "}
+            item{p!.items === 1 ? "" : "s"}, {p!.memories} memor
+            {p!.memories === 1 ? "y" : "ies"} waiting.
+          </span>
+        </div>
+      )}
+      {(p?.failed ?? 0) > 0 && (
+        <div className="text-[var(--text-muted)]">
+          {p!.failed} file{p!.failed === 1 ? "" : "s"} or item
+          {p!.failed === 1 ? "" : "s"} couldn't be indexed — they're retried
+          every hour.
+        </div>
+      )}
     </div>
   );
 }
@@ -775,7 +826,8 @@ function EmbeddingConfigDialog({
                   autoFocus
                 />
                 <span className="mt-1 block text-[11px] text-[var(--text-muted)]">
-                  Dimensions are auto-probed with a test embed call on save.
+                  Every save makes one test embed call to check the model and
+                  its dimensions.
                 </span>
               </label>
             )}
@@ -907,7 +959,7 @@ function CustomModelRow({
 
   return (
     <div className="flex items-start gap-3 rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)]/10 text-[var(--accent)]">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)]/10 text-[var(--accent-text)]">
         <Sparkles className="h-4 w-4" />
       </div>
       <div className="min-w-0 flex-1">
@@ -961,7 +1013,7 @@ function CustomModelRow({
 function EmptyState({ onCreate }: { onCreate: () => void }) {
   return (
     <div className="rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] px-6 py-10 text-center">
-      <Sparkles className="mx-auto h-6 w-6 text-[var(--accent)]" />
+      <Sparkles className="mx-auto h-6 w-6 text-[var(--accent-text)]" />
       <h3 className="mt-2 text-base font-semibold">
         No custom models yet
       </h3>

@@ -67,6 +67,8 @@ export function MeetingNotesModal({
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [uploadPct, setUploadPct] = useState(0);
+  const [acting, setActing] = useState(false);
   const [job, setJob] = useState<MeetingJob | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -122,11 +124,13 @@ export function MeetingNotesModal({
   const start = useCallback(async () => {
     if (!file || uploading) return;
     setUploading(true);
+    setUploadPct(0);
     setError(null);
     try {
       const created = await workspacesApi.createMeetingJob(workspaceId, file, {
         title: title.trim() || undefined,
         language: navigator.language || undefined,
+        onProgress: (f) => setUploadPct(Math.round(f * 100)),
       });
       setJob(created);
       setFile(null);
@@ -173,7 +177,7 @@ export function MeetingNotesModal({
               ) : job.status === "failed" ? (
                 <XCircle className="h-4 w-4 shrink-0 text-[var(--danger)]" />
               ) : (
-                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--accent)]" />
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--accent-text)]" />
               )}
               <span className="min-w-0 flex-1 truncate font-medium">
                 {job.title || "Meeting recording"}
@@ -217,6 +221,69 @@ export function MeetingNotesModal({
                 Open the note
               </button>
             )}
+            {ACTIVE.has(job.status) && (
+              <button
+                type="button"
+                disabled={acting}
+                onClick={async () => {
+                  setActing(true);
+                  try {
+                    setJob(await workspacesApi.cancelMeetingJob(workspaceId, job.id));
+                  } catch (e) {
+                    setError(apiErrorMessage(e, "Couldn't cancel it."));
+                  } finally {
+                    setActing(false);
+                  }
+                }}
+                className="mt-2 w-full rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            )}
+            {job.status === "failed" && job.has_transcript && (
+              <div className="mt-2.5 flex gap-2">
+                {/* The transcription survived the failure — don't lose it
+                    (R-133). */}
+                <button
+                  type="button"
+                  disabled={acting}
+                  onClick={async () => {
+                    setActing(true);
+                    setError(null);
+                    try {
+                      setJob(await workspacesApi.retryMeetingJob(workspaceId, job.id));
+                    } catch (e) {
+                      setError(apiErrorMessage(e, "Couldn't retry."));
+                    } finally {
+                      setActing(false);
+                    }
+                  }}
+                  className="flex-1 rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+                >
+                  Retry the notes
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const blob = await workspacesApi.meetingTranscript(workspaceId, job.id);
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = `${(job.title || "meeting").replace(/[^\w\- ]+/g, "_")} transcript.txt`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    } catch (e) {
+                      setError(apiErrorMessage(e, "Couldn't download the transcript."));
+                    }
+                  }}
+                  className="flex-1 rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]"
+                >
+                  Download transcript
+                </button>
+              </div>
+            )}
+            {error && <p className="mt-2 text-xs text-[var(--danger)]">{error}</p>}
             {(job.status === "done" || job.status === "failed") && (
               <button
                 type="button"
@@ -251,7 +318,7 @@ export function MeetingNotesModal({
             >
               {file ? (
                 <>
-                  <FileAudio className="h-6 w-6 text-[var(--accent)]" />
+                  <FileAudio className="h-6 w-6 text-[var(--accent-text)]" />
                   <span className="max-w-full truncate text-sm font-medium text-[var(--text)]">
                     {file.name}
                   </span>
@@ -308,8 +375,16 @@ export function MeetingNotesModal({
               ) : (
                 <Upload className="h-4 w-4" />
               )}
-              {uploading ? "Uploading…" : "Transcribe & summarise"}
+              {uploading ? `Uploading… ${uploadPct}%` : "Transcribe & summarise"}
             </button>
+            {uploading && (
+              <div className="h-1.5 overflow-hidden rounded-full bg-[var(--surface-2)]">
+                <div
+                  className="h-full rounded-full bg-[var(--accent)] transition-all"
+                  style={{ width: `${uploadPct}%` }}
+                />
+              </div>
+            )}
           </>
         )}
       </div>

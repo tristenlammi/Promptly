@@ -13,16 +13,22 @@ import {
   GripVertical,
   History,
   Loader2,
+  MessageSquare,
   MoveHorizontal,
+  Printer,
   Save,
+  Settings2,
   X,
 } from "lucide-react";
 
 import { filesApi, type FileItem } from "@/api/files";
 import { documentsApi, type DocumentDownloadFormat } from "@/api/documents";
 import { useQueryClient } from "@tanstack/react-query";
-import { DocumentHistoryPanel } from "./DocumentHistoryPanel";
+import { VersionHistoryPanel } from "@/components/files/VersionHistoryPanel";
 import { cn } from "@/utils/cn";
+import { apiErrorMessage } from "@/utils/apiError";
+import { saveChip, type SaveChip } from "@/lib/editorSync";
+import { confirm } from "@/components/shared/ConfirmDialog";
 import { UserAvatar } from "@/components/shared/UserAvatar";
 import {
   NOTE_WIDTH_CLASS,
@@ -33,10 +39,26 @@ import {
 import { buildExtensions } from "./extensions";
 import type { WikiTarget } from "./WikiLinkExtension";
 import { DocumentToolbar } from "./DocumentToolbar";
+import { CommentBubbleMenu, EditorBubbleMenu } from "./EditorBubbleMenu";
+import { CommentsPanel, type CommentDraft } from "./CommentsPanel";
+import { anchorFromSelection, OPEN_COMMENT_EVENT } from "./CommentsExtension";
+import { useDocComments } from "./useDocComments";
+import { useIsPhone, useKeyboardInset } from "./useKeyboardInset";
+import { toast } from "@/store/toastStore";
+import DOMPurify from "dompurify";
+import MarkdownIt from "markdown-it";
+import { useRegisterEditorAi } from "@/lib/editorAiBridge";
+import { EditorContextBar } from "./EditorContextBar";
+import { FindBar } from "./FindBar";
+import { SuggestionBubble } from "./SuggestionControls";
 import { EditorAiEnhance } from "./EditorAiEnhance";
 import { LinkHoverPreview } from "./LinkHoverPreview";
 import { DocumentOutline, WordCountPill } from "./EditorExtras";
 import { useCollabProvider } from "./useCollabProvider";
+import { usePageSetup } from "./usePageSetup";
+import { PageSetupDialog } from "./PageSetupDialog";
+import { PrintPreviewModal } from "./PrintPreviewModal";
+import * as Y from "yjs";
 import {
   spellCheckPluginKey,
   SPELLCHECK_WORD_EVENT,
@@ -78,7 +100,13 @@ interface DocumentEditorModalProps {
   /** Workspace-note-only: enables the ``[[`` wiki-link autocomplete and
    *  passes the items fetcher straight through to ``buildExtensions``.
    *  Omitted for normal Drive documents so their editor is unchanged. */
-  wikiLink?: { items: (query: string) => Promise<WikiTarget[]> };
+  wikiLink?: {
+    items: (query: string) => Promise<WikiTarget[]>;
+    /** ``@`` menu: people + items + dates (R-232). */
+    mentions?: (query: string) => Promise<WikiTarget[]>;
+    /** A person was mentioned — the host notifies them (R-232). */
+    onMention?: (userId: string) => void;
+  };
   /** Inline-only: a leading glyph rendered before the title (the note
    *  kind-icon), so the note bar's left cluster matches the shared
    *  ``ItemPaneHeader`` canvas/sheet/board use. */
@@ -86,9 +114,41 @@ interface DocumentEditorModalProps {
   /** Inline-only: a control rendered right after the title — the
    *  workspace ``⚡`` context toggle, mirroring ``ItemPaneHeader``. */
   titleAdornment?: React.ReactNode;
+  /** Rename some other way than Drive's — a workspace note is renamed
+   *  through its workspace item (Drive refuses to rename workspace files).
+   *  When set, anyone who can edit the content can edit the title. */
+  onRenameTitle?: (title: string) => Promise<void>;
+  /** Open with the find bar on this text — where a chat citation points
+   *  (WP-5.2). The longest leading run of its words that the document
+   *  actually contains is searched for. */
+  initialFind?: string;
 }
 
-type SaveStatus = "idle" | "dirty" | "syncing" | "saved" | "offline";
+/** The longest leading run of ``phrase``'s words found inside one block of
+ *  the document (find matches within a paragraph), or ``null``. */
+const md = new MarkdownIt({ html: false, linkify: true });
+
+/** An Ask answer (Markdown) as HTML the editor turns into its own blocks. */
+function markdownToHtml(markdown: string): string {
+  return md.render(markdown);
+}
+
+function findablePrefix(editor: Editor, phrase: string): string | null {
+  const blocks: string[] = [];
+  editor.state.doc.descendants((node) => {
+    if (node.isTextblock) {
+      blocks.push(node.textContent.replace(/\s+/g, " ").toLowerCase());
+      return false;
+    }
+    return true;
+  });
+  const words = phrase.split(/\s+/).filter(Boolean);
+  for (let n = words.length; n >= 2; n--) {
+    const cand = words.slice(0, n).join(" ");
+    if (blocks.some((b) => b.includes(cand.toLowerCase()))) return cand;
+  }
+  return null;
+}
 
 /** Documents are stored as ``<name>.html`` / ``.md`` Drive files, but the
  *  editor title should read like a document name, not a filename — split so
@@ -108,10 +168,22 @@ export function DocumentEditorModal({
   wikiLink,
   titleIcon,
   titleAdornment,
+  onRenameTitle,
+  initialFind,
 }: DocumentEditorModalProps) {
   const queryClient = useQueryClient();
-  const { ydoc, provider, status: collabStatus, user, error } =
-    useCollabProvider(file.id);
+  const {
+    ydoc,
+    provider,
+    status: collabStatus,
+    user,
+    error,
+    warning: collabWarning,
+    canEdit: serverCanEdit,
+    synced,
+    unsynced,
+    epoch: collabEpoch,
+  } = useCollabProvider(file.id);
 
   // Per-user editor width (shared with standalone Drive documents).
   const noteWidth = useNoteWidthStore((s) => s.width);
@@ -119,7 +191,8 @@ export function DocumentEditorModal({
 
   const [filename, setFilename] = useState(() => splitDocExt(file.filename).base);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const historyOpenRef = useRef(false);
+  historyOpenRef.current = historyOpen;
   const [renameError, setRenameError] = useState<string | null>(null);
   // Wall-clock timestamp of the last successful manual save. Drives
   // the persistent "Saved Xs ago" chip so a user on a broken-WS
@@ -149,13 +222,53 @@ export function DocumentEditorModal({
   // built-in read-only mode and the collab token endpoint mints a
   // ``perm=read`` JWT so the Hocuspocus server rejects updates
   // even if a malicious client tried to flip ``editable`` on.
-  const canEdit = !sharedWithMe || (file.sharing?.can_edit ?? false);
+  //
+  // The server decides (owner, ``can_edit`` grant, or a workspace
+  // owner/admin/editor role) and says so with the collab token. Guessing
+  // from Drive grants here used to give every workspace member — viewers
+  // included — an editable editor whose edits the server then dropped
+  // (roadmap R-218). Unknown (token not loaded yet) means read-only.
+  // Nor before the server's copy has arrived: the local Y.Doc is empty
+  // until then, and anything typed would merge in beside the real text.
+  const canEdit = (serverCanEdit ?? false) && synced;
+  // Paper, margins, header/footer, page numbers — in the Y.Doc (WP-6.4).
+  const [pageSetup, applyPageSetup] = usePageSetup(ydoc);
+  const [pageSetupOpen, setPageSetupOpen] = useState(false);
+  const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
+  // The title: a Drive document is renamed by its owner only (it's the
+  // file's name); a workspace note by anyone who can edit it (R-218).
+  const titleEditable = onRenameTitle ? serverCanEdit === true : !sharedWithMe && serverCanEdit !== false;
+  // Save / rename answer with a bare file row — keep the sharing summary
+  // or an editor-grantee's UI flips to owner mode afterwards (R-218).
+  const updateFile = useCallback(
+    (updated: FileItem) => onFileUpdated?.({ ...updated, sharing: updated.sharing ?? file.sharing }),
+    [onFileUpdated, file.sharing]
+  );
 
-  // "Saved" ticks back to "idle" on a short timer — pure UX
-  // cosmetics so the user sees the confirmation breath before it
-  // fades.
-  const savedTimerRef = useRef<number | null>(null);
 
+  // The suggestion lists read through a ref, so items and members added
+  // while the note is open show up without rebuilding the editor (R-232).
+  const wikiRef = useRef(wikiLink);
+  wikiRef.current = wikiLink;
+  const hasWiki = Boolean(wikiLink);
+  const stableWiki = useMemo(
+    () =>
+      hasWiki
+        ? {
+            items: (q: string) => wikiRef.current?.items(q) ?? Promise.resolve([]),
+            mentions: (q: string) =>
+              (wikiRef.current?.mentions ?? wikiRef.current?.items)?.(q) ?? Promise.resolve([]),
+            onMention: (userId: string) => {
+              wikiRef.current?.onMention?.(userId);
+              // Tell the person (best effort; the backend checks they can
+              // open this document and doesn't repeat itself).
+              void documentsApi.notifyMention(file.id, userId).catch(() => undefined);
+            },
+          }
+        : undefined,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [hasWiki, file.id]
+  );
   const extensions = useMemo(
     () =>
       buildExtensions({
@@ -163,9 +276,9 @@ export function DocumentEditorModal({
         provider,
         user,
         placeholder: "Start typing, or hit / for commands…",
-        wikiLink,
+        wikiLink: stableWiki,
       }),
-    [ydoc, provider, user, wikiLink]
+    [ydoc, provider, user, stableWiki]
   );
 
   // ``editor`` from useEditor is the source of truth, but the
@@ -181,6 +294,19 @@ export function DocumentEditorModal({
   // can show "Uploading…" without each paste needing its own toast.
   const [pasteUploading, setPasteUploading] = useState(false);
   const [pasteError, setPasteError] = useState<string | null>(null);
+
+  // Find / replace bar (WP-4.5): null = closed. Ctrl/⌘+F opens find,
+  // Ctrl/⌘+H opens it with the replace row (editors only).
+  const [findMode, setFindMode] = useState<null | { replace: boolean; n: number; term?: string }>(null);
+
+  // Comments (WP-4.5, R-227): the side panel, a draft on the selection,
+  // and the thread that's focused (highlighted in the text too).
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const commentsOpenRef = useRef(false);
+  commentsOpenRef.current = commentsOpen;
+  const [commentDraft, setCommentDraft] = useState<CommentDraft | null>(null);
+  const [activeComment, setActiveComment] = useState<string | null>(null);
+  const startCommentRef = useRef<() => void>(() => undefined);
 
   // ``canEdit`` is captured into the editorProps closure when the
   // editor is created and we deliberately don't rebuild the editor
@@ -219,8 +345,7 @@ export function DocumentEditorModal({
         }
         chain.run();
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "Image upload failed";
-        setPasteError(msg);
+        setPasteError(apiErrorMessage(e, "Image upload failed"));
         // Auto-clear after a few seconds so a stale error doesn't
         // shadow a successful next paste.
         window.setTimeout(() => setPasteError(null), 4000);
@@ -234,6 +359,12 @@ export function DocumentEditorModal({
   const editor = useEditor(
     {
       extensions,
+      // Not every transaction (R-234): each keystroke, remote edit and
+      // remote caret move re-rendered this whole modal. The toolbar, bubble
+      // menu and block bar subscribe to what they show
+      // (``useEditorFormatState``); outline / word count / comments listen
+      // to document updates themselves.
+      shouldRerenderOnTransaction: false,
       autofocus: "end",
       // Read-only grantees can't type; TipTap honours this by
       // disabling input + visually muting toolbar buttons through
@@ -310,6 +441,33 @@ export function DocumentEditorModal({
           void uploadAndInsertImages(images, null);
           return true;
         },
+        handleKeyDown: (_view, event) => {
+          const mod = event.ctrlKey || event.metaKey;
+          if (!mod || event.altKey) return false;
+          const key = event.key.toLowerCase();
+          if (key === "f" && !event.shiftKey) {
+            event.preventDefault();
+            setFindMode((m) => ({ replace: false, n: (m?.n ?? 0) + 1 }));
+            return true;
+          }
+          if (key === "h" && !event.shiftKey) {
+            event.preventDefault();
+            setFindMode((m) => ({ replace: true, n: (m?.n ?? 0) + 1 }));
+            return true;
+          }
+          return false;
+        },
+        handleDOMEvents: {
+          // Ctrl/⌘+Alt+M — comment on the selection, as in Docs.
+          keydown: (_view, event) => {
+            if ((event.ctrlKey || event.metaKey) && event.altKey && event.code === "KeyM") {
+              event.preventDefault();
+              startCommentRef.current();
+              return true;
+            }
+            return false;
+          },
+        },
         // Drag-and-drop pictures from the desktop / another tab.
         // ``moved=true`` means the user is dragging an existing
         // node inside the editor — leave that to ProseMirror.
@@ -348,6 +506,47 @@ export function DocumentEditorModal({
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+
+  const comments = useDocComments(file.id, editor, provider);
+  const isPhone = useIsPhone();
+  const keyboardInset = useKeyboardInset();
+  const dockToolbar = isPhone && keyboardInset > 0 && canEdit && !error;
+  startCommentRef.current = () => {
+    if (!editor) return;
+    if (!comments.canComment) {
+      toast.info("You can read this document's comments, but not add them.");
+      return;
+    }
+    const draft = anchorFromSelection(editor);
+    if (!draft) {
+      toast.info("Select some text to comment on.");
+      return;
+    }
+    setCommentDraft(draft);
+    setCommentsOpen(true);
+  };
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) editor.commands.setActiveComment(activeComment);
+  }, [editor, activeComment]);
+  // Clicking highlighted text opens its thread.
+  useEffect(() => {
+    const open = (e: Event) => {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id;
+      if (!id) return;
+      setCommentsOpen(true);
+      setActiveComment(id);
+    };
+    document.addEventListener(OPEN_COMMENT_EVENT, open);
+    return () => document.removeEventListener(OPEN_COMMENT_EVENT, open);
+  }, []);
+  // A notification link (``?comment=<id>``) opens straight to the thread.
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("comment");
+    if (id) {
+      setCommentsOpen(true);
+      setActiveComment(id);
+    }
+  }, [file.id]);
 
   // ``useEditor`` captures ``editable`` at create time. If a
   // grantee's permission changes mid-session (e.g. owner promotes
@@ -447,113 +646,116 @@ export function DocumentEditorModal({
   ]);
 
   // ------------------------------------------------------------------
-  // Offline fallback — seed the editor from the saved HTML blob
+  // Offline fallback — show the last saved version, read-only
   // ------------------------------------------------------------------
-  // When the collab WebSocket fails (typical prod symptom: a
-  // Cloudflare tunnel that hasn't been told to upgrade WS, a stopped
-  // collab container, or an aggressively-buffering reverse proxy)
-  // the Y.Doc never receives the previously-saved state. The editor
-  // stays empty, the user can't see what they wrote earlier, and a
-  // manual Save would clobber the on-disk blob with the empty
-  // editor content.
-  //
-  // To make the offline path actually usable we fetch the HTML blob
-  // a couple of seconds after we determine the WS isn't coming up
-  // and apply it via ``editor.commands.setContent``. y-prosemirror
-  // mirrors that into the local Y.Doc, so subsequent edits + manual
-  // saves persist correctly. Guards:
-  //
-  //   * Only seed once per modal lifetime (``seededRef``) so we
-  //     can't fight a slow-but-eventually-successful WS.
-  //   * Only seed when the editor is empty — if the WS DID briefly
-  //     deliver content before going down, we leave that alone.
-  //   * Soft-fail on fetch errors. The user can still type from
-  //     scratch; the manual save endpoint doesn't depend on this.
-  const seededRef = useRef(false);
+  // When live sync can't connect at all (stopped collab container, a
+  // tunnel without WebSocket support) the editor never receives the
+  // document. This used to load the saved HTML *into* the collaborative
+  // editor — which created a second copy of every paragraph that merged
+  // with the real one on reconnect, duplicating the whole document for
+  // everyone (R-022). Now the saved HTML is shown in a separate read-only
+  // view until the live copy arrives; nothing is ever seeded.
+  const [offlineHtml, setOfflineHtml] = useState<string | null>(null);
   useEffect(() => {
-    if (seededRef.current) return;
-    if (!editor) return;
-    if (collabStatus === "connected") return;
-    // Fire once we hit a *terminal* disconnect — "connecting" is
-    // the WS's normal state during the first handshake, so a 2s
-    // timer there would seed too eagerly. Hocuspocus reports
-    // "disconnected" after each failed connect attempt, which is
-    // the cue we want.
-    if (collabStatus !== "disconnected") return;
-
+    if (synced || collabStatus !== "disconnected") return;
     let cancelled = false;
     const timer = window.setTimeout(async () => {
-      if (cancelled || seededRef.current) return;
       try {
         const { blob } = await documentsApi.download(file.id, "html");
         const html = (await blob.text()).trim();
-        if (cancelled || seededRef.current) return;
-        // Editor may have raced ahead with user keystrokes by now;
-        // never overwrite local edits.
-        if (!editor.isEmpty) return;
-        if (!html) return;
-        // ``setContent(..., false)`` doesn't emit a transaction-meta
-        // ``addToHistory`` flag, which keeps the seed out of the
-        // user-visible undo stack — backspace shouldn't undo "open
-        // the document".
-        editor.commands.setContent(html, false);
-        seededRef.current = true;
+        if (!cancelled) setOfflineHtml(html);
       } catch (err) {
-        // Soft-fail; an empty editor is still usable.
-        console.warn("[doc] offline seed failed", err);
+        console.warn("[doc] offline preview failed", err);
       }
     }, 2000);
-
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [collabStatus, editor, file.id]);
+  }, [collabStatus, synced, file.id]);
+  const showOfflineCopy = !synced && offlineHtml !== null;
 
-  // Collab-status → save-indicator mapping.
+  // The editor page's Ask panel (WP-5.5): what's selected, and inserting
+  // an answer (Markdown → the document's own blocks) after the selection.
+  useRegisterEditorAi({
+    getSelection: () => {
+      if (!editor || editor.state.selection.empty) return null;
+      const { from, to } = editor.state.selection;
+      const text = editor.state.doc.textBetween(from, to, "\n").trim();
+      if (!text) return null;
+      const words = text.split(/\s+/).length;
+      return { label: `${words} word${words === 1 ? "" : "s"} selected`, text: text.slice(0, 8000) };
+    },
+    insert: (markdown: string) => {
+      if (!editor || !canEdit) {
+        toast.info("You can't edit this document.");
+        return;
+      }
+      const html = DOMPurify.sanitize(markdownToHtml(markdown));
+      editor.chain().focus().insertContentAt(editor.state.selection.to, html).run();
+    },
+  });
+
+  // A citation link: once the content has arrived, open find on the passage.
+  const initialFindDone = useRef(false);
   useEffect(() => {
-    if (collabStatus === "disconnected") {
-      setSaveStatus("offline");
-    } else if (collabStatus === "connecting") {
-      setSaveStatus("syncing");
-    } else {
-      setSaveStatus("saved");
-      if (savedTimerRef.current !== null) {
-        window.clearTimeout(savedTimerRef.current);
-      }
-      savedTimerRef.current = window.setTimeout(() => {
-        setSaveStatus("idle");
-      }, 1800);
-    }
-    return () => {
-      if (savedTimerRef.current !== null) {
-        window.clearTimeout(savedTimerRef.current);
-        savedTimerRef.current = null;
-      }
-    };
-  }, [collabStatus]);
+    if (!initialFind || initialFindDone.current || !synced || !editor) return;
+    initialFindDone.current = true;
+    const term = findablePrefix(editor, initialFind);
+    if (term) setFindMode({ replace: false, n: 1, term });
+  }, [initialFind, synced, editor]);
 
-  // Listen to the Y.Doc for local changes so we can flip
-  // "saved" → "syncing" while Hocuspocus batches the update and
-  // "syncing" → "saved" once the server debounce fires. The
-  // debounce is server-side only, so here we just watch for a
-  // short quiet period after each change.
+  // The save chip follows the provider: unacknowledged local changes are
+  // "Saving…", none is "Saved", and while disconnected it says how much
+  // lives only in this tab (R-224). Remote updates don't count as edits.
+  const [lastLocalEditAt, setLastLocalEditAt] = useState<Date | null>(null);
   useEffect(() => {
     if (!ydoc) return;
-    let settleTimer: number | null = null;
-    const onUpdate = () => {
-      setSaveStatus("syncing");
-      if (settleTimer) window.clearTimeout(settleTimer);
-      settleTimer = window.setTimeout(() => {
-        setSaveStatus("saved");
-      }, 3500);
+    const onUpdate = (_u: Uint8Array, origin: unknown) => {
+      if (provider && origin === provider) return;
+      setLastLocalEditAt(new Date());
     };
     ydoc.on("update", onUpdate);
     return () => {
       ydoc.off("update", onUpdate);
-      if (settleTimer) window.clearTimeout(settleTimer);
     };
-  }, [ydoc]);
+  }, [ydoc, provider]);
+  const chip = saveChip({
+    fatal: error,
+    synced,
+    status: collabStatus,
+    unsynced,
+    savedManuallyAt: lastSavedAt,
+    lastLocalEditAt,
+  });
+
+  // Leaving with edits only this tab has: ask first, and let the browser
+  // warn on reload / tab close (R-225).
+  const unsyncedRef = useRef(0);
+  unsyncedRef.current = collabStatus === "connected" ? 0 : unsynced;
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (unsyncedRef.current > 0) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+  const requestClose = useCallback(async () => {
+    if (unsyncedRef.current > 0) {
+      const ok = await confirm({
+        title: "Close with unsynced changes?",
+        message:
+          "Live editing is offline, and some of your edits are only in this tab. Press Save first to keep them, or close and lose them.",
+        confirmLabel: "Close anyway",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    onClose();
+  }, [onClose]);
 
   // Body scroll lock while the modal is open. (Inline mode lives inside
   // the normal page flow, so it must not touch body scroll.)
@@ -571,14 +773,28 @@ export function DocumentEditorModal({
   useEffect(() => {
     if (inline) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.querySelector(".ProseMirror-menubar")) {
-        e.preventDefault();
-        onClose();
-      }
+      if (e.key !== "Escape") return;
+      // Decide after every other handler has had this key: the slash menu
+      // (handled inside ProseMirror), the emoji picker, the spellcheck
+      // popover and the download menu all close on Esc, and used to take
+      // the whole document with them.
+      window.setTimeout(() => {
+        if (e.defaultPrevented) return;
+        if (document.querySelector(ESC_LAYERS)) return;
+        if (historyOpenRef.current) {
+          setHistoryOpen(false);
+          return;
+        }
+        if (commentsOpenRef.current) {
+          setCommentsOpen(false);
+          return;
+        }
+        void requestClose();
+      }, 0);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, inline]);
+  }, [requestClose, inline]);
 
   // Collaborator awareness — the CollaborationCursor extension
   // publishes each client's user object into the provider's
@@ -627,17 +843,21 @@ export function DocumentEditorModal({
     }
     setRenameError(null);
     try {
-      const updated = await filesApi.renameFile(file.id, next);
-      setFilename(splitDocExt(updated.filename).base);
-      onFileUpdated?.(updated);
+      if (onRenameTitle) {
+        await onRenameTitle(typed.replace(/\.(html?|md)$/i, ""));
+        updateFile({ ...file, filename: next });
+      } else {
+        const updated = await filesApi.renameFile(file.id, next);
+        setFilename(splitDocExt(updated.filename).base);
+        updateFile(updated);
+      }
       // Keep Drive listings in sync.
       await queryClient.invalidateQueries({ queryKey: ["drive"] });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Rename failed";
-      setRenameError(msg);
+      setRenameError(apiErrorMessage(e, "Rename failed"));
       setFilename(base);
     }
-  }, [filename, file.filename, file.id, onFileUpdated, queryClient]);
+  }, [filename, file, onRenameTitle, updateFile, queryClient]);
 
   // Owner-only manual save. Bypasses the Hocuspocus snapshot path
   // entirely — captures whatever the editor currently renders and
@@ -657,32 +877,27 @@ export function DocumentEditorModal({
     setManualSaveError(null);
     try {
       const html = ed.getHTML();
-      const updated = await documentsApi.manualSave(file.id, html);
-      onFileUpdated?.(updated);
+      // The CRDT state rides along so the server merges these edits into
+      // the document itself — a Save while live sync is down used to
+      // write only the HTML, which the next live edit overwrote (R-022).
+      const updated = await documentsApi.manualSave(file.id, html, {
+        yjsState: ydoc ? encodeState(ydoc) : undefined,
+        epoch: collabEpoch,
+      });
+      updateFile(updated);
       await queryClient.invalidateQueries({ queryKey: ["drive"] });
       // The timestamp drives a *durable* "Saved Xs ago" chip even
       // when the collab WS is down. Without it, the SaveIndicator
       // would re-render straight back to "Offline — Save manually"
       // and the user would reasonably think the click did nothing.
       setLastSavedAt(new Date());
-      // Flash the green tick briefly too so the click feels
-      // responsive — the relative-time chip takes over once the
-      // tick fades.
-      setSaveStatus("saved");
-      if (savedTimerRef.current !== null) {
-        window.clearTimeout(savedTimerRef.current);
-      }
-      savedTimerRef.current = window.setTimeout(() => {
-        setSaveStatus("idle");
-      }, 1800);
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Save failed";
-      setManualSaveError(msg);
+      setManualSaveError(apiErrorMessage(e, "Save failed"));
       window.setTimeout(() => setManualSaveError(null), 5000);
     } finally {
       setManualSaving(false);
     }
-  }, [canEdit, file.id, manualSaving, onFileUpdated, queryClient]);
+  }, [canEdit, file.id, manualSaving, updateFile, queryClient, ydoc, collabEpoch]);
 
   // Download in the requested format. ``html`` returns the on-disk
   // blob verbatim, ``md`` runs it through markdownify on the
@@ -716,8 +931,7 @@ export function DocumentEditorModal({
         // grab the blob before the URL is invalidated.
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "Download failed";
-        setDownloadError(msg);
+        setDownloadError(apiErrorMessage(e, "Download failed"));
         window.setTimeout(() => setDownloadError(null), 5000);
       } finally {
         setDownloading(null);
@@ -771,9 +985,9 @@ export function DocumentEditorModal({
       // Tap on the backdrop (not a click that bubbled from the card)
       // closes the modal. Same behaviour as the file preview modal
       // so the Drive has a consistent "click-away" feel.
-      if (e.target === e.currentTarget) onClose();
+      if (e.target === e.currentTarget) void requestClose();
     },
-    [onClose]
+    [requestClose]
   );
 
   // Inline mode fills its parent (no modal inset / rounding / shadow);
@@ -827,10 +1041,10 @@ export function DocumentEditorModal({
           // Grantees can read the doc but not rename it — make the
           // input static so a click doesn't put the user in an edit
           // state that would fail the moment they hit blur.
-          readOnly={sharedWithMe}
+          readOnly={!titleEditable}
           className={cn(
             "min-w-0 flex-1 truncate rounded-md bg-transparent px-2 py-1 text-sm font-semibold outline-none",
-            sharedWithMe
+            !titleEditable
               ? "cursor-default"
               : "focus:bg-black/5 dark:focus:bg-white/5"
           )}
@@ -840,9 +1054,8 @@ export function DocumentEditorModal({
         {inline && titleAdornment}
 
         <SaveIndicator
-          status={saveStatus}
+          chip={chip}
           error={error}
-          collabOffline={collabStatus === "disconnected"}
           lastSavedAt={lastSavedAt}
         />
 
@@ -876,6 +1089,28 @@ export function DocumentEditorModal({
             <span className="hidden sm:inline">Save</span>
           </button>
         )}
+
+        {/* Comments (WP-4.5, R-227) — everyone who can open the document
+            reads them; editors add, reply and resolve. */}
+        <button
+          type="button"
+          onClick={() => setCommentsOpen((v) => !v)}
+          aria-label={comments.openCount ? `Comments (${comments.openCount} open)` : "Comments"}
+          aria-pressed={commentsOpen}
+          title="Comments (Ctrl+Alt+M on a selection to add one)"
+          className={cn(
+            "inline-flex h-9 items-center gap-1.5 rounded-md px-2.5 text-sm transition",
+            commentsOpen ? "bg-black/10 text-[var(--text)] dark:bg-white/15" : "text-[var(--text)] hover:bg-black/5 dark:hover:bg-white/10"
+          )}
+        >
+          <MessageSquare className="h-4 w-4" />
+          <span className="hidden lg:inline">Comments</span>
+          {comments.openCount > 0 && (
+            <span className="rounded-full bg-[var(--accent)] px-1.5 text-[11px] font-semibold leading-4 text-white">
+              {comments.openCount}
+            </span>
+          )}
+        </button>
 
         {/* Version history (Phase 9). Available to anyone who can read the
             doc; restore is gated to editors inside the panel. */}
@@ -927,8 +1162,22 @@ export function DocumentEditorModal({
               )}
             >
               <DownloadMenuItem
+                icon={<FileText className="h-4 w-4" />}
+                label="Word (.docx)"
+                onClick={() => {
+                  setDownloadMenuOpen(false);
+                  // From the live editor, so it has the very latest edits.
+                  void import("@/lib/office/wordActions")
+                    .then(({ downloadDocx }) => downloadDocx(file, editorRef.current?.getHTML(), pageSetup))
+                    .catch((e) => {
+                      setDownloadError(apiErrorMessage(e, "Download failed"));
+                      window.setTimeout(() => setDownloadError(null), 5000);
+                    });
+                }}
+              />
+              <DownloadMenuItem
                 icon={<FileCode className="h-4 w-4" />}
-                label="HTML (.html)"
+                label="Web page (.html)"
                 onClick={() => void handleDownload("html")}
               />
               <DownloadMenuItem
@@ -940,6 +1189,23 @@ export function DocumentEditorModal({
                 icon={<FileDown className="h-4 w-4" />}
                 label="PDF (.pdf)"
                 onClick={() => void handleDownload("pdf")}
+              />
+              <div role="separator" className="my-1 border-t border-[var(--border)]" />
+              <DownloadMenuItem
+                icon={<Printer className="h-4 w-4" />}
+                label="Print preview…"
+                onClick={() => {
+                  setDownloadMenuOpen(false);
+                  setPrintPreviewOpen(true);
+                }}
+              />
+              <DownloadMenuItem
+                icon={<Settings2 className="h-4 w-4" />}
+                label="Page setup…"
+                onClick={() => {
+                  setDownloadMenuOpen(false);
+                  setPageSetupOpen(true);
+                }}
               />
             </div>
           )}
@@ -956,7 +1222,7 @@ export function DocumentEditorModal({
             "inline-flex h-9 w-9 items-center justify-center rounded-md hover:bg-black/5 dark:hover:bg-white/10",
             noteWidth === "default"
               ? "text-[var(--muted)] hover:text-[var(--text)]"
-              : "text-[var(--accent)]"
+              : "text-[var(--accent-text)]"
           )}
         >
           <MoveHorizontal className="h-5 w-5" />
@@ -964,7 +1230,7 @@ export function DocumentEditorModal({
 
         <button
           type="button"
-          onClick={onClose}
+          onClick={() => void requestClose()}
           aria-label="Close document"
           className="inline-flex h-9 w-9 items-center justify-center rounded-md text-[var(--muted)] hover:bg-black/5 hover:text-[var(--text)] dark:hover:bg-white/10"
         >
@@ -1008,27 +1274,44 @@ export function DocumentEditorModal({
           chip is easy to miss and the user thinks autosave is
           working. Surface it explicitly so they reach for the
           Save button. */}
+      {collabWarning && !error && collabStatus !== "disconnected" && (
+        <div
+          role="status"
+          className="flex items-start gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+        >
+          <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+          <div>{collabWarning}</div>
+        </div>
+      )}
       {collabStatus === "disconnected" && !error && (
         <div className="flex items-start gap-2 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <div>
-            <strong className="font-semibold">Live sync offline.</strong>{" "}
-            Loaded the last saved version. Autosave is paused —
-            press{" "}
-            <kbd className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[10px]">
-              ⌘/Ctrl
-            </kbd>{" "}
-            +{" "}
-            <kbd className="rounded border border-amber-500/40 bg-amber-500/10 px-1 py-0.5 text-[10px]">
-              S
-            </kbd>{" "}
-            (or the Save button) to persist your changes.
-          </div>
+          {synced ? (
+            <div>
+              <strong className="font-semibold">Live sync offline.</strong>{" "}
+              Keep editing — your changes are kept in this tab and sync when
+              the connection is back. Press Save to store them on the server
+              now, in case this tab closes first.
+            </div>
+          ) : (
+            <div>
+              <strong className="font-semibold">Can&apos;t reach live editing.</strong>{" "}
+              {showOfflineCopy
+                ? "Showing the last saved version, read-only. "
+                : ""}
+              Editing comes back as soon as the connection does.
+            </div>
+          )}
         </div>
       )}
 
       {/* Toolbar */}
-      <div className="relative">
+      <div
+        className={cn("relative", serverCanEdit === false && "hidden", dockToolbar && "fixed inset-x-0 z-[60] shadow-[0_-4px_12px_rgba(0,0,0,0.12)]")}
+        // On a phone with the keyboard up, the toolbar sits just above it,
+        // as in Docs (R-231) — not three rows over the top of the page.
+        style={dockToolbar ? { bottom: keyboardInset } : undefined}
+      >
         <DocumentToolbar
           editor={editor}
           documentId={file.id}
@@ -1038,8 +1321,24 @@ export function DocumentEditorModal({
           // "connecting" state — doing so makes the editor feel broken
           // on every cold open.
           disabled={!editor || Boolean(error) || !canEdit}
+          onFind={() => setFindMode((m) => ({ replace: false, n: (m?.n ?? 0) + 1 }))}
         />
+        {canEdit && !error && <EditorContextBar editor={editor} />}
       </div>
+      <SuggestionBubble editor={editor} canResolve={canEdit} />
+      {editor && !error && findMode && (
+        <FindBar
+          key={findMode.n}
+          editor={editor}
+          withReplace={findMode.replace}
+          canReplace={canEdit}
+          initialTerm={findMode.term}
+          onClose={() => {
+            setFindMode(null);
+            editor.commands.focus();
+          }}
+        />
+      )}
 
       {/* Editor area — relative wrapper so the outline rail + word-count
           pill float over the scroll region instead of scrolling with it. */}
@@ -1051,7 +1350,8 @@ export function DocumentEditorModal({
             // behind the iOS home indicator / rounded corners.
             "pl-[env(safe-area-inset-left,0)]",
             "pr-[env(safe-area-inset-right,0)]",
-            "pb-[max(env(safe-area-inset-bottom,0),1.5rem)]"
+            "pb-[max(env(safe-area-inset-bottom,0),1.5rem)]",
+            commentsOpen && "sm:pr-80"
           )}
         >
           {error ? (
@@ -1082,17 +1382,26 @@ export function DocumentEditorModal({
                     (e.target as HTMLInputElement).blur();
                   }
                 }}
-                readOnly={sharedWithMe}
+                readOnly={!titleEditable}
                 placeholder="Untitled"
                 aria-label="Document title"
                 className={cn(
                   // px-6 matches the ProseMirror content's 24px padding so
                   // the title's left edge lines up with the body text.
                   "w-full bg-transparent px-6 pb-1 pt-6 text-3xl font-bold tracking-tight text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]/40",
-                  sharedWithMe && "cursor-default"
+                  !titleEditable && "cursor-default"
                 )}
               />
-              <EditorContent editor={editor} />
+              {showOfflineCopy ? (
+                <div
+                  className="ProseMirror px-6 py-4"
+                  // Sanitised server-side on every save path (the same
+                  // allowlist the version-history preview relies on).
+                  dangerouslySetInnerHTML={{ __html: offlineHtml ?? "" }}
+                />
+              ) : (
+                <EditorContent editor={editor} />
+              )}
             </div>
           )}
         </div>
@@ -1116,7 +1425,35 @@ export function DocumentEditorModal({
             DragHandle's Tiptap-moved DOM node; its wrapper is always mounted
             (see EditorAiEnhance) to avoid the insertBefore reconciliation
             error entirely. */}
-        {editor && !error && canEdit && <EditorAiEnhance editor={editor} />}
+        {editor && !error && canEdit && <EditorAiEnhance editor={editor} fileId={file.id} />}
+        {/* Selection formatting bubble (R-226 — it existed but was never
+            mounted). Same commands as the toolbar. */}
+        {editor && !error && canEdit && (
+          <EditorBubbleMenu editor={editor} onComment={() => startCommentRef.current()} />
+        )}
+        {/* Someone who can comment but not edit (WP-6.6). */}
+        {editor && !error && !canEdit && comments.canComment && (
+          <CommentBubbleMenu editor={editor} onComment={() => startCommentRef.current()} />
+        )}
+        {commentsOpen && !error && (
+          <CommentsPanel
+            documentId={file.id}
+            editor={editor}
+            threads={comments.threads}
+            canComment={comments.canComment}
+            loading={comments.loading}
+            draft={commentDraft}
+            activeId={activeComment}
+            onActivate={setActiveComment}
+            onDraftDone={() => setCommentDraft(null)}
+            onChanged={comments.changed}
+            onClose={() => {
+              setCommentsOpen(false);
+              setCommentDraft(null);
+              setActiveComment(null);
+            }}
+          />
+        )}
         {/* Spell-check suggestion popover — opens when a squiggle is clicked
             (the SpellCheckExtension fires a DOM event caught above). */}
         {editor && !error && canEdit && spellTarget && (
@@ -1134,27 +1471,26 @@ export function DocumentEditorModal({
       </div>
 
       {historyOpen && (
-        <DocumentHistoryPanel
-          documentId={file.id}
-          canEdit={canEdit}
-          onClose={() => setHistoryOpen(false)}
-          onRestore={async (html) => {
-            // Set the live editor content — this emits an update that
-            // flows through the Collaboration extension → Yjs → peers +
-            // the snapshot path, so the restore persists everywhere. A
-            // manual save (tagged "restore") captures it as a version.
-            // TipTap v2 signature: setContent(content, emitUpdate).
-            editor?.commands.setContent(html, true);
-            try {
-              await documentsApi.manualSave(file.id, html, "restore");
-            } catch {
-              // The Yjs sync already persisted the content; a failed
-              // explicit save just means no distinct "restore" version
-              // marker. Non-fatal.
-            }
-          }}
-        />
+        // One history for documents, sheets and whiteboards (WP-6.2): a
+        // restore is done by the server, exactly, and the editor reloads.
+        <VersionHistoryPanel fileId={file.id} onClose={() => setHistoryOpen(false)} />
       )}
+
+      <PageSetupDialog
+        open={pageSetupOpen}
+        value={pageSetup}
+        readOnly={!canEdit}
+        onClose={() => setPageSetupOpen(false)}
+        onApply={applyPageSetup}
+      />
+      <PrintPreviewModal
+        open={printPreviewOpen}
+        fileId={file.id}
+        title={filename}
+        version={JSON.stringify(pageSetup)}
+        onClose={() => setPrintPreviewOpen(false)}
+        onPageSetup={() => setPageSetupOpen(true)}
+      />
       </div>
   );
 
@@ -1177,109 +1513,63 @@ export function DocumentEditorModal({
 }
 
 function SaveIndicator({
-  status,
+  chip,
   error,
-  collabOffline,
   lastSavedAt,
 }: {
-  status: SaveStatus;
+  chip: SaveChip;
   error: string | null;
-  collabOffline: boolean;
-  /** Wall-clock timestamp of the last successful manual save, or
-   *  ``null`` if the user hasn't manually saved this session.
-   *  Drives the persistent "Saved Xs ago" chip so a click on the
-   *  Save button has visible feedback even when the collab WS is
-   *  offline (which would otherwise pin the indicator to
-   *  "Offline — Save manually" forever). */
+  /** The last manual Save this session (shown in the tooltip). */
   lastSavedAt: Date | null;
 }) {
-  if (error) {
-    return (
-      <span
-        title={error}
-        className="inline-flex items-center gap-1 rounded-md bg-red-500/10 px-2 py-1 text-xs text-red-500"
-      >
-        <AlertTriangle className="h-3.5 w-3.5" /> Error
-      </span>
-    );
-  }
-
-  // The freshly-saved tick + the persistent "Saved Xs ago" chip
-  // both override the offline-collab signal — pressing Save needs
-  // visible feedback regardless of whether the WS is healthy. Only
-  // when neither is active do we fall back to the offline chip /
-  // raw status.
-  const showFreshTick = status === "saved";
-  const effective: SaveStatus =
-    showFreshTick || lastSavedAt
-      ? "saved"
-      : collabOffline
-        ? "offline"
-        : status;
-
   const styles =
-    effective === "offline"
-      ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
-      : effective === "syncing"
-        ? "text-[var(--muted)]"
-        : effective === "saved"
+    chip.kind === "error"
+      ? "bg-red-500/10 text-red-500"
+      : chip.kind === "offline"
+        ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+        : chip.kind === "saved"
           ? "text-emerald-600 dark:text-emerald-400"
           : "text-[var(--muted)]";
-
-  // Pick the visible label.
-  let label: string;
-  if (effective === "offline") {
-    label = "Offline — Save manually";
-  } else if (effective === "syncing") {
-    label = "Syncing…";
-  } else if (effective === "saved") {
-    label = showFreshTick
-      ? "All changes saved"
-      : `Saved ${formatRelative(lastSavedAt!)}`;
-  } else {
-    label = "Ready";
-  }
-
+  const title =
+    chip.kind === "error"
+      ? (error ?? undefined)
+      : chip.kind === "offline"
+        ? "Live sync is offline. Changes stay in this tab and sync on reconnect; Save stores them now."
+        : lastSavedAt
+          ? `Last saved manually at ${lastSavedAt.toLocaleTimeString()}`
+          : chip.kind === "saved"
+            ? "Every change has reached the server."
+            : undefined;
   return (
     <span
-      className={cn(
-        "hidden items-center gap-1 rounded-md px-2 py-1 text-xs sm:inline-flex",
-        styles
-      )}
+      className={cn("inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs", styles)}
       aria-live="polite"
-      title={
-        effective === "offline"
-          ? "Live collaboration offline — autosave paused. Use the Save button."
-          : effective === "saved" && lastSavedAt
-            ? `Last saved at ${lastSavedAt.toLocaleTimeString()}`
-            : undefined
-      }
+      aria-label={chip.label}
+      title={title}
     >
-      {effective === "syncing" || effective === "idle" ? (
+      {chip.kind === "saving" || chip.kind === "loading" ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : effective === "saved" ? (
+      ) : chip.kind === "saved" ? (
         <Check className="h-3.5 w-3.5" />
       ) : (
         <AlertTriangle className="h-3.5 w-3.5" />
       )}
-      {label}
+      {/* A phone shows the icon only (R-224); the label stays readable
+          to screen readers through aria-label. */}
+      <span className="hidden sm:inline">{chip.label}</span>
     </span>
   );
 }
 
-/** Loose relative-time formatter for the "Saved Xs ago" chip.
- *  Caps at 24h — past that we'd rather render the absolute time so
- *  a stale tab doesn't quietly read "Saved 17h ago" forever. */
-function formatRelative(when: Date): string {
-  const sec = Math.max(0, Math.floor((Date.now() - when.getTime()) / 1000));
-  if (sec < 5) return "just now";
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return `at ${when.toLocaleTimeString()}`;
-}
+/** Open layers that own Esc — while one is up, Esc closes it, not the
+ *  document. */
+const ESC_LAYERS = [
+  "[data-esc-layer]",
+  "[role='menu']",
+  "[role='listbox']",
+  "[role='dialog'][aria-modal='true']",
+  ".tippy-box",
+].join(", ");
 
 function DownloadMenuItem({
   icon,
@@ -1349,4 +1639,14 @@ function Collaborators({
       )}
     </div>
   );
+}
+
+/** Base64 of the editor's full CRDT state, for a merge-safe manual save. */
+function encodeState(ydoc: Y.Doc): string {
+  const bytes = Y.encodeStateAsUpdate(ydoc);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
 }

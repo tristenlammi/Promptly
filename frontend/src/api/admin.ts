@@ -23,9 +23,15 @@ export interface UserImportResult {
   skipped_count: number;
   created: { email: string; temp_password: string }[];
   skipped: { row: number; email: string; reason: string }[];
+  /** Set when the import stopped partway; ``created`` lists what was made. */
+  failed?: string;
 }
 
 export interface CreateUserPayload {
+  can_generate_images?: boolean;
+  can_execute_code?: boolean;
+  can_reach_private_network?: boolean;
+  must_change_password?: boolean;
   email: string;
   username: string;
   password: string;
@@ -44,6 +50,83 @@ export interface CreateUserPayload {
   monthly_token_budget?: number | null;
 }
 
+export interface BackupRun {
+  id: string;
+  kind: "nightly" | "pre_migrate" | "manual" | string;
+  status: "running" | "ok" | "failed" | string;
+  filename: string | null;
+  size_bytes: number | null;
+  revision: string | null;
+  error: string | null;
+  /** What a successful run did, in a sentence. */
+  detail?: string | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export type OffsiteTargetKind = "folder" | "s3" | "sftp" | "rest";
+
+/** Off-site backup (WP-2.3). Carries no secrets — only which are set. */
+export interface OffsiteOverview {
+  enabled: boolean;
+  target_kind: OffsiteTargetKind;
+  location: string;
+  credentials_set: string[];
+  hour: number;
+  keep_daily: number;
+  keep_weekly: number;
+  keep_monthly: number;
+  restore_test_enabled: boolean;
+  healthy: boolean;
+  warning: string | null;
+  last_copy: BackupRun | null;
+  last_copy_ok: BackupRun | null;
+  last_check: BackupRun | null;
+  last_restore_test: BackupRun | null;
+}
+
+export interface OffsiteUpdatePayload {
+  enabled?: boolean;
+  target_kind?: OffsiteTargetKind;
+  location?: string;
+  credentials?: Record<string, string>;
+  hour?: number;
+  restore_test_enabled?: boolean;
+}
+
+export interface BackupsOverview {
+  last_success: BackupRun | null;
+  last_failure: BackupRun | null;
+  runs: BackupRun[];
+  keep_nightly: number;
+  location: string;
+  disk_free_bytes: number | null;
+  pending_deletion_count: number;
+  pending_deletion_bytes: number;
+  offsite: OffsiteOverview;
+}
+
+/** What deleting a user would remove — fetched before the admin confirms. */
+export interface UserDeletionPreview {
+  username: string;
+  is_admin: boolean;
+  file_count: number;
+  file_bytes: number;
+  conversation_count: number;
+  workspaces: {
+    id: string;
+    title: string;
+    members: { id: string; username: string }[];
+  }[];
+}
+
+export interface DeleteUserPayload {
+  /** Must equal the username (type-to-confirm, enforced server-side). */
+  confirm_username: string;
+  /** workspace id -> new owner id, for each owned workspace to keep. */
+  transfers: Record<string, string>;
+}
+
 export interface UpdateUserPayload {
   email?: string;
   username?: string;
@@ -59,6 +142,8 @@ export interface UpdateUserPayload {
   can_generate_images?: boolean;
   /** Toggle code-execution (Run button) access. Omit to leave unchanged. */
   can_execute_code?: boolean;
+  /** Toggle local-network access for automations. Omit to leave unchanged. */
+  can_reach_private_network?: boolean;
   /** Omit to leave membership unchanged; send a list to replace it. */
   group_ids?: string[];
   /**
@@ -78,6 +163,9 @@ export interface ResetPasswordPayload {
 export interface AuthEventsQuery {
   user_id?: string;
   event_type?: string;
+  /** ISO dates; ``until`` is exclusive. */
+  since?: string;
+  until?: string;
   limit?: number;
   offset?: number;
 }
@@ -122,12 +210,16 @@ export interface AppSettingsPatch {
   oidc_client_secret?: string;
   oidc_button_label?: string | null;
   oidc_scopes?: string | null;
+  oidc_trust_unverified_email?: boolean;
+  oidc_satisfies_mfa?: boolean;
   /**
    * Org-wide quota defaults. Omit = unchanged; `null` = revert to
    * "no default" (uncapped); number = new default for users without
    * a per-user override.
    */
   default_storage_cap_bytes?: number | null;
+  /** Largest single (resumable) upload, bytes; null = the 10 GB default (WP-8.2). */
+  max_upload_bytes_large?: number | null;
   default_daily_token_budget?: number | null;
   default_monthly_token_budget?: number | null;
   /**
@@ -183,11 +275,69 @@ export interface AppSettingsPatch {
    */
   voice_provider_id?: string | null;
   voice_model_id?: string | null;
+  /** Photos vision (PH-2): paired, as the others; plus the monthly limit. */
+  photos_vision_provider_id?: string | null;
+  photos_vision_model_id?: string | null;
+  photos_vision_monthly_limit?: number;
 }
 
 export interface OriginPreview {
   canonical: string;
   warnings: string[];
+}
+
+/** Admin → Storage (WP-7.2). */
+export interface StorageCheckRun {
+  id: string;
+  started_at: string | null;
+  finished_at: string | null;
+  status: "running" | "ok" | "problems" | "failed";
+  trigger: string;
+  checked: number;
+  verified: number;
+  bytes_verified: number;
+  missing: number;
+  damaged: number;
+  recovered: number;
+  quarantined: number;
+  error: string | null;
+}
+
+export interface StorageProblem {
+  id: string;
+  filename: string;
+  owner: string | null;
+  state: "missing" | "damaged";
+  size_bytes: number;
+  verified_at: string | null;
+  storage_path: string;
+  trashed: boolean;
+}
+
+export interface UnderstandingStage {
+  stage: string;
+  label: string;
+  done: number;
+  total: number;
+  failed: number;
+  waiting?: string;
+}
+
+export interface StorageHealth {
+  /** The media worker's work (WP-7.4): files per state, rendition bytes. */
+  media: { counts: Partial<Record<"pending" | "processing" | "ready" | "failed" | "skipped", number>>; derived_bytes: number };
+  /** Understanding photos (PH-2): every library, and the offline place names. */
+  understanding?: {
+    stages: UnderstandingStage[];
+    gazetteer: { places: number; error: string | null; source: string; attribution: string };
+  };
+  disk: { total: number; used: number; free: number; min_free: number; percent_used: number; uploads_paused: boolean };
+  checksums: boolean | null;
+  files: { canonical: number; hashed: number; unhashed: number; verified_30d: number };
+  problems: StorageProblem[];
+  problem_count: number;
+  quarantine: { count: number; bytes: number; oldest: string | null; items: { path: string; size: number }[] };
+  runs: StorageCheckRun[];
 }
 
 export const adminApi = {
@@ -208,8 +358,56 @@ export const adminApi = {
     const { data } = await apiClient.patch<AdminUser>(`/admin/users/${id}`, payload);
     return data;
   },
-  async deleteUser(id: string): Promise<void> {
-    await apiClient.delete(`/admin/users/${id}`);
+  async storageHealth(): Promise<StorageHealth> {
+    const { data } = await apiClient.get<StorageHealth>("/admin/storage/health");
+    return data;
+  },
+  async runStorageCheck(): Promise<void> {
+    await apiClient.post("/admin/storage/check");
+  },
+  async recheckFile(id: string): Promise<{ state: string }> {
+    const { data } = await apiClient.post<{ state: string }>(`/admin/storage/files/${id}/recheck`);
+    return data;
+  },
+  async retryMedia(): Promise<{ queued: number }> {
+    const { data } = await apiClient.post<{ queued: number }>("/admin/storage/media/retry");
+    return data;
+  },
+  async retryUnderstanding(): Promise<{ retried: number }> {
+    const { data } = await apiClient.post<{ retried: number }>("/admin/storage/understanding/retry");
+    return data;
+  },
+  async emptyQuarantine(): Promise<{ deleted: number }> {
+    const { data } = await apiClient.post<{ deleted: number }>("/admin/storage/quarantine/empty");
+    return data;
+  },
+  async backups(): Promise<BackupsOverview> {
+    const { data } = await apiClient.get<BackupsOverview>("/admin/backups");
+    return data;
+  },
+  async runBackup(): Promise<void> {
+    await apiClient.post("/admin/backups/run");
+  },
+  async updateOffsite(patch: OffsiteUpdatePayload): Promise<OffsiteOverview> {
+    const { data } = await apiClient.put<OffsiteOverview>("/admin/backups/offsite", patch);
+    return data;
+  },
+  /** Reach the target with the saved settings (can take a while). */
+  async testOffsite(): Promise<{ ok: boolean; created?: boolean; snapshots?: number; latest?: string | null; error?: string }> {
+    const { data } = await apiClient.post("/admin/backups/offsite/test", null, { timeout: 180_000 });
+    return data;
+  },
+  async offsiteAction(action: "run" | "check" | "restore-test"): Promise<void> {
+    await apiClient.post(`/admin/backups/offsite/${action}`);
+  },
+  async deletionPreview(id: string): Promise<UserDeletionPreview> {
+    const { data } = await apiClient.get<UserDeletionPreview>(
+      `/admin/users/${id}/deletion-preview`
+    );
+    return data;
+  },
+  async deleteUser(id: string, payload: DeleteUserPayload): Promise<void> {
+    await apiClient.delete(`/admin/users/${id}`, { data: payload });
   },
 
   /** Download all users as a CSV blob (no secrets). */
@@ -222,15 +420,33 @@ export const adminApi = {
 
   /** Bulk-create users from a CSV file. Returns per-row results incl. the
    *  one-time temp passwords for newly created accounts. */
-  async importUsersCsv(file: File): Promise<UserImportResult> {
+  async importUsersCsv(
+    file: File,
+    onProgress?: (done: number, total: number) => void
+  ): Promise<UserImportResult> {
     const form = new FormData();
     form.append("file", file);
-    const { data } = await apiClient.post<UserImportResult>(
+    // Runs on the server; poll until it's done (R-137). The result, with
+    // the temp passwords, stays retrievable for an hour.
+    const { data: job } = await apiClient.post<{ job_id: string; total: number }>(
       "/admin/users/import",
       form,
       { headers: { "Content-Type": "multipart/form-data" } }
     );
-    return data;
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const { data } = await apiClient.get<
+        UserImportResult & { status: string; done: number; total: number; error?: string }
+      >(`/admin/users/import/${job.job_id}`);
+      onProgress?.(data.done, data.total);
+      if (data.status !== "running") {
+        if (data.status === "failed" && data.error) {
+          // Still hand back what was created — those passwords matter.
+          return { ...data, failed: data.error } as UserImportResult;
+        }
+        return data;
+      }
+    }
   },
 
   // ---------------- Per-user security actions ----------------
@@ -244,6 +460,11 @@ export const adminApi = {
   },
   async enableUser(id: string): Promise<AdminUser> {
     const { data } = await apiClient.post<AdminUser>(`/admin/users/${id}/enable`);
+    return data;
+  },
+  /** Turn off a user's two-step verification (lost phone + codes). */
+  async resetMfa(id: string): Promise<AdminUser> {
+    const { data } = await apiClient.post<AdminUser>(`/admin/users/${id}/reset-mfa`);
     return data;
   },
   async logoutEverywhere(id: string): Promise<AdminUser> {
@@ -283,10 +504,25 @@ export const adminApi = {
     const params: Record<string, string | number> = {};
     if (query.user_id) params.user_id = query.user_id;
     if (query.event_type) params.event_type = query.event_type;
+    if (query.since) params.since = query.since;
+    if (query.until) params.until = query.until;
     if (query.limit !== undefined) params.limit = query.limit;
     if (query.offset !== undefined) params.offset = query.offset;
     const { data } = await apiClient.get<AuthEvent[]>("/admin/auth-events", {
       params,
+    });
+    return data;
+  },
+
+  /** The filtered audit log as a CSV download (R-145). */
+  async exportAuthEvents(query: AuthEventsQuery = {}): Promise<Blob> {
+    const params: Record<string, string> = {};
+    if (query.event_type) params.event_type = query.event_type;
+    if (query.since) params.since = query.since;
+    if (query.until) params.until = query.until;
+    const { data } = await apiClient.get<Blob>("/admin/auth-events.csv", {
+      params,
+      responseType: "blob",
     });
     return data;
   },

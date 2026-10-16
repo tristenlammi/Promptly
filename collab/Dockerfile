@@ -8,12 +8,14 @@
 # docker network; nginx proxies /api/collab/* to the websocket listener
 # on port 1234 internally.
 
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 WORKDIR /app
 
-# Install deps first so `npm install` layer is reusable.
-COPY package.json package-lock.json* ./
-RUN npm install --omit=dev --no-audit --no-fund
+# Install deps first so the layer is reusable. ``npm ci`` installs exactly
+# what package-lock.json pins — without the lockfile every rebuild could
+# pull different (untested) versions of Hocuspocus / Yjs.
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --no-audit --no-fund
 
 # App source.
 COPY src ./src

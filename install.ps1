@@ -52,25 +52,38 @@ function Write-Fail($msg)    { Write-Host "  ERR $msg" -ForegroundColor Red }
 
 # ---------- 1. prerequisite checks ----------
 Write-Section "Checking prerequisites"
-try { docker version --format '{{.Server.Version}}' | Out-Null }
-catch { throw "Docker is not running or not installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/" }
+# Native commands don't throw when they fail - check $LASTEXITCODE.
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    throw "Docker isn't installed. Install Docker Desktop from https://www.docker.com/products/docker-desktop/"
+}
+docker info *> $null
+if ($LASTEXITCODE -ne 0) { throw "The Docker daemon isn't reachable. Start Docker Desktop and try again." }
 
-try { docker compose version | Out-Null }
-catch { throw "docker compose v2 is not available. Update Docker Desktop." }
-
-try { docker info 2>$null | Out-Null }
-catch { throw "The Docker daemon isn't reachable. Start Docker Desktop and try again." }
+$composeVer = (docker compose version --short 2>$null)
+if ($LASTEXITCODE -ne 0 -or -not $composeVer) { throw "docker compose v2 is not available. Update Docker Desktop." }
+# The compose file needs >= 2.24 (optional env_file / depends_on entries).
+$composeNum = ($composeVer -replace '^v', '') -replace '[^0-9.].*$', ''
+if ([version]$composeNum -lt [version]"2.24.0") {
+    throw "docker compose $composeVer is too old (need 2.24 or newer). Update Docker Desktop."
+}
 
 Write-Ok "Docker and docker compose v2 detected"
 
 function New-HexSecret([int]$Bytes) {
     $buf = New-Object byte[] $Bytes
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($buf)
+    # RandomNumberGenerator::Fill only exists on PowerShell 7 (.NET Core);
+    # Create().GetBytes() works on the Windows PowerShell 5.1 that ships
+    # with Windows too.
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try { $rng.GetBytes($buf) } finally { $rng.Dispose() }
     -join ($buf | ForEach-Object { $_.ToString('x2') })
 }
 
 # ---------- 2. .env bootstrap ----------
-if (-not (Test-Path ".env")) {
+# A brand-new .env copies COMPOSE_PROFILES from the example, so "the line is
+# missing" can't be how a first install is recognised.
+$FreshEnv = -not (Test-Path ".env")
+if ($FreshEnv) {
     Write-Section "Creating .env from .env.example"
     Copy-Item ".env.example" ".env"
 }
@@ -91,6 +104,8 @@ function Set-IfPlaceholder([ref]$Text, [string]$Key, [string]$Value) {
 Set-IfPlaceholder ([ref]$envText) "SECRET_KEY"        (New-HexSecret 32)
 Set-IfPlaceholder ([ref]$envText) "SEARXNG_SECRET"    (New-HexSecret 32)
 Set-IfPlaceholder ([ref]$envText) "POSTGRES_PASSWORD" (New-HexSecret 24)
+Set-IfPlaceholder ([ref]$envText) "SETUP_TOKEN"       (New-HexSecret 6)
+Set-IfPlaceholder ([ref]$envText) "TUS_HOOK_SECRET"   (New-HexSecret 32)
 
 # ---------- 3. optional services (compose profiles) ----------
 # COMPOSE_PROFILES in .env is the persistent source of truth: docker
@@ -156,19 +171,23 @@ if ($OllamaMode -eq "bundled") { $profiles += $OllamaProfile }
 if (-not $NoSearch) { $profiles += "search" }
 $profilesCsv = $profiles -join ","
 
-if ($ProfileFlagsGiven -or ($envText -notmatch "(?m)^COMPOSE_PROFILES=")) {
+if ($ProfileFlagsGiven -or $FreshEnv -or ($envText -notmatch "(?m)^COMPOSE_PROFILES=")) {
     Write-Section "Configuring optional services"
     Set-EnvLine ([ref]$envText) "COMPOSE_PROFILES" $profilesCsv
     Set-EnvLine ([ref]$envText) "SEARXNG_ENABLED" $(if ($NoSearch) { "false" } else { "true" })
     Write-Ok "Ollama: $OllamaLabel"
     if ($OllamaNote) { Write-Skip $OllamaNote }
-    if ($OllamaMode -eq "host" -and $envText -notmatch "(?m)^OLLAMA_URL=") {
-        Set-EnvLine ([ref]$envText) "OLLAMA_URL" "http://host.docker.internal:11434"
-    }
     if ($NoSearch) { Write-Skip "-NoSearch: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)" }
     Write-Ok "COMPOSE_PROFILES=$(if ($profilesCsv) { $profilesCsv } else { '<none>' })"
 } else {
     Write-Skip "COMPOSE_PROFILES already set, leaving untouched (re-run with -WithOllama/-NoSearch to change)"
+}
+
+# A host Ollama is wired whenever one is detected and nothing is set yet -
+# not only when the profile block runs.
+if ($OllamaMode -eq "host" -and $envText -notmatch "(?m)^OLLAMA_URL=") {
+    Set-EnvLine ([ref]$envText) "OLLAMA_URL" "http://host.docker.internal:11434"
+    Write-Ok "OLLAMA_URL -> the Ollama running on this machine"
 }
 
 # Persist .env in LF mode (the Linux containers parse it).
@@ -219,7 +238,17 @@ if (-not $healthy) {
 
 # ---------- 6. final report ----------
 $portLine = (Get-Content ".env" | Where-Object { $_ -match "^NGINX_HTTP_PORT=" } | Select-Object -First 1)
-$usePort  = if ($portLine) { $portLine.Substring(16) } else { "8087" }
+$usePort  = if ($portLine) { $portLine.Substring(16).Trim() } else { "" }
+if (-not $usePort) { $usePort = "8087" }
+$setupLine = (Get-Content ".env" | Where-Object { $_ -match "^SETUP_TOKEN=" } | Select-Object -First 1)
+$setupCode = if ($setupLine) { $setupLine.Substring(12).Trim() } else { "" }
+$lanIp = $null
+try {
+    $lanIp = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+        Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" -and
+                       $_.InterfaceAlias -notmatch "vEthernet|WSL|Loopback|Docker" } |
+        Select-Object -First 1 -ExpandProperty IPAddress
+} catch {}
 
 Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
@@ -227,14 +256,17 @@ Write-Host " Promptly is up. " -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Open in your browser:"
-if ($usePort -eq "80") { Write-Host "    http://localhost" }
-else                   { Write-Host "    http://localhost:$usePort" }
+$suffix = if ($usePort -eq "80") { "" } else { ":$usePort" }
+Write-Host "    http://localhost$suffix"
+if ($lanIp) { Write-Host "    http://$lanIp$suffix   (from other devices on your network)" }
 Write-Host ""
-Write-Host "  The first visit will launch the setup wizard:"
-Write-Host "    1. Create the bootstrap admin account."
-Write-Host "    2. (Optional) Set the public URL people will reach Promptly on."
-Write-Host "    3. (Optional) Pick how knowledge libraries get embedded."
-Write-Host "    4. (Optional) Protect the admin account with two-step verification."
+if ($setupCode -and -not $setupCode.StartsWith("change-me")) {
+    Write-Host "  Setup code (asked for when you create the admin account): " -NoNewline
+    Write-Host $setupCode -ForegroundColor Yellow
+    Write-Host ""
+}
+Write-Host "  The setup wizard walks you through your admin account, a model"
+Write-Host "  provider, the public URL, embeddings, email and two-step verification."
 if ($OllamaMode -eq "cloud") {
     Write-Host ""
     Write-Skip "No local-model runtime. Connect a cloud provider (OpenAI, Anthropic, OpenRouter, ...) in the wizard. For local models, install Ollama natively and re-run, or use -WithOllama."

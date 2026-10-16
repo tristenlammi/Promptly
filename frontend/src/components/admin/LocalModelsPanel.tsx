@@ -104,7 +104,7 @@ export function LocalModelsPanel() {
               href="https://ollama.com/library"
               target="_blank"
               rel="noreferrer noopener"
-              className="inline-flex items-center gap-0.5 text-[var(--accent)] hover:underline"
+              className="inline-flex items-center gap-0.5 text-[var(--accent-text)] hover:underline"
             >
               ollama.com/library
               <ExternalLink className="h-3 w-3" aria-hidden />
@@ -167,7 +167,7 @@ function HardwareCard({
   return (
     <div className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
       <div className="flex items-start gap-3">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)]/15 text-[var(--accent)]">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)]/15 text-[var(--accent-text)]">
           {probe.has_nvidia ? (
             <HardDrive className="h-4 w-4" />
           ) : (
@@ -190,15 +190,27 @@ function HardwareCard({
                 </span>
                 {totalVram > 0 && <span>{formatBytes(totalVram)} VRAM total</span>}
               </>
+            ) : probe.gpu_status === "in_use" ? (
+              <span>
+                GPU in use by Ollama ({formatBytes(probe.ollama_vram_bytes)} in VRAM)
+              </span>
+            ) : probe.gpu_status === "none" ? (
+              <span>No NVIDIA GPU detected — CPU only</span>
             ) : (
-              <span>No NVIDIA GPU detected — CPU fallback only</span>
+              <span>GPU: can't tell from here</span>
             )}
           </div>
-          {!probe.has_nvidia && (
+          {probe.gpu_status === "unknown" && (
             <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-              Larger models (13B+) will be painfully slow on CPU. To enable
-              GPU acceleration, set <code>COMPOSE_PROFILES=gpu</code> in
-              your .env and restart the stack.
+              Only Ollama's container can see the GPU, so it shows up here
+              once a model is loaded on it. If you haven't turned GPU
+              acceleration on, set <code>COMPOSE_PROFILES=gpu</code> in your
+              .env and restart the stack.
+            </p>
+          )}
+          {probe.gpu_status === "none" && (
+            <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+              Larger models (13B+) will be painfully slow on CPU.
             </p>
           )}
         </div>
@@ -293,7 +305,7 @@ function PullByNameForm({
       className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
     >
       <div className="flex items-start gap-2">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)]/10 text-[var(--accent)]">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--accent)]/10 text-[var(--accent-text)]">
           <Download className="h-4 w-4" />
         </div>
         <div className="min-w-0 flex-1">
@@ -349,7 +361,14 @@ function PullByNameForm({
               style={{ width: pct === null ? "10%" : `${pct}%` }}
             />
           </div>
-          {error && <div className="text-[11px] text-red-500">{error}</div>}
+        </div>
+      )}
+
+      {/* Outside the in-flight block: the pull has ended by the time an
+          error is known, so it used to unmount with it (R-278). */}
+      {error && !isOurs && (
+        <div role="alert" className="mt-2 pl-11 text-[11px] text-red-500">
+          Couldn't pull that model: {error}
         </div>
       )}
     </form>
@@ -389,6 +408,10 @@ function SizingHint({ probe }: { probe: HardwareProbe | undefined }) {
   } else if (probe.has_nvidia) {
     recommendation =
       "Your GPU is small — stick to 1-3B models for interactive speed.";
+  } else if (probe.gpu_status === "in_use" || probe.gpu_status === "unknown") {
+    // Don't steer a GPU install towards tiny models on a guess (R-279).
+    recommendation =
+      "As a rule of thumb: 8 GB of VRAM runs 7-8B models well, 16 GB runs 13-14B, 24 GB runs 32B (Q4).";
   } else if (probe.total_ram_bytes && probe.total_ram_bytes >= 32 * GB) {
     recommendation =
       "CPU-only with ≥32 GB RAM — 7-8B models are usable but slow. Try 3B models first.";

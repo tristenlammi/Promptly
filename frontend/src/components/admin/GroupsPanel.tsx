@@ -127,7 +127,7 @@ export function GroupsPanel() {
                     {g.name}
                   </span>
                   {g.allowed_models.length > 0 && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent-text)]">
                       <Sparkles className="h-2.5 w-2.5" />
                       {g.allowed_models.length} model
                       {g.allowed_models.length === 1 ? "" : "s"}
@@ -374,7 +374,7 @@ function GroupEditModal({
                           {m.display_name}
                         </span>
                         {m.is_custom && (
-                          <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--accent)]/10 px-1 py-0.5 text-[9px] font-medium text-[var(--accent)]">
+                          <span className="inline-flex items-center gap-0.5 rounded-full bg-[var(--accent)]/10 px-1 py-0.5 text-[9px] font-medium text-[var(--accent-text)]">
                             <Sparkles className="h-2 w-2" />
                             custom
                           </span>

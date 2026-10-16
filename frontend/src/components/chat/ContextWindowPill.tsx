@@ -71,6 +71,7 @@ export function ContextWindowPill({
       content: m.content,
       promptTokens: m.prompt_tokens,
       completionTokens: m.completion_tokens,
+      contextUsage: m.context_usage,
     }));
     if (isStreaming && streamingContent) {
       // Fold the in-flight assistant stream into the count so the
@@ -82,6 +83,7 @@ export function ContextWindowPill({
         content: streamingContent,
         promptTokens: null,
         completionTokens: null,
+        contextUsage: null,
       });
     }
     return computeContextBudget({ messages: msgs });
@@ -221,10 +223,24 @@ export function ContextWindowPill({
             </div>
 
             <div className="mt-3 space-y-1 text-[11px]">
-              <Row
-                label={budget.measured ? "Context used" : "Chat history"}
-                value={budget.historyTokens}
-              />
+              {budget.parts ? (
+                <>
+                  {/* What the last request was made of (WP-1.4). */}
+                  <Row label="Conversation" value={budget.parts.history} />
+                  <Row label="Instructions" value={budget.parts.instructions} />
+                  {budget.parts.tools > 0 && (
+                    <Row label="Tool definitions" value={budget.parts.tools} />
+                  )}
+                  {budget.parts.turn > 0 && (
+                    <Row label="Date, memories & files" value={budget.parts.turn} />
+                  )}
+                </>
+              ) : (
+                <Row
+                  label={budget.measured ? "Context used" : "Chat history"}
+                  value={budget.historyTokens}
+                />
+              )}
               <Row
                 label="Response headroom (reserved)"
                 value={budget.responseReserveTokens}
@@ -238,7 +254,7 @@ export function ContextWindowPill({
 
             <div className="mt-3 border-t border-[var(--border)] pt-2 text-[10px] text-[var(--text-muted)]">
               {budget.measured
-                ? "Based on the last turn's actual token usage (includes system prompt, memory, and attachments). The pill turns amber at 60% and red at 85%."
+                ? "Based on the size of the last request the model received. The breakdown is approximate. The pill turns amber at 60% and red at 85%."
                 : "Estimated — actual token counts vary by model. The pill turns amber at 60% and red at 85%."}
             </div>
 

@@ -199,6 +199,12 @@ async def update_provider(
                 detail="api_key cannot be blank — omit the field to leave unchanged",
             )
         provider.api_key = encrypt_api_key(payload.api_key)
+        from app.auth.audit import EVENT_PROVIDER_KEY_CHANGED, record_event, safe_dict
+
+        await record_event(
+            db, event_type=EVENT_PROVIDER_KEY_CHANGED, user_id=user.id, identifier=user.username,
+            detail=safe_dict({"provider": provider.name, "provider_id": str(provider.id)}),
+        )
     if payload.enabled is not None:
         provider.enabled = payload.enabled
     if payload.models is not None:

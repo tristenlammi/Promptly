@@ -255,7 +255,7 @@ export function SearchDateFilter({ value, onChange, onOpenChange }: Props) {
         className={cn(
           "inline-flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-1 text-[11px] transition",
           active
-            ? "border-[var(--accent)]/50 bg-[var(--accent)]/10 text-[var(--accent)]"
+            ? "border-[var(--accent)]/50 bg-[var(--accent)]/10 text-[var(--accent-text)]"
             : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
         )}
       >
@@ -316,7 +316,7 @@ export function SearchDateFilter({ value, onChange, onOpenChange }: Props) {
                 >
                   <span>{p.label}</span>
                   {selected && (
-                    <Check className="h-3.5 w-3.5 text-[var(--accent)]" />
+                    <Check className="h-3.5 w-3.5 text-[var(--accent-text)]" />
                   )}
                 </button>
               );

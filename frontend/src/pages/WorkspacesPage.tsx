@@ -5,7 +5,9 @@ import {
   ArrowUpDown,
   LayoutGrid,
   Plus,
+  RotateCcw,
   Search,
+  Trash2,
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
@@ -17,10 +19,17 @@ import {
   useArchiveWorkspace,
   useWorkspaces,
   useDeleteWorkspace,
+  useRestoreWorkspace,
+  useTrashedWorkspaces,
   useUnarchiveWorkspace,
 } from "@/hooks/useWorkspaces";
 import type { WorkspaceSummary } from "@/api/workspaces";
+import { ErrorState } from "@/components/shared/Callout";
+import { toast } from "@/store/toastStore";
+import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
+
+import { WORKSPACE_DELETE_LOSES } from "@/components/workspaces/workspaceCopy";
 
 type Tab = "active" | "archived";
 type SortKey = "updated" | "created" | "title" | "content";
@@ -38,12 +47,21 @@ export function WorkspacesPage() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [tab, setTab] = useState<Tab>("active");
 
-  const { data: activeWorkspaces, isLoading: activeLoading } = useWorkspaces({
-    archived: false,
-  });
-  const { data: archivedWorkspaces, isLoading: archivedLoading } = useWorkspaces(
-    { archived: true }
-  );
+  const {
+    data: activeWorkspaces,
+    isLoading: activeLoading,
+    isError: activeError,
+    refetch: refetchActive,
+  } = useWorkspaces({ archived: false });
+  const {
+    data: archivedWorkspaces,
+    isLoading: archivedLoading,
+    isError: archivedError,
+    refetch: refetchArchived,
+  } = useWorkspaces({ archived: true });
+  const { data: trashed } = useTrashedWorkspaces(tab === "archived");
+  const restoreMutation = useRestoreWorkspace();
+  const [purgeTarget, setPurgeTarget] = useState<WorkspaceSummary | null>(null);
 
   const [deleteTarget, setDeleteTarget] =
     useState<WorkspaceSummary | null>(null);
@@ -57,6 +75,9 @@ export function WorkspacesPage() {
   const workspaces =
     tab === "active" ? activeWorkspaces ?? [] : archivedWorkspaces ?? [];
   const isLoading = tab === "active" ? activeLoading : archivedLoading;
+  // A failed fetch used to fall through to "Create your first workspace"
+  // (R-182).
+  const isError = tab === "active" ? activeError : archivedError;
 
   // Hub sort + filter (7.5). Client-side: the payload is already the
   // full list, so there's nothing to gain from a round-trip.
@@ -92,8 +113,30 @@ export function WorkspacesPage() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
-    await deleteMutation.mutateAsync(deleteTarget.id);
-    setDeleteTarget(null);
+    try {
+      await deleteMutation.mutateAsync(deleteTarget.id);
+      const title = deleteTarget.title;
+      const id = deleteTarget.id;
+      setDeleteTarget(null);
+      toast.success(`"${title}" moved to Recently deleted.`, {
+        action: {
+          label: "Undo",
+          onClick: () => restoreMutation.mutate(id),
+        },
+      });
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't delete the workspace."));
+    }
+  };
+
+  const handlePurge = async () => {
+    if (!purgeTarget) return;
+    try {
+      await deleteMutation.mutateAsync({ id: purgeTarget.id, permanent: true });
+      setPurgeTarget(null);
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't delete the workspace."));
+    }
   };
 
   const handleArchive = async () => {
@@ -161,6 +204,19 @@ export function WorkspacesPage() {
             <div className="mt-10 text-sm text-[var(--text-muted)]">
               Loading workspaces...
             </div>
+          ) : isError ? (
+            <ErrorState>
+              <span>Couldn&apos;t load your workspaces. </span>
+              <button
+                type="button"
+                className="font-medium underline"
+                onClick={() =>
+                  void (tab === "active" ? refetchActive() : refetchArchived())
+                }
+              >
+                Try again
+              </button>
+            </ErrorState>
           ) : workspaces.length === 0 ? (
             <EmptyState tab={tab} onNewWorkspace={() => setWizardOpen(true)} />
           ) : shown.length === 0 ? (
@@ -187,6 +243,57 @@ export function WorkspacesPage() {
               ))}
             </div>
           )}
+
+          {tab === "archived" && (trashed ?? []).length > 0 && (
+            <section className="mt-10">
+              <h2 className="text-sm font-semibold text-[var(--text)]">
+                Recently deleted
+              </h2>
+              <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                Only you can see these. Each is deleted for good 30 days after
+                you deleted it.
+              </p>
+              <ul className="mt-3 divide-y divide-[var(--border)] rounded-card border border-[var(--border)]">
+                {(trashed ?? []).map((w) => (
+                  <li
+                    key={w.id}
+                    className="flex flex-wrap items-center gap-3 px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate font-medium">{w.title}</div>
+                      <div className="text-xs text-[var(--text-muted)]">
+                        {daysLeftLabel(w.trashed_at)}
+                      </div>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leftIcon={<RotateCcw className="h-3.5 w-3.5" />}
+                      disabled={restoreMutation.isPending}
+                      onClick={() =>
+                        restoreMutation.mutate(w.id, {
+                          onError: (err) =>
+                            toast.error(
+                              apiErrorMessage(err, "Couldn't restore the workspace.")
+                            ),
+                        })
+                      }
+                    >
+                      Restore
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+                      onClick={() => setPurgeTarget(w)}
+                    >
+                      Delete forever
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </div>
       </div>
 
@@ -205,18 +312,38 @@ export function WorkspacesPage() {
         firstTitle="Delete this workspace?"
         firstDescription={
           deleteTarget
-            ? `"${deleteTarget.title}" will be deleted. Conversations inside it are preserved — they'll move back to your top-level chat list. Pinned files stay in your library. This cannot be undone.`
+            ? `"${deleteTarget.title}" moves to Recently deleted (in the Archive tab) and every member loses access. You can restore it for 30 days; after that ${WORKSPACE_DELETE_LOSES} are gone for good. Chats come back to whoever started them, and files stay in their owners' Drive.`
+            : ""
+        }
+        firstConfirmLabel="Continue"
+        secondTitle="Delete workspace"
+        secondDescription={
+          deleteTarget ? `Move "${deleteTarget.title}" to Recently deleted?` : ""
+        }
+        secondConfirmLabel="Delete workspace"
+      />
+
+      <ConfirmDoubleModal
+        open={Boolean(purgeTarget)}
+        onClose={() => setPurgeTarget(null)}
+        onConfirm={handlePurge}
+        destructive
+        pending={deleteMutation.isPending}
+        firstTitle="Delete forever?"
+        firstDescription={
+          purgeTarget
+            ? `"${purgeTarget.title}" and ${WORKSPACE_DELETE_LOSES} will be deleted permanently. This can't be undone. Chats come back to whoever started them; files stay in their owners' Drive.`
             : ""
         }
         firstConfirmLabel="Continue"
         secondTitle="Delete permanently"
         secondDescription={
-          deleteTarget
-            ? `Type the workspace title to confirm permanent deletion of "${deleteTarget.title}".`
+          purgeTarget
+            ? `Type the workspace title to confirm permanent deletion of "${purgeTarget.title}".`
             : ""
         }
-        typeToConfirm={deleteTarget?.title}
-        secondConfirmLabel="Delete workspace"
+        typeToConfirm={purgeTarget?.title}
+        secondConfirmLabel="Delete forever"
       />
 
       <ConfirmDoubleModal
@@ -253,7 +380,7 @@ function Tabs({
   archivedCount: number;
 }) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-1" role="tablist" aria-label="Workspaces">
       <TabButton
         active={tab === "active"}
         onClick={() => onChange("active")}
@@ -287,6 +414,9 @@ function TabButton({
 }) {
   return (
     <button
+      type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
       className={cn(
         "relative -mb-px inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition",
@@ -301,7 +431,7 @@ function TabButton({
         className={cn(
           "rounded-full px-1.5 text-[10px]",
           active
-            ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+            ? "bg-[var(--accent)]/15 text-[var(--accent-text)]"
             : "bg-[var(--border)]/40 text-[var(--text-muted)]"
         )}
       >
@@ -322,7 +452,7 @@ function EmptyState({
     return (
       <div className="mt-10 rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] p-10 text-center">
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)]/10">
-          <Archive className="h-5 w-5 text-[var(--accent)]" />
+          <Archive className="h-5 w-5 text-[var(--accent-text)]" />
         </div>
         <h2 className="text-lg font-semibold">Archive is empty</h2>
         <p className="mx-auto mt-2 max-w-md text-sm text-[var(--text-muted)]">
@@ -336,7 +466,7 @@ function EmptyState({
   return (
     <div className="mt-10 rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] p-10 text-center">
       <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-[var(--accent)]/10">
-        <LayoutGrid className="h-5 w-5 text-[var(--accent)]" />
+        <LayoutGrid className="h-5 w-5 text-[var(--accent-text)]" />
       </div>
       <h2 className="text-lg font-semibold">Create your first workspace</h2>
       <p className="mx-auto mt-2 max-w-md text-sm text-[var(--text-muted)]">
@@ -355,4 +485,13 @@ function EmptyState({
       </div>
     </div>
   );
+}
+
+function daysLeftLabel(trashedAt: string | null | undefined): string {
+  if (!trashedAt) return "";
+  const purgeAt = +new Date(trashedAt) + 30 * 86_400_000;
+  const days = Math.max(0, Math.ceil((purgeAt - Date.now()) / 86_400_000));
+  return days <= 1
+    ? "Deleted for good within a day"
+    : `Deleted for good in ${days} days`;
 }

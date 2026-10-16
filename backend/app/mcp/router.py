@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,7 @@ from app.auth.models import User
 from app.auth.utils import encrypt_secret
 from app.database import get_db
 from app.groups.models import UserGroup
-from app.mcp.client import McpError, fetch_tools
+from app.mcp.client import McpError, check_url, fetch_tools
 from app.mcp.models import (
     ConnectorGroup,
     ConnectorUser,
@@ -95,6 +95,11 @@ class ConnectorResponse(BaseModel):
     workspace_ids: list[uuid.UUID]
     tools: list[ToolInfo]
     tools_refreshed_at: datetime | None
+    # Health (R-158) — refreshes and live calls both update these.
+    last_ok_at: datetime | None = None
+    last_error: str | None = None
+    last_error_at: datetime | None = None
+    consecutive_failures: int = 0
     created_at: datetime
 
 
@@ -164,15 +169,31 @@ async def _set_users(
 async def _set_workspaces(
     db: AsyncSession, connector_id: uuid.UUID, workspace_ids: list[uuid.UUID]
 ) -> None:
-    await db.execute(
-        delete(WorkspaceMcpConnector).where(
-            WorkspaceMcpConnector.connector_id == connector_id
-        )
+    wanted = set(workspace_ids)
+    existing = set(
+        (
+            await db.execute(
+                select(WorkspaceMcpConnector.workspace_id).where(
+                    WorkspaceMcpConnector.connector_id == connector_id
+                )
+            )
+        ).scalars()
     )
-    for wid in dict.fromkeys(workspace_ids):
-        db.add(
-            WorkspaceMcpConnector(connector_id=connector_id, workspace_id=wid)
+    if existing - wanted:
+        await db.execute(
+            delete(WorkspaceMcpConnector).where(
+                WorkspaceMcpConnector.connector_id == connector_id,
+                WorkspaceMcpConnector.workspace_id.in_(existing - wanted),
+            )
         )
+    # New rows are the admin's; rows already there keep who attached them.
+    for wid in dict.fromkeys(workspace_ids):
+        if wid not in existing:
+            db.add(
+                WorkspaceMcpConnector(
+                    connector_id=connector_id, workspace_id=wid, attached_by_admin=True
+                )
+            )
 
 
 async def _to_response(
@@ -203,8 +224,21 @@ async def _to_response(
             for t in (c.tool_catalog or [])
         ],
         tools_refreshed_at=c.tools_refreshed_at,
+        last_ok_at=c.last_ok_at,
+        last_error=c.last_error,
+        last_error_at=c.last_error_at,
+        consecutive_failures=c.consecutive_failures or 0,
         created_at=c.created_at,
     )
+
+
+async def _valid_url_or_400(url: str) -> None:
+    """A bad scheme, a metadata address or an unresolvable name is the
+    admin's to fix, with the reason — not a 500 (R-157)."""
+    try:
+        await check_url(url)
+    except McpError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 async def _get_owned_connector(
@@ -321,6 +355,21 @@ async def create_connector(
     _valid_availability(payload.availability)
     if payload.kind not in ("mcp", "unifi"):
         raise HTTPException(status_code=400, detail="Unsupported connector kind")
+    await _valid_url_or_400(payload.url.strip())
+    # A retry after a slow or failed create used to leave "Home" and
+    # "Home-2" side by side (R-157).
+    clash = (
+        await db.execute(
+            select(McpConnector.id).where(
+                func.lower(McpConnector.name) == payload.name.strip().lower()
+            )
+        )
+    ).first()
+    if clash:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A connector called “{payload.name.strip()}” already exists.",
+        )
     connector = McpConnector(
         name=payload.name.strip(),
         slug=await _unique_slug(db, payload.name),
@@ -375,6 +424,9 @@ async def update_connector(
     user: User = Depends(require_admin),
 ) -> ConnectorResponse:
     c = await _get_owned_connector(connector_id, user, db)
+    reach_before = (c.url, c.transport, c.auth_header_name, c.auth_value_encrypted)
+    if payload.url is not None and payload.url.strip() != c.url:
+        await _valid_url_or_400(payload.url.strip())
     if payload.name is not None:
         c.name = payload.name.strip()
     if payload.url is not None:
@@ -418,6 +470,14 @@ async def update_connector(
         await _set_workspaces(db, c.id, [])
     await db.commit()
     await db.refresh(c)
+    # A new address, transport or token means a possibly different tool
+    # list — re-read it now rather than leave the old one (R-158).
+    if (c.url, c.transport, c.auth_header_name, c.auth_value_encrypted) != reach_before:
+        try:
+            await refresh_catalog(db, c)
+        except McpError as e:
+            logger.info("mcp update: catalog refresh failed for %s: %s", c.slug, e)
+        await db.refresh(c)
     return await _to_response(db, c)
 
 
@@ -455,15 +515,29 @@ class TestRequest(BaseModel):
     transport: str = "http"
     auth_header_name: str | None = Field(default=None, max_length=64)
     auth_value: str | None = Field(default=None, max_length=4000)
+    # Editing an existing connector: test with its saved token when the
+    # form leaves the field blank (it never shows the stored secret).
+    connector_id: uuid.UUID | None = None
 
 
 @router.post("/test")
 async def test_connection(
     payload: TestRequest,
-    _: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
 ) -> dict:
     """Probe a connector without saving — returns the tools (or a clean
     error) so the admin can validate before creating it."""
+    if payload.connector_id is not None and not payload.auth_value:
+        saved = await _get_owned_connector(payload.connector_id, admin, db)
+        if saved.auth_value_encrypted:
+            from app.auth.utils import decrypt_secret
+
+            try:
+                payload.auth_value = decrypt_secret(saved.auth_value_encrypted)
+            except Exception:  # noqa: BLE001
+                return {"ok": False, "error": "The saved token can't be read — enter it again.", "tools": []}
+            payload.auth_header_name = payload.auth_header_name or saved.auth_header_name
     if payload.kind == "unifi":
         from app.mcp.unifi import UNIFI_TOOLS, UniFiError, probe
 

@@ -3,6 +3,7 @@ import { useLocation, useSearchParams, NavLink } from "react-router-dom";
 import { DRIVE_SUBNAV_ITEMS } from "@/components/layout/navItems";
 import { cn } from "@/utils/cn";
 
+import { FilesMenuButton, useInFilesShell } from "./FilesShell";
 import { StorageUsageIndicator } from "./StorageUsageIndicator";
 
 /**
@@ -23,8 +24,34 @@ import { StorageUsageIndicator } from "./StorageUsageIndicator";
  * the right-side chips always stay reachable instead of truncating.
  */
 export function DriveSubNav({ className }: { className?: string }) {
+  const inShell = useInFilesShell();
   const location = useLocation();
   const [params] = useSearchParams();
+  if (inShell) {
+    // The Files rail carries navigation (WP-3.5). Below 1024 px a slim
+    // bar opens it as a drawer; phones also get a Search shortcut (the
+    // header search box is hidden there).
+    return (
+      <div
+        className={cn(
+          "flex items-center gap-2 border-b border-[var(--border)] px-3 py-1.5 md:px-6 lg:hidden",
+          className
+        )}
+      >
+        <FilesMenuButton className="hidden md:inline-flex" />
+        <NavLink
+          to="/files/search"
+          className="inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)] md:hidden"
+          aria-label="Search Drive"
+        >
+          <DriveSearchIcon />
+          Search
+        </NavLink>
+        <div className="ml-auto" />
+        <StorageUsageIndicator />
+      </div>
+    );
+  }
   // Always reveal the Search tab on mobile so touch users have a
   // single-tap entrypoint to search (the desktop TopNav search box
   // is hidden at ``md-``). On desktop we also show it whenever the

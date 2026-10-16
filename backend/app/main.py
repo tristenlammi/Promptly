@@ -81,6 +81,15 @@ async def lifespan(_: FastAPI):
     # can blend keyword + meaning-based recall. No-op when embeddings
     # aren't configured.
     indexer_task = start_semantic_indexer()
+    # WP-5.1 — Ask your Drive: indexes opted-in people's files in the
+    # background (no-op until someone turns it on and an embedder exists).
+    from app.files.drive_index import start_drive_indexer
+
+    drive_indexer_task = start_drive_indexer()
+    # Hourly retry of anything queued or failed for the embedder (R-321).
+    from app.custom_models.backfill import start_embedding_reconciler
+
+    reconcile_task = start_embedding_reconciler()
     # D4 — backstop sweeper that trashes Chat Uploads files no live
     # message still references (the delete-conversation hook covers the
     # common case in real time; this catches edits / stragglers).
@@ -89,6 +98,11 @@ async def lifespan(_: FastAPI):
     # single orphaned row permanently blocks its schedule (see the
     # module docstring) with no error surfaced anywhere.
     stale_run_reaper_task = start_stale_run_reaper()
+    # Measures how late the event loop wakes — blocking work shows up in
+    # Admin ▸ Console instead of as a mystery freeze.
+    from app.observability.metrics import start_loop_lag_sampler
+
+    loop_lag_task = start_loop_lag_sampler()
     # Voice Phase 2 — the Wyoming listener, so Home Assistant satellites
     # can run this instance's commands. Off unless explicitly enabled;
     # start_wyoming() logs its own reason when it declines. Imported here
@@ -97,6 +111,22 @@ async def lifespan(_: FastAPI):
     from app.wyoming_bridge.startup import start_wyoming, stop_wyoming
 
     await start_wyoming()
+    # Indexing a restart interrupted goes back in the queue (R-178).
+    try:
+        from app.custom_models.backfill import recover_interrupted_indexing
+
+        await recover_interrupted_indexing()
+    except Exception:  # noqa: BLE001
+        logger.exception("Couldn't recover interrupted indexing")
+    # Say loudly if stored secrets no longer decrypt (SECRET_KEY changed),
+    # and move any under SECRET_KEY_PREVIOUS onto the current key (R-138).
+    # Never blocks boot.
+    try:
+        from app.auth.key_check import check_stored_secrets
+
+        await check_stored_secrets()
+    except Exception:  # noqa: BLE001 — a fresh database, a missing table…
+        logger.exception("Stored-secret check didn't run")
     try:
         yield
     finally:
@@ -113,8 +143,11 @@ async def lifespan(_: FastAPI):
             sweeper_task,
             scheduler_task,
             indexer_task,
+            drive_indexer_task,
+            reconcile_task,
             chat_upload_sweeper_task,
             stale_run_reaper_task,
+            loop_lag_task,
         ):
             bg.cancel()
             try:
@@ -313,6 +346,21 @@ async def health() -> JSONResponse:
     return JSONResponse(body, status_code=200 if overall_ok else 503)
 
 
+@app.get("/api/health/live", tags=["health"])
+async def health_live() -> JSONResponse:
+    """Liveness for the container healthcheck: the process is up and can
+    reach its database. Unlike ``/api/health`` it doesn't fail on optional
+    dependencies — a SearXNG hiccup used to mark the backend unhealthy, so
+    anything waiting on a healthy backend (the worker, update scripts)
+    stalled for no reason (R-245)."""
+    pg = await _check_postgres()
+    ok = bool(pg["ok"])
+    return JSONResponse(
+        {"status": "ok" if ok else "down", "service": "promptly-backend"},
+        status_code=200 if ok else 503,
+    )
+
+
 # ---- Router registration ----
 from app.admin.router import router as admin_router  # noqa: E402
 from app.app_settings.router import router as app_settings_router  # noqa: E402
@@ -343,9 +391,18 @@ from app.groups.router import router as groups_admin_router  # noqa: E402
 from app.chat.router import router as chat_router  # noqa: E402
 from app.chat.folders_router import router as chat_folders_router  # noqa: E402
 from app.chat.proposals_router import router as proposals_router  # noqa: E402
+from app.chat.approvals_router import router as approvals_router  # noqa: E402
+from app.chat.connectors_router import router as chat_connectors_router  # noqa: E402
 from app.tasks.hooks_router import router as hooks_router  # noqa: E402
 from app.custom_models.router import router as custom_models_router  # noqa: E402
+from app.files.doc_comments_router import router as doc_comments_router  # noqa: E402
 from app.files.documents_router import router as documents_router  # noqa: E402
+from app.files.documents_router import internal_router as documents_internal_router  # noqa: E402
+from app.files.office_router import router as office_router  # noqa: E402
+from app.files.editor_ai import router as editor_ai_router  # noqa: E402
+from app.files.versions_router import router as versions_router  # noqa: E402
+from app.files.pdf_router import router as pdf_router  # noqa: E402
+from app.files.shell_router import router as files_shell_router  # noqa: E402
 from app.files.links_router import router as links_router  # noqa: E402
 from app.files.router import router as files_router  # noqa: E402
 from app.files.share_router import router as file_share_router  # noqa: E402
@@ -366,6 +423,12 @@ from app.voice.router import router as voice_router  # noqa: E402
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(mfa_router, prefix="/api/auth/mfa", tags=["mfa"])
 app.include_router(admin_router, prefix="/api/admin", tags=["admin"])
+from app.backups.router import router as backups_router  # noqa: E402
+
+app.include_router(backups_router, prefix="/api/admin", tags=["admin"])
+from app.files.storage_admin_router import router as storage_admin_router  # noqa: E402
+
+app.include_router(storage_admin_router, prefix="/api/admin", tags=["admin"])
 app.include_router(
     app_settings_router, prefix="/api/admin/app-settings", tags=["admin"]
 )
@@ -384,6 +447,8 @@ app.include_router(
     chat_folders_router, prefix="/api/chat/folders", tags=["chat-folders"]
 )
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
+app.include_router(approvals_router, prefix="/api/chat", tags=["chat"])
+app.include_router(chat_connectors_router, prefix="/api/chat", tags=["chat"])
 # Workspace write-back proposals (Batch 4.1) — conversation-scoped, so
 # they live under the chat prefix.
 app.include_router(
@@ -514,6 +579,69 @@ app.include_router(files_router, prefix="/api/files", tags=["files"])
 # the collab-aware endpoints easy to find + easy to lock down in
 # nginx / rate limits independently.
 app.include_router(documents_router, prefix="/api/documents", tags=["documents"])
+app.include_router(doc_comments_router, prefix="/api/documents", tags=["documents"])
+# Collab → backend only; nginx answers 404 for /api/internal/ (WP-3.2).
+app.include_router(documents_internal_router, prefix="/api/internal/documents", tags=["internal"])
+# One collab-token endpoint for documents, sheets and whiteboards (WP-3.2).
+app.include_router(editor_ai_router, prefix="/api/files", tags=["files"])
+app.include_router(versions_router, prefix="/api/files", tags=["files"])
+app.include_router(pdf_router, prefix="/api/files", tags=["files"])
+from app.files.media_router import router as media_router  # noqa: E402
+from app.files.media_serve_router import router as media_serve_router  # noqa: E402
+from app.files.media_serve_router import urls_router as media_urls_router  # noqa: E402
+
+app.include_router(media_router, prefix="/api/files", tags=["files"])
+app.include_router(media_urls_router, prefix="/api/files", tags=["files"])
+# /m/<token> at the edge → /api/m/<token> here (WP-7.5).
+app.include_router(media_serve_router, prefix="/api/m", tags=["files"])
+# Settings → Devices: app passwords (WP-8.3).
+from app.auth.app_passwords_router import router as app_passwords_router  # noqa: E402
+
+app.include_router(app_passwords_router, prefix="/api/auth", tags=["auth"])
+# WebDAV for sync clients and mounts (WP-8.4) — at /dav/, outside /api/.
+from app.files.dav import router as dav_router  # noqa: E402
+
+app.include_router(dav_router, prefix="/dav")
+# Photos (Part E): the library over Files (WP-9.1).
+# The family library (PH-5).
+from app.photos.family_router import router as photo_family_router  # noqa: E402
+
+app.include_router(photo_family_router, prefix="/api/photos/family", tags=["photos"])
+# Memories (PH-5) — before the library's own routes.
+from app.photos.memories_router import router as photo_memories_router  # noqa: E402
+
+app.include_router(photo_memories_router, prefix="/api/photos/memories", tags=["photos"])
+from app.photos.router import router as photos_router  # noqa: E402
+
+app.include_router(photos_router, prefix="/api/photos", tags=["photos"])
+from app.photos.albums_router import router as albums_router  # noqa: E402
+
+app.include_router(albums_router, prefix="/api/photos/albums", tags=["photos"])
+# Public album links (WP-9.5): made by the owner, opened by anyone at /s/<token>.
+from app.photos.album_links import owner_router as album_links_router  # noqa: E402
+from app.photos.album_links import public_router as album_public_router  # noqa: E402
+
+app.include_router(album_links_router, prefix="/api/photos/albums", tags=["photos"])
+# People and pets (PH-3).
+from app.photos.people_router import router as people_router  # noqa: E402
+
+app.include_router(people_router, prefix="/api/photos", tags=["photos"])
+app.include_router(album_public_router, prefix="/api/s", tags=["file-shares"])
+# Moving in: Takeout and other imports (WP-10.1).
+from app.imports.router import router as imports_router  # noqa: E402
+
+app.include_router(imports_router, prefix="/api/imports", tags=["imports"])
+# Export my library (WP-10.4).
+from app.files.exports_router import router as exports_router  # noqa: E402
+
+app.include_router(exports_router, prefix="/api/files/exports", tags=["files"])
+# tusd's upload hooks (WP-8.2) — internal: nginx refuses /api/internal/.
+from app.files.tus_hooks import router as tus_hooks_router  # noqa: E402
+
+app.include_router(tus_hooks_router, prefix="/api/internal", tags=["internal"])
+app.include_router(office_router, prefix="/api/files", tags=["files"])
+# The Files shell: workspace drives, details pane, storage meter (WP-3.5).
+app.include_router(files_shell_router, prefix="/api/files", tags=["files"])
 # Public share-link API. Mounted under ``/api/s/*`` so nginx still
 # proxies it to the backend (``/s/*`` alone would collide with the
 # SPA route for the share landing page). Each endpoint is

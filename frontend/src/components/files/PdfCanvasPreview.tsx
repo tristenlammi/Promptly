@@ -41,6 +41,9 @@ interface PdfCanvasPreviewProps {
   filename: string;
   /** Rendered instead of the canvases when pdf.js can't parse the file. */
   onError?: (message: string) => void;
+  /** Open scrolled to this page, outlined — where a chat citation points
+   *  (WP-5.2). Out-of-range values are clamped. */
+  initialPage?: number;
 }
 
 // Type-only, so nothing from pdf.js is pulled into this chunk at build
@@ -53,8 +56,14 @@ export function PdfCanvasPreview({
   data,
   filename,
   onError,
+  initialPage,
 }: PdfCanvasPreviewProps) {
   const [doc, setDoc] = useState<PdfDocument | null>(null);
+  // Page 1's shape, used as every unrendered page's placeholder size so a
+  // jump to page N lands where page N will be (pages before it haven't
+  // rendered yet).
+  const [baseRatio, setBaseRatio] = useState<number | null>(null);
+  const scrolledToTarget = useRef(false);
   const [err, setErr] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -62,26 +71,19 @@ export function PdfCanvasPreview({
 
   useEffect(() => {
     let cancelled = false;
-    let loaded: PdfDocument | null = null;
+    let task: import("pdfjs-dist").PDFDocumentLoadingTask | null = null;
     (async () => {
       try {
-        const pdfjs = await import("pdfjs-dist");
-        // Vite emits the worker as its own asset and hands back a URL on
-        // our own origin, which is what ``worker-src 'self'`` allows.
-        const workerUrl = (
-          await import("pdfjs-dist/build/pdf.worker.min.mjs?url")
-        ).default;
-        pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-        // pdf.js transfers the buffer to its worker, which detaches it —
-        // and the caller may re-render us with the same ArrayBuffer. Hand
-        // over a copy so a second mount doesn't get an empty buffer.
-        const task = pdfjs.getDocument({ data: data.slice(0) });
-        const document_ = await task.promise;
+        // Worker, CMaps and fonts from our own origin; the bytes are copied
+        // (pdf.js detaches what it's given) — lib/pdfjs.
+        const { openPdf } = await import("@/lib/pdfjs");
+        task = await openPdf(data);
         if (cancelled) {
-          void document_.destroy();
+          void task.destroy();
           return;
         }
-        loaded = document_;
+        const document_ = await task.promise;
+        if (cancelled) return;
         setDoc(document_);
       } catch (e) {
         if (cancelled) return;
@@ -93,7 +95,7 @@ export function PdfCanvasPreview({
     })();
     return () => {
       cancelled = true;
-      void loaded?.destroy();
+      void task?.destroy();
     };
     // ``onError`` is a render-scoped callback in practice; re-running the
     // whole document load when it changes identity would refetch on every
@@ -119,6 +121,32 @@ export function PdfCanvasPreview({
     [doc]
   );
 
+  const target =
+    doc && initialPage && Number.isFinite(initialPage)
+      ? Math.min(Math.max(1, Math.floor(initialPage)), doc.numPages)
+      : null;
+
+  useEffect(() => {
+    if (!doc) return;
+    let cancelled = false;
+    void doc.getPage(1).then((p) => {
+      if (cancelled) return;
+      const v = p.getViewport({ scale: 1 });
+      setBaseRatio(v.height / v.width);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc]);
+
+  useEffect(() => {
+    if (!target || target === 1 || scrolledToTarget.current || !baseRatio || containerWidth <= 0) return;
+    const el = scrollRef.current?.querySelector<HTMLElement>(`[data-page="${target}"]`);
+    if (!el) return;
+    scrolledToTarget.current = true;
+    el.scrollIntoView({ block: "start" });
+  }, [target, baseRatio, containerWidth]);
+
   if (err) {
     return (
       <div className="rounded-md border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
@@ -138,7 +166,7 @@ export function PdfCanvasPreview({
     <div className="flex h-full w-full max-w-5xl flex-col overflow-hidden rounded-md bg-[var(--surface)] shadow-2xl">
       <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-xs text-[var(--text-muted)]">
         <span>
-          {doc.numPages} page{doc.numPages === 1 ? "" : "s"}
+          {target ? `Page ${target} of ${doc.numPages}` : `${doc.numPages} page${doc.numPages === 1 ? "" : "s"}`}
         </span>
         <div className="flex items-center gap-1">
           <ZoomButton
@@ -173,6 +201,8 @@ export function PdfCanvasPreview({
               pageNumber={n}
               containerWidth={containerWidth}
               zoom={zoom}
+              fallbackRatio={baseRatio}
+              target={n === target}
             />
           ))}
         </div>
@@ -216,15 +246,20 @@ function PdfPageCanvas({
   pageNumber,
   containerWidth,
   zoom,
+  fallbackRatio,
+  target = false,
 }: {
   doc: PdfDocument;
   pageNumber: number;
   containerWidth: number;
   zoom: number;
+  fallbackRatio?: number | null;
+  /** The page a citation points at: rendered straight away, outlined. */
+  target?: boolean;
 }) {
   const holderRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [visible, setVisible] = useState(pageNumber === 1);
+  const [visible, setVisible] = useState(pageNumber === 1 || target);
   // Keeps the scroll height honest before a page has rendered, so
   // scrolling doesn't jump as pages fill in behind the viewport.
   const [ratio, setRatio] = useState<number | null>(null);
@@ -261,7 +296,7 @@ function PdfPageCanvas({
     canvas.height = Math.floor(viewport.height);
     canvas.style.width = `${Math.floor(viewport.width / dpr)}px`;
     canvas.style.height = `${Math.floor(viewport.height / dpr)}px`;
-    const task = page.render({ canvasContext: ctx, viewport });
+    const task = page.render({ canvas, canvasContext: ctx, viewport });
     return task;
   }, [doc, pageNumber, containerWidth, zoom, visible]);
 
@@ -288,12 +323,17 @@ function PdfPageCanvas({
   return (
     <div
       ref={holderRef}
-      className="bg-white shadow-lg"
+      data-page={pageNumber}
+      data-target={target || undefined}
+      className={cn("bg-white shadow-lg", target && "ring-4 ring-[var(--accent)]")}
       style={
         // Reserve the right height before render so the scrollbar doesn't
-        // lurch. Falls back to A4 proportions until the page is measured.
-        ratio && containerWidth
-          ? { width: (containerWidth - 24) * zoom, height: (containerWidth - 24) * zoom * ratio }
+        // lurch — its own shape once measured, else page 1's.
+        (ratio ?? fallbackRatio) && containerWidth
+          ? {
+              width: (containerWidth - 24) * zoom,
+              height: (containerWidth - 24) * zoom * (ratio ?? fallbackRatio ?? 1),
+            }
           : undefined
       }
     >

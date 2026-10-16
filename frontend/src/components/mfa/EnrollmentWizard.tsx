@@ -395,7 +395,7 @@ function MethodCard({
       disabled={disabled}
       className="flex items-start gap-3 rounded-card border border-[var(--border)] bg-[var(--bg)] p-4 text-left transition hover:border-[var(--accent)]/60 hover:bg-[var(--accent)]/5 disabled:opacity-60"
     >
-      <div className="mt-0.5 text-[var(--accent)]">{icon}</div>
+      <div className="mt-0.5 text-[var(--accent-text)]">{icon}</div>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">{title}</div>
         <div className="mt-0.5 text-xs text-[var(--text-muted)]">

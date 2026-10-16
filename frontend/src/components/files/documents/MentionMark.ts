@@ -13,6 +13,17 @@ export const MentionMark = Mark.create({
   inclusive: false,
   excludes: "_", // don't co-mingle with other marks on the same run
 
+  addAttributes() {
+    return {
+      // The mentioned person (R-232) — a name alone can change or collide.
+      userId: {
+        default: null,
+        parseHTML: (el) => el.getAttribute("data-user-id") || null,
+        renderHTML: (attrs) => (attrs.userId ? { "data-user-id": attrs.userId } : {}),
+      },
+    };
+  },
+
   parseHTML() {
     return [{ tag: 'span[data-type="mention"]' }];
   },

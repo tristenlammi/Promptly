@@ -123,6 +123,42 @@ def _stream_stats() -> dict[str, Any]:
     }
 
 
+# ---- Event-loop lag -------------------------------------------------
+# A task that asks to wake every LAG_INTERVAL and measures how late it was.
+# On this single-worker backend, any lateness is time every user's stream
+# was frozen by something blocking the loop (bcrypt, Pillow, a zip…). The
+# number makes the next such regression visible instead of a vague
+# "the app felt stuck" report (R-016).
+LAG_INTERVAL = 0.5
+_lag_samples: deque = deque(maxlen=120)  # last ~minute
+
+
+async def _sample_loop_lag() -> None:
+    import asyncio
+
+    while True:
+        start = time.perf_counter()
+        await asyncio.sleep(LAG_INTERVAL)
+        late_ms = max(0.0, (time.perf_counter() - start - LAG_INTERVAL) * 1000)
+        with _lock:
+            _lag_samples.append(late_ms)
+
+
+def start_loop_lag_sampler():
+    import asyncio
+
+    return asyncio.create_task(_sample_loop_lag(), name="loop_lag_sampler")
+
+
+def _loop_lag() -> dict[str, float]:
+    with _lock:
+        samples = list(_lag_samples)
+    return {
+        "last_ms": round(samples[-1], 1) if samples else 0.0,
+        "max_1m_ms": round(max(samples), 1) if samples else 0.0,
+    }
+
+
 def snapshot() -> dict[str, Any]:
     """Point-in-time view of everything worth watching."""
     from app.background import pending_count
@@ -157,6 +193,7 @@ def snapshot() -> dict[str, Any]:
         "db_pool": _pool_stats(),
         "streams": _stream_stats(),
         "background_tasks": pending_count(),
+        "loop_lag": _loop_lag(),
         "memory_rss_bytes": _rss_bytes(),
     }
 

@@ -96,7 +96,7 @@ export function WorkspaceCard({
               </h3>
               {isCollaborator && (
                 <span
-                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent-text)]"
                   title={
                     workspace.shared_by
                       ? `Shared by ${workspace.shared_by.username}`
@@ -301,7 +301,7 @@ function IconActionButton({
         "relative z-10 rounded p-1 text-[var(--text-muted)] transition",
         destructive
           ? "hover:bg-[var(--danger-bg)] hover:text-[var(--danger)]"
-          : "hover:bg-[var(--accent)]/10 hover:text-[var(--accent)]"
+          : "hover:bg-[var(--accent)]/10 hover:text-[var(--accent-text)]"
       )}
     >
       {children}

@@ -150,6 +150,12 @@ async def _set_task_connectors(
                 db.add(TaskConnector(task_id=task_id, connector_id=cid))
 
 
+def _trigger_label(task: Task) -> str | None:
+    from app.tasks.flow_service import trigger_label
+
+    return trigger_label(task)
+
+
 def _serialize(
     task: Task,
     latest: TaskRun | None,
@@ -173,7 +179,7 @@ def _serialize(
         weekday=task.weekday,
         day_of_month=task.day_of_month,
         timezone=task.timezone,
-        schedule_label=describe_schedule(
+        schedule_label=_trigger_label(task) or describe_schedule(
             frequency=task.frequency,
             hour=task.hour,
             minute=task.minute,
@@ -187,6 +193,7 @@ def _serialize(
         weekdays=list(task.weekdays) if task.weekdays else None,
         enabled=task.enabled,
         notify=task.notify,
+        notify_mode=task.notify_mode or "failures",
         retention_runs=task.retention_runs,
         concurrency=task.concurrency,
         is_advanced=task.is_advanced,
@@ -200,8 +207,34 @@ def _serialize(
     )
 
 
+async def _enforce_policy(
+    db: AsyncSession, user: User, task: Task, graph: FlowGraph | None
+) -> None:
+    """422 listing everything this user may not do in this automation
+    (models, workspace role, private network, connector tools)."""
+    from app.tasks.policy import FlowPolicyError, check
+
+    try:
+        await check(db, user=user, task=task, graph=graph)
+    except FlowPolicyError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e)
+        ) from e
+
+
+def _stored_graph(task: Task) -> FlowGraph | None:
+    try:
+        return FlowGraph.model_validate(task.flow_graph) if task.flow_graph else None
+    except Exception:  # noqa: BLE001 — a malformed stored graph is checked at run time
+        return None
+
+
 def _compute_next(task: Task) -> datetime | None:
-    if not task.enabled:
+    """Next clock fire — None when disabled or when the flow's trigger isn't
+    a schedule. The one place every save path computes it (R-010)."""
+    from app.tasks.flow_service import has_schedule_trigger
+
+    if not task.enabled or not has_schedule_trigger(task):
         return None
     return compute_next_run(
         frequency=task.frequency,
@@ -215,6 +248,20 @@ def _compute_next(task: Task) -> datetime | None:
         tz_name=task.timezone,
     )
 
+
+
+
+def _valid_notify_mode(mode: str | None) -> str:
+    from app.tasks.schemas import NOTIFY_MODES
+
+    if mode is None:
+        return "failures"
+    if mode not in NOTIFY_MODES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"notify_mode must be one of {', '.join(NOTIFY_MODES)}",
+        )
+    return mode
 
 @router.get("", response_model=list[TaskResponse])
 async def list_tasks(
@@ -387,10 +434,12 @@ async def create_task(
         weekdays=payload.weekdays,
         timezone=timezone,
         enabled=payload.enabled,
-        notify=payload.notify,
+        notify=payload.notify and payload.notify_mode != "never",
+        notify_mode=_valid_notify_mode(payload.notify_mode if payload.notify else "never"),
         retention_runs=payload.retention_runs,
         concurrency=payload.concurrency,
     )
+    await _enforce_policy(db, user, task, None)
     task.next_run_at = _compute_next(task)
     db.add(task)
     await db.flush()
@@ -476,6 +525,27 @@ async def duplicate_task(
     return _serialize(copy, None, conns.get(copy.id, []))
 
 
+@router.post("/{task_id}/webhook/rotate", response_model=TaskResponse)
+async def rotate_webhook_secret(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TaskResponse:
+    """A new webhook URL; the old one stops working at once. A leaked URL
+    couldn't be revoked short of deleting the automation (R-195)."""
+    import secrets as _secrets
+
+    task = await _get_owned_task(task_id, user, db)
+    if not task.webhook_secret:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This automation has no webhook.")
+    task.webhook_secret = _secrets.token_urlsafe(32)[:64]
+    await db.commit()
+    await db.refresh(task)
+    latest = await _latest_runs(db, [task.id])
+    conns = await _connector_ids_for(db, [task.id])
+    return _serialize(task, latest.get(task.id), conns.get(task.id, []))
+
+
 @router.get("/{task_id}", response_model=TaskResponse)
 async def get_task(
     task_id: uuid.UUID,
@@ -486,6 +556,12 @@ async def get_task(
     latest = await _latest_runs(db, [task.id])
     conns = await _connector_ids_for(db, [task.id])
     return _serialize(task, latest.get(task.id), conns.get(task.id, []))
+
+
+# What the plain form may still change on a flow (Advanced) automation.
+_ADVANCED_EDITABLE = frozenset(
+    {"title", "enabled", "notify", "retention_runs", "concurrency", "workspace_id"}
+)
 
 
 @router.patch("/{task_id}", response_model=TaskResponse)
@@ -499,6 +575,26 @@ async def update_task(
     task = await _get_owned_task(task_id, user, db)
     old_workspace_id = task.workspace_id
     data = payload.model_dump(exclude_unset=True)
+    # notify (on/off) and notify_mode travel together (R-152).
+    if "notify_mode" in data:
+        data["notify_mode"] = _valid_notify_mode(data["notify_mode"])
+        data["notify"] = data["notify_mode"] != "never"
+    elif data.get("notify") is False:
+        data["notify_mode"] = "never"
+    elif data.get("notify") is True and task.notify_mode == "never":
+        data["notify_mode"] = "failures"
+    if task.is_advanced:
+        # A flow's prompt, model and schedule live in its graph; writing the
+        # Simple columns from the form desynced it (and re-armed the clock
+        # for webhook-only flows) — R-010.
+        flow_owned = set(data) - _ADVANCED_EDITABLE
+        if flow_owned:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="This automation is a flow — change "
+                + ", ".join(sorted(flow_owned))
+                + " in the flow editor.",
+            )
     # ``connector_ids`` is a join, not a column — handle separately.
     connector_ids = data.pop("connector_ids", None)
     if "workspace_id" in data:
@@ -519,6 +615,8 @@ async def update_task(
         if key == "title" and value is not None:
             value = value.strip()
         setattr(task, key, value)
+    if {"model_id", "provider_id", "workspace_id"} & data.keys():
+        await _enforce_policy(db, user, task, _stored_graph(task))
     if touched_schedule:
         task.next_run_at = _compute_next(task)
     if connector_ids is not None:
@@ -602,25 +700,29 @@ async def put_task_graph(
     user: User = Depends(get_current_user),
 ) -> FlowGraph:
     task = await _get_owned_task(task_id, user, db)
+    await _enforce_policy(db, user, task, graph)
     try:
         await apply_graph(db, task, graph)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
         )
+    # A new flow is created switched off (so a blank draft never runs its
+    # placeholder); its first successful save switches it on.
+    first_save = not await db.scalar(
+        select(func.count(FlowGraphVersion.id)).where(FlowGraphVersion.task_id == task.id)
+    )
+    if first_save and task.last_run_at is None:
+        task.enabled = True
     # Version history (A3): snapshot the saved graph so this edit can be undone
     # across saves. Append-then-prune; never the reason a save fails.
     await snapshot_flow_version(db, task, graph)
-    # The schedule may have changed — recompute the next fire time. A flow
-    # whose only trigger is a webhook (0136) must never fire on the clock:
-    # the stale schedule columns are just a projection, so park next_run_at.
+    # The trigger may have changed — recompute the next fire time (None for
+    # webhook / event / manual flows).
     from app.tasks.flow_graph import NodeType as _NT
 
     stored = task.flow_graph
-    has_schedule_trigger = stored is None or any(
-        n.get("type") == _NT.TRIGGER_SCHEDULE for n in stored.get("nodes", [])
-    )
-    task.next_run_at = _compute_next(task) if has_schedule_trigger else None
+    task.next_run_at = _compute_next(task)
     # A webhook trigger needs its inbound credential minted exactly once.
     has_webhook_trigger = stored is not None and any(
         n.get("type") == _NT.TRIGGER_WEBHOOK for n in stored.get("nodes", [])
@@ -628,10 +730,61 @@ async def put_task_graph(
     if has_webhook_trigger and not task.webhook_secret:
         task.webhook_secret = secrets.token_urlsafe(32)[:64]
     task.updated_at = datetime.now(timezone.utc)
+    # A complete save supersedes any draft (R-149).
+    task.draft_graph = None
     await db.commit()
     await db.refresh(task)
     _reindex_automations(background, task.workspace_id)
     return await load_or_derive_graph(db, task)
+
+
+class GraphDraft(BaseModel):
+    graph: dict | None = None
+    saved_at: datetime | None = None
+
+
+@router.get("/{task_id}/graph/draft", response_model=GraphDraft)
+async def get_task_graph_draft(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GraphDraft:
+    task = await _get_owned_task(task_id, user, db)
+    d = task.draft_graph or None
+    return GraphDraft(graph=(d or {}).get("graph"), saved_at=(d or {}).get("saved_at"))
+
+
+@router.put("/{task_id}/graph/draft", response_model=GraphDraft)
+async def put_task_graph_draft(
+    task_id: uuid.UUID,
+    graph: dict,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> GraphDraft:
+    """Keep a flow that isn't complete yet (R-149). Nothing runs it — the
+    automation keeps running its last complete version, if any. It used to
+    be impossible to save half-built work, so closing the tab lost it."""
+    import json as _json
+
+    task = await _get_owned_task(task_id, user, db)
+    if len(_json.dumps(graph, default=str)) > 1_000_000:
+        raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="That flow is too big.")
+    now = datetime.now(timezone.utc)
+    task.draft_graph = {"graph": graph, "saved_at": now.isoformat()}
+    await db.commit()
+    return GraphDraft(graph=graph, saved_at=now)
+
+
+@router.delete("/{task_id}/graph/draft", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_task_graph_draft(
+    task_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    task = await _get_owned_task(task_id, user, db)
+    task.draft_graph = None
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{task_id}/promote", response_model=FlowGraph)
@@ -699,6 +852,7 @@ async def restore_flow_version(
             status_code=status.HTTP_404_NOT_FOUND, detail="Version not found."
         )
     graph = FlowGraph.model_validate(version.graph)
+    await _enforce_policy(db, user, task, graph)
     try:
         await apply_graph(db, task, graph)
     except ValueError as exc:
@@ -707,13 +861,7 @@ async def restore_flow_version(
         )
     await snapshot_flow_version(db, task, graph)
     # Keep the schedule projection coherent, same as a normal save.
-    from app.tasks.flow_graph import NodeType as _NT
-
-    stored = task.flow_graph
-    has_schedule_trigger = stored is None or any(
-        n.get("type") == _NT.TRIGGER_SCHEDULE for n in stored.get("nodes", [])
-    )
-    task.next_run_at = _compute_next(task) if has_schedule_trigger else None
+    task.next_run_at = _compute_next(task)
     task.updated_at = datetime.now(timezone.utc)
     await db.commit()
     _reindex_automations(background, task.workspace_id)
@@ -727,6 +875,13 @@ class GraphTestRequest(BaseModel):
     graph: FlowGraph
     target_node_id: str
     pinned: dict[str, str] = {}
+    # Also run steps that change things elsewhere (non-GET HTTP, MCP tools).
+    execute_actions: bool = False
+
+
+# A test run answers inside one request; longer flows are tested by running
+# them (the client waits a little longer than this).
+_TEST_RUN_LIMIT_S = 110
 
 
 @router.post("/{task_id}/graph/test")
@@ -736,15 +891,26 @@ async def test_task_graph(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Synchronously run the flow up to one node and return per-node data. Skips
-    all side effects (no notes/cards/messages created, memory not written)."""
+    """Run the flow up to one node and return per-node data. No outputs are
+    created, memory isn't written, delays don't wait, and steps that change
+    things elsewhere (non-GET HTTP, MCP tools) are skipped unless
+    ``execute_actions``. Stops after :data:`_TEST_RUN_LIMIT_S` seconds."""
     from app.models_config.provider import ProviderError
     from app.tasks.graph_runner import run_graph_flow
     from app.tasks.runner import TaskRunError
 
     task = await _get_owned_task(task_id, user, db)
+    from app.tasks.policy import problems
+
+    found = await problems(db, user=user, task=task, graph=body.graph)
+    if found:
+        return {"ok": False, "error": " ".join(found), "nodes": []}
+    from app.billing.usage import check_budget, record_usage
+
+    if (await check_budget(db, user)).verdict == "blocked":
+        return {"ok": False, "error": "Your usage budget is used up.", "nodes": []}
     try:
-        _report, _sources, _usage, node_runs = await run_graph_flow(
+        _report, _sources, usage, node_runs = await run_graph_flow(
             task=task,
             graph=body.graph,
             user=user,
@@ -753,11 +919,26 @@ async def test_task_graph(
             stop_at=body.target_node_id,
             pinned=body.pinned,
             dry_run=True,
+            execute_actions=body.execute_actions,
+            time_budget=_TEST_RUN_LIMIT_S,
         )
     except (TaskRunError, ProviderError) as exc:
         return {"ok": False, "error": str(exc), "nodes": []}
     except Exception as exc:  # noqa: BLE001 — surface build errors, don't 500
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "nodes": []}
+    # Test runs spend the same tokens a real run does.
+    if usage.get("prompt_tokens") or usage.get("completion_tokens"):
+        try:
+            await record_usage(
+                db,
+                user_id=user.id,
+                prompt_tokens=usage.get("prompt_tokens"),
+                completion_tokens=usage.get("completion_tokens"),
+                cost_usd=usage.get("cost_usd"),
+            )
+            await db.commit()
+        except Exception:  # noqa: BLE001
+            pass
     return {"ok": True, "nodes": node_runs}
 
 
@@ -971,7 +1152,7 @@ async def run_to_chat(
     (parent_id / active_leaf) stays consistent.
     """
     task, run = await _get_owned_run(task_id, run_id, user, db)
-    if run.status != "success" or not run.output_markdown:
+    if run.status not in ("success", "warning") or not run.output_markdown:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only a finished report can be opened in chat.",
@@ -1020,7 +1201,7 @@ async def export_run_pdf(
 ) -> Response:
     """Render a finished run to a PDF download (reuses the chat renderer)."""
     task, run = await _get_owned_run(task_id, run_id, user, db)
-    if run.status != "success" or not run.output_markdown:
+    if run.status not in ("success", "warning") or not run.output_markdown:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Only a finished report can be exported.",

@@ -27,6 +27,8 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { confirm as confirmDialog } from "@/components/shared/ConfirmDialog";
+import { toast } from "@/store/toastStore";
 import {
   Braces,
   Brain,
@@ -37,6 +39,7 @@ import {
   Columns3,
   Copy,
   Download,
+  FolderSearch,
   FileText,
   GitBranch,
   GitMerge,
@@ -83,6 +86,7 @@ import {
   type EventTriggerData,
   type ExtractData,
   type FetchPageData,
+  type WorkspaceReadData,
   type HttpHeader,
   type HttpRequestData,
   type McpActionData,
@@ -114,6 +118,7 @@ import { secretsApi } from "@/api/secrets";
 import { useThemeStore } from "@/store/themeStore";
 import { Modal } from "@/components/shared/Modal";
 import type { WorkspaceItemNode } from "@/api/workspaces";
+import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -142,6 +147,9 @@ interface FlowEditCtx {
   runningNode: string | null;
   runToHere: (nodeId: string) => void;
   togglePin: (nodeId: string) => void;
+  // Test runs skip steps that change things elsewhere unless this is on.
+  executeActions: boolean;
+  setExecuteActions: (on: boolean) => void;
   updateNodeData: (id: string, patch: Record<string, unknown>) => void;
   setOutputTypeFor: (id: string, type: string) => void;
   removeNode: (id: string) => void;
@@ -219,6 +227,8 @@ function InlineNodeSettings({
         running={ctx.runningNode === node.id}
         onRunToHere={() => ctx.runToHere(node.id)}
         onTogglePin={() => ctx.togglePin(node.id)}
+        executeActions={ctx.executeActions}
+        onExecuteActions={ctx.setExecuteActions}
         inWorkspace={ctx.inWorkspace}
         connectors={ctx.connectors}
         canDelete={canDelete}
@@ -350,7 +360,7 @@ function VariableField({
           e.preventDefault();
           openPicker();
         }}
-        className="mt-1 inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)] transition hover:text-[var(--accent)]"
+        className="mt-1 inline-flex items-center gap-1 text-[10px] text-[var(--text-muted)] transition hover:text-[var(--accent-text)]"
         title="Insert a variable (or just type {)"
       >
         <Braces className="h-3 w-3" /> Insert variable
@@ -367,7 +377,7 @@ function VariableField({
                 }}
                 className="flex w-full flex-col items-start px-2.5 py-1 text-left transition hover:bg-[var(--hover)]"
               >
-                <code className="text-[11px] text-[var(--accent)]">{`{{${v.token}}}`}</code>
+                <code className="text-[11px] text-[var(--accent-text)]">{`{{${v.token}}}`}</code>
                 <span className="text-[10px] text-[var(--text-muted)]">
                   {v.label}
                 </span>
@@ -386,6 +396,7 @@ function nodeModalTitle(type?: string): string {
   if (type === "ai.extract") return "Extract";
   if (type === "search.web") return "Web search";
   if (type === "fetch.page") return "Fetch page";
+  if (type === "workspace.read") return "Workspace";
   if (type === "research.deep") return "Deep research";
   if (type === "loop.foreach") return "Loop";
   if (type === "memory.store") return "Memory";
@@ -773,6 +784,35 @@ function FetchNode({ id, type, data, selected }: NodeProps) {
             </span>
           </div>
         </>
+      )}
+    </NodeShell>
+  );
+}
+
+function WorkspaceReadNode({ id, type, data, selected }: NodeProps) {
+  const d = data as unknown as WorkspaceReadData;
+  const detail = useDetailed(id, type ?? "workspace.read", data);
+  const what =
+    d.mode === "item"
+      ? d.title || (d.item_id ? "A chosen item" : "")
+      : d.mode === "file"
+        ? d.file_id || "{{trigger.json.file_id}}"
+        : d.query;
+  return (
+    <NodeShell
+      icon={<FolderSearch className="h-3.5 w-3.5" />}
+      label={d.mode === "item" ? "Read item" : d.mode === "file" ? "Read file" : "Search workspace"}
+      accent="#14b8a6"
+      selected={selected}
+      hasIn
+      hasOut
+    >
+      {detail ?? (
+        <div className="truncate text-[var(--text)]">
+          {what || (
+            <span className="italic text-[var(--text-muted)]">Searches for the upstream text</span>
+          )}
+        </div>
       )}
     </NodeShell>
   );
@@ -1323,7 +1363,7 @@ function JsonTree({
   const [open, setOpen] = useState(depth < 2);
   const isObj = value !== null && typeof value === "object";
   const label = keyName !== undefined && (
-    <span className="text-[var(--accent)]">{keyName}: </span>
+    <span className="text-[var(--accent-text)]">{keyName}: </span>
   );
 
   if (!isObj) {
@@ -1508,6 +1548,10 @@ function HttpRequestConfig({
   node: { data: unknown };
   onPatch: (patch: Record<string, unknown>) => void;
 }) {
+  // Admins, or users an admin allowed (Admin ▸ Users) — R-008.
+  const canReachPrivate = useAuthStore(
+    (st) => st.user?.role === "admin" || st.user?.can_reach_private_network === true
+  );
   const d = node.data as unknown as HttpRequestData;
   const headers = d.headers ?? [];
   const { data: secrets } = useQuery({
@@ -1563,7 +1607,7 @@ function HttpRequestConfig({
             onClick={() =>
               onPatch({ headers: [...headers, { name: "", value: "" }] })
             }
-            className="inline-flex items-center gap-1 text-xs text-[var(--accent)] hover:underline"
+            className="inline-flex items-center gap-1 text-xs text-[var(--accent-text)] hover:underline"
           >
             <Plus className="h-3 w-3" /> Add
           </button>
@@ -1698,10 +1742,17 @@ function HttpRequestConfig({
         </span>
       </label>
 
-      <label className="flex items-start gap-2 text-xs text-[var(--text-muted)]">
+      <label
+        className={cn(
+          "flex items-start gap-2 text-xs text-[var(--text-muted)]",
+          !canReachPrivate && d.allow_private_network !== true && "opacity-60"
+        )}
+      >
         <input
           type="checkbox"
           checked={d.allow_private_network === true}
+          // Without permission the box can only be cleared, not set.
+          disabled={!canReachPrivate && d.allow_private_network !== true}
           onChange={(e) => onPatch({ allow_private_network: e.target.checked })}
           className="mt-0.5 accent-[var(--accent)]"
         />
@@ -1710,8 +1761,9 @@ function HttpRequestConfig({
             Allow private network
           </span>
           <span className="mt-0.5 block text-[10px] leading-snug">
-            Permit reaching a LAN / localhost address (self-hosted services on
-            your own network). Cloud metadata endpoints stay blocked either way.
+            {canReachPrivate
+              ? "Permit reaching an address on your own network (LAN, Tailscale, this server). Promptly's own services and cloud metadata endpoints stay blocked."
+              : "Reaching your own network needs an admin to allow it for your account."}
           </span>
         </span>
       </label>
@@ -1729,6 +1781,7 @@ const nodeTypes = {
   "ai.extract": ExtractNode,
   "search.web": SearchNode,
   "fetch.page": FetchNode,
+  "workspace.read": WorkspaceReadNode,
   "http.request": HttpNode,
   "mcp.action": McpNode,
   "research.deep": DeepResearchNode,
@@ -1753,6 +1806,7 @@ const PROCESSING_NODE_TYPES = new Set([
   "ai.extract",
   "search.web",
   "fetch.page",
+  "workspace.read",
   "http.request",
   "mcp.action",
   "research.deep",
@@ -1775,6 +1829,7 @@ type AddableNodeType =
   | "ai.extract"
   | "search.web"
   | "fetch.page"
+  | "workspace.read"
   | "http.request"
   | "mcp.action"
   | "research.deep"
@@ -1848,6 +1903,15 @@ const NODE_CATALOG: {
     color: "#3b82f6",
     group: "Data & web",
     keywords: "url scrape read article",
+  },
+  {
+    type: "workspace.read",
+    label: "Workspace",
+    desc: "Search this workspace, or read a note, board, sheet or file.",
+    icon: FolderSearch,
+    color: "#14b8a6",
+    group: "Data & web",
+    keywords: "rag docs knowledge note board sheet file read search drive",
   },
   {
     type: "http.request",
@@ -2083,10 +2147,13 @@ export function TaskFlowEditor({
   taskId,
   activeRun,
   animateRunId,
+  onDirtyChange,
 }: {
   taskId: string;
   activeRun?: TaskRun | null;
   animateRunId?: string | null;
+  /** Unsaved canvas changes — the page asks before "Run now" (R-149). */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { data: graph, isLoading } = useTaskGraph(taskId);
   const save = useSaveTaskGraph(taskId);
@@ -2126,8 +2193,8 @@ export function TaskFlowEditor({
     const out: BoardOption[] = [];
     const walk = (ns: WorkspaceItemNode[], prefix: string) => {
       for (const n of ns) {
-        if (n.kind === "folder") {
-          const label = prefix + (n.title || "Folder");
+        if (n.kind === "folder" || n.kind === "container") {
+          const label = prefix + (n.title || (n.kind === "container" ? "Notebook" : "Folder"));
           out.push({ id: n.id, title: label });
           walk(n.children ?? [], label + " / ");
         } else if (n.children?.length) {
@@ -2233,6 +2300,34 @@ export function TaskFlowEditor({
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  // The variable picker offered only generic tokens, so referencing step
+  // 2's output from step 4 meant guessing a node id (R-155).
+  const stepVars = useMemo<FlowVar[]>(() => {
+    const out: FlowVar[] = [];
+    let ai = 0;
+    for (const n of nodes) {
+      const t = n.type ?? "";
+      if (t.startsWith("output.") || t.startsWith("trigger.")) continue;
+      if (t === "ai.prompt") ai += 1;
+      const name =
+        String((n.data as Record<string, unknown>)?.label ?? "").trim() ||
+        (t === "ai.prompt" ? `AI step ${ai}` : nodeModalTitle(t));
+      out.push({ token: `node_${n.id}.output`, label: `${name} — its output` });
+      out.push({ token: `node_${n.id}.json.field`, label: `${name} — a JSON field (rename 'field')` });
+    }
+    const trig = nodes.find((n) => (n.type ?? "").startsWith("trigger."));
+    if (trig?.type === "trigger.webhook") {
+      out.push({ token: "trigger.json.field", label: "A field from the webhook body" });
+      out.push({ token: "trigger.headers.x_github_event", label: "A request header (lower-case, _ for -)" });
+      out.push({ token: "trigger.query.name", label: "A query-string value" });
+    } else if (trig?.type === "trigger.event") {
+      out.push({ token: "trigger.json.file_id", label: "The event's file id" });
+      out.push({ token: "trigger.json.filename", label: "The event's file name" });
+    }
+    out.push({ token: "utc_datetime", label: "Run date & time in UTC" });
+    return out;
+  }, [nodes]);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
   // ---- Canvas undo/redo (A4) ----
   // Snapshot-based: each structural edit pushes the *prior* {nodes, edges}
@@ -2392,7 +2487,7 @@ export function TaskFlowEditor({
         setEdges(rf.edges);
         setDirty(false);
         setHistoryOpen(false);
-        void qc.invalidateQueries({ queryKey: ["task-graph", taskId] });
+        void qc.invalidateQueries({ queryKey: ["tasks", taskId, "graph"] });
         window.setTimeout(
           () => rfInstance.current?.fitView({ padding: 0.25, duration: 250 }),
           60
@@ -2455,6 +2550,7 @@ export function TaskFlowEditor({
     }
   }, [graph, nodes, edges, taskId, explainBusy]);
 
+  const [executeActions, setExecuteActions] = useState(false);
   const runToHere = useCallback(
     async (nodeId: string) => {
       if (!graph) return;
@@ -2465,7 +2561,8 @@ export function TaskFlowEditor({
           taskId,
           fromRF(graph, nodes, edges),
           nodeId,
-          pins
+          pins,
+          executeActions
         );
         if (!res.ok) {
           setTestError(res.error ?? "Test failed.");
@@ -2481,13 +2578,18 @@ export function TaskFlowEditor({
             };
           return next;
         });
-      } catch {
-        setTestError("Couldn't run the test.");
+      } catch (e) {
+        const timedOut = (e as { code?: string })?.code === "ECONNABORTED";
+        setTestError(
+          timedOut
+            ? "The test took longer than two minutes. Run the automation to test long steps."
+            : "Couldn't run the test."
+        );
       } finally {
         setRunningNode(null);
       }
     },
-    [graph, nodes, edges, pins, taskId]
+    [graph, nodes, edges, pins, taskId, executeActions]
   );
   const togglePin = useCallback(
     (nodeId: string) => {
@@ -2504,7 +2606,9 @@ export function TaskFlowEditor({
   // ---- Run replay: paint each node's status onto the canvas as the run's
   // steps come back, so you watch the flow light up like n8n. ----
   const runDone =
-    activeRun?.status === "success" || activeRun?.status === "failed";
+    activeRun?.status === "success" ||
+    activeRun?.status === "warning" ||
+    activeRun?.status === "failed";
   const runActive =
     activeRun?.status === "pending" || activeRun?.status === "running";
   const statusByNode = useMemo<Record<string, string>>(() => {
@@ -2584,6 +2688,8 @@ export function TaskFlowEditor({
   const fitted = useRef(false);
   useEffect(() => {
     if (!graph) return;
+    // A refetch of the saved graph mustn't wipe what's being edited.
+    if (dirtyRef.current) return;
     const rf = toRF(graph);
     setNodes(rf.nodes);
     setEdges(rf.edges);
@@ -2746,6 +2852,8 @@ export function TaskFlowEditor({
       else if (type === "ai.extract") data = { spec: "", ...modelBits };
       else if (type === "search.web") data = { query: "", count: 5 };
       else if (type === "fetch.page") data = { url: "", max_chars: 8000 };
+      else if (type === "workspace.read")
+        data = { mode: "search", query: "", item_id: null, title: "", file_id: "", top_k: 6 };
       else if (type === "http.request")
         data = {
           method: "GET",
@@ -2905,9 +3013,74 @@ export function TaskFlowEditor({
   const onSave = useCallback(() => {
     if (!graph) return;
     save.mutate(fromRF(graph, nodes, edges), {
-      onSuccess: () => setDirty(false),
+      onSuccess: () => {
+        setDirty(false);
+        setDraftInfo(null); // a complete save replaces the draft
+      },
     });
   }, [graph, nodes, edges, save]);
+
+  // Drafts (R-149): a half-built flow can't pass the save checks, so it
+  // used to be impossible to keep — closing the tab lost it.
+  const [draftInfo, setDraftInfo] = useState<{ saved_at: string | null; graph: FlowGraph | null } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    tasksApi
+      .getGraphDraft(taskId)
+      .then((d) => {
+        if (!cancelled && d.graph) setDraftInfo(d);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [taskId]);
+  const saveDraft = useCallback(async () => {
+    if (!graph) return;
+    try {
+      const r = await tasksApi.saveGraphDraft(taskId, fromRF(graph, nodes, edges));
+      setDirty(false);
+      save.reset();
+      setDraftInfo({ saved_at: r.saved_at, graph: null });
+      toast.success("Saved as a draft — it won't run until the flow is complete and saved.");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't save the draft."));
+    }
+  }, [graph, nodes, edges, taskId, save]);
+  const loadDraft = useCallback(() => {
+    if (!draftInfo?.graph) return;
+    takeSnapshot();
+    const rf = toRF(draftInfo.graph);
+    setNodes(rf.nodes);
+    setEdges(rf.edges);
+    setDirty(true);
+    setDraftInfo({ ...draftInfo, graph: null });
+  }, [draftInfo, takeSnapshot, setNodes, setEdges]);
+  const discardDraft = useCallback(async () => {
+    try {
+      await tasksApi.deleteGraphDraft(taskId);
+    } catch {
+      /* it'll be replaced by the next save anyway */
+    }
+    setDraftInfo(null);
+  }, [taskId]);
+
+  // Never lose unsaved work silently: tell the page, and warn before the
+  // tab closes (R-149).
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   if (isLoading || !graph) {
     return (
@@ -2952,6 +3125,8 @@ export function TaskFlowEditor({
     runningNode,
     runToHere,
     togglePin,
+    executeActions,
+    setExecuteActions,
     updateNodeData,
     setOutputTypeFor,
     removeNode,
@@ -2960,7 +3135,7 @@ export function TaskFlowEditor({
   return (
     <FlowEditContext.Provider value={editCtx}>
     <div className="flex h-full min-h-0">
-      <div className="relative min-w-0 flex-1">
+      <div ref={canvasRef} className="relative min-w-0 flex-1">
         {/* Toolbar */}
         <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
           <input
@@ -2977,15 +3152,32 @@ export function TaskFlowEditor({
             className={cn(
               "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-medium",
               graph.mode === "advanced"
-                ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]"
+                ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent-text)]"
                 : "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]"
             )}
           >
             <Zap className="h-3 w-3" />
             {graph.mode === "advanced" ? "Advanced flow" : "Simple task"}
           </span>
-          <span className="hidden text-[11px] text-[var(--text-muted)] lg:inline">
-            Right-click to add nodes · drag off a handle to chain
+          {/* A visible way to add a step — it was right-click only, with a
+              hint hidden below large screens (R-155). */}
+          <button
+            type="button"
+            onClick={() => {
+              const r = canvasRef.current?.getBoundingClientRect();
+              setNodeMenu(null);
+              setMenu({
+                x: r ? r.left + r.width / 2 - 140 : window.innerWidth / 2 - 140,
+                y: r ? r.top + 60 : 160,
+              });
+            }}
+            className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 py-1 text-[11px] font-medium text-[var(--text)] hover:bg-[var(--hover)]"
+          >
+            <Plus className="h-3 w-3" />
+            Add step
+          </button>
+          <span className="hidden text-[11px] text-[var(--text-muted)] xl:inline">
+            or right-click the canvas · drag off a handle to chain
           </span>
           <button
             type="button"
@@ -2994,7 +3186,7 @@ export function TaskFlowEditor({
               setCopilotOpen(true);
             }}
             title="Describe an automation and let AI draft the flow"
-            className="inline-flex items-center gap-1 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2 py-1 text-xs font-medium text-[var(--accent)] transition hover:bg-[var(--accent)]/15"
+            className="inline-flex items-center gap-1 rounded-md border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2 py-1 text-xs font-medium text-[var(--accent-text)] transition hover:bg-[var(--accent)]/15"
           >
             <Sparkles className="h-3.5 w-3.5" />
             Draft with AI
@@ -3051,7 +3243,7 @@ export function TaskFlowEditor({
             className={cn(
               "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition",
               detailed
-                ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]"
+                ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent-text)]"
                 : "border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--surface-hover)]"
             )}
           >
@@ -3077,7 +3269,7 @@ export function TaskFlowEditor({
           </button>
 
           {runActive && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--accent)]">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--accent-text)]">
               <Loader2 className="h-3 w-3 animate-spin" /> Running…
             </span>
           )}
@@ -3107,6 +3299,32 @@ export function TaskFlowEditor({
         {save.isError && (
           <div className="absolute left-3 top-12 z-10 max-w-md rounded-md border border-[var(--danger-border)] bg-[var(--danger-bg)] px-2.5 py-1.5 text-[11px] text-[var(--danger)]">
             {saveErrorMessage(save.error)}
+            <button
+              type="button"
+              onClick={() => void saveDraft()}
+              className="ml-2 font-semibold underline"
+            >
+              Save as draft
+            </button>
+          </div>
+        )}
+        {!save.isError && draftInfo && (
+          <div className="absolute left-3 top-12 z-10 flex max-w-md flex-wrap items-center gap-2 rounded-md border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-2.5 py-1.5 text-[11px] text-[var(--text)]">
+            <span>
+              {draftInfo.graph
+                ? "There's an unfinished draft of this flow"
+                : "Draft saved"}
+              {draftInfo.saved_at ? ` (${new Date(draftInfo.saved_at).toLocaleString()})` : ""} —
+              it doesn't run until it's complete and saved.
+            </span>
+            {draftInfo.graph && (
+              <button type="button" onClick={loadDraft} className="font-semibold underline">
+                Open draft
+              </button>
+            )}
+            <button type="button" onClick={() => void discardDraft()} className="text-[var(--text-muted)] underline">
+              Discard
+            </button>
           </div>
         )}
 
@@ -3176,7 +3394,7 @@ export function TaskFlowEditor({
           <div className="absolute right-3 top-12 z-10 max-w-sm rounded-lg border border-[var(--border)] bg-[var(--bg)] p-3 shadow-lg">
             <div className="mb-1 flex items-center justify-between">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text)]">
-                <HelpCircle className="h-3.5 w-3.5 text-[var(--accent)]" />
+                <HelpCircle className="h-3.5 w-3.5 text-[var(--accent-text)]" />
                 What this flow does
               </span>
               <button
@@ -3198,7 +3416,7 @@ export function TaskFlowEditor({
           <div className="absolute right-3 top-12 z-10 flex max-h-[70vh] w-80 flex-col rounded-lg border border-[var(--border)] bg-[var(--bg)] shadow-lg">
             <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text)]">
-                <History className="h-3.5 w-3.5 text-[var(--accent)]" />
+                <History className="h-3.5 w-3.5 text-[var(--accent-text)]" />
                 Version history
               </span>
               <button
@@ -3419,7 +3637,11 @@ export function TaskFlowEditor({
               running={runningNode === selected.id}
               onRunToHere={() => runToHere(selected.id)}
               onTogglePin={() => togglePin(selected.id)}
+              executeActions={executeActions}
+              onExecuteActions={setExecuteActions}
               inWorkspace={!!task?.workspace_id}
+              workspaceId={task?.workspace_id ?? null}
+              extraVars={stepVars.filter((v) => !v.token.startsWith(`node_${selected.id}.`))}
               driveFolders={driveFolders}
               connectors={connectors ?? []}
               canDelete={
@@ -3437,6 +3659,22 @@ export function TaskFlowEditor({
                   ? `${window.location.origin}/api/hooks/${task.id}/${task.webhook_secret}`
                   : null
               }
+              onRotateWebhook={async () => {
+                const ok = await confirmDialog({
+                  title: "Regenerate the webhook URL?",
+                  message:
+                    "The current URL stops working straight away — anything posting to it needs the new one.",
+                  confirmLabel: "Regenerate",
+                  danger: true,
+                });
+                if (!ok) return;
+                try {
+                  await tasksApi.rotateWebhook(taskId);
+                  await qc.invalidateQueries({ queryKey: ["tasks"] });
+                } catch (err) {
+                  toast.error(apiErrorMessage(err, "Couldn't regenerate the URL."));
+                }
+              }}
               onDelete={() => {
                 removeNode(selected.id);
                 setSelectedId(null);
@@ -3493,13 +3731,18 @@ function NodeInspector({
   running,
   onRunToHere,
   onTogglePin,
+  executeActions,
+  onExecuteActions,
   inWorkspace,
+  workspaceId,
+  extraVars,
   connectors,
   canDelete,
   onPatch,
   onSetOutputType,
   onSetTriggerType,
   webhookUrl,
+  onRotateWebhook,
   onDelete,
   onDuplicate,
   inline,
@@ -3516,7 +3759,12 @@ function NodeInspector({
   running?: boolean;
   onRunToHere?: () => void;
   onTogglePin?: () => void;
+  executeActions?: boolean;
+  onExecuteActions?: (on: boolean) => void;
   inWorkspace: boolean;
+  workspaceId?: string | null;
+  /** Earlier steps' outputs and trigger fields for the variable picker. */
+  extraVars?: FlowVar[];
   connectors: AvailableTaskConnector[];
   canDelete: boolean;
   onPatch: (patch: Record<string, unknown>) => void;
@@ -3525,11 +3773,13 @@ function NodeInspector({
   onSetTriggerType?: (type: string) => void;
   /** Full inbound-hook URL once the secret is minted (after first save). */
   webhookUrl?: string | null;
+  onRotateWebhook?: () => void;
   onDelete: () => void;
   /** Duplicate this node (A4) — absent for the singleton trigger. */
   onDuplicate?: () => void;
   inline?: boolean;
 }) {
+  const vars = useMemo(() => [...DEFAULT_VARS, ...(extraVars ?? [])], [extraVars]);
   const isOutput = (node.type ?? "").startsWith("output.");
   const { data: models } = useAvailableModels();
   const ai = node.data as unknown as AIPromptData;
@@ -3561,6 +3811,19 @@ function NodeInspector({
               )}
               Run to here
             </button>
+            {onExecuteActions && (
+              <label
+                className="inline-flex items-center gap-1 text-[11px] text-[var(--text-muted)]"
+                title="Test runs skip steps that change things elsewhere (HTTP POST/PUT/DELETE, MCP tools). Tick to run them for real."
+              >
+                <input
+                  type="checkbox"
+                  checked={!!executeActions}
+                  onChange={(e) => onExecuteActions(e.target.checked)}
+                />
+                Run actions for real
+              </label>
+            )}
             {onTogglePin && (
               <button
                 type="button"
@@ -3570,7 +3833,7 @@ function NodeInspector({
                 className={cn(
                   "inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs transition disabled:opacity-40",
                   pinned
-                    ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]"
+                    ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent-text)]"
                     : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]"
                 )}
               >
@@ -3613,7 +3876,7 @@ function NodeInspector({
               <VariableField
                 value={(node.data as unknown as AIPromptData).prompt}
                 onChange={(v) => onPatch({ prompt: v })}
-                variables={DEFAULT_VARS}
+                variables={vars}
                 multiline
                 rows={8}
                 placeholder="What should this step do?"
@@ -3776,7 +4039,7 @@ function NodeInspector({
               <VariableField
                 value={(node.data as unknown as WebSearchData).query}
                 onChange={(v) => onPatch({ query: v })}
-                variables={DEFAULT_VARS}
+                variables={vars}
                 multiline
                 rows={3}
                 placeholder="Leave blank to search the previous step's output"
@@ -3809,6 +4072,14 @@ function NodeInspector({
         </>
       )}
 
+      {node.type === "workspace.read" && (
+        <WorkspaceReadFields
+          data={node.data as unknown as WorkspaceReadData}
+          onPatch={onPatch}
+          workspaceId={workspaceId ?? null}
+        />
+      )}
+
       {node.type === "fetch.page" && (
         <>
           <label className="text-xs font-medium text-[var(--text-muted)]">
@@ -3817,7 +4088,7 @@ function NodeInspector({
               <VariableField
                 value={(node.data as unknown as FetchPageData).url}
                 onChange={(v) => onPatch({ url: v })}
-                variables={DEFAULT_VARS}
+                variables={vars}
                 placeholder="Leave blank to fetch the first URL from upstream"
               />
             </div>
@@ -3873,7 +4144,7 @@ function NodeInspector({
               <VariableField
                 value={(node.data as unknown as DeepResearchData).query}
                 onChange={(v) => onPatch({ query: v })}
-                variables={DEFAULT_VARS}
+                variables={vars}
                 multiline
                 rows={3}
                 placeholder="Leave blank to research the previous step's output"
@@ -4280,7 +4551,7 @@ function NodeInspector({
                   <VariableField
                     value={c.source}
                     onChange={(v) => onPatch({ source: v })}
-                    variables={DEFAULT_VARS}
+                    variables={vars}
                     placeholder="Blank = the whole upstream. Or a field: {{json.status}}"
                   />
                 </div>
@@ -4307,7 +4578,7 @@ function NodeInspector({
                       <VariableField
                         value={c.value}
                         onChange={(v) => onPatch({ value: v })}
-                        variables={DEFAULT_VARS}
+                        variables={vars}
                         placeholder={
                           c.operator === "matches"
                             ? "regular expression"
@@ -4660,7 +4931,7 @@ function NodeInspector({
                       <VariableField
                         value={d.title}
                         onChange={(v) => onPatch({ title: v })}
-                        variables={DEFAULT_VARS}
+                        variables={vars}
                         placeholder="Leave blank to use the result's first line"
                       />
                     </div>
@@ -4675,7 +4946,7 @@ function NodeInspector({
                       }
                       className="mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]"
                     >
-                      <option value="">Workspace root</option>
+                      <option value="">Top level</option>
                       {folders.map((f) => (
                         <option key={f.id} value={f.id}>
                           {f.title}
@@ -4880,9 +5151,43 @@ function NodeInspector({
                       POST anything to this URL to start a run. The request
                       body reaches the flow as{" "}
                       <code>{"{{trigger.payload}}"}</code> (JSON fields as{" "}
-                      <code>{"{{trigger.json.<field>}}"}</code>). Anyone with
-                      the URL can fire it — treat it like a password.
+                      <code>{"{{trigger.json.<field>}}"}</code>), headers as{" "}
+                      <code>{"{{trigger.headers.x_github_event}}"}</code> and the
+                      query string as <code>{"{{trigger.query.<name>}}"}</code>.
+                      Anyone with the URL can fire it — treat it like a password.
                     </p>
+                    {onRotateWebhook && (
+                      <button
+                        type="button"
+                        onClick={onRotateWebhook}
+                        className="mt-1.5 text-[11px] font-medium text-[var(--accent-text)] hover:underline"
+                      >
+                        Regenerate URL
+                      </button>
+                    )}
+                    <div className="mt-3 space-y-1.5">
+                      <div className="text-xs font-medium text-[var(--text-muted)]">
+                        Check signature (optional)
+                      </div>
+                      <input
+                        value={String((node.data as Record<string, unknown>).signature_header ?? "")}
+                        onChange={(e) => onPatch({ signature_header: e.target.value })}
+                        placeholder="Header, e.g. X-Hub-Signature-256"
+                        aria-label="Signature header"
+                        className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs"
+                      />
+                      <input
+                        value={String((node.data as Record<string, unknown>).signature_secret ?? "")}
+                        onChange={(e) => onPatch({ signature_secret: e.target.value.toUpperCase() })}
+                        placeholder="Credential name holding the shared secret"
+                        aria-label="Signature credential"
+                        className="w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-xs"
+                      />
+                      <p className="text-[10px] leading-snug text-[var(--text-muted)]">
+                        Requests without a valid HMAC-SHA256 of the body in
+                        that header are refused.
+                      </p>
+                    </div>
                   </div>
                 ) : (
                   <p className="text-xs text-[var(--text-muted)]">
@@ -4997,7 +5302,7 @@ function NodeInspector({
                           }}
                           className={`rounded-md border px-2 py-1 text-[11px] font-medium transition ${
                             on
-                              ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                              ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent-text)]"
                               : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
                           }`}
                         >
@@ -5118,5 +5423,119 @@ function NodeInspector({
         </div>
       )}
     </div>
+  );
+}
+
+/** Inspector for the Workspace step (R-153). */
+function WorkspaceReadFields({
+  data,
+  onPatch,
+  workspaceId,
+}: {
+  data: WorkspaceReadData;
+  onPatch: (patch: Record<string, unknown>) => void;
+  workspaceId: string | null;
+}) {
+  const { data: tree } = useWorkspaceTree(workspaceId ?? undefined);
+  const items = useMemo(() => {
+    const out: { id: string; title: string; kind: string }[] = [];
+    const walk = (ns: WorkspaceItemNode[]) => {
+      for (const n of ns) {
+        if (["note", "board", "sheet", "canvas", "roster"].includes(n.kind))
+          out.push({ id: n.id, title: n.title || "Untitled", kind: n.kind });
+        if (n.children?.length) walk(n.children);
+      }
+    };
+    walk(tree ?? []);
+    return out;
+  }, [tree]);
+  const mode = data.mode || "search";
+  const fieldCls =
+    "mt-1 w-full rounded-md border border-[var(--border)] bg-[var(--surface)] p-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]";
+  if (!workspaceId) {
+    return (
+      <p className="text-[11px] text-[var(--warning)]">
+        This step reads a workspace, so it only runs in a workspace&apos;s
+        automations.
+      </p>
+    );
+  }
+  return (
+    <>
+      <label className="text-xs font-medium text-[var(--text-muted)]">
+        What to read
+        <select
+          value={mode}
+          onChange={(e) => onPatch({ mode: e.target.value })}
+          className={fieldCls}
+        >
+          <option value="search">Search the workspace</option>
+          <option value="item">One note, board, sheet or roster</option>
+          <option value="file">A file (e.g. the one that just arrived)</option>
+        </select>
+      </label>
+      {mode === "search" && (
+        <label className="text-xs font-medium text-[var(--text-muted)]">
+          Search for
+          <div className="mt-1">
+            <VariableField
+              value={data.query}
+              onChange={(v) => onPatch({ query: v })}
+              variables={DEFAULT_VARS}
+              placeholder="Leave blank to search for the upstream text"
+            />
+          </div>
+        </label>
+      )}
+      {mode === "item" && (
+        <>
+          <label className="text-xs font-medium text-[var(--text-muted)]">
+            Item
+            <select
+              value={data.item_id ?? ""}
+              onChange={(e) => onPatch({ item_id: e.target.value || null })}
+              className={fieldCls}
+            >
+              <option value="">Find by title (below)</option>
+              {items.map((it) => (
+                <option key={it.id} value={it.id}>
+                  {it.title} ({it.kind})
+                </option>
+              ))}
+            </select>
+          </label>
+          {!data.item_id && (
+            <label className="text-xs font-medium text-[var(--text-muted)]">
+              Title
+              <div className="mt-1">
+                <VariableField
+                  value={data.title}
+                  onChange={(v) => onPatch({ title: v })}
+                  variables={DEFAULT_VARS}
+                  placeholder="e.g. Sprint board, or {{trigger.json.item_title}}"
+                />
+              </div>
+            </label>
+          )}
+        </>
+      )}
+      {mode === "file" && (
+        <label className="text-xs font-medium text-[var(--text-muted)]">
+          File id
+          <div className="mt-1">
+            <VariableField
+              value={data.file_id}
+              onChange={(v) => onPatch({ file_id: v })}
+              variables={DEFAULT_VARS}
+              placeholder="{{trigger.json.file_id}} — from a “file added” trigger"
+            />
+          </div>
+        </label>
+      )}
+      <p className="text-[11px] text-[var(--text-muted)]">
+        Reads only what this automation&apos;s owner can see. The text flows on
+        as <code className="rounded bg-[var(--surface-2)] px-1">{"{{upstream_output}}"}</code>.
+      </p>
+    </>
   );
 }

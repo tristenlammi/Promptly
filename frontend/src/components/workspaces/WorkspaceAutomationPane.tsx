@@ -1,6 +1,6 @@
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Loader2, Play, XCircle } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import {
@@ -13,8 +13,10 @@ import {
 import type { WorkspaceItemNode } from "@/api/workspaces";
 import { RunStatusChip } from "@/components/tasks/RunStatusChip";
 import { TaskRunDocument } from "@/components/tasks/TaskRunDocument";
+import { DiagnoseRun, RunSteps } from "@/components/tasks/RunSteps";
 import { Button } from "@/components/shared/Button";
 import { cn } from "@/utils/cn";
+import { confirm as confirmDialog } from "@/components/shared/ConfirmDialog";
 import { ItemPaneHeader } from "./ItemPaneHeader";
 
 // React Flow is heavy — only load it when an automation is opened.
@@ -52,6 +54,9 @@ export function WorkspaceAutomationPane({
   const { data: runs } = useTaskRuns(taskId, true);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [showFlow, setShowFlow] = useState(true);
+  const [flowDirty, setFlowDirty] = useState(false);
+  const flowOpened = useRef(false);
+  if (showFlow) flowOpened.current = true;
   // The run just kicked off by "Run now" — the flow canvas animates this one
   // (rather than instantly painting an old run picked from the rail).
   const [animateRunId, setAnimateRunId] = useState<string | null>(null);
@@ -67,6 +72,15 @@ export function WorkspaceAutomationPane({
   const { data: run } = useTaskRun(taskId, selectedRunId ?? undefined, polling);
 
   const onRunNow = async () => {
+    if (flowDirty) {
+      const ok = await confirmDialog({
+        title: "Run the saved version?",
+        message:
+          "The flow has unsaved changes. Run now runs the last saved version — save first to include them.",
+        confirmLabel: "Run saved version",
+      });
+      if (!ok) return;
+    }
     const created = await runTask.mutateAsync(taskId);
     setSelectedRunId(created.id);
     setAnimateRunId(created.id);
@@ -180,7 +194,10 @@ export function WorkspaceAutomationPane({
         )}
 
         <div className="min-w-0 flex-1">
-          {showFlow ? (
+          {/* The editor stays mounted once opened (hidden behind the runs),
+              so picking a run no longer discards unsaved edits (R-149). */}
+          {flowOpened.current && (
+            <div className={cn("h-full", !showFlow && "hidden")}>
             <Suspense
               fallback={
                 <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
@@ -193,9 +210,12 @@ export function WorkspaceAutomationPane({
                 taskId={taskId}
                 activeRun={run ?? null}
                 animateRunId={animateRunId}
+                onDirtyChange={setFlowDirty}
               />
             </Suspense>
-          ) : (
+            </div>
+          )}
+          {!showFlow && (
             <div className="promptly-scroll h-full overflow-y-auto px-5 py-4">
               {run ? (
                 <>
@@ -221,38 +241,15 @@ export function WorkspaceAutomationPane({
                     )}
                   </div>
                   <TaskRunDocument run={run} />
+                  <div className="mx-auto mt-3 max-w-3xl">
+                    <DiagnoseRun run={run} />
+                  </div>
                   {(run.node_runs ?? []).length > 0 && (
                     <div className="mx-auto mt-6 max-w-3xl border-t border-[var(--border)] pt-3">
                       <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                         Steps
                       </h4>
-                      <div className="flex flex-col gap-1.5">
-                        {(run.node_runs ?? []).map((s) => (
-                          <details
-                            key={s.node_id}
-                            className="rounded-md border border-[var(--border)] bg-[var(--surface)]"
-                          >
-                            <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs">
-                              {s.status === "success" ? (
-                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                              ) : (
-                                <XCircle className="h-3.5 w-3.5 shrink-0 text-red-500" />
-                              )}
-                              <span className="min-w-0 truncate font-medium text-[var(--text)]">
-                                {s.label || s.type}
-                              </span>
-                              {(s.completion_tokens ?? 0) > 0 && (
-                                <span className="ml-auto shrink-0 text-[var(--text-muted)]">
-                                  {s.completion_tokens} tok
-                                </span>
-                              )}
-                            </summary>
-                            <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-[var(--border)] px-3 py-2 text-[11px] leading-relaxed text-[var(--text-muted)]">
-                              {s.output || "(no output)"}
-                            </pre>
-                          </details>
-                        ))}
-                      </div>
+                      <RunSteps steps={run.node_runs ?? []} />
                     </div>
                   )}
                 </>

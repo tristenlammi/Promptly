@@ -115,7 +115,7 @@ export function MoveToWorkspaceMenu({
                   className={cn(
                     "flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition",
                     "hover:bg-[var(--accent)]/5",
-                    active && "text-[var(--accent)]"
+                    active && "text-[var(--accent-text)]"
                   )}
                 >
                   <LayoutGrid className="h-3.5 w-3.5" />

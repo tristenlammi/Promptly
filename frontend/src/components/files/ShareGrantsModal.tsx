@@ -4,7 +4,10 @@ import {
   Check,
   Copy as CopyIcon,
   Eye,
+  Globe,
+  Link2,
   Loader2,
+  MessageSquare,
   Pencil,
   Search,
   Trash2,
@@ -15,6 +18,7 @@ import {
   filesApi,
   MAX_GRANTS_PER_RESOURCE,
   type Grantee,
+  type ShareLinkRole,
   type ShareableResourceType,
   type UserSearchHit,
 } from "@/api/files";
@@ -23,6 +27,7 @@ import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
 
 import { extractError } from "./helpers";
+import { ShareLinkDialog } from "./ShareLinkDialog";
 
 interface ShareGrantsModalProps {
   open: boolean;
@@ -35,6 +40,9 @@ interface ShareGrantsModalProps {
      *  hide the Editor option in the role picker so users don't
      *  hit a backend 400. */
     supports_edit?: boolean;
+    /** What a share link (and a person) can be given on it — from
+     *  ``shareRolesFor`` (WP-6.6). Commenter needs ``comment`` here. */
+    roles?: ShareLinkRole[];
   } | null;
   onClose: () => void;
   /** Called with the latest list whenever a grant is added,
@@ -48,23 +56,26 @@ interface ShareGrantsModalProps {
  *  ``can_copy`` + ``can_edit`` boolean pair the backend stores —
  *  keeping that mapping in one place stops the UI and the API
  *  drifting apart. */
-type Role = "viewer" | "viewer_copy" | "editor";
+type Role = "viewer" | "viewer_copy" | "commenter" | "editor";
 
-function roleFromGrant(g: Pick<Grantee, "can_copy" | "can_edit">): Role {
+function roleFromGrant(g: Pick<Grantee, "can_copy" | "can_edit" | "can_comment">): Role {
   if (g.can_edit) return "editor";
+  if (g.can_comment) return "commenter";
   if (g.can_copy) return "viewer_copy";
   return "viewer";
 }
 
-function flagsFromRole(role: Role): { can_copy: boolean; can_edit: boolean } {
+function flagsFromRole(role: Role): { can_copy: boolean; can_edit: boolean; can_comment: boolean } {
   switch (role) {
     case "editor":
-      return { can_copy: false, can_edit: true };
+      return { can_copy: false, can_edit: true, can_comment: false };
+    case "commenter":
+      return { can_copy: false, can_edit: false, can_comment: true };
     case "viewer_copy":
-      return { can_copy: true, can_edit: false };
+      return { can_copy: true, can_edit: false, can_comment: false };
     case "viewer":
     default:
-      return { can_copy: false, can_edit: false };
+      return { can_copy: false, can_edit: false, can_comment: false };
   }
 }
 
@@ -100,13 +111,16 @@ export function ShareGrantsModal({
   const [defaultRole, setDefaultRole] = useState<Role>("viewer");
   const [adding, setAdding] = useState(false);
 
-  const supportsEdit = resource?.supports_edit ?? false;
+  const supportsEdit = resource?.supports_edit ?? resource?.roles?.includes("edit") ?? false;
+  const supportsComment = resource?.roles?.includes("comment") ?? false;
 
   // "Stop sharing" inline confirm — we deliberately don't stack
   // another <Modal> on top of this one (focus-trap nightmare) and
   // instead swap in an inline banner near the footer.
   const [confirmUnshare, setConfirmUnshare] = useState(false);
   const [unsharing, setUnsharing] = useState(false);
+  // The link manager replaces this sheet while open (no stacked modals).
+  const [linksOpen, setLinksOpen] = useState(false);
 
   // Reset everything when the modal opens against a new resource.
   useEffect(() => {
@@ -180,7 +194,8 @@ export function ShareGrantsModal({
     [grants]
   );
 
-  const atCap = grants.length >= MAX_GRANTS_PER_RESOURCE;
+  // People who joined through a link don't count toward the list's limit.
+  const atCap = grants.filter((g) => !g.via_link).length >= MAX_GRANTS_PER_RESOURCE;
 
   const handleAdd = async (user: UserSearchHit) => {
     if (!resource || adding) return;
@@ -198,6 +213,7 @@ export function ShareGrantsModal({
         grantee_user_id: user.id,
         can_copy: flags.can_copy,
         can_edit: flags.can_edit,
+        can_comment: flags.can_comment,
       });
       setGrants(res.grants);
       setQuery("");
@@ -222,7 +238,7 @@ export function ShareGrantsModal({
         resource.type,
         resource.id,
         g.grant_id,
-        { can_copy: flags.can_copy, can_edit: flags.can_edit }
+        { can_copy: flags.can_copy, can_edit: flags.can_edit, can_comment: flags.can_comment }
       );
       setGrants(res.grants);
       onChanged?.();
@@ -266,12 +282,30 @@ export function ShareGrantsModal({
   if (!resource) return null;
 
   return (
-    <Modal open={open} onClose={onClose} widthClass="max-w-xl">
+    <>
+    <ShareLinkDialog
+      open={open && linksOpen}
+      resource={
+        resource
+          ? {
+              kind: resource.type === "folder" ? "folder" : "file",
+              id: resource.id,
+              name: resource.name,
+              roles: resource.type === "folder" ? ["view"] : resource.roles,
+            }
+          : null
+      }
+      onClose={() => {
+        setLinksOpen(false);
+        onChanged?.();
+      }}
+    />
+    <Modal open={open && !linksOpen} onClose={onClose} widthClass="max-w-xl">
       <div className="space-y-4">
         <header className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-lg font-semibold text-[var(--text)]">
-              <Users className="h-5 w-5 text-[var(--accent)]" />
+              <Users className="h-5 w-5 text-[var(--accent-text)]" />
               <span>Share {resource.type === "folder" ? "folder" : "file"}</span>
             </h2>
             <p className="mt-0.5 truncate text-sm text-[var(--text-muted)]">
@@ -283,7 +317,7 @@ export function ShareGrantsModal({
               "shrink-0 rounded-full px-2 py-1 text-xs font-medium",
               atCap
                 ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                : "bg-[var(--accent)]/10 text-[var(--accent)]"
+                : "bg-[var(--accent)]/10 text-[var(--accent-text)]"
             )}
           >
             {grants.length}/{MAX_GRANTS_PER_RESOURCE}
@@ -340,6 +374,7 @@ export function ShareGrantsModal({
               value={defaultRole}
               onChange={setDefaultRole}
               supportsEdit={supportsEdit}
+                      supportsComment={supportsComment}
               disabled={atCap || adding}
               size="sm"
             />
@@ -354,7 +389,11 @@ export function ShareGrantsModal({
               )}
               {!searching && results.length === 0 && (
                 <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
-                  {query.trim() ? "No matches." : "No other users yet."}
+                  {query.trim().length === 1
+                    ? "Keep typing…"
+                    : query.trim()
+                      ? "No matches."
+                      : "Type a name or email to find someone."}
                 </div>
               )}
               {results.map((u) => {
@@ -388,7 +427,7 @@ export function ShareGrantsModal({
                           Already added
                         </span>
                       ) : (
-                        <span className="shrink-0 text-xs text-[var(--accent)]">
+                        <span className="shrink-0 text-xs text-[var(--accent-text)]">
                           + Add
                         </span>
                       )}
@@ -423,8 +462,16 @@ export function ShareGrantsModal({
                   className="flex items-center justify-between gap-3 border-t border-[var(--border)] px-3 py-2 first:border-t-0"
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-medium text-[var(--text)]">
+                    <div className="flex items-center gap-1.5 truncate text-sm font-medium text-[var(--text)]">
                       @{g.username}
+                      {g.via_link && (
+                        <span
+                          title="Joined through a share link — this lasts while the link does. Choose a role to keep them."
+                          className="inline-flex items-center gap-0.5 rounded bg-[var(--surface)] px-1 py-0.5 text-[10px] font-normal text-[var(--text-muted)]"
+                        >
+                          <Link2 className="h-3 w-3" /> via link
+                        </span>
+                      )}
                     </div>
                     {g.email && (
                       <div className="truncate text-xs text-[var(--text-muted)]">
@@ -437,6 +484,7 @@ export function ShareGrantsModal({
                       value={roleFromGrant(g)}
                       onChange={(r) => void handleSetRole(g, r)}
                       supportsEdit={supportsEdit}
+                      supportsComment={supportsComment}
                       size="xs"
                     />
                     <button
@@ -454,6 +502,28 @@ export function ShareGrantsModal({
                   </div>
                 </div>
               ))}
+          </div>
+        </div>
+
+        {/* General access — public links, folded into the same dialog
+            so they can be made, seen and turned off from Drive (R-208). */}
+        <div className="space-y-1">
+          <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+            General access
+          </h3>
+          <div className="flex items-center justify-between gap-3 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <Globe className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+              <div className="min-w-0">
+                <div className="text-sm text-[var(--text)]">Anyone with the link</div>
+                <div className="text-xs text-[var(--text-muted)]">
+                  Optional password and expiry. People outside Promptly can open it.
+                </div>
+              </div>
+            </div>
+            <Button variant="secondary" size="sm" onClick={() => setLinksOpen(true)}>
+              Manage links
+            </Button>
           </div>
         </div>
 
@@ -518,6 +588,7 @@ export function ShareGrantsModal({
         </footer>
       </div>
     </Modal>
+    </>
   );
 }
 
@@ -532,6 +603,7 @@ interface RolePickerProps {
    *  hide the Editor option (the backend rejects ``can_edit=true``
    *  for them so we don't even render it). */
   supportsEdit: boolean;
+  supportsComment?: boolean;
   disabled?: boolean;
   /** ``"sm"`` for the picker header, ``"xs"`` for compact rows. */
   size?: "xs" | "sm";
@@ -541,6 +613,7 @@ function RolePicker({
   value,
   onChange,
   supportsEdit,
+  supportsComment = false,
   disabled = false,
   size = "sm",
 }: RolePickerProps) {
@@ -564,6 +637,14 @@ function RolePicker({
       icon: <CopyIcon className="h-3 w-3" />,
     },
   ];
+  if (supportsComment) {
+    items.push({
+      role: "commenter",
+      label: "Commenter",
+      title: "Read and comment — they can't change the content.",
+      icon: <MessageSquare className="h-3 w-3" />,
+    });
+  }
   if (supportsEdit) {
     items.push({
       role: "editor",
@@ -603,7 +684,7 @@ function RolePicker({
               padY,
               idx > 0 && "border-l border-[var(--border)]",
               selected
-                ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+                ? "bg-[var(--accent)]/15 text-[var(--accent-text)]"
                 : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
               disabled && "cursor-not-allowed"
             )}

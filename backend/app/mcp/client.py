@@ -14,6 +14,7 @@ Every call is guarded:
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 import logging
 from typing import Any
@@ -22,7 +23,7 @@ from mcp import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamablehttp_client
 
-from app.net.safe_fetch import assert_provider_url_safe
+from app.net.safe_fetch import UnsafeURLError, assert_provider_url_safe
 
 logger = logging.getLogger("promptly.mcp.client")
 
@@ -32,6 +33,14 @@ MAX_TOOL_RESULT_CHARS = 20_000
 
 class McpError(RuntimeError):
     """A connector call failed (bad URL, unreachable, protocol error)."""
+
+
+class McpToolFailed(McpError):
+    """The server ran the tool and it reported failure (an ``isError``
+    result, or Home Assistant's ``response_type: "error"``). It used to
+    come back as ordinary text, so "close the garage" failing in Home
+    Assistant still spoke "Garage closed." and logged a green tick (R-130).
+    """
 
 
 def _tool_annotations(tool: Any) -> dict[str, Any]:
@@ -114,6 +123,70 @@ def describe_error(exc: BaseException) -> str:
     return "; ".join(unique[:3]) or type(exc).__name__
 
 
+def url_problem(exc: UnsafeURLError) -> str:
+    """What an admin should do about a refused connector URL. The common
+    Home Assistant mistakes (no ``http://``, an unresolvable ``.local``
+    name) used to surface as a bare 500 (R-157)."""
+    if exc.reason == "bad_scheme":
+        return (
+            "Use a full address starting with http:// or https:// — for "
+            "example http://192.168.1.10:8123/mcp_server/sse."
+        )
+    if exc.reason == "dns_failure":
+        return (
+            f"{exc}. The server can't look that name up — if it's a .local "
+            "name, use the device's IP address instead."
+        )
+    return str(exc)
+
+
+async def check_url(url: str) -> None:
+    """Refuse unsafe or unresolvable connector URLs with a usable message.
+    The DNS lookup runs off the event loop (one worker serves everyone)."""
+    try:
+        await asyncio.to_thread(assert_provider_url_safe, url)
+    except UnsafeURLError as e:
+        raise McpError(url_problem(e)) from e
+
+
+# Keywords some providers reject in a function schema. A connector's raw
+# schema used to go out verbatim, so one oddly-shaped tool could fail every
+# Tools-on chat for users on those models (R-160).
+_DROP_SCHEMA_KEYS = frozenset({"$schema", "$id", "$comment", "$defs", "definitions"})
+
+
+def normalise_schema(schema: Any) -> dict[str, Any]:
+    """An object schema every provider accepts: local ``$ref``s inlined,
+    meta keywords dropped, ``type: object`` with ``properties`` at the top."""
+    if not isinstance(schema, dict):
+        return {"type": "object", "properties": {}}
+    defs = {**(schema.get("definitions") or {}), **(schema.get("$defs") or {})}
+
+    def _walk(node: Any, depth: int) -> Any:
+        if depth > 12:
+            return {}
+        if isinstance(node, list):
+            return [_walk(x, depth + 1) for x in node]
+        if not isinstance(node, dict):
+            return node
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/"):
+            target = defs.get(ref.rsplit("/", 1)[-1])
+            merged = {**(target or {}), **{k: v for k, v in node.items() if k != "$ref"}}
+            return _walk(merged, depth + 1)
+        return {
+            k: _walk(v, depth + 1)
+            for k, v in node.items()
+            if k not in _DROP_SCHEMA_KEYS and k != "$ref"
+        }
+
+    out = _walk(schema, 0)
+    out["type"] = "object"
+    if not isinstance(out.get("properties"), dict):
+        out["properties"] = {}
+    return out
+
+
 async def fetch_tools(
     url: str,
     *,
@@ -126,22 +199,34 @@ async def fetch_tools(
     :class:`McpError` on any failure — the admin "test connection" path
     surfaces the message.
     """
-    assert_provider_url_safe(url)
+    await check_url(url)
 
     async def _do() -> list[dict[str, Any]]:
         async with _open(url, headers, transport) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
-                result = await session.list_tools()
+                # Servers may page their catalog; only page one used to be
+                # read (R-160). Bounded so a looping cursor can't hang us.
+                tools: list[Any] = []
+                cursor: str | None = None
+                for _ in range(50):
+                    result = (
+                        await session.list_tools(cursor)
+                        if cursor
+                        else await session.list_tools()
+                    )
+                    tools.extend(result.tools)
+                    cursor = getattr(result, "nextCursor", None)
+                    if not cursor:
+                        break
                 return [
                     {
                         "name": t.name,
                         "description": t.description or "",
-                        "input_schema": t.inputSchema
-                        or {"type": "object", "properties": {}},
+                        "input_schema": normalise_schema(t.inputSchema),
                         "annotations": _tool_annotations(t),
                     }
-                    for t in result.tools
+                    for t in tools
                 ]
 
     try:
@@ -164,18 +249,22 @@ async def call_tool(
 ) -> str:
     """Invoke ``name`` on the server and return a text result (capped).
 
-    Non-text content blocks are summarised by type. ``isError`` results are
-    prefixed so the model knows the tool failed. Raises :class:`McpError`
-    on transport failure (the chat router turns that into a tool error).
+    Non-text content blocks are summarised by type. Raises
+    :class:`McpToolFailed` when the tool reports failure and
+    :class:`McpError` on transport failure — every caller (chat, commands,
+    automations, Wyoming) treats both as a failed run.
     """
-    assert_provider_url_safe(url)
+    await check_url(url)
 
     async def _do() -> str:
         async with _open(url, headers, transport) as (read, write):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 result = await session.call_tool(name, arguments or {})
-                return _extract_text(result)
+                text = _extract_text(result)
+                if getattr(result, "isError", False) or _reports_error(text):
+                    raise McpToolFailed(_failure_message(name, text))
+                return text
 
     try:
         return await asyncio.wait_for(_do(), timeout=MCP_TIMEOUT_S)
@@ -197,11 +286,47 @@ def _extract_text(result: Any) -> str:
         else:
             parts.append(f"[{getattr(block, 'type', 'content')} block]")
     text = "\n".join(parts).strip() or "(tool returned no content)"
-    if getattr(result, "isError", False):
-        text = "The tool reported an error:\n" + text
     if len(text) > MAX_TOOL_RESULT_CHARS:
         text = text[:MAX_TOOL_RESULT_CHARS] + "\n…[truncated]"
     return text
 
 
-__all__ = ["fetch_tools", "call_tool", "McpError", "MAX_TOOL_RESULT_CHARS"]
+def _reports_error(text: str) -> bool:
+    """Home Assistant answers an intent it couldn't carry out with a normal
+    result whose JSON says ``"response_type": "error"``."""
+    if '"response_type"' not in text:
+        return False
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False
+    return isinstance(data, dict) and data.get("response_type") == "error"
+
+
+def _failure_message(name: str, text: str) -> str:
+    """The tool's own explanation, readable on its own (it's spoken, logged
+    in History and shown in chat)."""
+    detail: object = text
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict):
+            speech = ((data.get("speech") or {}).get("plain") or {}).get("speech")
+            detail = speech or (data.get("data") or {}).get("code") or text
+    except (ValueError, AttributeError, TypeError):
+        pass
+    detail = str(detail).strip()
+    if len(detail) > 500:
+        detail = detail[:500] + "…"
+    return f"{name} failed: {detail}" if detail else f"{name} failed."
+
+
+__all__ = [
+    "fetch_tools",
+    "call_tool",
+    "check_url",
+    "normalise_schema",
+    "url_problem",
+    "McpError",
+    "McpToolFailed",
+    "MAX_TOOL_RESULT_CHARS",
+]

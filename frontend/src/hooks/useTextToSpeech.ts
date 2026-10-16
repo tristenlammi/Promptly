@@ -124,6 +124,27 @@ let ttsCounter = 0;
 let activeTtsId = 0;
 let activeStopper: (() => void) | null = null;
 
+/** Play one clip to the end. ``"blocked"`` means the browser refused to
+ *  start audio (no recent tap — autoplay policy), which used to end voice
+ *  mode silently mid-conversation (R-165). */
+function playClip(
+  url: string,
+  hold: (a: HTMLAudioElement) => void
+): Promise<"ended" | "blocked" | "failed"> {
+  return new Promise((resolve) => {
+    const audio = new Audio(url);
+    hold(audio);
+    audio.onended = () => resolve("ended");
+    audio.onerror = () => resolve("failed");
+    void audio.play().catch((err: unknown) =>
+      resolve((err as { name?: string })?.name === "NotAllowedError" ? "blocked" : "failed")
+    );
+  });
+}
+
+const BLOCKED_MESSAGE =
+  "Your browser blocked the spoken reply — tap the orb (or anywhere) to let it play.";
+
 export function useTextToSpeech(): UseTextToSpeechReturn {
   const [supported] = useState<boolean>(detectSupported);
   const [speaking, setSpeaking] = useState(false);
@@ -240,16 +261,17 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
             : Promise.resolve<string | null>(null);
 
         // Play this chunk and wait for it to finish.
-        const finished = await new Promise<boolean>((resolve) => {
-          const audio = new Audio(url);
-          audioRef.current = audio;
-          audio.onended = () => resolve(true);
-          audio.onerror = () => resolve(false);
-          void audio.play().catch(() => resolve(false));
+        const outcome = await playClip(url, (a) => {
+          audioRef.current = a;
         });
         if (run !== runRef.current) return;
-        if (!finished) {
+        if (outcome !== "ended") {
           setSpeaking(false);
+          setLoading(false);
+          if (outcome === "blocked") setError(BLOCKED_MESSAGE);
+          // Hand control back either way — the caller's loop (voice mode
+          // listening again) mustn't die with the audio.
+          opts?.onDone?.();
           return;
         }
       }
@@ -326,12 +348,14 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
         }
       };
 
-      // Consumer: synth + play each chunk in order. Sequential (no
-      // prefetch) — the win here is starting sentence 1 while the model is
+      // Consumer: synth + play each chunk in order, fetching the next
+      // sentence while this one plays — one at a time left a pause between
+      // every sentence (R-165). The win is also starting sentence 1 while the model is
       // still generating sentence 2, not overlapping synth with playback.
       void (async () => {
         let idx = 0;
         let started = false;
+        const fetched = new Map<number, Promise<string | null>>();
         for (;;) {
           if (run !== runRef.current) return;
           if (idx >= queue.length) {
@@ -339,23 +363,26 @@ export function useTextToSpeech(): UseTextToSpeechReturn {
             await waitForMore();
             continue;
           }
-          const url = await fetchChunk(queue[idx]);
+          const url = await (fetched.get(idx) ?? fetchChunk(queue[idx]));
+          fetched.delete(idx);
           if (run !== runRef.current) return;
           if (!started) {
             setLoading(false);
             started = true;
           }
           if (url) {
-            const ok = await new Promise<boolean>((resolve) => {
-              const audio = new Audio(url);
-              audioRef.current = audio;
-              audio.onended = () => resolve(true);
-              audio.onerror = () => resolve(false);
-              void audio.play().catch(() => resolve(false));
+            if (idx + 1 < queue.length && !fetched.has(idx + 1)) {
+              fetched.set(idx + 1, fetchChunk(queue[idx + 1]));
+            }
+            const outcome = await playClip(url, (a) => {
+              audioRef.current = a;
             });
             if (run !== runRef.current) return;
-            if (!ok) {
+            if (outcome !== "ended") {
               setSpeaking(false);
+              setLoading(false);
+              if (outcome === "blocked") setError(BLOCKED_MESSAGE);
+              opts?.onDone?.();
               return;
             }
           }

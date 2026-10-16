@@ -86,12 +86,6 @@ class DeepResearchTool(Tool):
         "`fetch_url`). One call does the whole investigation; you then write "
         "the final report yourself from the evidence it returns."
     )
-    prompt_hint = (
-        "Kick off a full multi-angle web investigation (parallel search + read "
-        "+ gap-check) and get back cited evidence to synthesise from. Best for "
-        "broad, open-ended, or comparative questions. For one fact use "
-        "web_search; for one page use fetch_url."
-    )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {

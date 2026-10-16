@@ -17,8 +17,10 @@ const VARIANTS: Record<Variant, string> = {
   primary:
     "bg-[var(--accent)] text-white hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
   secondary:
-    "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)]",
-  ghost: "text-[var(--text)] hover:bg-[var(--hover)]",
+    "border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] hover:bg-[var(--hover)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+  // Keyboard focus was invisible on secondary and ghost buttons (R-088).
+  ghost:
+    "text-[var(--text)] hover:bg-[var(--hover)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
   danger:
     "bg-red-600 text-white hover:bg-red-700 focus-visible:ring-2 focus-visible:ring-red-500",
 };

@@ -176,6 +176,7 @@ async def notify_user(
 # Per-user inbox cap — enough scroll-back to catch up after a holiday
 # without the table growing unboundedly.
 _INBOX_CAP = 200
+_AUTOMATION_INBOX_CAP = 50
 
 
 async def _dispatch(
@@ -185,12 +186,25 @@ async def _dispatch(
     payload: PushPayload,
     actor_user_id: UUID | None = None,
     workspace_id: UUID | None = None,
-) -> None:
+) -> dict[str, int]:
+    """Write the inbox row and push to every device. Returns what happened
+    to the pushes: ``{"delivered", "failed", "removed"}``."""
+    outcome = {"delivered": 0, "failed": 0, "removed": 0}
     async with _session_maker() as db:
         # 1) Durable inbox row first — it must land even when the user
         #    has push muted or owns no subscriptions.
         if category != "test":
             try:
+                # An automation keeps one rolling inbox row — its latest
+                # result — instead of one per run (R-152).
+                if category == "task_complete" and payload.url:
+                    await db.execute(
+                        delete(Notification).where(
+                            Notification.user_id == user_id,
+                            Notification.category == "task_complete",
+                            Notification.url == payload.url,
+                        )
+                    )
                 db.add(
                     Notification(
                         user_id=user_id,
@@ -203,13 +217,21 @@ async def _dispatch(
                     )
                 )
                 await db.flush()
-                # Prune beyond the cap (cheap: only fires on insert).
+                # Prune beyond the cap (cheap: only fires on insert) — per
+                # kind: automation results have their own budget, so they
+                # can never push out mentions, invites or assignments.
+                is_auto = category == "task_complete"
                 stale = (
                     await db.execute(
                         select(Notification.id)
-                        .where(Notification.user_id == user_id)
+                        .where(
+                            Notification.user_id == user_id,
+                            (Notification.category == "task_complete")
+                            if is_auto
+                            else (Notification.category != "task_complete"),
+                        )
                         .order_by(Notification.created_at.desc())
-                        .offset(_INBOX_CAP)
+                        .offset(_AUTOMATION_INBOX_CAP if is_auto else _INBOX_CAP)
                     )
                 ).scalars().all()
                 if stale:
@@ -235,11 +257,11 @@ async def _dispatch(
             # Should never happen on a healthy install; log loud enough
             # to surface in Admin → Console without spamming.
             logger.warning("push dispatch skipped: VAPID private key not configured")
-            return
+            return outcome
 
         prefs = await _get_prefs(db, user_id)
         if not _should_send(prefs, category):
-            return
+            return outcome
 
         subs = (
             (
@@ -253,7 +275,7 @@ async def _dispatch(
             .all()
         )
         if not subs:
-            return
+            return outcome
 
         # pywebpush is sync + blocking. Ship the per-subscription
         # send into a thread so one slow push service doesn't stall
@@ -304,6 +326,26 @@ async def _dispatch(
                 .values(last_used_at=now)
             )
         await db.commit()
+        outcome["delivered"] = len(live_ids)
+        outcome["removed"] = len(dead_ids)
+        outcome["failed"] = len(subs) - len(live_ids) - len(dead_ids)
+        return outcome
+
+
+async def send_test_push(user_id: UUID) -> dict[str, int]:
+    """A test push, awaited, so the caller can say what actually arrived
+    — it used to report how many devices were *registered* (R-167)."""
+    return await _dispatch(
+        user_id=user_id,
+        category="test",
+        payload=PushPayload(
+            title="Promptly",
+            body="Push notifications are set up correctly.",
+            url="/account/notifications",
+            tag="promptly-test",
+            category="test",
+        ),
+    )
 
 
 # ---------------------------------------------------------------------
@@ -374,9 +416,11 @@ async def _get_prefs(db: AsyncSession, user_id: UUID) -> PushPreferences:
 def _should_send(prefs: PushPreferences, category: str) -> bool:
     if not prefs.enabled:
         return False
-    if category == "test":
+    if category in ("test", "system_alert"):
         # Diagnostic pushes obey the master switch but not the
         # per-category flags — otherwise a user with everything
-        # turned off couldn't verify their setup.
+        # turned off couldn't verify their setup. Admin alerts (a backup
+        # failed, a connector is down) have no flag of their own, so the
+        # lookup always said no and they never pushed (R-167).
         return True
     return bool(getattr(prefs, category, False))

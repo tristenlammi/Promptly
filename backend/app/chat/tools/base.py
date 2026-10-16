@@ -57,6 +57,12 @@ class ToolContext:
     # payload (e.g. run_agents' per-agent state array) surfaced on the
     # SSE event alongside the human ``message``.
     on_progress: Callable[[str, dict[str, Any] | None], None] | None = None
+    # State shared by every tool call in one chat turn. ``untrusted`` is
+    # True once content from outside the user's own words has entered the
+    # turn (web pages, search results, connectors, files, other members'
+    # workspace text) — tools that act on the user's behalf, like
+    # ``remember``, treat that turn's instructions with suspicion (R-019).
+    turn: dict[str, Any] | None = None
 
     def report_progress(
         self, message: str, data: dict[str, Any] | None = None
@@ -124,13 +130,6 @@ class Tool(abc.ABC):
     # Add a new category if you ship a tool family that needs its own
     # opt-in; the registry lookup will pick it up automatically.
     category: str = "artefact"
-    # Optional. Used by :func:`app.chat.tools.prompt.build_tools_system_prompt`
-    # to render the per-tool bullet inside the tool-aware system message.
-    # When unset (the default) the system prompt falls back to
-    # ``description``. Override with a punchier, more conversational
-    # one-liner when the OpenAI ``description`` is heavy on schema-style
-    # detail and you want the system prompt to read more naturally.
-    prompt_hint: str | None = None
     # Optional per-turn invocation cap. ``None`` (the default) means
     # "as many as the model wants, up to ``MAX_TOOL_HOPS``". A positive
     # int makes the dispatch loop refuse the (cap+1)-th call in the

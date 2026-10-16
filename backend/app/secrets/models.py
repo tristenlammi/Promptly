@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -30,6 +31,12 @@ class UserSecret(UUIDPKMixin, TimestampMixin, Base):
     # Uppercase identifier (A-Z, 0-9, _) — what ``{{secret.NAME}}`` names.
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     value_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    # Hosts this credential may be sent to (``api.github.com``,
+    # ``*.example.com``). Empty = any host. A step that would send it
+    # anywhere else fails instead (R-005).
+    allowed_hosts: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
 
 
 __all__ = ["UserSecret"]

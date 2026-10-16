@@ -38,7 +38,7 @@ export function RunOutputPane({
   if (status === "running") {
     return (
       <Centered>
-        <Loader2 className="mb-2 h-5 w-5 animate-spin text-[var(--accent)]" />
+        <Loader2 className="mb-2 h-5 w-5 animate-spin text-[var(--accent-text)]" />
         <p className="text-sm text-[var(--text-muted)]">Running in the sandbox…</p>
       </Centered>
     );

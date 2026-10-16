@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 import { apiClient } from "@/api/client";
 import type { FileItem, FileScope } from "@/api/files";
+import { TusRejected, tusUpload } from "@/lib/tusUpload";
+import { alreadyThere } from "@/lib/uploadPrecheck";
 import { apiErrorMessage } from "@/utils/apiError";
 
 /**
@@ -40,7 +42,12 @@ export type UploadStatus =
   | "uploading"
   | "done"
   | "error"
-  | "cancelled";
+  | "cancelled"
+  // The folder already has a file with this name — waiting for the user
+  // to pick Replace or Keep both (R-212).
+  | "conflict";
+
+export type ConflictMode = "ask" | "keep_both" | "replace";
 
 export interface UploadTask {
   /** Client-generated, stable for the life of the panel. */
@@ -60,13 +67,19 @@ export interface UploadTask {
    *  ``invalidateQueries`` key after a successful upload. */
   scope: FileScope;
   folderId: string | null;
-  route?: "chat" | "generated";
+  /** Into this workspace's drive (WP-7.6): the same upload, pinned there. */
+  workspaceId?: string;
+  route?: "chat" | "generated" | "camera";
+  /** How a name clash is handled; "ask" turns one into a ``conflict``. */
+  onConflict?: ConflictMode;
   /** Surfaced to the panel for "Just uploaded" / "3s ago" copy. */
   startedAt: number;
   completedAt?: number;
   /** Populated on success so the watcher can surface the new row
    *  in any list that's already displayed. */
   result?: FileItem;
+  /** Done without uploading: the same file was already there (WP-8.2). */
+  skipped?: boolean;
   /** Internal — allows cancelling the in-flight XHR. Not surfaced
    *  through the public API so components can't accidentally mutate
    *  it; the ``cancel`` action below handles abort properly. */
@@ -80,6 +93,12 @@ export interface UploadTask {
 export interface CompletedTaskEvent {
   id: string;
   scope: FileScope;
+  /** The folder it landed in (WP-7.6: only that folder is refreshed). */
+  folderId: string | null;
+  /** The new file, on success. */
+  fileId?: string;
+  /** Uploaded into this workspace's drive. */
+  workspaceId?: string;
   status: "done" | "error" | "cancelled";
   name: string;
   error?: string;
@@ -89,7 +108,11 @@ interface StartArgs {
   files: File[];
   scope: FileScope;
   folderId: string | null;
-  route?: "chat" | "generated";
+  /** A workspace's drive (WP-7.6); ``folderId`` is then a folder in it. */
+  workspaceId?: string;
+  route?: "chat" | "generated" | "camera";
+  /** Drive surfaces pass "ask" so a clash can be resolved by the user. */
+  onConflict?: ConflictMode;
 }
 
 interface UploadStoreState {
@@ -111,6 +134,12 @@ interface UploadStoreState {
   dismissTask: (id: string) => void;
   /** Remove every finished task — "Clear" button. */
   clearCompleted: () => void;
+  /** Send a failed upload again — the file is kept until the task is
+   *  dismissed, so nothing needs re-picking (R-212). */
+  retryUpload: (id: string) => void;
+  retryAllFailed: () => void;
+  /** Answer a name clash. */
+  resolveConflict: (id: string, mode: "keep_both" | "replace" | "skip") => void;
   /** Panel UI state. */
   setPanelCollapsed: (v: boolean) => void;
   /** Drain completion events for the watcher. */
@@ -147,7 +176,7 @@ export const useUploadStore = create<UploadStoreState>((set, get) => ({
   pendingCompletions: [],
   panelCollapsed: false,
 
-  startUploads: ({ files, scope, folderId, route }) => {
+  startUploads: ({ files, scope, folderId, workspaceId, route, onConflict }) => {
     if (files.length === 0) return;
     const now = Date.now();
     const newTasks: UploadTask[] = files.map((f) => ({
@@ -158,13 +187,22 @@ export const useUploadStore = create<UploadStoreState>((set, get) => ({
       status: "queued",
       scope,
       folderId,
+      workspaceId,
       route,
+      onConflict,
       startedAt: now,
     }));
+    void loadPolicy();
     // Stash the File blobs in a side-map keyed by task id. We keep
     // them outside the store so Zustand isn't diffing ~MB-sized
     // File refs on every progress tick.
     newTasks.forEach((t, i) => pendingBlobs.set(t.id, files[i]));
+    // Which are already there, byte for byte — one check for the batch
+    // (WP-8.2). Auto-routed uploads (chat) are deduped by the server.
+    if (!route) {
+      const check = alreadyThere({ files, scope, folderId, workspaceId });
+      newTasks.forEach((t, i) => prechecks.set(t.id, check.then((skip) => skip.has(i))));
+    }
     set((s) => ({ tasks: [...s.tasks, ...newTasks] }));
     schedule();
   },
@@ -180,7 +218,7 @@ export const useUploadStore = create<UploadStoreState>((set, get) => ({
         ),
         pendingCompletions: [
           ...s.pendingCompletions,
-          { id, scope: task.scope, status: "cancelled", name: task.name },
+          { id, scope: task.scope, folderId: task.folderId, workspaceId: task.workspaceId, status: "cancelled", name: task.name },
         ],
       }));
       return;
@@ -196,15 +234,56 @@ export const useUploadStore = create<UploadStoreState>((set, get) => ({
     const task = get().tasks.find((t) => t.id === id);
     if (!task) return;
     if (task.status === "uploading" || task.status === "queued") return;
+    pendingBlobs.delete(id);
     set((s) => ({ tasks: s.tasks.filter((t) => t.id !== id) }));
   },
 
   clearCompleted: () => {
+    const keep = (t: UploadTask) =>
+      t.status === "queued" || t.status === "uploading" || t.status === "conflict";
+    get().tasks.forEach((t) => {
+      if (!keep(t)) pendingBlobs.delete(t.id);
+    });
+    set((s) => ({ tasks: s.tasks.filter(keep) }));
+  },
+
+  retryUpload: (id) => {
+    const task = get().tasks.find((t) => t.id === id);
+    if (!task || task.status !== "error" || !pendingBlobs.has(id)) return;
     set((s) => ({
-      tasks: s.tasks.filter(
-        (t) => t.status === "queued" || t.status === "uploading"
+      tasks: s.tasks.map((t) =>
+        t.id === id
+          ? { ...t, status: "queued", error: undefined, uploaded: 0, completedAt: undefined }
+          : t
       ),
     }));
+    schedule();
+  },
+
+  retryAllFailed: () => {
+    get()
+      .tasks.filter((t) => t.status === "error" && pendingBlobs.has(t.id))
+      .forEach((t) => get().retryUpload(t.id));
+  },
+
+  resolveConflict: (id, mode) => {
+    const task = get().tasks.find((t) => t.id === id);
+    if (!task || task.status !== "conflict") return;
+    if (mode === "skip") {
+      pendingBlobs.delete(id);
+      set((s) => ({
+        tasks: s.tasks.map((t) =>
+          t.id === id ? { ...t, status: "cancelled", completedAt: Date.now() } : t
+        ),
+      }));
+      return;
+    }
+    set((s) => ({
+      tasks: s.tasks.map((t) =>
+        t.id === id ? { ...t, status: "queued", onConflict: mode, error: undefined } : t
+      ),
+    }));
+    schedule();
   },
 
   setPanelCollapsed: (v) => set({ panelCollapsed: v }),
@@ -231,6 +310,61 @@ export const useUploadStore = create<UploadStoreState>((set, get) => ({
  *  multi-MB ArrayBuffers on every progress tick. Keyed by task id,
  *  cleared when the task settles. */
 const pendingBlobs = new Map<string, File>();
+/** Per task: "the same file is already there" (WP-8.2). */
+const prechecks = new Map<string, Promise<boolean>>();
+
+/** The server's allowlist + size cap, fetched once (R-212): a disallowed
+ *  or oversized file is refused here instead of after a full upload. */
+interface UploadPolicy {
+  max_bytes: number;
+  allowed_extensions: string[];
+  /** Resumable uploads (WP-8.2): files over ``tus_threshold`` go to
+   *  ``tus_endpoint`` (null when it isn't running), up to ``large_max_bytes``. */
+  tus_endpoint?: string | null;
+  tus_threshold?: number;
+  large_max_bytes?: number;
+}
+let policy: UploadPolicy | null = null;
+let policyLoading: Promise<void> | null = null;
+
+function loadPolicy(): Promise<void> {
+  if (policy || policyLoading) return policyLoading ?? Promise.resolve();
+  policyLoading = apiClient
+    .get<UploadPolicy>("/files/upload-policy")
+    .then((r) => {
+      policy = r.data;
+    })
+    .catch(() => {
+      /* the server still checks — this is only a shortcut */
+    })
+    .finally(() => {
+      policyLoading = null;
+    });
+  return policyLoading;
+}
+
+/** Does this file go the resumable way? */
+function viaTus(file: File): boolean {
+  return !!policy?.tus_endpoint && file.size > (policy.tus_threshold ?? Infinity);
+}
+
+function preflight(file: File): string | null {
+  if (!policy) return null;
+  const dot = file.name.lastIndexOf(".");
+  const ext = dot >= 0 ? file.name.slice(dot).toLowerCase() : "";
+  if (!policy.allowed_extensions.includes(ext)) {
+    return ext
+      ? `${ext} files can't be uploaded here`
+      : "Files without an extension can't be uploaded here";
+  }
+  const limit = viaTus(file) ? (policy.large_max_bytes ?? policy.max_bytes) : policy.max_bytes;
+  if (file.size > limit) {
+    const gb = limit >= 1024 ** 3;
+    return `Too large — the limit is ${gb ? `${Math.round((limit / 1024 ** 3) * 10) / 10} GB` : `${Math.round(limit / (1024 * 1024))} MB`}`;
+  }
+  if (file.size === 0) return "The file is empty";
+  return null;
+}
 
 function schedule(): void {
   const state = useUploadStore.getState();
@@ -251,20 +385,47 @@ async function runTask(taskId: string): Promise<void> {
   const task = state.tasks.find((t) => t.id === taskId);
   const blob = pendingBlobs.get(taskId);
   if (!task || !blob) return;
+  // Claim the slot before any await, or the scheduler starts it twice.
   const abort = new AbortController();
   useUploadStore.setState((s) => ({
     tasks: s.tasks.map((t) =>
       t.id === taskId ? { ...t, status: "uploading", _abort: abort } : t
     ),
   }));
+  const same = prechecks.get(taskId);
+  prechecks.delete(taskId);
+  if (same && (await same.catch(() => false))) {
+    useUploadStore.setState((s) => ({
+      tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, skipped: true } : t)),
+    }));
+    finishTask(taskId, "done");
+    pendingBlobs.delete(taskId);
+    schedule();
+    return;
+  }
+  await loadPolicy();
+  const refused = preflight(blob);
+  if (refused) {
+    finishTask(taskId, "error", refused);
+    pendingBlobs.delete(taskId); // retrying can't fix this one
+    schedule();
+    return;
+  }
+
+  if (viaTus(blob)) {
+    await runTus(taskId, task, blob, abort);
+    return;
+  }
 
   const form = new FormData();
   form.append("file", blob);
   form.append("scope", task.scope);
   if (task.folderId) form.append("folder_id", task.folderId);
+  if (task.workspaceId) form.append("workspace_id", task.workspaceId);
   if (task.route && !task.folderId && task.scope === "mine") {
     form.append("route", task.route);
   }
+  if (task.onConflict) form.append("on_conflict", task.onConflict);
 
   try {
     const res = await apiClient.post<FileItem>("/files/", form, {
@@ -294,13 +455,68 @@ async function runTask(taskId: string): Promise<void> {
       (err as { code?: string })?.code === "ERR_CANCELED" ||
       (err as { name?: string })?.name === "CanceledError" ||
       (err as { name?: string })?.name === "AbortError";
+    const conflict =
+      (err as { response?: { status?: number; data?: { detail?: { code?: string } } } })
+        ?.response;
     if (aborted) {
       finishTask(taskId, "cancelled");
+      pendingBlobs.delete(taskId);
+    } else if (conflict?.status === 409 && conflict.data?.detail?.code === "name_exists") {
+      // Keep the file: the user chooses Replace or Keep both.
+      useUploadStore.setState((s) => ({
+        tasks: s.tasks.map((t) =>
+          t.id === taskId ? { ...t, status: "conflict", uploaded: 0, _abort: undefined } : t
+        ),
+      }));
     } else {
+      // Kept so "Retry" doesn't need the file picked again (R-212).
       finishTask(taskId, "error", toMessage(err));
     }
   } finally {
-    pendingBlobs.delete(taskId);
+    if (useUploadStore.getState().tasks.find((t) => t.id === taskId)?.status === "done") {
+      pendingBlobs.delete(taskId);
+    }
+    schedule();
+  }
+}
+
+/** A big file, resumably (WP-8.2). */
+async function runTus(taskId: string, task: UploadTask, blob: File, abort: AbortController): Promise<void> {
+  const metadata: Record<string, string> = {
+    filename: blob.name,
+    filetype: blob.type || "application/octet-stream",
+    scope: task.scope,
+    last_modified: String(blob.lastModified || ""),
+  };
+  if (task.folderId) metadata.folder_id = task.folderId;
+  if (task.workspaceId) metadata.workspace_id = task.workspaceId;
+  if (task.onConflict) metadata.on_conflict = task.onConflict;
+  if (task.route && !task.folderId && task.scope === "mine") metadata.route = task.route;
+  try {
+    const fileId = await tusUpload({
+      file: blob,
+      metadata,
+      signal: abort.signal,
+      onProgress: (sent, total) =>
+        useUploadStore.setState((s) => ({
+          tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, uploaded: Math.min(sent, total), size: total } : t)),
+        })),
+    });
+    const { data } = await apiClient.get<FileItem>(`/files/${fileId}`);
+    finishTask(taskId, "done", undefined, data);
+  } catch (err: unknown) {
+    if ((err as { name?: string })?.name === "AbortError") {
+      finishTask(taskId, "cancelled");
+      pendingBlobs.delete(taskId);
+    } else if (err instanceof TusRejected && err.status === 409 && (err.detail as { code?: string })?.code === "name_exists") {
+      useUploadStore.setState((s) => ({
+        tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: "conflict", uploaded: 0, _abort: undefined } : t)),
+      }));
+    } else {
+      finishTask(taskId, "error", err instanceof Error ? err.message : "Upload failed");
+    }
+  } finally {
+    if (useUploadStore.getState().tasks.find((t) => t.id === taskId)?.status === "done") pendingBlobs.delete(taskId);
     schedule();
   }
 }
@@ -338,6 +554,11 @@ function finishTask(
         {
           id: taskId,
           scope: task.scope,
+          // Auto-routed uploads (chat / generated) land where the server
+          // put them.
+          folderId: result?.folder_id ?? task.folderId,
+          fileId: result?.id,
+          workspaceId: task.workspaceId,
           status,
           name: task.name,
           error,
@@ -363,6 +584,10 @@ export function selectFinishedTasks(state: UploadStoreState): UploadTask[] {
     (t) =>
       t.status === "done" || t.status === "error" || t.status === "cancelled"
   );
+}
+
+export function selectConflictTasks(state: UploadStoreState): UploadTask[] {
+  return state.tasks.filter((t) => t.status === "conflict");
 }
 
 export function selectHasActive(state: UploadStoreState): boolean {

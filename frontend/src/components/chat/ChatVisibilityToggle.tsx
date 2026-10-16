@@ -85,7 +85,7 @@ export function ChatVisibilityToggle({
       className={cn(
         "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition disabled:opacity-60",
         shared
-          ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)] hover:bg-[var(--accent)]/15"
+          ? "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent-text)] hover:bg-[var(--accent)]/15"
           : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
       )}
     >

@@ -42,7 +42,7 @@ export function SpellCheckControl() {
         )}
       >
         <SpellCheck
-          className={cn("h-4 w-4", enabled && "text-[var(--accent)]")}
+          className={cn("h-4 w-4", enabled && "text-[var(--accent-text)]")}
         />
         <span className="text-[10px] font-semibold tabular-nums">
           {enabled ? spellLangShort(lang) : "off"}
@@ -103,7 +103,7 @@ export function SpellCheckControl() {
                 >
                   <span>{l.label}</span>
                   {l.code === lang && (
-                    <Check className="h-4 w-4 text-[var(--accent)]" />
+                    <Check className="h-4 w-4 text-[var(--accent-text)]" />
                   )}
                 </button>
               ))}
@@ -142,7 +142,7 @@ export function AutocorrectToggle() {
       )}
     >
       <WandSparkles
-        className={cn("h-4 w-4", autocorrect && "text-[var(--accent)]")}
+        className={cn("h-4 w-4", autocorrect && "text-[var(--accent-text)]")}
       />
     </button>
   );

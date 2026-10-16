@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { usePasswordPolicy } from "@/hooks/usePasswordPolicy";
 import {
   Loader2,
   Search,
@@ -25,6 +26,9 @@ export interface UserFormValues {
   can_generate_images: boolean;
   /** Whether the user can run code via the "Run" button on code artifacts. */
   can_execute_code: boolean;
+  can_reach_private_network: boolean;
+  /** Create only: ask them to choose their own password on first sign-in. */
+  must_change_password?: boolean;
   /** Group memberships (role bundles — grant connectors + models). */
   group_ids: string[];
   /**
@@ -70,6 +74,7 @@ export function UserFormModal({
   onClose,
   onSubmit,
 }: UserFormModalProps) {
+  const policy = usePasswordPolicy();
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -77,6 +82,8 @@ export function UserFormModal({
   const [fullAccess, setFullAccess] = useState(true);
   const [canGenerateImages, setCanGenerateImages] = useState(true);
   const [canExecuteCode, setCanExecuteCode] = useState(true);
+  const [canReachPrivate, setCanReachPrivate] = useState(false);
+  const [mustChangePassword, setMustChangePassword] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [groupIds, setGroupIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
@@ -110,6 +117,7 @@ export function UserFormModal({
       setFullAccess(user.allowed_models === null);
       setCanGenerateImages(user.can_generate_images ?? true);
       setCanExecuteCode(user.can_execute_code ?? true);
+      setCanReachPrivate(user.can_reach_private_network ?? false);
       setPicked(new Set(user.allowed_models ?? []));
       setGroupIds(new Set(user.group_ids ?? []));
       setStorageCapGb(
@@ -135,6 +143,7 @@ export function UserFormModal({
       setFullAccess(true);
       setCanGenerateImages(true);
       setCanExecuteCode(true);
+      setCanReachPrivate(false);
       setPicked(new Set());
       setGroupIds(new Set());
       setStorageCapGb("");
@@ -208,6 +217,8 @@ export function UserFormModal({
           role === "admin" || fullAccess ? null : Array.from(picked),
         can_generate_images: canGenerateImages,
         can_execute_code: canExecuteCode,
+        can_reach_private_network: canReachPrivate,
+        must_change_password: mode === "create" ? mustChangePassword : undefined,
         group_ids: Array.from(groupIds),
         storage_cap_bytes: storageBytes,
         daily_token_budget: parseQuota(dailyTokens),
@@ -276,7 +287,7 @@ export function UserFormModal({
           type="password"
           value={password}
           onChange={setPassword}
-          minLength={mode === "create" ? 8 : undefined}
+          minLength={mode === "create" ? policy.min_length : undefined}
           required={mode === "create"}
           autoComplete="new-password"
           placeholder={mode === "edit" ? "Leave blank to keep unchanged" : undefined}
@@ -354,6 +365,25 @@ export function UserFormModal({
             <span className="mb-2 block text-xs font-medium text-[var(--text-muted)]">
               Capabilities
             </span>
+            {mode === "create" && (
+              <label className="mb-2 flex cursor-pointer items-start gap-2 rounded-card border border-[var(--border)] px-3 py-2">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={mustChangePassword}
+                  onChange={(e) => setMustChangePassword(e.target.checked)}
+                />
+                <span className="text-xs">
+                  <span className="font-medium text-[var(--text)]">
+                    Ask them to choose their own password
+                  </span>
+                  <span className="block text-[11px] text-[var(--text-muted)]">
+                    They sign in with the password you set here, then pick a new one
+                    before they can do anything else.
+                  </span>
+                </span>
+              </label>
+            )}
             <label className="flex cursor-pointer items-start gap-2 rounded-card border border-[var(--border)] px-3 py-2">
               <input
                 type="checkbox"
@@ -385,6 +415,24 @@ export function UserFormModal({
                 <span className="block text-[11px] text-[var(--text-muted)]">
                   Let this user run code with the “Run” button on code
                   artifacts. Off = the Run button is hidden for them.
+                </span>
+              </span>
+            </label>
+            <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-card border border-[var(--border)] px-3 py-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={canReachPrivate}
+                onChange={(e) => setCanReachPrivate(e.target.checked)}
+              />
+              <span className="text-xs">
+                <span className="font-medium text-[var(--text)]">
+                  Automations can reach your network
+                </span>
+                <span className="block text-[11px] text-[var(--text-muted)]">
+                  Let this user's automation HTTP steps call devices on your
+                  own network (LAN, Tailscale, this server). Promptly's own
+                  services stay off-limits either way.
                 </span>
               </span>
             </label>
@@ -432,7 +480,7 @@ export function UserFormModal({
                   />
                   <button
                     type="button"
-                    className="text-[11px] text-[var(--accent)] hover:underline"
+                    className="text-[11px] text-[var(--accent-text)] hover:underline"
                     onClick={selectAll}
                   >
                     Select all
@@ -541,7 +589,7 @@ export function UserFormModal({
                       {g.name}
                     </span>
                     {g.allowed_models.length > 0 && (
-                      <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent)]">
+                      <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-[var(--accent)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent-text)]">
                         <Sparkles className="h-2.5 w-2.5" />
                         {g.allowed_models.length}
                       </span>

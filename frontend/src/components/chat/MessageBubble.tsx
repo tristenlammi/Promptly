@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -57,6 +57,7 @@ import type {
   ToolInvocation,
   VisionRelayInvocation,
 } from "@/api/types";
+import { isFileSource } from "@/api/types";
 import { useCodeArtifactStore } from "@/stores/codeArtifactStore";
 import {
   normaliseLanguage,
@@ -85,6 +86,8 @@ import {
   stepsFromInvocations,
   stepsFromPersisted,
 } from "./ToolActivityCard";
+import { PhotoResultsCards } from "./PhotoResultsCard";
+import { ToolApprovalCards } from "./ToolApprovalCard";
 import { VisionRelayChip } from "./VisionRelayChip";
 
 interface MessageBubbleProps {
@@ -293,7 +296,7 @@ function MentionChip({
       }}
       className={cn(
         "mx-[1px] inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0 align-baseline text-[12px] font-medium leading-5 transition",
-        "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]",
+        "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent-text)]",
         "hover:bg-[var(--accent)]/20 hover:border-[var(--accent)]/60"
       )}
       title={`Go to chat: ${clean}`}
@@ -333,7 +336,7 @@ function ConnectorMentionChip({ title }: { title: string }) {
     <span
       className={cn(
         "mx-[1px] inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0 align-baseline text-[12px] font-medium leading-5",
-        "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent)]"
+        "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent-text)]"
       )}
       title={`Connector invoked: ${clean}`}
     >
@@ -714,7 +717,7 @@ function Avatar({ role }: { role: ChatMessage["role"] }) {
       <div
         className={cn(
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-          "bg-[var(--accent)]/20 text-[var(--accent)]"
+          "bg-[var(--accent)]/20 text-[var(--accent-text)]"
         )}
       >
         <UserIcon className="h-4 w-4" />
@@ -1172,7 +1175,7 @@ function MessageBubbleImpl({
                 onClick={() => void onContinue()}
                 className={cn(
                   "inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 font-medium transition",
-                  "bg-[var(--accent)]/15 text-[var(--accent)] hover:bg-[var(--accent)]/25"
+                  "bg-[var(--accent)]/15 text-[var(--accent-text)] hover:bg-[var(--accent)]/25"
                 )}
               >
                 <ArrowDownToLine className="h-3.5 w-3.5" />
@@ -1190,6 +1193,10 @@ function MessageBubbleImpl({
         )}
         {hasToolInvocations && (
           <ToolActivityCard steps={activitySteps} streaming={!!streaming} />
+        )}
+        {hasToolInvocations && <PhotoResultsCards steps={activitySteps} />}
+        {!streaming && messageId && toolCalls && toolCalls.length > 0 && (
+          <ToolApprovalCards messageId={messageId} toolCalls={toolCalls} />
         )}
         {hasAttachments && !editing && (
           <AttachmentChips
@@ -1260,7 +1267,7 @@ function MessageBubbleImpl({
                 onClick={handleReadAloud}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-xs",
-                  "text-[var(--accent)] transition",
+                  "text-[var(--accent-text)] transition",
                   "hover:bg-black/[0.04]",
                   "dark:hover:bg-white/[0.06]"
                 )}
@@ -1464,7 +1471,10 @@ function UserMessageEditor({
 
   const trimmed = text.trim();
   const unchanged = trimmed === initialText.trim();
-  const disabled = submitting || trimmed.length === 0 || unchanged;
+  // Your own message can be sent again as it is ("Resend"); an AI reply
+  // edit needs an actual change.
+  const disabled =
+    submitting || trimmed.length === 0 || (unchanged && variant === "assistant");
 
   const handleSubmit = async () => {
     if (disabled) return;
@@ -1477,6 +1487,8 @@ function UserMessageEditor({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Keys during IME composition belong to the input method (R-071).
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "Escape") {
       e.preventDefault();
       onCancel();
@@ -1558,7 +1570,9 @@ function UserMessageEditor({
               : "Sending..."
             : isAssistant
               ? "Save"
-              : "Save & resend"}
+              : unchanged
+                ? "Resend"
+                : "Save & resend"}
         </button>
       </div>
     </div>
@@ -1662,7 +1676,7 @@ function AttachmentChips({
                 "cursor-pointer transition hover:bg-[var(--accent)]/[0.08]"
               )}
             >
-              <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+              <Icon className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
               <span className="truncate">{a.filename}</span>
               {HoverIcon && (
                 <HoverIcon
@@ -1896,6 +1910,34 @@ function SourcesFooter({
       </summary>
       <ol className="space-y-2 px-3 pb-3 pt-1 text-xs">
         {sources.map((s, idx) => {
+          if (isFileSource(s)) {
+            // A passage from the user's files — opens the file in the app,
+            // at the page / row it came from (WP-5.2).
+            return (
+              <li key={`${s.url}-${idx}`} className="flex gap-2" data-testid="file-source">
+                <span className="shrink-0 font-mono text-[var(--text-muted)]">
+                  [{idx + 1}]
+                </span>
+                <div className="min-w-0 flex-1">
+                  <Link
+                    to={s.url}
+                    className="inline-flex max-w-full items-center gap-1 font-medium text-[var(--accent-text)] hover:underline"
+                  >
+                    <FileText className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{s.title || "Untitled"}</span>
+                  </Link>
+                  <div className="truncate text-[var(--text-muted)]">
+                    {s.location ? `Your files · ${s.location}` : "Your files"}
+                  </div>
+                  {s.snippet && (
+                    <div className="mt-0.5 line-clamp-2 text-[var(--text)] opacity-80">
+                      {s.snippet}
+                    </div>
+                  )}
+                </div>
+              </li>
+            );
+          }
           let host = "";
           try {
             host = new URL(s.url).host;
@@ -1912,7 +1954,7 @@ function SourcesFooter({
                   href={s.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="font-medium text-[var(--accent)] hover:underline"
+                  className="font-medium text-[var(--accent-text)] hover:underline"
                 >
                   {s.title || host}
                 </a>
@@ -2374,7 +2416,7 @@ function RegenerateControl({
                       </span>
                     </span>
                     {isCurrent && (
-                      <Check className="h-3 w-3 shrink-0 text-[var(--accent)]" />
+                      <Check className="h-3 w-3 shrink-0 text-[var(--accent-text)]" />
                     )}
                   </button>
                 </li>

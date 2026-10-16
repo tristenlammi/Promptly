@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Loader2,
   MessageSquare,
+  Pencil,
   Quote,
   RotateCcw,
   Send,
@@ -19,6 +20,7 @@ import {
 import { useWorkspaceTree } from "@/hooks/useWorkspaces";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
+import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { MentionTextarea } from "./MentionTextarea";
 
@@ -27,6 +29,12 @@ interface Props {
   itemId: string;
   /** Owner/editor can post; viewers see a read-only thread. */
   canEdit: boolean;
+  /** Workspace owner/admin — may remove anyone's comment. */
+  canModerate?: boolean;
+  /** Open by default (the side drawer on sheets and canvases). */
+  defaultOpen?: boolean;
+  /** Placeholder for an empty thread. */
+  emptyHint?: string;
 }
 
 /**
@@ -34,9 +42,17 @@ interface Props {
  * chronological discussion that lives alongside the item without editing
  * it. Rendered as a collapsible panel beneath the item (next to backlinks).
  */
-export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
+export function ItemCommentsPanel({
+  workspaceId,
+  itemId,
+  canEdit,
+  canModerate = false,
+  defaultOpen = false,
+  emptyHint = "No comments yet. Select text in the note and hit “Quote selection” to anchor one.",
+}: Props) {
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
-  const isOwnerOrAdmin = useAuthStore((s) => s.user?.role === "admin");
+  // The *workspace's* owner/admin moderates — not the app admin (R-202).
+  const isOwnerOrAdmin = canModerate;
   const [comments, setComments] = useState<WorkspaceItemComment[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState("");
@@ -73,8 +89,8 @@ export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
       setComments((prev) => [...prev, created]);
       setDraft("");
       setQuote(null);
-    } catch {
-      // swallow — the user can retry
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't post the comment."));
     } finally {
       setPosting(false);
     }
@@ -84,8 +100,17 @@ export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
     try {
       await workspacesApi.deleteComment(workspaceId, itemId, id);
       setComments((prev) => prev.filter((c) => c.id !== id));
-    } catch {
-      // swallow
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't delete the comment."));
+    }
+  };
+
+  const saveEdit = async (id: string, body: string) => {
+    try {
+      const updated = await workspacesApi.editComment(workspaceId, itemId, id, body);
+      setComments((prev) => prev.map((x) => (x.id === updated.id ? updated : x)));
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't save the edit."));
     }
   };
 
@@ -100,8 +125,8 @@ export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
       setComments((prev) =>
         prev.map((x) => (x.id === updated.id ? updated : x))
       );
-    } catch {
-      // swallow
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't update the comment."));
     }
   };
 
@@ -155,7 +180,7 @@ export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
   const resolved = comments.filter((c) => Boolean(c.resolved_at));
 
   return (
-    <details className="border-t border-[var(--border)]">
+    <details className="border-t border-[var(--border)]" open={defaultOpen || undefined}>
       <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] hover:text-[var(--text)]">
         <MessageSquare className="h-3.5 w-3.5" />
         Comments
@@ -170,10 +195,7 @@ export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
             <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading…
           </div>
         ) : comments.length === 0 ? (
-          <p className="py-2 text-xs text-[var(--text-muted)]">
-            No comments yet. Select text in the note and hit “Quote
-            selection” to anchor one.
-          </p>
+          <p className="py-2 text-xs text-[var(--text-muted)]">{emptyHint}</p>
         ) : (
           <>
             <ul className="space-y-2.5 py-1">
@@ -187,6 +209,8 @@ export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
                     (c.author_user_id === currentUserId || isOwnerOrAdmin)
                   }
                   onDelete={() => void remove(c.id)}
+                  canEditBody={canEdit && c.author_user_id === currentUserId}
+                  onEdit={(body) => void saveEdit(c.id, body)}
                   onToggleResolved={() => void toggleResolved(c)}
                   onMakeCard={
                     boardItemId
@@ -223,7 +247,7 @@ export function ItemCommentsPanel({ workspaceId, itemId, canEdit }: Props) {
 
         {canEdit && quote && (
           <div className="mt-2 flex items-start gap-2 rounded-md border-l-2 border-[var(--accent)] bg-[var(--accent)]/5 px-2.5 py-1.5">
-            <Quote className="mt-0.5 h-3 w-3 shrink-0 text-[var(--accent)]" />
+            <Quote className="mt-0.5 h-3 w-3 shrink-0 text-[var(--accent-text)]" />
             <span className="min-w-0 flex-1 text-xs italic text-[var(--text-muted)] line-clamp-2">
               {quote}
             </span>
@@ -301,6 +325,8 @@ function CommentRow({
   onDelete,
   onToggleResolved,
   onMakeCard,
+  canEditBody = false,
+  onEdit,
 }: {
   comment: WorkspaceItemComment;
   canEdit: boolean;
@@ -308,8 +334,12 @@ function CommentRow({
   onDelete: () => void;
   onToggleResolved: () => void;
   onMakeCard?: () => void;
+  canEditBody?: boolean;
+  onEdit?: (body: string) => void;
 }) {
   const resolved = Boolean(c.resolved_at);
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(c.body);
   return (
     <li className="group flex gap-2 text-sm">
       <div className="min-w-0 flex-1">
@@ -318,6 +348,7 @@ function CommentRow({
             {c.author_name}
           </span>
           <span>{new Date(c.created_at).toLocaleString()}</span>
+          {c.edited_at && <span>(edited)</span>}
           {resolved && (
             <span className="inline-flex items-center gap-0.5 text-[var(--success)]">
               <CheckCircle2 className="h-3 w-3" /> resolved
@@ -329,11 +360,70 @@ function CommentRow({
             {c.quote}
           </div>
         )}
-        <div className="whitespace-pre-wrap break-words text-[var(--text)]">
-          {c.body}
-        </div>
+        {editing ? (
+          <div className="mt-1 space-y-1">
+            <textarea
+              value={text}
+              autoFocus
+              aria-label="Edit comment"
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  setText(c.body);
+                  setEditing(false);
+                } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  if (text.trim() && text.trim() !== c.body) onEdit?.(text.trim());
+                  setEditing(false);
+                }
+              }}
+              rows={2}
+              className="w-full resize-y rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-sm outline-none focus:border-[var(--accent)]"
+            />
+            <div className="flex gap-2 text-xs">
+              <button
+                type="button"
+                className="font-medium text-[var(--accent-text)]"
+                onClick={() => {
+                  if (text.trim() && text.trim() !== c.body) onEdit?.(text.trim());
+                  setEditing(false);
+                }}
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                className="text-[var(--text-muted)]"
+                onClick={() => {
+                  setText(c.body);
+                  setEditing(false);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="whitespace-pre-wrap break-words text-[var(--text)]">
+            {c.body}
+          </div>
+        )}
       </div>
-      <div className="flex h-fit shrink-0 items-center opacity-0 transition group-hover:opacity-100">
+      <div className="flex h-fit shrink-0 items-center opacity-0 transition focus-within:opacity-100 group-hover:opacity-100">
+        {canEditBody && !editing && (
+          <button
+            type="button"
+            onClick={() => {
+              setText(c.body);
+              setEditing(true);
+            }}
+            className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+            title="Edit comment"
+            aria-label="Edit comment"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
         {canEdit && onMakeCard && !resolved && (
           <button
             type="button"

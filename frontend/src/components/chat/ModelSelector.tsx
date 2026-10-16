@@ -98,9 +98,21 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
 
   if (available.length === 0) {
     if (compact) {
+      // Non-admins can't add one — /models bounced them back to /chat.
+      if (!isAdmin) {
+        return (
+          <span
+            title="No model available — ask an admin to add one"
+            aria-label="No model available"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-dashed border-[var(--border)] text-[var(--text-muted)]"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </span>
+        );
+      }
       return (
         <button
-          onClick={() => navigate("/models")}
+          onClick={() => navigate("/admin?tab=models")}
           aria-label="Configure a model"
           title="Configure a model"
           className={cn(
@@ -237,7 +249,7 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
                       </div>
                     </div>
                     {active && (
-                      <Check className="mt-1 h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+                      <Check className="mt-1 h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
                     )}
                   </button>
                 );
@@ -255,7 +267,7 @@ function CustomBadge() {
     <span
       className={cn(
         "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide",
-        "bg-[var(--accent)]/15 text-[var(--accent)]"
+        "bg-[var(--accent)]/15 text-[var(--accent-text)]"
       )}
       title="Custom assistant — admin-curated personality + knowledge library"
     >

@@ -7,7 +7,9 @@ from datetime import datetime
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.auth.email_address import EmailAddress
 
 from app.auth.password_policy import (
     MAX_PASSWORD_LENGTH,
@@ -19,7 +21,7 @@ UserRole = Literal["admin", "user"]
 
 
 class RegisterRequest(BaseModel):
-    email: EmailStr
+    email: EmailAddress
     username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
 
@@ -38,7 +40,7 @@ class SetupRequest(BaseModel):
     promoted straight to `role="admin"`.
     """
 
-    email: EmailStr
+    email: EmailAddress
     username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9_.-]+$")
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=MAX_PASSWORD_LENGTH)
 
@@ -47,10 +49,14 @@ class SetupRequest(BaseModel):
     def _strong_password(cls, v: str) -> str:
         validate_password_strength(v)
         return v
+    # The code the installer printed (see ``Settings.SETUP_TOKEN``).
+    setup_code: str | None = Field(default=None, max_length=200)
 
 
 class SetupStatusResponse(BaseModel):
     requires_setup: bool
+    # The installer printed a setup code that step 1 must ask for.
+    setup_code_required: bool = False
 
 
 class SsoStatusResponse(BaseModel):
@@ -117,7 +123,7 @@ class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    email: EmailStr
+    email: str
     username: str
     role: UserRole
     # NULL = full access to the admin's curated pool. Admins effectively
@@ -127,6 +133,9 @@ class UserResponse(BaseModel):
     # artifacts (POST /api/code/run). The frontend uses this to show/hide
     # the button; admins are effectively always True. Server re-checks.
     can_execute_code: bool = True
+    # May the user's automation HTTP steps reach the local network? Admins
+    # always may; the flow editor hides the option otherwise.
+    can_reach_private_network: bool = False
     settings: dict[str, Any]
     # Profile appearance: signed picture URL (None = initials chip; a
     # model property, so it serializes from anywhere) and the chosen
@@ -160,7 +169,7 @@ class DirectoryUser(BaseModel):
     # would let any authenticated user harvest every account's email for
     # phishing + targeted lockout. The picker resolves invites by username or
     # a free-typed email, so it never needs the directory to hand emails back.
-    email: EmailStr | None = None
+    email: str | None = None
     # Appearance for the picker rows (safe to expose: avatars are
     # visible to every authenticated user anyway).
     avatar_url: str | None = None

@@ -115,6 +115,17 @@ _STANDARD_LOGRECORD_KEYS: frozenset[str] = frozenset(
 )
 
 
+
+def _redact_path(path: str) -> str:
+    """Webhook URLs carry their secret in the path — keep it out of logs
+    (R-195)."""
+    if path.startswith("/api/hooks/"):
+        parts = path.split("/")
+        if len(parts) >= 5:
+            parts[4] = "[secret]"
+            return "/".join(parts)
+    return path
+
 class JsonFormatter(logging.Formatter):
     """One-line JSON formatter with stable field ordering."""
 
@@ -278,8 +289,16 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 
         # Compose a "method path" route label that's stable (no ids in
         # the path). Full path is fine for our log volume.
-        route = f"{request.method} {request.url.path}"
+        route = f"{request.method} {_redact_path(request.url.path)}"
 
+        # For cookie-setting code (auth/cookies.py): the host decides
+        # whether a plain-HTTP LAN install gets a non-Secure session cookie.
+        from app.auth.cookies import remember_request
+
+        remember_request(
+            request.headers.get("host"),
+            https=request.url.scheme == "https",
+        )
         rid_token = _request_id_ctx.set(request_id)
         uid_token = _user_id_ctx.set(None)
         route_token = _route_ctx.set(route)

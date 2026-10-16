@@ -1,6 +1,8 @@
 import { useCallback, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
+import { chatApi } from "@/api/chat";
+import { authHeader } from "@/api/client";
 import {
   researchApi,
   type ResearchRefinePayload,
@@ -42,30 +44,24 @@ export function useResearch() {
   const store = useResearchStore();
   const queryClient = useQueryClient();
   const abortRef = useRef<AbortController | null>(null);
+  // The server-side job being watched, so Cancel can actually stop it.
+  const streamRef = useRef<string | null>(null);
 
-  // Shared SSE driver for both a fresh investigation and a refinement —
-  // the stream shape is identical, only the endpoint + header label differ.
-  const run = useCallback(
-    async (
-      conversationId: string,
-      label: string,
-      getResp: () => Promise<Response>
-    ) => {
-      // Cancel any in-flight research.
-      abortRef.current?.abort();
-      const ac = new AbortController();
-      abortRef.current = ac;
-
-      store.startResearch(conversationId, label);
-
+  // Follow a research job's stream. Research runs on the server as a
+  // background job: this only watches it, so a reload can come back to it
+  // (``reattachResearch``) and Cancel stops it server-side.
+  const follow = useCallback(
+    async (conversationId: string, streamId: string, ac: AbortController) => {
       let resp: Response;
       try {
-        resp = await getResp();
-      } catch (err) {
-        store.setError("Failed to connect to research service.");
+        resp = await fetch(chatApi.streamUrl(streamId), {
+          headers: { Accept: "text/event-stream", ...authHeader() },
+          signal: ac.signal,
+        });
+      } catch {
+        if (!ac.signal.aborted) store.setError("Failed to connect to research service.");
         return;
       }
-
       if (!resp.ok || !resp.body) {
         store.setError(`Research service returned ${resp.status}.`);
         return;
@@ -88,6 +84,7 @@ export function useResearch() {
             store.setError(data.error as string);
             break;
           }
+          if (data.done) break;
 
           if (ev === "research_decomposed") {
             store.setDecomposed(
@@ -101,10 +98,6 @@ export function useResearch() {
             store.setReading(data.index as number);
           } else if (ev === "research_question_done") {
             store.setQuestionDone(data.index as number);
-          } else if (ev === "research_gap_start") {
-            // gap check in progress — no UI update needed
-          } else if (ev === "research_gap_done") {
-            // nothing to update
           } else if (ev === "research_synth_start") {
             store.setSynthesizing();
           } else if (typeof data.delta === "string") {
@@ -127,35 +120,86 @@ export function useResearch() {
             void queryClient.invalidateQueries({ queryKey: ["conversations"] });
           }
         }
-      } catch (err) {
+      } catch {
         if (!ac.signal.aborted) {
           store.setError("Research stream was interrupted.");
         }
+      } finally {
+        if (streamRef.current === streamId) streamRef.current = null;
       }
     },
     [store, queryClient]
   );
 
+  // Shared driver for a fresh investigation and a refinement — the stream
+  // shape is identical, only the endpoint + header label differ.
+  const run = useCallback(
+    async (
+      conversationId: string,
+      label: string,
+      start: () => Promise<{ stream_id: string }>
+    ) => {
+      // Cancel any in-flight research.
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      store.startResearch(conversationId, label);
+
+      let streamId: string;
+      try {
+        streamId = (await start()).stream_id;
+      } catch {
+        store.setError("Failed to connect to research service.");
+        return;
+      }
+      streamRef.current = streamId;
+      await follow(conversationId, streamId, ac);
+    },
+    [store, follow]
+  );
+
   const startResearch = useCallback(
     (conversationId: string, payload: ResearchStartPayload) =>
-      run(conversationId, payload.query, () =>
-        researchApi.startStream(conversationId, payload)
-      ),
+      run(conversationId, payload.query, () => researchApi.start(conversationId, payload)),
     [run]
   );
 
   const refineResearch = useCallback(
     (conversationId: string, payload: ResearchRefinePayload) =>
       run(conversationId, `Dig deeper: ${payload.refinement}`, () =>
-        researchApi.refineStream(conversationId, payload)
+        researchApi.refine(conversationId, payload)
       ),
     [run]
   );
 
+  /** Come back to a research job still running after a reload or after
+   *  navigating away. The server replays its progress from the start. */
+  const reattachResearch = useCallback(
+    async (conversationId: string, streamId: string, label: string) => {
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+      store.startResearch(conversationId, label);
+      streamRef.current = streamId;
+      await follow(conversationId, streamId, ac);
+    },
+    [store, follow]
+  );
+
   const cancelResearch = useCallback(() => {
+    // Stop the job itself — dropping the connection alone left it
+    // searching and spending in the background.
+    const streamId = streamRef.current;
+    streamRef.current = null;
     abortRef.current?.abort();
     store.reset();
+    if (streamId) {
+      void chatApi.stopStream(streamId).catch(() => {
+        /* already finished — nothing to stop */
+      });
+    }
   }, [store]);
 
-  return { startResearch, refineResearch, cancelResearch };
+  return { startResearch, refineResearch, reattachResearch, cancelResearch };
 }

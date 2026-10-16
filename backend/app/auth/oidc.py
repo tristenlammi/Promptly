@@ -56,6 +56,8 @@ class OidcConfig:
     client_secret: str
     scopes: str
     button_label: str
+    trust_unverified_email: bool = False
+    satisfies_mfa: bool = False
 
 
 def _default_label() -> str:
@@ -82,6 +84,8 @@ async def load_oidc_config(db: AsyncSession) -> OidcConfig | None:
         scopes=(row.oidc_scopes or _DEFAULT_SCOPES).strip() or _DEFAULT_SCOPES,
         button_label=(row.oidc_button_label or _default_label()).strip()
         or _default_label(),
+        trust_unverified_email=bool(row.oidc_trust_unverified_email),
+        satisfies_mfa=bool(row.oidc_satisfies_mfa),
     )
 
 
@@ -192,16 +196,20 @@ async def exchange_and_verify(
     return claims
 
 
-def verified_email_from_claims(claims: dict) -> str | None:
+def verified_email_from_claims(claims: dict, *, trust_unverified: bool = False) -> str | None:
     """Extract a trustworthy email from id_token claims, or ``None``.
 
-    Requires the ``email_verified`` claim to be truthy when the provider sends
-    it (most do). Without a verified email we refuse to match an account.
+    The provider has to say ``email_verified: true``. A missing claim used
+    to count as verified, so a provider that lets users type any address
+    could hand over someone else's account (R-140). ``trust_unverified``
+    is the admin's opt-in for providers that never send the claim.
     """
     email = (claims.get("email") or "").strip().lower()
     if not email:
         return None
-    verified = claims.get("email_verified", True)
-    if verified in (False, "false", "False", 0, "0"):
-        return None
-    return email
+    if trust_unverified:
+        return email
+    verified = claims.get("email_verified")
+    if verified is True or (isinstance(verified, str) and verified.lower() == "true"):
+        return email
+    return None

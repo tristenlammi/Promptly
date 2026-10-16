@@ -75,6 +75,11 @@ async def _resolve_custom_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token subject",
         ) from e
+    # Which sign-in session this request comes from (WP-7.2).
+    from app.auth.credential import set_credential
+
+    sid = payload.get("sid")
+    set_credential(f"session:{sid}" if isinstance(sid, str) and sid else None)
 
     user = await db.get(User, user_id)
     if user is None:
@@ -99,7 +104,9 @@ async def _resolve_custom_user(
     # All three return the same generic 401 so the response gives no
     # signal about *why* the session was killed.
     # ----------------------------------------------------------------
-    if user.disabled or user.is_locked:
+    # Not ``is_locked``: a brute-force lock blocks new password logins, not
+    # live sessions — otherwise five bad guesses logged the owner out (R-002).
+    if user.disabled:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Session is no longer valid",
@@ -126,6 +133,20 @@ async def get_current_user(
         return single
 
     user = await _resolve_custom_user(credentials, db)
+
+    # A user who must choose a new password (an admin set this one) can
+    # reach their account endpoints and nothing else until they do. The
+    # flag used to be recorded and never enforced (R-259).
+    if user.must_change_password and not request.url.path.startswith("/api/auth/"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="password_change_required",
+        )
+
+    # Side model calls made for this request are charged to this user (R-276).
+    from app.billing.usage_context import bill_usage_to
+
+    bill_usage_to(user.id)
 
     # Attach to request.state for cheap reuse by other dependencies/middleware.
     request.state.user = user

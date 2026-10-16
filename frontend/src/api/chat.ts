@@ -8,6 +8,7 @@ import type {
   SendMessageResponse,
   TemporaryMode,
   WebSearchMode,
+  PersistedToolCall,
 } from "./types";
 
 /** One of a workspace's pinned files, with whether the current chat has
@@ -168,6 +169,12 @@ export interface RegenerateMessagePayload {
 export interface ImportConversationsResponse {
   imported: number;
   skipped: number;
+  /** Already imported earlier (same source chat) — skipped (R-309). */
+  duplicates?: number;
+  /** Titles of chats that couldn't be imported. */
+  failed?: string[];
+  /** Titles cut off at the per-chat message cap. */
+  truncated?: string[];
   total_messages: number;
   conversations: Array<{
     id: string;
@@ -177,7 +184,47 @@ export interface ImportConversationsResponse {
   }>;
 }
 
+/** Rows per page of the conversation list. */
+export const CONVERSATION_PAGE_SIZE = 50;
+
+/** Where the next page of the conversation list starts: built from the
+ *  previous page's last row (the server pages by these keys, so chats that
+ *  move while you scroll don't get skipped or repeated). */
+export function conversationCursor(c: ConversationSummary, archived = false): string {
+  return archived
+    ? `${c.archived_at}|${c.id}`
+    : `${c.pinned ? 1 : 0}|${c.updated_at}|${c.id}`;
+}
+
+export interface ChatConnector {
+  id: string;
+  name: string;
+  tool_count: number;
+  on: boolean;
+}
+
 export const chatApi = {
+  /** One page of the conversation list. ``scope: "personal"`` leaves out
+   *  workspace chats; ``folder`` is "none" (unfiled) or a folder id. */
+  async listPage(params: {
+    limit?: number;
+    archived?: boolean;
+    scope?: "all" | "personal";
+    folder?: string;
+    cursor?: string | null;
+    q?: string;
+  }): Promise<ConversationSummary[]> {
+    const { cursor, q, ...rest } = params;
+    const { data } = await apiClient.get<ConversationSummary[]>("/chat/conversations", {
+      params: {
+        limit: CONVERSATION_PAGE_SIZE,
+        ...rest,
+        ...(cursor ? { cursor } : {}),
+        ...(q && q.trim() ? { q: q.trim() } : {}),
+      },
+    });
+    return data;
+  },
   async list(
     limit = 50,
     offset = 0,
@@ -199,6 +246,32 @@ export const chatApi = {
   async get(id: string): Promise<ConversationDetail> {
     const { data } = await apiClient.get<ConversationDetail>(
       `/chat/conversations/${id}`
+    );
+    return data;
+  },
+  /** Connectors this chat can use, and whether each is on here (R-161). */
+  async listChatConnectors(conversationId: string): Promise<ChatConnector[]> {
+    const { data } = await apiClient.get<ChatConnector[]>(
+      `/chat/conversations/${conversationId}/connectors`
+    );
+    return data;
+  },
+  async setChatConnectors(conversationId: string, disabledIds: string[]): Promise<void> {
+    await apiClient.put(`/chat/conversations/${conversationId}/connectors`, {
+      disabled_connector_ids: disabledIds,
+    });
+  },
+  /** Approve or decline a connector action the model asked to take. */
+  async decideToolCall(
+    messageId: string,
+    callId: string,
+    approve: boolean
+  ): Promise<{ tool_call: PersistedToolCall }> {
+    const { data } = await apiClient.post<{ tool_call: PersistedToolCall }>(
+      `/chat/messages/${messageId}/tool-calls/${encodeURIComponent(callId)}/approval`,
+      { approve },
+      // Running it reaches the outside service — give it time.
+      { timeout: 90_000 }
     );
     return data;
   },
@@ -236,7 +309,10 @@ export const chatApi = {
   ): Promise<SendMessageResponse> {
     const { data } = await apiClient.post<SendMessageResponse>(
       `/chat/conversations/${id}/messages`,
-      payload
+      payload,
+      // Large attachments are indexed during the send; the 30 s default
+      // timed out and left a duplicate or unanswered turn (R-070).
+      { timeout: 120_000 }
     );
     return data;
   },
@@ -312,9 +388,24 @@ export const chatApi = {
       body,
       {
         headers: { "Content-Type": "multipart/form-data" },
+        // A whole ChatGPT history takes far longer than the default 30 s;
+        // the request used to "fail" while the server kept going (R-309).
+        timeout: 15 * 60 * 1000,
       }
     );
     return data;
+  },
+
+  /** Every conversation you own as one re-importable JSON file (R-310). */
+  async exportAllConversations(): Promise<{ blob: Blob; filename: string }> {
+    const res = await apiClient.get<Blob>("/chat/exports/conversations", {
+      responseType: "blob",
+      timeout: 10 * 60 * 1000,
+    });
+    const filename =
+      extractFilename(res.headers?.["content-disposition"]) ??
+      "Promptly conversations.json";
+    return { blob: res.data, filename };
   },
   /** Phase 3.2 — rewrite a rough composer draft into a sharper prompt.
    *  Stateless; returns the improved text for a preview/accept flow. */
@@ -366,6 +457,20 @@ export const chatApi = {
    *  the conversation page mounts after the user navigated away mid-
    *  reply — if a stream is found we re-attach to its live tail
    *  instead of leaving them watching a frozen "thinking" state. */
+  /** Like ``activeStream``, plus what kind of run it is ("chat" or
+   *  "research") so a reload reattaches with the right view. */
+  async activeStreamInfo(conversationId: string): Promise<{
+    stream_id: string | null;
+    kind: "chat" | "research" | null;
+    label: string | null;
+  }> {
+    const { data } = await apiClient.get<{
+      stream_id: string | null;
+      kind?: "chat" | "research" | null;
+      label?: string | null;
+    }>(`/chat/conversations/${conversationId}/active-stream`);
+    return { stream_id: data.stream_id, kind: data.kind ?? "chat", label: data.label ?? null };
+  },
   async activeStream(conversationId: string): Promise<string | null> {
     const { data } = await apiClient.get<{ stream_id: string | null }>(
       `/chat/conversations/${conversationId}/active-stream`
@@ -611,12 +716,47 @@ export interface WorkspaceProposalChanges {
   due_date?: string | null;
 }
 
+/** One step of a ``file_changes`` proposal (WP-5.3), described in paths
+ *  (``""`` = My files) so the card can show exactly what will change. */
+export interface FileChangeStep {
+  op: "create_folder" | "move" | "rename";
+  /** create_folder */
+  path?: string;
+  exists?: boolean;
+  /** move / rename */
+  item_type?: "file" | "folder";
+  item_id?: string;
+  name?: string;
+  from?: string;
+  /** move */
+  to?: string;
+  to_new?: boolean;
+  /** rename */
+  new_name?: string;
+}
+
 export interface WorkspaceProposal {
   id: string;
   conversation_id: string;
-  workspace_id: string;
-  kind: "create_note" | "add_cards" | "update_cards";
+  /** ``null`` for a Drive proposal (``file_changes``). */
+  workspace_id: string | null;
+  kind: "create_note" | "add_cards" | "update_cards" | "file_changes" | "photo_album" | "photo_share" | "photo_relationship";
   payload: {
+    /** photo_album — the photos (the first few, for a smart album). */
+    file_ids?: string[];
+    count?: number;
+    action?: "create" | "add";
+    smart_rules?: Record<string, unknown> | null;
+    /** photo_share */
+    album_title?: string;
+    role?: "viewer" | "contributor";
+    people?: { user_id: string; username: string }[];
+    /** photo_relationship */
+    person_name?: string;
+    label?: string;
+    /** file_changes only. */
+    operations?: FileChangeStep[];
+    summary?: string;
     title?: string;
     markdown?: string;
     board_item_id?: string;

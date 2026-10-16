@@ -106,7 +106,7 @@ export function ProviderCard({ provider }: { provider: Provider }) {
               {provider.type}
             </span>
             {isSystem && (
-              <span className="rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--accent)]">
+              <span className="rounded-full bg-[var(--accent)]/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--accent-text)]">
                 System
               </span>
             )}
@@ -154,7 +154,7 @@ export function ProviderCard({ provider }: { provider: Provider }) {
             <span aria-hidden>·</span>
             <span
               className={cn(
-                isCurated && "font-medium text-[var(--accent)]"
+                isCurated && "font-medium text-[var(--accent-text)]"
               )}
             >
               {isCurated

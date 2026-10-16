@@ -24,7 +24,10 @@ import app.db_models  # noqa: F401
 config = context.config
 
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # Keep the app's own loggers alive: the default disables every logger
+    # that exists already, so bootstrap's errors *after* a migration (and
+    # its "Migrations complete") silently vanished.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 settings = get_settings()
 # Override whatever sqlalchemy.url is (empty) with the app-configured DB URL.
@@ -60,6 +63,13 @@ def do_run_migrations(connection: Connection) -> None:
         compare_server_default=True,
     )
     with context.begin_transaction():
+        # Fail fast instead of hanging when something (a worker, collab, a
+        # long query) holds a lock a migration needs: the transaction rolls
+        # back cleanly and the boot error says what happened (R-250).
+        # ``SET LOCAL`` inside alembic's own transaction — running anything
+        # on the connection *before* it autobegins a transaction alembic
+        # then treats as external, and the migration is silently rolled back.
+        context.execute("SET LOCAL lock_timeout = '30s'")
         context.run_migrations()
 
 

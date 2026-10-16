@@ -3,6 +3,13 @@
 @import "highlight.js/styles/github-dark.css";
 /* KaTeX styles for LaTeX/math rendering (remark-math + rehype-katex). */
 @import "katex/dist/katex.min.css";
+/* DM Sans (OFL-1.1), bundled locally so no visitor request ever goes to
+   Google Fonts. Each weight file carries the latin + latin-ext faces with
+   unicode-range, so a page only downloads the subsets it uses. */
+@import "@fontsource/dm-sans/400.css";
+@import "@fontsource/dm-sans/500.css";
+@import "@fontsource/dm-sans/600.css";
+@import "@fontsource/dm-sans/700.css";
 
 @tailwind base;
 @tailwind components;
@@ -28,8 +35,13 @@
      a grey line. */
   --border: rgba(122, 105, 95, 0.16);
   --text: #1A1A19;
-  --text-muted: #6B7280;
+  /* Contrast (R-091): ≥4.5:1 on --bg, --surface and hover fills. */
+  --text-muted: #5F6672;
   --accent: #D97757;
+  /* Accent-coloured *text*. The brand accent is 3:1 on the light
+     background — too faint to read; this is 5.4:1 (R-091). Fills,
+     borders and icons keep --accent. */
+  --accent-text: #A84B2A;
   /* Darkened accent for hover on filled accent buttons. */
   --accent-hover: #C2613E;
   /* Raised/recessed neutral surfaces above --surface, used for
@@ -60,13 +72,13 @@
   /* Semantic status colours. The `-bg` tints are alpha-based so they
      read the same in both themes; the text/icon colours are tuned per
      theme below (darker on light, lighter on dark) for contrast. */
-  --danger: #DC2626;
+  --danger: #C81E1E;
   --danger-bg: rgba(220, 38, 38, 0.10);
   --danger-border: rgba(220, 38, 38, 0.38);
   --warning: #B45309;
   --warning-bg: rgba(245, 158, 11, 0.12);
   --warning-border: rgba(245, 158, 11, 0.38);
-  --success: #059669;
+  --success: #047857;
   --success-bg: rgba(16, 185, 129, 0.12);
   --success-border: rgba(16, 185, 129, 0.38);
   /* Elevation scale — one intentional set of shadows so depth reads
@@ -86,6 +98,8 @@ html.dark {
   --border: rgba(168, 148, 132, 0.18);
   --text: #F5F5F4;
   --text-muted: #A8A29E;
+  /* On dark the accent itself reads fine as text. */
+  --accent-text: var(--accent);
   /* Hover brightens the accent on dark (vs. darkening on light). */
   --accent-hover: #E08A6E;
   /* Raised surfaces step lighter than --surface (#27231E) on dark.
@@ -363,7 +377,8 @@ body {
 .promptly-prose ol { list-style: decimal; }
 .promptly-prose li { margin: 0.25rem 0; }
 .promptly-prose a {
-  color: var(--accent);
+  /* --accent-text: the terracotta itself is ~3:1 on the light theme (V14). */
+  color: var(--accent-text);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
@@ -598,7 +613,7 @@ body {
 
 /* Links */
 .promptly-doc a {
-  color: var(--accent);
+  color: var(--accent-text);
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
@@ -619,7 +634,7 @@ body {
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
   background: color-mix(in srgb, var(--accent) 10%, transparent);
-  color: var(--accent);
+  color: var(--accent-text);
   font-weight: 500;
   font-size: 0.92em;
   line-height: 1.35;
@@ -830,7 +845,7 @@ html.dark .promptly-doc mark {
 
 /* @person mention chip (our MentionMark). */
 .promptly-doc .doc-mention {
-  color: var(--accent);
+  color: var(--accent-text);
   background: var(--accent-soft);
   border-radius: 0.35rem;
   padding: 0.02rem 0.3rem;
@@ -967,7 +982,7 @@ html.dark .promptly-doc mark {
    The CollaborationCursor extension injects a span with this class
    at every remote user's cursor; without CSS the caret is invisible
    so the awareness channel feels broken even when it works. */
-.promptly-doc .collaboration-cursor__caret {
+.promptly-doc .collaboration-carets__caret {
   border-left: 1px solid;
   border-right: 1px solid;
   border-color: currentColor;
@@ -977,7 +992,7 @@ html.dark .promptly-doc mark {
   position: relative;
   word-break: normal;
 }
-.promptly-doc .collaboration-cursor__label {
+.promptly-doc .collaboration-carets__label {
   position: absolute;
   top: -1.4em;
   left: -1px;
@@ -1085,20 +1100,262 @@ html.dark .promptly-doc mark {
     overflow: visible;
     padding: 0;
   }
-  /* Ink-friendly regardless of app theme. */
-  .document-print-root,
-  .document-print-root * {
+  /* Prints in the light theme whatever the app's (the editor also drops
+     the dark class while printing — usePageSetup), on white paper. Text
+     colours, highlights and callout fills print as they look: forcing
+     every element to black on white lost them (WP-6.4). */
+  .document-print-root {
+    --bg: #fff;
+    --surface: #fff;
+    --surface-1: #F2F0EC;
+    --surface-2: #EBE8E3;
+    --text: #1A1A19;
+    --text-muted: #5F6672;
+    --border: rgba(122, 105, 95, 0.16);
     background: #fff !important;
-    color: #000 !important;
+    color: #1A1A19;
+  }
+  .document-print-root * {
     box-shadow: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   .document-print-root a {
-    color: #000 !important;
     text-decoration: underline;
   }
   /* Collaboration cursors/selections are screen furniture. */
-  .document-print-root .collaboration-cursor__caret,
-  .document-print-root .collaboration-cursor__label {
+  .document-print-root .collaboration-carets__caret,
+  .document-print-root .collaboration-carets__label {
     display: none !important;
+  }
+}
+
+/* Long conversations: the browser skips layout and paint for messages
+   that are off screen (R-065). The remembered size keeps the scrollbar
+   steady once a message has been seen. */
+.promptly-message {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+
+/* Controls revealed on hover (row ⋯ menus, selection checkboxes) are always
+   visible where there's no hover — phones and tablets (R-210). */
+@media (pointer: coarse) {
+  .touch-reveal {
+    opacity: 1 !important;
+  }
+}
+
+/* The PDF viewer's stylesheet (WP-6.5) sets `color-scheme: light dark` on
+   :root, which would turn native controls and scrollbars dark everywhere
+   once a PDF has been opened. The app's own themes decide that. */
+html:root {
+  color-scheme: normal;
+}
+/* pdf.js's own container must be positioned; our host keeps the pages
+   centred with a little room around them. */
+.pdf-viewer-host .pdfViewer {
+  padding: 12px 0;
+}
+.pdf-viewer-host .pdfViewer .page[data-target] {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---- WP-4.5: Docs parity ------------------------------------------- */
+
+/* Images: resizable (TipTap's handles), aligned, captioned. The resize
+   container is a flex box; stack the caption under the picture. */
+.promptly-doc [data-resize-container][data-node="image"] {
+  flex-direction: column;
+  align-items: center;
+  margin: 0.75rem 0;
+}
+.promptly-doc [data-resize-container][data-node="image"][data-align="left"] {
+  align-items: flex-start;
+}
+.promptly-doc [data-resize-container][data-node="image"][data-align="right"] {
+  align-items: flex-end;
+}
+.promptly-doc [data-resize-wrapper] img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.promptly-doc [data-resize-handle] {
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.promptly-doc .ProseMirror-selectednode [data-resize-handle],
+.promptly-doc [data-resize-container]:hover [data-resize-handle],
+.promptly-doc [data-resize-container][data-resize-state="true"] [data-resize-handle] {
+  opacity: 1;
+}
+.promptly-doc [data-resize-handle="bottom-right"],
+.promptly-doc [data-resize-handle="bottom-left"],
+.promptly-doc [data-resize-handle="top-right"],
+.promptly-doc [data-resize-handle="top-left"] {
+  width: 10px;
+  height: 10px;
+  margin: -5px;
+  border-radius: 2px;
+  background: var(--accent);
+  border: 1.5px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+.promptly-doc [data-resize-handle="bottom-right"],
+.promptly-doc [data-resize-handle="top-left"] {
+  cursor: nwse-resize;
+}
+.promptly-doc [data-resize-handle="bottom-left"],
+.promptly-doc [data-resize-handle="top-right"] {
+  cursor: nesw-resize;
+}
+.promptly-doc [data-resize-handle="left"],
+.promptly-doc [data-resize-handle="right"] {
+  width: 6px;
+  cursor: ew-resize;
+}
+.promptly-doc [data-resize-handle="top"],
+.promptly-doc [data-resize-handle="bottom"] {
+  height: 6px;
+  cursor: ns-resize;
+}
+.promptly-doc .ProseMirror-selectednode [data-resize-wrapper] {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.375rem;
+}
+.promptly-doc .doc-image-caption,
+.promptly-doc figure.doc-figure figcaption {
+  margin-top: 0.35rem;
+  max-width: 100%;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  text-align: center;
+  font-style: italic;
+}
+.promptly-doc figure.doc-figure {
+  margin: 0.75rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.promptly-doc figure.doc-figure[data-align="left"] {
+  align-items: flex-start;
+}
+.promptly-doc figure.doc-figure[data-align="right"] {
+  align-items: flex-end;
+}
+
+/* Manual page break: a labelled rule on screen, a new page in print. */
+.promptly-doc .doc-page-break {
+  position: relative;
+  margin: 1.25rem 0;
+  border-top: 1px dashed var(--border);
+  height: 0;
+}
+.promptly-doc .doc-page-break::after {
+  content: "Page break";
+  position: absolute;
+  left: 50%;
+  top: -0.6rem;
+  transform: translateX(-50%);
+  padding: 0 0.5rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: var(--bg);
+}
+.promptly-doc .doc-page-break.ProseMirror-selectednode {
+  border-top-color: var(--accent);
+}
+@media print {
+  .promptly-doc .doc-page-break {
+    border: 0;
+    margin: 0;
+    break-after: page;
+    page-break-after: always;
+  }
+  .promptly-doc .doc-page-break::after {
+    content: none;
+  }
+}
+
+/* Find & replace highlights. */
+.promptly-doc .find-match {
+  background: rgba(250, 204, 21, 0.45);
+  border-radius: 2px;
+}
+.promptly-doc .find-match-current {
+  background: rgba(249, 115, 22, 0.6);
+  box-shadow: 0 0 0 1px rgba(249, 115, 22, 0.8);
+}
+
+/* LaTeX maths (KaTeX). */
+.promptly-doc [data-type="inline-math"],
+.promptly-doc [data-type="block-math"] {
+  cursor: pointer;
+  border-radius: 0.25rem;
+}
+.promptly-doc [data-type="inline-math"]:hover,
+.promptly-doc [data-type="block-math"]:hover {
+  background: var(--hover);
+}
+.promptly-doc [data-type="block-math"] {
+  display: block;
+  margin: 0.75rem 0;
+  text-align: center;
+  overflow-x: auto;
+}
+.promptly-doc [data-type="block-math"].ProseMirror-selectednode,
+.promptly-doc [data-type="inline-math"].ProseMirror-selectednode {
+  outline: 2px solid var(--accent);
+}
+.promptly-doc sub,
+.promptly-doc sup {
+  font-size: 0.75em;
+}
+/* A selected image outlines the picture, not the full-width row. */
+.promptly-doc [data-resize-container].ProseMirror-selectednode {
+  outline: none;
+  background: transparent;
+}
+
+/* Comment highlights (WP-4.5, R-227): decorations, never document marks. */
+/* Suggestions (Stage 6 suggestion mode): suggested text underlined in
+   green, suggested deletions struck through in red. */
+.promptly-doc .suggestion-ins,
+.promptly-prose .suggestion-ins {
+  color: #15803d;
+  text-decoration: underline;
+  text-decoration-color: #22c55e;
+  text-decoration-thickness: 2px;
+  cursor: pointer;
+}
+.promptly-doc .suggestion-del,
+.promptly-prose .suggestion-del {
+  color: #b91c1c;
+  text-decoration: line-through;
+  text-decoration-color: #ef4444;
+  cursor: pointer;
+}
+html.dark .promptly-doc .suggestion-ins { color: #4ade80; }
+html.dark .promptly-doc .suggestion-del { color: #f87171; }
+
+.promptly-doc .doc-comment {
+  background: rgba(251, 191, 36, 0.22);
+  border-bottom: 2px solid rgba(245, 158, 11, 0.7);
+  cursor: pointer;
+}
+.promptly-doc .doc-comment-active {
+  background: rgba(251, 191, 36, 0.45);
+}
+@media print {
+  .promptly-doc .doc-comment {
+    background: none;
+    border: 0;
   }
 }

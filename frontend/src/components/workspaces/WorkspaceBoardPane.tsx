@@ -1,4 +1,6 @@
+import { useSearchParams } from "react-router-dom";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { DraftInput } from "@/components/shared/DraftInput";
 import { useIsMutating } from "@tanstack/react-query";
 import {
   ArrowUpDown,
@@ -33,7 +35,8 @@ import {
   useWorkspaceTree,
 } from "@/hooks/useWorkspaces";
 import { ItemPaneHeader } from "./ItemPaneHeader";
-import { filesApi } from "@/api/files";
+import { downloadAuthed, extractError } from "@/components/files/helpers";
+import { toast } from "@/store/toastStore";
 import type {
   BoardColumn,
   BoardField,
@@ -238,6 +241,16 @@ export function WorkspaceBoardPane({
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropCol, setDropCol] = useState<string | null>(null);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
+  // ``?card=<id>`` (from My Work) opens that card on arrival (R-184).
+  const [params, setParams] = useSearchParams();
+  useEffect(() => {
+    const card = params.get("card");
+    if (!card) return;
+    setOpenTaskId(card);
+    params.delete("card");
+    setParams(params, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Set to a card's id right after the "+" creates it so the detail panel
   // can focus + select the placeholder title for immediate renaming.
   const [justCreatedId, setJustCreatedId] = useState<string | null>(null);
@@ -699,6 +712,7 @@ export function WorkspaceBoardPane({
           columns={boardColumns}
           onChange={onColumnsChange}
           onClose={() => setManagingCols(false)}
+          cardCount={(colId) => (tasks ?? []).filter((t) => t.status === colId).length}
         />
       )}
 
@@ -908,17 +922,33 @@ function ColumnsManager({
   columns,
   onChange,
   onClose,
+  cardCount,
 }: {
   columns: BoardColumn[];
   onChange: (cols: BoardColumn[]) => void;
   onClose: () => void;
+  cardCount: (columnId: string) => number;
 }) {
   const [newName, setNewName] = useState("");
   const update = (id: string, patch: Partial<BoardColumn>) =>
     onChange(columns.map((c) => (c.id === id ? { ...c, ...patch } : c)));
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     if (columns.length <= 1) return; // keep at least one column
-    onChange(columns.filter((c) => c.id !== id));
+    const rest = columns.filter((c) => c.id !== id);
+    const n = cardCount(id);
+    if (n > 0) {
+      // Its cards move to the first remaining column (the server does
+      // the move) — say so instead of stranding them (R-201).
+      const col = columns.find((c) => c.id === id);
+      const ok = await confirm({
+        title: `Delete "${col?.name ?? "column"}"?`,
+        message: `Its ${n} card${n === 1 ? "" : "s"} will move to "${rest[0].name}".`,
+        confirmLabel: "Delete column",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    onChange(rest);
   };
   const move = (id: string, dir: -1 | 1) => {
     const i = columns.findIndex((c) => c.id === id);
@@ -962,9 +992,10 @@ function ColumnsManager({
                 <ArrowUpDown className="h-3 w-3 rotate-180" />
               </button>
             </div>
-            <input
+            <DraftInput
               value={c.name}
-              onChange={(e) => update(c.id, { name: e.target.value })}
+              aria-label="Column name"
+              onCommit={(name) => update(c.id, { name: name.trim() || c.name })}
               className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-sm text-[var(--text)] outline-none"
             />
             <label
@@ -978,22 +1009,19 @@ function ColumnsManager({
               />
               Done
             </label>
-            <input
+            <DraftInput
               type="number"
               min={0}
-              value={c.wip ?? ""}
+              value={c.wip != null ? String(c.wip) : ""}
               placeholder="WIP"
-              onChange={(e) =>
-                update(c.id, {
-                  wip: e.target.value ? Number(e.target.value) : null,
-                })
-              }
+              aria-label="Work-in-progress limit"
+              onCommit={(v) => update(c.id, { wip: v ? Number(v) : null })}
               className="w-14 rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-xs text-[var(--text)] outline-none"
             />
             <button
               type="button"
               disabled={columns.length <= 1}
-              onClick={() => remove(c.id)}
+              onClick={() => void remove(c.id)}
               className="rounded p-0.5 text-[var(--text-muted)] hover:text-[var(--danger)] disabled:opacity-30"
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -1215,9 +1243,10 @@ function FieldsManager({
         {fields.map((f) => (
           <div key={f.id} className="space-y-1">
             <div className="flex items-center gap-2">
-              <input
+              <DraftInput
                 value={f.name}
-                onChange={(e) => patch(f.id, { name: e.target.value })}
+                aria-label="Field name"
+                onCommit={(name) => patch(f.id, { name: name.trim() || f.name })}
                 className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--bg)] px-1.5 py-0.5 text-sm text-[var(--text)] outline-none"
               />
               <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--text-muted)]">
@@ -1600,7 +1629,7 @@ function BoardCard({
                     openTaskLink(l as TaskLink, onOpenItem);
                   }}
                   title={isUrl ? l.url ?? l.title : `Open ${l.title}`}
-                  className="inline-flex items-center gap-1.5 text-left text-xs text-[var(--text-muted)] transition hover:text-[var(--accent)]"
+                  className="inline-flex items-center gap-1.5 text-left text-xs text-[var(--text-muted)] transition hover:text-[var(--accent-text)]"
                 >
                   <LinkIcon className="h-3 w-3 shrink-0" />
                   <span className="min-w-0 truncate underline-offset-2 hover:underline">
@@ -1615,21 +1644,24 @@ function BoardCard({
         {full && attachments.length > 0 && (
           <div className="mt-2 flex flex-col gap-0.5 pl-[18px]">
             {attachments.map((a) => (
-              <a
+              <button
+                type="button"
                 key={a.file_id}
-                href={filesApi.downloadUrl(a.file_id)}
-                target="_blank"
-                rel="noreferrer"
                 draggable={false}
-                onClick={(e) => e.stopPropagation()}
-                title={`Open ${a.filename || "file"}`}
-                className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)] transition hover:text-[var(--accent)]"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  downloadAuthed({ id: a.file_id, filename: a.filename || "file" }).catch(
+                    (err) => toast.error(extractError(err))
+                  );
+                }}
+                title={`Download ${a.filename || "file"}`}
+                className="inline-flex items-center gap-1.5 text-left text-xs text-[var(--text-muted)] transition hover:text-[var(--accent-text)]"
               >
                 <Paperclip className="h-3 w-3 shrink-0" />
                 <span className="min-w-0 truncate underline-offset-2 hover:underline">
                   {a.filename || "File"}
                 </span>
-              </a>
+              </button>
             ))}
           </div>
         )}

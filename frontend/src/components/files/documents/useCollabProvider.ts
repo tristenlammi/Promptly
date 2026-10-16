@@ -3,6 +3,9 @@ import { HocuspocusProvider, WebSocketStatus } from "@hocuspocus/provider";
 import * as Y from "yjs";
 
 import { documentsApi, type CollabTokenResponse } from "@/api/documents";
+import { epochWatcher, isResetPing, reloadForRestore } from "@/lib/collabReset";
+import { collabRetryDelay, isFatalCollabError } from "@/lib/editorSync";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /**
  * Subscribes the editor to the Hocuspocus collab room for a
@@ -10,21 +13,18 @@ import { documentsApi, type CollabTokenResponse } from "@/api/documents";
  *
  * Lifecycle:
  *
- *  1. On mount, POST ``GET /api/documents/:id/collab-token`` to
- *     get the short-lived JWT Hocuspocus expects. The token is
- *     stored in a ref so the auto-reconnect path can hand the
- *     provider a fresh one without re-wiring the React tree.
- *  2. Build a Y.Doc + HocuspocusProvider pointed at the
- *     same-origin websocket ``wss://<host>/api/collab/<id>``.
- *     Nginx proxies this to the Node collab service.
- *  3. Schedule a token refresh ~30s before ``expires_at`` so an
- *     active edit session never disconnects.
- *  4. On unmount, destroy the provider + Y.Doc so the socket
- *     closes cleanly and the browser can GC the CRDT.
- *
- * Returns the Y.Doc, provider instance, current connection
- * status, and the authenticated user info (name + colour) the
- * CollaborationCursor extension needs.
+ *  1. Build a Y.Doc + HocuspocusProvider pointed at the same-origin
+ *     websocket ``wss://<host>/api/collab/<id>`` (nginx proxies it to the
+ *     Node collab service). The provider's ``token`` is a *function*: it
+ *     fetches a fresh short-lived JWT whenever it connects, reconnects or
+ *     the server asks for one before the old one expires — there's no
+ *     refresh timer to fail.
+ *  2. A failed token fetch or a rejected reconnect is transient — a
+ *     backend restart during a deploy, a laptop waking up — so it's
+ *     retried with backoff while the editor stays mounted, and only a
+ *     confirmed 403 / 404 ("you can't open this") is final (R-221).
+ *  3. On unmount, destroy the provider + Y.Doc so the socket closes
+ *     cleanly and the browser can GC the CRDT.
  */
 export type CollabStatus = "connecting" | "connected" | "disconnected";
 
@@ -33,8 +33,20 @@ export interface UseCollabProviderResult {
   provider: HocuspocusProvider | null;
   status: CollabStatus;
   user: CollabTokenResponse["user"] | null;
-  /** Error from the initial token fetch, if any. */
+  /** Final: you can't open this document (403 / 404). The editor shows an
+   *  error card only for this. */
   error: string | null;
+  /** Transient trouble (retrying) — shown as a banner over a live editor. */
+  warning: string | null;
+  /** Server's edit permission from the token; ``null`` until known. */
+  canEdit: boolean | null;
+  /** True once the server's copy has been received. Until then the local
+   *  Y.Doc is empty — nothing may be typed into it or saved from it. */
+  synced: boolean;
+  /** Local changes the server hasn't acknowledged yet (R-224). */
+  unsynced: number;
+  /** The edit generation this editor loaded (WP-6.2); null until known. */
+  epoch: number | null;
 }
 
 /**
@@ -50,15 +62,23 @@ function collabWebsocketUrl(documentId: string): string {
   return `${proto}://${window.location.host}/api/collab/${documentId}`;
 }
 
+const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+
 export function useCollabProvider(documentId: string): UseCollabProviderResult {
   const [status, setStatus] = useState<CollabStatus>("connecting");
   const [user, setUser] = useState<CollabTokenResponse["user"] | null>(null);
+  // ``null`` until the first token arrives — callers treat unknown as
+  // read-only so nobody types before their permission is known.
+  const [canEdit, setCanEdit] = useState<boolean | null>(null);
+  const [synced, setSynced] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [unsynced, setUnsynced] = useState(0);
+  const [provider, setProvider] = useState<HocuspocusProvider | null>(null);
 
   const ydocRef = useRef<Y.Doc | null>(null);
-  const providerRef = useRef<HocuspocusProvider | null>(null);
-  const tokenRef = useRef<string | null>(null);
-  const refreshTimerRef = useRef<number | null>(null);
+  // The edit generation this editor loaded (WP-6.2) — a Save sends it.
+  const epochRef = useRef(epochWatcher());
 
   // Freshly minted Y.Doc + provider per ``documentId``. Swapping
   // between docs tears the old session down cleanly so two
@@ -69,89 +89,103 @@ export function useCollabProvider(documentId: string): UseCollabProviderResult {
 
   useEffect(() => {
     let cancelled = false;
+    let current: HocuspocusProvider | null = null;
+    let reconnectTimer: number | null = null;
+    let authFailures = 0;
 
-    const clearRefreshTimer = () => {
-      if (refreshTimerRef.current !== null) {
-        window.clearTimeout(refreshTimerRef.current);
-        refreshTimerRef.current = null;
-      }
-    };
-
-    const scheduleRefresh = (expiresAt: number) => {
-      clearRefreshTimer();
-      // Refresh 30s before expiry, but never less than 15s from now
-      // (so a clock skew of a few seconds doesn't flap the connection).
-      const now = Math.floor(Date.now() / 1000);
-      const delaySec = Math.max(15, expiresAt - now - 30);
-      refreshTimerRef.current = window.setTimeout(() => {
-        void refreshToken();
-      }, delaySec * 1000);
-    };
-
-    const refreshToken = async () => {
-      try {
-        const response = await documentsApi.getCollabToken(documentId);
-        if (cancelled) return;
-        tokenRef.current = response.token;
-        setUser(response.user);
-        if (providerRef.current) {
-          // HocuspocusProvider re-reads its token from the options
-          // object on reconnect. We both update the object and
-          // trigger a reconnect so the new token takes effect
-          // immediately.
-          (providerRef.current as unknown as { configuration: { token?: string } }).configuration.token =
-            response.token;
-        }
-        scheduleRefresh(response.expires_at);
-      } catch (e) {
-        if (!cancelled) {
-          const msg =
-            e instanceof Error ? e.message : "Failed to refresh collab token";
-          setError(msg);
+    /** A fresh token, retried through transient failures. Throws only
+     *  when the document is out of reach (or the hook unmounted). */
+    const fetchToken = async (): Promise<string> => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const response = await documentsApi.getCollabToken(documentId);
+          // Restored since this editor loaded → reload, don't merge.
+          epochRef.current.seen(response.epoch);
+          if (cancelled) throw new Error("closed");
+          setUser(response.user);
+          setCanEdit(response.can_edit ?? false);
+          setWarning(null);
+          return response.token;
+        } catch (e) {
+          if (cancelled) throw e;
+          if (isFatalCollabError(e)) {
+            setError(apiErrorMessage(e, "You can't open this document."));
+            throw e;
+          }
+          setWarning(
+            `Reconnecting to live editing… (${apiErrorMessage(e, "connection lost")}) Your edits are kept in this tab.`
+          );
+          await sleep(collabRetryDelay(attempt));
         }
       }
     };
 
     (async () => {
       try {
-        const response = await documentsApi.getCollabToken(documentId);
-        if (cancelled) return;
-        tokenRef.current = response.token;
-        setUser(response.user);
-        scheduleRefresh(response.expires_at);
-
-        const provider = new HocuspocusProvider({
+        // Fetch once up front so a document you can't open fails here,
+        // before a socket is opened.
+        const first = await fetchToken();
+        let handedFirst = false;
+        const p = new HocuspocusProvider({
           url: collabWebsocketUrl(documentId),
           name: documentId,
           document: ydocRef.current!,
-          token: response.token,
+          token: async () => {
+            if (!handedFirst) {
+              handedFirst = true;
+              return first;
+            }
+            return fetchToken();
+          },
+          onSynced: ({ state }) => {
+            if (!cancelled && state) setSynced(true);
+          },
+          onStateless: ({ payload }) => {
+            if (isResetPing(payload)) reloadForRestore();
+          },
           onStatus: ({ status: s }) => {
             if (cancelled) return;
             if (s === WebSocketStatus.Connected) setStatus("connected");
             else if (s === WebSocketStatus.Connecting) setStatus("connecting");
             else setStatus("disconnected");
           },
-          onAuthenticationFailed: ({ reason }) => {
+          onAuthenticated: () => {
+            authFailures = 0;
+            if (!cancelled) setWarning(null);
+          },
+          onUnsyncedChanges: ({ number }) => {
+            if (!cancelled) setUnsynced(number);
+          },
+          onAuthenticationFailed: () => {
             if (cancelled) return;
-            setError(reason || "Collaboration session rejected");
+            // Usually a token that expired while the socket was away. Try
+            // again with a fresh one; keep the editor and its edits.
+            setWarning("Reconnecting to live editing… Your edits are kept in this tab.");
+            const delay = collabRetryDelay(authFailures++);
+            if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+            reconnectTimer = window.setTimeout(() => {
+              if (cancelled || !current) return;
+              current.disconnect();
+              void current.connect();
+            }, delay);
           },
         });
-        providerRef.current = provider;
-      } catch (e) {
-        if (!cancelled) {
-          const msg =
-            e instanceof Error ? e.message : "Failed to start collaboration";
-          setError(msg);
-          setStatus("disconnected");
+        if (cancelled) {
+          p.destroy();
+          return;
         }
+        current = p;
+        setProvider(p);
+      } catch {
+        if (!cancelled) setStatus("disconnected");
       }
     })();
 
     return () => {
       cancelled = true;
-      clearRefreshTimer();
-      providerRef.current?.destroy();
-      providerRef.current = null;
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      current?.destroy();
+      setProvider(null);
       ydocRef.current?.destroy();
       ydocRef.current = null;
     };
@@ -163,9 +197,15 @@ export function useCollabProvider(documentId: string): UseCollabProviderResult {
 
   return {
     ydoc: ydocRef.current,
-    provider: providerRef.current,
+    provider,
     status,
     user,
     error,
+    warning,
+    canEdit,
+    synced,
+    unsynced,
+    /** The edit generation this editor loaded (null until known). */
+    epoch: epochRef.current.loaded,
   };
 }

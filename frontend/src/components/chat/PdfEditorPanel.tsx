@@ -107,6 +107,8 @@ function PdfEditorPanelInner({ attachment, onClose }: InnerProps) {
   // The editor instance is created once on mount; the doc itself is
   // swapped in via ``setContent`` once the source has loaded.
   const editor = useEditor({
+    // Keep v2's re-render on every transaction (the toolbar reads it).
+    shouldRerenderOnTransaction: true,
     extensions: [
       StarterKit.configure({
         // Pull the heading levels the assistant actually uses in
@@ -172,7 +174,7 @@ function PdfEditorPanelInner({ attachment, onClose }: InnerProps) {
   // the editor so the toolbar stays mounted (which helps focus/IME).
   useEffect(() => {
     if (!editor || loadState !== "ready" || source === null) return;
-    editor.commands.setContent(source.content || "", false);
+    editor.commands.setContent(source.content || "", { emitUpdate: false });
     // Auto-focus the editor body once content is in. Place the caret
     // at the end so the user can immediately start typing without
     // first having to click into the panel. Wrapped in a microtask so
@@ -226,7 +228,7 @@ function PdfEditorPanelInner({ attachment, onClose }: InnerProps) {
       );
       if (!ok) return;
     }
-    editor.commands.setContent(savedMarkdown, false);
+    editor.commands.setContent(savedMarkdown, { emitUpdate: false });
     setIsDirty(false);
   }, [editor, source, isDirty, savedMarkdown]);
 
@@ -541,7 +543,7 @@ function PreviewHeader({
       <div
         className={cn(
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
-          "bg-[var(--accent)]/15 text-[var(--accent)]"
+          "bg-[var(--accent)]/15 text-[var(--accent-text)]"
         )}
       >
         <FileText className="h-5 w-5" />
@@ -663,7 +665,7 @@ function Header({
       <div
         className={cn(
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg",
-          "bg-[var(--accent)]/15 text-[var(--accent)]"
+          "bg-[var(--accent)]/15 text-[var(--accent-text)]"
         )}
       >
         <FileText className="h-5 w-5" />
@@ -788,7 +790,7 @@ function Toolbar({ editor }: { editor: Editor }) {
         "inline-flex h-8 w-8 items-center justify-center rounded-md text-sm transition",
         "disabled:cursor-not-allowed disabled:opacity-40",
         active
-          ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+          ? "bg-[var(--accent)]/15 text-[var(--accent-text)]"
           : "text-[var(--text-muted)] hover:bg-black/[0.05] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
       )}
     >

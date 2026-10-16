@@ -16,7 +16,10 @@ export type AuthStatus =
   // ``mfa_required`` setting is on and they have no method enrolled
   // yet. They get walked through the enrollment wizard before being
   // granted real session tokens.
-  | "mfa_enrollment_required";
+  | "mfa_enrollment_required"
+  // The server didn't answer (restarting for an update, network down).
+  // Not a reason to show the login page: the session may be fine.
+  | "reconnecting";
 
 /** State carried between the password step and the second-factor step.
  *

@@ -5,6 +5,7 @@ import {
   type AppSettingsPatch,
   type AuthEventsQuery,
   type CreateUserPayload,
+  type DeleteUserPayload,
   type ResetPasswordPayload,
   type UpdateUserPayload,
 } from "@/api/admin";
@@ -84,7 +85,8 @@ export function useUpdateAdminUser() {
 export function useDeleteAdminUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => adminApi.deleteUser(id),
+    mutationFn: (args: { id: string; payload: DeleteUserPayload }) =>
+      adminApi.deleteUser(args.id, args.payload),
     onSuccess: () => invalidateUserViews(qc),
   });
 }
@@ -110,6 +112,14 @@ export function useEnableUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => adminApi.enableUser(id),
+    onSuccess: () => invalidateUserViews(qc),
+  });
+}
+
+export function useResetUserMfa() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => adminApi.resetMfa(id),
     onSuccess: () => invalidateUserViews(qc),
   });
 }

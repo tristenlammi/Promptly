@@ -37,11 +37,12 @@ from app.chat.models import Conversation, Message
 # Shared helpers
 # ---------------------------------------------------------------------
 
-EXPORT_SCHEMA_VERSION = 1
-"""Bumped whenever the JSON payload shape changes in a
-   backward-incompatible way. The import endpoint uses it to pick a
-   parser; older exports keep working because we only ever add fields
-   in minor revisions of the same major version."""
+EXPORT_SCHEMA_VERSION = 2
+"""Bumped whenever the JSON payload shape changes. v2 (R-307) adds the
+   message tree — ``parent_id`` per message and the conversation's
+   ``active_leaf_message_id`` — plus ``model_id`` / ``reasoning_content`` /
+   ``tool_calls``. The importer reads both: a v1 file (no ``parent_id``)
+   imports as a straight line, as before."""
 
 
 def _iso(dt: datetime | None) -> str | None:
@@ -102,13 +103,20 @@ def render_conversation_markdown(
 
         ---
 
+        <!-- promptly:message role=user -->
         ## User
 
         <content>
 
+        <!-- promptly:message role=assistant -->
         ## Assistant
 
         <content>
+
+    ``messages`` should be the visible thread (``versioning.active_path``),
+    not every regeneration. The HTML-comment marker before each heading is
+    invisible in a Markdown viewer and lets the importer split exactly
+    there, even when a message itself contains "## User" (R-325).
 
     Attachments produce a compact chip line below the message so the
     export is still useful when the original files are long gone. We
@@ -137,6 +145,7 @@ def render_conversation_markdown(
             # personal-context / tool preambles. They're still in the
             # JSON export for fidelity.
             continue
+        lines.append(f"<!-- promptly:message role={msg.role} -->")
         lines.append(f"## {_role_label(msg.role)}")
         lines.append("")
         body = _strip_thinking(msg.content or "").rstrip()
@@ -207,6 +216,7 @@ def render_conversation_json(
           "messages": [
             {
               "id": "<uuid>",
+              "parent_id": "<uuid>" | null,
               "role": "user" | "assistant" | "system",
               "content": "...",
               "created_at": "<iso>",
@@ -241,13 +251,22 @@ def render_conversation_json(
             "starred": bool(getattr(conv, "starred", False)),
             "temporary_mode": getattr(conv, "temporary_mode", None),
             "expires_at": _iso(getattr(conv, "expires_at", None)),
+            "active_leaf_message_id": (
+                str(conv.active_leaf_message_id)
+                if getattr(conv, "active_leaf_message_id", None)
+                else None
+            ),
         },
         "messages": [
             {
                 "id": str(m.id),
+                "parent_id": str(m.parent_id) if m.parent_id else None,
                 "role": m.role,
                 "content": m.content,
                 "created_at": _iso(m.created_at),
+                "model_id": m.model_id,
+                "reasoning_content": m.reasoning_content,
+                "tool_calls": m.tool_calls,
                 "sources": m.sources,
                 "attachments": m.attachments,
                 "prompt_tokens": m.prompt_tokens,
@@ -259,6 +278,20 @@ def render_conversation_json(
             for m in messages
         ],
     }
+
+
+def render_conversations_bundle_bytes(
+    items: list[tuple[Conversation, list[Message]]],
+) -> bytes:
+    """Every conversation in one ``promptly.conversations`` file — the
+    "Export all" download (R-310). The importer reads it back."""
+    payload = {
+        "schema_version": EXPORT_SCHEMA_VERSION,
+        "format": "promptly.conversations",
+        "exported_at": _iso(datetime.now(timezone.utc)),
+        "conversations": [render_conversation_json(c, ms) for c, ms in items],
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8")
 
 
 def render_conversation_json_bytes(
@@ -296,7 +329,11 @@ def render_conversation_pdf(
     """
     from app.chat.pdf_render import render_markdown_to_pdf
 
-    md = render_conversation_markdown(conv, messages)
+    from app.chat.versioning import active_path
+
+    md = render_conversation_markdown(
+        conv, active_path(messages, getattr(conv, "active_leaf_message_id", None))
+    )
     title = (
         conv.title.strip() if conv.title and conv.title.strip() else "Conversation"
     )

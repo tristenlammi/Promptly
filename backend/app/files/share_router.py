@@ -31,6 +31,8 @@ would bring origin + SameSite complexity we don't need.
 """
 from __future__ import annotations
 
+import asyncio
+
 import logging
 import urllib.parse
 import uuid
@@ -46,14 +48,16 @@ from fastapi import (
     status,
 )
 from fastapi.responses import FileResponse as FastAPIFileResponse
+from fastapi.responses import Response
 from jose import JWTError, jwt
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
-from app.auth.utils import JWT_ALGORITHM, verify_password
+from app.auth.utils import JWT_ALGORITHM, averify_password
 from app.config import get_settings
 from app.database import get_db
+from app.files.generated_kinds import GeneratedKind
 from app.rate_limit import RateLimitShareUnlock
 from app.files.models import (
     FileFolder,
@@ -70,6 +74,7 @@ from app.files.schemas import (
     ShareLinkUnlockRequest,
     ShareLinkUnlockResponse,
 )
+from app.files.office import is_shell
 from app.files.storage import absolute_path
 
 logger = logging.getLogger("promptly.files.share")
@@ -186,7 +191,7 @@ async def _resolve_authed_user(
     except (ValueError, KeyError):
         return None
     user = await db.get(User, user_id)
-    if user is None or user.disabled or user.is_locked:
+    if user is None or user.disabled:
         return None
     token_tv = payload.get("tv", 0)
     if int(token_tv) != int(user.token_version):
@@ -305,6 +310,7 @@ async def get_share_meta(
     # authed — the landing page uses it to decide whether to show the
     # "you're viewing as X" chip.
     requires_auth = link.access_mode == "invite"
+    authed: User | None = None
 
     # Gate check, but tolerate the case where the landing page is
     # calling this endpoint *before* it has a password — we still
@@ -351,6 +357,14 @@ async def get_share_meta(
             created_at=link.created_at,
         )
 
+    # A comment / edit link (WP-6.6), opened signed in and unlocked: the
+    # visitor gets its role, and the landing page sends them to the editor.
+    open_path: str | None = None
+    if authed is not None and (link.role or "view") != "view":
+        from app.files.link_roles import claim_link
+
+        open_path = await claim_link(db, link, authed)
+
     # Fully unlocked — return the real filename/size/mime so the
     # landing page can render a preview.
     filename: str | None = None
@@ -366,6 +380,13 @@ async def get_share_meta(
         folder = await db.get(FileFolder, link.resource_id)
         if folder is not None and folder.trashed_at is None:
             filename = folder.name
+    elif link.resource_type == "album":
+        # A photo album (WP-9.5): its gallery is /api/s/{token}/album.
+        from app.photos.album_models import Album
+
+        album = await db.get(Album, link.resource_id)
+        if album is not None:
+            filename = album.title
 
     return ShareLinkMetaResponse(
         resource_type=link.resource_type,  # type: ignore[arg-type]
@@ -378,7 +399,13 @@ async def get_share_meta(
         filename=filename,
         mime_type=mime_type,
         size_bytes=size_bytes,
+        role=(link.role or "view"),  # type: ignore[arg-type]
+        open_path=open_path,
     )
+
+
+_UNLOCK_MAX_FAILURES = 10
+_UNLOCK_WINDOW_S = 15 * 60
 
 
 @router.post("/{token}/unlock", response_model=ShareLinkUnlockResponse)
@@ -396,7 +423,28 @@ async def unlock_share(
         # frontend shouldn't care.
         return ShareLinkUnlockResponse(unlock_token=_mint_unlock_token(link.id))
 
-    if not verify_password(payload.password, link.password_hash):
+    # Per-link cap: the per-IP rate limit was the only brake on guessing a
+    # link's password, and the client IP was spoofable (R-014). A link that
+    # takes this many wrong passwords pauses for the window, wherever the
+    # guesses come from.
+    from app.redis_client import redis
+
+    fail_key = f"share_unlock_fail:{link.id}"
+    try:
+        failures = int(await redis.get(fail_key) or 0)
+    except Exception:  # noqa: BLE001 — Redis down: rely on the per-IP limit
+        failures = 0
+    if failures >= _UNLOCK_MAX_FAILURES:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many wrong passwords for this link. Try again in 15 minutes.",
+        )
+    if not await averify_password(payload.password, link.password_hash):
+        try:
+            if int(await redis.incr(fail_key)) == 1:
+                await redis.expire(fail_key, _UNLOCK_WINDOW_S)
+        except Exception:  # noqa: BLE001
+            pass
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Password is incorrect",
@@ -412,6 +460,24 @@ def _share_content_disposition(filename: str) -> str:
     fallback = fallback.replace('"', "_").replace("\\", "_")
     encoded = urllib.parse.quote(filename, safe="")
     return f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{encoded}'
+
+
+async def _egress_path(link: FileShareLink, file: UserFile):
+    """What a share link serves: the original, or — for a photo, unless the
+    link keeps location — a copy with its metadata removed (D13). Refuses
+    rather than leak if the copy can't be made."""
+    from app.files import egress
+
+    path = absolute_path(file.storage_path)
+    if link.keep_location or file.mime_type not in egress.STRIPPABLE_MIMES:
+        return path
+    out = await asyncio.to_thread(egress.public_copy, file.storage_path, file.mime_type)
+    if out is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="This photo couldn't be prepared for sharing right now. Try again shortly.",
+        )
+    return out
 
 
 @router.get("/{token}/download")
@@ -435,6 +501,12 @@ async def download_share(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Linked file no longer exists",
         )
+    if is_shell(file):
+        await _bump_access(db, link)
+        return await _shell_download(db, file)
+    if file.source_kind == GeneratedKind.DOCUMENT.value:
+        await _bump_access(db, link)
+        return await _document_download(file)
     path = absolute_path(file.storage_path)
     if not path.exists():
         raise HTTPException(
@@ -442,6 +514,7 @@ async def download_share(
             detail="File data missing on disk",
         )
     await _bump_access(db, link)
+    path = await _egress_path(link, file)
     return FastAPIFileResponse(
         path=str(path),
         media_type="application/octet-stream",
@@ -585,6 +658,12 @@ async def browse_share(
                 .where(
                     UserFile.folder_id == target.id,
                     UserFile.trashed_at.is_(None),
+                    # A document's inline images are part of the document,
+                    # not loose files in the folder (R-027).
+                    or_(
+                        UserFile.source_kind.is_(None),
+                        UserFile.source_kind != GeneratedKind.DOCUMENT_ASSET.value,
+                    ),
                 )
                 .order_by(UserFile.filename.asc())
             )
@@ -629,6 +708,12 @@ async def download_share_file(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="File not found"
         )
+    if is_shell(file):
+        await _bump_access(db, link)
+        return await _shell_download(db, file)
+    if file.source_kind == GeneratedKind.DOCUMENT.value:
+        await _bump_access(db, link)
+        return await _document_download(file)
     path = absolute_path(file.storage_path)
     if not path.exists():
         raise HTTPException(
@@ -636,6 +721,7 @@ async def download_share_file(
             detail="File data missing on disk",
         )
     await _bump_access(db, link)
+    path = await _egress_path(link, file)
     return FastAPIFileResponse(
         path=str(path),
         media_type="application/octet-stream",
@@ -646,6 +732,116 @@ async def download_share_file(
             "Cross-Origin-Resource-Policy": "cross-origin",
         },
     )
+
+
+# --------------------------------------------------------------------
+# Sheets and whiteboards behind a link (WP-3.4) — no blob of their own
+# --------------------------------------------------------------------
+async def _document_download(file: UserFile) -> Response:
+    """A shared document's HTML with its pictures re-signed for this visit
+    (WP-4.6, R-228): the document stores only asset *paths*; a guest gets
+    links that work for a few hours, never a permanent credential."""
+    from app.files.doc_assets import sign_in_html
+
+    path = absolute_path(file.storage_path)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File data missing on disk")
+    html_text = await asyncio.to_thread(path.read_text, encoding="utf-8")
+    return Response(
+        content=sign_in_html(html_text, file.id).encode("utf-8"),
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": _share_content_disposition(file.filename),
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+        },
+    )
+
+
+async def _shell_download(db: AsyncSession, file: UserFile) -> Response:
+    from app.files.office import content_for_shell, export_for_download
+
+    entity = await content_for_shell(db, file)
+    if entity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked file no longer exists")
+    data, filename, _mime = await asyncio.to_thread(export_for_download, file, entity)
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": _share_content_disposition(filename),
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+            "Cross-Origin-Resource-Policy": "cross-origin",
+        },
+    )
+
+
+async def _office_view(db: AsyncSession, file: UserFile) -> dict:
+    """What the landing page renders read-only: a sheet's workbook or a
+    whiteboard's scene."""
+    import json
+
+    from app.files.office import content_for_shell
+    from app.files.office_templates import office_title
+    from app.workspaces.export_router import canvas_scene_json
+
+    entity = await content_for_shell(db, file) if is_shell(file) else None
+    if entity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nothing to show")
+    if file.source_kind == GeneratedKind.SHEET.value:
+        return {"kind": "sheet", "title": office_title(file), "data": entity.data or []}
+    scene = await asyncio.to_thread(canvas_scene_json, entity.yjs_update or b"")
+    return {
+        "kind": "whiteboard",
+        "title": office_title(file),
+        "scene": json.loads(scene) if scene else {"elements": [], "files": {}},
+    }
+
+
+@router.get("/{token}/office")
+async def view_share_office(
+    token: str,
+    request: Request,
+    x_share_unlock: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """A shared sheet or whiteboard, read-only."""
+    link = await _load_live_link(db, token)
+    if link.resource_type != "file":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a file link")
+    await _gate_link(request, db, link, unlock_header=x_share_unlock)
+    file = await db.get(UserFile, link.resource_id)
+    if file is None or file.trashed_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked file no longer exists")
+    out = await _office_view(db, file)
+    await _bump_access(db, link)
+    return out
+
+
+@router.get("/{token}/file/{file_id}/office")
+async def view_share_folder_office(
+    token: str,
+    file_id: uuid.UUID,
+    request: Request,
+    x_share_unlock: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """A sheet or whiteboard inside a shared folder, read-only."""
+    link = await _load_live_link(db, token)
+    if link.resource_type != "folder":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not a folder link")
+    await _gate_link(request, db, link, unlock_header=x_share_unlock)
+    file = await db.get(UserFile, file_id)
+    if (
+        file is None
+        or file.trashed_at is not None
+        or file.folder_id is None
+        or not await _ancestors_contain(db, file.folder_id, link.resource_id)
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    return await _office_view(db, file)
 
 
 __all__ = ["router"]

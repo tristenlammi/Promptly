@@ -567,12 +567,19 @@ async def test_a_connector_can_speak_sse(db):
     assert row.transport == "sse"
 
 
-def test_home_assistant_is_reachable_on_a_lan_address():
+def test_home_assistant_is_reachable_on_a_lan_address(monkeypatch):
     """HA lives at 192.168.x.x or homeassistant.local. The SSRF guard
     deliberately allows private addresses (self-hosted model servers need
     it too) and blocks only cloud metadata endpoints — worth pinning,
     because tightening it later would silently break every home setup."""
+    import ipaddress
+
+    from app.net import safe_fetch
     from app.net.safe_fetch import assert_provider_url_safe
+
+    # ``.local`` is mDNS, which a test container can't resolve — answer as
+    # the LAN would, so this pins the policy rather than the network.
+    monkeypatch.setattr(safe_fetch, "_resolve_all", lambda host: [ipaddress.ip_address("192.168.1.50")])
 
     assert_provider_url_safe("http://homeassistant.local:8123/mcp_server/sse")
     assert_provider_url_safe("http://192.168.1.50:8123/mcp_server/sse")
@@ -1100,6 +1107,9 @@ async def test_fixed_arguments_are_sent_and_slots_win(db, user):
         user,
         name="Kitchen lamp off",
         action_type="prompt",
+        # The slot must be declared by a phrase to be overridable — slots
+        # nothing declares are dropped (see the R-031 tests below).
+        phrases=["turn off the {name}"],
         body="off: {name}",
         action_args={"name": "Kitchen Lamp"},
     )
@@ -1395,3 +1405,233 @@ async def test_an_unshared_command_stays_invisible(db, user):
     command, _ = await resolve(db, user.id, "private thing")
 
     assert command is None
+
+
+# ----------------------------------------- connector policy (R-031)
+#
+# Running a command used to check only that its connector existed and was
+# on — never the runner's own access, the tool allow-list, or the
+# destructive-tool block. So a shared command lent everyone its author's
+# connector access. These pin the one shared decision function.
+
+
+async def _connector(db, **kw):
+    from app.mcp.models import McpConnector
+
+    c = McpConnector(
+        name=kw.pop("name", "Home"), slug=f"home{uuid.uuid4().hex[:6]}",
+        kind="mcp", url="http://stub.invalid", enabled=True,
+        tool_catalog=kw.pop("tool_catalog", [
+            {"name": "lights_off", "annotations": {}},
+            {"name": "unlock_door", "annotations": {"destructiveHint": True}},
+        ]),
+        **kw,
+    )
+    db.add(c)
+    await db.commit()
+    await db.refresh(c)
+    return c
+
+
+async def _stranger(db):
+    from app.auth.models import User
+
+    u = User(
+        email=f"s-{uuid.uuid4().hex[:8]}@example.com",
+        username=f"s-{uuid.uuid4().hex[:8]}", password_hash="x", role="user",
+    )
+    db.add(u)
+    await db.commit()
+    await db.refresh(u)
+    return u
+
+
+async def test_a_shared_command_does_not_lend_its_authors_connector_access(db, user):
+    """The author is granted a restricted connector; the runner is not."""
+    from app.mcp.models import ConnectorUser
+
+    c = await _connector(db, availability="restricted")
+    db.add(ConnectorUser(connector_id=c.id, user_id=user.id))
+    await db.commit()
+    row = await _cmd(db, user, action_type="mcp_tool",
+                     action_ref=f"{c.id}:lights_off", shared=True)
+    stranger = await _stranger(db)
+
+    await assert_runnable(db, row, user)  # the author may
+    with pytest.raises(CommandError) as exc:
+        await assert_runnable(db, row, stranger)
+    assert "isn't available" in str(exc.value)
+
+
+async def test_a_tool_outside_the_allow_list_is_refused(db, user):
+    c = await _connector(db, allowed_tools=["something_else"])
+    row = await _cmd(db, user, action_type="mcp_tool", action_ref=f"{c.id}:lights_off")
+
+    with pytest.raises(CommandError) as exc:
+        await assert_runnable(db, row, user)
+    assert "switched off on" in str(exc.value)
+
+
+async def test_a_tool_the_connector_doesnt_offer_is_refused(db, user):
+    c = await _connector(db)
+    row = await _cmd(db, user, action_type="mcp_tool", action_ref=f"{c.id}:rm_rf")
+
+    with pytest.raises(CommandError):
+        await assert_runnable(db, row, user)
+
+
+async def test_destructive_tools_need_ask_before_running(db, user):
+    c = await _connector(db)
+    plain = await _cmd(db, user, action_type="mcp_tool",
+                       action_ref=f"{c.id}:unlock_door")
+    guarded = await _cmd(db, user, action_type="mcp_tool",
+                         action_ref=f"{c.id}:unlock_door", confirm_before_run=True)
+
+    with pytest.raises(CommandError):
+        await assert_runnable(db, plain, user)
+    await assert_runnable(db, guarded, user)  # does not raise
+
+
+async def test_only_declared_slots_can_override_fixed_arguments(db, user):
+    """A caller can't inject arguments the command's phrases don't declare."""
+    row = await _cmd(
+        db, user, phrases=["greet {who}"],
+        body="Hello {who}, from {sender}", action_args={"sender": "Mum"},
+    )
+
+    result = await execute(db, row, user, slots={"who": "Sam", "sender": "attacker"})
+
+    assert result["text"] == "Hello Sam, from Mum"
+
+
+async def test_someone_elses_shared_command_hides_its_target(db, user):
+    from app.commands.router import _as_responses
+
+    c = await _connector(db)
+    row = await _cmd(db, user, action_type="mcp_tool",
+                     action_ref=f"{c.id}:lights_off",
+                     action_args={"name": "Kitchen lamp"}, shared=True)
+    stranger = await _stranger(db)
+
+    [mine] = await _as_responses(db, [row], user)
+    [theirs] = await _as_responses(db, [row], stranger)
+
+    assert mine.action_ref is not None
+    assert theirs.action_ref is None and theirs.action_args == {}
+
+
+# ------------------------------------------------------------ slot values (R-162)
+
+
+@pytest.mark.parametrize(
+    ("said", "phrase", "expected"),
+    [
+        ("set the thermostat to 21.5", "set the thermostat to {temp}", "21.5"),
+        ("call O'Brien's phone", "call {name} phone", "O'Brien's"),
+        ("play Café del Mar", "play {album}", "Café del Mar"),
+        ("set the timer for twenty five minutes", "set the timer for {n} minutes", "25"),
+        ("Hey Promptly, turn off the Garage lights please.", "turn off the {room} lights", "Garage"),
+    ],
+)
+def test_slot_values_are_what_was_said(said, phrase, expected):
+    result = match(said, _cands((1, [phrase])))
+    assert result is not None
+    assert list(result.slots.values()) == [expected]
+
+
+# ------------------------------------------------------------ history (R-163, R-196)
+
+
+async def _other_user(db):
+    from app.auth.models import User
+
+    other = User(
+        email=f"other-{uuid.uuid4().hex[:8]}@example.com",
+        username=f"other-{uuid.uuid4().hex[:8]}",
+        password_hash="x",
+        role="user",
+    )
+    db.add(other)
+    await db.commit()
+    await db.refresh(other)
+    return other
+
+
+async def test_your_own_command_beats_a_shared_one_with_the_same_phrase(db, user):
+    """A shared command claiming your phrase used to switch yours off too."""
+    other = await _other_user(db)
+    await _cmd(db, other, name="Theirs", phrases=["lights off"], shared=True)
+    mine = await _cmd(db, user, name="Mine", phrases=["lights off"])
+
+    command, _ = await resolve(db, user.id, "lights off")
+
+    assert command is not None and command.id == mine.id
+
+
+async def test_two_of_your_own_still_tie(db, user):
+    await _cmd(db, user, name="One", phrases=["lights off"])
+    await _cmd(db, user, name="Two", phrases=["lights off"])
+
+    command, _ = await resolve(db, user.id, "lights off")
+
+    assert command is None
+
+
+async def test_an_ambiguous_utterance_says_why_in_history(db, user):
+    from app.commands.service import explain_miss
+
+    await _cmd(db, user, name="One", phrases=["lights off"])
+    await _cmd(db, user, name="Two", phrases=["lights off"])
+
+    name, reason = await explain_miss(db, user.id, "lights off")
+
+    assert "“One”" in reason and "“Two”" in reason
+
+
+async def test_a_satellite_run_is_in_history(db, user, monkeypatch):
+    """Wyoming runs were never logged — the one place "did it fire?" was
+    unanswerable."""
+    from sqlalchemy import select
+
+    import app.wyoming_bridge.service as wy
+    from app.commands.models import CommandRun
+
+    row = await _cmd(db, user, name="Porch light", phrases=["porch light on"],
+                     action_type="prompt", body="hi", response_template="Porch light on.")
+
+    async def _ok(db, command, user, slots=None):
+        return {"kind": "prompt", "text": "hi"}
+
+    monkeypatch.setattr(wy, "execute", _ok)
+    spoken = await wy.answer(db, user, "porch light on")
+
+    runs = (await db.execute(select(CommandRun).where(CommandRun.user_id == user.id))).scalars().all()
+    assert spoken.text == "Porch light on."
+    assert [(r.command_name, r.source, r.ok) for r in runs] == [("Porch light", "wyoming", True)]
+
+
+# ------------------------------------------------------------ HA devices (R-164)
+
+
+def test_arguments_are_sent_as_the_type_the_tool_declares():
+    from app.commands.service import coerce_args
+
+    schema = {"properties": {
+        "brightness": {"type": "integer"},
+        "volume": {"type": "number"},
+        "on": {"type": ["boolean", "null"]},
+        "name": {"type": "string"},
+    }}
+    out = coerce_args({"brightness": "50", "volume": "0.5", "on": "yes", "name": "21"}, schema)
+    assert out == {"brightness": 50, "volume": 0.5, "on": True, "name": "21"}
+
+
+def test_same_named_devices_in_different_rooms_are_both_listed():
+    from app.commands.devices import _dedupe, _entry
+
+    found = _dedupe([
+        _entry("Light", "light", "Kitchen"),
+        _entry("Light", "light", "Bedroom"),
+        _entry("Light", "light", "Kitchen"),
+    ])
+    assert sorted(d["area"] for d in found) == ["Bedroom", "Kitchen"]

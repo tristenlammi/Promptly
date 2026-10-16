@@ -78,6 +78,7 @@ from app.workspaces.schemas import (
     WorkspaceUsage,
     WorkspaceUsageModel,
 )
+from app.workspaces.visibility import conversation_visible_to
 from app.workspaces.shares import (
     get_accessible_workspace,
     is_owner_of_workspace,
@@ -124,6 +125,38 @@ async def _get_owned_workspace(
     return await is_owner_of_workspace(workspace_id, user, db)
 
 
+async def _get_owned_workspace_any(
+    workspace_id: uuid.UUID, user: User, db: AsyncSession
+) -> Workspace:
+    """Like :func:`_get_owned_workspace`, but a trashed workspace counts —
+    for delete / restore."""
+    return await is_owner_of_workspace(workspace_id, user, db, allow_trashed=True)
+
+
+WORKSPACE_TRASH_DAYS = 30
+
+
+async def purge_trashed_workspaces(db: AsyncSession) -> int:
+    """Delete workspaces trashed more than :data:`WORKSPACE_TRASH_DAYS`
+    ago (nightly maintenance). Returns how many went."""
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=WORKSPACE_TRASH_DAYS)
+    rows = list(
+        (
+            await db.execute(
+                select(Workspace).where(
+                    Workspace.trashed_at.is_not(None),
+                    Workspace.trashed_at < cutoff,
+                )
+            )
+        ).scalars()
+    )
+    for ws in rows:
+        await db.delete(ws)
+    return len(rows)
+
+
 async def _validate_provider(
     provider_id: uuid.UUID | None, user: User, db: AsyncSession
 ) -> ModelProvider | None:
@@ -144,6 +177,12 @@ async def _validate_provider(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
         )
     owner_ok = provider.user_id is None or provider.user_id == user.id
+    if not owner_ok:
+        # Providers added in the admin panel carry the adding admin's id
+        # and are shared with everyone — the chat picker offers them to all
+        # users, so a non-admin choosing one isn't "unknown" (R-179).
+        owner = await db.get(User, provider.user_id)
+        owner_ok = owner is not None and owner.role == "admin"
     if not owner_ok:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider"
@@ -232,10 +271,18 @@ async def _summary_with_rollups(
     N-workspaces * 2-counts pattern is fine for the dozens of
     workspaces a power user will accumulate.
     """
+    from app.workspaces.visibility import conversation_visible_to, item_visible_to
+
+    # Only what this caller can see — private chats and drafts are their
+    # creator's alone, and trashed content isn't content (R-203).
     conv_count = await db.scalar(
         select(func.count())
         .select_from(Conversation)
-        .where(Conversation.workspace_id == ws.id)
+        .where(
+            Conversation.workspace_id == ws.id,
+            Conversation.archived_at.is_(None),
+            conversation_visible_to(caller.id),
+        )
     )
     # Mirror the Drive pane's filter: the auto-maintained Workspace
     # Memory doc is pinned for retrieval but hidden from the file list,
@@ -247,6 +294,7 @@ async def _summary_with_rollups(
         .join(UserFile, UserFile.id == WorkspaceFile.file_id)
         .where(
             WorkspaceFile.workspace_id == ws.id,
+            UserFile.trashed_at.is_(None),
             or_(
                 UserFile.source_kind.is_(None),
                 UserFile.source_kind != WORKSPACE_MEMORY_SOURCE_KIND,
@@ -262,6 +310,8 @@ async def _summary_with_rollups(
         .where(
             WorkspaceItem.workspace_id == ws.id,
             WorkspaceItem.archived_at.is_(None),
+            WorkspaceItem.trashed_at.is_(None),
+            item_visible_to(caller.id),
         )
         .group_by(WorkspaceItem.kind)
     )
@@ -314,6 +364,7 @@ async def _summary_with_rollups(
 @router.get("", response_model=list[WorkspaceSummary])
 async def list_workspaces(
     archived: bool = False,
+    trashed: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[WorkspaceSummary]:
@@ -328,6 +379,22 @@ async def list_workspaces(
     row carries a ``role`` discriminator so the card UI can badge
     shared ones.
     """
+    if trashed:
+        # The owner's recently deleted workspaces, restorable until the
+        # retention sweep purges them (R-177).
+        rows = list(
+            (
+                await db.execute(
+                    select(Workspace)
+                    .where(
+                        Workspace.user_id == user.id,
+                        Workspace.trashed_at.is_not(None),
+                    )
+                    .order_by(Workspace.trashed_at.desc())
+                )
+            ).scalars()
+        )
+        return [await _summary_with_rollups(w, db, user) for w in rows]
     accessible_ids = await list_accessible_workspace_ids(user, db)
     if not accessible_ids:
         return []
@@ -373,6 +440,185 @@ class MyWorkResponse(BaseModel):
 
 # NOTE: registered before the /{workspace_id} routes — FastAPI matches in
 # declaration order and "my-work" must not be parsed as a workspace UUID.
+@router.get("/templates")
+async def list_templates(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    """The new-workspace picker's catalog: the built-in starters plus every
+    workspace the caller can open that's been saved as a template. The
+    picker used to carry its own copy of the built-in list (R-204)."""
+    from app.workspaces.templates import template_catalog
+
+    out = template_catalog()
+    ids = await list_accessible_workspace_ids(user, db)
+    if ids:
+        for w in (
+            await db.execute(
+                select(Workspace)
+                .where(Workspace.id.in_(ids), Workspace.is_template.is_(True))
+                .order_by(Workspace.title.asc())
+            )
+        ).scalars():
+            out.append(
+                {
+                    "key": f"ws:{w.id}",
+                    "name": w.title,
+                    "description": w.description or "Your team's template.",
+                    "group": "Your templates",
+                }
+            )
+    return out
+
+
+class MyShift(BaseModel):
+    workspace_id: uuid.UUID
+    workspace_title: str
+    roster_item_id: uuid.UUID
+    roster_title: str
+    date: str
+    start: str | None = None
+    end: str | None = None
+    hours: float | None = None
+    note: str | None = None
+
+
+async def _my_shifts(db: AsyncSession, user: User, days: int = 56) -> list[MyShift]:
+    """The caller's upcoming shifts across every roster they can see — the
+    published version where there is one (R-174)."""
+    from app.chat.models import Roster, WorkspaceShare
+    from app.workspaces.roster_text import upcoming_for, visible_shifts
+    from app.workspaces.visibility import item_visible_to
+
+    ids = await list_accessible_workspace_ids(user, db)
+    if not ids:
+        return []
+    admin_of = {
+        w for w in (
+            await db.execute(select(Workspace.id).where(Workspace.id.in_(ids), Workspace.user_id == user.id))
+        ).scalars()
+    } | {
+        w for w in (
+            await db.execute(
+                select(WorkspaceShare.workspace_id).where(
+                    WorkspaceShare.invitee_user_id == user.id,
+                    WorkspaceShare.status == "accepted",
+                    WorkspaceShare.role == "admin",
+                )
+            )
+        ).scalars()
+    }
+    rows = (
+        await db.execute(
+            select(WorkspaceItem, Roster, Workspace.title)
+            .join(Roster, Roster.id == WorkspaceItem.ref_id)
+            .join(Workspace, Workspace.id == WorkspaceItem.workspace_id)
+            .where(
+                WorkspaceItem.workspace_id.in_(ids),
+                WorkspaceItem.kind == "roster",
+                WorkspaceItem.trashed_at.is_(None),
+                WorkspaceItem.archived_at.is_(None),
+                Workspace.archived_at.is_(None),
+                item_visible_to(user.id),
+            )
+        )
+    ).all()
+    out: list[MyShift] = []
+    for item, roster, ws_title in rows:
+        shifts = visible_shifts(roster.data, for_admin=item.workspace_id in admin_of)
+        for sh in upcoming_for(str(user.id), shifts, days=days):
+            out.append(
+                MyShift(
+                    workspace_id=item.workspace_id,
+                    workspace_title=ws_title,
+                    roster_item_id=item.id,
+                    roster_title=item.title or "Roster",
+                    date=str(sh.get("date")),
+                    start=sh.get("start") if sh.get("timed") else None,
+                    end=sh.get("end") if sh.get("timed") else None,
+                    hours=sh.get("hours"),
+                    note=(sh.get("note") or None),
+                )
+            )
+    out.sort(key=lambda m: (m.date, m.start or ""))
+    return out
+
+
+def _ics_signature(user: User) -> str:
+    import hashlib
+    import hmac
+
+    from app.config import get_settings
+
+    # token_version in the signature: "sign out everywhere" revokes feeds.
+    msg = f"shifts-ics:{user.id}:{user.token_version}".encode()
+    return hmac.new(get_settings().SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()[:40]
+
+
+@router.get("/my-shifts", response_model=list[MyShift])
+async def my_shifts(
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[MyShift]:
+    return await _my_shifts(db, user)
+
+
+@router.post("/my-shifts/calendar-link")
+async def my_shifts_calendar_link(
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> dict[str, str]:
+    """A private calendar-feed URL (subscribe from a phone's calendar).
+    Signing out everywhere changes it."""
+    base = str(request.base_url).rstrip("/")
+    return {"url": f"{base}/api/workspaces/my-shifts.ics?u={user.id}&sig={_ics_signature(user)}"}
+
+
+@router.get("/my-shifts.ics")
+async def my_shifts_ics(
+    u: uuid.UUID,
+    sig: str,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    import hmac
+
+    from app.workspaces.localtime import zone_of
+    from app.workspaces.roster_text import shift_bounds
+
+    user = await db.get(User, u)
+    if user is None or user.disabled or not hmac.compare_digest(sig, _ics_signature(user)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    zone = zone_of(user)
+    now = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    def esc(v: str) -> str:
+        return v.replace("\\", "\\\\").replace(";", "\\;").replace(",", "\\,").replace("\n", "\\n")
+
+    lines = [
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Promptly//Shifts//EN",
+        "CALSCALE:GREGORIAN", "X-WR-CALNAME:My shifts (Promptly)",
+    ]
+    for i, m in enumerate(await _my_shifts(db, user, days=120)):
+        st, en, all_day = shift_bounds(
+            {"date": m.date, "timed": bool(m.start and m.end), "start": m.start, "end": m.end}, zone
+        )
+        lines += ["BEGIN:VEVENT", f"UID:{m.roster_item_id}-{m.date}-{m.start or 'day'}-{i}@promptly", f"DTSTAMP:{now}"]
+        if all_day:
+            lines += [f"DTSTART;VALUE=DATE:{st:%Y%m%d}", f"DTEND;VALUE=DATE:{en:%Y%m%d}"]
+        else:
+            u1, u2 = st.astimezone(timezone.utc), en.astimezone(timezone.utc)
+            lines += [f"DTSTART:{u1:%Y%m%dT%H%M%SZ}", f"DTEND:{u2:%Y%m%dT%H%M%SZ}"]
+        lines.append(f"SUMMARY:{esc(f'Shift — {m.roster_title}')}")
+        desc = m.workspace_title + (f" — {m.note}" if m.note else "")
+        lines += [f"DESCRIPTION:{esc(desc)}", "END:VEVENT"]
+    lines.append("END:VCALENDAR")
+    return Response(
+        content="\r\n".join(lines) + "\r\n",
+        media_type="text/calendar; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 @router.get("/my-work", response_model=MyWorkResponse)
 async def my_work(
     db: AsyncSession = Depends(get_db),
@@ -387,25 +633,37 @@ async def my_work(
     accessible_ids = await list_accessible_workspace_ids(user, db)
     if not accessible_ids:
         return MyWorkResponse(cards=[])
+    from app.workspaces.board_columns import done_status_ids
+
     board = aliased(WorkspaceItem)
     rows = (
         await db.execute(
-            select(WorkspaceTask, Workspace.title, board.title)
+            select(WorkspaceTask, Workspace.title, board.title, board.config)
             .join(Workspace, Workspace.id == WorkspaceTask.workspace_id)
             .outerjoin(board, board.id == WorkspaceTask.board_item_id)
             .where(
                 WorkspaceTask.assignee_user_id == user.id,
-                WorkspaceTask.status != "done",
                 WorkspaceTask.workspace_id.in_(accessible_ids),
                 Workspace.archived_at.is_(None),
+                # Cards on a board that's been trashed or archived aren't
+                # on anyone's plate (R-184).
+                board.trashed_at.is_(None),
+                board.archived_at.is_(None),
             )
             .order_by(
                 WorkspaceTask.due_at.asc().nulls_last(),
                 WorkspaceTask.created_at.desc(),
             )
-            .limit(200)
+            .limit(400)
         )
     ).all()
+    # "Done" is whatever column the board says is done — a custom "Shipped"
+    # column used to leave finished cards on the list for good (R-184).
+    rows = [
+        (t, ws_title, board_title)
+        for t, ws_title, board_title, config in rows
+        if t.status not in done_status_ids(config)
+    ][:200]
     return MyWorkResponse(
         cards=[
             MyWorkCard(
@@ -431,6 +689,7 @@ async def my_work(
 async def create_workspace(
     payload: WorkspaceCreate,
     request: Request,
+    background: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WorkspaceSummary:
@@ -457,13 +716,38 @@ async def create_workspace(
     # Starter template (4.6): seed notes / board / system prompt inside the
     # same transaction. A template bug must never lose the workspace, so
     # failures degrade to a blank workspace with a logged warning.
-    if payload.template:
+    to_index: list = []
+    if payload.template and payload.template.startswith("ws:"):
+        # One of the caller's accessible workspaces saved as a template.
+        from app.workspaces.duplicate import copy_workspace_content
+
+        try:
+            tpl_id = uuid.UUID(payload.template[3:])
+        except ValueError:
+            tpl_id = None
+        tpl = None
+        if tpl_id is not None:
+            try:
+                tpl, _r = await get_accessible_workspace(tpl_id, user, db)
+            except HTTPException:
+                tpl = None
+        if tpl is None or not tpl.is_template:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="That template isn't available.",
+            )
+        to_index = await copy_workspace_content(db, src=tpl, dest=ws, user=user)
+    elif payload.template:
+        # A savepoint, so a template that fails part-way rolls back cleanly
+        # and leaves a blank workspace — a bare try/except couldn't undo a
+        # failed flush (R-204).
         try:
             from app.workspaces.templates import apply_template
 
-            await apply_template(
-                db, ws=ws, user=user, template_key=payload.template
-            )
+            async with db.begin_nested():
+                await apply_template(
+                    db, ws=ws, user=user, template_key=payload.template
+                )
         except Exception:  # noqa: BLE001
             logger.warning(
                 "template %r failed; created blank workspace",
@@ -479,6 +763,10 @@ async def create_workspace(
     )
     await db.commit()
     await db.refresh(ws)
+    if to_index:
+        from app.workspaces.duplicate import schedule_indexing
+
+        schedule_indexing(background, ws.id, to_index)
     return await _summary_with_rollups(ws, db, user)
 
 
@@ -564,9 +852,11 @@ async def get_workspace(
                 email=c.email,
                 avatar_url=c.avatar_url,
                 avatar_color=c.avatar_color,
+                role=participants.roles.get(c.user_id),
             )
             for c in participants.collaborators
         ],
+        my_share_id=participants.share_ids.get(user.id),
         instruction_tokens=stats.instruction_tokens,
         pinned_file_tokens=stats.pinned_file_tokens,
         per_turn_tokens=stats.per_turn_tokens,
@@ -607,6 +897,16 @@ async def update_workspace(
     if "description" in sent:
         ws.description = payload.description
     if "system_prompt" in sent:
+        if "expected_system_prompt" in sent and (ws.system_prompt or "") != (
+            payload.expected_system_prompt or ""
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Someone else changed the instructions while you were "
+                    "editing them."
+                ),
+            )
         ws.system_prompt = payload.system_prompt
     # Default model + provider are validated as a *pair* against the
     # resulting state — sending one without the other (or a model the
@@ -623,7 +923,11 @@ async def update_workspace(
             if "default_provider_id" in sent
             else ws.default_provider_id
         )
-        await _validate_default_model(new_provider, new_model, user, db)
+        # Only a *change* is validated — an admin without access to the
+        # current default used to be unable to save anything, even a typo
+        # fix in the description, because every save re-sent it (R-179).
+        if (new_model, new_provider) != (ws.default_model_id, ws.default_provider_id):
+            await _validate_default_model(new_provider, new_model, user, db)
         ws.default_model_id = new_model
         ws.default_provider_id = new_provider
     # ``memory_mode`` is the source of truth; keep the legacy boolean synced.
@@ -646,12 +950,18 @@ async def update_workspace(
             if "memory_provider_id" in sent
             else ws.memory_provider_id
         )
-        if new_mem_model and new_mem_provider:
+        changed = (new_mem_model, new_mem_provider) != (
+            ws.memory_model_id,
+            ws.memory_provider_id,
+        )
+        if changed and new_mem_model and new_mem_provider:
             await _validate_default_model(
                 new_mem_provider, new_mem_model, user, db
             )
         ws.memory_model_id = new_mem_model
         ws.memory_provider_id = new_mem_provider
+    if "is_template" in sent and payload.is_template is not None:
+        ws.is_template = payload.is_template
     # Drive storage cap — owner-only (collaborators can edit content, but
     # capping the drive is a lifecycle decision like delete/share).
     if "storage_quota_bytes" in sent:
@@ -671,25 +981,208 @@ async def update_workspace(
 async def delete_workspace(
     workspace_id: uuid.UUID,
     request: Request,
+    permanent: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    """Permanently delete a workspace. Conversations inside the workspace
-    are *preserved* (the FK is ``ON DELETE SET NULL``) and bubble
-    back up to the top-level list — we never silently destroy chat
-    history."""
-    ws = await _get_owned_workspace(workspace_id, user, db)
+    """Move a workspace to the owner's trash, or (``permanent=true`` on a
+    trashed one) delete it for good.
+
+    A delete used to be immediate and final: boards and cards, sheets,
+    canvases, rosters, discussions and comments all cascade with the row
+    (R-177). Now it's hidden from everyone and restorable for
+    :data:`WORKSPACE_TRASH_DAYS` days, then the nightly maintenance purges
+    it. On purge, conversations are preserved (``ON DELETE SET NULL``)
+    and come back to their creators' chat lists."""
+    ws = await _get_owned_workspace_any(workspace_id, user, db)
     title = ws.title
-    await db.delete(ws)
+    if ws.trashed_at is None:
+        if permanent:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Move the workspace to the trash before deleting it for good.",
+            )
+        ws.trashed_at = datetime.now(timezone.utc)
+        detail = f'"{title}" (ws={workspace_id}) moved to trash'
+    else:
+        if not permanent:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        await db.delete(ws)
+        detail = f'"{title}" (ws={workspace_id}) deleted permanently'
     await record_event(
         db,
         event_type=EVENT_WORKSPACE_DELETED,
         request=request,
         user_id=user.id,
-        detail=f'"{title}" (ws={workspace_id})',
+        detail=detail,
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{workspace_id}/events")
+async def workspace_events(
+    workspace_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Live feed of structural changes to this workspace — items, chats,
+    files, members, automations — so open pages refresh when a teammate
+    changes something (R-187). Access is checked on each connect."""
+    from fastapi.responses import StreamingResponse
+
+    from app.workspaces import live
+
+    await get_accessible_workspace(workspace_id, user, db)
+    # Hand the DB connection back before the long-lived stream starts.
+    await db.close()
+    return StreamingResponse(
+        live.event_stream(workspace_id, request),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-store",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+class DuplicateWorkspaceRequest(BaseModel):
+    title: str | None = None
+
+
+@router.post(
+    "/{workspace_id}/duplicate",
+    response_model=WorkspaceSummary,
+    status_code=status.HTTP_201_CREATED,
+)
+async def duplicate_workspace(
+    workspace_id: uuid.UUID,
+    payload: DuplicateWorkspaceRequest,
+    background: BackgroundTasks,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceSummary:
+    """A new workspace, owned by the caller, with this one's setup: its
+    instructions, notebooks, notes, sheets, boards (columns, labels and
+    cards), canvases, rosters and the caller's automations (paused).
+    Chats, discussions, members and pinned files stay behind (R-204)."""
+    from app.workspaces.duplicate import copy_workspace_content, schedule_indexing
+
+    src, role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_admin(role)
+    title = (payload.title or "").strip()[:255] or f"{src.title} (copy)"[:255]
+    ws = Workspace(user_id=user.id, title=title)
+    db.add(ws)
+    await db.flush()
+    ws_folder = await create_workspace_folder_tree(db, user, ws.title)
+    ws.root_folder_id = ws_folder.id
+    to_index = await copy_workspace_content(db, src=src, dest=ws, user=user)
+    await record_event(
+        db,
+        event_type=EVENT_WORKSPACE_CREATED,
+        request=request,
+        user_id=user.id,
+        detail=f'"{ws.title}" (ws={ws.id}) duplicated from ws={src.id}',
+    )
+    await db.commit()
+    await db.refresh(ws)
+    schedule_indexing(background, ws.id, to_index)
+    return await _summary_with_rollups(ws, db, user)
+
+
+@router.post("/{workspace_id}/restore", response_model=WorkspaceSummary)
+async def restore_workspace(
+    workspace_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceSummary:
+    """Bring a trashed workspace back, exactly as it was (R-177)."""
+    ws = await _get_owned_workspace_any(workspace_id, user, db)
+    if ws.trashed_at is not None:
+        ws.trashed_at = None
+        ws.updated_at = datetime.now(timezone.utc)
+        await record_event(
+            db,
+            event_type=EVENT_WORKSPACE_UNARCHIVED,
+            request=request,
+            user_id=user.id,
+            detail=f'"{ws.title}" (ws={ws.id}) restored from trash',
+        )
+        await db.commit()
+        await db.refresh(ws)
+    return await _summary_with_rollups(ws, db, user)
+
+
+class TransferWorkspaceRequest(BaseModel):
+    user_id: uuid.UUID
+    # Stay on as an admin member (the usual case) or step away entirely.
+    keep_access: bool = True
+
+
+@router.post("/{workspace_id}/transfer", response_model=WorkspaceSummary)
+async def transfer_workspace_ownership(
+    workspace_id: uuid.UUID,
+    payload: TransferWorkspaceRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> WorkspaceSummary:
+    """Hand the workspace — and its Drive folder and files — to one of its
+    admins. There was no way to do this short of an admin deleting the
+    owner's account (R-177)."""
+    from app.chat.models import WorkspaceShare
+    from app.workspaces.ownership import transfer_workspace
+
+    ws = await _get_owned_workspace(workspace_id, user, db)
+    share = (
+        await db.execute(
+            select(WorkspaceShare).where(
+                WorkspaceShare.workspace_id == ws.id,
+                WorkspaceShare.invitee_user_id == payload.user_id,
+                WorkspaceShare.status == "accepted",
+            )
+        )
+    ).scalars().first()
+    new_owner = await db.get(User, payload.user_id)
+    if (
+        share is None
+        or share.role != "admin"
+        or new_owner is None
+        or new_owner.disabled
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The new owner has to be an active admin of this workspace.",
+        )
+    await transfer_workspace(db, ws, new_owner)
+    if payload.keep_access:
+        db.add(
+            WorkspaceShare(
+                workspace_id=ws.id,
+                inviter_user_id=new_owner.id,
+                invitee_user_id=user.id,
+                status="accepted",
+                role="admin",
+                accepted_at=datetime.now(timezone.utc),
+            )
+        )
+    ws.updated_at = datetime.now(timezone.utc)
+    from app.auth.events import EVENT_WORKSPACE_SHARE_CREATED
+
+    await record_event(
+        db,
+        event_type=EVENT_WORKSPACE_SHARE_CREATED,
+        request=request,
+        user_id=user.id,
+        detail=f'"{ws.title}" (ws={ws.id}) ownership → {new_owner.username}',
+    )
+    await db.commit()
+    await db.refresh(ws)
+    return await _summary_with_rollups(ws, db, user)
 
 
 # ---------------------------------------------------------------------
@@ -760,17 +1253,20 @@ async def list_workspace_conversations(
     """Return every conversation under ``workspace_id`` (most recent
     first).
 
-    Workspace sharing is workspace-level: once the caller has access
-    to the workspace (owner or accepted collaborator), they see
-    **every** chat in it — the inviter's originals as well as
-    anything other collaborators have added since. Individual
-    conversation shares still work on top of this and remain
+    Once the caller has access to the workspace (owner or accepted
+    collaborator) they see every chat *shared with the workspace*
+    (``visibility='workspace'``) plus their own chats. Another member's
+    private chat stays creator-only — even for the owner (R-040, R-312).
+    Individual conversation shares still work on top of this and remain
     invisible here; they're surfaced through the main sidebar.
     """
     ws, _role = await get_accessible_workspace(workspace_id, user, db)
     q = (
         select(Conversation)
-        .where(Conversation.workspace_id == ws.id)
+        .where(
+            Conversation.workspace_id == ws.id,
+            conversation_visible_to(user.id),
+        )
         .order_by(Conversation.updated_at.desc())
     )
     res = await db.execute(q)
@@ -908,10 +1404,13 @@ async def workspace_usage(
 async def reindex_workspace_files(
     workspace_id: uuid.UUID,
     background: BackgroundTasks,
+    failed_only: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Queue a background re-index of every pinned file in the workspace.
+    """Queue a background re-index of the workspace's files, items, chats
+    and automations (R-321); ``failed_only`` retries just what's queued or
+    failed.
 
     Useful after enabling an embedding provider for the first time, or
     to backfill files pinned before Phase-2 that are still ``queued``.
@@ -919,7 +1418,7 @@ async def reindex_workspace_files(
     Returns immediately; the Files tab's polling will show progress.
     """
     ws = await _get_owned_workspace(workspace_id, user, db)
-    background.add_task(reindex_workspace, ws.id)
+    background.add_task(reindex_workspace, ws.id, failed_only=failed_only)
     return {"queued": True}
 
 

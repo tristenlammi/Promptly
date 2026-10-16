@@ -15,8 +15,12 @@ import type { CollabTokenResponse } from "./documents";
 
 export interface CanvasMetadata {
   id: string;
-  workspace_id: string;
+  /** Null for a personal whiteboard made from Files (WP-3.4). */
+  workspace_id: string | null;
   title: string;
+  /** The whiteboard's Drive file. */
+  file_id?: string | null;
+  can_edit?: boolean;
 }
 
 export const canvasApi = {
@@ -46,9 +50,10 @@ export const canvasApi = {
   /** Run server-side background removal on an image, returning the
    *  transparent PNG cut-out. The image bytes never leave the user's own
    *  backend (rembg runs there). */
-  async removeBackground(image: Blob): Promise<Blob> {
+  async removeBackground(image: Blob, workspaceId: string): Promise<Blob> {
     const form = new FormData();
     form.append("file", image, "image.png");
+    form.append("workspace_id", workspaceId);
     const { data } = await apiClient.post<Blob>(
       `/canvas/remove-background`,
       form,

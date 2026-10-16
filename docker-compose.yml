@@ -41,10 +41,22 @@
 # "promptly_*" in `docker volume ls`.
 name: Promptly
 
+# Every service rotates its logs. The json-file driver's default keeps them
+# forever, and a full disk takes Postgres down with it — a data-loss event,
+# not a nuisance.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   nginx:
-    image: nginx:alpine
+    # Pinned to a release line, bumped on purpose (R-243): `update.sh` pulls
+    # patch releases within it, never a surprise major/minor jump.
+    image: nginx:1.31-alpine
     container_name: Promptly-Nginx
+    logging: *default-logging
     # Only nginx publishes ports to the host — everything else
     # (frontend, backend, Postgres, Redis, SearXNG) stays on the
     # internal "promptly" docker network and is reached through
@@ -57,6 +69,14 @@ services:
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
+      # Operator server blocks (TLS, server_name…), gitignored — see the
+      # include at the end of nginx.conf.
+      - ./nginx/local:/etc/nginx/conf.d/local:ro
+      # Signed media links (WP-7.5): nginx serves photos, videos and
+      # downloads straight from the uploads folder, read-only, once the
+      # backend has checked the link.
+      - ./nginx/promptly:/etc/nginx/promptly:ro
+      - ${PROMPTLY_UPLOADS_DIR:-./data/uploads}:/srv/promptly-uploads:ro
     depends_on:
       - frontend
       - backend
@@ -79,6 +99,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: Promptly-Frontend
+    logging: *default-logging
     environment:
       - VITE_API_BASE_URL=/api
     expose:
@@ -93,11 +114,29 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    # Named so the arq worker runs the very same image (it has no build of
+    # its own): one build per update, and the two can never drift apart.
+    image: promptly-backend:local
     container_name: Promptly-Backend
+    logging: *default-logging
+    # Operator settings in .env (COOKIE_SECURE, RATE_LIMIT_*, LOCKOUT_*,
+    # SETUP_TOKEN, …) reach the backend. Without this only the handful of
+    # variables listed below did, so documented settings silently did
+    # nothing (R-283). The list below still wins where both set a value.
+    env_file:
+      - path: .env
+        required: false
     environment: &backend-env
       - DATABASE_URL=postgresql+asyncpg://promptly:${POSTGRES_PASSWORD:-promptly}@postgres:5432/promptly
       - REDIS_URL=redis://redis:6379/0
       - SECRET_KEY=${SECRET_KEY:-}
+      # Backend ↔ collab shared token; empty = derived from SECRET_KEY.
+      - COLLAB_INTERNAL_TOKEN=${COLLAB_INTERNAL_TOKEN:-}
+      # Resumable uploads through the tusd service below (WP-8.2). The hook
+      # secret is shared with tusd; empty = only a container on this
+      # network can call the hooks (nginx refuses /api/internal/ anyway).
+      - TUS_ENABLED=${TUS_ENABLED:-true}
+      - TUS_HOOK_SECRET=${TUS_HOOK_SECRET:-}
       - SINGLE_USER_MODE=${SINGLE_USER_MODE:-false}
       - SEARXNG_URL=http://searxng:8080
       # False when the stack runs without the bundled SearXNG container
@@ -121,6 +160,7 @@ services:
       # Overridable so --no-ollama installs can point at an Ollama that
       # already runs on the host (e.g. http://host.docker.internal:11434).
       - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-8192}
       # Embedding model auto-pulled on Ollama first start. Small
       # (~270 MB), fast, 768-dim — plenty for knowledge-base RAG
       # without making first-run downloads painful.
@@ -141,6 +181,9 @@ services:
       # the backend POSTs assistant text to for read-aloud + voice mode.
       - TTS_URL=http://tts:8000
       - TTS_VOICE=${TTS_VOICE:-af_heart}
+      # Office previews + document thumbnails through the bundled
+      # Gotenberg ``convert`` service (on by default).
+      - CONVERT_URL=${CONVERT_URL:-http://convert:3000}
       # Wyoming bridge (Voice Phase 2) — lets Home Assistant voice
       # satellites run this instance's commands. OFF by default: the
       # Wyoming protocol has no authentication, so anything that can
@@ -159,8 +202,15 @@ services:
       # Bind-mount user data into the project directory so it's
       # always next to the compose file — easy to back up, easy
       # to inspect, and survives container recreation.
-      - ./data/uploads:/app/uploads
+      # PROMPTLY_UPLOADS_DIR (WP-7.1): keep uploads somewhere else — an
+      # array or NAS share — while Postgres stays on fast disk.
+      - ${PROMPTLY_UPLOADS_DIR:-./data/uploads}:/app/uploads
       - ./data/whiteboard:/app/whiteboard
+      # Database dumps: before every migration, and nightly (keep 14).
+      - ./data/backups:/app/backups
+      # Off-site backup "folder" target — point OFFSITE_BACKUP_DIR at a
+      # USB disk or NAS mount on the host (Admin → Backups, WP-2.3).
+      - ${OFFSITE_BACKUP_DIR:-./data/offsite}:/app/offsite
     expose:
       - "8000"
     mem_limit: ${BACKEND_MEM_LIMIT:-4g}
@@ -196,12 +246,12 @@ services:
         condition: service_started
     restart: unless-stopped
     healthcheck:
-      # The /api/health endpoint pings Postgres, Redis, and
-      # SearXNG and returns 503 if any of them is unreachable,
-      # so this single probe also surfaces upstream-dependency
-      # failures via `docker compose ps`. Long start_period
-      # because Alembic migrations run on first boot.
-      test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)\""]
+      # Liveness only (process + Postgres). The deep /api/health probe
+      # also fails on optional services like SearXNG, which used to hold
+      # up everything that waits for a healthy backend. Long
+      # start_period because Alembic migrations (and the pre-migration
+      # backup) run on boot.
+      test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health/live', timeout=3).status == 200 else 1)\""]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -209,9 +259,11 @@ services:
     networks:
       # Backend straddles both networks: ``promptly`` for the app
       # services (Postgres, Redis, Ollama, SearXNG) + the internet,
-      # and ``sandbox-net`` so it can reach the isolated code sandbox.
+      # and ``sandbox-net`` so it can reach the isolated code sandbox
+      # (and ``convert-net`` for the optional Office converter).
       - promptly
       - sandbox-net
+      - convert-net
     extra_hosts:
       # Lets the backend reach a *native* host Ollama via
       # ``OLLAMA_URL=http://host.docker.internal:11434`` (the default when
@@ -227,32 +279,56 @@ services:
     # in Redis and this worker picks it up. Reuses the backend's environment
     # (DB, Redis, provider/search/ollama URLs) and data volumes (runs write
     # generated files just like the API path).
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    # The backend's image — built once by the backend service. Used to be a
+    # second build of the same Dockerfile that had to be remembered on every
+    # backend change, or the worker ran stale code (R-243).
+    image: promptly-backend:local
+    pull_policy: never
     container_name: Promptly-ArqWorker
+    logging: *default-logging
     # Bypass the shared entrypoint (which runs Alembic migrations + singleton
     # provisioning) — the backend owns those. The worker just needs a migrated
     # DB, which is ready by the time any job is enqueued. Avoids two containers
     # racing to migrate on a fresh deploy.
     entrypoint: ["arq", "app.tasks.worker.WorkerSettings"]
+    env_file:
+      - path: .env
+        required: false
     environment: *backend-env
     mem_limit: ${ARQ_MEM_LIMIT:-2g}
     volumes:
-      - ./data/uploads:/app/uploads
+      - ${PROMPTLY_UPLOADS_DIR:-./data/uploads}:/app/uploads
       - ./data/whiteboard:/app/whiteboard
+      - ./data/backups:/app/backups
+      - ${OFFSITE_BACKUP_DIR:-./data/offsite}:/app/offsite
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # The backend runs the migrations; new worker code must not touch
+      # the database before they've landed (R-244). The worker also
+      # checks the schema revision itself on startup.
+      backend:
+        condition: service_healthy
       ollama:
         condition: service_started
         required: false
+    # Give in-flight jobs time to finish on `docker compose up -d` /
+    # stop instead of being killed mid-step (R-240, R-241).
+    stop_grace_period: 120s
+    healthcheck:
+      # arq writes a health key to Redis every few seconds while it runs.
+      test: ["CMD", "arq", "--check", "app.tasks.worker.WorkerSettings"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
     restart: unless-stopped
     networks:
       - promptly
       - sandbox-net
+      - convert-net
     extra_hosts:
       # Same host-Ollama reachability as the backend (the worker runs
       # research/automation jobs that may hit Ollama too).
@@ -269,20 +345,27 @@ services:
       context: ./collab
       dockerfile: Dockerfile
     container_name: Promptly-Collab
+    logging: *default-logging
     mem_limit: ${COLLAB_MEM_LIMIT:-1g}
     environment:
-      # SECRET_KEY is used for two things here:
-      #   1. Verifying the short-lived collab JWT the backend hands
-      #      the browser (HS256, shared secret).
-      #   2. Authenticating the snapshot POST back to the backend
-      #      (bearer token) so only this service can overwrite
-      #      HTML/FTS content.
+      # SECRET_KEY verifies the short-lived collab JWT the backend hands
+      # the browser (HS256). The snapshot POST back to the backend and the
+      # backend's "drop this user's sockets" call use COLLAB_INTERNAL_TOKEN
+      # (empty = derived from SECRET_KEY, the same on both sides).
       - SECRET_KEY=${SECRET_KEY:-}
+      - COLLAB_INTERNAL_TOKEN=${COLLAB_INTERNAL_TOKEN:-}
       - DATABASE_URL=postgresql://promptly:${POSTGRES_PASSWORD:-promptly}@postgres:5432/promptly
       - BACKEND_INTERNAL_URL=http://backend:8000
       - SNAPSHOT_DEBOUNCE_MS=${COLLAB_SNAPSHOT_DEBOUNCE_MS:-3000}
     expose:
       - "1234"
+    healthcheck:
+      # Hocuspocus answers plain HTTP on its websocket port.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:1234/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
@@ -301,6 +384,7 @@ services:
     # Required by Custom Models' RAG knowledge base.
     image: pgvector/pgvector:pg15
     container_name: Promptly-Postgres
+    logging: *default-logging
     # Memory ceiling (DoS backstop) — well above steady-state so a query
     # spike can't OOM the host, sized for a homelab. Tune via env if needed.
     mem_limit: ${POSTGRES_MEM_LIMIT:-2g}
@@ -311,6 +395,10 @@ services:
       # default once DOMAIN is public, and ./install.sh seeds a strong value.
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-promptly}
       - POSTGRES_DB=promptly
+      # Page checksums catch a disk that silently corrupts data (WP-7.2).
+      # Only applies when the database is first created — an existing one
+      # is switched on offline (README → "Database checksums").
+      - POSTGRES_INITDB_ARGS=--data-checksums
     volumes:
       - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
@@ -323,8 +411,9 @@ services:
       - promptly
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     container_name: Promptly-Redis
+    logging: *default-logging
     mem_limit: ${REDIS_MEM_LIMIT:-512m}
     volumes:
       - ./data/redis:/data
@@ -348,8 +437,9 @@ services:
     # other tooling — can keep using 11434 without colliding. The
     # backend talks to it on the internal ``promptly`` network at
     # the unmapped 11434, which is unaffected.
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.0
     container_name: Promptly-Ollama
+    logging: *default-logging
     # Optional: only runs when the "ollama" profile is active.
     # ``COMPOSE_PROFILES`` in .env is the source of truth — install.sh
     # writes ``ollama,search`` for a full install and drops entries for
@@ -364,6 +454,10 @@ services:
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      # Context window per request. Ollama's own default is small and long
+      # prompts were cut off silently; raise it if you have the memory
+      # (R-303). The backend reads the same value for the context meter.
+      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-8192}
       # Model auto-pulled by ``entrypoint-bootstrap.sh`` on first
       # start. Mirrored from the backend env so a single env var
       # controls both sides.
@@ -409,6 +503,88 @@ services:
       - promptly
 
   # ------------------------------------------------------------
+  # ------------------------------------------------------------
+  # Media worker (WP-7.4): photos' and videos' metadata, thumbnails,
+  # previews, posters and web-playable videos, on its own Arq queue
+  # (``promptly:media``) and its own CPU budget, so a phone backup of
+  # hundreds of photos never slows chat. Same image as the backend.
+  # GPU video encoding is opt-in: docker-compose.media-nvidia.yml /
+  # docker-compose.media-vaapi.yml / docker-compose.media-qsv.yml.
+  # ------------------------------------------------------------
+  media-worker:
+    image: promptly-backend:local
+    pull_policy: never
+    container_name: Promptly-MediaWorker
+    logging: *default-logging
+    entrypoint: ["arq", "app.tasks.media_worker.MediaWorkerSettings"]
+    env_file:
+      - path: .env
+        required: false
+    environment: *backend-env
+    # Two photos at a time, one video; capped so the rest of the box —
+    # the API above all — keeps its share.
+    cpus: ${MEDIA_WORKER_CPUS:-2}
+    mem_limit: ${MEDIA_WORKER_MEM_LIMIT:-3g}
+    volumes:
+      - ${PROMPTLY_UPLOADS_DIR:-./data/uploads}:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - promptly
+
+  # ------------------------------------------------------------
+  # Resumable uploads (WP-8.2): tusd takes big files (a 4 GB phone video)
+  # in ~50 MB chunks it can resume after a dropped connection or a refresh,
+  # writing into uploads/.tus. Before the first byte and after the last it
+  # asks the backend (who, where, allowlist, disk, quota; then files it
+  # through the normal upload path). Small files don't come here.
+  # The whole command is set on purpose: the image's default turns on file
+  # hooks, which would win over the HTTP ones.
+  # ------------------------------------------------------------
+  tusd:
+    image: tusproject/tusd:v2.10.1
+    container_name: Promptly-Tusd
+    logging: *default-logging
+    # Root, so it can write into the uploads folder whoever owns it (the
+    # backend runs as root too); it's only reachable through nginx.
+    user: "0:0"
+    command:
+      - -host=0.0.0.0
+      - -port=8080
+      - -base-path=/api/files/tus/
+      - -upload-dir=/srv/uploads/.tus
+      - -behind-proxy
+      - -hooks-http=http://backend:8000/api/internal/tus-hook?key=${TUS_HOOK_SECRET:-}
+      # No spaces — tusd checks the list as written. No post-receive (it
+      # would call the backend every second per upload).
+      - -hooks-enabled-events=pre-create,pre-finish,post-finish,post-terminate
+      # Filing a 4 GB video (hashing it) takes a while; and never twice.
+      - -hooks-http-timeout=600s
+      - -hooks-http-retry=1
+      - -hooks-http-size-limit=65536
+      - -disable-download
+      - -disable-concatenation
+      - -disable-cors
+      # A hard ceiling; the admin's cap (Admin > App settings) is checked
+      # by the backend before an upload starts.
+      - -max-size=107374182400
+      - -expose-metrics=false
+      - -show-greeting=false
+    volumes:
+      - ${PROMPTLY_UPLOADS_DIR:-./data/uploads}:/srv/uploads
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - promptly
+
   # Optional GPU override for the Ollama runtime.
   #
   # Enabled with ``COMPOSE_PROFILES=gpu``:
@@ -437,11 +613,16 @@ services:
   # ------------------------------------------------------------
   ollama-gpu:
     profiles: ["gpu"]
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.0
     container_name: Promptly-Ollama-GPU
+    logging: *default-logging
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      # Context window per request. Ollama's own default is small and long
+      # prompts were cut off silently; raise it if you have the memory
+      # (R-303). The backend reads the same value for the context meter.
+      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-8192}
       - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
       # See the CPU service above — keep interactive query embeds from
       # queuing behind a bulk background re-index.
@@ -481,11 +662,16 @@ services:
     # Same volume/env/alias contract as the other two variants, so
     # exactly one of ollama / ollama-gpu / ollama-rocm runs at a time.
     profiles: ["rocm"]
-    image: ollama/ollama:rocm
+    image: ollama/ollama:0.40.0-rocm
     container_name: Promptly-Ollama-ROCm
+    logging: *default-logging
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
       - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      # Context window per request. Ollama's own default is small and long
+      # prompts were cut off silently; raise it if you have the memory
+      # (R-303). The backend reads the same value for the context meter.
+      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-8192}
       - OLLAMA_DEFAULT_EMBEDDING_MODEL=${OLLAMA_DEFAULT_EMBEDDING_MODEL:-nomic-embed-text}
       - OLLAMA_NUM_PARALLEL=${OLLAMA_NUM_PARALLEL:-2}
       # Consumer Radeons often report a GFX version ROCm doesn't officially
@@ -528,6 +714,7 @@ services:
     # Tag list: https://hub.docker.com/r/searxng/searxng/tags
     image: searxng/searxng:2026.4.17-e8299a4c3
     container_name: Promptly-SearXNG
+    logging: *default-logging
     # Optional: only runs when the "search" profile is active (see the
     # ollama service note — COMPOSE_PROFILES in .env drives both).
     profiles: ["search"]
@@ -586,6 +773,7 @@ services:
       context: ./sandbox
       dockerfile: Dockerfile
     container_name: Promptly-Sandbox
+    logging: *default-logging
     environment:
       - SANDBOX_SECRET=${SECRET_KEY:-}
     read_only: true
@@ -624,6 +812,7 @@ services:
       context: ./whisper
       dockerfile: Dockerfile
     container_name: Promptly-Whisper
+    logging: *default-logging
     mem_limit: ${WHISPER_MEM_LIMIT:-2g}
     environment:
       - WHISPER_MODEL=${WHISPER_MODEL:-base}
@@ -646,6 +835,68 @@ services:
     networks:
       - promptly
 
+  photos-ml:
+    # Understanding photos (Part E §E4.2, PH-2): ONNX Runtime behind a
+    # small FastAPI service. Started by default; if it's stopped, Photos
+    # still works and search by what's in a photo waits until it runs.
+    #
+    # First start downloads the pinned models (~1.5 GB: SigLIP 2 image +
+    # text encoders) into ./data/models, checked against their SHA-256.
+    # Hardware: set PHOTOS_ML_PROVIDERS (OpenVINOExecutionProvider,
+    # CUDAExecutionProvider) with a matching image; the CPU is the default.
+    build:
+      context: ./photos-ml
+      dockerfile: Dockerfile
+    container_name: Promptly-PhotosML
+    logging: *default-logging
+    cpus: ${PHOTOS_ML_CPUS:-2}
+    mem_limit: ${PHOTOS_ML_MEM_LIMIT:-3g}
+    environment:
+      - PHOTOS_ML_PROVIDERS=${PHOTOS_ML_PROVIDERS:-}
+      - PHOTOS_ML_THREADS=${PHOTOS_ML_THREADS:-0}  # 0 = the CPUs it's given
+      - PHOTOS_ML_TEXT_VARIANT=${PHOTOS_ML_TEXT_VARIANT:-fp32}
+      - PHOTOS_ML_VISION_VARIANT=${PHOTOS_ML_VISION_VARIANT:-fp32}
+    volumes:
+      - ./data/models:/models
+    expose:
+      - "8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - promptly
+
+  convert:
+    # Faithful Office previews (Stage 12, Part C P10): Gotenberg (MIT,
+    # LibreOffice inside, ~700 MB) turns .pptx / .ppt / .doc / .xls and
+    # OpenDocument files into PDFs the preview shows, and gives Docs and
+    # Office files their first-page thumbnails. Started by default (the
+    # backend reaches it at CONVERT_URL); if it's stopped, those files
+    # preview as a text outline.
+    #
+    # Only on the internal ``convert-net``: no internet, so a document
+    # can't make LibreOffice fetch anything.
+    image: gotenberg/gotenberg:8.37.0
+    container_name: Promptly-Convert
+    logging: *default-logging
+    command:
+      - gotenberg
+      - --api-timeout=180s
+      - --chromium-auto-start=false
+      - --libreoffice-auto-start=true
+      - --log-level=warn
+    cpus: ${CONVERT_CPUS:-2}
+    mem_limit: ${CONVERT_MEM_LIMIT:-2g}
+    expose:
+      - "3000"
+    restart: unless-stopped
+    networks:
+      - convert-net
+
   tts:
     # Text-to-speech worker (Voice Phase 2). Wraps Kokoro-82M in a tiny
     # FastAPI service; the backend POSTs assistant text to
@@ -659,6 +910,7 @@ services:
       context: ./tts
       dockerfile: Dockerfile
     container_name: Promptly-TTS
+    logging: *default-logging
     mem_limit: ${TTS_MEM_LIMIT:-2g}
     environment:
       - TTS_VOICE=${TTS_VOICE:-af_heart}
@@ -690,5 +942,11 @@ networks:
   # except the backend that submits the job.
   sandbox-net:
     name: promptly-sandbox
+    driver: bridge
+    internal: true
+  # Internal-only, for the optional Office converter (Stage 12): the backend
+  # and worker reach it; it reaches nothing.
+  convert-net:
+    name: promptly-convert
     driver: bridge
     internal: true

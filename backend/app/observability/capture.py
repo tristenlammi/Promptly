@@ -201,6 +201,10 @@ class DbErrorHandler(logging.Handler):
         super().__init__(level=logging.ERROR)
 
     def emit(self, record: logging.LogRecord) -> None:
+        # At interpreter shutdown module globals are torn down (get_route is
+        # None) — capturing then only produces a cascade of secondary errors.
+        if get_route is None or capture_error is None:
+            return
         try:
             msg = record.getMessage()
         except Exception:  # noqa: BLE001

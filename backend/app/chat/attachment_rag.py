@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.semantic_search import get_embedding_config
@@ -45,6 +45,7 @@ async def index_attachments_for_conversation(
     *,
     conversation_id: uuid.UUID,
     files: list[UserFile],
+    interactive: bool = False,
 ) -> int:
     """Chunk + embed ``files`` into the conversation's RAG scope.
 
@@ -65,7 +66,11 @@ async def index_attachments_for_conversation(
     for f in files:
         try:
             chunks, embeddings = await embed_file_to_chunks(
-                f, provider=cfg.provider, model_id=cfg.model_id, dim=cfg.dim
+                f,
+                provider=cfg.provider,
+                model_id=cfg.model_id,
+                dim=cfg.dim,
+                interactive=interactive,
             )
         except (ValueError, RuntimeError) as e:
             # ValueError: not text-extractable (image/binary) or empty.
@@ -82,6 +87,7 @@ async def index_attachments_for_conversation(
             scope_kind="conversation",
             scope_id=conversation_id,
             user_file_id=f.id,
+            commit=False,
         )
         await insert_chunks(
             db,
@@ -104,6 +110,40 @@ async def index_attachments_for_conversation(
     return indexed
 
 
+async def index_turn_attachments(
+    conversation_id: uuid.UUID, file_ids: list[uuid.UUID], *, interactive: bool = False
+) -> int:
+    """Index a turn's documents for the rest of the conversation.
+
+    Runs in the background after the reply, with its own session. The turn
+    that brought the file has it inline; every later turn retrieves from it
+    here. Without this, "summarise this contract" then "what does clause 7
+    say?" was answered without the contract (R-045). A no-op without an
+    embedder — later turns then re-send the file instead.
+    """
+    from app.database import SessionLocal
+
+    if not file_ids:
+        return 0
+    try:
+        async with SessionLocal() as db:
+            already = await conversation_indexed_file_ids(db, conversation_id)
+            wanted = [fid for fid in file_ids if fid not in already]
+            if not wanted:
+                return 0
+            files = list(
+                (await db.execute(select(UserFile).where(UserFile.id.in_(wanted)))).scalars()
+            )
+            n = await index_attachments_for_conversation(
+                db, conversation_id=conversation_id, files=files, interactive=interactive
+            )
+            await db.commit()
+            return n
+    except Exception:  # noqa: BLE001 — background best effort
+        logger.exception("attachment_rag: indexing turn files failed for %s", conversation_id)
+        return 0
+
+
 async def conversation_indexed_file_ids(
     db: AsyncSession, conversation_id: uuid.UUID
 ) -> set[uuid.UUID]:
@@ -112,10 +152,14 @@ async def conversation_indexed_file_ids(
     Used at send time so the inline-attachment preamble can *skip* these
     files (their content comes from retrieval instead) — avoiding both the
     64 KB truncation and double-feeding."""
+    # Only chunks from the current embedding model count: after a switch the
+    # old ones can't be retrieved, and the file must be inlined instead of
+    # silently dropped (R-319).
     rows = await db.execute(
         text(
-            "SELECT DISTINCT user_file_id FROM knowledge_chunks "
-            "WHERE conversation_id = :cid"
+            "SELECT DISTINCT kc.user_file_id FROM knowledge_chunks kc "
+            "JOIN app_settings s ON s.embedding_model_id = kc.embedding_model "
+            "WHERE kc.conversation_id = :cid"
         ),
         {"cid": str(conversation_id)},
     )

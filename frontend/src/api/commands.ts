@@ -134,6 +134,8 @@ export interface ConnectorDevice {
   area: string;
   state: string;
   actions: string[];
+  /** Locks, doors, alarms, valves: a command on one asks before running. */
+  confirm_by_default?: boolean;
 }
 
 export interface ConnectorDevices {
@@ -204,6 +206,7 @@ export const commandsApi = {
    *  menu can preview a phrase. */
   async match(utterance: string): Promise<CommandMatch> {
     const { data } = await apiClient.post<CommandMatch>("/commands/match", {
+      source: "voice",
       utterance,
     });
     return data;

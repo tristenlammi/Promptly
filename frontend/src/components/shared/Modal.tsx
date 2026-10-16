@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
@@ -30,6 +30,10 @@ interface ModalProps {
   dismissible?: boolean;
 }
 
+/** Open dialogs, oldest first; the last one is on top. */
+const openLayers: number[] = [];
+let layerSeq = 0;
+
 export function Modal({
   open,
   onClose,
@@ -41,13 +45,43 @@ export function Modal({
   dismissible = true,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
+  const [layerId] = useState(() => ++layerSeq);
+  // Where focus was before opening — captured during the render that opens
+  // the dialog, before React's ``autoFocus`` moves focus inside it (an
+  // effect-time capture saw the dialog's own button and restored nothing).
+  const returnFocus = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current && typeof document !== "undefined") {
+    returnFocus.current = document.activeElement as HTMLElement | null;
+  }
+  wasOpen.current = open;
+
+  // Each dialog its own title id — two open at once used to share one.
+  const titleId = useId();
+
+  // Only the top-most dialog answers Escape and traps Tab — one Escape used
+  // to close every open layer at once (R-088).
+  useEffect(() => {
+    if (!open) return;
+    openLayers.push(layerId);
+    return () => {
+      const i = openLayers.lastIndexOf(layerId);
+      if (i >= 0) openLayers.splice(i, 1);
+    };
+  }, [open, layerId]);
 
   // Close on Escape + trap Tab focus inside the dialog.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
+      if (openLayers[openLayers.length - 1] !== layerId) return;
       if (e.key === "Escape") {
-        if (dismissible) onClose();
+        // Something inside (a menu, a picker) already handled it.
+        if (e.defaultPrevented) return;
+        if (dismissible) {
+          e.preventDefault();
+          onClose();
+        }
         return;
       }
       if (e.key !== "Tab") return;
@@ -75,7 +109,7 @@ export function Modal({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, onClose, dismissible, layerId]);
 
   // Lock body scroll while open.
   useEffect(() => {
@@ -92,11 +126,15 @@ export function Modal({
   // top of the page).
   useEffect(() => {
     if (!open) return;
-    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const previouslyFocused = returnFocus.current;
     // Defer to next frame so the portal content is mounted first.
     const raf = requestAnimationFrame(() => {
       const root = dialogRef.current;
       if (!root) return;
+      // A field with ``autoFocus`` already has focus — keep it. (React
+      // doesn't leave an ``autofocus`` attribute in the DOM, so the lookup
+      // below never saw it and moved focus to the close button instead.)
+      if (root.contains(document.activeElement)) return;
       const target =
         root.querySelector<HTMLElement>("[autofocus]") ??
         root.querySelector<HTMLElement>(FOCUSABLE_SELECTOR) ??
@@ -116,7 +154,7 @@ export function Modal({
       className="fixed inset-0 z-50 flex items-center justify-center px-4"
       role="dialog"
       aria-modal="true"
-      aria-labelledby={title ? "modal-title" : undefined}
+      aria-labelledby={title ? titleId : undefined}
     >
       {dismissible ? (
         <button
@@ -144,7 +182,7 @@ export function Modal({
         <div className="flex items-start justify-between gap-4 border-b border-[var(--border)] px-5 py-4">
           <div className="min-w-0 flex-1">
             {title && (
-              <h2 id="modal-title" className="truncate text-lg font-semibold">
+              <h2 id={titleId} className="truncate text-lg font-semibold">
                 {title}
               </h2>
             )}

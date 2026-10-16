@@ -1,51 +1,48 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Briefcase,
   FileText,
   FileUp,
+  GraduationCap,
+  Hammer,
   Handshake,
+  Home,
+  LayoutTemplate,
   Loader2,
+  Plane,
   Rocket,
+  type LucideIcon,
 } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { workspacesApi } from "@/api/workspaces";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { WorkspaceModelField } from "@/components/workspaces/WorkspaceModelField";
 import { useCreateWorkspace } from "@/hooks/useWorkspaces";
+import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 import { apiErrorMessage } from "@/utils/apiError";
 
-/** Starter templates (4.6) — mirrors backend/app/workspaces/templates.py.
- *  Kept as a static list client-side: templates are content, and the
- *  backend silently ignores unknown keys, so drift degrades to Blank. */
-const TEMPLATES = [
-  {
-    key: null,
-    name: "Blank",
-    description: "Start from scratch.",
-    icon: FileText,
-  },
-  {
-    key: "legal_matter",
-    name: "Legal matter",
-    description: "Matter overview, client intake, deadlines board.",
-    icon: Briefcase,
-  },
-  {
-    key: "engineering_sprint",
-    name: "Engineering sprint",
-    description: "Sprint goals, runbook, labelled sprint board.",
-    icon: Rocket,
-  },
-  {
-    key: "client_onboarding",
-    name: "Client onboarding",
-    description: "Checklist, welcome pack, pipeline board.",
-    icon: Handshake,
-  },
-] as const;
+/** Starter templates come from the server (``GET /workspaces/templates``):
+ *  the built-in ones plus any workspace saved as a template. The list used
+ *  to be duplicated here (R-204). Icons are presentation, so they stay. */
+const TEMPLATE_ICONS: Record<string, LucideIcon> = {
+  legal_matter: Briefcase,
+  engineering_sprint: Rocket,
+  client_onboarding: Handshake,
+  household: Home,
+  trip: Plane,
+  renovation: Hammer,
+  school: GraduationCap,
+};
+const GROUP_ORDER = ["Home & family", "Work", "Your templates"];
+const BLANK = {
+  key: null as string | null,
+  name: "Blank",
+  description: "Start from scratch.",
+  group: "",
+};
 
 interface NewWorkspaceModalProps {
   open: boolean;
@@ -74,6 +71,24 @@ export function NewWorkspaceModal({
   const importInputRef = useRef<HTMLInputElement | null>(null);
   const queryClient = useQueryClient();
   const create = useCreateWorkspace();
+  const { data: catalog } = useQuery({
+    queryKey: ["workspaces", "templates"],
+    queryFn: () => workspacesApi.templates(),
+    enabled: open,
+    staleTime: 60_000,
+  });
+  const groups = useMemo(() => {
+    const byGroup = new Map<string, typeof BLANK[]>();
+    for (const t of catalog ?? []) {
+      const g = t.group || "Work";
+      byGroup.set(g, [...(byGroup.get(g) ?? []), { ...t, key: t.key as string | null }]);
+    }
+    const rank = (g: string) => {
+      const i = GROUP_ORDER.indexOf(g);
+      return i === -1 ? GROUP_ORDER.length : i;
+    };
+    return [...byGroup.entries()].sort(([a], [b]) => rank(a) - rank(b));
+  }, [catalog]);
 
   // Markdown-zip import (Obsidian vault / Notion export) — an alternate
   // door out of this modal: pick a zip, land in the new workspace.
@@ -87,6 +102,24 @@ export function NewWorkspaceModal({
         title.trim() || undefined
       );
       await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      // The modal closes on success, so the import summary — including
+      // what was left out and why — goes in a toast (R-315).
+      const imported = `${result.notes} note${result.notes === 1 ? "" : "s"}${
+        result.notebooks
+          ? ` in ${result.notebooks} notebook${result.notebooks === 1 ? "" : "s"}`
+          : ""
+      }`;
+      const skippedLines = Object.entries(result.skipped ?? {}).map(
+        ([reason, count]) => `${count} × ${reason}`
+      );
+      if (skippedLines.length) {
+        toast.warning(`Skipped ${result.skipped_total}: ${skippedLines.join(" · ")}`, {
+          title: `Imported ${imported}`,
+          duration: 15_000,
+        });
+      } else {
+        toast.success(`Imported ${imported}.`);
+      }
       reset();
       onCreated?.(result.id);
       onClose();
@@ -158,9 +191,21 @@ export function NewWorkspaceModal({
           <label className="mb-1 block text-xs font-medium text-[var(--text-muted)]">
             Start from
           </label>
+          <div className="max-h-72 space-y-2 overflow-y-auto pr-0.5">
+          {[["", [BLANK]] as const, ...groups].map(([group, list]) => (
+          <div key={group || "blank"}>
+          {group && (
+            <div className="mb-1 mt-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+              {group}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-1.5">
-            {TEMPLATES.map((t) => {
-              const Icon = t.icon;
+            {list.map((t) => {
+              const Icon =
+                t.key === null
+                  ? FileText
+                  : TEMPLATE_ICONS[t.key] ??
+                    (t.key.startsWith("ws:") ? LayoutTemplate : FileText);
               const selected = template === t.key;
               return (
                 <button
@@ -178,7 +223,7 @@ export function NewWorkspaceModal({
                     className={cn(
                       "mt-0.5 h-4 w-4 shrink-0",
                       selected
-                        ? "text-[var(--accent)]"
+                        ? "text-[var(--accent-text)]"
                         : "text-[var(--text-muted)]"
                     )}
                   />
@@ -193,6 +238,9 @@ export function NewWorkspaceModal({
                 </button>
               );
             })}
+          </div>
+          </div>
+          ))}
           </div>
         </div>
 
@@ -276,7 +324,9 @@ export function NewWorkspaceModal({
               </span>
               <span className="mt-0.5 block text-[11px] leading-snug">
                 Obsidian vaults and Notion / Confluence Markdown exports —
-                folders become folders, .md files become notes.
+                .md files become notes, top-level folders become notebooks
+                (deeper folders stay in the note title). Images and other
+                files are skipped.
               </span>
             </span>
           </button>

@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   DndContext,
@@ -63,6 +63,8 @@ import { ErrorState } from "@/components/shared/Callout";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { ConfirmDoubleModal } from "@/components/shared/ConfirmDoubleModal";
+import { WORKSPACE_DELETE_LOSES } from "@/components/workspaces/workspaceCopy";
+import { useWorkspaceEvents } from "@/hooks/useWorkspaceEvents";
 import { ImportConversationsModal } from "@/components/chat/ImportConversationsModal";
 import { ShareWorkspaceDialog } from "@/components/chat/ShareWorkspaceDialog";
 import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
@@ -111,6 +113,11 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { WorkspaceDrivePane } from "@/components/workspaces/WorkspaceDrivePane";
 import { WorkspaceSearchPane } from "@/components/workspaces/WorkspaceSearchPane";
 import { WorkspaceOverviewPane } from "@/components/workspaces/WorkspaceOverviewPane";
+import {
+  MobileBoardView,
+  MobileRosterView,
+  MobileSheetView,
+} from "@/components/workspaces/MobileReadViews";
 import { WorkspaceAutomationPane } from "@/components/workspaces/WorkspaceAutomationPane";
 import { WorkspaceSettingsContent } from "@/components/workspaces/WorkspaceSettingsDrawer";
 import {
@@ -123,6 +130,7 @@ import { chatApi } from "@/api/chat";
 import { useModelStore } from "@/store/modelStore";
 import { type WorkspaceItemNode } from "@/api/workspaces";
 import { apiErrorMessage } from "@/utils/apiError";
+import { toast } from "@/store/toastStore";
 import {
   clearPendingHighlight,
   onPendingHighlight,
@@ -158,7 +166,14 @@ export function WorkspaceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
-  const { data: workspace, isLoading } = useWorkspace(id);
+  const {
+    data: workspace,
+    isLoading,
+    error: workspaceError,
+    refetch: refetchWorkspace,
+  } = useWorkspace(id);
+  // Teammates' changes appear without a reload (R-187).
+  useWorkspaceEvents(id);
   const { data: conversations } = useWorkspaceConversations(id);
   const { data: tree, isLoading: treeLoading } = useWorkspaceTree(id);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -169,6 +184,8 @@ export function WorkspaceDetailPage() {
   const [driveOpen, setDriveOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Phone home: the item list, or the overview (V9 — it wasn't reachable).
+  const [mobileTab, setMobileTab] = useState<"items" | "overview">("items");
   const [importOpen, setImportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -189,8 +206,17 @@ export function WorkspaceDetailPage() {
       return;
     }
     if (!id) return;
+    // The workspace's default model when the user can use it, else the
+    // first one they can.
+    const models = taskModels ?? [];
+    const first =
+      models.find(
+        (m) =>
+          m.model_id === workspace?.default_model_id &&
+          m.provider_id === workspace?.default_provider_id
+      ) ?? models[0];
+    let createdId: string | null = null;
     try {
-      const first = (taskModels ?? [])[0];
       const created = await createTask.mutateAsync({
         title: "Untitled automation",
         prompt: "Describe what this automation should do.",
@@ -203,13 +229,15 @@ export function WorkspaceDetailPage() {
         minute: 0,
         weekday: null,
         day_of_month: null,
-        timezone:
-          Intl.DateTimeFormat().resolvedOptions().timeZone ||
-          "Australia/Brisbane",
-        enabled: true,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+        // Off until the flow is first saved (the save switches it on). A
+        // draft someone opened and walked away from used to run its
+        // placeholder prompt every day at 09:00 (R-189).
+        enabled: false,
         notify: true,
         retention_runs: 30,
       });
+      createdId = created.id;
       await tasksApi.promote(created.id);
       await qc.invalidateQueries({ queryKey: ["workspaces", "tree", id] });
       // Open it inline in the workspace shell (rail + top bar stay put),
@@ -226,8 +254,10 @@ export function WorkspaceDetailPage() {
         indexing_status: null,
         children: [],
       });
-    } catch {
-      /* surfaced by the mutation's error handling */
+    } catch (err) {
+      // A draft that never became a flow is useless — don't leave it behind.
+      if (createdId) void tasksApi.remove(createdId).catch(() => undefined);
+      toast.error(apiErrorMessage(err, "Couldn't create the automation."));
     }
   };
   const qc = useQueryClient();
@@ -275,27 +305,48 @@ export function WorkspaceDetailPage() {
   // workspace id, so closing an item later doesn't re-open it, and a
   // workspace switch re-reads (and clears stale state).
   const restoredForRef = useRef<string | null>(null);
+  // The ``item`` param as this page last wrote (or adopted) it. A URL that
+  // differs from it changed from outside — Back / Forward or a link.
+  const lastItemRef = useRef<string | null>(null);
   useEffect(() => {
     if (!tree || !id || restoredForRef.current === id) return;
     restoredForRef.current = id;
+    lastItemRef.current = searchParams.get("item");
     const primary = findNode(tree, searchParams.get("item"));
     setSelected(primary);
     const split = findNode(tree, searchParams.get("item2"));
     setSecondary(split && split.id !== primary?.id ? split : null);
   }, [tree, id, searchParams, findNode]);
 
-  // Mirror the current selection back into the URL (replace, so selecting
-  // items doesn't pile up browser history). Guarded until restore has run
-  // for this id so we never clobber the param before reading it.
+  // Back / Forward moved the URL to another item: open that one. Back used
+  // to leave the workspace altogether, phones' back gesture included
+  // (R-182).
+  useEffect(() => {
+    if (!tree || !id || restoredForRef.current !== id) return;
+    const urlItem = searchParams.get("item");
+    if (urlItem === lastItemRef.current) return;
+    lastItemRef.current = urlItem;
+    setSelected(findNode(tree, urlItem));
+  }, [tree, id, searchParams, findNode]);
+
+  // Mirror the current selection back into the URL. Opening a different
+  // primary item pushes a history entry (so Back returns to the previous
+  // one); split-pane and other changes replace. Guarded until restore has
+  // run for this id so we never clobber the param before reading it.
   useEffect(() => {
     if (restoredForRef.current !== id) return;
+    // An outside URL change is being adopted above — don't write over it.
+    if (searchParams.get("item") !== lastItemRef.current) return;
     const next = new URLSearchParams(searchParams);
     if (selected) next.set("item", selected.id);
     else next.delete("item");
     if (secondary) next.set("item2", secondary.id);
     else next.delete("item2");
     if (next.toString() !== searchParams.toString()) {
-      setSearchParams(next, { replace: true });
+      const primaryChanged =
+        (selected?.id ?? null) !== searchParams.get("item");
+      lastItemRef.current = selected?.id ?? null;
+      setSearchParams(next, { replace: !primaryChanged });
     }
   }, [selected, secondary, id, searchParams, setSearchParams]);
 
@@ -480,14 +531,20 @@ export function WorkspaceDetailPage() {
     const readable = activeNode
       ? MOBILE_READABLE_KINDS.has(activeNode.kind)
       : false;
-    // Chat + discussion get the real write permission (same value the desktop
-    // path derives from the workspace access role); every other kind stays
-    // read-only on a phone.
+    // Notes, chats and discussions get the real write permission (same value
+    // the desktop path derives from the workspace access role) — notes were
+    // read-only on a phone (V9); everything else reads only.
     const mobileCanEdit =
       activeNode &&
-      (activeNode.kind === "chat" || activeNode.kind === "discussion")
-        ? canEdit
+      (activeNode.kind === "chat" ||
+        activeNode.kind === "discussion" ||
+        activeNode.kind === "note")
+        ? canEdit && !isArchived
         : false;
+    const people = [
+      ...(workspace?.owner ? [workspace.owner] : []),
+      ...(workspace?.collaborators ?? []),
+    ];
     return (
       <ItemPreviewContext.Provider value={(n) => setSelected(n)}>
         <TopNav
@@ -508,14 +565,42 @@ export function WorkspaceDetailPage() {
             </Button>
           }
         />
-        {isLoading || !workspace ? (
+        {workspaceError && !workspace ? (
+          <WorkspaceLoadError error={workspaceError} onRetry={() => void refetchWorkspace()} />
+        ) : isLoading || !workspace ? (
           <div className="flex flex-1 items-center gap-2 px-4 py-6 text-sm text-[var(--text-muted)]">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading workspace…
           </div>
+        ) : activeNode?.kind === "task" && activeNode.ref_id ? (
+          // An automation's runs, report, pause and Run now work on a phone
+          // on its own page (R-154).
+          <Navigate to={`/tasks/${activeNode.ref_id}`} replace />
         ) : activeNode ? (
-          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            {readable ? (
+          <section className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {readable && MOBILE_READ_VIEW_KINDS.has(activeNode.kind) && id ? (
+              activeNode.kind === "board" ? (
+                <MobileBoardView
+                  key={activeNode.id}
+                  workspaceId={id}
+                  boardItemId={activeNode.id}
+                  people={people}
+                />
+              ) : activeNode.kind === "roster" && activeNode.ref_id ? (
+                <MobileRosterView
+                  key={activeNode.id}
+                  workspaceId={id}
+                  rosterId={activeNode.ref_id}
+                  people={people}
+                />
+              ) : activeNode.ref_id ? (
+                <MobileSheetView
+                  key={activeNode.id}
+                  workspaceId={id}
+                  sheetId={activeNode.ref_id}
+                />
+              ) : null
+            ) : readable ? (
               <WorkspaceItemView
                 key={activeNode.id}
                 node={activeNode}
@@ -529,7 +614,7 @@ export function WorkspaceDetailPage() {
                 <EmptyState
                   icon={<Monitor className="h-5 w-5" />}
                   title={`${KIND_META[activeNode.kind]?.label ?? "This item"} is best on desktop`}
-                  description="Notes, chats, and discussions work here on your phone. Canvases, boards, sheets, and rosters need the desktop layout — open this workspace on a computer to view them."
+                  description="This needs the desktop layout — open this workspace on a computer to work on it. Notes, chats, discussions, boards, rosters, sheets and whiteboards (view only) work here."
                   action={
                     <Button variant="primary" onClick={() => setSelected(null)}>
                       Back to items
@@ -538,9 +623,20 @@ export function WorkspaceDetailPage() {
                 />
               </div>
             )}
-          </main>
+          </section>
+        ) : mobileTab === "overview" ? (
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <MobileHomeTabs tab={mobileTab} onChange={setMobileTab} />
+            <WorkspaceOverviewPane
+              workspaceId={workspace.id}
+              title={workspace.title}
+              onOpenItem={(n) => setSelected(n)}
+              canEdit={canEdit && !isArchived}
+            />
+          </div>
         ) : (
           <div className="min-h-0 flex-1 overflow-y-auto">
+            <MobileHomeTabs tab={mobileTab} onChange={setMobileTab} />
             {workspace.description && (
               <p className="border-b border-[var(--border)] px-4 py-3 text-sm text-[var(--text-muted)]">
                 {workspace.description}
@@ -583,8 +679,8 @@ export function WorkspaceDetailPage() {
               </div>
             )}
             <p className="px-4 py-4 text-center text-xs text-[var(--text-muted)]">
-              Chats and discussions work on mobile. Other items are read-only
-              here — open on desktop to edit.
+              Boards, rosters and sheets are read-only on a phone, and
+              canvases need a computer.
             </p>
           </div>
         )}
@@ -602,7 +698,7 @@ export function WorkspaceDetailPage() {
             ? workspace.description
             : workspace?.role === "collaborator" && workspace?.shared_by
               ? `Shared by ${workspace.shared_by.username}`
-              : "Project workspace — everything here is context for its chats"
+              : undefined
         }
         actions={
           <div className="flex items-center gap-2">
@@ -626,7 +722,8 @@ export function WorkspaceDetailPage() {
                 </kbd>
               </span>
             </Button>
-            {!isArchived && isOwner && (
+            {/* Admins manage members too, so they get Share (R-180). */}
+            {!isArchived && canManage && (
               <Button
                 variant="ghost"
                 leftIcon={<Share2 className="h-4 w-4" />}
@@ -649,7 +746,9 @@ export function WorkspaceDetailPage() {
         }
       />
 
-      {isLoading || !workspace ? (
+      {workspaceError && !workspace ? (
+        <WorkspaceLoadError error={workspaceError} onRetry={() => void refetchWorkspace()} />
+      ) : isLoading || !workspace ? (
         <div className="flex flex-1 items-center gap-2 px-6 py-6 text-sm text-[var(--text-muted)]">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading workspace...
@@ -710,7 +809,7 @@ export function WorkspaceDetailPage() {
           </aside>
 
           {/* Main pane */}
-          <main
+          <section
             className={
               "flex min-w-0 flex-1 flex-col " +
               (secondary || settingsOpen || driveOpen || searchOpen
@@ -871,7 +970,7 @@ export function WorkspaceDetailPage() {
                 />
               </>
             )}
-          </main>
+          </section>
         </div>
       )}
 
@@ -881,7 +980,7 @@ export function WorkspaceDetailPage() {
         defaultWorkspaceId={id}
       />
 
-      {workspace && isOwner && (
+      {workspace && canManage && (
         <ShareWorkspaceDialog
           open={shareOpen}
           onClose={() => setShareOpen(false)}
@@ -896,7 +995,16 @@ export function WorkspaceDetailPage() {
         onClose={() => setDeleteOpen(false)}
         onConfirm={async () => {
           if (!workspace) return;
-          await remove.mutateAsync(workspace.id);
+          // A failed delete used to leave the dialog open with an
+          // unhandled rejection (R-182).
+          try {
+            await remove.mutateAsync(workspace.id);
+          } catch (err) {
+            toast.error(apiErrorMessage(err, "Couldn't delete the workspace."));
+            return;
+          }
+          setDeleteOpen(false);
+          toast.success(`"${workspace.title}" moved to Recently deleted.`);
           navigate("/workspaces");
         }}
         destructive
@@ -904,17 +1012,14 @@ export function WorkspaceDetailPage() {
         firstTitle="Delete this workspace?"
         firstDescription={
           workspace
-            ? `"${workspace.title}" will be deleted. Conversations inside it are preserved and will move back to your top-level chat list. Pinned files stay in your library.`
+            ? `"${workspace.title}" moves to Recently deleted (in the Archive tab) and every member loses access. You can restore it for 30 days; after that ${WORKSPACE_DELETE_LOSES} are gone for good. Chats come back to whoever started them, and files stay in their owners' Drive.`
             : ""
         }
         firstConfirmLabel="Continue"
-        secondTitle="Delete permanently"
+        secondTitle="Delete workspace"
         secondDescription={
-          workspace
-            ? `Type the workspace title to confirm permanent deletion of "${workspace.title}".`
-            : ""
+          workspace ? `Move "${workspace.title}" to Recently deleted?` : ""
         }
-        typeToConfirm={workspace?.title}
         secondConfirmLabel="Delete workspace"
       />
 
@@ -992,15 +1097,25 @@ const KIND_META: Partial<
   task: { icon: Clock, label: "Automation" },
 };
 
-// Kinds that render usefully on a phone (Lean mobile cut). Notes read
-// beautifully in a single column (read-only); chats and discussions are
-// fully interactive; the heavier editors — canvas / sheet / board / roster /
-// automation — need the desktop layout, so on mobile they show a "best on
-// desktop" notice instead of squeezing a broken editor onto the screen.
+// Kinds that render usefully on a phone. Notes, chats and discussions are
+// fully editable; boards, rosters and sheets get simple read views (V9 —
+// they used to be "best on desktop" with nothing to see). Canvases and
+// automations still need the desktop layout.
 const MOBILE_READABLE_KINDS = new Set<WorkspaceItemNode["kind"]>([
   "note",
   "chat",
   "discussion",
+  "board",
+  "roster",
+  "sheet",
+  // Whiteboards open view-only on a phone (Part C §2.4, WP-3.5).
+  "canvas",
+  "task", // opens its runs page (R-154)
+]);
+const MOBILE_READ_VIEW_KINDS = new Set<WorkspaceItemNode["kind"]>([
+  "board",
+  "roster",
+  "sheet",
 ]);
 
 /**
@@ -1275,7 +1390,9 @@ function WorkspaceMainPane({
             <span className="font-medium text-[var(--text)]">
               {collaboratorNames.join(", ")}
             </span>
-            . They can see and edit every chat in this workspace.
+            . They see its notes, boards, sheets and files, and any chat
+            someone shares with the workspace — your other chats stay private
+            to you.
           </span>
         </div>
       )}
@@ -1292,21 +1409,24 @@ function WorkspaceMainPane({
           <Users
             className={
               "h-3.5 w-3.5 shrink-0 " +
-              (canEdit ? "text-[var(--accent)]" : "text-[var(--warning)]")
+              (canEdit ? "text-[var(--accent-text)]" : "text-[var(--warning)]")
             }
           />
           <span>
             {canEdit ? (
               <>
-                You have collaborator access to this workspace, shared by{" "}
-                <span className="font-medium">{sharedByName}</span>. You can see
-                and edit every chat in it.
+                Shared with you by{" "}
+                <span className="font-medium">{sharedByName}</span>. You can add
+                and edit its notes, boards and other items. Chats stay private
+                to whoever started them until they share them with the
+                workspace.
               </>
             ) : (
               <>
                 <span className="font-semibold">View-only access</span> — shared
                 by <span className="font-medium">{sharedByName}</span>. You can
-                read its chats, notes, and files but not change them.
+                read its notes, files and the chats people share with the
+                workspace, but not change them.
               </>
             )}
           </span>
@@ -1476,12 +1596,14 @@ function WorkspaceItemView({
   }
   if (node.kind === "canvas") {
     return (
-      <WorkspaceCanvasPaneFrame
-        node={node}
-        workspaceId={workspaceId}
-        canEdit={canEdit}
-        onOpenItem={onOpenItem}
-      />
+      <WithComments workspaceId={workspaceId} itemId={node.id} canEdit={canEdit}>
+        <WorkspaceCanvasPaneFrame
+          node={node}
+          workspaceId={workspaceId}
+          canEdit={canEdit}
+          onOpenItem={onOpenItem}
+        />
+      </WithComments>
     );
   }
   if (node.kind === "sheet" && node.ref_id) {
@@ -1496,12 +1618,14 @@ function WorkspaceItemView({
           </div>
         }
       >
-        <WorkspaceSheetPane
-          workspaceId={workspaceId}
-          sheetId={node.ref_id}
-          canEdit={canEdit}
-          node={node}
-        />
+        <WithComments workspaceId={workspaceId} itemId={node.id} canEdit={canEdit}>
+          <WorkspaceSheetPane
+            workspaceId={workspaceId}
+            sheetId={node.ref_id}
+            canEdit={canEdit}
+            node={node}
+          />
+        </WithComments>
       </Suspense>
     );
   }
@@ -1840,6 +1964,12 @@ function WorkspaceNotePane({
             syncNoteTitle(f);
           }}
           wikiLink={wikiLink}
+          // Drive won't rename a workspace's files — the title renames the
+          // item, which renames its note file too (R-218).
+          onRenameTitle={async (title) => {
+            await updateItem.mutateAsync({ itemId: node.id, payload: { title } });
+            syncedTitleRef.current = title;
+          }}
           // Match the shared ItemPaneHeader's left cluster: note kind-icon
           // + the ⚡ workspace-context toggle canvas/sheet/board all show.
           titleIcon={
@@ -1859,11 +1989,8 @@ function WorkspaceNotePane({
         itemId={node.id}
         onOpenItem={onOpenItem}
       />
-      <ItemCommentsPanel
-        workspaceId={workspaceId}
-        itemId={node.id}
-        canEdit={canEdit}
-      />
+      {/* Note comments live in the editor now, anchored in the text
+          (WP-4.5, R-227) — the Comments button in its header. */}
     </div>
   );
 }
@@ -2236,7 +2363,7 @@ function SortableTab({
           className={cn(
             "transition",
             contextOn
-              ? "text-[var(--accent)]"
+              ? "text-[var(--accent-text)]"
               : "text-[var(--text-muted)] opacity-0 group-hover:opacity-100"
           )}
           aria-label={
@@ -2610,3 +2737,131 @@ function WorkspaceCanvasPaneFrame({
   );
 }
 
+
+/** The workspace couldn't load: gone or no access (404), or a failure.
+ *  It used to spin "Loading workspace…" forever (R-182). */
+function WorkspaceLoadError({
+  error,
+  onRetry,
+}: {
+  error: unknown;
+  onRetry: () => void;
+}) {
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  const gone = status === 404 || status === 403;
+  return (
+    <ErrorState tone={gone ? "info" : "danger"}>
+      {gone ? (
+        <>
+          You no longer have access to this workspace — it may have been
+          deleted, or you were removed from it.{" "}
+        </>
+      ) : (
+        <>
+          Couldn&apos;t load this workspace.{" "}
+          <button type="button" className="font-medium underline" onClick={onRetry}>
+            Try again
+          </button>{" "}
+          or{" "}
+        </>
+      )}
+      <Link to="/workspaces" className="font-medium underline">
+        {gone ? "Back to your workspaces" : "go back to your workspaces"}
+      </Link>
+      .
+    </ErrorState>
+  );
+}
+
+/** Items / Overview switch on the phone's workspace home (V9). */
+function MobileHomeTabs({
+  tab,
+  onChange,
+}: {
+  tab: "items" | "overview";
+  onChange: (t: "items" | "overview") => void;
+}) {
+  return (
+    <div className="flex gap-1 border-b border-[var(--border)] px-3 py-2" role="tablist">
+      {(["items", "overview"] as const).map((t) => (
+        <button
+          key={t}
+          type="button"
+          role="tab"
+          aria-selected={tab === t}
+          onClick={() => onChange(t)}
+          className={cn(
+            "rounded-full px-3 py-1 text-xs font-medium",
+            tab === t
+              ? "bg-[var(--accent)]/15 text-[var(--accent-text)]"
+              : "text-[var(--text-muted)]"
+          )}
+        >
+          {t === "items" ? "Items" : "Overview"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function canModerateIn(role: string | null | undefined): boolean {
+  return role === "owner" || role === "admin";
+}
+
+/** Sheets and canvases get the same comment thread notes have, in a
+ *  drawer beside the item (R-202 — they had none). */
+function WithComments({
+  workspaceId,
+  itemId,
+  canEdit,
+  children,
+}: {
+  workspaceId: string;
+  itemId: string;
+  canEdit: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const { data: ws } = useWorkspace(workspaceId);
+  return (
+    <div className="relative flex min-h-0 flex-1">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+      {open && (
+        <aside
+          aria-label="Comments"
+          className="flex w-80 shrink-0 flex-col overflow-y-auto border-l border-[var(--border)] bg-[var(--surface)]"
+        >
+          <div className="flex items-center justify-end px-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              className="rounded p-1 text-xs text-[var(--text-muted)] hover:text-[var(--text)]"
+            >
+              Close
+            </button>
+          </div>
+          <ItemCommentsPanel
+            workspaceId={workspaceId}
+            itemId={itemId}
+            canEdit={canEdit}
+            canModerate={canModerateIn(ws?.access_role)}
+            defaultOpen
+            emptyHint="No comments yet — start the conversation about this item."
+          />
+        </aside>
+      )}
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          title="Comments"
+          aria-label="Open comments"
+          className="absolute bottom-3 right-3 z-20 inline-flex items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1.5 text-xs font-medium text-[var(--text)] shadow-sm transition hover:bg-[var(--hover)]"
+        >
+          <MessageSquare className="h-3.5 w-3.5" />
+          Comments
+        </button>
+      )}
+    </div>
+  );
+}

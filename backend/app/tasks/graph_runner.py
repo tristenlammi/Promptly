@@ -15,6 +15,7 @@ nodes and wires their outputs together.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -43,6 +44,7 @@ from app.tasks.flow_graph import (
     DeepResearchData,
     ExtractData,
     FetchPageData,
+    WorkspaceReadData,
     FlowGraph,
     FlowNode,
     HttpRequestData,
@@ -87,7 +89,25 @@ _DELAY_CAP_SECONDS = 600
 _VAR_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_.\-]+)\s*\}\}")
 
 
+# Variables a step referenced that had no value — shown on the step in the
+# run inspector instead of failing silently with literal "{{json.x}}" (R-150).
+_UNRESOLVED: "contextvars.ContextVar[set[str] | None]" = contextvars.ContextVar(
+    "promptly_flow_unresolved", default=None
+)
+
+
+def _note_unresolved(template: str, context: dict[str, str]) -> None:
+    bucket = _UNRESOLVED.get()
+    if bucket is None or not template:
+        return
+    for m in _VAR_RE.finditer(template):
+        name = m.group(1)
+        if name not in context and not name.startswith("secret."):
+            bucket.add(name)
+
+
 def _interpolate(template: str, context: dict[str, str]) -> str:
+    _note_unresolved(template, context)
     return _VAR_RE.sub(
         lambda m: context.get(m.group(1), m.group(0)), template
     )
@@ -111,20 +131,29 @@ def _try_json(text: str):
     return obj if isinstance(obj, (dict, list)) else None
 
 
-def _flatten_json(obj, prefix: str, out: dict[str, str], depth: int = 0) -> None:
+_JSON_LEAVES_PER_VALUE = 2000
+
+
+def _flatten_json(obj, prefix: str, out: dict[str, str], depth: int = 0, budget: list | None = None) -> None:
     """Flatten a JSON value into ``prefix.path`` → string leaves so templates can
     reference fields: ``{{json.status}}``, ``{{json.items.0.name}}``. Bounded so a
-    huge object can't explode the context."""
-    if len(out) > 400 or depth > 6:
+    huge object can't explode the context — per value, not across the whole
+    context: one shared 400-entry cap meant a GitHub-sized webhook body used
+    it all up and later ``{{json.*}}`` references silently stopped
+    resolving (R-150)."""
+    if budget is None:
+        budget = [_JSON_LEAVES_PER_VALUE]
+    if budget[0] <= 0 or depth > 8:
         return
     if isinstance(obj, dict):
         for k, v in obj.items():
-            _flatten_json(v, f"{prefix}.{k}", out, depth + 1)
+            _flatten_json(v, f"{prefix}.{k}", out, depth + 1, budget)
     elif isinstance(obj, list):
-        for i, v in enumerate(obj[:50]):
-            _flatten_json(v, f"{prefix}.{i}", out, depth + 1)
+        for i, v in enumerate(obj[:100]):
+            _flatten_json(v, f"{prefix}.{i}", out, depth + 1, budget)
     else:
         out[prefix] = "" if obj is None else str(obj)
+        budget[0] -= 1
 
 
 def _json_dumps(obj) -> str:
@@ -132,6 +161,13 @@ def _json_dumps(obj) -> str:
         return json.dumps(obj, ensure_ascii=False)
     except (TypeError, ValueError):
         return ""
+
+
+def _as_utc(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso).astimezone(_tz.utc).isoformat(timespec="minutes")
+    except (TypeError, ValueError):
+        return iso
 
 
 def _step_context(
@@ -155,6 +191,7 @@ def _step_context(
         "datetime": now_local,
         "date": now_local[:10],
         "time": now_local[11:16] if len(now_local) >= 16 else "",
+        "utc_datetime": _as_utc(now_local),
     }
     # Webhook payloads that are JSON get field access anywhere in the flow:
     # ``{{trigger.json.<path>}}`` — not just on the node right after the trigger.
@@ -246,6 +283,115 @@ async def _run_search_node(
     return text, sources, record
 
 
+async def _run_workspace_read_node(
+    node: FlowNode, ctx: dict[str, str], *, db, task: Task, user: User
+) -> tuple[str, dict, dict]:
+    """Execute a ``workspace.read`` node (R-153) → (text, structured, record).
+    Reads only what the automation's owner may see in its workspace."""
+    from app.chat.models import WorkspaceFile, WorkspaceItem
+    from app.files.models import UserFile
+    from app.workspaces.knowledge import (
+        _item_backing_text,
+        read_workspace_item_text,
+        retrievable_workspace_file_ids,
+    )
+    from app.workspaces.shares import workspace_role
+
+    data = WorkspaceReadData.model_validate(node.data)
+    if task.workspace_id is None:
+        raise TaskRunError("The workspace step only works in a workspace's automations.")
+    if await workspace_role(db, task.workspace_id, user) is None:
+        raise TaskRunError("The automation's owner no longer has access to its workspace.")
+    wid = task.workspace_id
+    cap = max(500, min(int(data.max_chars or 20000), 100_000))
+    mode = (data.mode or "search").lower()
+
+    if mode == "file":
+        raw = _interpolate(data.file_id or "", ctx).strip() or ctx.get("trigger.json.file_id", "")
+        try:
+            fid = uuid.UUID(raw)
+        except ValueError as e:
+            raise TaskRunError("The workspace step needs a file id (e.g. {{trigger.json.file_id}}).") from e
+        uf = await db.get(UserFile, fid)
+        in_ws = await db.scalar(
+            select(WorkspaceFile.file_id).where(WorkspaceFile.workspace_id == wid, WorkspaceFile.file_id == fid)
+        )
+        allowed = uf is not None and uf.trashed_at is None and (
+            in_ws is not None or fid in await retrievable_workspace_file_ids(db, wid) or uf.user_id == user.id
+        )
+        if not allowed:
+            raise TaskRunError("That file isn't in this workspace (or was deleted).")
+        text = (uf.content_text or "").strip()
+        if not text:
+            raise TaskRunError(f"“{uf.filename}” has no readable text (an image, or not indexed yet).")
+        text = text[:cap]
+        return text, {"file_id": str(uf.id), "filename": uf.filename, "text": text}, {
+            "node_id": node.id, "type": node.type, "label": "Read file", "status": "success",
+            "output": f"{uf.filename}: {len(text)} characters",
+        }
+
+    if mode == "item":
+        item = None
+        text = None
+        if data.item_id:
+            try:
+                item = await db.get(WorkspaceItem, uuid.UUID(str(data.item_id)))
+            except ValueError:
+                item = None
+            if item is not None and (
+                item.workspace_id != wid
+                or item.trashed_at is not None
+                or (item.visibility == "private" and item.created_by != user.id)
+            ):
+                item = None
+            if item is not None:
+                text = await _item_backing_text(db, item)
+        else:
+            title = _interpolate(data.title or "", ctx).strip()
+            if title:
+                hit = await read_workspace_item_text(db, workspace_id=wid, user_id=user.id, title=title)
+                if hit is not None:
+                    item, text = hit
+        if item is None:
+            raise TaskRunError("The workspace step couldn't find that item (check its title).")
+        text = (text or "").strip()[:cap]
+        return text, {"item_id": str(item.id), "title": item.title, "kind": item.kind, "text": text}, {
+            "node_id": node.id, "type": node.type, "label": f"Read {item.kind}", "status": "success",
+            "output": text[:2000] or "(empty)",
+        }
+
+    # search
+    from app.chat.semantic_search import get_embedding_config
+    from app.custom_models.retrieval import retrieve_workspace_context
+    from app.workspaces.knowledge import build_workspace_injection, format_retrieved_block
+
+    query = _interpolate(data.query or "", ctx).strip() or ctx.get("upstream_output", "").strip()
+    if not query:
+        raise TaskRunError("The workspace search has nothing to search for.")
+    query = query[:2000]
+    if await get_embedding_config(db) is None:
+        # No embedder: hand over the workspace's content itself.
+        inj = await build_workspace_injection(db, workspace_id=wid, query=query)
+        text = (inj.system_block or "").strip()[:cap]
+        hits: list[dict] = []
+    else:
+        allowed = await retrievable_workspace_file_ids(db, wid)
+        chunks = (
+            await retrieve_workspace_context(
+                db, workspace_id=wid, query=query,
+                top_k=max(1, min(int(data.top_k or 6), 20)), file_ids=list(allowed),
+            )
+            if allowed
+            else []
+        )
+        text = format_retrieved_block(chunks)[:cap] if chunks else ""
+        hits = [{"file": c.filename, "text": c.text[:500], "score": round(float(c.score), 3)} for c in chunks]
+    return text or "Nothing in this workspace matched.", {"query": query, "results": hits}, {
+        "node_id": node.id, "type": node.type, "label": "Search workspace", "status": "success",
+        "output": (text or "Nothing matched.")[:2000],
+    }
+
+
 async def _run_fetch_node(
     node: FlowNode, ctx: dict[str, str]
 ) -> tuple[str, list[dict], dict, dict]:
@@ -307,10 +453,17 @@ async def _run_fetch_node(
 # prompts — a key must never reach a model provider), and every value
 # is swapped back to its token before anything is recorded.
 # ---------------------------------------------------------------------
-_SECRET_TOKEN_RE = re.compile(r"\{\{\s*secret\.([A-Za-z][A-Za-z0-9_]*)\s*\}\}")
 
 
-async def _load_secrets(db, user_id: uuid.UUID) -> dict[str, str]:
+class _Vault(dict):
+    """name → decrypted value, plus ``hosts``: name → allowed host patterns."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.hosts: dict[str, list[str]] = {}
+
+
+async def _load_secrets(db, user_id: uuid.UUID) -> _Vault:
     """The owner's decrypted vault, name → value. Rows that fail to
     decrypt (rotated SECRET_KEY) are skipped rather than killing the run."""
     from app.auth.utils import decrypt_secret
@@ -325,29 +478,14 @@ async def _load_secrets(db, user_id: uuid.UUID) -> dict[str, str]:
         .scalars()
         .all()
     )
-    out: dict[str, str] = {}
+    out = _Vault()
     for r in rows:
         try:
             out[r.name] = decrypt_secret(r.value_encrypted)
+            out.hosts[r.name] = list(r.allowed_hosts or [])
         except Exception:  # noqa: BLE001 — undecryptable → treat as absent
             logger.warning("secret %s failed to decrypt; skipping", r.name)
     return out
-
-
-def _resolve_secret_tokens(text: str, secrets: dict[str, str]) -> str:
-    """Replace ``{{secret.NAME}}`` with the vault value; unknown names fail
-    loudly (a silently-empty Authorization header is a debugging tarpit)."""
-
-    def _rep(m: re.Match) -> str:
-        name = m.group(1).upper()
-        if name not in secrets:
-            raise TaskRunError(
-                f"Unknown credential {{{{secret.{name}}}}} — add it under "
-                "Automations ▸ Credentials."
-            )
-        return secrets[name]
-
-    return _SECRET_TOKEN_RE.sub(_rep, text)
 
 
 def _redact_secrets(text: str, secrets: dict[str, str]) -> str:
@@ -364,11 +502,26 @@ _HTTP_MAX_RESPONSE_BYTES = 2 * 1024 * 1024  # cap the wire read
 _HTTP_MAX_TEXT = 60_000  # cap what flows downstream / into records
 
 
+def _render(template: str, ctx: dict[str, str], **kw) -> str:
+    """:func:`app.tasks.templating.render`, with its errors as run errors."""
+    from app.tasks.templating import UnknownSecretError, render
+
+    _note_unresolved(template, ctx)
+    try:
+        return render(template, ctx, **kw)
+    except UnknownSecretError as e:
+        raise TaskRunError(
+            f"Unknown credential {{{{secret.{e.name}}}}} — add it under "
+            "Automations ▸ Credentials."
+        ) from e
+
+
 async def _run_http_node(
     node: FlowNode,
     ctx: dict[str, str],
     *,
     secrets: dict[str, str],
+    user: User | None = None,
 ) -> tuple[str, object, dict]:
     """Execute an ``http.request`` node → (text, structured, record).
 
@@ -394,7 +547,24 @@ async def _run_http_node(
     if method not in _HTTP_METHODS:
         raise TaskRunError(f"Unsupported HTTP method {method!r}.")
 
-    url = _resolve_secret_tokens(_interpolate(data.url, ctx).strip(), secrets)
+    from urllib.parse import urlparse
+
+    from app.net.internal_hosts import INTERNAL_HOSTS, may_reach_private_network
+    from app.secrets.hosts import host_allowed
+
+    # Reaching your own network is a permission, not a checkbox: the step's
+    # opt-in only counts for an admin or a user an admin allowed (R-008).
+    if data.allow_private_network and user is not None and not may_reach_private_network(user):
+        raise TaskRunError(
+            "This step is set to reach your own network, which needs an admin "
+            "to allow it for your account (Admin ▸ Users)."
+        )
+
+    # Credentials come only from the author's template, never from values
+    # pasted in at run time (R-005); JSON bodies get JSON-escaped values
+    # (R-012).
+    used: list[str] = []
+    url = _render(data.url, ctx, secrets=secrets, on_secret=used.append).strip()
     if not url:
         raise TaskRunError("The HTTP step has no URL.")
 
@@ -403,19 +573,27 @@ async def _run_http_node(
         name = (h.name or "").strip()
         if not name:
             continue
-        headers[name] = _resolve_secret_tokens(
-            _interpolate(h.value or "", ctx), secrets
-        )
+        headers[name] = _render(h.value or "", ctx, secrets=secrets, on_secret=used.append)
 
     json_body = None
     content_body: str | None = None
     if method != "GET" and (data.body or "").strip():
-        raw_body = _resolve_secret_tokens(_interpolate(data.body, ctx), secrets)
+        raw_body = _render(data.body, ctx, secrets=secrets, json_aware=True, on_secret=used.append)
         try:
             json_body = _json.loads(raw_body)
         except (ValueError, TypeError):
             content_body = raw_body
             headers.setdefault("Content-Type", "text/plain; charset=utf-8")
+
+    host = (urlparse(url).hostname or "").lower()
+    hosts = getattr(secrets, "hosts", {})
+    for name in dict.fromkeys(used):
+        if not host_allowed(host, hosts.get(name, [])):
+            raise TaskRunError(
+                f"Credential {name} may only be sent to {', '.join(hosts[name])}, "
+                f"not {host or 'this URL'}. Change the step's URL or the "
+                "credential's allowed hosts."
+            )
 
     timeout = max(1, min(120, data.timeout_s or 30))
     label = f"HTTP {method}"
@@ -429,6 +607,7 @@ async def _run_http_node(
             timeout_seconds=float(timeout),
             max_bytes=_HTTP_MAX_RESPONSE_BYTES,
             allow_private=data.allow_private_network,
+            deny_hosts=INTERNAL_HOSTS,
         )
     except UnsafeURLError as e:
         hint = (
@@ -499,7 +678,7 @@ async def _run_mcp_node(
     JSON results feed ``{{json.*}}`` downstream."""
     import json as _json
 
-    from app.mcp.service import McpError, call_connector_tool, connectors_for_turn
+    from app.mcp.service import McpError, call_connector_tool
 
     data = McpActionData.model_validate(node.data)
     if not data.connector_id or not data.tool_name:
@@ -510,16 +689,24 @@ async def _run_mcp_node(
     except ValueError as exc:
         raise TaskRunError("The MCP step's connector id is invalid.") from exc
 
-    # Gate: the connector must still be reachable for this owner/workspace.
-    reachable = await connectors_for_turn(
-        db, user_id=user.id, workspace_id=workspace_id
-    )
-    if not any(c.id == connector_id for c in reachable):
-        raise TaskRunError(
-            "This automation can no longer reach the selected connector."
-        )
+    # Gate: the same decision chat makes — reachable for this owner and
+    # workspace, in the catalog, on the allow-list, and not destructive
+    # (an unattended run has no human to confirm it). It previously
+    # checked only reachability and ran any tool name in the graph JSON.
+    from app.mcp.service import authorize_connector_tool
 
-    raw_args = _interpolate(data.arguments or "{}", ctx).strip() or "{}"
+    try:
+        await authorize_connector_tool(
+            db,
+            user_id=user.id,
+            workspace_id=workspace_id,
+            connector_id=connector_id,
+            real_tool=data.tool_name,
+        )
+    except McpError as exc:
+        raise TaskRunError(f"This automation can't run {data.tool_name!r}: {exc}") from exc
+
+    raw_args = _render(data.arguments or "{}", ctx, json_aware=True).strip() or "{}"
     try:
         arguments = _json.loads(raw_args)
         if not isinstance(arguments, dict):
@@ -971,8 +1158,10 @@ async def _run_memory_node(
             parts.append(f"(run {e.get('at', '?')})\n{e.get('value', '')}")
     text = "\n\n".join(parts)
 
+    # Computed for test runs too (the label reports it); only a real run
+    # persists it. A test run used to crash here (R-013).
+    new_entries = (prev + [{"value": current, "at": now_local}])[-cap:]
     if not dry_run:
-        new_entries = (prev + [{"value": current, "at": now_local}])[-cap:]
         if row is not None:
             row.entries = new_entries
             flag_modified(row, "entries")
@@ -1151,7 +1340,9 @@ async def _resolve_workspace_and_folder(
     parent_id: uuid.UUID | None = None
     if folder_item_id:
         folder = await db.get(WorkspaceItem, uuid.UUID(folder_item_id))
-        if folder is None or folder.kind != "folder" or folder.workspace_id != ws.id:
+        # Notebooks are the only grouping now (folders were removed), so the
+        # picker that offered only folders was always empty (R-155).
+        if folder is None or folder.kind not in ("folder", "container") or folder.workspace_id != ws.id:
             raise TaskRunError(
                 "The folder this automation files into no longer exists in its "
                 "workspace."
@@ -1303,8 +1494,10 @@ async def _write_sheet(db, *, task: Task, data: SheetOutputData, text: str) -> s
         data=workbook,
         content_text="\n".join("\t".join(r) for r in rows) or None,
     )
-    db.add(sheet)
-    await db.flush()  # assign sheet.id before the item links to it
+    from app.files.generated_kinds import GeneratedKind
+    from app.files.office import add_with_shell
+
+    await add_with_shell(db, sheet, kind=GeneratedKind.SHEET.value)  # assigns sheet.id
     pos = await _next_position(db, ws.id, parent_id)
     item = WorkspaceItem(
         workspace_id=ws.id,
@@ -1570,6 +1763,7 @@ _NODE_KIND_NAMES = {
     NodeType.EXTRACT: "an extract step",
     NodeType.SEARCH_WEB: "a web search",
     NodeType.FETCH_PAGE: "a fetch-page step",
+    NodeType.WORKSPACE_READ: "a workspace step",
     NodeType.HTTP_REQUEST: "an HTTP request",
     NodeType.MCP_ACTION: "a tool action",
     NodeType.DEEP_RESEARCH: "a deep-research step",
@@ -1621,6 +1815,7 @@ _NODE_TIMEOUT_BUDGET = {
     NodeType.EXTRACT: 90,
     NodeType.SEARCH_WEB: 45,
     NodeType.FETCH_PAGE: 45,
+    NodeType.WORKSPACE_READ: 30,
     NodeType.HTTP_REQUEST: 45,
     NodeType.MCP_ACTION: 60,
     NodeType.DEEP_RESEARCH: 420,  # search + fetch top-N + cited synthesis
@@ -1634,6 +1829,16 @@ _NODE_TIMEOUT_BUDGET = {
 # what trips first, not the blunt worker kill.
 _RUN_TIMEOUT_FLOOR = 300
 _RUN_TIMEOUT_CEILING = 3000
+
+
+def _changes_things(node: FlowNode) -> bool:
+    """Steps whose effect lands outside this run: anything but a GET, and
+    any MCP tool."""
+    if node.type == NodeType.MCP_ACTION:
+        return True
+    if node.type == NodeType.HTTP_REQUEST:
+        return str((node.data or {}).get("method") or "GET").upper() != "GET"
+    return False
 
 
 def estimate_flow_timeout(graph: FlowGraph) -> int:
@@ -1702,11 +1907,13 @@ async def run_graph_flow(
     user: User,
     run_started_at: datetime,
     trigger_payload: str | None = None,
+    trigger_meta: dict | None = None,
     db,
     stop_at: str | None = None,
     pinned: dict[str, str] | None = None,
     dry_run: bool = False,
     time_budget: float | None = None,
+    execute_actions: bool = True,
 ) -> tuple[str, list[dict], dict, list[dict]]:
     """Execute a flow graph as a DAG → ``(report, sources, usage, node_runs)``.
 
@@ -1744,7 +1951,15 @@ async def run_graph_flow(
     pinned = pinned or {}
 
     tz = _flow_timezone(graph, task)
-    now_local = run_started_at.astimezone(_tz.utc).isoformat(timespec="minutes")
+    # In the schedule's timezone, as the comment on the context promised —
+    # it was UTC, so an 8 am Sydney run was dated yesterday at 21:00 (R-148).
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    try:
+        zone = ZoneInfo(tz) if tz else _tz.utc
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = _tz.utc
+    now_local = run_started_at.astimezone(zone).isoformat(timespec="minutes")
 
     outputs: dict[str, str] = {}  # node_id → text output (for {{node_x.output}})
     structured: dict[str, object] = {}  # node_id → parsed JSON (for {{...json.path}})
@@ -1892,6 +2107,10 @@ async def run_graph_flow(
             structured=structured,
             upstream_struct=upstream_struct,
         )
+        # A webhook's (allow-listed) headers and query string (R-195).
+        for part in ("headers", "query"):
+            for k, v in ((trigger_meta or {}).get(part) or {}).items():
+                ctx[f"trigger.{part}.{k}"] = str(v)
 
         # Test runs don't perform output side effects (no note/card/message
         # created) — they just report what *would* happen.
@@ -1910,8 +2129,29 @@ async def run_graph_flow(
             )
             continue
 
+        # Test runs don't perform actions elsewhere either — a POST/DELETE
+        # or an MCP tool really happened on every "Run to here" (R-013) —
+        # unless the person testing ticked "run actions for real".
+        if dry_run and not execute_actions and _changes_things(node):
+            outputs[nid] = upstream
+            node_runs.append(
+                {
+                    "node_id": nid,
+                    "type": node.type,
+                    "label": f"{_friendly_node_name(node)} (skipped in test)",
+                    "status": "success",
+                    "output": (
+                        "(test run — this step changes things elsewhere, so it "
+                        "wasn't run. Tick “Run actions for real” to include it.)"
+                    ),
+                }
+            )
+            continue
+
         _retry_max = _node_retries(node)
         _retry_n = 0
+        _runs_before = len(node_runs)
+        _unres_token = _UNRESOLVED.set(set())
         while True:
             try:
                 if node.type == NodeType.CONDITION:
@@ -1962,7 +2202,8 @@ async def run_graph_flow(
 
                 elif node.type == NodeType.DELAY:
                     secs = max(0, min(_DELAY_CAP_SECONDS, DelayData.model_validate(node.data).seconds or 0))
-                    if secs:
+                    # A test run doesn't wait — it would only eat its time limit.
+                    if secs and not dry_run:
                         await asyncio.sleep(secs)
                     outputs[nid] = upstream  # pass the text through unchanged
                     node_runs.append(
@@ -1986,6 +2227,15 @@ async def run_graph_flow(
                     structured[nid] = node_sources
                     last_processing_output = text
 
+                elif node.type == NodeType.WORKSPACE_READ:
+                    text, ws_struct, record = await _run_workspace_read_node(
+                        node, ctx, db=db, task=task, user=user
+                    )
+                    node_runs.append(record)
+                    outputs[nid] = text
+                    structured[nid] = ws_struct
+                    last_processing_output = text
+
                 elif node.type == NodeType.FETCH_PAGE:
                     text, node_sources, fetch_struct, record = await _run_fetch_node(
                         node, ctx
@@ -2000,7 +2250,7 @@ async def run_graph_flow(
                     if secrets_cache is None:
                         secrets_cache = await _load_secrets(db, task.user_id)
                     text, http_struct, record = await _run_http_node(
-                        node, ctx, secrets=secrets_cache
+                        node, ctx, secrets=secrets_cache, user=user
                     )
                     node_runs.append(record)
                     outputs[nid] = text
@@ -2234,7 +2484,36 @@ async def run_graph_flow(
                     structured.pop(nid, None)  # drop any partial state
                     continue  # retry this node
                 if (node.data or {}).get("on_error") != "continue":
-                    raise
+                    # Fail fast — but keep what ran: the steps before this
+                    # one (some may have filed cards or posted messages), the
+                    # tokens spent, and which step broke. A failed run used
+                    # to keep nothing at all (R-146).
+                    label = _node_label(node)
+                    msg = (
+                        str(_exc)
+                        if isinstance(_exc, (TaskRunError, _ProviderError))
+                        else f"Unexpected error: {type(_exc).__name__}: {str(_exc)[:300]}"
+                    )
+                    node_runs.append(
+                        {
+                            "node_id": nid,
+                            "type": node.type,
+                            "label": label,
+                            "status": "error",
+                            "input": upstream,
+                            "output": msg[:1000],
+                        }
+                    )
+                    for r in node_runs:
+                        if "input" not in r:
+                            r["input"] = inputs_by_node.get(r["node_id"], "")
+                    _UNRESOLVED.reset(_unres_token)
+                    raise FlowFailed(
+                        f"{label} failed: {msg}",
+                        node_runs=node_runs,
+                        usage=usage,
+                        node_id=nid,
+                    ) from _exc
                 outputs[nid] = ""
                 structured[nid] = None
                 _tail = (
@@ -2254,6 +2533,13 @@ async def run_graph_flow(
                     }
                 )
             break
+
+        _unres = _UNRESOLVED.get() or set()
+        _UNRESOLVED.reset(_unres_token)
+        if _unres:
+            for r in node_runs[_runs_before:]:
+                if r.get("node_id") == nid:
+                    r["unresolved"] = sorted(_unres)[:20]
 
         # Expose this node's JSON (if it emitted any) for downstream field refs.
         # Nodes with explicit structure (search/fetch/deep/loop) set it above.
@@ -2290,4 +2576,47 @@ async def run_graph_flow(
     return report, deduped, usage, node_runs
 
 
-__all__ = ["run_graph_flow", "_interpolate"]
+from app.models_config.provider import ProviderError as _ProviderError  # noqa: E402
+
+class FlowFailed(TaskRunError):
+    """A step failed and stopped the flow. Carries what had run so far."""
+
+    def __init__(self, message: str, *, node_runs: list[dict], usage: dict, node_id: str):
+        super().__init__(message)
+        self.node_runs = node_runs
+        self.usage = usage
+        self.node_id = node_id
+
+
+_NODE_LABELS = {
+    "ai.prompt": "AI step",
+    "ai.summarise": "Summarise",
+    "ai.extract": "Extract",
+    "search.web": "Web search",
+    "fetch.page": "Fetch page",
+    "http.request": "HTTP request",
+    "mcp.action": "Connector action",
+    "research.deep": "Deep research",
+    "loop.foreach": "Loop",
+    "memory.store": "Memory",
+    "flow.merge": "Merge",
+    "flow.delay": "Delay",
+    "control.condition": "Condition",
+    "control.router": "Router",
+    "output.report": "Report",
+    "output.board_card": "Create card",
+    "output.chat_message": "Post to chat",
+    "output.note": "Write note",
+    "output.sheet": "Add to sheet",
+}
+
+
+def _node_label(node) -> str:
+    custom = str((node.data or {}).get("label") or "").strip()
+    if custom:
+        return custom[:80]
+    t = str(getattr(node.type, "value", node.type))
+    return _NODE_LABELS.get(t, t.split(".")[-1].replace("_", " ").capitalize())
+
+
+__all__ = ["run_graph_flow", "_interpolate", "FlowFailed"]

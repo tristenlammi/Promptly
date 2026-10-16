@@ -65,6 +65,10 @@ class WorkspaceDefaults(BaseModel):
     default_chat_model_id: str | None
     vision_relay_provider_id: uuid.UUID | None
     vision_relay_model_id: str | None
+    # Whether file / note search can work at all. Without an embedding
+    # model, workspaces showed "indexing" spinners that never ended
+    # (R-261); the UI says what's missing instead.
+    embedding_configured: bool = False
 
 
 @router.get("", response_model=WorkspaceDefaults)
@@ -89,4 +93,7 @@ async def get_workspace_defaults(
         default_chat_model_id=row.default_chat_model_id,
         vision_relay_provider_id=row.vision_relay_provider_id,
         vision_relay_model_id=row.vision_relay_model_id,
+        embedding_configured=bool(
+            row.embedding_provider_id and row.embedding_model_id and row.embedding_dim
+        ),
     )

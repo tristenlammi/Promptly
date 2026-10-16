@@ -28,10 +28,6 @@ class AttachDemoFileTool(Tool):
         "it for normal answers. The file lands in the user's "
         "'Generated Files' folder."
     )
-    prompt_hint = (
-        "Attach a small plaintext file to your reply. Diagnostic only — "
-        "call only when the user explicitly asks for a test attachment."
-    )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {

@@ -12,8 +12,8 @@ Supported source formats:
 * **ChatGPT export** — OpenAI's account export ships a
   ``conversations.json`` file that is a *list* of conversation records
   (``[{"title": ..., "mapping": {...}}, ...]``). We parse the mapping
-  tree into a linear message list following the ``parent -> children``
-  pointers from each root.
+  tree into a linear message list: the branch the user kept, from
+  ``current_node`` back to the root.
 * **Claude export** — Anthropic's export is a ZIP with
   ``conversations.json`` (list of chats, each with a flat
   ``chat_messages`` array). We handle either a raw JSON list or an
@@ -64,6 +64,13 @@ class ParsedMessage:
     created_at: datetime | None = None
     sources: list[Any] | None = None
     attachments: list[Any] | None = None
+    # Tree position in the source (Promptly JSON v2 keeps regenerations and
+    # edits as siblings, R-307). None = chain linearly after the previous.
+    source_id: str | None = None
+    parent_source_id: str | None = None
+    model_id: str | None = None
+    reasoning_content: str | None = None
+    tool_calls: list[Any] | None = None
 
 
 @dataclass
@@ -78,6 +85,12 @@ class ParsedConversation:
     # ``created_at`` of the DB row when provided. Falls back to
     # ``now()`` otherwise.
     created_at: datetime | None = None
+    # The visible branch's last message (a ``source_id``) when the source
+    # kept a tree.
+    active_leaf_source_id: str | None = None
+    # Stable id of the chat in its source ("chatgpt:<id>", …), so a retried
+    # import skips what already came in instead of duplicating it (R-309).
+    source_key: str | None = None
 
 
 class ImportError(Exception):
@@ -151,21 +164,38 @@ def _looks_like_zip(data: bytes) -> bool:
     return len(data) >= 4 and data[:2] == b"PK" and data[2] in (3, 5, 7)
 
 
+# Uncompressed-size budget for the conversations file inside an archive.
+# A 61 KB zip expanded to 63 MB in testing, so a 100 MB upload could
+# inflate past the container's memory (R-308). A heavy ChatGPT account's
+# conversations.json is well under this.
+MAX_ZIP_MEMBER_BYTES = 400 * 1024 * 1024
+
+
 def _parse_zip(data: bytes) -> list[ParsedConversation]:
     try:
         zf = zipfile.ZipFile(BytesIO(data))
     except zipfile.BadZipFile as exc:
         raise ImportError("The uploaded file isn't a valid ZIP archive.") from exc
 
+    names = zf.namelist()
+    bases = {n.rsplit("/", 1)[-1].lower() for n in names}
+    if "manifest.json" in bases and any(n.startswith(("chats/", "notes/")) for n in names):
+        # A Promptly *workspace* export: readable transcripts, not a chat
+        # archive (R-327).
+        raise ImportError(
+            "This is a Promptly workspace export. It's a readable copy of the "
+            "workspace, not a chat archive — export chats as JSON to move them."
+        )
+
     # Look for the canonical ``conversations.json`` first — covers
     # both ChatGPT and Claude layouts. Fall back to the first .json
     # in the archive if nothing named that.
     candidates: list[str] = []
-    for name in zf.namelist():
+    for name in names:
         base = name.rsplit("/", 1)[-1].lower()
         if base == "conversations.json":
             candidates.insert(0, name)  # prioritise
-        elif base.endswith(".json"):
+        elif base.endswith(".json") and base != "manifest.json":
             candidates.append(name)
 
     if not candidates:
@@ -173,11 +203,23 @@ def _parse_zip(data: bytes) -> list[ParsedConversation]:
             "ZIP archive didn't contain a conversations.json file."
         )
 
-    with zf.open(candidates[0]) as fp:
-        try:
-            obj = json.load(fp)
-        except json.JSONDecodeError as exc:
-            raise ImportError(f"conversations.json is invalid: {exc.msg}") from exc
+    info = zf.getinfo(candidates[0])
+    if info.file_size > MAX_ZIP_MEMBER_BYTES:
+        raise ImportError(
+            f"{info.filename} is too large to import "
+            f"({info.file_size // (1024 * 1024)} MB uncompressed; "
+            f"max {MAX_ZIP_MEMBER_BYTES // (1024 * 1024)} MB)."
+        )
+    with zf.open(info) as fp:
+        # Read through a bound — the declared size can lie.
+        raw = fp.read(MAX_ZIP_MEMBER_BYTES + 1)
+    if len(raw) > MAX_ZIP_MEMBER_BYTES:
+        raise ImportError(f"{info.filename} is too large to import.")
+    try:
+        obj = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ImportError(f"{info.filename} is invalid JSON.") from exc
+    del raw
 
     return _dispatch_json(obj)
 
@@ -280,9 +322,14 @@ def _parse_iso(value: Any) -> datetime | None:
 
 def _parse_promptly_conversation(obj: dict[str, Any]) -> ParsedConversation:
     conv = obj.get("conversation") or {}
+    if not isinstance(conv, dict):
+        conv = {}
     messages_in = obj.get("messages") or []
     if not isinstance(messages_in, list):
         raise ImportError("Promptly export is missing a valid 'messages' list.")
+
+    def _str(v: Any) -> str | None:
+        return v if isinstance(v, str) and v else None
 
     msgs: list[ParsedMessage] = []
     for m in messages_in:
@@ -305,16 +352,24 @@ def _parse_promptly_conversation(obj: dict[str, Any]) -> ParsedConversation:
                     if isinstance(m.get("attachments"), list)
                     else None
                 ),
+                # v2 exports carry the tree; v1 files have no parent_id
+                # and import as a straight line, as before.
+                source_id=_str(m.get("id")) if "parent_id" in m else None,
+                parent_source_id=_str(m.get("parent_id")),
+                model_id=_str(m.get("model_id")),
+                reasoning_content=_str(m.get("reasoning_content")),
+                tool_calls=m.get("tool_calls") if isinstance(m.get("tool_calls"), list) else None,
             )
         )
 
+    conv_id = _str(conv.get("id"))
     return ParsedConversation(
-        title=(conv.get("title") if isinstance(conv, dict) else None) or None,
+        title=conv.get("title") or None,
         messages=msgs,
         source_format="promptly",
-        created_at=_parse_iso(
-            conv.get("created_at") if isinstance(conv, dict) else None
-        ),
+        created_at=_parse_iso(conv.get("created_at")),
+        active_leaf_source_id=_str(conv.get("active_leaf_message_id")),
+        source_key=f"promptly:{conv_id}" if conv_id else None,
     )
 
 
@@ -324,61 +379,80 @@ def _parse_promptly_conversation(obj: dict[str, Any]) -> ParsedConversation:
 
 
 def _parse_chatgpt_conversation(obj: dict[str, Any]) -> ParsedConversation:
-    """Walk ChatGPT's ``mapping`` tree from the root into a linear
-    turn-by-turn list.
+    """Walk ChatGPT's ``mapping`` tree into a linear turn-by-turn list.
 
     The mapping is a dict ``{node_id -> {message, parent, children}}``
-    describing a tree (ChatGPT supports regeneration branches). We
-    take the *first* child at each branch — that matches "what the
-    user saw last" well enough for an import; preserving every branch
-    would require projectised alt-takes on the message model which
-    we don't have.
+    describing a tree: a regeneration or an edited prompt is a later
+    *child*. We follow the branch the user kept — from ``current_node`` (the
+    active leaf) up the parent pointers — and fall back to the *last* child
+    at each fork when it's missing. Taking the first child imported the
+    drafts the user had rejected and dropped everything after (R-306).
     """
     title = obj.get("title") or None
     mapping = obj.get("mapping") or {}
     if not isinstance(mapping, dict):
         raise ImportError("ChatGPT export node had a malformed 'mapping' field.")
+    conv_id = obj.get("conversation_id") or obj.get("id")
+    source_key = f"chatgpt:{conv_id}" if isinstance(conv_id, str) and conv_id else None
 
-    # Root = node whose parent is None.
-    root_id: str | None = None
-    for nid, node in mapping.items():
-        if not isinstance(node, dict):
-            continue
-        if node.get("parent") is None:
-            root_id = nid
-            break
-    if root_id is None:
-        # Some exports use a fixed sentinel key. Fall back to any key.
-        root_id = next(iter(mapping.keys()), None)
-    if root_id is None:
+    leaf = obj.get("current_node")
+    if not (isinstance(leaf, str) and isinstance(mapping.get(leaf), dict)):
+        leaf = _chatgpt_last_leaf(mapping)
+    if leaf is None:
         return ParsedConversation(
-            title=title, source_format="chatgpt", messages=[]
+            title=title, source_format="chatgpt", messages=[], source_key=source_key
         )
 
-    msgs: list[ParsedMessage] = []
-    node_id: str | None = root_id
-    # Cap iteration to a very generous 10k nodes as a runaway-graph
-    # safety net — real ChatGPT threads top out at a few hundred.
-    for _ in range(10_000):
-        if node_id is None:
-            break
+    # Leaf → root, then reverse. Capped and cycle-guarded against a
+    # malformed graph — real threads are a few hundred nodes.
+    chain: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    node_id: Any = leaf
+    while isinstance(node_id, str) and node_id not in seen and len(chain) < 10_000:
+        seen.add(node_id)
         node = mapping.get(node_id)
         if not isinstance(node, dict):
             break
+        chain.append(node)
+        node_id = node.get("parent")
+    chain.reverse()
+
+    msgs: list[ParsedMessage] = []
+    for node in chain:
         msg = node.get("message")
         if isinstance(msg, dict):
             parsed = _chatgpt_message(msg)
             if parsed is not None:
                 msgs.append(parsed)
-        children = node.get("children") or []
-        node_id = children[0] if isinstance(children, list) and children else None
 
     return ParsedConversation(
         title=title,
         messages=msgs,
         source_format="chatgpt",
         created_at=_chatgpt_root_created_at(obj),
+        source_key=source_key,
     )
+
+
+def _chatgpt_last_leaf(mapping: dict[str, Any]) -> str | None:
+    """No ``current_node``: from the root, take the newest child at each fork."""
+    root_id: str | None = None
+    for nid, node in mapping.items():
+        if isinstance(node, dict) and node.get("parent") is None:
+            root_id = nid
+            break
+    if root_id is None:
+        root_id = next(iter(mapping.keys()), None)
+    node_id = root_id
+    seen: set[str] = set()
+    while isinstance(node_id, str) and node_id not in seen:
+        seen.add(node_id)
+        node = mapping.get(node_id)
+        children = node.get("children") if isinstance(node, dict) else None
+        if not (isinstance(children, list) and children):
+            return node_id
+        node_id = children[-1]
+    return node_id if isinstance(node_id, str) else None
 
 
 def _chatgpt_root_created_at(obj: dict[str, Any]) -> datetime | None:
@@ -391,6 +465,29 @@ def _chatgpt_root_created_at(obj: dict[str, Any]) -> datetime | None:
     return None
 
 
+# Rows that aren't part of the visible conversation: reasoning, custom
+# instructions, tool output and browsing display (R-313). They imported as
+# blank bubbles or stray tool-call code.
+_CHATGPT_HIDDEN_TYPES = frozenset(
+    {
+        "thoughts",
+        "reasoning_recap",
+        "user_editable_context",
+        "model_editable_context",
+        "execution_output",
+        "tether_browsing_display",
+        "tether_quote",
+        "system_error",
+        "sonic_webpage",
+    }
+)
+
+# ChatGPT marks citations with private-use characters:
+# "\ue200cite\ue202turn0search3\ue201". They rendered as odd glyphs.
+_CHATGPT_CITE_RE = re.compile("\ue200[^\ue201]*\ue201")
+_CHATGPT_PUA_RE = re.compile("[\ue200-\ue2ff]")
+
+
 def _chatgpt_message(msg: dict[str, Any]) -> ParsedMessage | None:
     author = msg.get("author") or {}
     role = (author.get("role") if isinstance(author, dict) else None) or ""
@@ -400,11 +497,22 @@ def _chatgpt_message(msg: dict[str, Any]) -> ParsedMessage | None:
         # to put them and a Promptly tool-call snapshot wouldn't be
         # meaningful without the original tool registry.
         return None
+    meta = msg.get("metadata") if isinstance(msg.get("metadata"), dict) else {}
+    if meta.get("is_visually_hidden_from_conversation"):
+        return None
+    recipient = msg.get("recipient")
+    if isinstance(recipient, str) and recipient not in ("all", ""):
+        # Addressed to a tool (browsing, python, …): a tool call, not a reply.
+        return None
 
     content = msg.get("content") or {}
+    if isinstance(content, dict) and content.get("content_type") in _CHATGPT_HIDDEN_TYPES:
+        return None
     text = _chatgpt_extract_text(content)
-    if not text.strip() and role == "system":
-        # Hidden system seeds clutter the import without adding value.
+    text = _CHATGPT_PUA_RE.sub("", _CHATGPT_CITE_RE.sub("", text))
+    if not text.strip():
+        # Nothing to show — a blank bubble, and a blank row sent to the
+        # model if the chat is continued.
         return None
 
     ts = msg.get("create_time")
@@ -455,16 +563,17 @@ def _chatgpt_extract_text(content: Any) -> str:
 
 def _parse_claude_conversation(obj: dict[str, Any]) -> ParsedConversation:
     title = obj.get("name") or obj.get("title") or None
+    conv_id = obj.get("uuid") or obj.get("id")
+    source_key = f"claude:{conv_id}" if isinstance(conv_id, str) and conv_id else None
     messages = obj.get("chat_messages") or obj.get("messages") or []
     if not isinstance(messages, list):
         return ParsedConversation(
-            title=title, source_format="claude", messages=[]
+            title=title, source_format="claude", messages=[], source_key=source_key
         )
+    messages = _claude_active_branch([m for m in messages if isinstance(m, dict)])
 
     msgs: list[ParsedMessage] = []
     for m in messages:
-        if not isinstance(m, dict):
-            continue
         role = (m.get("sender") or m.get("role") or "").strip().lower()
         # Claude uses "human"/"assistant"; normalise to our "user".
         if role == "human":
@@ -488,25 +597,76 @@ def _parse_claude_conversation(obj: dict[str, Any]) -> ParsedConversation:
         messages=msgs,
         source_format="claude",
         created_at=_parse_iso(obj.get("created_at")),
+        source_key=source_key,
     )
 
 
+def _claude_active_branch(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Retried and edited turns carry ``parent_message_uuid``: follow the
+    last message's parents back so abandoned branches stay out. Exports
+    without the pointers stay linear."""
+    by_id = {m.get("uuid"): m for m in messages if isinstance(m.get("uuid"), str)}
+    if not messages or len(by_id) != len(messages):
+        return messages
+    if not any(isinstance(m.get("parent_message_uuid"), str) for m in messages):
+        return messages
+    chain: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    cur: dict[str, Any] | None = messages[-1]
+    while cur is not None and cur["uuid"] not in seen:
+        seen.add(cur["uuid"])
+        chain.append(cur)
+        cur = by_id.get(cur.get("parent_message_uuid"))
+    chain.reverse()
+    return chain
+
+
+def _fence(body: str, lang: str = "") -> str:
+    """A code fence longer than any backtick run inside ``body``."""
+    longest = max((len(r) for r in re.findall(r"`+", body)), default=0)
+    ticks = "`" * max(3, longest + 1)
+    return f"{ticks}{lang}\n{body.rstrip()}\n{ticks}"
+
+
 def _claude_extract_text(msg: dict[str, Any]) -> str:
-    # Newer Claude exports: ``content`` is a list of content blocks.
+    """The message text plus what Claude exports keep beside it: pasted or
+    uploaded document text (``attachments[].extracted_content``), file
+    names, and artifacts (``tool_use`` blocks) — the replies refer to them,
+    so they used to read as nonsense without them (R-330)."""
+    parts: list[str] = []
     content = msg.get("content")
     if isinstance(content, list):
-        out: list[str] = []
         for block in content:
-            if isinstance(block, dict) and isinstance(block.get("text"), str):
-                out.append(block["text"])
-        if out:
-            return "\n\n".join(out)
-    # Older / simpler: ``text`` field.
-    if isinstance(msg.get("text"), str):
-        return msg["text"]
-    if isinstance(content, str):
-        return content
-    return ""
+            if not isinstance(block, dict):
+                continue
+            if isinstance(block.get("text"), str) and block.get("type") in (None, "text"):
+                parts.append(block["text"])
+            elif block.get("type") == "tool_use":
+                inp = block.get("input") if isinstance(block.get("input"), dict) else {}
+                body = inp.get("content")
+                if isinstance(body, str) and body.strip():
+                    label = inp.get("title") or block.get("name") or "Artifact"
+                    lang = inp.get("language") if isinstance(inp.get("language"), str) else ""
+                    parts.append(f"**{label}**\n\n{_fence(body, lang)}")
+    if not parts:
+        # Older / simpler: ``text`` field.
+        if isinstance(msg.get("text"), str) and msg["text"].strip():
+            parts.append(msg["text"])
+        elif isinstance(content, str) and content.strip():
+            parts.append(content)
+    for att in msg.get("attachments") or []:
+        if not isinstance(att, dict):
+            continue
+        name = att.get("file_name") or "Attachment"
+        extracted = att.get("extracted_content")
+        if isinstance(extracted, str) and extracted.strip():
+            parts.append(f"**{name}**\n\n{_fence(extracted)}")
+        else:
+            parts.append(f"[attachment: {name}]")
+    for f in msg.get("files") or []:
+        if isinstance(f, dict) and f.get("file_name"):
+            parts.append(f"[file: {f['file_name']}]")
+    return "\n\n".join(p for p in parts if p and p.strip())
 
 
 # ---------------------------------------------------------------------
@@ -514,38 +674,91 @@ def _claude_extract_text(msg: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------
 
 
-_HEADING_RE = re.compile(
-    r"^##\s+(User|Assistant|System)\s*$", re.IGNORECASE | re.MULTILINE
-)
+_HEADING_RE = re.compile(r"^##\s+(User|Assistant|System)\s*$", re.IGNORECASE)
+# Promptly's own Markdown export marks each message (R-325) so the split
+# never depends on a heading that could also appear in a message.
+_MARKER_RE = re.compile(r"^<!--\s*promptly:message\s+role=(user|assistant|system)\s*-->\s*$", re.IGNORECASE)
+_FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+_SOURCES_RE = re.compile(r"\n\*\*Sources:\*\*\s*\n((?:\s*\d+\.\s+.*\n?)+)\s*$")
+_SOURCE_LINE_RE = re.compile(r"^\s*\d+\.\s+(?:\[(.*)\]\((\S+)\)|(.*))\s*$")
+
+
+def _split_points(lines: list[str]) -> list[tuple[int, str, bool]]:
+    """(line index, role, is_marker) for each message start outside code
+    fences. Markers win when present — a heading inside a message then
+    can't split it."""
+    fence: str | None = None
+    marks: list[tuple[int, str, bool]] = []
+    heads: list[tuple[int, str, bool]] = []
+    for idx, line in enumerate(lines):
+        f = _FENCE_RE.match(line)
+        if f:
+            token = f.group(1)
+            if fence is None:
+                fence = token
+            elif token[0] == fence[0] and len(token) >= len(fence):
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        m = _MARKER_RE.match(line)
+        if m:
+            marks.append((idx, m.group(1).lower(), True))
+            continue
+        h = _HEADING_RE.match(line)
+        if h:
+            heads.append((idx, h.group(1).lower(), False))
+    return marks or heads
+
+
+def _take_sources(body: str) -> tuple[str, list[dict[str, str]] | None]:
+    """Promptly's exporter appends a numbered **Sources:** list; turn it
+    back into ``sources`` instead of leaving it in the text."""
+    m = _SOURCES_RE.search("\n" + body)
+    if not m:
+        return body, None
+    out: list[dict[str, str]] = []
+    for line in m.group(1).splitlines():
+        sm = _SOURCE_LINE_RE.match(line)
+        if not sm:
+            continue
+        if sm.group(2):
+            out.append({"title": sm.group(1) or sm.group(2), "url": sm.group(2)})
+        elif sm.group(3):
+            out.append({"title": sm.group(3).strip()})
+    return ("\n" + body)[: m.start()].strip(), out or None
 
 
 def _parse_markdown_transcript(text: str) -> ParsedConversation:
-    """Split a Markdown transcript on ``## User`` / ``## Assistant``
-    headings. Very permissive — we don't require the Promptly-style
-    preamble or the ``---`` separators. Anything before the first
-    heading becomes a "system" message so notes / preambles aren't
-    silently dropped."""
+    """Split a Markdown transcript into messages — on Promptly's message
+    markers, else on ``## User`` / ``## Assistant`` headings — never inside
+    a code fence, so a chat about Markdown no longer splits mid-answer and
+    swaps roles (R-325). Anything before the first message becomes a
+    "system" message so notes / preambles aren't silently dropped."""
+    import hashlib
+
+    source_key = "markdown:" + hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:40]
     # Optional top-level title: first ``# Foo`` line in the file.
     title: str | None = None
     first_line = (text.splitlines() or [""])[0].strip()
     if first_line.startswith("# "):
         title = first_line[2:].strip() or None
 
-    matches = list(_HEADING_RE.finditer(text))
+    lines = text.split("\n")
+    points = _split_points(lines)
     msgs: list[ParsedMessage] = []
-    if not matches:
+    if not points:
         # Whole document becomes one assistant message — fallback
         # behaviour that at least preserves the content.
         body = text.strip()
         if body:
             msgs.append(ParsedMessage(role="assistant", content=body))
         return ParsedConversation(
-            title=title, messages=msgs, source_format="markdown"
+            title=title, messages=msgs, source_format="markdown", source_key=source_key
         )
 
-    # Preamble content (before first heading).
-    first_start = matches[0].start()
-    preamble = text[:first_start].strip()
+    # Preamble content (before the first message).
+    preamble = "\n".join(lines[: points[0][0]]).strip()
     # Skip the title line from the preamble when computing extra
     # context — otherwise the title doubles up inside a system msg.
     if title:
@@ -556,29 +769,32 @@ def _parse_markdown_transcript(text: str) -> ParsedConversation:
     preamble = re.sub(
         r"(?:^>\s?.*\n?)+", "", preamble, flags=re.MULTILINE
     ).strip()
-    # Any stray `---` separators in the preamble are noise.
-    preamble = preamble.replace("---", "").strip()
+    preamble = re.sub(r"^---\s*$", "", preamble, flags=re.MULTILINE).strip()
     if preamble:
         msgs.append(ParsedMessage(role="system", content=preamble))
 
-    for i, m in enumerate(matches):
-        role = m.group(1).lower()
-        start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        chunk = text[start:end]
-        # Strip Promptly's ``---`` separators and attachment chip line
-        # but keep everything else verbatim.
-        chunk = re.sub(r"^---\s*$", "", chunk, flags=re.MULTILINE)
-        chunk = re.sub(
-            r"^\*\*Attachments:\*\*.*$", "", chunk, flags=re.MULTILINE
-        )
-        content = chunk.strip()
+    for n, (idx, role, is_marker) in enumerate(points):
+        end = points[n + 1][0] if n + 1 < len(points) else len(lines)
+        body_lines = lines[idx + 1 : end]
+        if is_marker and body_lines and _HEADING_RE.match(body_lines[0]):
+            body_lines = body_lines[1:]  # the heading under the marker
+        # Promptly's separator between messages: only the trailing one.
+        while body_lines and not body_lines[-1].strip():
+            body_lines.pop()
+        if body_lines and body_lines[-1].strip() == "---":
+            body_lines.pop()
+        body = "\n".join(body_lines)
+        # The attachment chip line is the exporter's; the files themselves
+        # don't travel.
+        body = re.sub(r"^\*\*Attachments:\*\*.*$", "", body, flags=re.MULTILINE)
+        body, sources = _take_sources(body.strip())
+        content = body.strip()
         if not content:
             continue
-        msgs.append(ParsedMessage(role=role, content=content))
+        msgs.append(ParsedMessage(role=role, content=content, sources=sources))
 
     return ParsedConversation(
-        title=title, messages=msgs, source_format="markdown"
+        title=title, messages=msgs, source_format="markdown", source_key=source_key
     )
 
 

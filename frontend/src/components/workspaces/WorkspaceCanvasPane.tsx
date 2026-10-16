@@ -16,13 +16,17 @@ import {
 import {
   convertToExcalidrawElements,
   Excalidraw,
+  exportToBlob,
   sceneCoordsToViewportCoords,
   viewportCoordsToSceneCoords,
 } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 
+import { CanvasComments } from "./CanvasComments";
+
 import { canvasApi } from "@/api/canvas";
+import { officeApi } from "@/api/office";
 import { useCanvasThemeStore } from "@/store/canvasThemeStore";
 import { useThemeStore } from "@/store/themeStore";
 // Re-points Excalidraw's indigo accent at the app's terracotta (scoped to
@@ -44,6 +48,8 @@ import { useExcalidrawCanvas } from "./useExcalidrawCanvas";
 import { buildBundledLibraryItems } from "./canvas/libraries";
 import { removeImageBackground } from "./canvas/backgroundRemoval";
 import { canvasSceneToText } from "./canvas/sceneText";
+import { SLIDE_H, SLIDE_W, deckMap, isDeck, notesMap } from "./slides/deck";
+import { SlidesPanel } from "./slides/SlidesPanel";
 
 // The onChange element list type, derived from the component so we don't
 // reach into Excalidraw's internal element type-paths.
@@ -98,6 +104,9 @@ const LINK_PILL_ICON: Record<string, LucideIcon> = {
  * zero height.
  */
 const TEXT_DEBOUNCE_MS = 1500;
+// The Drive grid thumbnail (WP-3.4) is re-rendered this long after the
+// last change — it's a picture of the board, not a live view.
+const THUMB_DEBOUNCE_MS = 8000;
 
 // The canvas background, matched to the app's rail (--bg light, #FAF9F7).
 // IMPORTANT: this is a SINGLE value for BOTH themes on purpose. Excalidraw's
@@ -117,8 +126,20 @@ export function WorkspaceCanvasPane({
   header,
   workspaceId,
   onOpenItem,
+  fileId,
+  openCommentId,
+  deckTitle,
+  startDeck = false,
 }: {
   canvasId: string;
+  /** The file's name — what an exported deck is called (Stage 12). */
+  deckTitle?: string;
+  /** A new presentation: turn slide mode on, with a first slide. */
+  startDeck?: boolean;
+  /** The board's file — turns on comments (WP-6.1). */
+  fileId?: string;
+  /** Open the comments on this thread (a notification's link). */
+  openCommentId?: string | null;
   /** Viewer-role access → board opens read-only. */
   readOnly?: boolean;
   /** Enables cross-item linking: a selected shape can be linked to a
@@ -208,6 +229,43 @@ export function WorkspaceCanvasPane({
     readOnly,
   });
 
+  // Slides-lite (Stage 12): slide mode is part of the document itself.
+  const [deckOn, setDeckOn] = useState(false);
+  useEffect(() => {
+    if (!ydoc) return;
+    const deck = deckMap(ydoc);
+    const sync = () => setDeckOn(isDeck(ydoc));
+    sync();
+    deck.observe(sync);
+    return () => deck.unobserve(sync);
+  }, [ydoc]);
+  const persistScene = useCallback(() => {
+    const api = excalidrawAPI;
+    if (api) binding.onChange(api.getSceneElements(), api.getAppState(), api.getFiles());
+  }, [excalidrawAPI, binding]);
+  useEffect(() => {
+    if (!startDeck || readOnly || !binding.ready || !ydoc || !excalidrawAPI || isDeck(ydoc)) return;
+    const hasFrame = excalidrawAPI.getSceneElements().some((e) => e.type === "frame");
+    if (!hasFrame) {
+      // The frame, then a title placed in it (its frameId) — not the
+      // skeleton's "children", which moves them.
+      const frameId = `slide-${crypto.randomUUID().slice(0, 12)}`;
+      const made = convertToExcalidrawElements([
+        { type: "frame", id: frameId, children: [], name: "Slide 1", x: 0, y: 0, width: SLIDE_W, height: SLIDE_H },
+        { type: "text", x: 120, y: 360, text: "Your title", fontSize: 96, strokeColor: "#1e1e1e", frameId },
+      ], { regenerateIds: false });
+      excalidrawAPI.updateScene({ elements: [...excalidrawAPI.getSceneElementsIncludingDeleted(), ...made] });
+      persistScene();
+      const frame = made.find((e) => e.type === "frame");
+      ydoc.transact(() => deckMap(ydoc).set("order", frame ? [frame.id] : []));
+      window.setTimeout(() => frame && excalidrawAPI.scrollToContent(frame, { fitToContent: true }), 50);
+    }
+    ydoc.transact(() => {
+      deckMap(ydoc).set("mode", "slides");
+      notesMap(ydoc);
+    });
+  }, [startDeck, readOnly, binding.ready, ydoc, excalidrawAPI, persistScene]);
+
   // "Remove background" tool — tracks a single selected image and where to
   // float its button. containerRef converts Excalidraw's window-relative
   // viewport coords into coords inside our overlay.
@@ -271,6 +329,63 @@ export function WorkspaceCanvasPane({
     [canvasId, readOnly]
   );
 
+  // --- Drive thumbnail push (debounced, editors only) ------------------
+  // Every whiteboard is a file (WP-3.2); its grid tile shows this picture.
+  const [thumbFileId, setThumbFileId] = useState<string | null>(null);
+  useEffect(() => {
+    if (readOnly) return;
+    let cancelled = false;
+    canvasApi
+      .get(canvasId)
+      .then((m) => {
+        if (!cancelled) setThumbFileId(m.file_id ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [canvasId, readOnly]);
+  const thumbTimerRef = useRef<number | null>(null);
+  const lastThumbSigRef = useRef("");
+  const scheduleThumb = useCallback(
+    (elements: ChangeElements) => {
+      if (readOnly || !thumbFileId || !excalidrawAPI) return;
+      const live = elements.filter((e) => !e.isDeleted);
+      const sig = `${live.length}:${live.reduce((n, e) => n + e.version, 0)}`;
+      if (sig === lastThumbSigRef.current) return;
+      if (thumbTimerRef.current !== null) window.clearTimeout(thumbTimerRef.current);
+      thumbTimerRef.current = window.setTimeout(() => {
+        thumbTimerRef.current = null;
+        lastThumbSigRef.current = sig;
+        const scene = excalidrawAPI.getSceneElements();
+        if (!scene.length) return;
+        void exportToBlob({
+          elements: scene,
+          appState: {
+            ...excalidrawAPI.getAppState(),
+            exportBackground: true,
+            exportWithDarkMode: false,
+            viewBackgroundColor: "#ffffff",
+          },
+          files: excalidrawAPI.getFiles(),
+          mimeType: "image/png",
+          maxWidthOrHeight: 640,
+        })
+          .then((blob: Blob) => officeApi.pushThumbnail(thumbFileId, blob))
+          .catch(() => {
+            // Best-effort — the grid falls back to the whiteboard icon.
+          });
+      }, THUMB_DEBOUNCE_MS);
+    },
+    [excalidrawAPI, readOnly, thumbFileId]
+  );
+  useEffect(
+    () => () => {
+      if (thumbTimerRef.current !== null) window.clearTimeout(thumbTimerRef.current);
+    },
+    []
+  );
+
   // One onChange feeds the collab binding, the RAG text push, and
   // persistence of the user's light/dark choice (Excalidraw owns the theme
   // toggle; we mirror it into the store so it sticks across sessions).
@@ -278,6 +393,7 @@ export function WorkspaceCanvasPane({
     (elements, appState, files) => {
       binding.onChange(elements, appState, files);
       schedulePush(elements);
+      scheduleThumb(elements);
       // A theme that differs from what we last applied means the user flipped
       // Excalidraw's own toggle. Record it as a sticky override (or clear the
       // override if they re-synced to the current app theme).
@@ -353,15 +469,16 @@ export function WorkspaceCanvasPane({
       }
       setLinkSel(linkNext);
     },
-    [binding.onChange, schedulePush, readOnly, linkingEnabled]
+    [binding.onChange, schedulePush, scheduleThumb, readOnly, linkingEnabled]
   );
 
   const handleRemoveBackground = useCallback(async () => {
     const api = excalidrawAPI;
-    if (!api || !imageSel || bgState === "working") return;
+    const wsId = workspaceId ?? header?.workspaceId;
+    if (!api || !imageSel || !wsId || bgState === "working") return;
     setBgState("working");
     try {
-      await removeImageBackground(api, imageSel.elementId, imageSel.fileId);
+      await removeImageBackground(api, imageSel.elementId, imageSel.fileId, wsId);
       setBgState("idle");
     } catch (err) {
       // eslint-disable-next-line no-console
@@ -369,7 +486,7 @@ export function WorkspaceCanvasPane({
       setBgState("error");
       window.setTimeout(() => setBgState("idle"), 4000);
     }
-  }, [excalidrawAPI, imageSel, bgState]);
+  }, [excalidrawAPI, imageSel, bgState, workspaceId, header?.workspaceId]);
 
   // Set (or clear) an element's link to a workspace item. Stores the same
   // relative wiki-href notes use, so Excalidraw renders its link badge and
@@ -543,6 +660,9 @@ export function WorkspaceCanvasPane({
       {/* Gate interaction until the binding is live so early strokes can't
        *  land before the Yjs doc is wired (they'd be dropped). Excalidraw
        *  mounts underneath; remote content streams in once synced. */}
+      {fileId && (
+        <CanvasComments fileId={fileId} api={excalidrawAPI} provider={provider} openThreadId={openCommentId} />
+      )}
       {!binding.ready && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--bg)]/60 text-sm text-[var(--text-muted)]">
           <span className="inline-flex items-center gap-2">
@@ -623,7 +743,7 @@ export function WorkspaceCanvasPane({
                       });
                     }}
                     title={`Open “${title}”`}
-                    className="inline-flex max-w-[14rem] items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent)] shadow-md transition hover:border-[var(--accent)]/60 hover:bg-[var(--accent)]/15"
+                    className="inline-flex max-w-[14rem] items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--accent)]/40 bg-[var(--accent)]/10 px-2.5 py-1 text-xs font-medium text-[var(--accent-text)] shadow-md transition hover:border-[var(--accent)]/60 hover:bg-[var(--accent)]/15"
                   >
                     <PillIcon className="h-3.5 w-3.5 shrink-0" />
                     <span className="truncate">{title}</span>
@@ -692,6 +812,13 @@ export function WorkspaceCanvasPane({
     </div>
   );
 
+  if (deckOn && excalidrawAPI && ydoc) {
+    return (
+      <SlidesPanel api={excalidrawAPI} ydoc={ydoc} readOnly={readOnly} persist={persistScene} title={deckTitle ?? "Presentation"} fileId={fileId}>
+        {canvasSurface}
+      </SlidesPanel>
+    );
+  }
   if (!header) return canvasSurface;
   return (
     <div className="flex h-full min-h-0 w-full flex-1 flex-col">

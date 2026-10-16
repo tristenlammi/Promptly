@@ -118,7 +118,7 @@ export function WorkspaceModelField({
         >
           <span className="flex min-w-0 items-center gap-2">
             {selected?.is_custom && (
-              <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+              <Sparkles className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
             )}
             <span className={cn("truncate", !selected && "text-[var(--text-muted)]")}>
               {selected ? selected.display_name : staleLabel ?? clearLabel}
@@ -143,7 +143,7 @@ export function WorkspaceModelField({
                     key={m.model_id}
                     active={m.model_id === modelId && m.provider_id === providerId}
                     onClick={() => pick(m)}
-                    icon={<Sparkles className="h-3.5 w-3.5 text-[var(--accent)]" />}
+                    icon={<Sparkles className="h-3.5 w-3.5 text-[var(--accent-text)]" />}
                     label={m.display_name}
                     sublabel={m.base_display_name ?? undefined}
                   />
@@ -197,7 +197,7 @@ function Option({
       onClick={onClick}
       className={cn(
         "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm transition hover:bg-[var(--accent)]/5",
-        active && "text-[var(--accent)]"
+        active && "text-[var(--accent-text)]"
       )}
     >
       <span className="flex w-4 shrink-0 justify-center">{icon}</span>

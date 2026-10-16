@@ -6,7 +6,7 @@ name: CI
 #
 # Deliberately kept to checks that pass today, so a red run always means a real
 # regression rather than pre-existing debt:
-#   - backend  : pytest (89 tests)
+#   - backend  : pytest (the full suite, ~1000 tests)
 #   - frontend : eslint (errors only — warnings are tracked debt), then the
 #                full production build, which is `tsc -b` + `vite build`.
 #
@@ -32,7 +32,7 @@ jobs:
   backend:
     name: Backend tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
 
     # The chat/streaming tests need a real database and Redis — that path
     # can't be meaningfully faked, which is why it had no coverage for so
@@ -73,13 +73,28 @@ jobs:
       PROMPTLY_REQUIRE_DB_TESTS: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11" # matches backend/Dockerfile (python:3.11-slim)
           cache: pip
           cache-dependency-path: backend/requirements.txt
+
+      # The system tools the backend image installs (backend/Dockerfile):
+      # ffmpeg (video), exiftool (location stripping), Pango + fonts
+      # (WeasyPrint PDFs), restic (off-site backups), and a pg_dump that
+      # matches the Postgres 15 service exactly — backups refuse any other.
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ffmpeg libimage-exiftool-perl restic \
+            libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
+            fonts-liberation fonts-dejavu-core fonts-noto-cjk postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client-15
+          echo "/usr/lib/postgresql/15/bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         working-directory: backend
@@ -93,16 +108,37 @@ jobs:
         working-directory: backend
         run: python -m pytest -q -rs
 
+      # WebDAV conformance (WP-8.4): the litmus suite against the real backend
+      # on a scratch database. scripts/dav_litmus_harness.py relaxes only the
+      # upload allowlist — litmus's files have no extension. basic, copymove
+      # and http must pass in full; props and locks are left out because
+      # custom ("dead") properties are refused by design (only the modified
+      # time is kept) — every other test in them passes.
+      - name: WebDAV conformance (litmus)
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://promptly:promptly@localhost:5432/promptly_litmus
+        run: |
+          PGPASSWORD=promptly psql -h localhost -U promptly -d promptly -c "CREATE DATABASE promptly_litmus"
+          python scripts/dav_litmus_harness.py > /tmp/harness.log 2>&1 &
+          for i in $(seq 90); do grep -q "LITMUS_PASSWORD=" /tmp/harness.log && break; sleep 2; done
+          LP=$(grep -o "LITMUS_PASSWORD=.*" /tmp/harness.log | cut -d= -f2)
+          for i in $(seq 30); do curl -s -o /dev/null -X OPTIONS http://localhost:8765/dav/ && break; sleep 1; done
+          docker run --rm --network host \
+            -e LITMUS_URL=http://localhost:8765/dav/ -e LITMUS_USERNAME=litmus -e LITMUS_PASSWORD="$LP" \
+            -e TESTS="basic copymove http" \
+            owncloud/litmus@sha256:155d66b7c4324d45a2391702f7857f7e96d79e3d96a2460298b9a4c4867074b5
+
   frontend:
     name: Frontend lint + build
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: "20"
+          node-version: "22" # matches frontend/Dockerfile (node:22-alpine)
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 

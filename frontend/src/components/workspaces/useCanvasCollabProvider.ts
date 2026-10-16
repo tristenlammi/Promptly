@@ -3,6 +3,7 @@ import { HocuspocusProvider, WebSocketStatus } from "@hocuspocus/provider";
 import * as Y from "yjs";
 
 import { canvasApi } from "@/api/canvas";
+import { epochWatcher, isResetPing, reloadForRestore } from "@/lib/collabReset";
 import type { CollabTokenResponse } from "@/api/documents";
 
 /**
@@ -69,6 +70,8 @@ export function useCanvasCollabProvider(
 
   useEffect(() => {
     let cancelled = false;
+    // The edit generation this board / sheet loaded (WP-6.2).
+    const epochs = epochWatcher();
 
     // Freshly minted Y.Doc per ``canvasId`` so two canvases' CRDTs never
     // bleed into each other.
@@ -94,6 +97,7 @@ export function useCanvasCollabProvider(
     const refreshToken = async () => {
       try {
         const response = await canvasApi.getCollabToken(canvasId);
+        epochs.seen(response.epoch);
         if (cancelled) return;
         tokenRef.current = response.token;
         setUser(response.user);
@@ -117,6 +121,7 @@ export function useCanvasCollabProvider(
     (async () => {
       try {
         const response = await canvasApi.getCollabToken(canvasId);
+        epochs.seen(response.epoch);
         if (cancelled) return;
         tokenRef.current = response.token;
         setUser(response.user);
@@ -135,7 +140,15 @@ export function useCanvasCollabProvider(
           },
           onAuthenticationFailed: ({ reason }) => {
             if (cancelled) return;
+            // Refused because the file was restored since we loaded? A fresh
+            // token tells — and reloads (WP-6.2).
+            void canvasApi.getCollabToken(canvasId)
+              .then((r) => epochs.seen(r.epoch))
+              .catch(() => undefined);
             setError(reason || "Collaboration session rejected");
+          },
+          onStateless: ({ payload }) => {
+            if (isResetPing(payload)) reloadForRestore();
           },
         });
         providerRef.current = p;

@@ -1,0 +1,20 @@
+# GPU video encoding for the media worker — NVIDIA (WP-7.4).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.media-nvidia.yml up -d
+#
+# (or add it to COMPOSE_FILE in .env). Needs the NVIDIA driver and the
+# NVIDIA Container Toolkit, as for Ollama's GPU profile. Videos that need
+# converting are encoded with NVENC; anything it can't do falls back to the
+# CPU encoder.
+services:
+  media-worker:
+    environment:
+      MEDIA_HWACCEL: nvenc
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, video]

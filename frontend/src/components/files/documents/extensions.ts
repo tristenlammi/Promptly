@@ -1,36 +1,36 @@
 import type { Extensions } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
-import CollaborationCursor from "@tiptap/extension-collaboration-cursor";
+import CollaborationCaret from "@tiptap/extension-collaboration-caret";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
-import { Color } from "@tiptap/extension-color";
-import Details from "@tiptap/extension-details";
-import DetailsContent from "@tiptap/extension-details-content";
-import DetailsSummary from "@tiptap/extension-details-summary";
+import { Details, DetailsContent, DetailsSummary } from "@tiptap/extension-details";
 import Highlight from "@tiptap/extension-highlight";
-import Image from "@tiptap/extension-image";
-import Link from "@tiptap/extension-link";
-import Placeholder from "@tiptap/extension-placeholder";
-import Table from "@tiptap/extension-table";
-import TableCell from "@tiptap/extension-table-cell";
-import TableHeader from "@tiptap/extension-table-header";
-import TableRow from "@tiptap/extension-table-row";
-import TaskItem from "@tiptap/extension-task-item";
-import TaskList from "@tiptap/extension-task-list";
-import TextStyle from "@tiptap/extension-text-style";
+import { TaskItem, TaskList } from "@tiptap/extension-list";
+import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table";
+import Mathematics from "@tiptap/extension-mathematics";
+import Subscript from "@tiptap/extension-subscript";
+import Superscript from "@tiptap/extension-superscript";
+import TextAlign from "@tiptap/extension-text-align";
+import { Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style";
 import Typography from "@tiptap/extension-typography";
-import Underline from "@tiptap/extension-underline";
 import Youtube from "@tiptap/extension-youtube";
+import { Placeholder } from "@tiptap/extensions";
 import { common, createLowlight } from "lowlight";
 import type { Doc as YDoc } from "yjs";
 import type { HocuspocusProvider } from "@hocuspocus/provider";
 
 import { AudioExtension } from "./AudioExtension";
+import { BlockMoveExtension } from "./BlockMoveExtension";
 import { CalloutExtension } from "./CalloutExtension";
 import { Column, Columns } from "./ColumnsExtension";
+import { CommentsExtension } from "./CommentsExtension";
+import { DocImage } from "./DocImage";
+import { FindReplaceExtension } from "./FindReplaceExtension";
 import { MentionMark } from "./MentionMark";
+import { PageBreakExtension } from "./PageBreakExtension";
 import { SlashCommandExtension } from "./SlashCommandExtension";
 import { SpellCheckExtension, SPELLCHECK_WORD_EVENT } from "./SpellCheckExtension";
+import { SuggestionExtension } from "./SuggestionExtension";
 import { WikiLinkExtension, type WikiTarget } from "./WikiLinkExtension";
 
 /**
@@ -40,9 +40,12 @@ import { WikiLinkExtension, type WikiTarget } from "./WikiLinkExtension";
  * flat array listing every block / mark the user asked for. A few
  * non-obvious configuration notes:
  *
- *   - ``StarterKit.history`` is disabled when collab is on because
- *     ``y-prosemirror`` ships its own yUndoPlugin; running both
- *     history managers at once corrupts the CRDT.
+ *   - ``StarterKit.undoRedo`` (v2's ``history``) is disabled when collab
+ *     is on because the Collaboration extension ships its own yUndoPlugin;
+ *     running both history managers at once corrupts the CRDT.
+ *   - TipTap v3's StarterKit brings Link and Underline (configured here)
+ *     and a TrailingNode, which stays off: every collaborator appending
+ *     its own trailing paragraph would grow the document on open.
  *   - ``StarterKit.codeBlock`` is disabled in favour of
  *     CodeBlockLowlight so we get language-aware highlighting via
  *     the existing highlight.js bundle.
@@ -87,6 +90,9 @@ import { WikiLinkExtension, type WikiTarget } from "./WikiLinkExtension";
  * HTML blob via DOMPurify, so anything missing in preview is
  * missing in FTS too.
  */
+/** Fired when a maths node is clicked; the editor opens its LaTeX editor. */
+export const EDIT_MATH_EVENT = "promptly:edit-math";
+
 export interface BuildExtensionsOptions {
   ydoc: YDoc | null;
   provider: HocuspocusProvider | null;
@@ -102,7 +108,13 @@ export interface BuildExtensionsOptions {
   /** Workspace-note-only: enables the ``[[`` wiki-link autocomplete.
    *  Absent for normal Drive documents, so nothing changes there. The
    *  ``items`` fetcher resolves the popup list for the current query. */
-  wikiLink?: { items: (query: string) => Promise<WikiTarget[]> };
+  wikiLink?: {
+    items: (query: string) => Promise<WikiTarget[]>;
+    /** ``@`` menu: people + items + dates (R-232). */
+    mentions?: (query: string) => Promise<WikiTarget[]>;
+    /** A person was mentioned — the host notifies them (R-232). */
+    onMention?: (userId: string) => void;
+  };
 }
 
 // Lazily-built lowlight instance. Registers the "common" languages
@@ -118,7 +130,6 @@ export function buildExtensions({
   placeholder = "Start typing, or hit / for commands…",
   wikiLink,
 }: BuildExtensionsOptions): Extensions {
-  const collabActive = Boolean(ydoc && provider);
 
   const extensions: Extensions = [
     StarterKit.configure({
@@ -126,10 +137,22 @@ export function buildExtensions({
       // undo plugin. Two history managers fight over the transactions
       // and eventually corrupt the Y.Doc — always leave one of the
       // two disabled.
-      history: collabActive ? false : {},
+      // Off whenever a Y.Doc is bound (Collaboration brings its own undo) —
+      // keying it on the provider left both on during the first render.
+      undoRedo: ydoc ? false : {},
       // Replaced by CodeBlockLowlight below so we get syntax
       // highlighting.
       codeBlock: false,
+      trailingNode: false,
+      link: {
+        openOnClick: false,
+        autolink: true,
+        protocols: ["http", "https", "mailto", "tel"],
+        HTMLAttributes: {
+          rel: "noopener noreferrer",
+          target: "_blank",
+        },
+      },
     }),
     CodeBlockLowlight.configure({
       lowlight,
@@ -142,13 +165,21 @@ export function buildExtensions({
       placeholder,
       emptyEditorClass: "is-editor-empty",
     }),
-    Underline,
     // Smart typography — curly quotes, em/en dashes, ellipsis, ©/™/… (MIT).
     Typography,
     // Text colour: the Color mark rides on TextStyle (both MIT). Renders as
     // ``<span style="color:…">`` — allow-listed + handled by the walker.
     TextStyle,
     Color,
+    // Font family and size ride on TextStyle too (WP-4.5). Rendered as
+    // ``font-family`` / ``font-size`` in the span's style; the server
+    // snapshot allow-lists both.
+    FontFamily,
+    FontSize,
+    // Paragraph / heading alignment (WP-4.5) — ``style="text-align:…"``.
+    TextAlign.configure({ types: ["heading", "paragraph"] }),
+    Subscript,
+    Superscript,
     Highlight.configure({
       multicolor: true,
     }),
@@ -156,17 +187,10 @@ export function buildExtensions({
     // can parse/preserve an existing mention, even opened outside a
     // workspace; only workspace notes actually insert them.
     MentionMark,
-    Link.configure({
-      openOnClick: false,
-      autolink: true,
-      protocols: ["http", "https", "mailto", "tel"],
-      HTMLAttributes: {
-        rel: "noopener noreferrer",
-        target: "_blank",
-      },
-    }),
-    Image.configure({
+    // Image with resize handles, a caption and alignment (WP-4.5).
+    DocImage.configure({
       allowBase64: false,
+      resize: { enabled: true, minWidth: 48, minHeight: 32, alwaysPreserveAspectRatio: true },
       HTMLAttributes: {
         class: "rounded-md max-w-full h-auto",
       },
@@ -221,6 +245,31 @@ export function buildExtensions({
     // Multi-column layouts (our own nodes — no Pro dependency).
     Columns,
     Column,
+    // Manual page breaks (WP-4.5): a new page in print, PDF and Word.
+    PageBreakExtension,
+    // LaTeX maths (KaTeX, already a dependency) — inline and block nodes
+    // holding their source in ``data-latex`` (WP-4.5). A click edits it.
+    Mathematics.configure({
+      katexOptions: { throwOnError: false },
+      inlineOptions: {
+        onClick: (node, pos) =>
+          document.dispatchEvent(new CustomEvent(EDIT_MATH_EVENT, { detail: { kind: "inline", pos, latex: node.attrs.latex } })),
+      },
+      blockOptions: {
+        onClick: (node, pos) =>
+          document.dispatchEvent(new CustomEvent(EDIT_MATH_EVENT, { detail: { kind: "block", pos, latex: node.attrs.latex } })),
+      },
+    }),
+    // Find & replace (WP-4.5) — highlights only; writes on replace.
+    FindReplaceExtension,
+    // Move the current block up / down (Alt+Shift+↑/↓; phone block bar).
+    BlockMoveExtension,
+    // Comment highlights (WP-4.5, R-227): decorations from the threads'
+    // Yjs-anchored ranges; nothing is written into the document.
+    CommentsExtension,
+    // Suggestion mode (track changes): suggested insertions / deletions,
+    // accepted or rejected later (Stage 6 stretch).
+    SuggestionExtension.configure({ author: user ? { id: user.id, name: user.name } : null }),
     // The "/" block menu the Placeholder text promises. Commands reuse
     // the toolbar's chains; image/audio delegate to the toolbar's picker
     // via a CustomEvent (see SlashCommandExtension for why).
@@ -247,6 +296,9 @@ export function buildExtensions({
     extensions.push(
       WikiLinkExtension.configure({
         items: wikiLink.items,
+        // People and dates were built but never passed through (R-232).
+        mentions: wikiLink.mentions,
+        onMention: wikiLink.onMention,
       })
     );
   }
@@ -268,12 +320,12 @@ export function buildExtensions({
     );
   }
 
-  // ``CollaborationCursor`` needs the live awareness channel, which
+  // ``CollaborationCaret`` (v2's CollaborationCursor) needs the live awareness channel, which
   // lives on the provider. Register it separately so its absence
   // during the async connect window doesn't block ``Collaboration``.
   if (provider) {
     extensions.push(
-      CollaborationCursor.configure({
+      CollaborationCaret.configure({
         provider,
         user: user ?? {
           id: "anonymous",

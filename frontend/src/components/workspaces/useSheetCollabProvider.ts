@@ -2,14 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { HocuspocusProvider, WebSocketStatus } from "@hocuspocus/provider";
 import * as Y from "yjs";
 
-import { workspacesApi } from "@/api/workspaces";
+import { epochWatcher, isResetPing, reloadForRestore } from "@/lib/collabReset";
+
+import type { SheetBackend } from "./sheetBackend";
 import type { CollabTokenResponse } from "@/api/documents";
 
 /**
  * Subscribes a Fortune-sheet workbook to the Hocuspocus collab room for a
  * sheet. The sheet twin of ``useCanvasCollabProvider`` — same lifecycle and
  * token-refresh dance; the only differences are the token endpoint
- * (``workspacesApi.getSheetCollabToken``) and the ``sheet:`` room prefix, so
+ * (``SheetBackend.collabToken`` — workspace or file route) and the ``sheet:`` room prefix, so
  * the collab server routes persistence to the ``spreadsheets`` table.
  */
 export type SheetCollabStatus = "connecting" | "connected" | "disconnected";
@@ -27,10 +29,8 @@ function sheetWebsocketUrl(sheetId: string): string {
   return `${proto}://${window.location.host}/api/collab/sheet:${sheetId}`;
 }
 
-export function useSheetCollabProvider(
-  workspaceId: string,
-  sheetId: string
-): UseSheetCollabProviderResult {
+export function useSheetCollabProvider(backend: SheetBackend): UseSheetCollabProviderResult {
+  const sheetId = backend.sheetId;
   const [status, setStatus] = useState<SheetCollabStatus>("connecting");
   const [user, setUser] = useState<CollabTokenResponse["user"] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +43,8 @@ export function useSheetCollabProvider(
 
   useEffect(() => {
     let cancelled = false;
+    // The edit generation this board / sheet loaded (WP-6.2).
+    const epochs = epochWatcher();
 
     const doc = new Y.Doc();
     setYdoc(doc);
@@ -65,10 +67,8 @@ export function useSheetCollabProvider(
 
     const refreshToken = async () => {
       try {
-        const response = await workspacesApi.getSheetCollabToken(
-          workspaceId,
-          sheetId
-        );
+        const response = await backend.collabToken();
+        epochs.seen(response.epoch);
         if (cancelled) return;
         tokenRef.current = response.token;
         setUser(response.user);
@@ -91,10 +91,8 @@ export function useSheetCollabProvider(
 
     (async () => {
       try {
-        const response = await workspacesApi.getSheetCollabToken(
-          workspaceId,
-          sheetId
-        );
+        const response = await backend.collabToken();
+        epochs.seen(response.epoch);
         if (cancelled) return;
         tokenRef.current = response.token;
         setUser(response.user);
@@ -113,7 +111,15 @@ export function useSheetCollabProvider(
           },
           onAuthenticationFailed: ({ reason }) => {
             if (cancelled) return;
+            // Refused because the file was restored since we loaded? A fresh
+            // token tells — and reloads (WP-6.2).
+            void backend.collabToken()
+              .then((r) => epochs.seen(r.epoch))
+              .catch(() => undefined);
             setError(reason || "Collaboration session rejected");
+          },
+          onStateless: ({ payload }) => {
+            if (isResetPing(payload)) reloadForRestore();
           },
         });
         providerRef.current = p;
@@ -138,7 +144,7 @@ export function useSheetCollabProvider(
       setYdoc(null);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspaceId, sheetId]);
+  }, [backend.key]);
 
   return { ydoc, provider, status, user, error };
 }

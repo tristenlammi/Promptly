@@ -85,6 +85,7 @@ export function SpellCheckPopover({
 
   return createPortal(
     <div
+      data-esc-layer=""
       ref={ref}
       style={{
         position: "fixed",

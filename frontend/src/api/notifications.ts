@@ -106,11 +106,13 @@ export const notificationsApi = {
     );
     return data;
   },
-  async sendTest(): Promise<number> {
-    const { data } = await apiClient.post<{ sent: number }>(
+  /** What the test push reached: accepted by the push service, failed,
+   *  or dropped because the browser had unsubscribed. */
+  async sendTest(): Promise<{ sent: number; failed: number; removed: number }> {
+    const { data } = await apiClient.post<{ sent: number; failed?: number; removed?: number }>(
       "/notifications/test"
     );
-    return data.sent;
+    return { sent: data.sent, failed: data.failed ?? 0, removed: data.removed ?? 0 };
   },
   // ---- Inbox (durable notification list) ----
   async inbox(limit = 30): Promise<InboxResponse> {

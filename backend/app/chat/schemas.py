@@ -52,6 +52,8 @@ class MessageResponse(BaseModel):
     # any assistant row produced before 0004_msg_metrics ran.
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    # Last request's size + breakdown, for the context meter (WP-1.4).
+    context_usage: dict[str, Any] | None = None
     ttft_ms: int | None = None
     total_ms: int | None = None
     # Which model produced this assistant row (raw id; the frontend maps it
@@ -122,6 +124,7 @@ class MessageResponse(BaseModel):
                         "created_at",
                         "prompt_tokens",
                         "completion_tokens",
+                        "context_usage",
                         "ttft_ms",
                         "total_ms",
                         "model_id",

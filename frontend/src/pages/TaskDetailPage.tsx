@@ -30,6 +30,7 @@ import { RunModal } from "@/components/tasks/RunModal";
 import { TopNav } from "@/components/layout/TopNav";
 import { Button } from "@/components/shared/Button";
 import { cn } from "@/utils/cn";
+import { confirm as confirmDialog } from "@/components/shared/ConfirmDialog";
 
 // React Flow is a heavy chunk — only load it when the Flow view is opened.
 const TaskFlowEditor = lazyWithRetry(
@@ -59,6 +60,9 @@ export function TaskDetailPage() {
   const promote = usePromoteTask(id ?? "");
   const [editOpen, setEditOpen] = useState(false);
   const [showFlow, setShowFlow] = useState(false);
+  const [flowDirty, setFlowDirty] = useState(false);
+  const flowOpened = useRef(false);
+  if (showFlow) flowOpened.current = true;
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
 
   // Advanced automations open straight into the flow editor (once, on load);
@@ -67,19 +71,24 @@ export function TaskDetailPage() {
   useEffect(() => {
     if (flowInit.current || !task) return;
     flowInit.current = true;
-    if (task.is_advanced || searchParams.get("flow") === "1") setShowFlow(true);
-  }, [task, searchParams]);
+    // Not on a phone: the canvas needs a bigger screen, and opening on it
+    // hid the runs — the one thing a phone can use (R-154).
+    if (!isMobile && (task.is_advanced || searchParams.get("flow") === "1")) setShowFlow(true);
+  }, [task, searchParams, isMobile]);
 
   // Workspace-homed automations live in their workspace — bounce there
   // with the automation pre-selected (its synthesised tree node id is the
   // task id) if someone lands on the standalone page.
+  // On a phone, stay here: the workspace shows automations as "best on
+  // desktop", so a failure push led nowhere — this page's runs, report,
+  // pause and Run now work on a phone (R-154).
   useEffect(() => {
-    if (task?.workspace_id) {
+    if (task?.workspace_id && !isMobile) {
       navigate(`/workspaces/${task.workspace_id}?item=${task.id}`, {
         replace: true,
       });
     }
-  }, [task?.workspace_id, task?.id, navigate]);
+  }, [task?.workspace_id, task?.id, navigate, isMobile]);
 
   const isAdvanced = task?.is_advanced ?? false;
   const onConvertToFlow = async () => {
@@ -114,6 +123,15 @@ export function TaskDetailPage() {
   const { data: run } = useTaskRun(id, selectedRunId ?? undefined, selectedPolling);
 
   const onRunNow = async () => {
+    if (flowDirty) {
+      const ok = await confirmDialog({
+        title: "Run the saved version?",
+        message:
+          "The flow has unsaved changes. Run now runs the last saved version — save first to include them.",
+        confirmLabel: "Run saved version",
+      });
+      if (!ok) return;
+    }
     if (!id) return;
     const created = await runTask.mutateAsync(id);
     setSelectedRunId(created.id);
@@ -229,7 +247,9 @@ export function TaskDetailPage() {
               variant="secondary"
               size="sm"
               leftIcon={<Pencil className="h-3.5 w-3.5" />}
-              onClick={() => setEditOpen(true)}
+              // A flow's steps and trigger live in the flow editor; the form
+              // would only rewrite columns the flow ignores.
+              onClick={() => (isAdvanced ? setShowFlow(true) : setEditOpen(true))}
             >
               Edit
             </Button>
@@ -246,8 +266,10 @@ export function TaskDetailPage() {
         }
       />
 
-      {showFlow && id && (
-        <div className="flex min-h-0 flex-1">
+      {/* Stays mounted once opened — switching to Runs used to unmount the
+          editor and throw away unsaved changes (R-149). */}
+      {flowOpened.current && id && (
+        <div className={cn("flex min-h-0 flex-1", !showFlow && "hidden")}>
           {/* Runs rail (left) — n8n-style history; click a run to read its
               report. Per-node run outputs come with the durable runner. */}
           {(runs ?? []).length > 0 && (
@@ -298,7 +320,11 @@ export function TaskDetailPage() {
                   </p>
                 </div>
               ) : (
-                <TaskFlowEditor taskId={id} />
+                <TaskFlowEditor
+                  taskId={id}
+                  onDirtyChange={setFlowDirty}
+                  activeRun={flowRunOpen ? run ?? null : null}
+                />
               )}
             </Suspense>
           </div>
@@ -332,7 +358,7 @@ export function TaskDetailPage() {
                   className={cn(
                     "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs transition",
                     r.id === selectedRunId
-                      ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                      ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent-text)]"
                       : "border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--hover)]"
                   )}
                 >
@@ -389,7 +415,7 @@ export function TaskDetailPage() {
         </aside>
 
         {/* Report viewer */}
-        <main className="promptly-scroll min-w-0 flex-1 overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] p-6">
+        <section className="promptly-scroll min-w-0 flex-1 overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] p-6">
           {!selectedRunId ? (
             <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
               Select a run to read its report.
@@ -407,7 +433,7 @@ export function TaskDetailPage() {
                     <span>{run.completion_tokens} tok</span>
                   )}
                 </div>
-                {run.status === "success" && run.output_markdown && (
+                {(run.status === "success" || run.status === "warning") && run.output_markdown && (
                   <div className="ml-auto flex items-center gap-1">
                     <button
                       onClick={() => void onCopy()}
@@ -450,7 +476,7 @@ export function TaskDetailPage() {
           ) : (
             <div className="text-sm text-[var(--text-muted)]">Loading…</div>
           )}
-        </main>
+        </section>
       </div>
 
       {task && (

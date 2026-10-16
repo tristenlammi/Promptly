@@ -20,6 +20,42 @@ RUN apt-get update \
         # ffmpeg/ffprobe: the meeting-notes worker probes uploaded
         # recordings and splits them into Whisper-sized Opus chunks.
         ffmpeg \
+        # exiftool: lossless metadata removal (location, camera serials)
+        # when a photo leaves Promptly — public links, AI providers —
+        # while the stored original stays byte-exact.
+        libimage-exiftool-perl \
+        # restic (+ ssh for SFTP targets): off-site backup of the database
+        # dumps, uploads and config from Admin → Backups (WP-2.3). The
+        # distro package gets Debian's security updates.
+        restic \
+        openssh-client \
+        # WeasyPrint (a Doc's PDF, WP-6.4): Pango + HarfBuzz-subset, and
+        # fonts so text isn't boxes — Liberation (metric twins of Arial /
+        # Times / Courier), DejaVu (Latin, Greek, Cyrillic), Noto CJK.
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        libharfbuzz-subset0 \
+        fonts-liberation \
+        fonts-dejavu-core \
+        fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/*
+
+# pg_dump for the built-in database backups (before every migration and
+# nightly). It must match the server's major version — a newer pg_dump
+# writes dumps an older server can refuse to restore — so pin the client
+# for the pgvector/pg15 server from the PostgreSQL project's own apt repo
+# (Debian trixie only ships 17). Bump together with the postgres image.
+ARG PG_CLIENT_MAJOR=15
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates gnupg \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-${PG_CLIENT_MAJOR} \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./

@@ -1,3 +1,4 @@
+import { apiErrorMessage } from "@/utils/apiError";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import ReactMarkdown from "react-markdown";
@@ -89,7 +90,7 @@ export function AskAnswer({
                   className={cn(
                     "mx-0.5 inline-flex -translate-y-[1px] items-center rounded-full border border-[var(--border)] px-1.5 text-[11px] font-medium no-underline",
                     c?.item_id
-                      ? "text-[var(--accent)] hover:bg-[var(--hover)]"
+                      ? "text-[var(--accent-text)] hover:bg-[var(--hover)]"
                       : "cursor-default text-[var(--text-muted)]"
                   )}
                 >
@@ -295,8 +296,12 @@ export function WorkspaceCommandPalette({
     try {
       const res = await workspacesApi.ask(workspaceId, q);
       setAnswer(res);
-    } catch {
-      setAskError("Couldn't get an answer. Try again in a moment.");
+    } catch (err) {
+      // The server says why — no model you can use, over budget, the
+      // model's down — instead of one generic line (R-183).
+      setAskError(
+        apiErrorMessage(err, "Couldn't get an answer. Try again in a moment.")
+      );
     } finally {
       setAsking(false);
     }
@@ -382,6 +387,13 @@ export function WorkspaceCommandPalette({
             )}
             {answer && (
               <div>
+                {answer.degraded === "embedder_unavailable" && (
+                  <p className="mb-2 rounded-card border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-1.5 text-[11px] text-[var(--text-muted)]">
+                    Meaning-based search is temporarily unavailable, so this
+                    answer comes from keyword matches and the workspace's
+                    content.
+                  </p>
+                )}
                 <AskAnswer answer={answer} onJump={jumpToCitation} />
                 {answer.citations.length > 0 && (
                   <div className="mt-3 border-t border-[var(--border)] pt-2">
@@ -442,7 +454,7 @@ export function WorkspaceCommandPalette({
                     cursor === 0 ? "bg-[var(--accent)]/10" : "hover:bg-[var(--hover)]"
                   )}
                 >
-                  <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent)]" />
+                  <Sparkles className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />
                   <span className="flex-1 truncate text-[var(--text)]">
                     Ask this workspace:{" "}
                     <span className="text-[var(--text-muted)]">“{query.trim()}”</span>

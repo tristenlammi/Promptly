@@ -42,9 +42,12 @@ _INFO = Info(
     handle=[
         HandleProgram(
             name="promptly",
+            # Only the command library answers here; anything else is handed
+            # back to Home Assistant's own agent. It used to promise answers
+            # "from your own workspaces", which it never gave (R-200).
             description=(
-                "Runs your Promptly commands and answers from your own "
-                "workspaces."
+                "Runs your Promptly commands. Anything else goes back to "
+                "Home Assistant's own agent."
             ),
             attribution=Attribution(name="Promptly", url="https://localhost"),
             installed=True,
@@ -80,6 +83,9 @@ class PromptlyHandler(AsyncEventHandler):
             return True
 
         if Transcript.is_type(event.type):
+            from app.wyoming_bridge.startup import note_activity
+
+            note_activity("utterance")
             said = Transcript.from_event(event).text or ""
             result = await self._answer(said)
             if not result.handled:
@@ -120,6 +126,9 @@ async def serve(host: str, port: int, user_id) -> asyncio.AbstractServer:
     """Start listening. Returns the server so the caller can close it."""
 
     async def _client(reader, writer):
+        from app.wyoming_bridge.startup import note_activity
+
+        note_activity("client")
         handler = PromptlyHandler(reader, writer, user_id=user_id)
         try:
             await handler.run()

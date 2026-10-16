@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { usePasswordPolicy } from "@/hooks/usePasswordPolicy";
 import {
   CheckCircle2,
   KeyRound,
@@ -34,6 +35,7 @@ import { EnrollmentWizard } from "./EnrollmentWizard";
  * accurate without a full page reload.
  */
 export function MfaSettingsPanel({ defaultEmail }: { defaultEmail?: string }) {
+  const trustedDays = usePasswordPolicy().trusted_device_days;
   const [status, setStatus] = useState<MfaStatus | null>(null);
   const [devices, setDevices] = useState<MfaTrustedDevice[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,7 +152,7 @@ export function MfaSettingsPanel({ defaultEmail }: { defaultEmail?: string }) {
       {status?.enrolled && (
         <Card>
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--accent)]/15 text-[var(--accent)]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--accent)]/15 text-[var(--accent-text)]">
               <KeyRound className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
@@ -177,13 +179,13 @@ export function MfaSettingsPanel({ defaultEmail }: { defaultEmail?: string }) {
       {status?.enrolled && (
         <Card>
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--accent)]/15 text-[var(--accent)]">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-[var(--accent)]/15 text-[var(--accent-text)]">
               <Monitor className="h-5 w-5" />
             </div>
             <div className="min-w-0 flex-1">
               <h3 className="text-sm font-semibold">Trusted devices</h3>
               <p className="mt-1 text-xs text-[var(--text-muted)]">
-                Devices you've trusted skip two-step verification for 30 days.
+                Devices you've trusted skip two-step verification for {trustedDays} days.
               </p>
 
               {devices.length === 0 ? (
@@ -281,9 +283,12 @@ export function MfaSettingsPanel({ defaultEmail }: { defaultEmail?: string }) {
         <DisableMfaModal
           method={status?.method ?? null}
           onClose={() => setDisablingOpen(false)}
-          onDone={async () => {
+          onDone={() => {
+            // Turning MFA off signs out every session, this one included.
+            // Say so, rather than the next request bouncing to a bare
+            // login page (R-142).
             setDisablingOpen(false);
-            await refresh();
+            void import("@/lib/session").then((m) => m.resetToLogin("mfa_disabled"));
           }}
         />
       )}
@@ -395,6 +400,7 @@ function RegenerateBackupCodesModal({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [password, setPassword] = useState("");
 
   return (
     <Modal open onClose={onClose} title="Regenerate backup codes">
@@ -418,6 +424,13 @@ function RegenerateBackupCodesModal({
               This will invalidate your existing backup codes and generate a
               fresh set. Continue?
             </p>
+            <Input
+              label="Current password"
+              type="password"
+              value={password}
+              onChange={setPassword}
+              autoComplete="current-password"
+            />
             {error && (
               <div
                 role="alert"
@@ -433,11 +446,12 @@ function RegenerateBackupCodesModal({
               <Button
                 variant="primary"
                 loading={busy}
+                disabled={!password.trim()}
                 onClick={async () => {
                   setBusy(true);
                   setError(null);
                   try {
-                    const payload = await mfaApi.regenerateBackupCodes();
+                    const payload = await mfaApi.regenerateBackupCodes(password);
                     onCodes(payload);
                   } catch (err) {
                     setError(explainError(err));

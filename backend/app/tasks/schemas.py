@@ -46,6 +46,7 @@ class TaskCreate(BaseModel):
 
     enabled: bool = True
     notify: bool = True
+    notify_mode: str = "failures"
     retention_runs: int = Field(default=30, ge=1, le=365)
     concurrency: str = "allow"
 
@@ -101,6 +102,7 @@ class TaskUpdate(BaseModel):
 
     enabled: bool | None = None
     notify: bool | None = None
+    notify_mode: str | None = None
     retention_runs: int | None = Field(default=None, ge=1, le=365)
     concurrency: str | None = None
 
@@ -186,6 +188,7 @@ class TaskResponse(BaseModel):
 
     enabled: bool
     notify: bool
+    notify_mode: str = "failures"
     retention_runs: int
     # Overlap policy (A3): allow (fire anyway) | skip (don't fire while a run
     # for this task is still in flight).
@@ -206,3 +209,6 @@ class TaskResponse(BaseModel):
 
     created_at: datetime
     updated_at: datetime
+
+
+NOTIFY_MODES = ("never", "failures", "every", "changes")

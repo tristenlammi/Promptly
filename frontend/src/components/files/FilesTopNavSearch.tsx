@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { Search, X } from "lucide-react";
+import { useMatch, useNavigate, useSearchParams } from "react-router-dom";
+import { Folder, FolderSearch, Search, X } from "lucide-react";
 
+import { DriveItemIcon } from "@/components/files/DriveItemIcon";
+import { useSearchFiles } from "@/hooks/useFiles";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { cn } from "@/utils/cn";
 
@@ -17,6 +19,132 @@ import { cn } from "@/utils/cn";
  *     an autofocused input. Submitting either mode navigates to
  *     ``/files/search?q=…`` where the results page runs the FTS.
  */
+/** Debounced query for the instant results (R-213: search used to run
+ *  only on submit). */
+function useDebounced(value: string, ms = 250): string {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = window.setTimeout(() => setV(value), ms);
+    return () => window.clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
+/** The top few matches as you type; Enter (or "See all") opens the
+ *  full results page. */
+function InstantResults({
+  q,
+  onPick,
+  onSeeAll,
+  className,
+  folderId,
+  inFolder,
+  onToggleFolder,
+}: {
+  q: string;
+  onPick: (to: string) => void;
+  onSeeAll: () => void;
+  className?: string;
+  /** The folder being browsed, when there is one. */
+  folderId?: string | null;
+  inFolder?: boolean;
+  onToggleFolder?: () => void;
+}) {
+  const debounced = useDebounced(q.trim());
+  const within = folderId && inFolder ? folderId : null;
+  const { data, isFetching } = useSearchFiles(debounced, "mine", {
+    limit: 6,
+    enabled: debounced.length >= 2,
+    folderId: within,
+  });
+  if (debounced.length < 2) return null;
+  const folders = (data?.folders ?? []).slice(0, 3);
+  const hits = data?.hits ?? [];
+  return (
+    <div className={className}>
+      {folderId && onToggleFolder && (
+        <div className="flex items-center gap-1.5 px-3 pb-1.5 pt-1 text-xs">
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={onToggleFolder}
+            aria-pressed={!!inFolder}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 transition",
+              inFolder
+                ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent-text)]"
+                : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
+            )}
+          >
+            <FolderSearch className="h-3 w-3" />
+            {inFolder ? (data?.within_trail?.split(" / ").pop() ?? "This folder") : "Only this folder"}
+          </button>
+          {inFolder && <span className="text-[var(--text-muted)]">· searching inside it</span>}
+        </div>
+      )}
+      {!data && isFetching && (
+        <div className="px-3 py-2 text-xs text-[var(--text-muted)]">Searching…</div>
+      )}
+      {data && folders.length === 0 && hits.length === 0 && (
+        <div className="px-3 py-2 text-xs text-[var(--text-muted)]">No matches yet.</div>
+      )}
+      {folders.map((f) => (
+        <button
+          key={f.id}
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() =>
+            onPick(f.scope === "mine" ? `/files/folder/${f.id}` : `/files/folder/${f.id}?scope=shared`)
+          }
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--hover)]"
+        >
+          <Folder className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">{f.name}</span>
+            {data?.folder_breadcrumbs?.[f.id] && (
+              <span className="block truncate text-[11px] text-[var(--text-muted)]">
+                {data.folder_breadcrumbs[f.id]}
+              </span>
+            )}
+          </span>
+        </button>
+      ))}
+      {hits.map((h) => (
+        <button
+          key={h.file.id}
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() =>
+            onPick(
+              `/files/search?q=${encodeURIComponent(debounced)}&open=${h.file.id}${within ? `&in=${within}` : ""}`
+            )
+          }
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-[var(--hover)]"
+        >
+          <DriveItemIcon file={h.file} className="h-4 w-4 shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">{h.file.filename}</span>
+            {h.breadcrumb && (
+              <span className="block truncate text-[11px] text-[var(--text-muted)]">
+                {h.breadcrumb}
+              </span>
+            )}
+          </span>
+        </button>
+      ))}
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={onSeeAll}
+        className="flex w-full items-center gap-2 border-t border-[var(--border)] px-3 py-2 text-left text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--hover)]"
+      >
+        <Search className="h-3.5 w-3.5" />
+        See all results for “{debounced}”{within ? " in this folder" : ""}
+      </button>
+    </div>
+  );
+}
+
 export function FilesTopNavSearch() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -25,6 +153,13 @@ export function FilesTopNavSearch() {
   const [focused, setFocused] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const isMobile = useIsMobile();
+  // Browsing a folder: the box can search inside it (WP-5.4) — on by
+  // default there, one click to widen to everything.
+  const folderMatch = useMatch("/files/folder/:folderId");
+  const folderId = folderMatch?.params.folderId ?? params.get("in") ?? null;
+  const [inFolder, setInFolder] = useState(true);
+  useEffect(() => setInFolder(true), [folderId]);
+  const within = folderId && inFolder ? folderId : null;
 
   useEffect(() => {
     setValue(urlQ);
@@ -33,7 +168,7 @@ export function FilesTopNavSearch() {
   const submit = (next: string) => {
     const trimmed = next.trim();
     if (!trimmed) return;
-    navigate(`/files/search?q=${encodeURIComponent(trimmed)}`);
+    navigate(`/files/search?q=${encodeURIComponent(trimmed)}${within ? `&in=${within}` : ""}`);
     setSheetOpen(false);
   };
 
@@ -61,6 +196,10 @@ export function FilesTopNavSearch() {
           initial={value}
           onClose={() => setSheetOpen(false)}
           onSubmit={submit}
+          onPick={(to) => {
+            setSheetOpen(false);
+            navigate(to);
+          }}
         />
       </>
     );
@@ -88,8 +227,26 @@ export function FilesTopNavSearch() {
         onChange={(e) => setValue(e.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") (e.target as HTMLInputElement).blur();
+        }}
         className="w-44 bg-transparent text-sm text-[var(--text)] placeholder:text-[var(--text-muted)] focus:outline-none md:w-64"
       />
+      {focused && (
+        <InstantResults
+          q={value}
+          folderId={folderId}
+          inFolder={inFolder}
+          onToggleFolder={() => setInFolder((v) => !v)}
+          onPick={(to) => {
+            setFocused(false);
+            (document.activeElement as HTMLElement | null)?.blur();
+            navigate(to);
+          }}
+          onSeeAll={() => submit(value)}
+          className="absolute left-0 right-0 top-full z-40 mt-1 max-h-96 overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg"
+        />
+      )}
     </form>
   );
 }
@@ -99,11 +256,13 @@ function SearchSheet({
   initial,
   onClose,
   onSubmit,
+  onPick,
 }: {
   open: boolean;
   initial: string;
   onClose: () => void;
   onSubmit: (v: string) => void;
+  onPick: (to: string) => void;
 }) {
   const [value, setValue] = useState(initial);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -172,8 +331,14 @@ function SearchSheet({
         </button>
       </div>
 
+      <InstantResults
+        q={value}
+        onPick={onPick}
+        onSeeAll={() => onSubmit(value)}
+        className="border-b border-[var(--border)]"
+      />
       <div className="flex-1 overflow-y-auto px-4 py-6 text-sm text-[var(--text-muted)]">
-        <p>Enter a term and tap Search — results show files matching by filename or content.</p>
+        <p>Search by name or content — files shared with you included.</p>
         <button
           type="button"
           onClick={() => onSubmit(value)}

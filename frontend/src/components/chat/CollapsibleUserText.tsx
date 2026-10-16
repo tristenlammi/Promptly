@@ -65,7 +65,7 @@ export function CollapsibleUserText({ children }: { children: ReactNode }) {
             setExpanded((v) => !v);
           }}
           aria-expanded={expanded}
-          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-[var(--accent)] transition hover:opacity-80"
+          className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-[var(--accent-text)] transition hover:opacity-80"
         >
           <ChevronDown
             className={cn(

@@ -10,8 +10,6 @@ operations (model pulls) to the UI.
 Endpoints (all mounted under ``/api/admin/local-models``):
 
 - ``GET  /installed`` — models currently on disk.
-- ``GET  /library``   — curated manifest of suggested models with
-                        VRAM/RAM hints.
 - ``GET  /hardware``  — probe the host for GPU/CPU/RAM specs so
                         the UI can render the "will it run?" badge.
 - ``POST /pull``      — SSE-streamed ``/api/pull``. Progress events
@@ -40,7 +38,6 @@ from app.auth.deps import require_admin
 from app.auth.models import User
 from app.database import get_db
 from app.local_models.hardware import probe_hardware
-from app.local_models.library import LIBRARY, LibraryEntry
 from app.models_config.models import ModelProvider
 
 log = logging.getLogger(__name__)
@@ -72,6 +69,11 @@ class HardwareProbe(BaseModel):
     cpu_count: int
     total_ram_bytes: int
     has_nvidia: bool
+    # "detected" (nvidia-smi saw it), "in_use" (Ollama has models in
+    # VRAM), "none", or "unknown" — the backend container usually can't
+    # see the GPU at all, so "unknown" is the honest default (R-279).
+    gpu_status: str = "unknown"
+    ollama_vram_bytes: int = 0
     gpus: list[dict] = Field(default_factory=list)
 
 
@@ -120,24 +122,11 @@ async def list_installed(
     return out
 
 
-@router.get("/library", response_model=list[LibraryEntry])
-async def get_library(
-    _user: User = Depends(require_admin),
-) -> list[LibraryEntry]:
-    """Return the curated list of recommended Ollama models.
-
-    Shipped as a static manifest so the Local Models tab can render
-    "will this run on your hardware?" badges without scraping
-    ollama.com on every page load.
-    """
-    return LIBRARY
-
-
 @router.get("/hardware", response_model=HardwareProbe)
 async def hardware(
     _user: User = Depends(require_admin),
 ) -> HardwareProbe:
-    return probe_hardware()
+    return await probe_hardware(_ollama_base_url())
 
 
 @router.delete("/installed/{name:path}")
@@ -224,8 +213,8 @@ async def pull_model(
 async def refresh_provider(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require_admin),
-) -> dict[str, int]:
-    """Reconcile the auto-registered Ollama provider's ``models`` list.
+) -> dict:
+    """Reconcile every Ollama provider's ``models`` list.
 
     Pulled models don't magically appear in ``list_available_models_for``
     — providers cache their ``models`` column. Call this endpoint after
@@ -237,38 +226,36 @@ async def refresh_provider(
     ``/api/admin/custom-models/bootstrap-local-embedding`` endpoint to
     create the provider row first.
     """
-    installed = await list_installed(_user=_user)  # type: ignore[arg-type]
-
-    result = await db.execute(
-        select(ModelProvider).where(
-            ModelProvider.user_id.is_(None),
-            ModelProvider.type == "ollama",
-        )
-    )
-    provider = result.scalar_one_or_none()
-    if provider is None:
-        return {"created": 0, "models": 0}
-
-    # Local import to avoid a top-level cycle with the custom_models
-    # package (which itself imports from models_config).
+    # Every Ollama provider, not just the system one: models pulled for an
+    # admin-added Ollama provider never appeared, and a second row made
+    # ``scalar_one_or_none`` 500 (R-300).
     from app.custom_models.embedding import is_embedding_model_id
+    from app.models_config.provider import model_router
 
-    provider.models = [
-        {
-            "id": m.name,
-            "display_name": m.name,
-            "context_window": None,
-            "supports_vision": False,
-            # Tag embedding-only backbones so ``list_available_models_for``
-            # can hide them from the chat picker without re-running the
-            # name heuristic. Preserves the same shape other providers
-            # use (``{"kind": "embedding"}``).
-            **({"kind": "embedding"} if is_embedding_model_id(m.name) else {}),
-        }
-        for m in installed
-    ]
+    rows = list(
+        (await db.execute(select(ModelProvider).where(ModelProvider.type == "ollama"))).scalars()
+    )
+    if not rows:
+        return {"created": 0, "models": 0, "providers": []}
+    report = []
+    for provider in rows:
+        try:
+            catalog = await model_router.list_models(provider)
+        except Exception as e:  # noqa: BLE001 — one unreachable Ollama mustn't stop the rest
+            report.append({"id": str(provider.id), "name": provider.name, "ok": False, "error": str(e)[:200]})
+            continue
+        for m in catalog:
+            # Tag embedding-only backbones so the chat picker hides them.
+            if is_embedding_model_id(m.get("id", "")):
+                m["kind"] = "embedding"
+        provider.models = catalog
+        report.append({"id": str(provider.id), "name": provider.name, "ok": True, "models": len(catalog)})
     await db.commit()
-    return {"created": 1, "models": len(provider.models)}
+    return {
+        "created": 1,
+        "models": sum(r.get("models", 0) for r in report),
+        "providers": report,
+    }
 
 
 # ---------------------------------------------------------------------------

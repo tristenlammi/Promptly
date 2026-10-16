@@ -16,12 +16,15 @@ from app.chat.tools.code_interpreter import CodeInterpreterTool
 from app.chat.tools.deep_research import DeepResearchTool
 from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
+from app.chat.tools.files import ListMyFilesTool, ProposeFileChangesTool, ReadFileTool
 from app.chat.tools.generate_image import GenerateImageTool
 from app.chat.tools.generate_pdf import GeneratePdfTool
 from app.chat.tools.memory import ForgetTool, RecallTool, RememberTool
+from app.chat.tools.photos import InspectPhotosTool, ProposePhotoActionTool, RefinePhotoResultsTool, SearchPhotosTool
 from app.chat.tools.query_board import QueryBoardCardsTool
 from app.chat.tools.read_workspace_item import ReadWorkspaceItemTool
 from app.chat.tools.run_agents import RunAgentsTool
+from app.chat.tools.search_my_files import SearchMyFilesTool
 from app.chat.tools.web_search import WebSearchTool
 from app.chat.tools.workspace_write import (
     ProposeBoardCardsTool,
@@ -47,6 +50,14 @@ REGISTRY: list[Tool] = [
     CodeInterpreterTool(),
     WebSearchTool(),
     FetchUrlTool(),
+    # Answers from the user's own files (category "drive", WP-5.2) —
+    # advertised when they turned AI search of their Drive on.
+    SearchMyFilesTool(),
+    # Find, open and organise files (category "files", WP-5.3) — with the
+    # Tools toggle, in any chat; changes go through a proposal card.
+    ListMyFilesTool(),
+    ReadFileTool(),
+    ProposeFileChangesTool(),
     # Parallel research sub-agents (category "agents") — advertised only
     # when Tools AND web search are both on, since each sub-agent's tool
     # set is search-only.
@@ -55,14 +66,15 @@ REGISTRY: list[Tool] = [
     # can launch the Deep Research pipeline itself and synthesise inline
     # from the returned cited evidence.
     DeepResearchTool(),
-    # Workspace write-back proposals (Batch 4.1) — category "workspace",
-    # only advertised in workspace chats.
+    # Workspace write-back proposals (Batch 4.1) — category
+    # "workspace_write": only advertised to current members who can write.
     ProposeWorkspaceNoteTool(),
     ProposeBoardCardsTool(),
     # Edit existing cards (status/priority/due) — the update half of the
     # board write-back, e.g. "mark the in-progress cards done".
     ProposeBoardUpdatesTool(),
     # Read-back: open a workspace item's full content on demand (Track 1 P3).
+    # Category "workspace": current members only (any role).
     ReadWorkspaceItemTool(),
     # Structured board queries — count/filter cards for real (Track 1 P4).
     QueryBoardCardsTool(),
@@ -72,6 +84,13 @@ REGISTRY: list[Tool] = [
     RememberTool(),
     ForgetTool(),
     RecallTool(),
+    # Ask your photos (category "photos", PH-4) — with the Tools toggle, for
+    # anyone with a photo library.
+    SearchPhotosTool(),
+    RefinePhotoResultsTool(),
+    InspectPhotosTool(),
+    # Albums, sharing, relationships from a chat — proposals only.
+    ProposePhotoActionTool(),
 ]
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the

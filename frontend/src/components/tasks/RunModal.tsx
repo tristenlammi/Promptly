@@ -1,8 +1,9 @@
-import { Check, Loader2, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
 
 import { Modal } from "@/components/shared/Modal";
 import { RunStatusChip } from "@/components/tasks/RunStatusChip";
 import { TaskRunDocument } from "@/components/tasks/TaskRunDocument";
+import { DiagnoseRun, RunSteps } from "@/components/tasks/RunSteps";
 import type { TaskRun } from "@/api/tasks";
 
 /**
@@ -46,36 +47,20 @@ export function RunModal({
               <button
                 type="button"
                 onClick={onOpenRuns}
-                className="text-xs font-medium text-[var(--accent)] hover:underline"
+                className="text-xs font-medium text-[var(--accent-text)] hover:underline"
               >
                 Open in Runs →
               </button>
             )}
           </div>
 
+          <DiagnoseRun run={run} />
           {steps.length > 0 && (
             <div className="space-y-1.5">
               <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
                 Steps
               </div>
-              {steps.map((s, i) => (
-                <details
-                  key={`${s.node_id}-${i}`}
-                  className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2"
-                >
-                  <summary className="flex cursor-pointer items-center justify-between gap-2 text-xs font-semibold text-[var(--text)]">
-                    <span className="truncate">{s.label}</span>
-                    {s.status === "success" ? (
-                      <Check className="h-3.5 w-3.5 shrink-0 text-[var(--success)]" />
-                    ) : (
-                      <X className="h-3.5 w-3.5 shrink-0 text-[var(--danger)]" />
-                    )}
-                  </summary>
-                  <pre className="promptly-scroll mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-[var(--text-muted)]">
-                    {s.output}
-                  </pre>
-                </details>
-              ))}
+              <RunSteps steps={steps} />
             </div>
           )}
 

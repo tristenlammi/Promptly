@@ -82,37 +82,27 @@ export function McpConnectorsPanel() {
     void load();
   }, [load]);
 
-  const onRefresh = async (c: McpConnector) => {
+  // Errors show on the row they belong to. They used to be swallowed on
+  // the assumption an interceptor showed them; nothing did (R-158).
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
+  const act = async (c: McpConnector, run: () => Promise<unknown>) => {
     setBusyId(c.id);
+    setRowError(null);
     try {
-      await mcpApi.refresh(c.id);
-      await load();
-    } catch {
-      // surfaced by the interceptor
+      await run();
+    } catch (e) {
+      setRowError({ id: c.id, message: extractError(e) });
     } finally {
+      await load();
       setBusyId(null);
     }
   };
-
-  const onToggle = async (c: McpConnector) => {
-    setBusyId(c.id);
-    try {
-      await mcpApi.update(c.id, { enabled: !c.enabled });
-      await load();
-    } finally {
-      setBusyId(null);
-    }
-  };
-
+  const onRefresh = (c: McpConnector) => act(c, () => mcpApi.refresh(c.id));
+  const onToggle = (c: McpConnector) =>
+    act(c, () => mcpApi.update(c.id, { enabled: !c.enabled }));
   const onDelete = async (c: McpConnector) => {
     if (!window.confirm(`Delete connector "${c.name}"?`)) return;
-    setBusyId(c.id);
-    try {
-      await mcpApi.remove(c.id);
-      await load();
-    } finally {
-      setBusyId(null);
-    }
+    await act(c, () => mcpApi.remove(c.id));
   };
 
   return (
@@ -162,6 +152,7 @@ export function McpConnectorsPanel() {
                         : "global"}
                     </Badge>
                     {!c.enabled && <Badge tone="muted">disabled</Badge>}
+                    {c.enabled && <HealthBadge c={c} />}
                   </div>
                   <div className="truncate text-xs text-[var(--text-muted)]">
                     {c.url}
@@ -173,6 +164,20 @@ export function McpConnectorsPanel() {
                       ? ` · refreshed ${new Date(c.tools_refreshed_at).toLocaleString()}`
                       : " · not yet fetched"}
                   </div>
+                  {c.enabled && c.consecutive_failures > 0 && c.last_error && (
+                    <div className="mt-1 text-xs text-[var(--danger)]">
+                      Last error
+                      {c.last_error_at
+                        ? ` (${new Date(c.last_error_at).toLocaleString()})`
+                        : ""}
+                      : {c.last_error}
+                    </div>
+                  )}
+                  {rowError?.id === c.id && (
+                    <div role="alert" className="mt-1 text-xs text-[var(--danger)]">
+                      {rowError.message}
+                    </div>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   <IconBtn
@@ -340,6 +345,8 @@ function ConnectorForm({
         transport,
         auth_header_name: authHeader || null,
         auth_value: authValue || null,
+        // Blank token while editing = test with the saved one.
+        ...(isEdit && connector && !authValue ? { connector_id: connector.id } : {}),
       });
       if (r.ok) setTestTools(r.tools);
       else setTestErr(r.error ?? "Connection failed");
@@ -378,6 +385,8 @@ function ConnectorForm({
         await mcpApi.update(connector.id, {
           name: name.trim(),
           url: url.trim(),
+          // The picker is shown when editing; its value used to be dropped.
+          transport,
           auth_header_name: authHeader || null,
           // Only send a new secret when the admin typed one.
           ...(authValue ? { auth_value: authValue } : {}),
@@ -678,6 +687,31 @@ function ConnectorForm({
   );
 }
 
+/** Works / failing / never checked, from the connector's health fields. */
+function HealthBadge({ c }: { c: McpConnector }) {
+  if (c.consecutive_failures > 0) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full bg-[var(--danger)]/10 px-2 py-0.5 text-[11px] font-medium text-[var(--danger)]"
+        title={c.last_error ?? undefined}
+      >
+        failing
+      </span>
+    );
+  }
+  if (c.last_ok_at) {
+    return (
+      <span
+        className="inline-flex items-center rounded-full bg-[var(--success)]/10 px-2 py-0.5 text-[11px] font-medium text-[var(--success)]"
+        title={`Last worked ${new Date(c.last_ok_at).toLocaleString()}`}
+      >
+        working
+      </span>
+    );
+  }
+  return null;
+}
+
 function toggle(set: Set<string>, id: string): Set<string> {
   const next = new Set(set);
   if (next.has(id)) next.delete(id);
@@ -805,7 +839,7 @@ function Badge({
         "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
         tone === "muted"
           ? "bg-black/[0.04] text-[var(--text-muted)] dark:bg-white/[0.06]"
-          : "bg-[var(--accent)]/10 text-[var(--accent)]"
+          : "bg-[var(--accent)]/10 text-[var(--accent-text)]"
       )}
     >
       {children}

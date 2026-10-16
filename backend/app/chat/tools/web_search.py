@@ -64,11 +64,6 @@ class WebSearchTool(Tool):
         "Prefer ONE focused query over several broad ones; you can call "
         "this tool again with a refined query if the first pass missed."
     )
-    prompt_hint = (
-        "Run a web search and get back numbered citations. Use whenever "
-        "the user wants fresh facts, recent news, or asks you to look "
-        "something up. Cite results inline with [1], [2] in your reply."
-    )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {

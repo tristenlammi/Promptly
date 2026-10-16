@@ -27,6 +27,15 @@ class Settings(BaseSettings):
 
     # ---- App ----
     SECRET_KEY: str = Field(default=_INSECURE_SECRET_PLACEHOLDER)
+    # The key before the last change. Encrypted values (provider API keys,
+    # MFA secrets, connector tokens) made with it still decrypt, so changing
+    # SECRET_KEY no longer locks out every MFA user (R-138). Sessions signed
+    # with the old key still end — everyone signs in again once.
+    SECRET_KEY_PREVIOUS: str | None = None
+    # How long the security audit log and the error log are kept. They
+    # used to grow forever (R-145).
+    AUDIT_RETENTION_DAYS: int = 365
+    ERROR_LOG_RETENTION_DAYS: int = 90
     DOMAIN: str = "localhost"
     # Master debug switch. Off by default. When True, /api/docs,
     # /api/redoc, and /api/openapi.json are exposed and the production
@@ -42,10 +51,15 @@ class Settings(BaseSettings):
     # Defaults to True because production deployments are HTTPS via the
     # Cloudflare tunnel. Override to False *only* in local dev when you
     # need to test cookie flows over plain HTTP.
-    COOKIE_SECURE: bool = True
+    # "auto" (default) | "true" | "false" — see app/auth/cookies.py.
+    COOKIE_SECURE: str = "auto"
     # "strict" is correct for first-party-only auth; refresh + device
     # cookies are never sent cross-site.
     COOKIE_SAMESITE: str = "strict"
+    # One-time code the installer prints; required to create the first admin
+    # (R-263). Unset (a manual compose install): setup is only accepted from
+    # the local network.
+    SETUP_TOKEN: str | None = None
 
     # ---- Host-header allowlist ----
     # Optional Starlette TrustedHostMiddleware allowlist. Empty (default)
@@ -115,6 +129,10 @@ class Settings(BaseSettings):
     # can always unlock early via POST /api/admin/users/{id}/unlock, and a
     # genuinely malicious account should be hard-``disabled`` instead.
     LOCKOUT_COOLDOWN_MINUTES: int = 15
+    # LOCKOUT_THRESHOLD now counts per account *and* IP address, so one
+    # stranger can't lock the owner out (R-002). This account-wide lock is
+    # the backstop for a spray from many addresses.
+    ACCOUNT_LOCKOUT_THRESHOLD: int = 25
 
     # ---- MFA ----
     # Issuer string baked into the otpauth:// URI shown to authenticator
@@ -146,7 +164,21 @@ class Settings(BaseSettings):
     # ---- Rate limiting ----
     # Master switch. Set to False in unit tests / dev iteration loops if
     # the limits start getting in the way.
+    # Resumable uploads through the tusd sidecar (WP-8.2). Compose turns it
+    # on; without tusd every upload is the one-request kind (100 MB).
+    TUS_ENABLED: bool = False
+    # Shared with tusd so only it can call the upload hooks (``?key=``).
+    TUS_HOOK_SECRET: str | None = None
+    # Files bigger than this go the resumable way.
+    TUS_THRESHOLD_BYTES: int = 64 * 1024 * 1024
     RATE_LIMIT_ENABLED: bool = True
+    # Signed media links (/m/, WP-7.5) get their own bucket: scrolling a
+    # photo grid is hundreds of small fetches, and must neither trip nor
+    # spend the general per-IP budget.
+    RATE_LIMIT_MEDIA: str = "6000/minute"
+    # WebDAV (/dav/, WP-8.4) too: a sync client lists every folder and sends
+    # a request per file.
+    RATE_LIMIT_DAV: str = "3000/minute"
     # Per-IP login throttle. The format is slowapi/limits' string DSL
     # ("count/window"). Tuned to be invisible to humans and brutal to
     # scripts: 10 attempts per minute per source IP.
@@ -170,9 +202,11 @@ class Settings(BaseSettings):
     # because this fires per-IP and protects against an unauthenticated
     # attacker spraying send requests for many usernames at once.
     RATE_LIMIT_MFA_EMAIL_SEND: str = "10/hour"
-    # Conservative blanket cap applied to every endpoint as a safety net.
-    # Tunes how aggressive a scraper can be against the public surface.
-    RATE_LIMIT_DEFAULT: str = "300/minute"
+    # Blanket cap applied to every endpoint as a safety net, per client IP.
+    # LAN clients count now too (they used to be exempt, R-134), and a
+    # workspace page or several people behind one router can be busy, so
+    # it sits well above normal use and below nginx's 30 r/s edge limit.
+    RATE_LIMIT_DEFAULT: str = "900/minute"
     # Per-user *sliding* window applied to chat sends. 60 messages in
     # any rolling 5-minute window is generous for a human (one every
     # 5 s sustained) but cuts off the runaway-script case where a
@@ -218,6 +252,10 @@ class Settings(BaseSettings):
     # returns a friendly 503 instead of hanging).
     STT_BACKEND: str = "local"
     WHISPER_URL: str = "http://whisper:8000"
+
+    # Understanding photos (PH-2): the photos-ml service (started by
+    # compose by default). Empty turns it off.
+    PHOTOS_ML_URL: str = "http://photos-ml:8000"
     # Model the cloud path asks for when ``STT_BACKEND=openai``. ``whisper-1``
     # is the broadly-available default; ``gpt-4o-transcribe`` is newer/better
     # where the account has access.
@@ -475,7 +513,7 @@ class Settings(BaseSettings):
                     "auth cookie is set Secure=true by default and won't "
                     "survive a plain HTTP origin."
                 )
-        if not self.COOKIE_SECURE:
+        if str(self.COOKIE_SECURE).strip().lower() in ("false", "0", "no", "off"):
             warnings.append(
                 "COOKIE_SECURE is False in your .env. The refresh-token "
                 "cookie will travel over plain HTTP — only safe in local "

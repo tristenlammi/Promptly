@@ -116,16 +116,6 @@ class GenerateImageTool(Tool):
         "compositions, or text-only descriptions of an image — only "
         "when an actual rendered image is the goal."
     )
-    prompt_hint = (
-        "Generate or edit an actual image and attach it to your reply. "
-        "Use whenever the user wants a picture, illustration, logo, "
-        "diagram, photo edit, or any visual the user wants to *see*. "
-        "When the user attaches an image and asks you to modify it, "
-        "call this tool — never refuse on the grounds that you 'can't "
-        "produce images'. The most recent image the user attached in "
-        "this turn is auto-passed as the edit source if you don't set "
-        "source_file_id explicitly."
-    )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {

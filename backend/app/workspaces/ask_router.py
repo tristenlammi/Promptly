@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +30,10 @@ from app.database import get_db
 from app.files.models import UserFile
 from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, model_router
+from app.workspaces.knowledge import (
+    build_workspace_injection,
+    retrievable_workspace_file_ids,
+)
 from app.workspaces.shares import get_accessible_workspace
 
 router = APIRouter()
@@ -66,24 +70,107 @@ class AskCitation(BaseModel):
 class AskResponse(BaseModel):
     answer: str
     citations: list[AskCitation] = Field(default_factory=list)
+    # "embedder_unavailable" when an embedder is set up but didn't answer:
+    # the answer came from keyword matches or the full content (R-322).
+    degraded: str | None = None
+
+
+_ASK_SYSTEM_FULL = (
+    "You answer the user's question using ONLY the workspace content "
+    "provided below. Name the item you're drawing on (its title) when you "
+    "use it. If the content doesn't contain the answer, say you couldn't "
+    "find it in this workspace rather than guessing. Be concise and direct."
+)
+
+
+async def _usable(
+    db: AsyncSession, user: User, provider_id, model_id: str | None
+) -> tuple[ModelProvider, str] | None:
+    """``(provider, model to call)`` when this caller may use the model,
+    resolving a custom model to its base — else ``None``."""
+    from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+    from app.models_config.access import is_model_allowed
+
+    if not provider_id or not model_id:
+        return None
+    provider = await db.get(ModelProvider, provider_id)
+    if provider is None or not provider.enabled:
+        return None
+    effective = model_id
+    if is_custom_model_id(model_id):
+        resolved = await resolve_custom_model(model_id, db)
+        if resolved is None:
+            return None
+        provider, effective = resolved.base_provider, resolved.base_model_id
+    if not await is_model_allowed(
+        user, db, model_id=model_id, base_model_id=effective
+    ):
+        return None
+    return provider, effective
 
 
 async def _resolve_chat_model(
-    db: AsyncSession, ws: Workspace
+    db: AsyncSession, ws: Workspace, user: User
 ) -> tuple[ModelProvider | None, str | None]:
-    """Provider + model to answer with: the workspace default if set and
-    usable, else the app-wide default chat model."""
-    if ws.default_provider_id and ws.default_model_id:
-        provider = await db.get(ModelProvider, ws.default_provider_id)
-        if provider is not None and provider.enabled:
-            return provider, ws.default_model_id
+    """Provider + model to answer with: the workspace default, else the
+    app default — whichever *this caller* is allowed to use. The workspace
+    default was checked against whoever set it, so a viewer used to get
+    answers from a model they'd been denied, outside their budget (R-183)."""
+    hit = await _usable(db, user, ws.default_provider_id, ws.default_model_id)
+    if hit is not None:
+        return hit
     # Per-org default chat model, resolved via the workspace owner's org.
     eff = await load_effective_defaults(db, await org_id_of(db, ws.user_id))
     if eff.default_chat_configured:
-        provider = await db.get(ModelProvider, eff.default_chat_provider_id)
-        if provider is not None and provider.enabled:
-            return provider, eff.default_chat_model_id
+        hit = await _usable(
+            db, user, eff.default_chat_provider_id, eff.default_chat_model_id
+        )
+        if hit is not None:
+            return hit
     return None, None
+
+
+async def _enforce_ask_quotas(request: Request, user: User, db: AsyncSession) -> None:
+    """The same per-user rate limit and token budget as sending a chat
+    message (R-183)."""
+    from app.billing.usage import check_budget
+    from app.rate_limit import enforce_user_message_rate
+
+    await enforce_user_message_rate(request, user)
+    snapshot = await check_budget(db, user)
+    if snapshot.verdict == "blocked":
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                "You've hit your daily token limit. Your budget resets at "
+                "midnight UTC, or ask an admin to raise your daily cap."
+                if snapshot.blocking_window == "daily"
+                else "You've hit your monthly token limit. The budget resets "
+                "at the start of next month, or ask an admin to raise your cap."
+            ),
+        )
+
+
+async def _ask_model(
+    provider: ModelProvider, model_id: str, system: str, user_msg: str
+) -> str:
+    try:
+        parts: list[str] = []
+        async for token in model_router.stream_chat(
+            provider=provider,
+            model_id=model_id,
+            messages=[ChatMessage(role="user", content=user_msg)],
+            system=system,
+            temperature=0.2,
+            max_tokens=900,
+        ):
+            parts.append(token)
+        return "".join(parts).strip()
+    except Exception as exc:  # noqa: BLE001 - surface a clean 502
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"The model couldn't be reached to answer: {exc}"[:300],
+        ) from exc
 
 
 async def _resolve_citation(
@@ -149,14 +236,79 @@ async def _resolve_citation(
 async def ask_workspace(
     workspace_id: uuid.UUID,
     payload: AskRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> AskResponse:
-    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    from app.chat.semantic_search import get_embedding_config
 
-    chunks = await retrieve_workspace_context(
-        db, workspace_id=ws.id, query=payload.question, top_k=_ASK_TOP_K
+    ws, _role = await get_accessible_workspace(workspace_id, user, db)
+    await _enforce_ask_quotas(request, user, db)
+    provider, model_id = await _resolve_chat_model(db, ws, user)
+    if provider is None or model_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "There's no model you can use to answer with. Set a default "
+                "model on the workspace, or ask an admin for access to one."
+            ),
+        )
+
+    # No embedder: nothing is ever chunked, so retrieval can't find
+    # anything — Ask used to answer "couldn't find anything" to every
+    # question. Answer from the same full content a workspace chat gets
+    # instead (R-183).
+    if await get_embedding_config(db) is None:
+        injection = await build_workspace_injection(
+            db, workspace_id=ws.id, query=payload.question
+        )
+        if not injection.system_block:
+            return AskResponse(
+                answer="There's nothing in this workspace to answer from yet.",
+                citations=[],
+            )
+        answer = await _ask_model(
+            provider,
+            model_id,
+            _ASK_SYSTEM_FULL,
+            f"Workspace content:\n{injection.system_block}\n\n"
+            f"Question: {payload.question}",
+        )
+        return AskResponse(answer=answer or "(no answer)", citations=[])
+
+    # Only content the AI is allowed to see — never another member's
+    # private draft, a trashed or archived item, or anything switched off
+    # for context (roadmap R-033).
+    from app.custom_models.retrieval import vector_status
+
+    allowed = await retrievable_workspace_file_ids(db, ws.id)
+    chunks = (
+        await retrieve_workspace_context(
+            db,
+            workspace_id=ws.id,
+            query=payload.question,
+            top_k=_ASK_TOP_K,
+            file_ids=list(allowed),
+        )
+        if allowed
+        else []
     )
+    degraded = "embedder_unavailable" if allowed and vector_status() != "ok" else None
+    if not chunks and degraded:
+        # The embedder is down: answer from the full content, like the
+        # no-embedder path, instead of "couldn't find anything" (R-322).
+        injection = await build_workspace_injection(
+            db, workspace_id=ws.id, query=payload.question
+        )
+        if injection.system_block:
+            answer = await _ask_model(
+                provider,
+                model_id,
+                _ASK_SYSTEM_FULL,
+                f"Workspace content:\n{injection.system_block}\n\n"
+                f"Question: {payload.question}",
+            )
+            return AskResponse(answer=answer or "(no answer)", citations=[], degraded=degraded)
     if not chunks:
         return AskResponse(
             answer=(
@@ -185,34 +337,8 @@ async def ask_workspace(
         blocks.append(f"[{idx}] {names[fid]}\n{joined}")
     context = "\n\n".join(blocks)
 
-    provider, model_id = await _resolve_chat_model(db, ws)
-    if provider is None or model_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "No model is configured to answer with. Set a default model "
-                "on the workspace (or an admin can set an app default)."
-            ),
-        )
-
     user_msg = f"Workspace context:\n{context}\n\nQuestion: {payload.question}"
-    try:
-        parts: list[str] = []
-        async for token in model_router.stream_chat(
-            provider=provider,
-            model_id=model_id,
-            messages=[ChatMessage(role="user", content=user_msg)],
-            system=_ASK_SYSTEM,
-            temperature=0.2,
-            max_tokens=900,
-        ):
-            parts.append(token)
-        answer = "".join(parts).strip()
-    except Exception as exc:  # noqa: BLE001 - surface a clean 502
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="The model couldn't be reached to answer.",
-        ) from exc
+    answer = await _ask_model(provider, model_id, _ASK_SYSTEM, user_msg)
 
     citations = []
     for idx, fid in enumerate(order, start=1):
@@ -222,7 +348,7 @@ async def ask_workspace(
         citation.snippet = (by_file[fid][0] or "")[:240] or None
         citations.append(citation)
     return AskResponse(
-        answer=answer or "(no answer)", citations=citations
+        answer=answer or "(no answer)", citations=citations, degraded=degraded
     )
 
 
@@ -247,6 +373,8 @@ class SearchHit(BaseModel):
 class SearchResponse(BaseModel):
     hits: list[SearchHit] = Field(default_factory=list)
     semantic_available: bool = False
+    # "embedder_unavailable" when one is set up but the vector arm failed.
+    degraded: str | None = None
 
 
 async def _visible_item_file_map(
@@ -389,8 +517,11 @@ async def _search_one_workspace(
 
     # 2) Full-text over backing + pinned files (GIN ``content_tsv``).
     if file_map:
+        from app.files.search_query import drive_tsquery
+
         content_tsv = literal_column("content_tsv")
-        tsquery = sa_func.websearch_to_tsquery("english", q)
+        # Names are indexed without stemming (WP-5.4) — query both ways.
+        tsquery = drive_tsquery(q)
         rank_expr = sa_func.ts_rank(content_tsv, tsquery)
         headline_expr = sa_func.ts_headline(
             "english",
@@ -432,10 +563,19 @@ async def _search_one_workspace(
     # 3) Semantic stragglers — meaning-matches that share no keywords.
     semantic_available = False
     try:
-        chunks = await retrieve_workspace_context(
-            db, workspace_id=ws.id, query=q, top_k=8
+        from app.custom_models.retrieval import vector_status
+
+        allowed = await retrievable_workspace_file_ids(db, ws.id)
+        chunks = (
+            await retrieve_workspace_context(
+                db, workspace_id=ws.id, query=q, top_k=8, file_ids=list(allowed)
+            )
+            if allowed
+            else []
         )
-        semantic_available = bool(chunks)
+        # Whether the vector arm actually ran — keyword hits alone used to
+        # count as "semantic available" (R-322).
+        semantic_available = bool(allowed) and vector_status() == "ok"
         for chunk in chunks:
             if chunk.score < 0.35:
                 continue  # below this it's noise, not a result
@@ -484,10 +624,16 @@ async def search_workspace(
     if len(q) < 2:
         return SearchResponse(hits=[], semantic_available=False)
     limit = max(1, min(60, limit))
+    from app.custom_models.retrieval import vector_status
+
     hits, semantic_available = await _search_one_workspace(
         db, ws, user, q, limit
     )
-    return SearchResponse(hits=hits, semantic_available=semantic_available)
+    return SearchResponse(
+        hits=hits,
+        semantic_available=semantic_available,
+        degraded="embedder_unavailable" if vector_status() == "unavailable" else None,
+    )
 
 
 # ---------------------------------------------------------------------
@@ -622,8 +768,14 @@ async def related_items(
         return RelatedResponse(items=[])
 
     try:
-        chunks = await retrieve_workspace_context(
-            db, workspace_id=ws.id, query=query, top_k=10
+        allowed = await retrievable_workspace_file_ids(db, ws.id)
+        chunks = (
+            await retrieve_workspace_context(
+                db, workspace_id=ws.id, query=query, top_k=10,
+                file_ids=list(allowed),
+            )
+            if allowed
+            else []
         )
     except Exception:  # pragma: no cover — best-effort
         return RelatedResponse(items=[])

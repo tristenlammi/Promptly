@@ -49,8 +49,12 @@ async def transcribe_audio(
     content_type: str | None,
     language: str | None = None,
     timeout_s: int | None = None,
+    batch: bool = False,
 ) -> TranscriptionResponse:
     """Transcribe a single audio clip to text.
+
+    ``batch`` puts it in the local worker's batch lane (meeting chunks), so
+    it never holds up dictation or voice mode.
 
     ``timeout_s`` overrides the dictation-tuned ``STT_TIMEOUT_S`` — meeting
     transcription sends 10-minute chunks that can legitimately take a few
@@ -76,6 +80,7 @@ async def transcribe_audio(
         content_type=content_type,
         language=language,
         timeout_s=timeout_s,
+        batch=batch,
     )
 
 
@@ -86,6 +91,7 @@ async def _transcribe_local(
     content_type: str | None,
     language: str | None,
     timeout_s: int | None = None,
+    batch: bool = False,
 ) -> TranscriptionResponse:
     settings = get_settings()
     base_url = (settings.WHISPER_URL or "").rstrip("/")
@@ -96,13 +102,21 @@ async def _transcribe_local(
         )
 
     files = {"file": (filename, data, content_type or "application/octet-stream")}
-    form = {"language": language or ""}
+    form = {"language": language or "", "lane": "batch" if batch else "interactive"}
     timeout = max(5, int(timeout_s or settings.STT_TIMEOUT_S or 60))
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             resp = await client.post(
                 f"{base_url}/transcribe", files=files, data=form
             )
+    except httpx.TimeoutException as exc:
+        # Reachable but slow — most often a long recording ahead of it.
+        # Saying "couldn't reach" sent people looking for an outage.
+        logger.warning("whisper timed out after %ss", timeout)
+        raise TranscriptionError(
+            "The transcriber is busy right now — try again in a moment.",
+            status_code=503,
+        ) from exc
     except httpx.HTTPError as exc:
         logger.warning("whisper unreachable: %s", exc)
         raise TranscriptionError(

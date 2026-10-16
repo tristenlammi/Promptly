@@ -1,3 +1,5 @@
+import type { ContextUsage } from "@/api/types";
+
 /**
  * Heuristic token counter used by the context-window pill.
  *
@@ -40,6 +42,10 @@ export interface MessageLike {
   promptTokens?: number | null;
   /** Real output-token count for this (assistant) message. */
   completionTokens?: number | null;
+  /** The last request's real size and breakdown (newer replies). Preferred
+   *  over ``promptTokens``, which adds up every tool-call round trip and
+   *  so overstated a turn that searched (WP-1.4). */
+  contextUsage?: ContextUsage | null;
 }
 
 /** Aggregate a conversation's messages into a single token estimate.
@@ -74,6 +80,8 @@ export interface ContextBudget {
    *  (the last assistant turn) rather than a pure char-heuristic estimate.
    *  Drives the tooltip's "actual vs estimated" wording. */
   measured: boolean;
+  /** What the measured turn's context was made of, when known. */
+  parts?: ContextUsage["parts"];
 }
 
 /** Build a full breakdown of token usage for a conversation.
@@ -102,8 +110,8 @@ export function computeContextBudget(
     const m = msgs[i];
     if (
       m.role === "assistant" &&
-      typeof m.promptTokens === "number" &&
-      m.promptTokens > 0
+      ((m.contextUsage?.total ?? 0) > 0 ||
+        (typeof m.promptTokens === "number" && m.promptTokens > 0))
     ) {
       anchorIdx = i;
       break;
@@ -112,10 +120,11 @@ export function computeContextBudget(
 
   if (anchorIdx >= 0) {
     const a = msgs[anchorIdx];
+    const usage = (a.contextUsage?.total ?? 0) > 0 ? a.contextUsage! : null;
     // Real input for that turn + the assistant's own reply (real if we
     // have it, else estimated) + every message after the anchor.
     let history =
-      (a.promptTokens ?? 0) +
+      (usage ? usage.total : (a.promptTokens ?? 0)) +
       (typeof a.completionTokens === "number"
         ? a.completionTokens
         : estimateTokens(a.content));
@@ -131,6 +140,10 @@ export function computeContextBudget(
       responseReserveTokens,
       totalTokens: history + responseReserveTokens,
       measured: true,
+      // The reply and anything after it are conversation too.
+      parts: usage
+        ? { ...usage.parts, history: usage.parts.history + (history - usage.total) }
+        : undefined,
     };
   }
 
@@ -158,5 +171,10 @@ export function formatTokens(n: number, compact = true): string {
   if (!compact) return Math.round(n).toLocaleString();
   if (n < 1000) return `${Math.round(n)}`;
   if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
+  // "1M", not "1000k" (V15).
+  if (n >= 1_000_000) {
+    const m = n / 1_000_000;
+    return `${Number.isInteger(Math.round(m * 10) / 10) ? Math.round(m) : m.toFixed(1)}M`;
+  }
   return `${Math.round(n / 1000)}k`;
 }

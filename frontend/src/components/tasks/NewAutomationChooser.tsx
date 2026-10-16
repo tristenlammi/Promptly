@@ -1,5 +1,6 @@
 import { Sparkles, Workflow } from "lucide-react";
 
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { Modal } from "@/components/shared/Modal";
 
 /**
@@ -18,6 +19,9 @@ export function NewAutomationChooser({
   onClose: () => void;
   onChoose: (mode: "simple" | "advanced") => void;
 }) {
+  // The flow canvas needs a bigger screen — offer Simple only on a phone
+  // instead of creating a flow nobody can edit there (R-154).
+  const isMobile = useIsMobile();
   return (
     <Modal
       open={open}
@@ -31,7 +35,7 @@ export function NewAutomationChooser({
           onClick={() => onChoose("simple")}
           className="flex flex-col gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--accent)] hover:bg-[var(--surface-hover)]"
         >
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[var(--surface-2)] text-[var(--accent)]">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[var(--surface-2)] text-[var(--accent-text)]">
             <Sparkles className="h-4 w-4" />
           </span>
           <span className="text-sm font-semibold text-[var(--text)]">Simple</span>
@@ -40,12 +44,18 @@ export function NewAutomationChooser({
           </span>
         </button>
 
+        {isMobile ? (
+          <p className="rounded-card border border-dashed border-[var(--border)] p-4 text-xs text-[var(--text-muted)]">
+            Advanced flows are built on a computer — the flow canvas needs a
+            bigger screen. You can still run and follow them here.
+          </p>
+        ) : (
         <button
           type="button"
           onClick={() => onChoose("advanced")}
           className="flex flex-col gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] p-4 text-left transition hover:border-[var(--accent)] hover:bg-[var(--surface-hover)]"
         >
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[var(--surface-2)] text-[var(--accent)]">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[var(--surface-2)] text-[var(--accent-text)]">
             <Workflow className="h-4 w-4" />
           </span>
           <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--text)]">
@@ -56,6 +66,7 @@ export function NewAutomationChooser({
             card on a board. More power.
           </span>
         </button>
+        )}
       </div>
     </Modal>
   );

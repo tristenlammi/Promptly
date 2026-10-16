@@ -36,6 +36,10 @@ export interface SlashItem {
 
 export const SlashCommandPluginKey = new PluginKey("slashCommand");
 
+/** Mirrors ``extensions.EDIT_MATH_EVENT`` (kept literal to avoid an import
+ *  cycle — extensions.ts imports this file). */
+const EDIT_MATH_EVENT = "promptly:edit-math";
+
 /** Event the Image/Audio items fire; DocumentToolbar opens its picker. */
 export const INSERT_ASSET_EVENT = "promptly:doc-insert-asset";
 
@@ -191,19 +195,29 @@ function buildItems(hasWikiLink: boolean): SlashItem[] {
       hint: "embed a video",
       keywords: ["video", "embed", "yt"],
       command: ({ editor, range }) => {
-        // Same flow as the toolbar button — a plain prompt keeps the two
-        // entry points identical.
-        const url = window.prompt("YouTube URL");
-        if (!url) {
-          editor.chain().focus().deleteRange(range).run();
-          return;
-        }
-        editor
-          .chain()
-          .focus()
-          .deleteRange(range)
-          .setYoutubeVideo({ src: url })
-          .run();
+        // Same flow as the toolbar button: its in-app link prompt.
+        editor.chain().focus().deleteRange(range).run();
+        document.dispatchEvent(
+          new CustomEvent(INSERT_ASSET_EVENT, { detail: { kind: "youtube" } })
+        );
+      },
+    },
+    {
+      title: "Page break",
+      hint: "start a new page",
+      keywords: ["page", "break", "print", "new page"],
+      command: ({ editor, range }) =>
+        editor.chain().focus().deleteRange(range).setPageBreak().run(),
+    },
+    {
+      title: "Formula",
+      hint: "LaTeX maths",
+      keywords: ["math", "maths", "latex", "equation", "katex"],
+      command: ({ editor, range }) => {
+        editor.chain().focus().deleteRange(range).run();
+        document.dispatchEvent(
+          new CustomEvent(EDIT_MATH_EVENT, { detail: { kind: "block" } })
+        );
       },
     },
   ];
@@ -233,6 +247,7 @@ class SlashPopup {
     this.onPick = onPick;
     this.el = document.createElement("div");
     this.el.className = "slash-command-popup";
+    this.el.dataset.escLayer = "";
     Object.assign(this.el.style, {
       position: "absolute",
       zIndex: "60",

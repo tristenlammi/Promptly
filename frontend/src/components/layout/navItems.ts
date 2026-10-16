@@ -5,6 +5,7 @@ import {
   MessagesSquare,
   Star,
   Trash2,
+  Link2,
   Share2,
   Clock,
   Search,
@@ -149,6 +150,12 @@ export const DRIVE_SUBNAV_ITEMS: NavItem[] = [
     to: "/files/shared",
     icon: Share2,
     label: "Shared",
+    section: "drive",
+  },
+  {
+    to: "/files/links",
+    icon: Link2,
+    label: "Shared links",
     section: "drive",
   },
   {

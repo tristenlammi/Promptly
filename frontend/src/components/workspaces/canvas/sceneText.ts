@@ -1,6 +1,6 @@
 import { getTextFromElements } from "@excalidraw/excalidraw";
 
-import { parseWikiHref } from "@/components/files/documents/WikiLinkExtension";
+import { parseWikiHref } from "@/components/files/documents/wikiLinks";
 
 /**
  * Flatten an Excalidraw scene into a STRUCTURED text description so workspace

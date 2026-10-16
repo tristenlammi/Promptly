@@ -19,25 +19,6 @@ export interface InstalledModel {
   quantization: string | null;
 }
 
-export type LibrarySizeClass = "tiny" | "small" | "medium" | "large";
-export type LibraryModality = "text" | "vision" | "code";
-
-export interface LibraryEntry {
-  name: string;
-  display_name: string;
-  family: string;
-  description: string;
-  size_class: LibrarySizeClass;
-  parameter_size: string;
-  context_window: number;
-  modality: LibraryModality;
-  disk_bytes: number;
-  recommended_vram_bytes: number;
-  recommended_ram_bytes: number | null;
-  supports_vision: boolean;
-  license: string | null;
-}
-
 export interface HardwareGPU {
   name: string;
   vram_total_bytes: number;
@@ -48,6 +29,10 @@ export interface HardwareProbe {
   cpu_count: number;
   total_ram_bytes: number;
   has_nvidia: boolean;
+  /** The backend usually can't see the GPU (only Ollama's container gets
+   *  it), so "unknown" is common and not a problem. */
+  gpu_status: "detected" | "in_use" | "none" | "unknown";
+  ollama_vram_bytes: number;
   gpus: HardwareGPU[];
 }
 
@@ -59,7 +44,10 @@ export interface PullEvent {
   completed?: number;
   total?: number;
   digest?: string;
-  error?: boolean;
+  /** ``true`` for the backend's own transport errors (message in
+   *  ``detail``); Ollama's in-stream failures carry the message here
+   *  as a string — e.g. "pull model manifest: file does not exist". */
+  error?: boolean | string;
   detail?: string;
   done?: boolean;
 }
@@ -69,10 +57,6 @@ const BASE = "/admin/local-models";
 export const localModelsApi = {
   async listInstalled(): Promise<InstalledModel[]> {
     const { data } = await apiClient.get<InstalledModel[]>(`${BASE}/installed`);
-    return data;
-  },
-  async library(): Promise<LibraryEntry[]> {
-    const { data } = await apiClient.get<LibraryEntry[]>(`${BASE}/library`);
     return data;
   },
   async hardware(): Promise<HardwareProbe> {

@@ -61,6 +61,8 @@ _LIMIT_LOGIN_IDENT: RateLimitItem = parse(_settings.RATE_LIMIT_LOGIN_IDENT)
 _LIMIT_REFRESH: RateLimitItem = parse(_settings.RATE_LIMIT_REFRESH)
 _LIMIT_SETUP: RateLimitItem = parse(_settings.RATE_LIMIT_SETUP)
 _LIMIT_DEFAULT: RateLimitItem = parse(_settings.RATE_LIMIT_DEFAULT)
+_LIMIT_MEDIA: RateLimitItem = parse(_settings.RATE_LIMIT_MEDIA)
+_LIMIT_DAV: RateLimitItem = parse(_settings.RATE_LIMIT_DAV)
 _LIMIT_MFA_VERIFY: RateLimitItem = parse(_settings.RATE_LIMIT_MFA_VERIFY)
 _LIMIT_MFA_EMAIL_SEND: RateLimitItem = parse(_settings.RATE_LIMIT_MFA_EMAIL_SEND)
 _LIMIT_USER_MESSAGES: RateLimitItem = parse(_settings.RATE_LIMIT_USER_MESSAGES)
@@ -85,6 +87,19 @@ def _ip_is_internal(ip: str) -> bool:
     return addr.is_private or addr.is_loopback or addr.is_link_local
 
 
+def _is_service_call(request: Request) -> bool:
+    """Service-to-service traffic (collab snapshots, healthchecks): a
+    private socket peer with no forwarded headers. Anything that came
+    through nginx carries X-Real-IP, and a private address *there* is a
+    LAN client — which used to be exempt from the blanket limit too, just
+    for being on the LAN (R-134)."""
+    headers = request.headers
+    if headers.get("X-Real-IP") or headers.get("X-Forwarded-For"):
+        return False
+    peer = (request.client.host if request.client else "") or ""
+    return _ip_is_internal(peer)
+
+
 # ---------------------------------------------------------------------
 # Blanket per-IP limiter (app-wide safety net)
 # ---------------------------------------------------------------------
@@ -100,12 +115,20 @@ async def blanket_rate_limit(request: Request) -> None:
     if request.url.path.startswith("/api/health"):
         return
     key = _client_ip(request)
-    if _ip_is_internal(key):
+    if _is_service_call(request):
         return
-    allowed = await _limiter.hit(_LIMIT_DEFAULT, "default", key)
+    # Signed media links (WP-7.5) and WebDAV (WP-8.4) have buckets of their own.
+    path = request.url.path
+    if path.startswith("/api/m/"):
+        bucket, limit = "media", _LIMIT_MEDIA
+    elif path == "/dav" or path.startswith("/dav/"):
+        bucket, limit = "dav", _LIMIT_DAV
+    else:
+        bucket, limit = "default", _LIMIT_DEFAULT
+    allowed = await _limiter.hit(limit, bucket, key)
     if allowed:
         return
-    await _record_rate_limit_audit(request, bucket="default")
+    await _record_rate_limit_audit(request, bucket=bucket)
     logger.warning(
         "Blanket rate limit exceeded: ip=%s path=%s",
         key,
@@ -114,7 +137,7 @@ async def blanket_rate_limit(request: Request) -> None:
     raise HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         detail="Too many requests. Please slow down and try again.",
-        headers={"Retry-After": str(_retry_after(_LIMIT_DEFAULT))},
+        headers={"Retry-After": str(_retry_after(limit))},
     )
 
 
@@ -266,7 +289,13 @@ async def enforce_login_identifier_rate(
     norm = (identifier or "").strip().lower()
     if not norm:
         return
-    allowed = await _limiter.hit(_LIMIT_LOGIN_IDENT, "login_ident", norm)
+    # Keyed per identifier *and* address: one key per identifier let anyone
+    # keep the owner from signing in by sending a few attempts a minute
+    # (R-002). Sprays from many addresses still hit the per-IP limit and
+    # the account-wide lockout.
+    allowed = await _limiter.hit(
+        _LIMIT_LOGIN_IDENT, "login_ident", f"{norm}|{_client_ip(request)}"
+    )
     if allowed:
         return
     safe_label = norm[:32]

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { usePasswordPolicy } from "@/hooks/usePasswordPolicy";
 import { useNavigate } from "react-router-dom";
 import {
   Cloud,
@@ -53,8 +54,45 @@ import { EnrollmentWizard } from "@/components/mfa/EnrollmentWizard";
 type Step = 1 | 2 | 3 | 4 | 5 | 6;
 const TOTAL_STEPS: Step = 6;
 
-export function SetupPage() {
-  const [step, setStep] = useState<Step>(1);
+// The wizard's progress, so a reload or a closed tab resumes it rather than
+// dropping the admin into the app with steps 2-6 lost (R-281).
+const SETUP_PROGRESS_KEY = "promptly.setup-step";
+
+function savedStep(): Step | null {
+  try {
+    const n = Number(localStorage.getItem(SETUP_PROGRESS_KEY));
+    return n >= 2 && n <= TOTAL_STEPS ? (n as Step) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True while an admin is part-way through the setup wizard. */
+export function setupInProgress(): boolean {
+  return savedStep() !== null;
+}
+
+export function SetupPage({ resume = false }: { resume?: boolean } = {}) {
+  const policy = usePasswordPolicy();
+  const [step, setStepState] = useState<Step>(() => (resume ? savedStep() ?? 2 : 1));
+  const setStep = (next: Step) => {
+    setStepState(next);
+    try {
+      localStorage.setItem(SETUP_PROGRESS_KEY, String(next));
+    } catch {
+      /* resume just won't work */
+    }
+  };
+  // The code the installer printed (R-263), when this install has one.
+  const [setupCode, setSetupCode] = useState("");
+  const [codeRequired, setCodeRequired] = useState(false);
+  useEffect(() => {
+    if (resume) return;
+    authApi
+      .setupStatus()
+      .then((s) => setCodeRequired(!!s.setup_code_required))
+      .catch(() => {});
+  }, [resume]);
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -80,8 +118,8 @@ export function SetupPage() {
       );
       return;
     }
-    if (password.length < 10) {
-      setError("Password must be at least 10 characters.");
+    if (password.length < policy.min_length) {
+      setError(`Password must be at least ${policy.min_length} characters.`);
       return;
     }
     if (!/\d/.test(password)) {
@@ -99,7 +137,7 @@ export function SetupPage() {
 
     setLoading(true);
     try {
-      const res = await authApi.setup(email.trim(), username.trim(), password);
+      const res = await authApi.setup(email.trim(), username.trim(), password, setupCode.trim());
       setUser(res.user);
       setAccessToken(res.access_token);
       // NOTE: deliberately NOT flipping auth status to "authenticated" here.
@@ -123,6 +161,11 @@ export function SetupPage() {
    *  routes. Must happen before the navigate, or the "needs_setup"
    *  catch-all bounces /chat straight back to /setup. */
   const finish = () => {
+    try {
+      localStorage.removeItem(SETUP_PROGRESS_KEY);
+    } catch {
+      /* ignore */
+    }
     setStatus("authenticated");
     navigate("/chat", { replace: true });
   };
@@ -169,6 +212,9 @@ export function SetupPage() {
             onSubmit={onSubmitAccount}
             loading={loading}
             error={error}
+            codeRequired={codeRequired}
+            setupCode={setupCode}
+            onSetupCode={setSetupCode}
           />
         )}
 
@@ -202,7 +248,13 @@ function AccountStep({
   onSubmit,
   loading,
   error,
+  codeRequired,
+  setupCode,
+  onSetupCode,
 }: {
+  codeRequired: boolean;
+  setupCode: string;
+  onSetupCode: (v: string) => void;
   email: string;
   onEmail: (v: string) => void;
   username: string;
@@ -219,7 +271,7 @@ function AccountStep({
     <>
       <div className="mb-4 flex items-start gap-2.5 rounded-card border border-[var(--accent)]/30 bg-[var(--accent)]/5 px-3 py-2.5 text-xs text-[var(--text)]">
         <ShieldCheck
-          className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]"
+          className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-text)]"
           aria-hidden
         />
         <div className="leading-relaxed">
@@ -230,13 +282,30 @@ function AccountStep({
       </div>
 
       <form onSubmit={onSubmit} className="space-y-3">
+        {codeRequired && (
+          <>
+            <LabeledInput
+              label="Setup code"
+              value={setupCode}
+              onChange={onSetupCode}
+              required
+              autoFocus
+              autoComplete="off"
+            />
+            <p className="text-[11px] text-[var(--text-muted)]">
+              Printed when Promptly was installed (it's also in the .env file as
+              SETUP_TOKEN). It stops anyone else on the network claiming this
+              server first.
+            </p>
+          </>
+        )}
         <LabeledInput
           label="Email"
           type="email"
           value={email}
           onChange={onEmail}
           required
-          autoFocus
+          autoFocus={!codeRequired}
         />
         <LabeledInput
           label="Username"
@@ -454,12 +523,31 @@ function PublicUrlStep({ onContinue }: { onContinue: () => void }) {
 // --------------------------------------------------------------------
 
 function EmbeddingStep({ onDone }: { onDone: () => void }) {
-  const [choice, setChoice] = useState<"local" | "skip" | null>(null);
+  const [choice, setChoice] = useState<"local" | "openai" | "skip" | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  // What this install can actually do. "Local — Recommended" used to be
+  // offered on every install, including the default one with no Ollama,
+  // and "succeeded" into an embedder that could never answer (R-253).
+  const [local, setLocal] = useState<{
+    ollama_reachable: boolean;
+    model: string;
+    model_installed: boolean;
+  } | null>(null);
+  const [openai, setOpenai] = useState<{ id: string; name: string } | null>(null);
+  useEffect(() => {
+    customModelsApi.localEmbeddingStatus().then(setLocal).catch(() => setLocal(null));
+    modelsApi
+      .list()
+      .then((ps) => {
+        const p = ps.find((x) => x.enabled && x.type === "openai");
+        if (p) setOpenai({ id: p.id, name: p.name });
+      })
+      .catch(() => {});
+  }, []);
 
-  const choose = async (pick: "local" | "skip") => {
+  const choose = async (pick: "local" | "openai" | "skip") => {
     setError(null);
     setChoice(pick);
     if (pick === "skip") {
@@ -468,7 +556,17 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
     }
     setLoading(true);
     try {
-      await customModelsApi.bootstrapLocalEmbedding();
+      if (pick === "openai" && openai) {
+        await customModelsApi.setEmbeddingConfig({
+          embedding_provider_id: openai.id,
+          embedding_model_id: "text-embedding-3-small",
+          embedding_dim: 1536,
+        });
+        const test = await customModelsApi.testEmbeddingConfig();
+        if (!test.ok) throw new Error(test.error || "OpenAI didn't answer a test request.");
+      } else {
+        await customModelsApi.bootstrapLocalEmbedding();
+      }
       setDone(true);
     } catch (err) {
       setError(extractError(err, "Could not configure local embeddings"));
@@ -513,13 +611,38 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
       <ProviderCard
         icon={<HardDrive className="h-5 w-5" />}
         title="Local embedding model"
-        subtitle="Bundled Ollama — runs entirely on this server. Recommended."
-        bullet="Downloads nomic-embed-text (270 MB) automatically"
+        subtitle={
+          local === null
+            ? "Checking whether this server can run one…"
+            : local.ollama_reachable
+              ? "Runs on this server — nothing leaves it. Recommended."
+              : "Not available: no Ollama is running for this install."
+        }
+        bullet={
+          local?.ollama_reachable
+            ? local.model_installed
+              ? `${local.model} is ready`
+              : `Downloads ${local.model} (about 270 MB) — this can take a few minutes`
+            : "Install Ollama (ollama.com) and re-run the installer to use this"
+        }
         selected={choice === "local"}
         loading={loading && choice === "local"}
-        disabled={done || loading}
+        disabled={done || loading || !local?.ollama_reachable}
         onClick={() => choose("local")}
       />
+
+      {openai && (
+        <ProviderCard
+          icon={<Cloud className="h-5 w-5" />}
+          title="OpenAI embeddings"
+          subtitle={`Use your ${openai.name} key with text-embedding-3-small.`}
+          bullet="Set up now in one click; costs a few cents per thousand pages"
+          selected={choice === "openai"}
+          loading={loading && choice === "openai"}
+          disabled={done || loading}
+          onClick={() => choose("openai")}
+        />
+      )}
 
       {/* This tile configures nothing — it defers to the admin panel. The old
           "API provider" label implied it set something up here. */}
@@ -553,8 +676,8 @@ function EmbeddingStep({ onDone }: { onDone: () => void }) {
               : "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
           ].join(" ")}
         >
-          {choice === "local"
-            ? "Local embedding model configured — file and workspace search are on."
+          {choice === "local" || choice === "openai"
+            ? "Embedding model set up and answering — file and workspace search are on."
             : "No embedding model set yet. File and workspace search stay off until you add one in Admin → Models."}
         </div>
       )}
@@ -633,6 +756,31 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
   const [skipped, setSkipped] = useState(false);
   const [modelCount, setModelCount] = useState<number | null>(null);
   const [checking, setChecking] = useState(true);
+  // Chat models of the connected provider, for picking everyone's default
+  // (R-262). Without one, the first chat ran on whatever sorted first.
+  const [chatModels, setChatModels] = useState<{ providerId: string; ids: string[] } | null>(null);
+  const [defaultModel, setDefaultModel] = useState("");
+  const [ollamaReachable, setOllamaReachable] = useState<boolean | null>(null);
+  useEffect(() => {
+    customModelsApi
+      .localEmbeddingStatus()
+      .then((s) => setOllamaReachable(s.ollama_reachable))
+      .catch(() => setOllamaReachable(null));
+  }, []);
+
+  const finishStep = async () => {
+    if (chatModels && defaultModel) {
+      try {
+        await adminApi.updateAppSettings({
+          default_chat_provider_id: chatModels.providerId,
+          default_chat_model_id: defaultModel,
+        });
+      } catch {
+        /* Not fatal — it can be set in Admin → Models. */
+      }
+    }
+    onDone();
+  };
 
   const choice = SETUP_PROVIDERS.find((p) => p.type === picked) ?? null;
 
@@ -679,7 +827,16 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
       let count = 0;
       try {
         const withModels = await modelsApi.fetchModels(provider.id);
-        count = withModels.models?.length ?? 0;
+        // Chat models only: an Ollama with just an embedding model has
+        // nothing to chat with.
+        const chat = (withModels.models ?? [])
+          .filter((m) => (m as { kind?: string }).kind !== "embedding" && !/embed/i.test(m.id))
+          .map((m) => m.id);
+        count = chat.length;
+        if (chat.length) {
+          setChatModels({ providerId: provider.id, ids: chat });
+          setDefaultModel(chat[0]);
+        }
       } catch {
         // The provider saved fine but the model list couldn't be fetched
         // (bad key, provider down, Ollama not running). Say so rather than
@@ -722,10 +879,20 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
             key={p.type}
             icon={p.type === "ollama" ? <HardDrive className="h-5 w-5" /> : <Cloud className="h-5 w-5" />}
             title={p.title}
-            subtitle={p.subtitle}
-            bullet={p.bullet}
+            subtitle={
+              p.type === "ollama" && ollamaReachable === false
+                ? "Not detected on this install."
+                : p.subtitle
+            }
+            bullet={
+              p.type === "ollama"
+                ? ollamaReachable === false
+                  ? "Install Ollama (ollama.com) and re-run the installer to use local models"
+                  : "Uses the Ollama this server is set up with"
+                : p.bullet
+            }
             selected={picked === p.type}
-            disabled={loading}
+            disabled={loading || (p.type === "ollama" && ollamaReachable === false)}
             onClick={() => {
               setPicked(p.type);
               setError(null);
@@ -772,9 +939,30 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
       {done && !error && (
         <div className="rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-xs text-[var(--text-muted)]">
           {modelCount
-            ? `Connected — ${modelCount} model${modelCount === 1 ? "" : "s"} available.`
-            : "Provider connected."}
+            ? `Connected — ${modelCount} chat model${modelCount === 1 ? "" : "s"} available.`
+            : picked === "ollama"
+              ? "Ollama is reachable but has no chat models yet — pull one in Admin → Local models."
+              : "Provider connected."}
         </div>
+      )}
+
+      {done && chatModels && (
+        <label className="block text-xs">
+          <span className="mb-1 block font-medium text-[var(--text-muted)]">
+            Default model for new chats
+          </span>
+          <select
+            value={defaultModel}
+            onChange={(e) => setDefaultModel(e.target.value)}
+            className="w-full rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
+          >
+            {chatModels.ids.map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+        </label>
       )}
 
       {skipped && (
@@ -804,7 +992,7 @@ function ProviderStep({ onDone }: { onDone: () => void }) {
           type="button"
           variant="primary"
           className="w-full"
-          onClick={onDone}
+          onClick={() => void finishStep()}
         >
           Continue
         </Button>
@@ -977,7 +1165,8 @@ function EmailStep({ onDone }: { onDone: () => void }) {
       await adminApi.sendTestEmail();
       setTestResult({
         ok: true,
-        msg: `Test email sent to ${fromAddress.trim()}. Check your inbox.`,
+        // It goes to the signed-in admin, not the From address.
+        msg: `Test email sent to ${useAuthStore.getState().user?.email ?? "your address"}. Check your inbox.`,
       });
     } catch (err) {
       setTestResult({
@@ -992,7 +1181,7 @@ function EmailStep({ onDone }: { onDone: () => void }) {
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-2.5 rounded-card border border-[var(--border)] bg-[var(--bg)] px-3 py-2.5 text-xs text-[var(--text-muted)]">
-        <Mail className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" aria-hidden />
+        <Mail className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent-text)]" aria-hidden />
         <div className="leading-relaxed">
           Connect an email account so Promptly can send things like sign-in
           codes, <span className="text-[var(--text)]">notifications</span>,{" "}
@@ -1026,7 +1215,7 @@ function EmailStep({ onDone }: { onDone: () => void }) {
             href="https://myaccount.google.com/apppasswords"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[var(--accent)] underline"
+            className="text-[var(--accent-text)] underline"
           >
             App Password
           </a>{" "}
@@ -1212,7 +1401,7 @@ function MfaStep({ email, onFinish }: { email: string; onFinish: () => void }) {
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-3 rounded-card border border-[var(--border)] bg-[var(--bg)] p-4">
-        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent)]" />
+        <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-[var(--accent-text)]" />
         <div>
           <p className="text-sm font-medium">Two-step verification</p>
           <p className="mt-1 text-xs text-[var(--text-muted)]">

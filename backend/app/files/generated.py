@@ -22,8 +22,8 @@ row" call.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
-from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,7 +32,6 @@ from app.files.models import UserFile
 from app.files.quota import get_quota
 from app.files.storage import (
     MAX_FILE_BYTES,
-    absolute_path,
     delete_blob,
     ensure_bucket,
     storage_path_for,
@@ -129,10 +128,15 @@ async def persist_generated_file(
     rel_path = storage_path_for(user.id, new_id, ext)
     ensure_bucket(user.id)
 
-    abs_path: Path = absolute_path(rel_path)
-    abs_path.parent.mkdir(parents=True, exist_ok=True)
+    from app.files import blobstore
+    from app.files.disk_guard import DiskFull, ensure_room
+
     try:
-        abs_path.write_bytes(content)
+        ensure_room(len(content))  # WP-7.2
+    except DiskFull as e:
+        raise GeneratedFileError(str(e)) from e
+    try:
+        staged = await blobstore.put_bytes(rel_path, content)
     except OSError as e:
         raise GeneratedFileError(f"Failed to write generated file: {e}") from e
 
@@ -148,6 +152,7 @@ async def persist_generated_file(
         source_kind=source_kind,
         source_file_id=source_file_id,
     )
+    blobstore.record(row, staged)
     db.add(row)
     try:
         await db.commit()
@@ -176,25 +181,19 @@ async def overwrite_generated_file(
     content: bytes,
     new_mime_type: str | None = None,
 ) -> UserFile:
-    """Replace the bytes of an existing ``UserFile`` row in place.
+    """Give an existing ``UserFile`` row new bytes, keeping the old ones as
+    a version (WP-8.1).
 
     Used by Phase A3's source-editor flow: the user saves new Markdown
-    via the side panel, we overwrite the source row, then re-render
-    the linked PDF and overwrite *its* row too — both via this helper.
-    Same id, same on-disk path; only ``size_bytes`` (and optionally
-    ``mime_type``) change. Keeping the id stable means every chip in
-    every chat history that already references this file picks up the
-    new content automatically the next time the user clicks download.
+    via the side panel, we update the source row, then re-render the
+    linked PDF and update *its* row too — both via this helper. Same id,
+    so every chip in every chat history that already references this file
+    picks up the new content the next time it's opened. The bytes go to a
+    new path and the old path becomes a version — they used to be
+    overwritten in place, so an edit could never be undone.
 
-    Quota delta: only the *change* in size counts against the cap (a
-    smaller new file actually frees space). We still refuse if the
-    delta would push the user over their cap. ``user`` must be the
-    owner of ``file``; the caller (the router) has already enforced
-    that via ``_load_writable_file``.
-
-    On any disk-write failure we leave the original bytes intact (we
-    write to a temp sibling first, then atomic-rename) so a half-saved
-    edit can never corrupt the chip download.
+    ``user`` must be the owner of ``file``; the caller (the router) has
+    already enforced that via ``_load_writable_file``.
     """
     if file.user_id != user.id:  # pragma: no cover — defensive
         raise GeneratedFileError("File does not belong to this user")
@@ -210,53 +209,33 @@ async def overwrite_generated_file(
         )
 
     delta = len(content) - file.size_bytes
-    if delta > 0:
-        # Only check quota when the file is *growing*. A re-render that
-        # produced fewer bytes can always succeed regardless of cap.
-        # ``quota.used_bytes`` already includes ``file.size_bytes``, so
-        # the comparison is against (used + delta), not (used + new).
-        quota = await get_quota(db, user)
-        if quota.cap_bytes is not None:
-            new_used = quota.used_bytes + delta
-            if new_used > quota.cap_bytes:
-                raise GeneratedFileError(
-                    "Save would exceed your storage cap. Free some "
-                    "space or ask an admin to raise it."
-                )
+    from app.files import blobstore
+    from app.files.blob_versions import VersionError, check_room, refresh_after_change, replace_bytes
 
-    # Atomic rename: write to ``<path>.tmp.<id>``, fsync, replace.
-    abs_path: Path = absolute_path(file.storage_path)
-    abs_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = abs_path.with_suffix(abs_path.suffix + f".tmp.{uuid.uuid4().hex}")
     try:
-        tmp_path.write_bytes(content)
-        # ``Path.replace`` is atomic on POSIX *and* Windows when both
-        # paths live on the same filesystem (they always do — same
-        # bucket dir). The original bytes survive any crash before
-        # this call returns.
-        tmp_path.replace(abs_path)
-    except OSError as e:
-        # Clean up the temp file if we failed mid-write.
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise GeneratedFileError(f"Failed to overwrite file: {e}") from e
+        await check_room(db, file, len(content))
+    except VersionError as e:
+        raise GeneratedFileError(str(e)) from e
 
-    file.size_bytes = len(content)
-    if new_mime_type is not None:
-        file.mime_type = new_mime_type
+    # Staged write, fsync, then into a *new* path (WP-7.1 / WP-8.1): the old
+    # bytes stay, as a version.
+    ext = os.path.splitext(file.storage_path or "")[1] or os.path.splitext(file.filename or "")[1]
+    new_path = storage_path_for(file.user_id, uuid.uuid4(), ext)
+    try:
+        staged = await blobstore.put_bytes(new_path, content)
+    except OSError as e:
+        raise GeneratedFileError(f"Failed to save the file: {e}") from e
+    await replace_bytes(
+        db, file, new_path=new_path, size=len(content), source="generated", author_id=user.id,
+        staged=staged, mime=new_mime_type,
+    )
     try:
         await db.commit()
     except Exception:
-        # The on-disk bytes have already been replaced. We can't roll
-        # them back without keeping a copy of the originals (which
-        # would defeat the atomic-rename simplicity), so we accept the
-        # minor inconsistency: the next read will see the new bytes
-        # but the row will reflect the old size until the next save.
-        # In practice this branch only fires if the database is down,
-        # in which case the user is about to see a 5xx anyway.
+        delete_blob(new_path)
         raise
+    await refresh_after_change(file)
+    await db.commit()
     await db.refresh(file)
     logger.info(
         "Overwrote generated file id=%s user=%s bytes=%d (delta=%+d)",

@@ -40,7 +40,8 @@ _NODE_CATALOG = """\
 TRIGGERS (exactly one, no incoming edges):
 - trigger.schedule  data: {frequency:"hourly|daily|weekly|monthly", hour:0-23, minute:0-59, weekday:0-6|null, day_of_month:1-28|null, timezone:"<IANA>"}
 - trigger.manual    data: {}                         (run only on demand)
-- trigger.webhook   data: {}                         (an inbound URL starts it; body → {{trigger.payload}} / {{trigger.json.<field>}})
+- trigger.webhook   data: {}                         (an inbound URL starts it; body → {{trigger.payload}} / {{trigger.json.<field>}}, headers → {{trigger.headers.<name>}})
+- trigger.event     data: {event:"file_added|card_moved|item_created", folder_id:null, column:null, board_item_id:null, item_kind:null}   (details → {{trigger.json.*}}, e.g. {{trigger.json.file_id}})
 
 PROCESSING (each reads upstream text, emits text):
 - ai.prompt      data: {prompt, provider_id, model_id, use_web_search:false, connector_ids:[]}
@@ -50,6 +51,8 @@ PROCESSING (each reads upstream text, emits text):
 - fetch.page     data: {url:"", max_chars:8000}                            (blank url = first URL in upstream)
 - http.request   data: {method:"GET|POST|PUT|PATCH|DELETE", url, headers:[{name,value}], body:"", timeout_s:30, fail_on_error_status:true, allow_private_network:false}
 - research.deep  data: {query:"", max_pages:5, provider_id, model_id}      (search+read+cited report)
+- mcp.action     data: {connector_id, tool_name, arguments:"{\"key\": \"{{upstream_output}}\"}"}   (call a connector tool directly; arguments is a JSON template)
+- workspace.read data: {mode:"search|item|file", query:"", title:"", item_id:null, file_id:"", top_k:6}   (workspace only: search the workspace, read one note/board/sheet/roster by title, or a file's text by id — e.g. file_id:"{{trigger.json.file_id}}")
 - loop.foreach   data: {split_mode:"lines|json", prompt:"...{{item}}...", provider_id, model_id, max_items:10, join_with:"blank|numbered"}
 - memory.store   data: {name:"Memory", remember:true, max_runs:5}          (remembers across runs; compare to last time)
 - flow.delay     data: {seconds:5}
@@ -68,7 +71,7 @@ OUTPUTS (terminal, no outgoing edges; at least one required):
 
 TEMPLATES you can use in any text/url/prompt/query field:
   {{upstream_output}}  {{node_<id>.output}}  {{json.<path>}}  {{node_<id>.json.<path>}}
-  {{trigger.payload}}  {{trigger.json.<field>}}  {{date}} {{time}} {{datetime}}
+  {{trigger.payload}}  {{trigger.json.<field>}}  {{date}} {{time}} {{datetime}} (the schedule's timezone)
   {{secret.NAME}}      (only inside http.request — the credentials vault)
 """
 
@@ -136,6 +139,32 @@ async def _resolve_copilot_model(
     return provider, drafter.model_id, catalog
 
 
+async def _metered(db: AsyncSession, user: User, **kw) -> str:
+    """One copilot model call, charged to the user like a chat turn: refused
+    when their budget is used up, and recorded in usage (R-011)."""
+    from app.billing.usage import check_budget, record_usage
+    from app.models_config.provider import model_router
+
+    if (await check_budget(db, user)).verdict == "blocked":
+        raise CopilotError("Your usage budget is used up.")
+    usage: dict = {}
+    chunks: list[str] = []
+    # Recorded below as a full turn, so not billed again as a side call.
+    async for tok in model_router.stream_chat(usage_out=usage, bill=False, **kw):
+        chunks.append(tok)
+    try:
+        await record_usage(
+            db,
+            user_id=user.id,
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+        )
+        await db.commit()
+    except Exception:  # noqa: BLE001 — metering must not break the copilot
+        logger.exception("recording copilot usage failed")
+    return "".join(chunks)
+
+
 async def draft_graph(
     db: AsyncSession,
     *,
@@ -147,7 +176,7 @@ async def draft_graph(
 
     Never persists — the caller hands it to the editor for review.
     """
-    from app.models_config.provider import ChatMessage, model_router
+    from app.models_config.provider import ChatMessage
 
     description = (description or "").strip()
     if len(description) < 3:
@@ -165,17 +194,16 @@ async def draft_graph(
     )
 
     async def _call(extra: str = "") -> str:
-        chunks: list[str] = []
-        async for tok in model_router.stream_chat(
+        return await _metered(
+            db,
+            user,
             provider=provider,
             model_id=model_id,
             messages=[ChatMessage(role="user", content=context + extra)],
             system=_SYSTEM_PROMPT,
             temperature=0.2,
             max_tokens=3000,
-        ):
-            chunks.append(tok)
-        return "".join(chunks)
+        )
 
     def _build(raw: str) -> FlowGraph:
         obj = _extract_json(raw)
@@ -225,7 +253,7 @@ async def explain_graph(
 ) -> str:
     """Plain-language walkthrough of what a flow does — for the 'Explain'
     action. Best-effort; returns a short markdown summary."""
-    from app.models_config.provider import ChatMessage, model_router
+    from app.models_config.provider import ChatMessage
 
     provider, model_id, _ = await _resolve_copilot_model(db, user)
     graph_json = json.dumps(graph.model_dump(mode="json").get("nodes", []))
@@ -235,17 +263,17 @@ async def explain_graph(
         "describing what the automation does end to end: what starts it, what "
         "each step does, and where the result goes."
     )
-    chunks: list[str] = []
-    async for tok in model_router.stream_chat(
+    text = await _metered(
+        db,
+        user,
         provider=provider,
         model_id=model_id,
         messages=[ChatMessage(role="user", content=graph_json)],
         system=sys,
         temperature=0.3,
         max_tokens=400,
-    ):
-        chunks.append(tok)
-    return "".join(chunks).strip() or "This flow has no steps yet."
+    )
+    return text.strip() or "This flow has no steps yet."
 
 
 async def diagnose_run(
@@ -258,21 +286,35 @@ async def diagnose_run(
 ) -> str:
     """Given a failed run's per-node records, explain what went wrong and how
     to fix it — for the 'Diagnose' action on a failed run."""
-    from app.models_config.provider import ChatMessage, model_router
+    from app.models_config.provider import ChatMessage
 
     provider, model_id, _ = await _resolve_copilot_model(db, user)
     # Trim node records to the fields that matter (drop big outputs).
     trimmed = [
         {
+            "node_id": r.get("node_id"),
             "type": r.get("type"),
             "status": r.get("status"),
             "label": r.get("label"),
             "output": (r.get("output") or "")[:400],
+            **({"unresolved_variables": r["unresolved"]} if r.get("unresolved") else {}),
         }
         for r in (node_runs or [])
     ]
+    # The flow itself (each step's settings, trimmed) — the graph was a
+    # parameter but never reached the prompt, so Diagnose guessed (R-146).
+    steps = [
+        {
+            "id": n.id,
+            "type": str(getattr(n.type, "value", n.type)),
+            "settings": json.dumps(n.data or {}, ensure_ascii=False, default=str)[:600],
+        }
+        for n in graph.nodes
+    ]
+    edges = [f"{e.source} -> {e.target}" for e in graph.edges][:60]
     payload = json.dumps(
-        {"error": error, "nodes": trimmed}, ensure_ascii=False
+        {"error": error, "flow": {"steps": steps, "edges": edges}, "run": trimmed},
+        ensure_ascii=False,
     )
     sys = (
         "You are debugging a failed automation run. Given the per-node results "
@@ -280,17 +322,17 @@ async def diagnose_run(
         "wrong and the concrete fix (which node, what to change). Plain "
         "language, no JSON."
     )
-    chunks: list[str] = []
-    async for tok in model_router.stream_chat(
+    text = await _metered(
+        db,
+        user,
         provider=provider,
         model_id=model_id,
         messages=[ChatMessage(role="user", content=payload)],
         system=sys,
         temperature=0.3,
         max_tokens=500,
-    ):
-        chunks.append(tok)
-    return "".join(chunks).strip() or "No diagnosis available."
+    )
+    return text.strip() or "No diagnosis available."
 
 
 __all__ = ["draft_graph", "explain_graph", "diagnose_run", "CopilotError"]

@@ -65,6 +65,8 @@ export interface SpellCheckConfig {
 
 interface SpellCheckPluginState extends SpellCheckConfig {
   deco: DecorationSet;
+  /** word → correct?, for the current dictionary + ignore list (R-234). */
+  cache: Map<string, boolean>;
 }
 
 export interface SpellCheckOptions {
@@ -146,35 +148,110 @@ function misspelledWordAt(
   return result;
 }
 
-function buildDecorations(
-  doc: PMNode,
+/** Squiggles for the text inside ``node`` (the whole doc, or one
+ *  textblock), whose content starts at ``offset``. Word verdicts go
+ *  through ``cache`` — most words repeat, and ``spell.correct`` is the
+ *  expensive part (R-234). */
+function checkWithin(
+  node: PMNode,
+  offset: number,
   spell: NspellLike,
   ignored: Set<string>,
-  caret: number | null
-): DecorationSet {
-  if (doc.content.size > MAX_CHARS) return DecorationSet.empty;
-  const decorations: Decoration[] = [];
-  doc.descendants((node, pos, parent) => {
-    if (!node.isText || !node.text) return;
-    if (shouldSkip(node, parent)) return;
-    const text = node.text;
+  cache: Map<string, boolean>,
+  caret: number | null,
+  out: Decoration[]
+): void {
+  node.descendants((child, pos, parent) => {
+    if (!child.isText || !child.text) return;
+    if (shouldSkip(child, parent)) return;
+    const text = child.text;
+    const base = offset + pos;
     for (const m of text.matchAll(WORD_RE)) {
       if (m.index === undefined) continue;
       const raw = m[0];
       const clean = trim(raw);
       if (clean.length < 2) continue;
-      if (ignored.has(clean.toLowerCase())) continue;
-      if (spell.correct(clean)) continue;
-      const from = pos + m.index;
+      let ok = cache.get(clean);
+      if (ok === undefined) {
+        ok = ignored.has(clean.toLowerCase()) || spell.correct(clean);
+        if (cache.size > 50_000) cache.clear();
+        cache.set(clean, ok);
+      }
+      if (ok) continue;
+      const from = base + m.index;
       const to = from + raw.length;
       // Don't underline the word the caret is currently in — it reads as
       // flagging a word "before it's finished". Once the caret leaves, it
       // gets checked like everything else.
       if (caret !== null && caret >= from && caret <= to) continue;
-      decorations.push(Decoration.inline(from, to, { class: "spellcheck-error" }));
+      out.push(Decoration.inline(from, to, { class: "spellcheck-error" }));
     }
   });
+}
+
+function buildDecorations(
+  doc: PMNode,
+  spell: NspellLike,
+  ignored: Set<string>,
+  caret: number | null,
+  cache: Map<string, boolean> = new Map()
+): DecorationSet {
+  if (doc.content.size > MAX_CHARS) return DecorationSet.empty;
+  const decorations: Decoration[] = [];
+  checkWithin(doc, 0, spell, ignored, cache, caret, decorations);
   return DecorationSet.create(doc, decorations);
+}
+
+/** Re-check only the textblocks overlapping ``ranges`` (R-234): drop their
+ *  old squiggles, add fresh ones. Everything else keeps its (mapped) set. */
+function recheckRanges(
+  set: DecorationSet,
+  doc: PMNode,
+  ranges: [number, number][],
+  spell: NspellLike,
+  ignored: Set<string>,
+  cache: Map<string, boolean>,
+  caret: number | null
+): DecorationSet {
+  const size = doc.content.size;
+  const blocks = new Map<number, PMNode>();
+  for (const [a, b] of ranges) {
+    // Positions can sit at the very end of the document; never ask for a
+    // range past it (that threw on an edit at the end).
+    const from = Math.max(0, Math.min(a, b, size));
+    const to = Math.min(size, Math.max(a, b, from + 1));
+    if (to <= from) continue;
+    doc.nodesBetween(from, to, (node, pos) => {
+      if (node.isTextblock) {
+        blocks.set(pos, node);
+        return false;
+      }
+      return true;
+    });
+  }
+  let next = set;
+  for (const [pos, node] of blocks) {
+    const start = pos + 1;
+    const end = pos + node.nodeSize - 1;
+    next = next.remove(next.find(start, end));
+    const fresh: Decoration[] = [];
+    checkWithin(node, start, spell, ignored, cache, caret, fresh);
+    if (fresh.length) next = next.add(doc, fresh);
+  }
+  return next;
+}
+
+/** Where a transaction changed the document, in the new document's
+ *  positions. */
+function changedRanges(tr: import("@tiptap/pm/state").Transaction): [number, number][] {
+  const out: [number, number][] = [];
+  tr.mapping.maps.forEach((map, i) => {
+    const rest = tr.mapping.slice(i + 1);
+    map.forEach((_os, _oe, ns, ne) => {
+      out.push([rest.map(ns, -1), rest.map(ne, 1)]);
+    });
+  });
+  return out;
 }
 
 // ---- Autocorrect helpers -------------------------------------------------
@@ -299,31 +376,41 @@ export const SpellCheckExtension = Extension.create<SpellCheckOptions>({
               spell: null,
               ignored: new Set<string>(),
               deco: DecorationSet.empty,
+              cache: new Map<string, boolean>(),
             };
           },
-          apply(tr, value, _oldState, newState) {
+          apply(tr, value, oldState, newState) {
             const meta = tr.getMeta(spellCheckPluginKey) as
               | Partial<SpellCheckConfig>
               | undefined;
+            // A new dictionary or ignore list invalidates every verdict.
             const cfg: SpellCheckPluginState = meta
-              ? { ...value, ...meta }
+              ? { ...value, ...meta, cache: new Map<string, boolean>() }
               : value;
 
-            // Rebuild decorations on config change, doc edits, OR caret moves
-            // (the caret determines which word is skipped as "being typed").
-            const needRebuild = Boolean(meta) || tr.docChanged || tr.selectionSet;
-            if (!needRebuild) {
+            if (!tr.docChanged && !tr.selectionSet && !meta) {
               return { ...cfg, deco: value.deco.map(tr.mapping, tr.doc) };
             }
             if (!cfg.enabled || !cfg.spell) {
               return { ...cfg, deco: DecorationSet.empty };
             }
-            const caret = newState.selection.empty
-              ? newState.selection.head
-              : null;
+            const caret = newState.selection.empty ? newState.selection.head : null;
+            if (meta || newState.doc.content.size > MAX_CHARS || value.deco === DecorationSet.empty && tr.docChanged) {
+              // Config changed (or first content): check the whole document.
+              return { ...cfg, deco: buildDecorations(newState.doc, cfg.spell, cfg.ignored, caret, cfg.cache) };
+            }
+            // Incremental (R-234): keep the mapped squiggles; re-check only
+            // the blocks the edit touched, plus where the caret left and
+            // landed (the word being typed is skipped, so those two can
+            // change on a caret move alone).
+            const ranges = tr.docChanged ? changedRanges(tr) : [];
+            const oldCaret = oldState.selection.head;
+            const mappedOld = tr.mapping.map(oldCaret);
+            ranges.push([mappedOld, mappedOld], [newState.selection.head, newState.selection.head]);
+            const mapped = value.deco.map(tr.mapping, tr.doc);
             return {
               ...cfg,
-              deco: buildDecorations(newState.doc, cfg.spell, cfg.ignored, caret),
+              deco: recheckRanges(mapped, newState.doc, ranges, cfg.spell, cfg.ignored, cfg.cache, caret),
             };
           },
         },

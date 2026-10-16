@@ -77,6 +77,46 @@ async def _get_runnable(
     return row
 
 
+async def _validate_tool_target(db: AsyncSession, row: Command, user: User) -> None:
+    """400 if a tool command points at something its author can't run.
+
+    Feedback at save time; the real guard is the same check at run time
+    (``assert_runnable``), against whoever is running it.
+    """
+    if row.action_type != "mcp_tool" or not row.action_ref:
+        return
+    from app.mcp.service import McpError, authorize_connector_tool
+
+    connector_id, _, tool = row.action_ref.partition(":")
+    try:
+        await authorize_connector_tool(
+            db,
+            user_id=user.id,
+            workspace_id=None,
+            connector_id=uuid.UUID(connector_id),
+            real_tool=tool,
+            allow_destructive=bool(row.confirm_before_run),
+        )
+    except (McpError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc) or "Invalid tool."
+        ) from exc
+
+
+def _redact_foreign(item: CommandResponse, row: Command, user: User) -> CommandResponse:
+    """Hide a shared command's internals from people who don't own it.
+
+    You can say someone else's shared command and run it, but its connector
+    target and fixed arguments are the owner's business — they may name
+    devices or carry identifiers. Applied to every response that can carry
+    another user's command (list and match).
+    """
+    if row.user_id != user.id:
+        item.action_ref = None
+        item.action_args = {}
+    return item
+
+
 async def _as_responses(
     db: AsyncSession, rows: list[Command], user: User
 ) -> list[CommandResponse]:
@@ -100,6 +140,7 @@ async def _as_responses(
         item = CommandResponse.model_validate(row)
         item.owned = row.user_id == user.id
         item.owner_name = None if item.owned else names.get(row.user_id)
+        _redact_foreign(item, row, user)
         out.append(item)
     return out
 
@@ -143,6 +184,7 @@ async def create_command(
             detail=f"That's the maximum of {MAX_COMMANDS_PER_USER} commands.",
         )
     row = Command(user_id=user.id, **body.model_dump())
+    await _validate_tool_target(db, row, user)
     db.add(row)
     await db.commit()
     await db.refresh(row)
@@ -159,6 +201,7 @@ async def update_command(
     row = await _get_owned(command_id, user, db)
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(row, field, value)
+    await _validate_tool_target(db, row, user)
     await db.commit()
     await db.refresh(row)
     return row
@@ -254,12 +297,18 @@ async def list_connector_devices(
     identical from the UI and need opposite fixes.
     """
     from app.commands.devices import (
+        CONFIRM_DOMAINS,
         LIVE_CONTEXT_TOOL,
         actions_for,
         parse_devices,
         supports_devices,
     )
-    from app.mcp.service import McpError, call_connector_tool, connectors_for_turn
+    from app.mcp.service import (
+        McpError,
+        authorize_connector_tool,
+        call_connector_tool,
+        connectors_for_turn,
+    )
 
     # Resolved the same way the tool list is, so this can't reach a
     # connector the caller couldn't already use.
@@ -283,6 +332,15 @@ async def list_connector_devices(
         }
 
     try:
+        # Same policy as every other connector call — honours the admin's
+        # allow-list too, not just reachability.
+        await authorize_connector_tool(
+            db,
+            user_id=user.id,
+            workspace_id=None,
+            connector_id=connector.id,
+            real_tool=LIVE_CONTEXT_TOOL,
+        )
         raw = await call_connector_tool(
             db,
             connector_id=connector.id,
@@ -298,7 +356,12 @@ async def list_connector_devices(
     return {
         "supported": True,
         "devices": [
-            {**d, "actions": actions_for(d["domain"], catalog)} for d in devices
+            {
+                **d,
+                "actions": actions_for(d["domain"], catalog),
+                "confirm_by_default": d["domain"] in CONFIRM_DOMAINS,
+            }
+            for d in devices
         ],
         # Only when we failed — otherwise it's a large blob nobody reads.
         "raw": "" if devices else raw[:4000],
@@ -324,16 +387,28 @@ async def match_command(
     """
     command, slots = await resolve(db, user.id, body.utterance)
     if command is None:
+        if body.source == "voice":
+            from app.commands.service import explain_miss, log_command_run
+
+            miss = await explain_miss(db, user.id, body.utterance)
+            if miss is not None:
+                log_command_run(
+                    db, user_id=user.id, command=None, name=miss[0], source="voice",
+                    ok=False, detail=miss[1], utterance=body.utterance,
+                )
+                await db.commit()
         close = await nearest(db, user.id, body.utterance)
         return CommandMatchResponse(
             matched=False,
             did_you_mean=(
-                CommandResponse.model_validate(close[0]) if close else None
+                _redact_foreign(CommandResponse.model_validate(close[0]), close[0], user)
+                if close
+                else None
             ),
         )
     return CommandMatchResponse(
         matched=True,
-        command=CommandResponse.model_validate(command),
+        command=_redact_foreign(CommandResponse.model_validate(command), command, user),
         slots=slots,
         needs_confirmation=needs_confirmation(command),
     )
@@ -392,6 +467,18 @@ async def run_command(
         await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 — never a silent 500 with no record
+        logger.exception("command run crashed: %s", row.id)
+        await db.rollback()
+        # The rollback expired both rows; load them again before logging.
+        await db.refresh(row)
+        await db.refresh(user)
+        detail = f"{row.name} didn't run — something went wrong on the server."
+        _log_run(db, row, user, body, ok=False, detail=detail)
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=detail
         ) from exc
 
     spoken = row.response_template

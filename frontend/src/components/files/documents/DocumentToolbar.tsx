@@ -22,7 +22,11 @@ import {
   Music,
   Pilcrow,
   Quote,
+  Plus,
   Redo2,
+  Search,
+  SeparatorHorizontal,
+  Sigma,
   Smile,
   Strikethrough,
   Table as TableIcon,
@@ -36,8 +40,23 @@ import { documentsApi } from "@/api/documents";
 
 import { EmojiPicker } from "./EmojiPicker";
 import { LinkEditorPopover } from "./LinkEditorPopover";
+import { PromptPopover } from "./PromptPopover";
+import { useEditorFormatState } from "./useEditorFormatState";
+import {
+  AlignControl,
+  BlockStyleControl,
+  FontControls,
+  MathControl,
+  Menu,
+  MenuItem,
+  ScriptControls,
+  useAnchoredMenu,
+} from "./ToolbarExtras";
+import { EDIT_MATH_EVENT } from "./extensions";
 import { SpellCheckControl, AutocorrectToggle } from "./SpellCheckControl";
+import { SuggestionModeControl } from "./SuggestionControls";
 import { INSERT_ASSET_EVENT } from "./SlashCommandExtension";
+import { apiErrorMessage } from "@/utils/apiError";
 
 /**
  * Document editor toolbar.
@@ -58,13 +77,18 @@ interface DocumentToolbarProps {
   editor: Editor | null;
   documentId: string;
   disabled?: boolean;
+  /** Open the find / replace bar (WP-4.5). */
+  onFind?: () => void;
 }
 
 export function DocumentToolbar({
   editor,
   documentId,
   disabled,
+  onFind,
 }: DocumentToolbarProps) {
+  // Re-render when the formatting at the cursor changes (R-234).
+  useEditorFormatState(editor);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const emojiButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -72,6 +96,7 @@ export function DocumentToolbar({
   const overflowTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const insertMenu = useAnchoredMenu();
   const [emojiOpen, setEmojiOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -108,6 +133,7 @@ export function DocumentToolbar({
       const kind = (e as CustomEvent<{ kind?: string }>).detail?.kind;
       if (kind === "image") imageInputRef.current?.click();
       else if (kind === "audio") audioInputRef.current?.click();
+      else if (kind === "youtube") setYoutubeAnchor(new DOMRect(window.innerWidth / 2 - 160, 140, 0, 0));
     };
     document.addEventListener(INSERT_ASSET_EVENT, handleInsertAsset);
     return () =>
@@ -127,8 +153,7 @@ export function DocumentToolbar({
           editor.chain().focus().setAudio({ src: asset.url }).run();
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : "Upload failed";
-        setUploadError(msg);
+        setUploadError(apiErrorMessage(e, "Upload failed"));
       } finally {
         setUploading(false);
       }
@@ -158,11 +183,11 @@ export function DocumentToolbar({
     void uploadAsset(file, "audio");
   };
 
-  const handleInsertYoutube = () => {
+  // In-app prompt for the YouTube link (was window.prompt — R-226).
+  const [youtubeAnchor, setYoutubeAnchor] = useState<DOMRect | null>(null);
+  const handleInsertYoutube = (anchor?: DOMRect) => {
     if (!editor) return;
-    const url = window.prompt("Paste a YouTube URL");
-    if (!url) return;
-    editor.chain().focus().setYoutubeVideo({ src: url }).run();
+    setYoutubeAnchor(anchor ?? new DOMRect(window.innerWidth / 2 - 160, 120, 0, 0));
   };
 
   // The in-app link editor (replaces window.prompt) anchors to the Link
@@ -188,7 +213,9 @@ export function DocumentToolbar({
   return (
     <div
       className={cn(
-        "sticky top-0 z-10 flex w-full flex-wrap items-center gap-1 overflow-x-auto border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1.5",
+        // One row that scrolls sideways on a phone (it wrapped to ~3 rows
+        // — R-231); wraps on wider screens.
+        "promptly-scroll sticky top-0 z-10 flex w-full flex-nowrap items-center gap-1 overflow-x-auto border-b border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 md:flex-wrap",
         // Match the header's notch padding so the toolbar doesn't
         // drift under the rounded iOS corners when scrolled.
         "pl-[max(env(safe-area-inset-left,0),0.5rem)]",
@@ -198,6 +225,15 @@ export function DocumentToolbar({
       role="toolbar"
       aria-label="Document formatting"
     >
+      {/* Font + alignment (WP-4.5) */}
+      <ToolbarGroup className="hidden md:flex">
+        <BlockStyleControl editor={editor} />
+        <FontControls editor={editor} />
+        <AlignControl editor={editor} />
+      </ToolbarGroup>
+
+      <Divider />
+
       {/* Text group */}
       <ToolbarGroup>
         <ToolButton
@@ -245,46 +281,15 @@ export function DocumentToolbar({
         >
           <LinkIcon className="h-4 w-4" />
         </ToolButton>
+        <span className="hidden items-center gap-0.5 md:flex">
+          <ScriptControls editor={editor} />
+        </span>
       </ToolbarGroup>
 
       <Divider />
 
       {/* Structure group */}
       <ToolbarGroup className="hidden md:flex">
-        <ToolButton
-          label="Heading 1"
-          active={editor?.isActive("heading", { level: 1 })}
-          onClick={() =>
-            editor?.chain().focus().toggleHeading({ level: 1 }).run()
-          }
-        >
-          <Heading1 className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton
-          label="Heading 2"
-          active={editor?.isActive("heading", { level: 2 })}
-          onClick={() =>
-            editor?.chain().focus().toggleHeading({ level: 2 }).run()
-          }
-        >
-          <Heading2 className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton
-          label="Heading 3"
-          active={editor?.isActive("heading", { level: 3 })}
-          onClick={() =>
-            editor?.chain().focus().toggleHeading({ level: 3 }).run()
-          }
-        >
-          <Heading3 className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton
-          label="Paragraph"
-          active={editor?.isActive("paragraph")}
-          onClick={() => editor?.chain().focus().setParagraph().run()}
-        >
-          <Pilcrow className="h-4 w-4" />
-        </ToolButton>
         <ToolButton
           label="Blockquote"
           active={editor?.isActive("blockquote")}
@@ -342,42 +347,33 @@ export function DocumentToolbar({
         <ToolButton label="Insert image" onClick={() => imageInputRef.current?.click()}>
           <ImageIcon className="h-4 w-4" />
         </ToolButton>
-        <ToolButton label="Insert audio" onClick={() => audioInputRef.current?.click()}>
-          <Music className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton label="Insert YouTube" onClick={handleInsertYoutube}>
-          <YoutubeIcon className="h-4 w-4" />
-        </ToolButton>
         <TableSizeButton editor={editor} />
+        {/* The rarer inserts live in one menu, as in Docs (keeps the
+            toolbar to a single row). */}
         <ToolButton
-          label="Callout"
-          active={editor?.isActive("callout")}
-          onClick={() =>
-            editor?.chain().focus().setCallout({ variant: "info" }).run()
-          }
-        >
-          <MessageSquareText className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton
-          label="Horizontal rule"
-          onClick={() => editor?.chain().focus().setHorizontalRule().run()}
-        >
-          <Minus className="h-4 w-4" />
-        </ToolButton>
-        <ToolButton
-          label="Emoji"
+          label="Insert"
           ref={emojiButtonRef}
-          onClick={() => setEmojiOpen((v) => !v)}
-          active={emojiOpen}
+          aria-haspopup="menu"
+          className="gap-0.5"
+          // cn() doesn't merge Tailwind conflicts — override w-8 inline.
+          style={{ width: "auto", paddingLeft: 6, paddingRight: 6 }}
+          onClick={insertMenu.toggle}
         >
-          <Smile className="h-4 w-4" />
+          <Plus className="h-4 w-4" />
+          <ChevronDown className="h-3 w-3" />
         </ToolButton>
+        <MathControl editor={editor} hideButton />
       </ToolbarGroup>
 
       <Divider />
 
-      {/* Undo / Redo */}
+      {/* Undo / Redo / Find */}
       <ToolbarGroup>
+        {onFind && (
+          <ToolButton label="Find and replace" onClick={onFind}>
+            <Search className="h-4 w-4" />
+          </ToolButton>
+        )}
         <ToolButton
           label="Undo"
           onClick={() => editor?.chain().focus().undo().run()}
@@ -401,6 +397,13 @@ export function DocumentToolbar({
       <ToolbarGroup>
         <SpellCheckControl />
         <AutocorrectToggle />
+      </ToolbarGroup>
+
+      <Divider />
+
+      {/* Editing / Suggesting (track changes), accept or reject all. */}
+      <ToolbarGroup>
+        <SuggestionModeControl editor={editor} disabled={disabled} />
       </ToolbarGroup>
 
       {/* Mobile overflow sheet trigger. On small screens we collapse
@@ -582,6 +585,46 @@ export function DocumentToolbar({
           anchor={emojiAnchor}
           onSelect={(glyph) => editor?.chain().focus().insertContent(glyph).run()}
           onClose={() => setEmojiOpen(false)}
+        />
+      )}
+
+      {editor && insertMenu.anchor && (
+        <Menu anchor={insertMenu.anchor} label="Insert" onClose={insertMenu.close} width={200}>
+          {(
+            [
+              ["Audio", <Music key="i" className="h-4 w-4" />, () => audioInputRef.current?.click()],
+              ["YouTube video", <YoutubeIcon key="i" className="h-4 w-4" />, () => handleInsertYoutube(insertMenu.anchor ?? undefined)],
+              ["Callout", <MessageSquareText key="i" className="h-4 w-4" />, () => editor.chain().focus().setCallout({ variant: "info" }).run()],
+              ["Divider", <Minus key="i" className="h-4 w-4" />, () => editor.chain().focus().setHorizontalRule().run()],
+              ["Page break", <SeparatorHorizontal key="i" className="h-4 w-4" />, () => editor.chain().focus().setPageBreak().run()],
+              ["Inline formula", <Sigma key="i" className="h-4 w-4" />, () => document.dispatchEvent(new CustomEvent(EDIT_MATH_EVENT, { detail: { kind: "inline" } }))],
+              ["Formula on its own line", <Sigma key="i" className="h-4 w-4" />, () => document.dispatchEvent(new CustomEvent(EDIT_MATH_EVENT, { detail: { kind: "block" } }))],
+              ["Emoji", <Smile key="i" className="h-4 w-4" />, () => setEmojiOpen(true)],
+            ] as const
+          ).map(([label, icon, run]) => (
+            <MenuItem
+              key={label}
+              onClick={() => {
+                insertMenu.close();
+                run();
+              }}
+            >
+              {icon}
+              {label}
+            </MenuItem>
+          ))}
+        </Menu>
+      )}
+
+      {editor && youtubeAnchor && (
+        <PromptPopover
+          anchor={youtubeAnchor}
+          label="YouTube link"
+          placeholder="Paste a YouTube link…"
+          onSubmit={(url) => {
+            if (url.trim()) editor.chain().focus().setYoutubeVideo({ src: url.trim() }).run();
+          }}
+          onClose={() => setYoutubeAnchor(null)}
         />
       )}
 
@@ -794,7 +837,7 @@ function ToolbarGroup({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-center gap-0.5", className)}>{children}</div>
+    <div className={cn("flex shrink-0 items-center gap-0.5", className)}>{children}</div>
   );
 }
 
@@ -802,7 +845,7 @@ function Divider({ className }: { className?: string }) {
   return (
     <span
       aria-hidden
-      className={cn("mx-1 hidden h-6 w-px bg-[var(--border)] md:inline-block", className)}
+      className={cn("mx-1 hidden h-6 w-px shrink-0 bg-[var(--border)] md:inline-block", className)}
     />
   );
 }

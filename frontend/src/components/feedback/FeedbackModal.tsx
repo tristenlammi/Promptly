@@ -83,7 +83,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
       <div className="w-full max-w-md overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)] shadow-2xl">
         <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3">
           <div className="flex items-center gap-2">
-            <MessageSquare className="h-4 w-4 text-[var(--accent)]" />
+            <MessageSquare className="h-4 w-4 text-[var(--accent-text)]" />
             <h2 className="text-sm font-semibold">Send feedback</h2>
           </div>
           <button
@@ -106,7 +106,7 @@ export function FeedbackModal({ onClose }: { onClose: () => void }) {
                   href={`mailto:${address}?subject=${encodeURIComponent(
                     "Promptly feedback"
                   )}`}
-                  className="text-[var(--accent)] underline"
+                  className="text-[var(--accent-text)] underline"
                 >
                   {address}
                 </a>{" "}

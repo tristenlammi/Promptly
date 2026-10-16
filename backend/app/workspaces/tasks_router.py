@@ -194,14 +194,37 @@ class WorkspaceTaskUpdate(BaseModel):
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
+async def _require_board_visible(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    board_item_id: uuid.UUID | None,
+    user: User,
+) -> None:
+    """404 for a card on someone else's private board — its cards and
+    comments were readable (and editable) through this API by every member
+    (R-168)."""
+    if board_item_id is None:
+        return
+    board = await db.get(WorkspaceItem, board_item_id)
+    if board is None or board.workspace_id != workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Board not found")
+    from app.workspaces.items_router import require_item_visible
+
+    require_item_visible(board, user)
+
+
 async def _load_task(
-    db: AsyncSession, workspace_id: uuid.UUID, task_id: uuid.UUID
+    db: AsyncSession, workspace_id: uuid.UUID, task_id: uuid.UUID, user: User
 ) -> WorkspaceTask:
     task = await db.get(WorkspaceTask, task_id)
     if task is None or task.workspace_id != workspace_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Task not found"
         )
+    try:
+        await _require_board_visible(db, workspace_id, task.board_item_id, user)
+    except HTTPException:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     return task
 
 
@@ -215,10 +238,11 @@ def _reindex_board(
     if board_item_id is None:
         return
     from app.workspaces.knowledge import index_board_for_workspace
+    from app.workspaces.reindex import schedule
 
-    background.add_task(
-        index_board_for_workspace, workspace_id, board_item_id
-    )
+    # Coalesced: a burst of edits (dragging cards around) re-embeds the
+    # board once, not once per request with the runs racing (R-170).
+    schedule(index_board_for_workspace, workspace_id, board_item_id)
 
 
 # ---------------------------------------------------------------------
@@ -270,8 +294,23 @@ async def list_tasks(
     """List a workspace's tasks. Scope to a single board with
     ``?board_item_id=``; omit it to count/list across all boards (the
     overview's open-task glance)."""
+    from sqlalchemy import or_
+
+    from app.workspaces.visibility import item_visible_to
+
     ws, _role = await get_accessible_workspace(workspace_id, user, db)
-    stmt = select(WorkspaceTask).where(WorkspaceTask.workspace_id == ws.id)
+    if board_item_id is not None:
+        await _require_board_visible(db, ws.id, board_item_id, user)
+    # Cards on other people's private boards stay out of the cross-board
+    # list too (the overview's "Needs attention" read it) — R-168.
+    stmt = (
+        select(WorkspaceTask)
+        .outerjoin(WorkspaceItem, WorkspaceItem.id == WorkspaceTask.board_item_id)
+        .where(
+            WorkspaceTask.workspace_id == ws.id,
+            or_(WorkspaceTask.board_item_id.is_(None), item_visible_to(user.id)),
+        )
+    )
     if board_item_id is not None:
         stmt = stmt.where(WorkspaceTask.board_item_id == board_item_id)
     rows = list(
@@ -303,6 +342,7 @@ async def create_task(
 ) -> WorkspaceTask:
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
+    await _require_board_visible(db, ws.id, payload.board_item_id, user)
 
     # New task lands at the end: max(position) + 1.
     max_pos = await db.scalar(
@@ -345,7 +385,7 @@ async def update_task(
 ) -> WorkspaceTask:
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    task = await _load_task(db, ws.id, task_id)
+    task = await _load_task(db, ws.id, task_id, user)
     sent = payload.model_fields_set
 
     # Snapshot fields that drive activity entries before we mutate them.
@@ -418,13 +458,17 @@ async def update_task(
         _log_activity(db, task.id, user.id, f"moved to {label}")
         card_moved_label = label
     if "due_at" in sent and task.due_at != old_due:
+        from app.workspaces.localtime import local_date, zone_of
+
+        # The day as the person setting it sees it, not the UTC date
+        # (a Friday-morning due date read as Thursday in AU) — R-173.
         _log_activity(
             db,
             task.id,
             user.id,
             "cleared the due date"
             if task.due_at is None
-            else f"set the due date to {task.due_at.date().isoformat()}",
+            else f"set the due date to {local_date(task.due_at, zone_of(user))}",
         )
     if "assignee_user_id" in sent and task.assignee_user_id != old_assignee:
         who = await _username(db, task.assignee_user_id)
@@ -452,7 +496,10 @@ async def update_task(
 
     await db.commit()
     await db.refresh(task)
-    _reindex_board(background, ws.id, task.board_item_id)
+    # A pure reorder within a column doesn't change what the board says,
+    # so it doesn't re-embed it (R-170).
+    if sent - {"position"}:
+        _reindex_board(background, ws.id, task.board_item_id)
     # Automations (E-batch): a column change fires event-triggered flows.
     # Post-commit + fire-and-forget so it can never fail the move itself.
     if card_moved_label is not None:
@@ -510,17 +557,42 @@ async def delete_task(
 ) -> Response:
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    task = await _load_task(db, ws.id, task_id)
+    task = await _load_task(db, ws.id, task_id, user)
     board_item_id = task.board_item_id
-    # Drop any attachment chunks so deleted cards don't leave RAG residue.
+    # Drop attachment chunks so deleted cards don't leave RAG residue — but
+    # only for files nothing else uses: a duplicated card (or a pinned file
+    # attached to a card) shares them, and deleting one copy purged the
+    # other's (R-201).
+    from app.chat.models import WorkspaceFile
     from app.workspaces.knowledge import delete_workspace_file_chunks
 
     for att in task.attachments or []:
         fid = att.get("file_id") if isinstance(att, dict) else None
-        if fid:
-            background.add_task(
-                delete_workspace_file_chunks, ws.id, uuid.UUID(str(fid))
+        if not fid:
+            continue
+        fid_s = str(fid)
+        others = (
+            await db.execute(
+                select(WorkspaceTask.attachments).where(
+                    WorkspaceTask.workspace_id == ws.id,
+                    WorkspaceTask.id != task.id,
+                    WorkspaceTask.attachments.is_not(None),
+                )
             )
+        ).scalars()
+        shared = any(
+            isinstance(a, dict) and str(a.get("file_id")) == fid_s
+            for atts in others
+            for a in (atts or [])
+        )
+        pinned = await db.scalar(
+            select(WorkspaceFile.file_id).where(
+                WorkspaceFile.workspace_id == ws.id,
+                WorkspaceFile.file_id == uuid.UUID(fid_s),
+            )
+        )
+        if not shared and pinned is None:
+            background.add_task(delete_workspace_file_chunks, ws.id, uuid.UUID(fid_s))
     await db.delete(task)
     await db.commit()
     _reindex_board(background, ws.id, board_item_id)
@@ -541,7 +613,7 @@ async def list_comments(
     user: User = Depends(get_current_user),
 ) -> list[WorkspaceTaskCommentResponse]:
     ws, _role = await get_accessible_workspace(workspace_id, user, db)
-    task = await _load_task(db, ws.id, task_id)
+    task = await _load_task(db, ws.id, task_id, user)
     rows = list(
         (
             await db.execute(
@@ -587,7 +659,7 @@ async def add_comment(
 ) -> WorkspaceTaskCommentResponse:
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    task = await _load_task(db, ws.id, task_id)
+    task = await _load_task(db, ws.id, task_id, user)
     comment = WorkspaceTaskComment(
         task_id=task.id,
         author_user_id=user.id,
@@ -640,17 +712,24 @@ async def delete_comment(
 ) -> Response:
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    task = await _load_task(db, ws.id, task_id)
+    task = await _load_task(db, ws.id, task_id, user)
     comment = await db.get(WorkspaceTaskComment, comment_id)
     if comment is None or comment.task_id != task.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found"
         )
-    # Only the author or the workspace owner can delete a comment.
-    if comment.author_user_id != user.id and ws.user_id != user.id:
+    # The card's activity trail ("moved to Done") is a record — nobody
+    # deletes it, author included (R-202).
+    if comment.kind == "activity":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not allowed to delete this comment",
+            detail="Activity entries can't be deleted.",
+        )
+    # The author, or a workspace owner/admin moderating (R-202).
+    if comment.author_user_id != user.id and access_role not in ("owner", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the author or a workspace admin can delete this comment.",
         )
     await db.delete(comment)
     await db.commit()
@@ -686,7 +765,7 @@ async def add_attachment(
 ) -> WorkspaceTask:
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    task = await _load_task(db, ws.id, task_id)
+    task = await _load_task(db, ws.id, task_id, user)
 
     file = await db.get(UserFile, payload.file_id)
     if file is None or file.user_id != user.id:
@@ -732,7 +811,7 @@ async def set_attachment_cover(
 ) -> WorkspaceTask:
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    task = await _load_task(db, ws.id, task_id)
+    task = await _load_task(db, ws.id, task_id, user)
     fid = str(file_id)
     atts = list(task.attachments or [])
     if not any(a.get("file_id") == fid for a in atts):
@@ -763,7 +842,7 @@ async def delete_attachment(
 ) -> WorkspaceTask:
     ws, access_role = await get_accessible_workspace(workspace_id, user, db)
     require_workspace_write(access_role)
-    task = await _load_task(db, ws.id, task_id)
+    task = await _load_task(db, ws.id, task_id, user)
     fid = str(file_id)
     atts = list(task.attachments or [])
     if not any(a.get("file_id") == fid for a in atts):

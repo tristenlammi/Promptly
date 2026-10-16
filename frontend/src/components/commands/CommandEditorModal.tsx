@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useId } from "react";
 import { Plus, RefreshCw, X } from "lucide-react";
 
 import {
@@ -6,6 +6,7 @@ import {
   type Command,
   type CommandActionType,
   type CommandInput,
+  type ConnectorDevice,
   type ToolSchema,
 } from "@/api/commands";
 import { Modal } from "@/components/shared/Modal";
@@ -171,7 +172,7 @@ export function CommandEditorModal({
         </Field>
 
         {!command && (
-          <Field label="What it does">
+          <Field label="What it does" group>
             <div className="flex flex-wrap gap-1.5">
               {(
                 [
@@ -267,6 +268,7 @@ export function CommandEditorModal({
         )}
 
         <Field
+          group
           label="Phrases"
           hint={
             actionType === "prompt"
@@ -473,8 +475,11 @@ function ToolPicker({
               connectorId={connectorId}
               toolName={toolName}
               deviceName={args.name ?? ""}
+              deviceArea={args.area ?? ""}
               onPick={(device, action) => {
-                onChange(`${connectorId}:${action}`);
+                // Choosing a device doesn't choose what to do to it — that
+                // used to default to the first action silently (R-164).
+                onChange(`${connectorId}:${action ?? ""}`);
                 // The device IS the argument. Filling it here is the
                 // whole point — otherwise you'd pick "Kitchen Lamp" and
                 // still have to retype it below.
@@ -488,9 +493,16 @@ function ToolPicker({
                     ([key]) => !TARGETING_ARGS.has(key.toLowerCase())
                   )
                 );
-                onArgsChange({ ...kept, name: device });
+                // The area goes with the name, so two "Light"s in
+                // different rooms reach the right one.
+                onArgsChange({
+                  ...kept,
+                  name: device.name,
+                  ...(device.area ? { area: device.area } : {}),
+                });
                 onPickDestructive(
-                  !!active.tools.find((t) => t.name === action)?.destructive
+                  device.confirm_by_default ||
+                    !!active.tools.find((t) => t.name === action)?.destructive
                 );
               }}
             />
@@ -592,12 +604,14 @@ function DevicePicker({
   connectorId,
   toolName,
   deviceName,
+  deviceArea,
   onPick,
 }: {
   connectorId: string;
   toolName: string;
   deviceName: string;
-  onPick: (device: string, action: string) => void;
+  deviceArea: string;
+  onPick: (device: ConnectorDevice, action: string | null) => void;
 }) {
   const { data, isLoading, isFetching, refetch, error } =
     useConnectorDevices(connectorId);
@@ -620,7 +634,10 @@ function DevicePicker({
   if (!data?.supported) return null;
 
   const devices = data.devices ?? [];
-  const selected = devices.find((d) => d.name === deviceName);
+  const keyOf = (d: ConnectorDevice) => `${d.name}|${d.area}|${d.domain}`;
+  const selected =
+    devices.find((d) => d.name === deviceName && (d.area ?? "") === deviceArea) ??
+    devices.find((d) => d.name === deviceName);
 
   return (
     <div className="rounded-md border border-[var(--border)] bg-[var(--bg)] p-2.5">
@@ -656,16 +673,16 @@ function DevicePicker({
           ) : (
             <div className="flex flex-col gap-2">
               <select
-                value={deviceName}
+                value={selected ? keyOf(selected) : ""}
                 onChange={(e) => {
-                  const device = devices.find((d) => d.name === e.target.value);
-                  if (device) onPick(device.name, device.actions[0] ?? toolName);
+                  const device = devices.find((d) => keyOf(d) === e.target.value);
+                  if (device) onPick(device, null);
                 }}
                 className={inputClass}
               >
                 <option value="">Choose a device…</option>
                 {devices.map((d) => (
-                  <option key={`${d.name}:${d.domain}`} value={d.name}>
+                  <option key={keyOf(d)} value={keyOf(d)}>
                     {d.name}
                     {d.area ? ` — ${d.area}` : ""}
                     {d.domain ? ` (${d.domain})` : ""}
@@ -674,12 +691,17 @@ function DevicePicker({
               </select>
 
               {selected && (
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {!toolName && (
+                    <span className="text-[11px] text-[var(--text-muted)]">
+                      What should it do?
+                    </span>
+                  )}
                   {selected.actions.map((action) => (
                     <button
                       key={action}
                       type="button"
-                      onClick={() => onPick(selected.name, action)}
+                      onClick={() => onPick(selected, action)}
                       className={cn(
                         "rounded-full border px-2.5 py-1 text-[11px] transition",
                         toolName === action
@@ -687,7 +709,7 @@ function DevicePicker({
                           : "border-[var(--border)] text-[var(--text-muted)] hover:text-[var(--text)]"
                       )}
                     >
-                      {friendlyAction(action)}
+                      {friendlyAction(action, selected.domain)}
                     </button>
                   ))}
                 </div>
@@ -712,7 +734,17 @@ function DevicePicker({
 
 /** "HassMediaPause" reads like an API. People pick actions, not
  *  identifiers. */
-function friendlyAction(action: string): string {
+function friendlyAction(action: string, domain = ""): string {
+  // On and off mean different things to a lock and a garage door —
+  // "Turn on" a lock was a guess at best (R-164).
+  const byDomain: Record<string, Record<string, string>> = {
+    lock: { HassTurnOn: "Lock", HassTurnOff: "Unlock" },
+    cover: { HassTurnOn: "Open", HassTurnOff: "Close" },
+    garage_door: { HassTurnOn: "Open", HassTurnOff: "Close" },
+    valve: { HassTurnOn: "Open", HassTurnOff: "Close" },
+  };
+  const specific = byDomain[domain]?.[action];
+  if (specific) return specific;
   const known: Record<string, string> = {
     HassTurnOn: "Turn on",
     HassTurnOff: "Turn off",
@@ -810,7 +842,7 @@ function ToolArgs({
             <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
               <code className="font-mono text-[var(--text)]">{name}</code>
               {required.has(name) && (
-                <span className="text-[var(--accent)]">required</span>
+                <span className="text-[var(--accent-text)]">required</span>
               )}
               {filledBySlot && (
                 <span className="rounded-full bg-[var(--surface-2)] px-1.5 text-[10px]">
@@ -878,11 +910,31 @@ function Field({
   label,
   hint,
   children,
+  group = false,
 }: {
   label: string;
   hint?: string;
   children: React.ReactNode;
+  /** Several controls (a row of buttons, an input with buttons): a
+   *  labelled group. A <label> around them gave the first button the
+   *  whole label as its accessible name ("What it does Run an automation
+   *  Call a tool" for the "Insert text" button). */
+  group?: boolean;
 }) {
+  const labelId = useId();
+  if (group) {
+    return (
+      <div role="group" aria-labelledby={labelId} className="block">
+        <span id={labelId} className="mb-1 block text-sm font-medium text-[var(--text)]">
+          {label}
+        </span>
+        {hint && (
+          <span className="mb-1.5 block text-xs text-[var(--text-muted)]">{hint}</span>
+        )}
+        {children}
+      </div>
+    );
+  }
   return (
     <label className="block">
       <span className="mb-1 block text-sm font-medium text-[var(--text)]">

@@ -59,9 +59,11 @@ const TABS: {
   hint: string;
   quiet?: boolean;
 }[] = [
-  { key: "prompts", label: "Prompts", hint: "Text you insert with /" },
-  { key: "commands", label: "Commands", hint: "Things Promptly does when you ask" },
+  // Automations lead (V13) — the page used to open on Prompts, which are
+  // text snippets, not automations.
   { key: "scheduled", label: "Scheduled", hint: "Runs on its own" },
+  { key: "commands", label: "Commands", hint: "Things Promptly does when you ask" },
+  { key: "prompts", label: "Prompts", hint: "Text you insert with /" },
   // Set apart deliberately — italic and dimmed. History is a record, not
   // a place you build things, and it shouldn't compete with the three
   // tabs that are actually the feature.
@@ -73,10 +75,37 @@ const TABS: {
   },
 ];
 
+
+/** Where a command run came from (R-163). */
+const SOURCE_LABELS: Record<string, string> = {
+  voice: "by voice",
+  wyoming: "from a Home Assistant satellite",
+  menu: "from the / menu",
+  library: "from the library",
+  chat: "typed",
+};
 export function TasksPage() {
-  // Prompts leads: it's the tab everyone uses daily, and Scheduled is
-  // the desktop-gated one.
-  const [tab, setTab] = useState<Tab>("prompts");
+  // Opens on what the page is named for — automations (V13) — or the tab
+  // in the link (?tab=prompts), or the one you used last.
+  const [tab, setTabState] = useState<Tab>(() => {
+    const fromUrl = new URLSearchParams(window.location.search).get("tab");
+    if (fromUrl && TABS.some((t) => t.key === fromUrl)) return fromUrl as Tab;
+    try {
+      const last = localStorage.getItem("promptly.automations.tab");
+      if (last && TABS.some((t) => t.key === last)) return last as Tab;
+    } catch {
+      /* storage unavailable */
+    }
+    return "scheduled";
+  });
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    try {
+      localStorage.setItem("promptly.automations.tab", t);
+    } catch {
+      /* storage unavailable */
+    }
+  };
   const [commandEditing, setCommandEditing] = useState<Command | null>(null);
   const [commandEditorOpen, setCommandEditorOpen] = useState(false);
   const { data: commands, isLoading: commandsLoading } = useCommands();
@@ -130,7 +159,9 @@ export function TasksPage() {
         timezone:
           Intl.DateTimeFormat().resolvedOptions().timeZone ||
           "Australia/Brisbane",
-        enabled: true,
+        // Off until the flow is first saved (the save switches it on) —
+        // a blank draft used to run its placeholder prompt daily at 09:00.
+        enabled: false,
         notify: true,
         retention_runs: 30,
       });
@@ -141,6 +172,12 @@ export function TasksPage() {
     }
   };
   const openEdit = (task: Task) => {
+    // A flow is edited in the flow editor: the form only knows the Simple
+    // prompt/model/schedule columns, which a flow doesn't use.
+    if (task.is_advanced) {
+      navigate(`/tasks/${task.id}?flow=1`);
+      return;
+    }
     setEditing(task);
     setFormOpen(true);
     setMenuFor(null);
@@ -419,7 +456,7 @@ export function TasksPage() {
                       e.stopPropagation();
                       void onRunNow(task);
                     }}
-                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-[var(--accent)] hover:bg-[var(--accent)]/10"
+                    className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--accent)]/10"
                   >
                     <Play className="h-3 w-3" /> Run now
                   </button>
@@ -515,7 +552,7 @@ function HistoryTabBody() {
                 {run.command_name}
               </span>
               <span className="text-xs text-[var(--text-muted)]">
-                {run.source === "voice" ? "by voice" : "typed"}
+                {SOURCE_LABELS[run.source] ?? "typed"}
               </span>
             </div>
             {run.utterance && (

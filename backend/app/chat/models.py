@@ -76,6 +76,13 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    # Connectors switched off for this chat (R-161). Every reachable
+    # connector's tools used to ride along on every Tools-on turn — a
+    # GitHub tool in a recipe chat. Off is the exception, so it's stored.
+    disabled_connector_ids: Mapped[list[str] | None] = mapped_column(
+        JSONB, nullable=True
+    )
+
     # When True the user has renamed the conversation themselves and the
     # server must not auto-regenerate the title after subsequent turns. Set
     # by the title-PATCH endpoint; cleared only if we reset the conversation.
@@ -90,6 +97,10 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
     title_refined: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+
+    # Where an imported chat came from ("chatgpt:<id>", …) so a retried
+    # import skips it instead of duplicating it (0187, R-309).
+    import_source_key: Mapped[str | None] = mapped_column(String(160), nullable=True)
 
     # Phase 4c — branching. Populated when this chat was forked from
     # another via ``POST /conversations/{id}/branch``. ``ON DELETE
@@ -372,6 +383,17 @@ class Workspace(UUIDPKMixin, TimestampMixin, Base):
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Deleted workspaces sit in the owner's trash for 30 days before the
+    # nightly maintenance purges them (0183, R-177). Trashed workspaces are
+    # invisible to every access path except the owner's restore / purge.
+    trashed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Saved as a template (0183, R-204): offered in the new-workspace picker
+    # to everyone who can open it; creating from it copies its setup.
+    is_template: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     # Opt-in rolling workspace memory (Phase 4). When true, a background
     # job maintains a single pinned "Workspace Memory" file, refreshed
     # from whichever chat in the workspace most recently produced a reply.
@@ -595,6 +617,11 @@ class WorkspaceItemComment(UUIDPKMixin, TimestampMixin, Base):
 
     __tablename__ = "workspace_item_comments"
 
+    # Set when the author edits the comment (0184, R-202).
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"),
         nullable=False,
@@ -706,14 +733,16 @@ class WorkspaceProposal(UUIDPKMixin, Base):
     conversation_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
     )
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    # None for a Drive proposal ("file_changes", WP-5.3) — it belongs to
+    # no workspace.
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True
     )
     # The chat-turn owner — the only account allowed to apply/dismiss.
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    # create_note | add_cards
+    # create_note | add_cards | update_cards | file_changes
     kind: Mapped[str] = mapped_column(String(32), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     # pending | applied | dismissed
@@ -841,6 +870,11 @@ class WorkspaceTaskComment(UUIDPKMixin, Base):
 
     __tablename__ = "workspace_task_comments"
 
+    # Set when the author edits the comment (0184, R-202).
+    edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     task_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspace_tasks.id", ondelete="CASCADE"),
         nullable=False,
@@ -883,10 +917,15 @@ class WorkspaceCanvas(UUIDPKMixin, TimestampMixin, Base):
 
     __tablename__ = "workspace_canvas"
 
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
+    # NULL for a personal whiteboard (made from Files, in no workspace).
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
+    )
+    # The whiteboard's Drive file — its shell (0189, app.files.office).
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id"), nullable=False, unique=True
     )
     title: Mapped[str] = mapped_column(
         String(255), nullable=False, default="Untitled canvas"
@@ -915,6 +954,25 @@ class WorkspaceCanvas(UUIDPKMixin, TimestampMixin, Base):
         return f"<WorkspaceCanvas id={self.id} title={self.title!r}>"
 
 
+class SpreadsheetVersion(UUIDPKMixin, CreatedAtMixin, Base):
+    """A snapshot of a spreadsheet's workbook (0184, R-132) — taken at most
+    every few minutes while it's edited, and before an import or restore,
+    so a bad edit can be undone from the version history."""
+
+    __tablename__ = "spreadsheet_versions"
+
+    spreadsheet_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("spreadsheets.id", ondelete="CASCADE"), nullable=False
+    )
+    data: Mapped[Any | None] = mapped_column(JSONB, nullable=True)
+    cell_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # autosave | import | restore | clear
+    reason: Mapped[str] = mapped_column(String(16), nullable=False, default="autosave", server_default="autosave")
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+
 class Spreadsheet(UUIDPKMixin, TimestampMixin, Base):
     """A spreadsheet (Fortune-sheet) — the backing entity for a
     ``kind='sheet'`` workspace item (standalone or a notebook page).
@@ -930,10 +988,20 @@ class Spreadsheet(UUIDPKMixin, TimestampMixin, Base):
 
     __tablename__ = "spreadsheets"
 
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
+    # NULL for a personal spreadsheet (made from Files, in no workspace).
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("workspaces.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
+    )
+    # The spreadsheet's Drive file — its shell (0189, app.files.office).
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id"), nullable=False, unique=True
+    )
+    # Bumped by every workbook-JSON save; a save sent against an older one
+    # gets a 409 instead of overwriting a colleague's change (0190, WP-3.3).
+    data_version: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
     )
     title: Mapped[str] = mapped_column(
         String(255),
@@ -1000,6 +1068,11 @@ class Roster(UUIDPKMixin, TimestampMixin, Base):
     # Flattened schedule text for RAG, pushed by the client on save (mirrors
     # ``Spreadsheet.content_text``).
     content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Bumped on every save; a save based on an older revision is refused
+    # (409) so a stale or failed-to-load editor can't overwrite the schedule.
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
     # Backing Drive text file that carries ``content_text`` into
     # ``knowledge_chunks``. ``ON DELETE SET NULL`` so a Drive-side delete
     # doesn't cascade away the roster.
@@ -1148,6 +1221,10 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
     # any stream that errored before usage was reported.
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Size of the last request in the turn and what filled it — see
+    # app/chat/context_usage.py. ``prompt_tokens`` is the sum over tool
+    # hops (billing); this is what the context meter reads (WP-1.4).
+    context_usage: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     ttft_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     total_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Which model produced this (assistant) row — stamped per turn, so each
@@ -1284,6 +1361,8 @@ class MessageEmbedding(TimestampMixin, Base):
     )
     content_hash: Mapped[str] = mapped_column(String(32), nullable=False)
     embed_dim: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Which embedding model made the vector (0186, R-317).
+    embed_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     def __repr__(self) -> str:
         return (

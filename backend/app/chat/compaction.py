@@ -16,6 +16,10 @@ messages silently. We:
 4. Hard-delete the original middle rows. Compaction is destructive —
    a "keep both" option would defeat the point of freeing context.
 
+All of this runs on the *visible* thread (``active_path``), never on
+every row: regenerated and edited versions the user switched away from
+are not part of the conversation being compacted.
+
 The function is best-effort: if the LLM call fails (rate limit,
 network, provider error), we leave the conversation untouched and
 raise ``CompactionError`` so the API layer can return a 502. A
@@ -31,6 +35,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.chat.models import Conversation, Message
+from app.chat.versioning import active_path, lineage_to
 from app.models_config.models import ModelProvider
 from app.models_config.provider import (
     ChatMessage,
@@ -162,7 +167,7 @@ async def compact_conversation(
     ``conversation``. The DB session is committed before returning
     so the deletes + insert land atomically.
     """
-    rows = list(
+    all_rows = list(
         (
             await db.execute(
                 select(Message)
@@ -173,6 +178,11 @@ async def compact_conversation(
         .scalars()
         .all()
     )
+    # Work on the visible thread only. Slicing every row by position used
+    # to mix in regenerated/edited versions the user had moved away from:
+    # the summary could be spliced onto an off-path row, the visible
+    # thread cut down to its last message, and the rest deleted (R-018).
+    rows = active_path(all_rows, conversation.active_leaf_message_id)
     total = len(rows)
     head_count = min(_KEEP_HEAD, total)
     # Cheap early-out before the (token-aware) tail walk: even with the
@@ -240,12 +250,31 @@ async def compact_conversation(
     )
     db.add(summary_message)
 
-    middle_ids = [m.id for m in middle]
-    await db.execute(delete(Message).where(Message.id.in_(middle_ids)))
+    # Delete the compacted rows and any branch hanging off them (a version
+    # of a compacted message can't be reached once its parent is gone).
+    # Alternative versions that branch off the kept head are untouched —
+    # they stay switchable alongside the summary.
+    # The first kept message — and any alternative versions of it — hang
+    # off the last compacted one; they move onto the summary instead.
+    reattach = [r for r in all_rows if r.parent_id == middle[-1].id]
+    doomed = _subtrees(
+        all_rows, {m.id for m in middle}, keep={r.id for r in reattach}
+    )
     await db.flush()
     await db.refresh(summary_message)
-    if tail:
-        tail[0].parent_id = summary_message.id
+    for r in reattach:
+        r.parent_id = summary_message.id
+    await db.flush()
+    await db.execute(delete(Message).where(Message.id.in_(doomed)))
+    await db.flush()
+
+    # Never commit a thread that no longer reaches its start.
+    if conversation.active_leaf_message_id is not None:
+        remaining = [r for r in all_rows if r.id not in doomed] + [summary_message]
+        walk = lineage_to(remaining, conversation.active_leaf_message_id)
+        if not walk or walk[0].parent_id is not None or (head and walk[0].id != head[0].id):
+            await db.rollback()
+            raise CompactionError("Compaction would break this conversation; nothing was changed.")
 
     # Bump the conversation's updated_at so sidebar bucketing reflects
     # the compaction activity.
@@ -261,9 +290,25 @@ async def compact_conversation(
     )
 
     return CompactionResult(
-        messages_removed=len(middle),
+        messages_removed=len(doomed),
         summary_message_id=str(summary_message.id),
     )
+
+
+def _subtrees(rows: list[Message], roots: set, *, keep: set) -> set:
+    """``roots`` plus every descendant, never crossing into ``keep``."""
+    children: dict = {}
+    for r in rows:
+        children.setdefault(r.parent_id, []).append(r.id)
+    out: set = set()
+    stack = list(roots)
+    while stack:
+        cur = stack.pop()
+        if cur in out or cur in keep:
+            continue
+        out.add(cur)
+        stack.extend(children.get(cur, []))
+    return out
 
 
 def is_compaction_summary(message: Message) -> bool:

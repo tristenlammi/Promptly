@@ -1,0 +1,11 @@
+# GPU video encoding for the media worker — Intel Quick Sync (WP-7.4).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.media-qsv.yml up -d
+#
+# Passes the host's /dev/dri through; falls back to the CPU encoder.
+services:
+  media-worker:
+    environment:
+      MEDIA_HWACCEL: qsv
+    devices:
+      - /dev/dri:/dev/dri

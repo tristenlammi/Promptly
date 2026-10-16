@@ -32,6 +32,8 @@ export interface NodeRun {
   output: string;
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
+  /** Template variables this step referenced that had no value. */
+  unresolved?: string[];
 }
 
 export interface TaskRun extends TaskRunSummary {
@@ -68,6 +70,7 @@ export interface Task {
   schedule_label: string;
   enabled: boolean;
   notify: boolean;
+  notify_mode?: TaskNotifyMode;
   retention_runs: number;
   /** Overlap policy: "allow" fires even if the last run is still going;
    *  "skip" holds a scheduled fire while a run is still in flight. */
@@ -105,9 +108,13 @@ export interface TaskInput {
   timezone: string;
   enabled: boolean;
   notify: boolean;
+  notify_mode?: TaskNotifyMode;
   retention_runs: number;
   concurrency?: TaskConcurrency;
 }
+
+/** When an automation notifies (R-152). */
+export type TaskNotifyMode = "never" | "failures" | "every" | "changes";
 
 export interface ConnectorTool {
   name: string;
@@ -211,11 +218,14 @@ export const tasksApi = {
     id: string,
     graph: FlowGraph,
     targetNodeId: string,
-    pinned: Record<string, string>
+    pinned: Record<string, string>,
+    executeActions = false
   ): Promise<GraphTestResult> {
     const { data } = await apiClient.post<GraphTestResult>(
       `/tasks/${id}/graph/test`,
-      { graph, target_node_id: targetNodeId, pinned }
+      { graph, target_node_id: targetNodeId, pinned, execute_actions: executeActions },
+      // The server stops a test at 110 s; wait a little longer than that.
+      { timeout: 125_000 }
     );
     return data;
   },
@@ -237,6 +247,23 @@ export const tasksApi = {
       { timeout: 60_000 }
     );
     return data.text;
+  },
+  /** An incomplete flow kept as a draft — never run (R-149). */
+  async getGraphDraft(id: string): Promise<{ graph: FlowGraph | null; saved_at: string | null }> {
+    const { data } = await apiClient.get(`/tasks/${id}/graph/draft`);
+    return data;
+  },
+  async saveGraphDraft(id: string, graph: FlowGraph): Promise<{ saved_at: string | null }> {
+    const { data } = await apiClient.put(`/tasks/${id}/graph/draft`, graph);
+    return data;
+  },
+  async deleteGraphDraft(id: string): Promise<void> {
+    await apiClient.delete(`/tasks/${id}/graph/draft`);
+  },
+  /** A new webhook URL; the old one stops working (R-195). */
+  async rotateWebhook(id: string): Promise<Task> {
+    const { data } = await apiClient.post<Task>(`/tasks/${id}/webhook/rotate`);
+    return data;
   },
   /** Copilot: why a failed run failed and how to fix it. */
   async diagnoseRun(id: string, runId: string): Promise<string> {
@@ -478,6 +505,17 @@ export interface RouterData {
 export interface FetchPageData {
   url: string;
   max_chars: number;
+}
+
+/** Read the automation's workspace (R-153). */
+export interface WorkspaceReadData {
+  mode: "search" | "item" | "file";
+  query: string;
+  item_id: string | null;
+  title: string;
+  file_id: string;
+  top_k: number;
+  max_chars?: number;
 }
 
 /** One header on an HTTP-request node. ``value`` is a template and may

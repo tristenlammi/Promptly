@@ -52,6 +52,15 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
         Boolean, nullable=False, default=True, server_default="true"
     )
 
+    # May this user's automation HTTP steps reach addresses on the local
+    # network (LAN, Tailscale, the Docker host)? FALSE by default — any
+    # user used to be able to tick that box per step (R-008, R-015).
+    # Admins are never gated. Internal Promptly services stay off-limits
+    # even with it.
+    can_reach_private_network: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     # User settings: default_model, default_search_on, preferred_search_provider, theme, ...
     settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default="{}"
@@ -113,6 +122,13 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
     )
     # Surfaced in the user's own profile + admin user table so suspicious
     # logins are easy to notice.
+    # When the account was last active — stamped when its session refreshes
+    # (app open, and every few minutes while in use). "Last seen" used to
+    # mean the last password sign-in, weeks ago for anyone who stays
+    # signed in (R-192).
+    last_seen_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     last_login_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
@@ -130,6 +146,12 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
     mfa_enrolled_method: Mapped[str | None] = mapped_column(
         String(16), nullable=True, default=None
     )
+    # The SSO identity this account is bound to: the provider's issuer and
+    # its stable subject id, recorded on first SSO sign-in and matched on
+    # from then on. Matching on email alone let anyone who could get that
+    # address at the provider sign in as the account (R-140).
+    oidc_issuer: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    oidc_subject: Mapped[str | None] = mapped_column(String(255), nullable=True)
     mfa_enrolled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )

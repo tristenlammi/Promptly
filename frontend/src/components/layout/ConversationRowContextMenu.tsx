@@ -237,7 +237,7 @@ export function ConversationRowContextMenu({
                   className={cn(
                     "h-3.5 w-3.5",
                     pinned
-                      ? "fill-current text-[var(--accent)]"
+                      ? "fill-current text-[var(--accent-text)]"
                       : "text-[var(--text-muted)]"
                   )}
                 />
@@ -280,7 +280,7 @@ export function ConversationRowContextMenu({
               <span
                 className={cn(
                   "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded",
-                  "bg-[var(--accent)]/10 text-[var(--accent)]"
+                  "bg-[var(--accent)]/10 text-[var(--accent-text)]"
                 )}
               >
                 <LayoutGrid className="h-3 w-3" />
@@ -301,7 +301,7 @@ export function ConversationRowContextMenu({
               <span
                 className={cn(
                   "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded",
-                  "bg-[var(--accent)]/10 text-[var(--accent)]"
+                  "bg-[var(--accent)]/10 text-[var(--accent-text)]"
                 )}
               >
                 <Folder className="h-3 w-3" />
@@ -416,7 +416,7 @@ export function ConversationRowContextMenu({
                       {movingTo === p.id ? (
                         <Loader2 className="h-3 w-3 animate-spin" />
                       ) : isCurrent ? (
-                        <Check className="h-3 w-3 text-[var(--accent)]" />
+                        <Check className="h-3 w-3 text-[var(--accent-text)]" />
                       ) : (
                         <LayoutGrid className="h-3 w-3 text-[var(--text-muted)]" />
                       )}
@@ -492,7 +492,7 @@ export function ConversationRowContextMenu({
                       {movingTo === f.id ? (
                         <Loader2 className="h-3 w-3 animate-spin" />
                       ) : isCurrent ? (
-                        <Check className="h-3 w-3 text-[var(--accent)]" />
+                        <Check className="h-3 w-3 text-[var(--accent-text)]" />
                       ) : (
                         <Folder className="h-3 w-3 text-[var(--text-muted)]" />
                       )}
@@ -556,7 +556,7 @@ function ExportRow({
       <span
         className={cn(
           "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded",
-          "bg-[var(--accent)]/10 text-[var(--accent)]"
+          "bg-[var(--accent)]/10 text-[var(--accent-text)]"
         )}
       >
         {busy ? (

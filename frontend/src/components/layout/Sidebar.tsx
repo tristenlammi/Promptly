@@ -4,6 +4,7 @@ import {
   Archive,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clock,
   Folder,
   FolderPlus,
@@ -33,19 +34,20 @@ import {
   hideConversationFromHistory,
   useArchiveConversation,
   useConversationsQuery,
+  useFolderConversations,
   useUpdateConversation,
 } from "@/hooks/useConversations";
 import { useWorkspaceInvites } from "@/hooks/useWorkspaces";
 import { BUCKET_ORDER, groupByBucket } from "@/utils/dateGroups";
 import { cn } from "@/utils/cn";
-import { ThemeToggle } from "@/components/shared/ThemeToggle";
+import { ThemeToggle, useThemeSync } from "@/components/shared/ThemeToggle";
 import { FeedbackModal } from "@/components/feedback/FeedbackModal";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { UserAvatar } from "@/components/shared/UserAvatar";
 import { ShareInvitesPanel } from "@/components/chat/ShareInvitesPanel";
 import { InboxPanel } from "./InboxPanel";
 import { useInbox } from "@/hooks/useInbox";
-import { authApi } from "@/api/auth";
+import { logout } from "@/lib/session";
 import type { ConversationSummary } from "@/api/types";
 import { Bell, Inbox } from "lucide-react";
 
@@ -74,7 +76,12 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Opt-in surfaces ship hidden and appear only once enabled here.
   const enabledNav = useAuthStore((s) => s.user?.settings?.enabled_nav);
   const isMobile = useIsMobile();
-  const { isLoading: convLoading } = useConversationsQuery(); // drives store
+  const {
+    isLoading: convLoading,
+    hasNextPage: moreChats,
+    fetchNextPage: loadMoreChats,
+    isFetchingNextPage: loadingMoreChats,
+  } = useConversationsQuery(); // drives store
   const [searchActive, setSearchActive] = useState(false);
   // Folder create/edit modal. ``folderModal`` = null (closed), "new", or the
   // folder being edited.
@@ -327,11 +334,18 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           );
         })}
 
+        {moreChats && (
+          <LoadMoreChats
+            loading={loadingMoreChats}
+            onLoad={() => void loadMoreChats()}
+          />
+        )}
+
         {convLoading && personalConversations.length === 0 && (
           <ChatListSkeleton />
         )}
 
-        {!convLoading && personalConversations.length === 0 && (
+        {!convLoading && personalConversations.length === 0 && folders.length === 0 && (
           <div className="mt-6 px-2 text-xs text-[var(--text-muted)]">
             No personal chats yet. Start a new chat or open a workspace.
           </div>
@@ -347,6 +361,35 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         onClose={() => setFolderModal(null)}
       />
     </aside>
+  );
+}
+
+/** Loads the next page of chats when it scrolls into view — older chats
+ *  used to be unreachable past the first 50 (R-047). Also a plain button,
+ *  for keyboards and for when the observer can't fire. */
+function LoadMoreChats({ loading, onLoad }: { loading: boolean; onLoad: () => void }) {
+  const ref = useRef<HTMLButtonElement | null>(null);
+  const onLoadRef = useRef(onLoad);
+  onLoadRef.current = onLoad;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || loading || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) onLoadRef.current();
+    });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [loading]);
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={onLoad}
+      disabled={loading}
+      className="mt-1 w-full rounded-md px-2 py-1.5 text-left text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)] disabled:opacity-70"
+    >
+      {loading ? "Loading…" : "Load older chats"}
+    </button>
   );
 }
 
@@ -369,7 +412,7 @@ function ChatListSkeleton() {
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mb-1 mt-3 flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--accent)]">
+    <div className="mb-1 mt-3 flex items-center gap-1.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-[var(--accent-text)]">
       {children}
     </div>
   );
@@ -594,7 +637,7 @@ function ConversationRow({
               The temporary-chat badge takes precedence in the rare
               overlap so we don't stack two leading glyphs. */}
           {conv.pinned && conv.temporary_mode !== "one_hour" && (
-            <Pin className="h-3 w-3 shrink-0 fill-current text-[var(--accent)]" />
+            <Pin className="h-3 w-3 shrink-0 fill-current text-[var(--accent-text)]" />
           )}
           {conv.temporary_mode === "one_hour" && (
             <TemporaryCountdownBadge expiresAt={conv.expires_at ?? null} />
@@ -635,7 +678,7 @@ function ConversationRow({
               <Pin
                 className={cn(
                   "h-3 w-3",
-                  conv.pinned ? "fill-current text-[var(--accent)]" : ""
+                  conv.pinned ? "fill-current text-[var(--accent-text)]" : ""
                 )}
               />
             </button>
@@ -693,6 +736,24 @@ function FolderRow({
 }) {
   const navigate = useNavigate();
   const expanded = useFolderUiStore((s) => !!s.expanded[folder.id]);
+  const folderQuery = useFolderConversations(folder.id, expanded);
+  // This folder's chats from the server, plus any the store just learned
+  // about (a chat moved in, a new chat here). Moving a chat refreshes every
+  // conversation query, folders included, so one moved out drops off too.
+  const folderChats = useMemo(() => {
+    const byId = new Map<string, ConversationSummary>();
+    for (const c of folderQuery.data?.pages.flat() ?? []) byId.set(c.id, c);
+    for (const c of chats) byId.set(c.id, c);
+    return [...byId.values()]
+      .filter((c) => c.folder_id === folder.id && !c.archived_at)
+      .sort((a, b) =>
+        a.pinned !== b.pinned
+          ? a.pinned
+            ? -1
+            : 1
+          : b.updated_at.localeCompare(a.updated_at)
+      );
+  }, [folderQuery.data, chats, folder.id]);
   const toggle = useFolderUiStore((s) => s.toggle);
   const expand = useFolderUiStore((s) => s.expand);
   const del = useDeleteFolder();
@@ -754,11 +815,12 @@ function FolderRow({
           ) : (
             <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
           )}
-          <Folder className="h-3.5 w-3.5 shrink-0 text-[var(--accent)]" />
+          <Folder className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
           <span className="truncate font-medium">{folder.name}</span>
-          {chats.length > 0 && (
+          {/* The server's count — the loaded chats are only a page. */}
+          {(folder.chat_count ?? folderChats.length) > 0 && (
             <span className="shrink-0 text-[11px] tabular-nums text-[var(--text-muted)]">
-              {chats.length}
+              {folder.chat_count ?? folderChats.length}
             </span>
           )}
         </button>
@@ -823,7 +885,9 @@ function FolderRow({
 
       {expanded && (
         <div className="ml-3 border-l border-[var(--border)] pl-1.5">
-          {chats.length === 0 ? (
+          {folderChats.length === 0 && folderQuery.isLoading ? (
+            <div className="px-2 py-1.5 text-xs text-[var(--text-muted)]">Loading…</div>
+          ) : folderChats.length === 0 ? (
             <button
               type="button"
               onClick={newChatInFolder}
@@ -832,9 +896,15 @@ function FolderRow({
               <Plus className="h-3 w-3" /> New chat
             </button>
           ) : (
-            chats.map((c) => (
+            folderChats.map((c) => (
               <ConversationRow key={c.id} conv={c} activeId={activeId} />
             ))
+          )}
+          {folderQuery.hasNextPage && (
+            <LoadMoreChats
+              loading={folderQuery.isFetchingNextPage}
+              onLoad={() => void folderQuery.fetchNextPage()}
+            />
           )}
         </div>
       )}
@@ -844,167 +914,196 @@ function FolderRow({
 
 function UserFooter() {
   const user = useAuthStore((s) => s.user);
-  const clear = useAuthStore((s) => s.clear);
   const navigate = useNavigate();
   const isAdmin = user?.role === "admin";
-  // The admin gets the admin surface.
-  const canManageOrg = isAdmin;
-  // Invites live here (account area) rather than the primary nav — they're
-  // an account-level collaboration action, not a content surface. Always
-  // rendered so the pending-count badge has a stable home.
+  // Invites live in the account menu — an account-level collaboration
+  // action, not a content surface. Pending ones badge the menu button.
   const [invitesOpen, setInvitesOpen] = useState(false);
   const { data: workspaceInvites } = useWorkspaceInvites();
   const inviteCount = workspaceInvites?.length ?? 0;
   // The durable notification inbox (mentions / assignments / invites /
-  // automation results). Always rendered — unlike invites it's the
-  // catch-up surface, so an empty state is still meaningful.
+  // automation results) keeps its own button: the unread badge is the
+  // "things need your attention" cue and shouldn't hide in a menu.
   const [inboxOpen, setInboxOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const { data: inbox } = useInbox();
   const unreadCount = inbox?.unread_count ?? 0;
+  // The theme listener lives with the toggle, which is now inside a menu
+  // that's usually closed — keep following the OS setting regardless.
+  useThemeSync();
 
-  const onLogout = async () => {
-    try {
-      await authApi.logout();
-    } catch {
-      // Ignore — clearing local state is the point.
-    }
-    clear();
-    navigate("/login");
+  // One account menu instead of seven footer rows (V6): the footer is
+  // just you + the inbox, and everything account-ish opens from you.
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (
+        !menuRef.current?.contains(e.target as Node) &&
+        !buttonRef.current?.contains(e.target as Node)
+      ) {
+        setMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setMenuOpen(false);
+        buttonRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  const go = (to: string) => {
+    setMenuOpen(false);
+    navigate(to);
   };
+  // Ends the session and leaves nothing of this user behind in the
+  // browser — cached data, drafts, push notifications (R-030).
+  const onLogout = () => void logout();
+
+  const itemClass =
+    "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-[var(--text)] transition hover:bg-[var(--hover)] focus:bg-[var(--hover)] focus:outline-none";
 
   return (
-    <div className="border-t border-[var(--border)] p-3 pb-safe">
+    <div className="relative border-t border-[var(--border)] p-3 pb-safe">
       <InstallAppButton />
-      {/* Archived chats — sits above Account/Settings so it reads as a
-          chat surface (where your put-away conversations live) rather
-          than an account control. */}
-      <button
-        onClick={() => navigate("/archive")}
-        className="mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-        title="Archived chats"
-        aria-label="Open archived chats"
-      >
-        <Archive className="h-4 w-4" />
-        <span className="font-medium">Archive</span>
-      </button>
-      {/* Notification inbox — mentions, card assignments, invites, and
-          automation results. The unread badge is the "3 things need your
-          attention" retention hook. */}
-      <button
-        onClick={() => setInboxOpen(true)}
-        className="relative mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-        title="Notifications"
-        aria-label="Open notification inbox"
-      >
-        <Bell className="h-4 w-4" />
-        <span className="font-medium">Inbox</span>
-        {unreadCount > 0 && (
-          <span className="ml-auto inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
-            {unreadCount}
-          </span>
-        )}
-      </button>
-      {/* Workspace invites — pending collaboration invites the user can
-          accept or decline. Click opens a modal listing them. Rendered only
-          while something is actually pending: permanent chrome for a rare
-          event was footer noise, and the modal has nothing to say at zero. */}
-      {inviteCount > 0 && (
-        <button
-          onClick={() => setInvitesOpen(true)}
-          className="relative mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-          title="Pending workspace invites"
-          aria-label="Open workspace invites"
+      {menuOpen && (
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label="Account"
+          className="absolute bottom-full left-3 right-3 z-30 mb-1 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1.5 shadow-xl"
         >
-          <Inbox className="h-4 w-4" />
-          <span className="font-medium">Invites</span>
-          <span className="ml-auto inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
-            {inviteCount}
-          </span>
-        </button>
-      )}
-      {/* Per-user account settings — every authenticated user gets one.
-          Hosts chat-default preferences plus MFA / trusted devices. The
-          route still ends in /security for backwards compatibility but
-          the page hosts the broader account surface now. */}
-      <button
-        onClick={() => navigate("/account/security")}
-        className="mb-1 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-        title="Account"
-        aria-label="Open account settings"
-      >
-        <ShieldCheck className="h-4 w-4" />
-        <span className="font-medium">Account</span>
-      </button>
-      {/* Admin surface. Org admins get the tenant-scoped view (Models, etc.);
-          the platform admin gets every tab. Members don't see it. */}
-      {canManageOrg && (
-        <button
-          onClick={() => navigate("/admin")}
-          className="mb-2 flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-          title={isAdmin ? "Platform admin" : "Organization admin"}
-          aria-label="Open admin"
-        >
-          <Settings className="h-4 w-4" />
-          <span className="font-medium">Admin</span>
-        </button>
-      )}
-      <div className="flex items-center gap-2.5">
-        <UserAvatar
-          name={user?.username ?? "?"}
-          userId={user?.id}
-          avatarUrl={user?.avatar_url}
-          color={user?.avatar_color}
-          size={32}
-          initialsCount={2}
-        />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-medium">
-              {user?.username ?? "Guest"}
-            </span>
-            {isAdmin && (
-              <span
-                className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)] ring-1 ring-[var(--accent)]/40"
-                title="Administrator"
-              >
-                Admin
+          <button role="menuitem" className={itemClass} onClick={() => go("/account")}>
+            <ShieldCheck className="h-4 w-4 text-[var(--text-muted)]" />
+            Account
+          </button>
+          {isAdmin && (
+            <button role="menuitem" className={itemClass} onClick={() => go("/admin")}>
+              <Settings className="h-4 w-4 text-[var(--text-muted)]" />
+              Admin
+            </button>
+          )}
+          <button role="menuitem" className={itemClass} onClick={() => go("/archive")}>
+            <Archive className="h-4 w-4 text-[var(--text-muted)]" />
+            Archived chats
+          </button>
+          {inviteCount > 0 && (
+            <button
+              role="menuitem"
+              className={itemClass}
+              onClick={() => {
+                setMenuOpen(false);
+                setInvitesOpen(true);
+              }}
+            >
+              <Inbox className="h-4 w-4 text-[var(--text-muted)]" />
+              Workspace invites
+              <span className="ml-auto inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
+                {inviteCount}
               </span>
-            )}
+            </button>
+          )}
+          <button
+            role="menuitem"
+            className={itemClass}
+            onClick={() => {
+              setMenuOpen(false);
+              setFeedbackOpen(true);
+            }}
+          >
+            <MessageSquare className="h-4 w-4 text-[var(--text-muted)]" />
+            Send feedback
+          </button>
+          <div className="my-1 flex items-center justify-between border-y border-[var(--border)] px-2 py-1.5">
+            <span className="text-sm text-[var(--text)]">Theme</span>
+            <ThemeToggle />
           </div>
-          <div className="truncate text-xs text-[var(--text-muted)]">
-            {user?.email ?? ""}
+          <button role="menuitem" className={itemClass} onClick={onLogout}>
+            <LogOut className="h-4 w-4 text-[var(--text-muted)]" />
+            Log out
+          </button>
+          <div
+            className="px-2 pb-0.5 pt-1 text-[10px] font-medium tracking-wide text-[var(--text-muted)]"
+            title={`Promptly v${__APP_VERSION__}`}
+          >
+            Promptly v{__APP_VERSION__}
           </div>
         </div>
+      )}
+      <div className="flex items-center gap-1">
         <button
-          onClick={onLogout}
-          className="rounded-md p-1.5 text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-          title="Log out"
-          aria-label="Log out"
-        >
-          <LogOut className="h-4 w-4" />
-        </button>
-      </div>
-      <div className="mt-3 flex items-center justify-between">
-        <button
+          ref={buttonRef}
           type="button"
-          onClick={() => setFeedbackOpen(true)}
-          className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-[var(--text-muted)] transition hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
-          title="Send feedback to the maintainer"
+          onClick={() => setMenuOpen((o) => !o)}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          aria-label="Account menu"
+          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition hover:bg-[var(--hover)]"
         >
-          <MessageSquare className="h-3.5 w-3.5" />
-          Feedback
+          <span className="relative shrink-0">
+            <UserAvatar
+              name={user?.username ?? "?"}
+              userId={user?.id}
+              avatarUrl={user?.avatar_url}
+              color={user?.avatar_color}
+              size={32}
+              initialsCount={2}
+            />
+            {inviteCount > 0 && (
+              <span
+                className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full bg-[var(--accent)] ring-2 ring-[var(--bg)]"
+                title={`${inviteCount} pending workspace invite${inviteCount === 1 ? "" : "s"}`}
+              />
+            )}
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5">
+              <span className="truncate text-sm font-medium">
+                {user?.username ?? "Guest"}
+              </span>
+              {isAdmin && (
+                <span
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent-text)] ring-1 ring-[var(--accent)]/40"
+                  title="Administrator"
+                >
+                  Admin
+                </span>
+              )}
+            </span>
+            <span className="block truncate text-xs text-[var(--text-muted)]">
+              {user?.email ?? ""}
+            </span>
+          </span>
+          <ChevronUp
+            className={cn(
+              "h-4 w-4 shrink-0 text-[var(--text-muted)] transition-transform",
+              !menuOpen && "rotate-180",
+            )}
+          />
         </button>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-[var(--text-muted)]">Theme</span>
-          <ThemeToggle />
-        </div>
-      </div>
-      <div
-        className="mt-2 text-center text-[10px] font-medium tracking-wide text-[var(--text-muted)]/60"
-        title={`Promptly v${__APP_VERSION__}`}
-      >
-        v{__APP_VERSION__}
+        <button
+          onClick={() => setInboxOpen(true)}
+          className="relative shrink-0 rounded-md p-2 text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+          title="Notifications"
+          aria-label="Open notification inbox"
+        >
+          <Bell className="h-4 w-4" />
+          {unreadCount > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-[var(--accent)] px-1 text-[10px] font-semibold text-white">
+              {unreadCount}
+            </span>
+          )}
+        </button>
       </div>
       <ShareInvitesPanel
         open={invitesOpen}

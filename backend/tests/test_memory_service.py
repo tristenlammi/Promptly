@@ -781,8 +781,10 @@ async def test_capture_deletes_a_retracted_fact(
 
     assert (await db.execute(select(UserMemory))).scalars().all() == []
     # A deletion isn't a save — surfacing it in the "saved to memory" chip
-    # would be actively misleading.
-    assert saved == []
+    # would be actively misleading. It's reported as a removal instead,
+    # shown with an Undo (R-267).
+    assert [x for x in saved if not x.get("removed")] == []
+    assert [x["content"] for x in saved if x.get("removed")] == ["User uses Vim"]
 
 
 async def test_capture_ignores_a_rewrite_that_changes_nothing(
@@ -959,7 +961,7 @@ def _stub_embeddings(monkeypatch):
     async def _get_cfg(_db):
         return cfg
 
-    async def _embed(*, provider, model_id, texts, dimensions=None):
+    async def _embed(*, provider, model_id, texts, dimensions=None, **_kw):
         return [_fake_vector(t) for t in texts]
 
     monkeypatch.setattr(svc, "get_embedding_config", _get_cfg)
@@ -1157,3 +1159,92 @@ async def test_strict_retrieval_returns_nothing_rather_than_recency(db, user):
 
     assert len(lenient) == 3  # recency stand-in — right for injection
     assert strict == []       # nothing genuinely matched
+
+
+
+async def _capture_no_commit(db, user, provider, conversation, monkeypatch, ops, user_text):
+    from app.memory.service import capture_memories
+
+    _stub_capture_model(monkeypatch, json.dumps(ops))
+    return await capture_memories(
+        db, user_id=user.id, user_text=user_text, assistant_text="Noted.",
+        source_conversation_id=conversation.id, provider=provider, model_id="test-model",
+    )
+
+
+async def _contents(user) -> list[str]:
+    from app.database import SessionLocal
+
+    async with SessionLocal() as s:
+        return sorted(
+            (await s.execute(select(UserMemory.content).where(UserMemory.user_id == user.id))).scalars()
+        )
+
+
+async def test_a_delete_only_capture_is_kept(db, user, provider, conversation, monkeypatch):
+    """It returned nothing, so nobody committed and it rolled back (R-270)."""
+    doomed = await _mem(db, user, "User uses Vim")
+    await db.commit()
+    await _capture_no_commit(db, user, provider, conversation, monkeypatch,
+                             [{"op": "delete", "id": str(doomed.id)}], "I no longer use Vim")
+    await db.rollback()  # what the caller effectively did
+    assert await _contents(user) == []
+
+
+async def test_capture_never_touches_pinned_facts(db, user, provider, conversation, monkeypatch):
+    pinned = await _mem(db, user, "User's daughter is called Ada")
+    pinned.pinned = True
+    await db.commit()
+    await _capture_no_commit(db, user, provider, conversation, monkeypatch,
+                             [{"op": "delete", "id": str(pinned.id)}], "Actually, forget that")
+    assert await _contents(user) == ["User's daughter is called Ada"]
+
+
+async def test_hand_written_facts_change_only_when_the_user_corrects_them(
+    db, user, provider, conversation, monkeypatch
+):
+    """Capture quietly rewrote facts the user had typed in (R-267/R-292)."""
+    mine = await _mem(db, user, "User works at Acme")
+    mine.source = "manual"
+    await db.commit()
+    rewrite = [{"op": "update", "id": str(mine.id), "text": "User works at Initech"}]
+
+    await _capture_no_commit(db, user, provider, conversation, monkeypatch, rewrite, "Busy day at the office")
+    assert await _contents(user) == ["User works at Acme"]
+
+    await _capture_no_commit(db, user, provider, conversation, monkeypatch, rewrite, "Actually I moved to Initech")
+    await db.commit()
+    assert await _contents(user) == ["User works at Initech"]
+
+
+async def test_plan_reports_a_cut_off_answer(db, user, monkeypatch):
+    import pytest
+
+    """A truncated JSON array used to parse as "no changes" — the user was
+    told nothing needed doing when the model just ran out of room (R-265)."""
+    from app.memory.service import plan_memory_edits
+
+    await _mem(db, user, "User works at Acme")
+    await db.commit()
+    _stub_model(monkeypatch, '[{"op": "delete", "id": "abc"}, {"op": "upd')
+
+    with pytest.raises(ValueError, match="cut off"):
+        await plan_memory_edits(db, user_id=user.id, instruction="forget work")
+
+
+async def test_retrieval_skips_off_topic_facts(db, user, monkeypatch):
+    """Nearest isn't relevant: an unrelated fact mustn't ride along on
+    every chat just because it's the closest of a small set (R-296)."""
+    from app.memory.service import embed_memory_row, retrieve_relevant_memories
+
+    cfg = _stub_embeddings(monkeypatch)
+    row = await _mem(db, user, "User enjoys cooking Thai food")
+    await db.flush()
+    await embed_memory_row(db, row, cfg)
+    await db.commit()
+
+    hits = await retrieve_relevant_memories(
+        db, user.id, query="what rust crate should I use", k=3
+    )
+
+    assert hits == []

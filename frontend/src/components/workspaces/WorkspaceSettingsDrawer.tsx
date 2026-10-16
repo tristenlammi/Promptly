@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   ArchiveRestore,
@@ -8,6 +10,7 @@ import {
   ChevronDown,
   ChevronRight,
   CircleAlert,
+  Copy as CopyIcon,
   Download,
   Gauge,
   Lightbulb,
@@ -27,7 +30,11 @@ import { Button } from "@/components/shared/Button";
 import { WorkspaceModelField } from "@/components/workspaces/WorkspaceModelField";
 import { WorkspaceMembersPanel } from "@/components/workspaces/WorkspaceMembersPanel";
 import { WorkspaceConnectorsTab } from "@/components/workspaces/WorkspaceConnectorsTab";
-import type { WorkspaceDetail, WorkspaceMemoryMode } from "@/api/workspaces";
+import type {
+  UpdateWorkspacePayload,
+  WorkspaceDetail,
+  WorkspaceMemoryMode,
+} from "@/api/workspaces";
 import { workspacesApi } from "@/api/workspaces";
 import { chatApi } from "@/api/chat";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -37,6 +44,7 @@ import {
   useWorkspaceMemory,
   useSaveWorkspaceMemory,
   useRegenerateWorkspaceMemory,
+  useTransferWorkspace,
   useWorkspaceUsage,
 } from "@/hooks/useWorkspaces";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -208,13 +216,11 @@ export function WorkspaceSettingsContent({
               canManage={canManage}
               owner={workspace.owner}
               collaborators={workspace.collaborators ?? []}
+              myShareId={workspace.my_share_id ?? null}
             />
           )}
           {tab === "connectors" && (
-            <WorkspaceConnectorsTab
-              workspaceId={workspace.id}
-              isOwner={isOwner}
-            />
+            <WorkspaceConnectorsTab workspaceId={workspace.id} />
           )}
           {tab === "usage" && (
             <UsageTab workspaceId={workspace.id} isOwner={isOwner} />
@@ -255,7 +261,7 @@ function DrawerTab({
           className={cn(
             "rounded-full px-1.5 text-[10px]",
             active
-              ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+              ? "bg-[var(--accent)]/15 text-[var(--accent-text)]"
               : "bg-[var(--border)]/40 text-[var(--text-muted)]"
           )}
         >
@@ -476,7 +482,7 @@ export function ContextBudgetBar({ workspace }: { workspace: WorkspaceDetail }) 
           </span>
         </span>
         {retrieval_active ? (
-          <span className="inline-flex items-center gap-1 text-[var(--accent)]">
+          <span className="inline-flex items-center gap-1 text-[var(--accent-text)]">
             <Zap className="h-3.5 w-3.5" />
             Retrieval on — only the most relevant chunks are sent each turn
           </span>
@@ -497,6 +503,12 @@ export function ContextBudgetBar({ workspace }: { workspace: WorkspaceDetail }) 
 // ---------------------------------------------------------------------
 // General settings
 // ---------------------------------------------------------------------
+
+function pick<T extends object, K extends keyof T>(obj: T, keys: K[]): Pick<T, K> {
+  const out = {} as Pick<T, K>;
+  for (const k of keys) out[k] = obj[k];
+  return out;
+}
 
 function SettingsTab({
   workspace,
@@ -537,17 +549,15 @@ function SettingsTab({
     if (exporting) return;
     setExporting(true);
     try {
-      const blob = await workspacesApi.exportZip(workspace.id);
-      const url = URL.createObjectURL(blob);
+      const url = await workspacesApi.exportLink(workspace.id);
+      // The server names the file (Content-Disposition); the browser
+      // streams it straight to disk.
       const a = document.createElement("a");
       a.href = url;
-      a.download = `promptly-workspace-${workspace.title
-        .replace(/[^\w\- ]+/g, "_")
-        .slice(0, 60)}.zip`;
+      a.rel = "noopener";
       document.body.appendChild(a);
       a.click();
       a.remove();
-      URL.revokeObjectURL(url);
     } catch {
       await confirm({
         title: "Export failed",
@@ -559,14 +569,85 @@ function SettingsTab({
     }
   };
 
-  const dirty =
-    title.trim() !== workspace.title ||
-    (description || "") !== (workspace.description || "") ||
-    (systemPrompt || "") !== (workspace.system_prompt || "") ||
-    (modelId || null) !== (workspace.default_model_id || null) ||
-    (providerId || null) !== (workspace.default_provider_id || null) ||
-    (memModelId || null) !== (workspace.memory_model_id || null) ||
-    (memProviderId || null) !== (workspace.memory_provider_id || null);
+  // What the server last told us, per field — the base each save diffs
+  // against. Only fields that differ from it are sent, so one admin
+  // fixing the title no longer re-sends (and reverts) the instructions
+  // another admin just changed, and an admin without access to the
+  // current default model can still save other fields (R-179).
+  type Fields = {
+    title: string;
+    description: string | null;
+    system_prompt: string | null;
+    default_model_id: string | null;
+    default_provider_id: string | null;
+    memory_model_id: string | null;
+    memory_provider_id: string | null;
+  };
+  const serverFields = (w: WorkspaceDetail): Fields => ({
+    title: w.title,
+    description: w.description || null,
+    system_prompt: w.system_prompt || null,
+    default_model_id: w.default_model_id || null,
+    default_provider_id: w.default_provider_id || null,
+    memory_model_id: w.memory_model_id || null,
+    memory_provider_id: w.memory_provider_id || null,
+  });
+  const localFields: Fields = {
+    title: title.trim(),
+    description: description.trim() || null,
+    system_prompt: systemPrompt.trim() || null,
+    default_model_id: modelId || null,
+    default_provider_id: providerId || null,
+    memory_model_id: memModelId || null,
+    memory_provider_id: memProviderId || null,
+  };
+  const base = useRef<Fields>(serverFields(workspace));
+  const changedKeys = (local: Fields): (keyof Fields)[] =>
+    (Object.keys(local) as (keyof Fields)[]).filter(
+      (k) => local[k] !== base.current[k]
+    );
+  const dirty = changedKeys(localFields).length > 0;
+
+  // A refetch (another admin saved) re-seeds every field this admin isn't
+  // in the middle of changing; fields they are changing keep their edit.
+  useEffect(() => {
+    const fresh = serverFields(workspace);
+    const prev = base.current;
+    const mine = localFields;
+    if (fresh.title !== prev.title && mine.title === prev.title)
+      setTitle(fresh.title);
+    if (fresh.description !== prev.description && mine.description === prev.description)
+      setDescription(fresh.description ?? "");
+    if (fresh.system_prompt !== prev.system_prompt && mine.system_prompt === prev.system_prompt)
+      setSystemPrompt(fresh.system_prompt ?? "");
+    if (
+      (fresh.default_model_id !== prev.default_model_id ||
+        fresh.default_provider_id !== prev.default_provider_id) &&
+      mine.default_model_id === prev.default_model_id &&
+      mine.default_provider_id === prev.default_provider_id
+    ) {
+      setModelId(fresh.default_model_id);
+      setProviderId(fresh.default_provider_id);
+    }
+    if (
+      (fresh.memory_model_id !== prev.memory_model_id ||
+        fresh.memory_provider_id !== prev.memory_provider_id) &&
+      mine.memory_model_id === prev.memory_model_id &&
+      mine.memory_provider_id === prev.memory_provider_id
+    ) {
+      setMemModelId(fresh.memory_model_id);
+      setMemProviderId(fresh.memory_provider_id);
+    }
+    // The instructions are the one field we don't overwrite under the
+    // admin's cursor: their next save sends the old text as the expected
+    // base and the server answers 409, which shows the conflict below.
+    base.current = {
+      ...fresh,
+      system_prompt:
+        mine.system_prompt !== prev.system_prompt ? prev.system_prompt : fresh.system_prompt,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [workspace]);
 
   // Autosave: debounce changes and persist them, no Save button. The
   // indicator below reflects saving / saved / failed. ``title`` can't be
@@ -574,31 +655,49 @@ function SettingsTab({
   const [saveState, setSaveState] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
-  const skipFirst = useRef(true);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [conflict, setConflict] = useState(false);
+  // Saves run one at a time, each diffing against the result of the last.
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const latest = useRef(localFields);
+  latest.current = localFields;
 
   useEffect(() => {
     if (!canManage) return;
-    if (skipFirst.current) {
-      skipFirst.current = false;
-      return;
-    }
     if (!dirty || !title.trim()) return;
-    const t = setTimeout(async () => {
-      setSaveState("saving");
-      try {
-        await update.mutateAsync({
-          title: title.trim(),
-          description: description.trim() || null,
-          system_prompt: systemPrompt.trim() || null,
-          default_model_id: modelId,
-          default_provider_id: providerId,
-          memory_model_id: memModelId,
-          memory_provider_id: memProviderId,
-        });
-        setSaveState("saved");
-      } catch {
-        setSaveState("error");
-      }
+    const t = setTimeout(() => {
+      queue.current = queue.current.then(async () => {
+        const local = latest.current;
+        const keys = changedKeys(local);
+        if (!keys.length || !local.title) return;
+        const payload: UpdateWorkspacePayload = {};
+        for (const k of keys) (payload as Record<string, unknown>)[k] = local[k];
+        // Model + provider travel as a pair.
+        if (keys.includes("default_model_id") || keys.includes("default_provider_id")) {
+          payload.default_model_id = local.default_model_id;
+          payload.default_provider_id = local.default_provider_id;
+        }
+        if (keys.includes("memory_model_id") || keys.includes("memory_provider_id")) {
+          payload.memory_model_id = local.memory_model_id;
+          payload.memory_provider_id = local.memory_provider_id;
+        }
+        if (keys.includes("system_prompt")) {
+          payload.expected_system_prompt = base.current.system_prompt;
+        }
+        setSaveState("saving");
+        try {
+          await update.mutateAsync(payload);
+          base.current = { ...base.current, ...pick(local, keys) };
+          setSaveState("saved");
+          setSaveError(null);
+          setConflict(false);
+        } catch (err) {
+          const status = (err as { response?: { status?: number } })?.response?.status;
+          setConflict(status === 409);
+          setSaveError(apiErrorMessage(err, "Couldn't save."));
+          setSaveState("error");
+        }
+      });
     }, 800);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -613,6 +712,16 @@ function SettingsTab({
     dirty,
     canManage,
   ]);
+
+  /** Drop this admin's unsaved instructions for the stored version. */
+  const takeTheirInstructions = () => {
+    const stored = workspace.system_prompt || null;
+    base.current = { ...base.current, system_prompt: stored };
+    setSystemPrompt(stored ?? "");
+    setConflict(false);
+    setSaveError(null);
+    setSaveState("idle");
+  };
 
   // Let the "Saved" confirmation fade back to the resting hint.
   useEffect(() => {
@@ -673,6 +782,28 @@ function SettingsTab({
             setProviderId(p);
           }}
         />
+        {canManage && conflict && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center gap-2 rounded-card border border-[var(--warning)]/40 bg-[var(--warning)]/10 px-3 py-2 text-xs"
+          >
+            <span className="min-w-0 flex-1">
+              {saveError} Your version hasn&apos;t been saved.
+            </span>
+            <button
+              type="button"
+              onClick={takeTheirInstructions}
+              className="rounded-input border border-[var(--border)] bg-[var(--surface)] px-2 py-1 font-medium hover:bg-[var(--hover)]"
+            >
+              Load their version
+            </button>
+          </div>
+        )}
+        {canManage && saveError && !conflict && (
+          <p role="alert" className="text-right text-xs text-[var(--danger)]">
+            {saveError}
+          </p>
+        )}
         {canManage && (
           <div className="flex h-5 items-center justify-end">
             <AutosaveIndicator
@@ -745,7 +876,7 @@ function SettingsTab({
             </p>
             <ul className="space-y-1.5">
               <li className="flex gap-2">
-                <span className="font-semibold text-[var(--accent)]">
+                <span className="font-semibold text-[var(--accent-text)]">
                   Cost-effective
                 </span>
                 <span>
@@ -808,12 +939,17 @@ function SettingsTab({
             </Button>
           </div>
           <p className="text-xs text-[var(--text-muted)]">
-            Everything in one archive: notes as Markdown, boards and sheets
-            as CSV, chat transcripts, pinned files, and a manifest. Good for
-            backups, hand-offs, and records requests.
+            Everything in one archive: notes as Markdown, boards, sheets and
+            rosters as CSV, discussions and chat transcripts, automations,
+            pinned files, and a manifest of the structure. A readable export
+            for hand-offs and records requests — not a restorable backup
+            (importing it brings back the notes only). Full backups are the
+            instance backup, under Admin → Backups.
           </p>
         </section>
       )}
+
+      {canManage && <ReuseSection workspace={workspace} />}
 
       {isOwner && (
         <section className="space-y-3 border-t border-[var(--border)] pt-6">
@@ -847,9 +983,12 @@ function SettingsTab({
             </Button>
           </div>
           <p className="text-xs text-[var(--text-muted)]">
-            Deleting a workspace preserves every conversation inside it — they
-            move back to your top-level chat list.
+            Deleting moves the workspace to Recently deleted (in the Archive
+            tab) for 30 days, where you can restore it. After that its notes,
+            boards, sheets, canvases, rosters and discussions are gone for
+            good; chats go back to whoever started them.
           </p>
+          <TransferOwnership workspace={workspace} />
         </section>
       )}
     </div>
@@ -1215,7 +1354,7 @@ function WorkspaceInstructionsEditor({
           onClick={handleEnhance}
           disabled={disabled || enhancing || !value.trim()}
           title="Rewrite these instructions to be clearer and fit how workspaces work"
-          className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2.5 py-1 text-[11px] font-medium text-[var(--accent)] transition hover:border-[var(--accent)]/50 hover:bg-[var(--accent)]/10 disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-full border border-[var(--border)] px-2.5 py-1 text-[11px] font-medium text-[var(--accent-text)] transition hover:border-[var(--accent)]/50 hover:bg-[var(--accent)]/10 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {enhancing ? (
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -1271,5 +1410,141 @@ function WorkspaceInstructionsEditor({
         </div>
       )}
     </div>
+  );
+}
+
+/** Hand the workspace (and its Drive folder) to one of its admins — the
+ *  owner stays on as an admin (R-177). */
+function TransferOwnership({ workspace }: { workspace: WorkspaceDetail }) {
+  const admins = (workspace.collaborators ?? []).filter((c) => c.role === "admin");
+  const [to, setTo] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const transfer = useTransferWorkspace(workspace.id);
+  const submit = async () => {
+    const person = admins.find((a) => a.user_id === to);
+    if (!person) return;
+    const ok = await confirm({
+      title: `Make ${person.username} the owner?`,
+      message:
+        `${person.username} becomes the owner of "${workspace.title}", ` +
+        "including its Drive folder and the files in it. You stay on as an " +
+        "admin, but only they can delete, archive or transfer it from now on.",
+      confirmLabel: "Transfer ownership",
+      danger: true,
+    });
+    if (!ok) return;
+    setError(null);
+    try {
+      await transfer.mutateAsync({ userId: person.user_id });
+      setTo("");
+    } catch (err) {
+      setError(apiErrorMessage(err, "Couldn't transfer the workspace."));
+    }
+  };
+  return (
+    <div className="space-y-2 border-t border-[var(--border)] pt-4">
+      <h4 className="text-xs font-semibold text-[var(--text)]">Transfer ownership</h4>
+      {admins.length === 0 ? (
+        <p className="text-xs text-[var(--text-muted)]">
+          Make a member an admin first (Members tab) — ownership can only go to
+          an admin.
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            aria-label="New owner"
+            className="rounded-input border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm outline-none focus:border-[var(--accent)]"
+          >
+            <option value="">Choose an admin…</option>
+            {admins.map((a) => (
+              <option key={a.user_id} value={a.user_id}>
+                {a.username}
+              </option>
+            ))}
+          </select>
+          <Button
+            variant="secondary"
+            disabled={!to || transfer.isPending}
+            onClick={() => void submit()}
+          >
+            {transfer.isPending ? "Transferring…" : "Transfer"}
+          </Button>
+        </div>
+      )}
+      {error && <p className="text-xs text-[var(--danger)]">{error}</p>}
+    </div>
+  );
+}
+
+/** Duplicate the workspace's setup, or offer it as a template for new
+ *  workspaces (R-204). */
+function ReuseSection({ workspace }: { workspace: WorkspaceDetail }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const update = useUpdateWorkspace(workspace.id);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const duplicate = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const copy = await workspacesApi.duplicate(workspace.id);
+      await qc.invalidateQueries({ queryKey: ["workspaces"] });
+      navigate(`/workspaces/${copy.id}`);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Couldn't duplicate the workspace."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="space-y-3 border-t border-[var(--border)] pt-6">
+      <h3 className="text-sm font-semibold">Reuse</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="secondary"
+          leftIcon={
+            busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <CopyIcon className="h-3.5 w-3.5" />
+            )
+          }
+          onClick={() => void duplicate()}
+          disabled={busy}
+        >
+          Duplicate workspace
+        </Button>
+      </div>
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={workspace.is_template === true}
+          disabled={update.isPending}
+          onChange={(e) =>
+            update.mutate(
+              { is_template: e.target.checked },
+              {
+                onSuccess: () =>
+                  void qc.invalidateQueries({ queryKey: ["workspaces", "templates"] }),
+              }
+            )
+          }
+        />
+        <span>
+          Offer as a template
+          <span className="block text-xs text-[var(--text-muted)]">
+            Members can start new workspaces from this one&apos;s setup —
+            instructions, notebooks, notes, boards and columns, sheets,
+            rosters and automations. Chats, discussions and files aren&apos;t
+            copied.
+          </span>
+        </span>
+      </label>
+      {error && <p className="text-xs text-[var(--danger)]">{error}</p>}
+    </section>
   );
 }

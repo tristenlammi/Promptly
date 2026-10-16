@@ -12,6 +12,7 @@ import {
   isCompactedSummary,
 } from "./CompactedSummaryRow";
 import { MessageBubble, type RegenerateOverride } from "./MessageBubble";
+import { MessageBoundary } from "@/components/system/RouteBoundary";
 import { RememberModal } from "./RememberModal";
 import { WorkspaceRememberModal } from "./WorkspaceRememberModal";
 import { StreamErrorCard } from "./StreamErrorCard";
@@ -117,6 +118,17 @@ interface ChatWindowProps {
   streaming?: boolean;
 }
 
+interface RowCallbacks {
+  edit: (text: string) => Promise<void>;
+  editAssistant: (text: string) => Promise<void>;
+  branch: () => Promise<void>;
+  regenerate: (override: RegenerateOverride | null) => Promise<void>;
+  digDeeper: () => Promise<void>;
+  continue: () => Promise<void>;
+  delete: () => Promise<void>;
+  feedback: (rating: "up" | "down" | null, reason?: string) => Promise<void>;
+}
+
 export function ChatWindow({
   onEditAndResend,
   onEditAssistant,
@@ -162,6 +174,15 @@ export function ChatWindow({
   const setStreamError = useChatStore((s) => s.setStreamError);
   const endRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  // Room under the newest question, so sending can scroll it to the top of
+  // the view with the answer streaming in below — the "scroll your bubble
+  // to the top" intent didn't work without it, and the reply streamed in
+  // out of sight below the fold (R-066). Shrinks to nothing as the reply
+  // grows past a screen.
+  const [tailSpace, setTailSpace] = useState(0);
+  const tailSpaceRef = useRef(0);
+  tailSpaceRef.current = tailSpace;
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   // Phase 3.3 — "Remember this" modal state. ``rememberText`` is the
   // message content pre-filled in the modal; null = modal closed.
@@ -183,7 +204,10 @@ export function ChatWindow({
   const isAtBottom = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return true;
-    return el.scrollHeight - el.scrollTop - el.clientHeight < atBottomThreshold;
+    return (
+      el.scrollHeight - tailSpaceRef.current - el.scrollTop - el.clientHeight <
+      atBottomThreshold
+    );
   }, []);
 
   // Refresh the "Jump to latest" pill on real scroll events from the
@@ -271,6 +295,29 @@ export function ChatWindow({
     isAtBottom,
   ]);
 
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    const content = contentRef.current;
+    if (!scroller || !content || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const users = content.querySelectorAll<HTMLElement>(".promptly-message.flex-row-reverse");
+      const lastUser = users[users.length - 1];
+      if (!lastUser) {
+        setTailSpace(0);
+        return;
+      }
+      const fromLastQuestion =
+        content.getBoundingClientRect().bottom - lastUser.getBoundingClientRect().top;
+      const need = Math.max(0, Math.round(scroller.clientHeight - fromLastQuestion - 16));
+      setTailSpace((prev) => (Math.abs(prev - need) < 4 ? prev : need));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(content);
+    ro.observe(scroller);
+    return () => ro.disconnect();
+  }, []);
+
   const jumpToLatest = () => {
     setShowJumpToLatest(false);
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
@@ -289,45 +336,103 @@ export function ChatWindow({
       toolInvocations.length > 0 ||
       visionRelayInvocations.length > 0);
 
-  // Find the id of the conversation's most recent user message. Only this
-  // one renders the pencil — editing earlier turns is intentionally not
-  // supported (would orphan every assistant reply that came after).
-  // Optimistic placeholders (id starts with "optimistic-") are skipped
-  // because the backend doesn't know about them yet.
-  const lastEditableUserId = useMemo<string | null>(() => {
+  // Edit and Regenerate work on *every* turn, not just the last (R-067):
+  // the backend branches the conversation, and the ‹ 2/3 › pager keeps
+  // every earlier version reachable, so nothing after the edited turn is
+  // lost. Optimistic rows are out — the backend can't target them yet.
+  // Authorship gate (shared workspace chats): you can only rewrite messages
+  // *you* sent; a null author is a legacy/solo row owned by the chat owner.
+  const canEdit = useCallback(
+    (m: (typeof messages)[number]) =>
+      !isStreaming &&
+      !!onEditAndResend &&
+      m.role === "user" &&
+      !m.id.startsWith("optimistic-") &&
+      (!m.author_user_id || m.author_user_id === currentUserId),
+    [isStreaming, onEditAndResend, currentUserId]
+  );
+  const canRegenerate = useCallback(
+    (m: (typeof messages)[number]) =>
+      !isStreaming &&
+      !!onRegenerate &&
+      m.role === "assistant" &&
+      !m.id.startsWith("optimistic-"),
+    [isStreaming, onRegenerate]
+  );
+  // Continue (for a truncated reply) still only applies to the latest one.
+  const lastAssistantId = useMemo<string | null>(() => {
     if (isStreaming) return null;
-    if (!onEditAndResend) return null;
     for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.role !== "user") continue;
-      if (m.id.startsWith("optimistic-")) return null;
-      // Authorship gate (shared workspace chats): the backend only lets
-      // you rewrite messages *you* sent — author = author_user_id ?? the
-      // conversation owner. Offering the pencil on a collaborator's turn
-      // just earns a 403 on save. A null author is a legacy/solo-chat row
-      // that resolves to the owner, so it stays editable for them (and in
-      // a shared chat every real turn carries a concrete author id).
-      if (m.author_user_id && m.author_user_id !== currentUserId) return null;
-      return m.id;
+      if (messages[i].role === "assistant") {
+        return messages[i].id.startsWith("optimistic-") ? null : messages[i].id;
+      }
     }
     return null;
-  }, [messages, isStreaming, onEditAndResend, currentUserId]);
+  }, [messages, isStreaming]);
 
-  // Same rule, mirrored for assistant turns: only the most recent
-  // assistant reply gets a Regenerate action. Optimistic rows (live
-  // streaming bubble) are out — the backend can't target them until
-  // they've been persisted with a real id.
-  const lastRegenerableAssistantId = useMemo<string | null>(() => {
-    if (isStreaming) return null;
-    if (!onRegenerate) return null;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const m = messages[i];
-      if (m.role !== "assistant") continue;
-      if (m.id.startsWith("optimistic-")) return null;
-      return m.id;
+  // A question left without an answer (the reply failed before the error
+  // card could show, or the page reloaded mid-send) can be sent again.
+  const unansweredUserId = useMemo<string | null>(() => {
+    if (isStreaming || !onRetry || streamError) return null;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== "user" || last.id.startsWith("optimistic-")) return null;
+    if (last.author_user_id && last.author_user_id !== currentUserId) return null;
+    return last.id;
+  }, [messages, isStreaming, onRetry, streamError, currentUserId]);
+
+  // Stable per-message callbacks. Every row used to get fresh arrow
+  // functions on each render, so the memoised MessageBubble re-rendered —
+  // and re-parsed its markdown — for every streamed token, in every message
+  // of the conversation (R-065/R-089). The handlers read the latest props
+  // through a ref, so their identity never changes.
+  const handlers = useRef({
+    onEditAndResend, onEditAssistant, onBranchFrom, onRegenerate, onContinue,
+    onDigDeeper, onDelete, onFeedback, onSelectVersion,
+  });
+  handlers.current = {
+    onEditAndResend, onEditAssistant, onBranchFrom, onRegenerate, onContinue,
+    onDigDeeper, onDelete, onFeedback, onSelectVersion,
+  };
+  const rowCallbacks = useRef(new Map<string, RowCallbacks>());
+  const callbacksFor = useCallback((id: string): RowCallbacks => {
+    let cb = rowCallbacks.current.get(id);
+    if (!cb) {
+      cb = {
+        edit: async (text) => {
+          await handlers.current.onEditAndResend?.(id, text);
+        },
+        editAssistant: async (text) => {
+          await handlers.current.onEditAssistant?.(id, text);
+        },
+        branch: async () => {
+          await handlers.current.onBranchFrom?.(id);
+        },
+        regenerate: async (override) => {
+          await handlers.current.onRegenerate?.(id, override);
+        },
+        digDeeper: async () => {
+          await handlers.current.onDigDeeper?.(id);
+        },
+        continue: async () => {
+          await handlers.current.onContinue?.(id);
+        },
+        delete: async () => {
+          await handlers.current.onDelete?.(id);
+        },
+        feedback: async (rating, reason) => {
+          await handlers.current.onFeedback?.(id, rating, reason);
+        },
+      };
+      rowCallbacks.current.set(id, cb);
     }
-    return null;
-  }, [messages, isStreaming, onRegenerate]);
+    return cb;
+  }, []);
+  const selectVersion = useCallback(
+    (...args: Parameters<NonNullable<typeof onSelectVersion>>) =>
+      handlers.current.onSelectVersion?.(...args),
+    []
+  );
+  const remember = useCallback((text: string) => setRememberText(text), []);
 
   // Build a quick id->username map so MessageBubble can render the
   // author chip without re-walking the participants array per row.
@@ -357,7 +462,7 @@ export function ChatWindow({
 
   return (
     <div ref={scrollRef} className="promptly-scroll relative flex-1 overflow-y-auto">
-      <div className="mx-auto w-full max-w-3xl">
+      <div ref={contentRef} className="mx-auto w-full max-w-3xl">
         {messages.map((m) => {
           // Compaction-generated system rows render as a distinct
           // collapsible summary strip rather than an avatar bubble
@@ -366,8 +471,8 @@ export function ChatWindow({
             return <CompactedSummaryRow key={m.id} content={m.content} />;
           }
           return (
+            <MessageBoundary key={m.id} content={m.content}>
             <MessageBubble
-              key={m.id}
               messageId={m.id}
               role={m.role}
               content={m.content}
@@ -385,28 +490,24 @@ export function ChatWindow({
               authorLookup={authorLookup}
               currentUserId={currentUserId}
               onEdit={
-                m.id === lastEditableUserId && onEditAndResend
-                  ? (newText) => onEditAndResend(m.id, newText)
+                canEdit(m)
+                  ? callbacksFor(m.id).edit
                   : m.role === "assistant" && onEditAssistant
-                    ? (newText) => onEditAssistant(m.id, newText)
+                    ? callbacksFor(m.id).editAssistant
                     : undefined
               }
               editedAt={m.edited_at ?? null}
-              onBranch={onBranchFrom ? () => onBranchFrom(m.id) : undefined}
-              onRegenerate={
-                m.id === lastRegenerableAssistantId && onRegenerate
-                  ? (override) => onRegenerate(m.id, override)
-                  : undefined
-              }
-              onDigDeeper={onDigDeeper ? () => onDigDeeper(m.id) : undefined}
+              onBranch={onBranchFrom ? callbacksFor(m.id).branch : undefined}
+              onRegenerate={canRegenerate(m) ? callbacksFor(m.id).regenerate : undefined}
+              onDigDeeper={onDigDeeper ? callbacksFor(m.id).digDeeper : undefined}
               onContinue={
-                m.id === lastRegenerableAssistantId && m.truncated && onContinue
-                  ? () => onContinue(m.id)
+                m.id === lastAssistantId && m.truncated && onContinue
+                  ? callbacksFor(m.id).continue
                   : undefined
               }
               onDelete={
                 onDelete && !m.id.startsWith("optimistic-")
-                  ? () => onDelete(m.id)
+                  ? callbacksFor(m.id).delete
                   : undefined
               }
               feedback={m.feedback}
@@ -415,19 +516,27 @@ export function ChatWindow({
                 onFeedback &&
                 m.role === "assistant" &&
                 !m.id.startsWith("optimistic-")
-                  ? (rating, reason) => onFeedback(m.id, rating, reason)
+                  ? callbacksFor(m.id).feedback
                   : undefined
               }
               versionIndex={m.version_index ?? undefined}
               versionCount={m.version_count ?? undefined}
               siblingIds={m.sibling_ids ?? undefined}
-              onSelectVersion={onSelectVersion}
-              onRemember={
-                onRememberToWorkspace || !hideRemember
-                  ? (text) => setRememberText(text)
-                  : undefined
-              }
+              onSelectVersion={onSelectVersion ? selectVersion : undefined}
+              onRemember={onRememberToWorkspace || !hideRemember ? remember : undefined}
             />
+            {m.id === unansweredUserId && (
+              <div className="-mt-1 mb-3 flex justify-end px-4">
+                <button
+                  type="button"
+                  onClick={onRetry}
+                  className="rounded-md border border-[var(--border)] px-2.5 py-1 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                >
+                  No reply yet — send again
+                </button>
+              </div>
+            )}
+            </MessageBoundary>
           );
         })}
 
@@ -459,6 +568,7 @@ export function ChatWindow({
 
         <div ref={endRef} className="h-6" />
       </div>
+      <div aria-hidden style={{ height: tailSpace }} />
 
       {showJumpToLatest && (
         <button
@@ -468,7 +578,7 @@ export function ChatWindow({
             "sticky bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5",
             "rounded-full border border-[var(--border)] bg-[var(--surface)]/95 px-3 py-1.5",
             "text-xs font-medium text-[var(--text)] shadow-lg backdrop-blur",
-            "transition-colors hover:border-[var(--accent)] hover:text-[var(--accent)]"
+            "transition-colors hover:border-[var(--accent)] hover:text-[var(--accent-text)]"
           )}
           aria-label="Jump to latest message"
         >

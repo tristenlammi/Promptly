@@ -50,9 +50,16 @@ def _soft_cooling(provider_id: uuid.UUID) -> bool:
     return bool(state) and time.monotonic() < state.get("until", 0.0)
 
 
-def _note_soft_failure(provider_id: uuid.UUID, provider_type: str) -> None:
+def _note_soft_failure(
+    provider_id: uuid.UUID, provider_type: str, *, retry_after: float | None = None
+) -> None:
     state = _soft_cooldowns.setdefault(provider_id, {"fails": 0, "until": 0.0})
     state["fails"] += 1
+    if retry_after is not None:
+        # The provider said when to come back (a 429's Retry-After): step
+        # back exactly that long, from the first time.
+        state["until"] = time.monotonic() + min(max(retry_after, 1.0), 3600.0)
+        return
     if state["fails"] >= _SOFT_FAILURE_THRESHOLD:
         state["until"] = time.monotonic() + _SOFT_COOLDOWN_SECONDS
         logger.info(
@@ -120,18 +127,26 @@ def _order_candidates(
     ordered = sorted(rows, key=lambda r: (r.position, r.created_at))
     out: list[SearchProvider] = []
     demoted: list[SearchProvider] = []
-    seen: set[str] = set()
+    # One entry per *configuration*, not per type: a second Brave key is a
+    # real fallback when the first is rate-limited (R-304). Keyless
+    # providers (SearXNG) are the same thing when they point at one URL.
+    def _identity(sp: SearchProvider) -> tuple:
+        cfg = getattr(sp, "config", None) or {}
+        url = cfg.get("url")
+        return (sp.type, url) if url and not cfg.get("api_key") else (sp.type, sp.id)
+
+    seen: set[tuple] = set()
     if primary is not None:
         out.append(primary)
-        seen.add(primary.type)
+        seen.add(_identity(primary))
     for sp in ordered:
         if primary is not None and sp.id == primary.id:
             continue
         if sp.cooldown_until is not None and sp.cooldown_until > now:
             continue
-        if sp.type in seen:
+        if _identity(sp) in seen:
             continue
-        seen.add(sp.type)
+        seen.add(_identity(sp))
         (demoted if _soft_cooling(sp.id) else out).append(sp)
     return out + demoted
 
@@ -249,7 +264,11 @@ async def run_search_with_failover(
                 _note_soft_success(sp.id)  # hard pause supersedes soft state
                 await _pause_provider(sp.id, sp.name, e)
             else:
-                _note_soft_failure(sp.id, sp.type)
+                _note_soft_failure(
+                    sp.id,
+                    sp.type,
+                    retry_after=(e.retry_after or 60.0) if e.status_code == 429 else None,
+                )
                 logger.warning(
                     "search failover: provider=%s errored (%s); %d left",
                     sp.type, e, remaining,

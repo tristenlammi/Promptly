@@ -27,6 +27,8 @@ retrieval quality.
 """
 from __future__ import annotations
 
+import time
+
 import hashlib
 import io
 import logging
@@ -35,6 +37,7 @@ import re
 from dataclasses import dataclass
 from typing import Iterable
 
+import openai
 from openai import AsyncOpenAI
 
 from app.files.models import UserFile
@@ -316,8 +319,15 @@ SUPPORTED_DIMS: frozenset[int] = frozenset({768, 1536})
 
 
 def embedding_dim_for(model_id: str) -> int | None:
-    """Return the vector dim for a known embedding model id."""
-    return KNOWN_EMBEDDING_DIMS.get(model_id)
+    """Return the vector dim for a known embedding model id. Tolerates an
+    Ollama tag (``nomic-embed-text:latest``) and a router prefix
+    (``openai/text-embedding-3-small``)."""
+    if not model_id:
+        return None
+    if model_id in KNOWN_EMBEDDING_DIMS:
+        return KNOWN_EMBEDDING_DIMS[model_id]
+    base = model_id.split(":", 1)[0].rsplit("/", 1)[-1]
+    return KNOWN_EMBEDDING_DIMS.get(base)
 
 
 # Substring hints that identify a model as an embedding-only backbone.
@@ -364,8 +374,17 @@ async def embed_texts(
     model_id: str,
     texts: list[str],
     dimensions: int | None = None,
+    fast: bool = False,
 ) -> list[list[float]]:
     """Embed a batch of strings via the configured provider.
+
+    ``fast=True`` for query-time calls a reply is waiting on (memory and
+    knowledge retrieval): a short timeout, no retries.
+
+    A circuit breaker (R-271): after a few failures in a row the embedder
+    is skipped for a minute, failing at once — the callers fall back. An
+    unreachable embedder used to add seconds to minutes to every chat turn
+    and memory write.
 
     Uses the existing :func:`_client_for` plumbing so OpenAI, Gemini
     (OpenAI-compat), and Ollama all flow through the same
@@ -387,7 +406,24 @@ async def embed_texts(
     cleaned = [t for t in texts if t and t.strip()]
     if not cleaned:
         return []
-    client: AsyncOpenAI = _client_for(provider)
+    key = str(getattr(provider, "id", None) or provider.name)
+    state = _breaker.setdefault(key, {"fails": 0, "open_until": 0.0})
+    if time.monotonic() < state["open_until"]:
+        raise EmbedderUnavailable(
+            "The embedding model failed several times just now; skipping it for a minute."
+        )
+    if getattr(provider, "enabled", True) is False:
+        # An admin disabling a provider means stop calling it — indexing and
+        # retrieval kept embedding through it (R-336).
+        raise EmbedderUnavailable("The embedding provider is disabled.")
+    client: AsyncOpenAI = _cached_client(provider)
+    # Interactive calls: 5 s, no retries. Background batches: 90 s, one
+    # retry — they used to inherit the SDK default of 600 s × 3 (R-318).
+    client = (
+        client.with_options(timeout=5.0, max_retries=0)
+        if fast
+        else client.with_options(timeout=90.0, max_retries=1)
+    )
     # Fairness gate: interactive query embeds (retrieval) take priority so a
     # bulk background re-index can't make a workspace chat hang waiting for
     # its query embedding. Background (indexing) calls tag themselves via
@@ -401,16 +437,135 @@ async def embed_texts(
         # because all current providers return them in submission order;
         # the ``[d.embedding for d in resp.data]`` comprehension just
         # mirrors the input ordering.
-        resp = await client.embeddings.create(
-            model=model_id,
-            input=cleaned,
-            # ``dimensions`` is omitted entirely when None so providers
-            # that don't accept the field don't receive an unexpected key.
-            **({"dimensions": dimensions} if dimensions is not None else {}),
+        # ``dimensions`` is sent only when it asks for something other than
+        # the model's native size: providers that don't support the field
+        # rejected every call for a model that already fits (R-333).
+        send_dims = (
+            dimensions
+            if dimensions is not None and dimensions != embedding_dim_for(model_id)
+            else None
         )
+        try:
+            resp = await client.embeddings.create(
+                model=model_id,
+                input=cleaned,
+                **({"dimensions": send_dims} if send_dims is not None else {}),
+            )
+        except openai.BadRequestError:
+            if send_dims is None:
+                raise
+            # Once more without it — the caller checks the length.
+            resp = await client.embeddings.create(model=model_id, input=cleaned)
+    except Exception as exc:
+        state["fails"] += 1
+        state["last_error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+        state["last_error_at"] = time.time()
+        if state["fails"] >= _BREAKER_FAILURES:
+            state["open_until"] = time.monotonic() + _BREAKER_OPEN_SECONDS
+            _note_outage(provider, state)
+        raise
     finally:
         await embedding_gate.release(lease)
+    if state.get("alerted"):
+        _note_recovery(provider)
+    state["fails"] = 0
+    state["alerted"] = False
+    state["last_ok_at"] = time.time()
     return [list(d.embedding) for d in resp.data]
+
+
+# One client per provider (rebuilt when the provider changes) — every
+# embed call used to build, and never close, a fresh HTTP client (R-324).
+_clients: dict[str, tuple[object, AsyncOpenAI]] = {}
+
+
+def _cached_client(provider: ModelProvider) -> AsyncOpenAI:
+    key = str(getattr(provider, "id", None) or provider.name)
+    stamp = (getattr(provider, "updated_at", None), getattr(provider, "base_url", None))
+    hit = _clients.get(key)
+    if hit is not None and hit[0] == stamp:
+        return hit[1]
+    client = _client_for(provider)
+    _clients[key] = (stamp, client)
+    return client
+
+
+def embedder_health() -> dict:
+    """In-process health of the embedder(s) (R-322): last success, last
+    error and whether calls are currently being skipped."""
+    now = time.monotonic()
+    out = {}
+    for key, st in _breaker.items():
+        out[key] = {
+            "consecutive_failures": int(st.get("fails", 0)),
+            "skipping": now < st.get("open_until", 0.0),
+            "last_ok_at": st.get("last_ok_at"),
+            "last_error": st.get("last_error"),
+            "last_error_at": st.get("last_error_at"),
+        }
+    return out
+
+
+def _note_outage(provider, state) -> None:
+    """Tell admins once per outage (R-322) — it used to look exactly like
+    'no results'."""
+    if state.get("alerted"):
+        return
+    state["alerted"] = True
+    _alert_admins(
+        "Embedding model isn't responding",
+        f"Calls to {getattr(provider, 'name', 'the embedding provider')} failed "
+        f"{int(state.get('fails', 0))} times in a row ({state.get('last_error', '')}). "
+        "Workspace search, Ask and memory fall back to keyword matching until it recovers.",
+    )
+
+
+def _note_recovery(provider) -> None:
+    _alert_admins(
+        "Embedding model is back",
+        f"{getattr(provider, 'name', 'The embedding provider')} is answering again.",
+    )
+
+
+def _alert_admins(title: str, body: str) -> None:
+    try:
+        import asyncio
+
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _send() -> None:
+        from sqlalchemy import select
+
+        from app.auth.models import User
+        from app.database import SessionLocal
+        from app.notifications import notify_user
+
+        async with SessionLocal() as db:
+            admins = (
+                await db.execute(select(User.id).where(User.role == "admin", User.disabled.is_(False)))
+            ).scalars().all()
+        for uid in admins:
+            await notify_user(
+                user_id=uid, category="system_alert", title=title, body=body,
+                url="/admin?tab=models", tag="promptly-embedder-health",
+            )
+
+    from app.background import spawn
+
+    spawn(_send(), name="embedder-health-alert")
+
+
+class EmbedderUnavailable(RuntimeError):
+    """The embedder is being skipped after repeated failures."""
+
+
+_BREAKER_FAILURES = 3
+_BREAKER_OPEN_SECONDS = 60.0
+# provider id -> consecutive failures / skip-until (monotonic). In-process
+# is fine: the backend runs a single worker.
+_breaker: dict[str, dict[str, float]] = {}
 
 
 # Used to format Python lists into the SQL literal pgvector expects:

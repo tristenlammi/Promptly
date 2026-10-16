@@ -72,12 +72,28 @@ export const discussionsApi = {
     await apiClient.delete(`/workspaces/${workspaceId}/threads/${threadId}`);
   },
 
+  /** The newest page of messages (oldest first); ``before`` loads the
+   *  page before it. */
   async listMessages(
     workspaceId: string,
-    threadId: string
+    threadId: string,
+    before?: string
   ): Promise<DiscussionMessage[]> {
     const { data } = await apiClient.get<DiscussionMessage[]>(
-      `/workspaces/${workspaceId}/threads/${threadId}/messages`
+      `/workspaces/${workspaceId}/threads/${threadId}/messages`,
+      { params: before ? { before } : undefined }
+    );
+    return data;
+  },
+
+  async editMessage(
+    workspaceId: string,
+    messageId: string,
+    body: string
+  ): Promise<DiscussionMessage> {
+    const { data } = await apiClient.patch<DiscussionMessage>(
+      `/workspaces/${workspaceId}/messages/${messageId}`,
+      { body }
     );
     return data;
   },

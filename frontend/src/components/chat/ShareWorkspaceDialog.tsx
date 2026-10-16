@@ -29,7 +29,7 @@ export function ShareWorkspaceDialog({
       open={open}
       onClose={onClose}
       title={`Share "${workspaceTitle}"`}
-      description="Inviting a teammate shares the whole workspace — every chat (including yours), pinned files, notes, canvases, and the system prompt. Whoever sends a message pays for that turn."
+      description="Inviting a teammate shares the workspace's notes, boards, sheets, canvases, files and instructions. Chats stay private to whoever started them until they share them with the workspace. Whoever sends a message pays for that turn."
       widthClass="max-w-xl"
     >
       <WorkspaceMembersPanel

@@ -1,3 +1,4 @@
+import { peekReturnTo } from "@/lib/returnTo";
 import { Navigate, useNavigate } from "react-router-dom";
 
 import { mfaApi } from "@/api/mfa";
@@ -36,7 +37,7 @@ export function MfaEnrollPage() {
         subheading="Your administrator requires two-factor authentication on every account."
         onComplete={(payload) => {
           loginSuccess(payload.user, payload.access_token);
-          navigate("/chat", { replace: true });
+          navigate(peekReturnTo("/chat"), { replace: true });
         }}
         onCancel={() => {
           clear();

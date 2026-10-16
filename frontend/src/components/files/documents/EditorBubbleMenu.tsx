@@ -1,11 +1,14 @@
 import { useState } from "react";
-import { BubbleMenu, type Editor } from "@tiptap/react";
+import type { Editor } from "@tiptap/react";
+import { BubbleMenu } from "@tiptap/react/menus";
+import { NodeSelection } from "@tiptap/pm/state";
 import {
   Bold,
   Code,
   Highlighter,
   Italic,
   Link as LinkIcon,
+  MessageSquarePlus,
   Strikethrough,
   Underline as UnderlineIcon,
 } from "lucide-react";
@@ -16,6 +19,7 @@ import {
   type CalloutVariant,
 } from "./CalloutExtension";
 import { LinkEditorPopover } from "./LinkEditorPopover";
+import { useEditorFormatState } from "./useEditorFormatState";
 
 /**
  * Selection bubble toolbar — the quick inline formatter that floats over a
@@ -53,7 +57,7 @@ function MarkButton({
       className={cn(
         "inline-flex h-7 w-7 items-center justify-center rounded-md transition",
         active
-          ? "bg-[var(--accent)]/15 text-[var(--accent)]"
+          ? "bg-[var(--accent)]/15 text-[var(--accent-text)]"
           : "text-[var(--text)] hover:bg-[var(--hover)]"
       )}
     >
@@ -62,15 +66,68 @@ function MarkButton({
   );
 }
 
-export function EditorBubbleMenu({ editor }: { editor: Editor }) {
+const BUBBLE_OPTIONS = { placement: "top" as const, offset: 8 };
+
+/** Text selections only — a selected image or block has its own controls
+ *  in the context bar (WP-4.5). */
+function showForTextSelection({
+  editor: ed,
+  state,
+  view,
+}: {
+  editor: Editor;
+  state: Editor["state"];
+  view: Editor["view"];
+}): boolean {
+  return (
+    ed.isEditable &&
+    view.hasFocus() &&
+    !state.selection.empty &&
+    !(state.selection instanceof NodeSelection) &&
+    !ed.isActive("codeBlock")
+  );
+}
+
+/** A read-only document's selection — for someone who can comment but
+ *  not edit (WP-6.6). No focus check: a read-only editor never has focus. */
+function showForReadOnlySelection({ editor: ed, state }: { editor: Editor; state: Editor["state"] }): boolean {
+  return !ed.isEditable && !state.selection.empty && !(state.selection instanceof NodeSelection);
+}
+
+/** "Comment" on a selection, for commenters (WP-6.6). */
+export function CommentBubbleMenu({ editor, onComment }: { editor: Editor; onComment: () => void }) {
+  return (
+    <BubbleMenu
+      editor={editor}
+      options={BUBBLE_OPTIONS}
+      shouldShow={showForReadOnlySelection}
+      className="flex items-center gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1 shadow-lg"
+      role="toolbar"
+      aria-label="Comment on the selection"
+    >
+      <MarkButton active={false} onClick={() => onComment()} title="Comment">
+        <MessageSquarePlus className="h-4 w-4" />
+      </MarkButton>
+    </BubbleMenu>
+  );
+}
+
+export function EditorBubbleMenu({ editor, onComment }: { editor: Editor; onComment?: () => void }) {
+  useEditorFormatState(editor);
   const [linkAnchor, setLinkAnchor] = useState<DOMRect | null>(null);
   const inCallout = editor.isActive("callout");
 
   return (
     <BubbleMenu
       editor={editor}
-      tippyOptions={{ duration: 120, maxWidth: "none" }}
+      // Both props must keep their identity across renders: BubbleMenu
+      // re-registers (dispatching a transaction) whenever they change, and
+      // this editor re-renders on every transaction — inline values loop.
+      options={BUBBLE_OPTIONS}
+      shouldShow={showForTextSelection}
       className="flex items-center gap-0.5 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-1 shadow-lg"
+      role="toolbar"
+      aria-label="Selection formatting"
     >
       <MarkButton
         active={editor.isActive("bold")}
@@ -121,6 +178,15 @@ export function EditorBubbleMenu({ editor }: { editor: Editor }) {
       >
         <LinkIcon className="h-4 w-4" />
       </MarkButton>
+
+      {onComment && (
+        <>
+          <span className="mx-0.5 h-5 w-px bg-[var(--border)]" aria-hidden />
+          <MarkButton active={false} onClick={() => onComment()} title="Comment">
+            <MessageSquarePlus className="h-4 w-4" />
+          </MarkButton>
+        </>
+      )}
 
       {linkAnchor && (
         <LinkEditorPopover

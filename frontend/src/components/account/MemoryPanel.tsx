@@ -4,6 +4,7 @@ import {
   Brain,
   Check,
   ChevronDown,
+  ClipboardPaste,
   Download,
   Eraser,
   ExternalLink,
@@ -26,9 +27,10 @@ import {
   type MemoryImportResult,
   MEMORY_CATEGORIES,
 } from "@/api/memory";
-import { useToastStore } from "@/store/toastStore";
+import { useToastStore, toast } from "@/store/toastStore";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { Modal } from "@/components/shared/Modal";
 import { formatRelativeTime } from "@/components/files/helpers";
 import { useAuthStore } from "@/store/authStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -73,6 +75,9 @@ function isStale(m: Memory): boolean {
 }
 
 /** Sort + group memories by the chosen mode. */
+/** Matches MAX_MEMORIES on the server (memory/constants.py). */
+const MEMORY_LIMIT = 200;
+
 function groupMemories(
   memories: Memory[],
   sortMode: SortMode
@@ -274,14 +279,24 @@ export function MemoryPanel() {
       setActionError(apiErrorMessage(err)),
   });
 
+  // A Promptly export (JSON array) or plain text, one fact per line —
+  // pasted, or read from a .txt / .md file (R-329).
   const importMut = useMutation({
-    mutationFn: (items: unknown[]) => memoryApi.import(items),
+    mutationFn: (input: { items: unknown[] } | { text: string }) =>
+      "text" in input ? memoryApi.importText(input.text) : memoryApi.import(input.items),
     onSuccess: (result: MemoryImportResult) => {
       void invalidate();
+      setPasteOpen(false);
+      setPasteText("");
+      const parts = [
+        `Imported ${result.imported} ${result.imported === 1 ? "memory" : "memories"}`,
+      ];
+      if (result.updated) parts.push(`${result.updated} updated`);
+      if (result.skipped) parts.push(`${result.skipped} skipped`);
+      if (result.errors)
+        parts.push(`${result.errors} ${result.errors === 1 ? "error" : "errors"}`);
       pushToast({
-        message: `Imported ${result.imported} ${result.imported === 1 ? "memory" : "memories"}` +
-          (result.skipped ? ` · ${result.skipped} skipped` : "") +
-          (result.errors ? ` · ${result.errors} errors` : ""),
+        message: parts.join(" · "),
         type: result.errors > 0 ? "warning" : "success",
       });
     },
@@ -289,18 +304,43 @@ export function MemoryPanel() {
       setActionError(apiErrorMessage(err)),
   });
 
+  // "Paste facts" dialog.
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState("");
+
   const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
+    let text: string;
     try {
-      const text = await file.text();
-      const parsed = JSON.parse(text);
-      if (!Array.isArray(parsed)) {
+      text = await file.text();
+    } catch {
+      setActionError("Couldn't read that file.");
+      return;
+    }
+    if (!/\.json$/i.test(file.name) && file.type !== "application/json") {
+      // .txt / .md — one fact per line; bullets are stripped server-side.
+      if (!text.trim()) {
+        setActionError("That file is empty.");
+        return;
+      }
+      importMut.mutate({ text });
+      return;
+    }
+    try {
+      const parsed: unknown = JSON.parse(text);
+      const items = Array.isArray(parsed)
+        ? parsed
+        : parsed && typeof parsed === "object" &&
+            Array.isArray((parsed as { memories?: unknown }).memories)
+          ? ((parsed as { memories: unknown[] }).memories)
+          : null;
+      if (!items) {
         setActionError("Import file must be a JSON array.");
         return;
       }
-      importMut.mutate(parsed);
+      importMut.mutate({ items });
     } catch {
       setActionError("Could not parse the import file. Make sure it's a valid Promptly memory export.");
     }
@@ -384,9 +424,13 @@ export function MemoryPanel() {
           />
         )}
 
-        {enabled && (
+        {/* Everything stored stays visible — and deletable, exportable — even
+            with memory off (R-291). Only adding, editing in words and Tidy up
+            need it on. */}
+        {(
           <>
             {/* ── Add new ───────────────────────────────────────────────── */}
+            {enabled && (
             <form
               className="space-y-2"
               onSubmit={(e) => {
@@ -450,6 +494,7 @@ export function MemoryPanel() {
                 </label>
               </div>
             </form>
+            )}
 
             {actionError && (
               <ErrorBox
@@ -518,8 +563,16 @@ export function MemoryPanel() {
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-                        {memories.length}{" "}
+                        {memories.length} / {MEMORY_LIMIT}{" "}
                         {memories.length === 1 ? "memory" : "memories"}
+                        {memories.length >= MEMORY_LIMIT * 0.9 && (
+                          <span
+                            className="ml-1.5 normal-case tracking-normal text-[var(--warning)]"
+                            title="When memory is full, the oldest unpinned facts Promptly picked up on its own make room for new ones. Facts you added or pinned are never removed."
+                          >
+                            · nearly full
+                          </span>
+                        )}
                       </span>
                       {/* Sort dropdown */}
                       <div className="relative">
@@ -552,7 +605,7 @@ export function MemoryPanel() {
                                     "flex w-full items-center gap-2 px-3 py-1.5 text-xs",
                                     "hover:bg-[var(--hover)]",
                                     s === sortMode
-                                      ? "text-[var(--accent)]"
+                                      ? "text-[var(--accent-text)]"
                                       : "text-[var(--text)]"
                                   )}
                                 >
@@ -588,7 +641,7 @@ export function MemoryPanel() {
                         className={cn(
                           "h-7 rounded-input border px-2.5 text-xs",
                           selectMode
-                            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent)]"
+                            ? "border-[var(--accent)] bg-[var(--accent)]/10 text-[var(--accent-text)]"
                             : "border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
                         )}
                       >
@@ -660,10 +713,10 @@ export function MemoryPanel() {
             )}
 
             {/* ── Edit in your own words ───────────────────────────────── */}
-            {memories.length > 0 && !selectMode && (
+            {enabled && memories.length > 0 && !selectMode && (
               <div className="rounded-card border border-[var(--border)] bg-[var(--bg)] p-3">
                 <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-[var(--text)]">
-                  <Eraser className="h-3.5 w-3.5 text-[var(--accent)]" />
+                  <Eraser className="h-3.5 w-3.5 text-[var(--accent-text)]" />
                   Change memory in your own words
                 </div>
                 <div className="flex items-center gap-2">
@@ -726,7 +779,7 @@ export function MemoryPanel() {
                           )}
                           {change.op === "update" && (
                             <span className="text-[var(--text-muted)]">
-                              <span className="font-medium text-[var(--accent)]">
+                              <span className="font-medium text-[var(--accent-text)]">
                                 Change
                               </span>{" "}
                               <span className="line-through">
@@ -777,9 +830,9 @@ export function MemoryPanel() {
             {/* ── Footer: Export / Import / Forget ─────────────────────── */}
             {!selectMode && (
               <div className="flex flex-wrap items-center justify-between gap-2">
-                {/* Tidy up + Export + Import */}
-                <div className="flex items-center gap-1.5">
-                  {memories.length > 1 && (
+                {/* Tidy up + Export + Import + Paste */}
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {enabled && memories.length > 1 && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -804,9 +857,14 @@ export function MemoryPanel() {
                       Tidy up
                     </Button>
                   )}
-                  <a
-                    href={memoryApi.exportUrl()}
-                    download="promptly-memories.json"
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void memoryApi
+                        .exportFile()
+                        .catch(() => toast.error("Couldn't export your memories."));
+                    }}
+                    disabled={memories.length === 0}
                     className={cn(
                       "inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-xs",
                       "border border-[var(--border)] bg-[var(--bg)] text-[var(--text-muted)]",
@@ -817,15 +875,16 @@ export function MemoryPanel() {
                   >
                     <Download className="h-3 w-3" />
                     Export
-                  </a>
+                  </button>
                   <Button
                     variant="ghost"
                     size="sm"
                     disabled={importMut.isPending}
                     onClick={() => importFileRef.current?.click()}
+                    title="Import a Promptly export (.json), or a .txt / .md file with one fact per line"
                     className="border border-[var(--border)] text-[var(--text-muted)]"
                   >
-                    {importMut.isPending ? (
+                    {importMut.isPending && !pasteOpen ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <Upload className="h-3.5 w-3.5" />
@@ -835,10 +894,71 @@ export function MemoryPanel() {
                   <input
                     ref={importFileRef}
                     type="file"
-                    accept="application/json,.json"
+                    accept="application/json,.json,text/plain,.txt,text/markdown,.md"
                     className="hidden"
                     onChange={(e) => void handleImportFile(e)}
                   />
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={importMut.isPending}
+                    onClick={() => {
+                      setActionError(null);
+                      setPasteOpen(true);
+                    }}
+                    title="Paste facts from another assistant, one per line"
+                    className="border border-[var(--border)] text-[var(--text-muted)]"
+                  >
+                    <ClipboardPaste className="h-3.5 w-3.5" />
+                    Paste facts
+                  </Button>
+                  <Modal
+                    open={pasteOpen}
+                    onClose={() => setPasteOpen(false)}
+                    title="Paste facts"
+                    description="One fact per line — for example, memories copied from another assistant. Bullets and numbering are removed, and facts you already have are skipped."
+                    dismissible={!pasteText.trim()}
+                    footer={
+                      <>
+                        {actionError && (
+                          <span className="mr-auto text-xs text-[var(--danger)]">
+                            {actionError}
+                          </span>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setPasteOpen(false)}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={!pasteText.trim() || importMut.isPending}
+                          onClick={() => importMut.mutate({ text: pasteText })}
+                        >
+                          {importMut.isPending && (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          )}
+                          Import
+                        </Button>
+                      </>
+                    }
+                  >
+                    <textarea
+                      value={pasteText}
+                      onChange={(e) => setPasteText(e.target.value)}
+                      autoFocus
+                      rows={10}
+                      placeholder={"- User is a backend developer\n- User prefers concise answers\n- User lives in Perth"}
+                      className={cn(
+                        "w-full resize-y rounded-input border border-[var(--border)]",
+                        "bg-[var(--bg)] px-3 py-2 text-sm text-[var(--text)]",
+                        "placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none"
+                      )}
+                    />
+                  </Modal>
                 </div>
 
                 {/* Forget everything */}
@@ -949,7 +1069,7 @@ function MemoryRow({
               aria-label="Save"
               disabled={!editText.trim() || updatePending}
               onClick={onSaveEdit}
-              className="mt-0.5 rounded p-1 text-[var(--accent)] hover:bg-[var(--accent)]/10 disabled:opacity-50"
+              className="mt-0.5 rounded p-1 text-[var(--accent-text)] hover:bg-[var(--accent)]/10 disabled:opacity-50"
             >
               <Check className="h-4 w-4" />
             </button>
@@ -1001,7 +1121,7 @@ function MemoryRow({
             className={cn(
               "mt-0.5 shrink-0 rounded p-0.5 transition-colors disabled:opacity-50",
               m.pinned
-                ? "text-[var(--accent)]"
+                ? "text-[var(--accent-text)]"
                 : "text-[var(--border)] hover:text-[var(--text-muted)]"
             )}
           >
@@ -1013,7 +1133,7 @@ function MemoryRow({
             {/* Provenance row */}
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
               {m.category && CATEGORY_LABELS[m.category] && (
-                <span className="inline-flex items-center rounded px-1 py-0 text-[10px] font-medium uppercase tracking-wide text-[var(--accent)] bg-[var(--accent)]/10">
+                <span className="inline-flex items-center rounded px-1 py-0 text-[10px] font-medium uppercase tracking-wide text-[var(--accent-text)] bg-[var(--accent)]/10">
                   {CATEGORY_LABELS[m.category]}
                 </span>
               )}
@@ -1046,7 +1166,7 @@ function MemoryRow({
                   href={`/chat/${m.source_conversation_id}`}
                   title="Open source conversation"
                   target="_self"
-                  className="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent)]"
+                  className="text-[10px] text-[var(--text-muted)] hover:text-[var(--accent-text)]"
                 >
                   <ExternalLink className="inline h-2.5 w-2.5" />
                 </a>

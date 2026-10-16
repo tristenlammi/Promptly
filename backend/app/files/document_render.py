@@ -93,6 +93,7 @@ _ALLOWED_TAGS = [
     "div",
     "details",
     "em",
+    "figcaption",
     "figure",
     "h1",
     "h2",
@@ -112,7 +113,9 @@ _ALLOWED_TAGS = [
     "source",
     "span",
     "strong",
+    "sub",
     "summary",
+    "sup",
     "table",
     "tbody",
     "td",
@@ -146,29 +149,96 @@ def _iframe_attr_ok(tag: str, name: str, value: str) -> bool:
     return False
 
 
-_ALLOWED_ATTRS: dict[str, Any] = {
-    "*": [
-        "class",
-        "id",
-        "style",
-        "data-checked",
-        "data-type",
-        "data-variant",  # callout colour
-        "dir",
-        "lang",
-    ],
-    "a": ["href", "title", "target", "rel"],
-    "audio": ["controls", "preload", "src"],
-    "img": ["src", "alt", "title", "width", "height"],
-    "source": ["src", "type"],
-    "iframe": _iframe_attr_ok,
-    "td": ["colspan", "rowspan"],
-    "th": ["colspan", "rowspan"],
-    "code": ["class"],
-    "pre": ["class"],
-    "mark": ["style"],
-    "span": ["style"],
+# Inline styles the editor produces (R-223): text / highlight colour,
+# alignment, font family and size, and table / image widths. bleach
+# without a CSS sanitizer blanked every ``style`` (colours "randomly
+# disappeared" from previews, exports and restores); instead each
+# declaration is checked here and a style with anything else is dropped.
+_LENGTH = r"\d{1,4}(?:\.\d{1,3})?(?:px|pt|em|rem|%)"
+_STYLE_VALUE = {
+    "color": _SAFE_COLOR,
+    "background-color": _SAFE_COLOR,
+    "text-align": re.compile(r"^(left|right|center|justify|start|end)$"),
+    "font-family": re.compile(r"^[A-Za-z0-9 ,'\"-]{1,120}$"),
+    "font-size": re.compile(rf"^{_LENGTH}$"),
+    "width": re.compile(rf"^{_LENGTH}$"),
+    "min-width": re.compile(rf"^{_LENGTH}$"),
 }
+_STYLE_DANGER = re.compile(r"[\\/*<>@{}]|url\s*\(|expression|&#", re.I)
+
+
+def safe_style(value: str) -> bool:
+    """True when every declaration in ``value`` is an allowed property with
+    a safe value (no ``url()``, ``expression``, comments or escapes)."""
+    if not value or len(value) > 500 or _STYLE_DANGER.search(value):
+        return False
+    decls = [d.strip() for d in value.split(";") if d.strip()]
+    if not decls:
+        return False
+    for decl in decls:
+        prop, sep, val = decl.partition(":")
+        prop, val = prop.strip().lower(), val.strip()
+        pattern = _STYLE_VALUE.get(prop)
+        if not sep or pattern is None or not pattern.match(val):
+            return False
+    return True
+
+
+_COMMON_ATTRS = {
+    "class",
+    "id",
+    "data-checked",
+    "data-type",
+    "data-variant",  # callout colour
+    "data-align",  # image / figure alignment
+    "data-latex",  # maths source
+    "data-caption",
+    "data-user-id",  # @-mentioned person
+    # A suggestion (suggestion mode): ins | del, its id, who and when.
+    "data-suggest",
+    "data-id",
+    "data-author",
+    "data-author-id",
+    "data-at",
+    "dir",
+    "lang",
+}
+
+_PER_TAG = {
+    "a": {"href", "title", "target", "rel"},
+    "audio": {"controls", "preload", "src"},
+    "img": {"src", "alt", "title", "width", "height"},
+    "source": {"src", "type"},
+    "td": {"colspan", "rowspan"},
+    "th": {"colspan", "rowspan"},
+}
+
+
+def _attr_ok(tag: str, name: str, value: str) -> bool:
+    if tag == "iframe":
+        return _iframe_attr_ok(tag, name, value)
+    if name in _PER_TAG.get(tag, ()):
+        return True
+    if name == "style":
+        return safe_style(value)
+    return name in _COMMON_ATTRS
+
+
+# One callable for every tag (bleach consults a tag's own entry *instead
+# of* "*", so per-tag lists would bypass the style check).
+_ALLOWED_ATTRS: Any = _attr_ok
+
+
+class _StyleSanitizer:
+    """bleach 6 empties every ``style`` unless it's given a CSS sanitizer;
+    it only calls ``sanitize_css``. Styles reaching here already passed
+    :func:`safe_style` in the attribute filter — keep them as written."""
+
+    def sanitize_css(self, style: str) -> str:
+        return style if safe_style(style) else ""
+
+
+_CSS_SANITIZER = _StyleSanitizer()
 
 # Protocol allowlist for href / src. Data URLs are intentionally *not*
 # allowed on <a> so a document can't smuggle an inline HTML payload.
@@ -187,6 +257,7 @@ def sanitize_document_html(raw: str) -> str:
         tags=_ALLOWED_TAGS,
         attributes=_ALLOWED_ATTRS,
         protocols=_ALLOWED_PROTOCOLS,
+        css_sanitizer=_CSS_SANITIZER,
         strip=True,
         strip_comments=True,
     )
@@ -196,6 +267,25 @@ def sanitize_document_html(raw: str) -> str:
 # --------------------------------------------------------------------
 # Y.Doc → HTML walker
 # --------------------------------------------------------------------
+def _text_style(attrs: dict[str, Any]) -> str:
+    parts = []
+    for key, prop in (("color", "color"), ("fontFamily", "font-family"), ("fontSize", "font-size")):
+        val = attrs.get(key)
+        if val is None or val == "":
+            continue
+        decl = f"{prop}:{str(val).strip()}"
+        if safe_style(decl):
+            parts.append(decl)
+    return ";".join(parts)
+
+
+def _align_attr(attrs: dict[str, Any]) -> str:
+    align = attrs.get("textAlign")
+    if align and str(align) in ("center", "right", "justify"):
+        return f' style="text-align:{align}"'
+    return ""
+
+
 def _render_marks(text: str, formats: dict[str, Any] | None) -> str:
     """Wrap ``text`` in the mark tags specified by ``formats``.
 
@@ -230,18 +320,24 @@ def _render_marks(text: str, formats: dict[str, Any] | None) -> str:
         elif mark_name == "code":
             open_tags.append("<code>")
             close_tags.append("</code>")
+        elif mark_name == "subscript":
+            open_tags.append("<sub>")
+            close_tags.append("</sub>")
+        elif mark_name == "superscript":
+            open_tags.append("<sup>")
+            close_tags.append("</sup>")
         elif mark_name == "mention":
-            # @person chip — plain styled span; text carries the @name.
-            open_tags.append('<span class="doc-mention" data-type="mention">')
+            # @person chip; ``data-user-id`` says who (R-232).
+            uid = (attrs or {}).get("userId") if isinstance(attrs, dict) else None
+            uid_attr = f' data-user-id="{html.escape(str(uid))}"' if uid and re.fullmatch(r"[0-9a-fA-F-]{36}", str(uid)) else ""
+            open_tags.append(f'<span class="doc-mention" data-type="mention"{uid_attr}>')
             close_tags.append("</span>")
         elif mark_name == "textStyle":
-            # Text colour (@tiptap/extension-color). Only emit a safe colour
-            # token (hex / rgb / named) so the style value can't smuggle CSS.
-            color = (attrs or {}).get("color") if isinstance(attrs, dict) else None
-            if color and _SAFE_COLOR.match(str(color).strip()):
-                open_tags.append(
-                    f'<span style="color:{html.escape(str(color).strip())}">'
-                )
+            # Colour, font family and size ride on TextStyle. Only values
+            # the style allowlist accepts are emitted.
+            style = _text_style(attrs if isinstance(attrs, dict) else {})
+            if style:
+                open_tags.append(f'<span style="{html.escape(style)}">')
                 close_tags.append("</span>")
         elif mark_name == "highlight":
             color = (attrs or {}).get("color") if isinstance(attrs, dict) else None
@@ -303,7 +399,44 @@ def _wrap(tag_name: str, attrs: dict[str, Any], inner: str) -> str:
         except (TypeError, ValueError):
             level = 1
         level = max(1, min(6, level))
-        return f"<h{level}>{inner}</h{level}>"
+        return f"<h{level}{_align_attr(attrs)}>{inner}</h{level}>"
+
+    if tag_name == "paragraph":
+        return f"<p{_align_attr(attrs)}>{inner}</p>"
+
+    # Table cells keep their spans and widths (merged cells used to come
+    # out as plain cells in previews, exports and the Word download).
+    if tag_name in ("tableCell", "tableHeader"):
+        cell = "th" if tag_name == "tableHeader" else "td"
+        bits = [f"<{cell}"]
+        for key in ("colspan", "rowspan"):
+            try:
+                n = int(float(attrs.get(key) or 1))
+            except (TypeError, ValueError):
+                n = 1
+            if n > 1:
+                bits.append(f' {key}="{min(n, 100)}"')
+        widths = attrs.get("colwidth")
+        if isinstance(widths, str):
+            widths = [w for w in widths.split(",") if w.strip()]
+        try:
+            total = sum(int(float(w)) for w in widths or [] if w is not None)
+        except (TypeError, ValueError):
+            total = 0
+        if total > 0:
+            bits.append(f' style="width:{min(total, 4000)}px"')
+        return "".join(bits) + f">{inner}</{cell}>"
+
+    if tag_name == "pageBreak":
+        return '<div class="doc-page-break" data-type="page-break"></div>'
+
+    # Maths: the LaTeX source, for the reader to render (and as text for
+    # search and exports).
+    if tag_name in ("inlineMath", "blockMath"):
+        esc = html.escape(str(attrs.get("latex") or ""))
+        if tag_name == "inlineMath":
+            return f'<span class="doc-math" data-type="inline-math" data-latex="{esc}">{esc}</span>'
+        return f'<div class="doc-math" data-type="block-math" data-latex="{esc}">{esc}</div>'
 
     # Code block: lowlight passes ``language`` via attrs.
     if tag_name == "codeBlock":
@@ -333,7 +466,8 @@ def _wrap(tag_name: str, attrs: dict[str, Any], inner: str) -> str:
         bits.append("</ol>")
         return "".join(bits)
 
-    # Image: attrs.src / alt / title.
+    # Image: attrs.src / alt / title, plus width (resize), caption and
+    # alignment; a captioned or aligned image becomes a <figure>.
     if tag_name == "image":
         src = attrs.get("src", "")
         alt = attrs.get("alt", "")
@@ -343,8 +477,21 @@ def _wrap(tag_name: str, attrs: dict[str, Any], inner: str) -> str:
             parts.append(f' alt="{html.escape(str(alt))}"')
         if title:
             parts.append(f' title="{html.escape(str(title))}"')
+        try:
+            width = int(float(attrs.get("width") or 0))
+        except (TypeError, ValueError):
+            width = 0
+        if width > 0:
+            parts.append(f' width="{min(width, 4000)}"')
         parts.append(" />")
-        return "".join(parts)
+        img = "".join(parts)
+        caption = str(attrs.get("caption") or "").strip()
+        align = str(attrs.get("align") or "")
+        if not caption and align not in ("left", "right"):
+            return img
+        align_attr = f' data-align="{align}"' if align in ("left", "center", "right") else ""
+        cap = f"<figcaption>{html.escape(caption)}</figcaption>" if caption else ""
+        return f'<figure class="doc-figure"{align_attr}>{img}{cap}</figure>'
 
     # Audio (custom node view): attrs.src + optional controls.
     if tag_name == "audio":

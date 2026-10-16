@@ -59,6 +59,9 @@ class WorkspaceParticipant(BaseModel):
     # Appearance for chips — mirrors ShareUserBrief.
     avatar_url: str | None = None
     avatar_color: str | None = None
+    # A collaborator's role ("admin" / "editor" / "viewer") so every member
+    # can see who the admins are; None on the owner row (R-180).
+    role: str | None = None
 
 
 class WorkspaceSummary(BaseModel):
@@ -81,6 +84,8 @@ class WorkspaceSummary(BaseModel):
     memory_model_id: str | None = None
     memory_provider_id: uuid.UUID | None = None
     archived_at: datetime | None
+    trashed_at: datetime | None = None
+    is_template: bool = False
     created_at: datetime
     updated_at: datetime
     # Rolled up by the list endpoint — cheap enough via ``COUNT(*)``
@@ -127,6 +132,9 @@ class WorkspaceDetail(WorkspaceSummary):
     # list without a second round-trip.
     owner: WorkspaceParticipant | None = None
     collaborators: list[WorkspaceParticipant] = Field(default_factory=list)
+    # The caller's own share on this workspace (None for the owner) — what
+    # "Leave workspace" revokes (R-180).
+    my_share_id: uuid.UUID | None = None
     # Per-turn context budget (Phase P2). ``per_turn_tokens`` is the
     # honest cost every chat in the workspace pays: instructions plus the
     # full pinned text in full-dump mode, or instructions plus a top-k
@@ -174,7 +182,7 @@ class WorkspaceCreate(BaseModel):
     default_provider_id: uuid.UUID | None = None
     # Optional starter template key (4.6): seeds notes / a labelled board /
     # a tuned system prompt. Unknown keys are ignored (blank workspace).
-    template: str | None = Field(default=None, max_length=40)
+    template: str | None = Field(default=None, max_length=60)
 
 
 class WorkspaceUpdate(BaseModel):
@@ -202,6 +210,12 @@ class WorkspaceUpdate(BaseModel):
     memory_provider_id: uuid.UUID | None = None
     # Drive cap (owner-only, enforced by the router). Send null to clear.
     storage_quota_bytes: int | None = Field(default=None, ge=0)
+    # The instructions the client started editing from. When sent with
+    # ``system_prompt`` and they no longer match what's stored, someone else
+    # changed them meanwhile — 409 instead of silently overwriting (R-179).
+    expected_system_prompt: str | None = Field(default=None, max_length=20_000)
+    # Offer this workspace as a template for new ones (R-204).
+    is_template: bool | None = None
 
 
 # ---------------------------------------------------------------------
@@ -434,19 +448,26 @@ class SpreadsheetResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
-    workspace_id: uuid.UUID
+    workspace_id: uuid.UUID | None
     title: str
     data: Any | None
+    # The save counter the next save must be based on (0190, WP-3.3).
+    data_version: int = 0
 
 
 class SpreadsheetSaveRequest(BaseModel):
     """Debounced save from the spreadsheet editor. ``data`` is the full
     Fortune-sheet workbook; ``content_text`` is the client-flattened cell
-    text used for workspace RAG."""
+    text used for workspace RAG.
+
+    ``data_version`` is the version the editor loaded or last saved: if
+    someone saved since, the save is refused (409) instead of overwriting
+    their tabs and structure. Older clients omit it and save as before."""
 
     data: Any
     content_text: str | None = None
     title: str | None = Field(default=None, max_length=255)
+    data_version: int | None = None
 
 
 class RosterResponse(BaseModel):
@@ -459,6 +480,7 @@ class RosterResponse(BaseModel):
     workspace_id: uuid.UUID
     title: str
     data: Any | None
+    revision: int = 0
 
 
 class RosterSaveRequest(BaseModel):
@@ -469,6 +491,9 @@ class RosterSaveRequest(BaseModel):
     data: Any
     content_text: str | None = None
     title: str | None = Field(default=None, max_length=255)
+    # The revision the editor loaded. A mismatch means someone else saved
+    # in between (or the editor never loaded the real roster) → 409.
+    base_revision: int | None = None
 
 
 class WorkspaceMemoryResponse(BaseModel):

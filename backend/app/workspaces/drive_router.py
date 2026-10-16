@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from fastapi import (
@@ -35,6 +36,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     HTTPException,
+    Request,
     Response,
     UploadFile,
     status,
@@ -43,26 +45,12 @@ from fastapi import Form
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.files.disk_guard import require_disk_room
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.chat.models import Workspace, WorkspaceFile
 from app.database import get_db
 from app.files.models import FileFolder, UserFile
-from app.files.quota import get_quota
-from app.files.safety import (
-    UnsafeUploadError,
-    sanitize_filename,
-    sniff_and_validate,
-    strip_image_metadata_in_place,
-)
-from app.files.storage import (
-    MAX_FILE_BYTES,
-    absolute_path,
-    copy_stream_to_disk_async,
-    delete_blob,
-    ensure_bucket,
-    storage_path_for,
-)
 from app.files.system_folders import (
     create_workspace_folder_tree,
     get_or_create_subfolder,
@@ -175,6 +163,77 @@ async def _drive_used_bytes(db: AsyncSession, workspace_id: uuid.UUID) -> int:
         .where(WorkspaceFile.workspace_id == workspace_id)
     )
     return int(used or 0)
+
+
+# ---------------------------------------------------------------------
+# Uploads go through the one Drive upload (WP-7.6)
+# ---------------------------------------------------------------------
+
+
+@dataclass
+class WorkspaceUploadTarget:
+    """Where an upload into a workspace drive lands: the owner's tree."""
+
+    ws: Workspace
+    owner: User
+    root: FileFolder
+    folder: FileFolder
+
+
+async def workspace_upload_target(
+    db: AsyncSession, workspace_id: uuid.UUID, user: User, folder_id: uuid.UUID | None
+) -> WorkspaceUploadTarget:
+    """The workspace (editors only), its owner — whose storage every
+    workspace byte uses — and the folder in its drive to upload into."""
+    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
+    require_workspace_write(access_role)
+    owner = await _workspace_owner(db, ws, user)
+    root = await _files_root(db, ws, owner)
+    folder = root
+    if folder_id is not None and folder_id != root.id:
+        folder = await _folder_in_subtree(db, folder_id, root, owner.id)
+    return WorkspaceUploadTarget(ws=ws, owner=owner, root=root, folder=folder)
+
+
+async def workspace_cap_exceeded(db: AsyncSession, ws: Workspace, size: int) -> bool:
+    """Would ``size`` more bytes go over the workspace's own storage cap?"""
+    if ws.storage_quota_bytes is None:
+        return False
+    return await _drive_used_bytes(db, ws.id) + size > ws.storage_quota_bytes
+
+
+async def adopt_workspace_upload(
+    db: AsyncSession, target: WorkspaceUploadTarget, row: UserFile, user: User, background: BackgroundTasks | None
+) -> WorkspaceFile:
+    """A file just uploaded into the drive becomes the workspace's: pinned
+    (context for its chats), indexed, and announced to its automations."""
+    pin = WorkspaceFile(workspace_id=target.ws.id, file_id=row.id, pinned_by=user.id)
+    db.add(pin)
+    target.ws.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(pin)
+    if background is not None:
+        background.add_task(index_file_for_workspace, target.ws.id, row.id)
+    else:  # pragma: no cover — every HTTP path has background tasks
+        from app.background import spawn
+
+        spawn(index_file_for_workspace(target.ws.id, row.id), name=f"ws_index_{row.id}")
+    from app.tasks.events import EVENT_FILE_ADDED, emit_workspace_event
+
+    emit_workspace_event(
+        workspace_id=target.ws.id,
+        event=EVENT_FILE_ADDED,
+        payload={
+            "file_id": str(row.id),
+            "filename": row.filename,
+            "mime_type": row.mime_type,
+            "size_bytes": row.size_bytes,
+            "uploaded_by": user.username,
+            "folder_id": str(target.folder.id),
+            "folder_name": target.folder.name,
+        },
+    )
+    return pin
 
 
 def _pin_to_drive_file(
@@ -302,194 +361,35 @@ async def get_drive(
 )
 async def upload_drive_file(
     workspace_id: uuid.UUID,
+    request: Request,
     file: UploadFile,
     background: BackgroundTasks,
     folder_id: uuid.UUID | None = Form(default=None),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
+    _room: None = Depends(require_disk_room),  # WP-7.2
 ) -> WorkspaceDriveFile:
     """Upload straight into the workspace drive.
 
-    The file is stored in the *owner's* bucket under the workspace's
-    ``Files`` folder (or a subfolder) no matter who uploads — same
-    ownership rule as notes/canvases — then pinned and indexed. Applies
-    the same sanitise → stream → sniff → EXIF-strip pipeline as the
-    personal-Drive upload, plus the workspace's own storage cap.
-    """
-    ws, access_role = await get_accessible_workspace(workspace_id, user, db)
-    require_workspace_write(access_role)
-    owner = await _workspace_owner(db, ws, user)
-    root = await _files_root(db, ws, owner)
+    The same upload as Drive's (``POST /api/files/`` with ``workspace_id``,
+    WP-7.6) — staged, sniffed, quota-locked, audited — so there's one
+    upload path, not two that drift. Stored in the *owner's* bucket under
+    the workspace's ``Files`` folder no matter who uploads, then pinned and
+    indexed."""
+    from app.files.router import upload_file
 
-    target = root
-    if folder_id is not None and folder_id != root.id:
-        target = await _folder_in_subtree(db, folder_id, root, owner.id)
-
-    # Filename hygiene before anything touches disk.
-    try:
-        clean_name = sanitize_filename(file.filename)
-    except UnsafeUploadError as e:
-        await file.close()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        )
-    import os
-
-    ext = os.path.splitext(clean_name)[1].lower()
-
-    # The owner's personal quota backs every workspace byte.
-    quota = await get_quota(db, owner)
-    if quota.cap_bytes is not None and quota.used_bytes >= quota.cap_bytes:
-        await file.close()
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=(
-                "The workspace owner's storage is full — free up space or "
-                "raise their quota before adding more files."
-            ),
-        )
-
-    new_id = uuid.uuid4()
-    rel_path = storage_path_for(owner.id, new_id, ext)
-    ensure_bucket(owner.id)
-    try:
-        size = await copy_stream_to_disk_async(
-            file.file, rel_path, size_limit=MAX_FILE_BYTES
-        )
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=(
-                f"File exceeds maximum size of "
-                f"{MAX_FILE_BYTES // (1024 * 1024)} MB"
-            ),
-        )
-    finally:
-        await file.close()
-
-    if size == 0:
-        delete_blob(rel_path)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The upload was empty — try attaching the file again.",
-        )
-
-    abs_path = absolute_path(rel_path)
-    try:
-        canonical_mime = sniff_and_validate(
-            abs_path,
-            declared_filename=clean_name,
-            declared_mime=file.content_type,
-        )
-    except UnsafeUploadError as e:
-        delete_blob(rel_path)
-        logger.warning(
-            "workspace %s: rejected drive upload %r (%s)",
-            ws.id,
-            clean_name,
-            e.code,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        )
-
-    strip_image_metadata_in_place(abs_path, canonical_mime)
-    try:
-        size = abs_path.stat().st_size
-    except OSError:
-        pass
-    if size <= 0:
-        delete_blob(rel_path)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="The upload finished but the file was empty on disk.",
-        )
-
-    # Exact-size checks: owner quota, then the workspace's own cap.
-    if quota.cap_bytes is not None and quota.used_bytes + size > quota.cap_bytes:
-        delete_blob(rel_path)
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=(
-                "This upload would push the workspace owner over their "
-                "storage limit."
-            ),
-        )
-    if ws.storage_quota_bytes is not None:
-        used = await _drive_used_bytes(db, ws.id)
-        if used + size > ws.storage_quota_bytes:
-            delete_blob(rel_path)
-            raise HTTPException(
-                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail=(
-                    "This upload would exceed the workspace's storage cap. "
-                    "Remove some files or raise the cap in Settings."
-                ),
-            )
-
-    row = UserFile(
-        id=new_id,
-        user_id=owner.id,
-        folder_id=target.id,
-        filename=clean_name,
-        original_filename=clean_name,
-        mime_type=canonical_mime,
-        size_bytes=size,
-        storage_path=rel_path,
+    resp = await upload_file(
+        request=request, file=file, scope="mine", folder_id=folder_id, route=None, on_conflict="allow",
+        last_modified=None, workspace_id=workspace_id, background=background, db=db, user=user, _room=None,
     )
-    db.add(row)
-    # No ORM relationship wires ``WorkspaceFile`` → ``UserFile``, so
-    # SQLAlchemy's unit of work doesn't know the pin depends on the file —
-    # flush the file first or the pin's FK insert races ahead and fails.
-    await db.flush()
-    pin = WorkspaceFile(workspace_id=ws.id, file_id=new_id, pinned_by=user.id)
-    db.add(pin)
-    ws.updated_at = datetime.now(timezone.utc)
-    try:
-        await db.commit()
-    except Exception:
-        delete_blob(rel_path)
-        raise
-    await db.refresh(row)
-    await db.refresh(pin)
-
-    # FTS extraction — best effort, post-commit (mirrors the Drive upload).
-    from app.files.extraction import extract_content_text
-
-    try:
-        content_text = extract_content_text(row)
-        if content_text is not None:
-            row.content_text = content_text
-            await db.commit()
-            await db.refresh(row)
-    except Exception:  # noqa: BLE001
-        logger.exception(
-            "FTS extraction failed for workspace drive file %s", row.id
+    target = await workspace_upload_target(db, workspace_id, user, folder_id)
+    pin = (
+        await db.execute(
+            select(WorkspaceFile).where(WorkspaceFile.workspace_id == workspace_id, WorkspaceFile.file_id == resp.id)
         )
-        await db.rollback()
-
-    background.add_task(index_file_for_workspace, ws.id, row.id)
-
-    # Automations (E-batch): fire event-triggered flows. Best-effort,
-    # non-blocking — a flow hiccup can never fail an upload.
-    from app.tasks.events import EVENT_FILE_ADDED, emit_workspace_event
-
-    emit_workspace_event(
-        workspace_id=ws.id,
-        event=EVENT_FILE_ADDED,
-        payload={
-            "file_id": str(row.id),
-            "filename": row.filename,
-            "mime_type": row.mime_type,
-            "size_bytes": row.size_bytes,
-            "uploaded_by": user.username,
-            "folder_id": str(target.id),
-            "folder_name": target.name,
-        },
-    )
-    return _pin_to_drive_file(
-        pin, row, in_subtree=True, root_id=root.id, owner=_participant(user)
-    )
+    ).scalar_one()
+    row = await db.get(UserFile, resp.id)
+    return _pin_to_drive_file(pin, row, in_subtree=True, root_id=target.root.id, owner=_participant(user))
 
 
 # ---------------------------------------------------------------------

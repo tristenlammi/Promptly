@@ -1,15 +1,22 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   Download,
   ExternalLink,
+  FilePen,
+  FileSpreadsheet,
+  MessageSquareText,
   FolderInput,
   Share2,
   Star,
   StarOff,
   Trash2,
   X,
+  History,
 } from "lucide-react";
 
 import type { FileItem, FolderItem } from "@/api/files";
+import { filesShellApi } from "@/api/filesShell";
+import { MediaDetails, isMediaFile } from "@/components/files/MediaDetails";
 import { DriveItemIcon } from "./DriveItemIcon";
 import { DriveThumb } from "./DriveThumb";
 import { GranteesPill } from "./GranteesPill";
@@ -40,6 +47,10 @@ export function DriveDetailsPanel({
   onStar,
   onUnstar,
   onTrash,
+  onAsk,
+  onOpenAsDocument,
+  onOpenAsSheet,
+  onHistory,
 }: {
   file?: FileItem | null;
   folder?: FolderItem | null;
@@ -52,7 +63,22 @@ export function DriveDetailsPanel({
   onStar: () => void;
   onUnstar: () => void;
   onTrash: () => void;
+  /** "Ask about this" — a chat with this file, or a folder's files. */
+  onAsk?: () => void;
+  /** A .docx: make an editable Promptly document from it. */
+  onOpenAsDocument?: () => void;
+  /** An .xlsx / .ods / .csv: make an editable Promptly sheet from it. */
+  onOpenAsSheet?: () => void;
+  /** Its earlier versions (WP-8.1). */
+  onHistory?: () => void;
 }) {
+  // Owner, location and dates (WP-3.5) — one small read per selection.
+  const { data: details } = useQuery({
+    queryKey: ["file-details", file?.id],
+    queryFn: () => filesShellApi.details(file!.id),
+    enabled: !!file,
+    staleTime: 30_000,
+  });
   const isFolder = !!folder;
   const name = folder ? folder.name : file ? displayFileName(file) : "";
   const starred = folder ? !!folder.starred_at : !!file?.starred_at;
@@ -108,13 +134,42 @@ export function DriveDetailsPanel({
           )}
           <Meta
             label="Modified"
-            value={updatedAt ? formatRelativeTime(updatedAt) : "—"}
+            value={
+              (details?.modified_at ?? updatedAt)
+                ? `${absoluteDate(details?.modified_at ?? updatedAt!)} (${formatRelativeTime(details?.modified_at ?? updatedAt!)})`
+                : "—"
+            }
           />
+          {(details?.created_at ?? folder?.created_at) && (
+            <Meta label="Created" value={absoluteDate(details?.created_at ?? folder!.created_at)} />
+          )}
+          {details && (
+            <>
+              <Meta label="Owner" value={details.is_owner ? "You" : (details.owner_name ?? "—")} />
+              <Meta label="Location" value={details.location} />
+              {details.versions > 0 && (
+                <Meta label="Versions kept" value={String(details.versions)} />
+              )}
+            </>
+          )}
         </dl>
+        {file && isMediaFile(file.mime_type) && <MediaDetails fileId={file.id} />}
 
         {/* Actions */}
         <div className="mt-5 space-y-1">
-          <PanelAction icon={<ExternalLink className="h-4 w-4" />} label={isFolder ? "Open" : "Preview"} onClick={onOpen} />
+          <PanelAction icon={<ExternalLink className="h-4 w-4" />} label="Open" onClick={onOpen} />
+          {onOpenAsDocument && (
+            <PanelAction icon={<FilePen className="h-4 w-4" />} label="Open in Promptly Docs" onClick={onOpenAsDocument} />
+          )}
+          {onOpenAsSheet && (
+            <PanelAction icon={<FileSpreadsheet className="h-4 w-4" />} label="Open in Promptly Sheets" onClick={onOpenAsSheet} />
+          )}
+          {onHistory && (
+            <PanelAction icon={<History className="h-4 w-4" />} label="Version history" onClick={onHistory} />
+          )}
+          {onAsk && (
+            <PanelAction icon={<MessageSquareText className="h-4 w-4" />} label="Ask about this" onClick={onAsk} />
+          )}
           {!isFolder && onDownload && (
             <PanelAction icon={<Download className="h-4 w-4" />} label="Download" onClick={onDownload} />
           )}
@@ -142,6 +197,19 @@ export function DriveDetailsPanel({
       </div>
     </div>
   );
+}
+
+/** "12 Oct 2026, 14:05" — the pane shows real dates (Part C §2.2). */
+function absoluteDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function Meta({ label, value }: { label: string; value: string }) {

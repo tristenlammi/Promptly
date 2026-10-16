@@ -1,4 +1,4 @@
-import { Users } from "lucide-react";
+import { Globe, Users } from "lucide-react";
 
 import type { GrantSummary } from "@/api/files";
 import { cn } from "@/utils/cn";
@@ -43,11 +43,12 @@ export function GranteesPill({
   const namesCompact = formatCompact(others, variant === "compact" ? 2 : 4);
   const namesFull = others.map((g) => `@${g.username}`).join(", ");
 
+  const links = isOwner ? sharing.public_links ?? 0 : 0;
   let text: string;
   if (isOwner) {
     if (others.length === 0) {
-      // Defensive: backend only emits a summary when grants exist.
-      text = "Shared";
+      // Only public links — anyone with the link can open it (R-208).
+      text = links ? "Anyone with the link" : "Shared";
     } else {
       text =
         variant === "compact"
@@ -78,14 +79,21 @@ export function GranteesPill({
       className={cn(
         "inline-flex max-w-full items-center gap-1 truncate rounded-full px-2 py-0.5 text-[11px]",
         "border border-[var(--accent)]/30",
-        "bg-[var(--accent)]/[0.08] text-[var(--accent)]",
+        "bg-[var(--accent)]/[0.08] text-[var(--accent-text)]",
         "dark:bg-[var(--accent)]/[0.15]",
         interactive && "cursor-pointer transition hover:bg-[var(--accent)]/[0.18]",
         className
       )}
     >
-      <Users className="h-3 w-3 shrink-0" />
+      {links && others.length === 0 ? (
+        <Globe className="h-3 w-3 shrink-0" />
+      ) : (
+        <Users className="h-3 w-3 shrink-0" />
+      )}
       <span className="truncate">{text}</span>
+      {links > 0 && others.length > 0 && (
+        <Globe className="h-3 w-3 shrink-0" aria-label="Also shared by link" />
+      )}
     </Wrapper>
   );
 }

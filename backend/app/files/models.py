@@ -22,14 +22,18 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     LargeBinary,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
     text,
 )
+from sqlalchemy import Uuid
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -55,6 +59,8 @@ class FileFolder(UUIDPKMixin, CreatedAtMixin, Base):
     system_kind: Mapped[str | None] = mapped_column(
         String(64), nullable=True, index=True
     )
+    # Left out of Photos, with everything inside it (WP-9.1).
+    hide_from_photos: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     # Soft-delete pointer for the Drive "Trash" view. NULL = live, any
     # non-null timestamp means the row is in the trash and should be
     # filtered out of normal browse results. The empty-trash endpoint
@@ -63,6 +69,11 @@ class FileFolder(UUIDPKMixin, CreatedAtMixin, Base):
     trashed_at: Mapped[_dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Who sent it to the trash, and from which session (0200, WP-7.2) — what
+    # the mass-delete guard counts and "restore everything this device
+    # deleted" puts back.
+    trashed_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    trashed_credential: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Per-user "Starred" flag; non-null = pinned in the Starred view,
     # value is when it was starred. Also used as a tiebreaker in the
     # default folder ordering.
@@ -131,6 +142,11 @@ class UserFile(UUIDPKMixin, CreatedAtMixin, Base):
     trashed_at: Mapped[_dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # Who sent it to the trash, and from which session (0200, WP-7.2) — what
+    # the mass-delete guard counts and "restore everything this device
+    # deleted" puts back.
+    trashed_by: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    trashed_credential: Mapped[str | None] = mapped_column(String(64), nullable=True)
     starred_at: Mapped[_dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -148,9 +164,50 @@ class UserFile(UUIDPKMixin, CreatedAtMixin, Base):
     content_text: Mapped[str | None] = mapped_column(
         Text, nullable=True
     )
+    # When the *content* last changed (0188, R-209). ``updated_at`` moves on
+    # every UPDATE — a star or a move — so "Modified" and Recent used it
+    # wrongly. Bumped by the flush hook below when the bytes change.
+    modified_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    # Office files: bumped when a version is restored (WP-6.2) — collab
+    # tokens carry it, and an editor from an older generation reloads
+    # instead of merging the replaced state back in.
+    collab_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    # The bytes' identity (0199, WP-7.1): hashes of canonical blobs, what the
+    # integrity scrubber last found (ready / ingesting / missing / damaged)
+    # and when it last checked them.
+    content_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sha1: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # For WebDAV sync clients — rclone's owncloud mode checks MD5 (WP-8.4).
+    md5: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    blob_state: Mapped[str] = mapped_column(String(16), nullable=False, default="ready", server_default="ready")
+    verified_at: Mapped[_dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Modified time on the device it was uploaded from (0201, WP-7.3) — the
+    # fallback "taken" date for a photo without one.
+    client_mtime: Mapped[_dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     def __repr__(self) -> str:
         return f"<UserFile id={self.id} name={self.filename!r} owner={self.user_id}>"
+
+
+# Columns whose change means the file's content changed.
+_CONTENT_COLUMNS = ("storage_path", "size_bytes", "content_text")
+
+
+def _bump_modified_at(session, _ctx, _instances) -> None:
+    from sqlalchemy import inspect as _inspect
+
+    now = _dt.datetime.now(_dt.timezone.utc)
+    for obj in session.dirty:
+        if not isinstance(obj, UserFile):
+            continue
+        state = _inspect(obj)
+        if any(state.attrs[c].history.has_changes() for c in _CONTENT_COLUMNS):
+            if not state.attrs["modified_at"].history.has_changes():
+                obj.modified_at = now
 
 
 class FileShareLink(UUIDPKMixin, CreatedAtMixin, Base):
@@ -179,6 +236,11 @@ class FileShareLink(UUIDPKMixin, CreatedAtMixin, Base):
     access_mode: Mapped[str] = mapped_column(String(16), nullable=False)
     # Optional bcrypt hash. NULL = no password required.
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Serve photos with their location and camera metadata? Off: the link
+    # gets a metadata-free copy (the stored original keeps it) — D13.
+    keep_location: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     # NULL = never expires.
     expires_at: Mapped[_dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -194,6 +256,14 @@ class FileShareLink(UUIDPKMixin, CreatedAtMixin, Base):
     last_accessed_at: Mapped[_dt.datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    # ``view`` / ``comment`` / ``edit`` (0198, WP-6.6). Comment and edit
+    # links are always ``invite`` — opening one signed in grants that role
+    # (a ``ResourceGrant`` with ``via_link_id``).
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="view", server_default="view")
+
+    def is_alive(self) -> bool:
+        now = _dt.datetime.now(_dt.timezone.utc)
+        return self.revoked_at is None and (self.expires_at is None or self.expires_at > now)
 
     def __repr__(self) -> str:
         return (
@@ -390,6 +460,15 @@ class ResourceGrant(UUIDPKMixin, CreatedAtMixin, Base):
     can_edit: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    # Comment without editing (0198, WP-6.6) — Docs, Sheets, Whiteboards.
+    can_comment: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # Set when the grant came from opening a comment / edit share link: it
+    # lasts while the link does (revoked → deleted; expired → ignored).
+    via_link_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("file_share_links.id", ondelete="CASCADE"), nullable=True
+    )
 
     __table_args__ = (
         CheckConstraint(
@@ -414,3 +493,219 @@ class ResourceGrant(UUIDPKMixin, CreatedAtMixin, Base):
             f"grantee={self.grantee_user_id} "
             f"can_copy={self.can_copy} can_edit={self.can_edit}>"
         )
+
+
+class BlobTombstone(UUIDPKMixin, CreatedAtMixin, Base):
+    """A blob waiting to be unlinked — deletion is deferred, never immediate.
+
+    Every path that permanently deletes user bytes (Delete forever, Empty
+    trash, folder purge, user deletion) records the blob here in the same
+    transaction as the row delete, instead of unlinking it. A daily sweep
+    unlinks it once ``purge_after`` has passed, and only if nothing
+    references the path again. That leaves a 14-day window in which a
+    mistaken purge can be undone from the nightly database dump plus the
+    still-present bytes.
+
+    ``is_dir`` marks a whole bucket (a deleted user's ``u_<id>``): the sweep
+    removes only the files inside it that no row references.
+
+    No FK to users — the owner is usually gone by the time this matters.
+    """
+
+    __tablename__ = "blob_tombstones"
+
+    storage_path: Mapped[str] = mapped_column(String(1024), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default=text("0")
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
+    reason: Mapped[str] = mapped_column(String(32), nullable=False)
+    is_dir: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    purge_after: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+
+
+class FileVersion(Base):
+    """A snapshot of an office file's editor state (0190, WP-3.3).
+
+    Written by the collab server (``auto`` every ~10 minutes of editing and
+    on last disconnect, ``shrink_guard`` before a much smaller state
+    replaces the current one) and by the backend (``pre_ai``, ``import``,
+    ``restore``, ``manual``). ``yjs_state`` is zlib-compressed; ``data`` is
+    a sheet's workbook JSON. Recovery is an admin script for now
+    (``python -m app.cli versions``); the restore UI comes later.
+    """
+
+    __tablename__ = "file_versions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    yjs_state: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    data: Mapped[object | None] = mapped_column(JSONB, nullable=True)
+    preview: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    author_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(Uuid), nullable=False, default=list, server_default=text("'{}'::uuid[]")
+    )
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    keep_forever: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # A PDF version's bytes (0197, WP-6.5) — a blob in the owner's bucket.
+    storage_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+class FileMedia(Base):
+    """A photo's or video's metadata (0201, WP-7.3) — see the migration."""
+
+    __tablename__ = "file_media"
+
+    file_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("files.id", ondelete="CASCADE"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)
+    taken_at: Mapped[_dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    taken_at_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    tz_offset: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lon: Mapped[float | None] = mapped_column(Float, nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    orientation: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    make: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(96), nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    codec: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    content_identifier: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    live_pair_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+    motion_video_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+    motion_embedded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    thumbhash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    derivative_state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    taken_at_override: Mapped[_dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lat_override: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lon_override: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    extracted_at: Mapped[_dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The media worker's renditions (0202, WP-7.4) under derived/<file_id>/.
+    renditions: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    derived_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default=text("0"))
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0, server_default=text("0"))
+    processing_started_at: Mapped[_dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class StorageCheck(Base):
+    """One run of the integrity scrubber (0200, WP-7.2)."""
+
+    __tablename__ = "storage_checks"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    started_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+    finished_at: Mapped[_dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # running → ok | problems (something missing / damaged) | failed
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    trigger: Mapped[str] = mapped_column(String(16), nullable=False, default="nightly")
+    checked: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    verified: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    bytes_verified: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    missing: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    damaged: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    recovered: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quarantined: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class FileActivity(Base):
+    """When a user last opened / edited a file (0191, WP-3.4) — one row per
+    user, file and kind, upserted. Drives Recent, so files shared with you
+    and workspace files you worked on show up there too."""
+
+    __tablename__ = "file_activity"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), primary_key=True
+    )
+    kind: Mapped[str] = mapped_column(String(8), primary_key=True)
+    at: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+class DocumentComment(UUIDPKMixin, CreatedAtMixin, Base):
+    """A comment on a Drive document or workspace note (0192, WP-4.5,
+    R-227). A thread is a root comment plus its replies (``parent_id``).
+
+    ``anchor`` holds two base64 Yjs relative positions (``{"from", "to"}``)
+    into the document's Y.Doc, so the highlight follows the text through
+    everyone's edits; ``quote`` keeps the words it was about, for when that
+    text is deleted. Resolving applies to the thread (the root row)."""
+
+    __tablename__ = "document_comments"
+
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("document_comments.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    # SET NULL keeps a departed member's comments readable.
+    author_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    quote: Mapped[str | None] = mapped_column(Text, nullable=True)
+    anchor: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    resolved_at: Mapped[_dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    edited_at: Mapped[_dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DriveIndexState(Base):
+    """What Ask your Drive indexed from each file (0193, WP-5.1): the text
+    hash and embedding model it was built from, so a background pass only
+    re-embeds what changed. ``skipped`` = nothing to index (an image, an
+    empty file)."""
+
+    __tablename__ = "drive_index_state"
+
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("files.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    chunks: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    indexed_at: Mapped[_dt.datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+from sqlalchemy import event as _event  # noqa: E402
+from sqlalchemy.orm import Session as _Session  # noqa: E402
+
+_event.listen(_Session, "before_flush", _bump_modified_at)

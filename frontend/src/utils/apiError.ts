@@ -55,14 +55,36 @@ export function normalizeApiDetail(detail: unknown): string | null {
  * anything else. Always returns a string, so the result can be put
  * straight into React state / JSX.
  */
+/** What a bare HTTP status means to a person — for errors that arrive
+ *  without a message of their own (often from the proxy in front of
+ *  Promptly), which used to read "Request failed with status code 429". */
+const STATUS_MESSAGES: Record<number, string> = {
+  401: "Your session has ended. Sign in again.",
+  403: "You don't have permission to do that.",
+  404: "That isn't there any more — it may have been deleted.",
+  408: "That took too long. Try again.",
+  409: "Something changed in the meantime. Refresh and try again.",
+  413: "That's too large to upload.",
+  429: "Too many requests at once. Wait a moment and try again.",
+  500: "Something went wrong on the server. Try again.",
+  502: "Promptly is restarting or unreachable. Try again in a moment.",
+  503: "Promptly is restarting or unreachable. Try again in a moment.",
+  504: "The server took too long to answer. Try again.",
+};
+
 export function apiErrorMessage(err: unknown, fallback = "Something went wrong. Try again."): string {
   if (err && typeof err === "object") {
-    const resp = (err as { response?: { data?: { detail?: unknown } } }).response;
+    const resp = (err as { response?: { status?: number; data?: { detail?: unknown } } }).response;
     const fromDetail = normalizeApiDetail(resp?.data?.detail);
     if (fromDetail) return fromDetail;
-    // No usable detail — an Error's message beats the generic fallback,
-    // but only for non-HTTP errors: Axios's "Request failed with status
-    // code 422" is worse than the caller's purpose-written fallback.
+    if (resp?.status && STATUS_MESSAGES[resp.status]) return STATUS_MESSAGES[resp.status];
+    const code = (err as { code?: string }).code;
+    if (code === "ECONNABORTED" || code === "ETIMEDOUT") {
+      return "That took too long — check your connection and try again.";
+    }
+    if (!resp && code === "ERR_NETWORK") {
+      return "Can't reach Promptly — check your connection and try again.";
+    }
     if (!resp && err instanceof Error && err.message) return err.message;
   }
   if (typeof err === "string" && err.trim()) return err;

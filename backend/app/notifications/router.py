@@ -357,25 +357,17 @@ async def send_test_push(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> TestPushResponse:
-    """Fire a diagnostic push to every subscription on the caller.
+    """Push to every device the caller registered and report what the push
+    services accepted — delivered, failed, or gone (an unsubscribed
+    browser, now removed)."""
+    from app.notifications.dispatch import send_test_push as _send
 
-    Returns how many subscriptions were targeted so the UI can show
-    "sent to 2 devices — check your phone" as confirmation."""
-    count = (
-        await db.execute(
-            select(PushSubscription).where(PushSubscription.user_id == user.id)
-        )
-    ).scalars().all()
-
-    await notify_user(
-        user_id=user.id,
-        category="test",
-        title="Promptly",
-        body="Push notifications are set up correctly.",
-        url="/account/security",
-        tag="promptly-test",
+    outcome = await _send(user.id)
+    return TestPushResponse(
+        sent=outcome["delivered"],
+        failed=outcome["failed"],
+        removed=outcome["removed"],
     )
-    return TestPushResponse(sent=len(count))
 
 
 # ---------------------------------------------------------------------

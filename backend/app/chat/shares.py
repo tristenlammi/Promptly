@@ -79,7 +79,7 @@ async def _has_workspace_access(
     from app.chat.models import Workspace
 
     ws = await db.get(Workspace, workspace_id)
-    if ws is None:
+    if ws is None or ws.trashed_at is not None:
         return False
     if ws.user_id == user.id:
         return True
@@ -187,13 +187,19 @@ async def list_accessible_workspace_ids(
     # Import lazily — see note in ``_has_workspace_access``.
     from app.chat.models import Workspace
 
+    # A trashed workspace is gone for everyone until it's restored (R-177).
     owned_res = await db.execute(
-        select(Workspace.id).where(Workspace.user_id == user.id)
+        select(Workspace.id).where(
+            Workspace.user_id == user.id, Workspace.trashed_at.is_(None)
+        )
     )
     shared_res = await db.execute(
-        select(WorkspaceShare.workspace_id).where(
+        select(WorkspaceShare.workspace_id)
+        .join(Workspace, Workspace.id == WorkspaceShare.workspace_id)
+        .where(
             WorkspaceShare.invitee_user_id == user.id,
             WorkspaceShare.status == "accepted",
+            Workspace.trashed_at.is_(None),
         )
     )
     ids: set[uuid.UUID] = set()

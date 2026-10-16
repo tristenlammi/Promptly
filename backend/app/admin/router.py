@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import logging
 import secrets
 import uuid
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 
 from fastapi import (
     APIRouter,
+    Body,
     Depends,
     HTTPException,
     Query,
@@ -22,6 +24,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -36,11 +39,16 @@ from app.admin.schemas import (
     AuthEventResponse,
     PasswordResetRequest,
 )
+from app.auth.email_address import normalise_email
 from app.auth.audit import (
     EVENT_DISABLE,
     EVENT_ENABLE,
     EVENT_FORCE_LOGOUT_ALL,
     EVENT_PASSWORD_RESET_BY_ADMIN,
+    EVENT_USERS_IMPORTED,
+    EVENT_EMAIL_CHANGED,
+    EVENT_ROLE_CHANGED,
+    EVENT_USER_CREATED,
     EVENT_UNLOCK,
     record_event,
     safe_dict,
@@ -48,7 +56,7 @@ from app.auth.audit import (
 from app.auth.deps import require_admin
 from app.auth.events import AuthEvent
 from app.auth.models import User
-from app.auth.utils import hash_password
+from app.auth.utils import ahash_password
 from app.billing.usage import check_budget
 from app.database import get_db
 from app.files.quota import get_quota
@@ -141,20 +149,28 @@ async def list_users(
 )
 async def create_user(
     payload: AdminUserCreate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    actor: User = Depends(require_admin),
 ) -> AdminUserResponse:
     user = User(
         email=payload.email.lower(),
         username=payload.username,
-        password_hash=hash_password(payload.password),
+        password_hash=await ahash_password(payload.password),
         role=payload.role,
         allowed_models=_clean_allowed_models(payload.allowed_models),
         settings={},
+        must_change_password=payload.must_change_password,
         storage_cap_bytes=payload.storage_cap_bytes,
         daily_token_budget=payload.daily_token_budget,
         monthly_token_budget=payload.monthly_token_budget,
     )
+    if payload.can_generate_images is not None:
+        user.can_generate_images = payload.can_generate_images
+    if payload.can_execute_code is not None:
+        user.can_execute_code = payload.can_execute_code
+    if payload.can_reach_private_network is not None:
+        user.can_reach_private_network = payload.can_reach_private_network
     db.add(user)
     try:
         await db.commit()
@@ -165,6 +181,7 @@ async def create_user(
             detail="Email or username already exists",
         ) from e
     await db.refresh(user)
+    await _audit(db, request, actor, EVENT_USER_CREATED, user, role=user.role)
     # Materialise the system folders (Chat Uploads / Generated Files / ...)
     # right away so the new account opens to a populated Files page instead
     # of an empty one. Runs in its own commit so a folder-creation glitch
@@ -237,7 +254,23 @@ async def export_users_csv(
 _IMPORT_MAX_ROWS = 1000
 
 
-@router.post("/users/import", status_code=status.HTTP_200_OK)
+# Import results (with the one-time temp passwords, encrypted) are kept this
+# long, so a closed tab or a slow import doesn't lose them.
+_IMPORT_RESULT_TTL_S = 3600
+
+
+def _import_key(job_id: str) -> str:
+    return f"promptly:user-import:{job_id}"
+
+
+async def _save_import(job_id: str, state: dict) -> None:
+    from app.auth.utils import encrypt_secret
+    from app.redis_client import redis
+
+    await redis.set(_import_key(job_id), encrypt_secret(json.dumps(state)), ex=_IMPORT_RESULT_TTL_S)
+
+
+@router.post("/users/import", status_code=status.HTTP_202_ACCEPTED)
 async def import_users_csv(
     file: UploadFile,
     db: AsyncSession = Depends(get_db),
@@ -246,10 +279,12 @@ async def import_users_csv(
     """Bulk-create users from a CSV with an ``email`` column (plus optional
     ``username`` / ``role``).
 
-    A temporary password is generated for every new account and returned
-    once in the response so the admin can distribute it; the user is forced
-    to change it on first login. Existing emails/usernames are skipped, not
-    overwritten — import never mutates an existing account.
+    Runs in the background and returns a job id to poll
+    (``GET /users/import/{job_id}``): each account costs a password hash,
+    so a real roster outlasted the browser's timeout and the temporary
+    passwords were lost (R-137). The result — including each new account's
+    one-time temporary password — is kept for an hour. Existing emails or
+    usernames are skipped, never overwritten.
     """
     raw = await file.read()
     try:
@@ -264,83 +299,133 @@ async def import_users_csv(
         raise HTTPException(
             status_code=400, detail="CSV needs at least an 'email' column."
         )
-
-    # Normalise header lookup (case-insensitive).
-    def _get(row: dict, key: str) -> str:
-        for k, v in row.items():
-            if (k or "").strip().lower() == key:
-                return (v or "").strip()
-        return ""
-
-    created: list[dict] = []
-    skipped: list[dict] = []
-    rows = list(reader)
+    rows = [
+        {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
+        for row in reader
+    ]
     if len(rows) > _IMPORT_MAX_ROWS:
         raise HTTPException(
             status_code=400,
             detail=f"Too many rows (max {_IMPORT_MAX_ROWS}).",
         )
 
-    for i, row in enumerate(rows):
-        email = _get(row, "email").lower()
-        if not email or "@" not in email:
-            skipped.append({"row": i + 2, "email": email, "reason": "invalid email"})
-            continue
-        username = _get(row, "username") or email.split("@")[0]
-        role = (_get(row, "role") or "user").lower()
-        if role not in ("user", "admin"):
-            role = "user"
+    from app.background import spawn
 
-        temp_password = secrets.token_urlsafe(12)
-        user = User(
-            email=email,
-            username=username,
-            password_hash=hash_password(temp_password),
-            role=role,
-            settings={},
-            must_change_password=True,
+    job_id = uuid.uuid4().hex
+    await _save_import(job_id, {"status": "running", "done": 0, "total": len(rows)})
+    spawn(_run_import(job_id, rows, admin.id), name=f"user-import-{job_id}")
+    return {"job_id": job_id, "total": len(rows)}
+
+
+@router.get("/users/import/{job_id}")
+async def import_users_status(
+    job_id: str,
+    _: User = Depends(require_admin),
+) -> dict:
+    from app.auth.utils import decrypt_secret
+    from app.redis_client import redis
+
+    raw = await redis.get(_import_key(job_id))
+    if raw is None:
+        raise HTTPException(status_code=404, detail="That import has expired.")
+    return json.loads(decrypt_secret(raw if isinstance(raw, str) else raw.decode()))
+
+
+async def _run_import(job_id: str, rows: list[dict], admin_id: uuid.UUID) -> None:
+    from pydantic import ValidationError
+
+    from app.database import SessionLocal
+
+    created: list[dict] = []
+    skipped: list[dict] = []
+    try:
+        async with SessionLocal() as db:
+            for i, row in enumerate(rows):
+                line = i + 2
+                raw_email = row.get("email", "")
+                try:
+                    email = normalise_email(raw_email)
+                except ValueError:
+                    skipped.append({"row": line, "email": raw_email, "reason": "invalid email"})
+                    continue
+                role = (row.get("role") or "user").lower()
+                if role not in ("user", "admin"):
+                    role = "user"
+                # Always meets the password policy (it asks for a number and a
+                # symbol, which a bare token doesn't guarantee).
+                temp_password = f"{secrets.token_urlsafe(10)}-{secrets.randbelow(900) + 100}!"
+                # The same rules as the add-user form, so the two can't drift.
+                try:
+                    checked = AdminUserCreate(
+                        email=email,
+                        username=row.get("username") or email.split("@")[0],
+                        password=temp_password,
+                        role=role,
+                    )
+                except ValidationError as e:
+                    reason = e.errors()[0].get("msg", "invalid row") if e.errors() else "invalid row"
+                    skipped.append({"row": line, "email": email, "reason": reason})
+                    continue
+                user = User(
+                    email=checked.email,
+                    username=checked.username,
+                    password_hash=await ahash_password(temp_password),
+                    role=checked.role,
+                    settings={},
+                    must_change_password=True,
+                )
+                db.add(user)
+                try:
+                    await db.commit()
+                except IntegrityError:
+                    await db.rollback()
+                    skipped.append({"row": line, "email": email, "reason": "email or username exists"})
+                    continue
+                await db.refresh(user)
+                try:
+                    await seed_system_folders(db, user)
+                    await db.commit()
+                except Exception:  # noqa: BLE001 — folder glitch must not fail the import
+                    await db.rollback()
+                created.append({"email": email, "temp_password": temp_password})
+                if (i + 1) % 10 == 0:
+                    await _save_import(job_id, {"status": "running", "done": i + 1, "total": len(rows)})
+        logger.info(
+            "Admin %s imported users: created=%d skipped=%d", admin_id, len(created), len(skipped)
         )
-        db.add(user)
-        try:
-            await db.commit()
-        except IntegrityError:
-            await db.rollback()
-            skipped.append(
-                {"row": i + 2, "email": email, "reason": "email or username exists"}
+        async with SessionLocal() as adb:
+            await record_event(
+                adb, event_type=EVENT_USERS_IMPORTED, user_id=admin_id,
+                detail=safe_dict({"created": len(created), "skipped": len(skipped)}),
             )
-            continue
-        await db.refresh(user)
-        try:
-            await seed_system_folders(db, user)
-            await db.commit()
-        except Exception:  # noqa: BLE001 — folder glitch must not fail the import
-            await db.rollback()
-        created.append({"email": email, "temp_password": temp_password})
-
-    logger.info(
-        "Admin %s imported users: created=%d skipped=%d",
-        admin.id,
-        len(created),
-        len(skipped),
-    )
-    return {
-        "created_count": len(created),
-        "skipped_count": len(skipped),
-        "created": created,
-        "skipped": skipped,
-    }
+            await adb.commit()
+        await _save_import(job_id, {
+            "status": "done", "done": len(rows), "total": len(rows),
+            "created_count": len(created), "skipped_count": len(skipped),
+            "created": created, "skipped": skipped,
+        })
+    except Exception:  # noqa: BLE001 — report the failure, keep what was made
+        logger.exception("user import %s failed", job_id)
+        await _save_import(job_id, {
+            "status": "failed", "done": len(created) + len(skipped), "total": len(rows),
+            "created_count": len(created), "skipped_count": len(skipped),
+            "created": created, "skipped": skipped,
+            "error": "The import stopped partway — the accounts listed were created.",
+        })
 
 
 @router.patch("/users/{user_id}", response_model=AdminUserResponse)
 async def update_user(
     user_id: uuid.UUID,
     payload: AdminUserUpdate,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     actor: User = Depends(require_admin),
 ) -> AdminUserResponse:
     target = await db.get(User, user_id)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    before = {"role": target.role, "email": target.email}
 
     fields = payload.model_fields_set
 
@@ -366,7 +451,7 @@ async def update_user(
         # the target user and force a password-change on next login.
         # Audit row tracked by the dedicated /reset-password endpoint;
         # PATCH callers get a generic admin-edit trail via auth_events.
-        target.password_hash = hash_password(payload.password)
+        target.password_hash = await ahash_password(payload.password)
         target.must_change_password = True
         target.token_version = (target.token_version or 0) + 1
 
@@ -395,6 +480,11 @@ async def update_user(
 
     if "can_execute_code" in fields and payload.can_execute_code is not None:
         target.can_execute_code = payload.can_execute_code
+    if (
+        "can_reach_private_network" in fields
+        and payload.can_reach_private_network is not None
+    ):
+        target.can_reach_private_network = payload.can_reach_private_network
 
     if "group_ids" in fields and payload.group_ids is not None:
         await _sync_user_groups(db, target.id, payload.group_ids)
@@ -408,7 +498,86 @@ async def update_user(
             detail="Email or username already exists",
         ) from e
     await db.refresh(target)
+    if target.role != before["role"]:
+        await _audit(db, request, actor, EVENT_ROLE_CHANGED, target,
+                     old=before["role"], new=target.role)
+    if target.email != before["email"]:
+        await _audit(db, request, actor, EVENT_EMAIL_CHANGED, target,
+                     old=before["email"], new=target.email)
+    if "password" in fields and payload.password is not None:
+        await _audit(db, request, actor, EVENT_PASSWORD_RESET_BY_ADMIN, target, via="edit")
     return await _user_response(db, target)
+
+
+async def _audit(db, request, actor: User, event_type: str, target, **detail) -> None:
+    """One audit row for an admin action on ``target`` (a user), committed."""
+    await record_event(
+        db,
+        request=request,
+        event_type=event_type,
+        user_id=target.id,
+        identifier=target.username,
+        detail=safe_dict({"by_admin": str(actor.id), **detail}),
+    )
+    await db.commit()
+
+
+class _DeletionWorkspace(BaseModel):
+    id: uuid.UUID
+    title: str
+    members: list[dict]
+
+
+class _DeletionPreviewResponse(BaseModel):
+    username: str
+    is_admin: bool
+    file_count: int
+    file_bytes: int
+    conversation_count: int
+    workspaces: list[_DeletionWorkspace]
+
+
+class _DeleteUserRequest(BaseModel):
+    # Type-to-confirm, checked server-side too.
+    confirm_username: str = ""
+    # workspace id -> new owner id, for every owned workspace to keep.
+    transfers: dict[uuid.UUID, uuid.UUID] = Field(default_factory=dict)
+
+
+@router.get("/users/{user_id}/deletion-preview", response_model=_DeletionPreviewResponse)
+async def user_deletion_preview(
+    user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> _DeletionPreviewResponse:
+    """What deleting this user would remove, and which of their workspaces
+    other people use — so the admin can hand those over first (R-004)."""
+    target = await db.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    from app.tasks.deletion import deletion_preview
+
+    p = await deletion_preview(db, target)
+    ids = {m for w in p.workspaces for m in w.member_ids}
+    names = {
+        u.id: u.username
+        for u in (await db.execute(select(User).where(User.id.in_(ids)))).scalars()
+    } if ids else {}
+    return _DeletionPreviewResponse(
+        username=target.username,
+        is_admin=target.role == "admin",
+        file_count=p.file_count,
+        file_bytes=p.file_bytes,
+        conversation_count=p.conversation_count,
+        workspaces=[
+            _DeletionWorkspace(
+                id=w.id,
+                title=w.title,
+                members=[{"id": str(m), "username": names.get(m, "?")} for m in w.member_ids],
+            )
+            for w in p.workspaces
+        ],
+    )
 
 
 @router.delete(
@@ -418,6 +587,8 @@ async def update_user(
 )
 async def delete_user(
     user_id: uuid.UUID,
+    request: Request,
+    payload: _DeleteUserRequest = Body(default_factory=_DeleteUserRequest),
     db: AsyncSession = Depends(get_db),
     actor: User = Depends(require_admin),
 ) -> Response:
@@ -429,16 +600,24 @@ async def delete_user(
     target = await db.get(User, user_id)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    # Route through the shared purge helper so the file BYTES on disk are
-    # cleaned up too — a bare ``db.delete`` cascades the DB rows but leaves the
-    # blobs orphaned. Returns False only for protected (operator) accounts.
-    from app.tasks.deletion import purge_user
+    if payload.confirm_username.strip() != target.username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Type the username to confirm the deletion.",
+        )
+    from app.tasks.deletion import DeletionRefused, purge_user
 
-    purged = await purge_user(db, target)
+    try:
+        purged = await purge_user(
+            db, target, transfers=payload.transfers, actor=actor, request=request
+        )
+    except DeletionRefused as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
     if not purged:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="This account is protected and cannot be deleted.",
+            detail="Admins can't be deleted. Change their role to User first.",
         )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -589,6 +768,9 @@ async def unlock_user(
     was_locked = target.locked_at is not None
     target.locked_at = None
     target.failed_login_attempts = 0
+    from app.auth import lockout
+
+    await lockout.clear(target.id)  # every per-address lock too
     await record_event(
         db,
         request=request,
@@ -705,7 +887,7 @@ async def reset_password(
     reset happened, by which admin.
     """
     target = await _load_target(user_id, db)
-    target.password_hash = hash_password(payload.password)
+    target.password_hash = await ahash_password(payload.password)
     target.must_change_password = True
     target.token_version = (target.token_version or 0) + 1
     await record_event(
@@ -718,6 +900,50 @@ async def reset_password(
     )
     await db.commit()
     await db.refresh(target)
+    return AdminUserResponse.model_validate(target)
+
+
+@router.post("/users/{user_id}/reset-mfa", response_model=AdminUserResponse)
+async def reset_mfa(
+    user_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_admin),
+) -> AdminUserResponse:
+    """Turn off a user's two-step verification — they lost their phone and
+    their backup codes. Signs them out everywhere; they can set it up again
+    after signing in (and will have to, if "Require MFA" is on). There used
+    to be no way to do this at all (R-138)."""
+    from app.auth.audit import EVENT_MFA_RESET
+    from app.mfa.service import disable_for_user
+
+    target = await _load_target(user_id, db)
+    await disable_for_user(db, user=target)
+    await record_event(
+        db,
+        request=request,
+        event_type=EVENT_MFA_RESET,
+        user_id=target.id,
+        identifier=target.username,
+        detail=safe_dict({"by_admin": str(actor.id)}),
+    )
+    await db.commit()
+    await db.refresh(target)
+    try:
+        from app.mfa.smtp import send_message
+
+        await send_message(
+            db,
+            to=target.email,
+            subject="Promptly: two-step verification was reset",
+            text_body=(
+                f"Hi {target.username},\n\nAn administrator turned off two-step "
+                "verification on your account. Sign in and set it up again under "
+                "Account → Security. If you didn't ask for this, tell your administrator."
+            ),
+        )
+    except Exception:  # noqa: BLE001 — SMTP is optional
+        pass
     return AdminUserResponse.model_validate(target)
 
 
@@ -792,6 +1018,8 @@ async def list_auth_events(
     _: User = Depends(require_admin),
     user_id: uuid.UUID | None = Query(default=None),
     event_type: str | None = Query(default=None, max_length=48),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> list[AuthEventResponse]:
@@ -807,9 +1035,43 @@ async def list_auth_events(
         stmt = stmt.where(AuthEvent.user_id == user_id)
     if event_type:
         stmt = stmt.where(AuthEvent.event_type == event_type)
+    if since is not None:
+        stmt = stmt.where(AuthEvent.created_at >= since)
+    if until is not None:
+        stmt = stmt.where(AuthEvent.created_at < until)
     stmt = stmt.offset(offset).limit(limit)
     rows = await db.execute(stmt)
     return [AuthEventResponse.model_validate(e) for e in rows.scalars().all()]
+
+
+@router.get("/auth-events.csv")
+async def export_auth_events(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+    event_type: str | None = Query(default=None, max_length=48),
+    since: datetime | None = Query(default=None),
+    until: datetime | None = Query(default=None),
+) -> Response:
+    """The audit log (filtered as the list is) as CSV, for keeping or
+    handing to someone else (R-145). Capped at 50,000 rows."""
+    stmt = select(AuthEvent).order_by(AuthEvent.created_at.desc())
+    if event_type:
+        stmt = stmt.where(AuthEvent.event_type == event_type)
+    if since is not None:
+        stmt = stmt.where(AuthEvent.created_at >= since)
+    if until is not None:
+        stmt = stmt.where(AuthEvent.created_at < until)
+    rows = (await db.execute(stmt.limit(50_000))).scalars().all()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["time", "event", "user_id", "identifier", "ip", "detail"])
+    for e in rows:
+        w.writerow([e.created_at.isoformat(), e.event_type, e.user_id or "", e.identifier, e.ip, e.detail or ""])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="promptly-audit-log.csv"'},
+    )
 
 
 # --------------------------------------------------------------------

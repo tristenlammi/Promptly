@@ -5,6 +5,9 @@ import type { WorkbookInstance } from "@fortune-sheet/react";
 import type { Sheet } from "@fortune-sheet/core";
 
 import type { CollabTokenResponse } from "@/api/documents";
+import { structEntries, sig as structSig } from "@/lib/sheetStructure";
+
+import { applyStructure, tabsMissingFrom } from "./fortuneStructure";
 
 /**
  * Binds a Fortune-sheet workbook to a Y.Doc for live multi-user editing —
@@ -20,10 +23,12 @@ import type { CollabTokenResponse } from "@/api/documents";
  * workbook into the Y.Doc; later clients load the room's cells instead. Both
  * are idempotent (same key → same value), so a simultaneous seed converges.
  *
- * Scope (MVP): cell values + formatting across the workbook's existing sheet
- * tabs. Adding/removing/reordering tabs and row/column structural ops aren't
- * specially modelled — cell deltas still reconcile, but tab structure is
- * best-effort.
+ * Structure (WP-6.3): tabs, merges, frozen panes, widths, hidden rows and
+ * columns, borders, images, conditional formats, links and validation live
+ * in a second map (``struct``, see ``lib/sheetStructure``), keyed finely
+ * enough that concurrent changes merge instead of the last save winning;
+ * remote changes are applied by ``fortuneStructure``. The saved workbook
+ * JSON is now a snapshot of the room, not where structure is shared.
  */
 const LOCAL_ORIGIN = "sheet-local";
 
@@ -89,7 +94,7 @@ export interface SheetPeer {
 
 export interface UseSheetCollabResult {
   /** Feed every Fortune-sheet ``onChange`` here to broadcast local edits. */
-  onLocalChange: (sheets: Sheet[]) => void;
+  onLocalChange: (sheets: Sheet[]) => LocalDiff | null;
   /** Broadcast an explicit "clear sheet" — wipes the shared cell map. */
   clearAll: () => void;
   /** True once the initial sync (seed or load) has completed. */
@@ -127,13 +132,21 @@ export function useSheetCollab({
   // suppress the echo from applying remote ops.
   const snapshotRef = useRef<Map<string, string>>(new Map());
   const yCellsRef = useRef<Y.Map<unknown> | null>(null);
+  // The same for the structure entries (WP-6.3).
+  const structSnapRef = useRef<Map<string, string>>(new Map());
+  const yStructRef = useRef<Y.Map<unknown> | null>(null);
+  // Structure keys just applied from the room that the workbook may not show
+  // yet (Fortune applies them on its next render) → until when to wait. An
+  // onChange in between would otherwise read "the merge is gone" and delete
+  // it for everyone — a loop between two windows.
+  const pendingRef = useRef<Map<string, number>>(new Map());
 
   // ----- local -> Yjs (stable handler) ---------------------------------
-  const onLocalChange = useCallback((sheets: Sheet[]) => {
-    if (!readyRef.current || readOnlyRef.current) return;
+  const onLocalChange = useCallback((sheets: Sheet[]): LocalDiff | null => {
+    if (!readyRef.current || readOnlyRef.current) return null;
     const yCells = yCellsRef.current;
     const doc = yCells?.doc;
-    if (!yCells || !doc) return;
+    if (!yCells || !doc) return null;
 
     const snapshot = snapshotRef.current;
     const current = enumerateCells(sheets);
@@ -145,7 +158,50 @@ export function useSheetCollab({
     for (const key of snapshot.keys()) {
       if (!current.has(key)) removed.push(key);
     }
-    if (!changed.length && !removed.length) return;
+    // Structure: what differs from the last synced structure.
+    const yStruct = yStructRef.current;
+    const structSnap = structSnapRef.current;
+    const struct = structEntries(sheets as unknown as Array<Record<string, unknown>>);
+    const sChanged: string[] = [];
+    const sRemoved: string[] = [];
+    if (yStruct) {
+      const pending = pendingRef.current;
+      const now = Date.now();
+      // Remote structure the workbook now shows is settled; anything still
+      // waiting isn't a local change.
+      const waiting = (key: string): boolean => {
+        const until = pending.get(key);
+        if (until === undefined) return false;
+        const shown = struct.has(key) ? structSig(struct.get(key)) : undefined;
+        if (shown === structSnap.get(key) || now > until) {
+          pending.delete(key);
+          return false;
+        }
+        return true;
+      };
+      for (const key of [...pending.keys()]) waiting(key);
+      for (const [key, v] of struct) if (structSnap.get(key) !== structSig(v) && !waiting(key)) sChanged.push(key);
+      for (const key of structSnap.keys()) if (!struct.has(key) && !waiting(key)) sRemoved.push(key);
+    }
+    if (yStruct && (sChanged.length || sRemoved.length)) {
+      doc.transact(() => {
+        for (const key of sChanged) {
+          const v = struct.get(key);
+          yStruct.set(key, clone(v));
+          structSnap.set(key, structSig(v));
+        }
+        for (const key of sRemoved) {
+          yStruct.delete(key);
+          structSnap.delete(key);
+        }
+      }, LOCAL_ORIGIN);
+    }
+    const structCount = sChanged.length + sRemoved.length;
+    if (!changed.length && !removed.length) {
+      // No cell differs from the last synced state — the echo of a remote
+      // edit we just applied (R-171), or a structure-only change.
+      return { changed: 0, removed: 0, struct: structCount };
+    }
 
     doc.transact(() => {
       for (const key of changed) {
@@ -158,14 +214,20 @@ export function useSheetCollab({
         snapshot.delete(key);
       }
     }, LOCAL_ORIGIN);
+    return { changed: changed.length, removed: removed.length, struct: structCount };
   }, []);
 
   const clearAll = useCallback(() => {
     const yCells = yCellsRef.current;
     const doc = yCells?.doc;
     if (!yCells || !doc) return;
-    doc.transact(() => yCells.clear(), LOCAL_ORIGIN);
+    doc.transact(() => {
+      yCells.clear();
+      // The blank workbook's structure is pushed by the next change.
+      yStructRef.current?.clear();
+    }, LOCAL_ORIGIN);
     snapshotRef.current.clear();
+    structSnapRef.current.clear();
   }, []);
 
   useEffect(() => {
@@ -178,6 +240,10 @@ export function useSheetCollab({
     const yCells = ydoc.getMap<unknown>("cells");
     yCellsRef.current = yCells;
     const snapshot = snapshotRef.current;
+    const yStruct = ydoc.getMap<unknown>("struct");
+    const structSnap = structSnapRef.current;
+    yStructRef.current = yStruct;
+    const structNow = () => new Map(yStruct.entries());
     const awareness = provider.awareness;
     const unsubs: Array<() => void> = [];
 
@@ -212,6 +278,28 @@ export function useSheetCollab({
     };
     yCells.observe(observer);
     unsubs.push(() => yCells.unobserve(observer));
+
+    // Remote structure → workbook. The snapshot takes the remote values first
+    // so the workbook's own onChange doesn't send them back.
+    const applyStruct = (keys: Iterable<string>) => {
+      const wb = workbookRef.current;
+      if (!wb) return;
+      const list = [...keys];
+      const until = Date.now() + 3000;
+      for (const key of list) {
+        const v = yStruct.get(key);
+        if (v === undefined) structSnap.delete(key);
+        else structSnap.set(key, structSig(v));
+        pendingRef.current.set(key, until);
+      }
+      applyStructure(wb, list, structNow());
+    };
+    const structObserver = (e: Y.YMapEvent<unknown>, txn: Y.Transaction) => {
+      if (txn.origin === LOCAL_ORIGIN || !readyRef.current) return;
+      applyStruct(e.keysChanged);
+    };
+    yStruct.observe(structObserver);
+    unsubs.push(() => yStruct.unobserve(structObserver));
 
     // ----- presence ------------------------------------------------------
     if (awareness && user) {
@@ -249,23 +337,58 @@ export function useSheetCollab({
     }
 
     // ----- initial sync (seed empty room, or load existing) ------------
+    // The room is the source of truth once it has ever been seeded. An
+    // *empty* room used to look "never initialised", so opening a sheet
+    // whose cells had all been deleted re-seeded it from the stale saved
+    // snapshot — bringing the deleted data back for everyone (R-171).
+    const meta = ydoc.getMap<unknown>("meta");
     const sync = (attempt = 0) => {
       const wb = workbookRef.current;
-      if (yCells.size === 0) {
-        // Empty room → seed from the locally-loaded workbook. The workbook
-        // may not have mounted yet (provider synced before data loaded);
-        // retry briefly so the existing cells reach the shared doc without
-        // waiting for the first edit.
-        if (!wb && attempt < 20) {
-          const t = setTimeout(() => sync(attempt + 1), 150);
-          unsubs.push(() => clearTimeout(t));
-          return;
+      // The workbook may not have mounted yet (provider synced before the
+      // data loaded); retry briefly.
+      if (!wb && attempt < 20) {
+        const t = setTimeout(() => sync(attempt + 1), 150);
+        unsubs.push(() => clearTimeout(t));
+        return;
+      }
+      const seeded = meta.get("seeded") === true || yCells.size > 0;
+      // A room from before WP-6.3 has cells but no structure yet: the first
+      // editor in shares its workbook's structure; later ones take the room's.
+      const structSeeded = meta.get("structSeeded") === true || yStruct.size > 0;
+      if (structSeeded && wb) {
+        // The room's tabs first, then drop local ones it doesn't have (so
+        // "never delete the last tab" can't leave a stray one behind).
+        const missing = tabsMissingFrom(wb, structNow());
+        applyStruct([...yStruct.keys()]);
+        for (const tab of missing) {
+          try {
+            wb.deleteSheet({ id: tab });
+          } catch {
+            /* last tab */
+          }
         }
+      } else if (!structSeeded) {
+        ydoc.transact(() => meta.set("structSeeded", true), LOCAL_ORIGIN);
+      }
+      if (!seeded) {
         readyRef.current = true;
         if (wb) onLocalChange(wb.getAllSheets());
+        ydoc.transact(() => meta.set("seeded", true), LOCAL_ORIGIN);
       } else {
+        if (meta.get("seeded") !== true) {
+          ydoc.transact(() => meta.set("seeded", true), LOCAL_ORIGIN);
+        }
+        // Cells the room no longer has were deleted by someone — drop
+        // them locally instead of keeping (and later re-saving) them.
+        if (wb) {
+          const local = enumerateCells(wb.getAllSheets());
+          const gone = [...local.keys()].filter((k) => !yCells.has(k));
+          applyRemote(gone);
+        }
         applyRemote([...yCells.keys()]);
         readyRef.current = true;
+        // A first editor since WP-6.3 shares the structure now.
+        if (!structSeeded && wb) onLocalChange(wb.getAllSheets());
       }
       setReady(true);
     };
@@ -295,7 +418,10 @@ export function useSheetCollab({
         /* ignore */
       }
       yCellsRef.current = null;
+      yStructRef.current = null;
       snapshot.clear();
+      structSnap.clear();
+      pendingRef.current.clear();
       readyRef.current = false;
       setReady(false);
       setPeers(0);
@@ -305,4 +431,12 @@ export function useSheetCollab({
   }, [ydoc, provider, user?.id, user?.name, user?.color, onLocalChange]);
 
   return { onLocalChange, clearAll, ready, peers, peerUsers };
+}
+
+/** What a local change sent to the room. */
+export interface LocalDiff {
+  changed: number;
+  removed: number;
+  /** Structure entries sent (WP-6.3) — a width, a merge, a new tab… */
+  struct?: number;
 }

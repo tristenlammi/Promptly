@@ -166,6 +166,9 @@ export interface User {
    *  artifacts. Admins are never gated. Optional for backward-compat with
    *  older cached sessions; treated as allowed unless explicitly `false`. */
   can_execute_code?: boolean;
+  /** May this user's automation HTTP steps reach the local network?
+   *  Admins always may. */
+  can_reach_private_network?: boolean;
 }
 
 /** Expanded row used by the admin users table. */
@@ -181,6 +184,9 @@ export interface AdminUser {
   /** Whether user-invoked code execution (the "Run" button on code
    *  artifacts) is allowed. Admins are never gated. */
   can_execute_code: boolean;
+  /** Whether the user's automation HTTP steps may reach the local network
+   *  (LAN, Tailscale, the Docker host). Admins are never gated. */
+  can_reach_private_network: boolean;
   /** Groups this user belongs to (role bundles — grant connectors + models). */
   group_ids: string[];
   created_at: string;
@@ -201,6 +207,8 @@ export interface AdminUser {
   /** Enrolled second-factor method (e.g. "totp", "email"), or null if the
    *  user has NOT set up MFA. */
   mfa_enrolled_method: string | null;
+  /** Last active (session refresh), not just last password sign-in. */
+  last_seen_at?: string | null;
   mfa_enrolled_at: string | null;
 
   // ----- Quota overrides (Phase 3) -----
@@ -272,6 +280,8 @@ export interface AppSettings {
   oidc_client_id: string | null;
   oidc_button_label: string | null;
   oidc_scopes: string | null;
+  oidc_trust_unverified_email: boolean;
+  oidc_satisfies_mfa: boolean;
   oidc_client_secret_set: boolean;
   oidc_configured: boolean;
   /**
@@ -279,6 +289,8 @@ export interface AppSettings {
    * users without their own override are uncapped".
    */
   default_storage_cap_bytes: number | null;
+  /** Largest single (resumable) upload, bytes; null = the 10 GB default (WP-8.2). */
+  max_upload_bytes_large: number | null;
   default_daily_token_budget: number | null;
   default_monthly_token_budget: number | null;
   /**
@@ -352,6 +364,12 @@ export interface AppSettings {
   voice_provider_id: string | null;
   voice_model_id: string | null;
   voice_configured: boolean;
+  /** The model that describes photos (PH-2), and how many a cloud one may
+   *  describe a month. */
+  photos_vision_provider_id: string | null;
+  photos_vision_model_id: string | null;
+  photos_vision_configured: boolean;
+  photos_vision_monthly_limit: number;
   updated_at: string;
 }
 
@@ -374,6 +392,8 @@ export interface WorkspaceDefaults {
   default_chat_model_id: string | null;
   vision_relay_provider_id: string | null;
   vision_relay_model_id: string | null;
+  /** An embedding model is set up, so file and note search can work. */
+  embedding_configured?: boolean;
 }
 
 // ---- Admin analytics ----
@@ -487,6 +507,15 @@ export interface ErrorEventDetail extends ErrorEventRow {
  *  exactly one process to describe. */
 export interface RuntimeMetrics {
   uptime_seconds: number;
+  /** Home Assistant voice bridge (R-200). */
+  wyoming?: {
+    state: "off" | "not_started" | "listening";
+    reason: string | null;
+    host?: string;
+    port?: number;
+    last_client_at?: string;
+    last_utterance_at?: string;
+  };
   requests: {
     total: number;
     by_class: Record<string, number>;
@@ -513,6 +542,8 @@ export interface RuntimeMetrics {
       };
   streams: { active: number; retained: number };
   background_tasks: number;
+  /** How late the event loop woke, in ms (blocking work shows up here). */
+  loop_lag?: { last_ms: number; max_1m_ms: number };
   memory_rss_bytes: number | null;
 }
 
@@ -690,6 +721,21 @@ export interface Source {
   title: string;
   url: string;
   snippet: string;
+  /** ``file`` — a passage from the user's own files (WP-5.2); ``url`` is
+   *  then an in-app link (``/files/f/{id}?page=…``) that opens the file
+   *  where the passage is. Web citations leave it unset. */
+  kind?: "file";
+  file_id?: string;
+  /** Where in the file — "page 3", "Budget · row 12". */
+  location?: string;
+  page?: number;
+  tab?: string;
+  row?: number;
+}
+
+/** A citation that opens a file inside the app (not an external page). */
+export function isFileSource(s: Source): boolean {
+  return s.kind === "file" && typeof s.url === "string" && s.url.startsWith("/files/f/");
 }
 
 export interface MessageAttachmentSnapshot {
@@ -708,6 +754,23 @@ export interface MessageAttachmentSnapshot {
    *  source it was rendered from (e.g. the markdown the PDF came
    *  from). ``null`` for user uploads and for source rows themselves. */
   source_file_id?: string | null;
+}
+
+/** What filled the model's context on a turn (WP-1.4). ``parts`` are
+ *  estimated from text size and scaled to the provider's real total. */
+export interface ContextUsage {
+  total: number;
+  measured: boolean;
+  parts: {
+    /** Standing instructions: guidelines, tool guidance, workspace/chat prompts. */
+    instructions: number;
+    /** Looked up for this message: date/time, memories, files, @-mentions. */
+    turn: number;
+    /** Tool definitions. */
+    tools: number;
+    /** The conversation itself, including tool results. */
+    history: number;
+  };
 }
 
 export interface ChatMessage {
@@ -732,6 +795,9 @@ export interface ChatMessage {
   // tracking was added.
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
+  /** Size of the last request in this turn and what filled it — what the
+   *  context meter shows. ``prompt_tokens`` is the sum over tool calls. */
+  context_usage?: ContextUsage | null;
   ttft_ms?: number | null;
   total_ms?: number | null;
   /** Which model produced this assistant reply (raw id; resolved to a

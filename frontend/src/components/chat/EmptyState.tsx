@@ -18,9 +18,12 @@ const WORKSPACE_SUGGESTIONS = [
   "Find an answer in the workspace docs",
 ];
 
+/** "none" = the server answered and there's no model this user can use. */
+export type ModelStatus = "loading" | "error" | "none" | "ready";
+
 interface EmptyStateProps {
   onSuggestion?: (text: string) => void;
-  hasModel: boolean;
+  modelStatus: ModelStatus;
   /** When this chat belongs to a workspace, the empty state greets with
    *  the workspace name and offers workspace-flavoured starters. */
   workspaceId?: string | null;
@@ -28,9 +31,10 @@ interface EmptyStateProps {
 
 export function EmptyState({
   onSuggestion,
-  hasModel,
+  modelStatus,
   workspaceId,
 }: EmptyStateProps) {
+  const hasModel = modelStatus === "ready";
   const { data: workspace } = useWorkspace(workspaceId ?? undefined);
   const inWorkspace = Boolean(workspaceId);
   const suggestions = inWorkspace ? WORKSPACE_SUGGESTIONS : GENERAL_SUGGESTIONS;
@@ -46,7 +50,7 @@ export function EmptyState({
         className="mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent)]/10"
         aria-hidden
       >
-        <Sparkles className="h-6 w-6 text-[var(--accent)]" />
+        <Sparkles className="h-6 w-6 text-[var(--accent-text)]" />
       </div>
       <h2 className="text-2xl font-semibold tracking-tight">
         {inWorkspace && workspace
@@ -54,21 +58,25 @@ export function EmptyState({
           : "What can I help you with?"}
       </h2>
       <p className="mt-2 max-w-md text-sm text-[var(--text-muted)]">
-        {!hasModel
-          ? isAdmin
-            ? "No model provider is connected yet, so Promptly can't answer anything."
-            : "No model provider is connected yet, so Promptly can't answer anything. Ask an administrator to add one."
-          : inWorkspace
+        {modelStatus === "loading"
+          ? "Loading models…"
+          : modelStatus === "error"
+            ? "Couldn't reach the server to load models. Check your connection — this will update when it's back."
+            : modelStatus === "none"
+              ? isAdmin
+                ? "No models are available yet — connect a provider, or refresh an existing provider's models in Admin → Models."
+                : "You don't have access to any models yet. Ask an administrator to add one or give you access."
+              : inWorkspace
             ? "This chat uses the workspace's instructions and files. Ask anything, or attach more — answers stream in as they're written."
             : "Ask anything, attach a file, or turn on web search. Answers stream in as they're written."}
       </p>
 
-      {!hasModel && isAdmin && (
+      {modelStatus === "none" && isAdmin && (
         <Link
           to="/admin?tab=models"
           className="mt-5 inline-flex items-center gap-1.5 rounded-input bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white transition hover:opacity-90"
         >
-          Connect a model provider
+          Set up models
         </Link>
       )}
 

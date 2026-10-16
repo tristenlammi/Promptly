@@ -32,10 +32,6 @@ class EchoTool(Tool):
         "user explicitly asks you to test the tool system or to demonstrate "
         "a tool call. Don't volunteer it for normal questions."
     )
-    prompt_hint = (
-        "Echo text back unchanged. Diagnostic only — call only when the "
-        "user explicitly asks to test tool calling."
-    )
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": {

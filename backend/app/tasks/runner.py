@@ -520,6 +520,27 @@ async def _generate(
     return final_text, deduped, usage
 
 
+# Runs one person may have going at once across the worker (R-151).
+PER_USER_CONCURRENT_RUNS = 2
+_FAIR_RETRY_SECONDS = 15
+
+
+async def _owner_busy(db, user_id, run_id) -> bool:
+    from sqlalchemy import func as _func
+
+    running = await db.scalar(
+        select(_func.count())
+        .select_from(TaskRun)
+        .join(Task, Task.id == TaskRun.task_id)
+        .where(
+            Task.user_id == user_id,
+            TaskRun.status == "running",
+            TaskRun.id != run_id,
+        )
+    )
+    return int(running or 0) >= PER_USER_CONCURRENT_RUNS
+
+
 async def execute_run(run_id: uuid.UUID) -> None:
     """Execute an already-created pending :class:`TaskRun` to completion.
 
@@ -532,6 +553,23 @@ async def execute_run(run_id: uuid.UUID) -> None:
         if run is None:
             logger.warning("execute_run: run %s vanished", run_id)
             return
+        if run.status != "pending":
+            # Only a pending run may start. arq re-delivers a job whose
+            # worker was killed mid-run (an update, a crash); starting it
+            # again replayed every step from the top — duplicate emails,
+            # webhooks and notes (R-241). Close it out instead and let the
+            # next schedule run it fresh.
+            if run.status == "running":
+                run.status = "failed"
+                run.error = (
+                    "Interrupted by a server restart. It wasn't retried, so "
+                    "steps that already ran won't run twice; the next "
+                    "scheduled run starts fresh."
+                )
+                run.finished_at = datetime.now(timezone.utc)
+                await db.commit()
+            logger.warning("execute_run: run %s was %s, not starting it", run_id, run.status)
+            return
         task = await db.get(Task, run.task_id)
         if task is None:
             run.status = "failed"
@@ -540,12 +578,40 @@ async def execute_run(run_id: uuid.UUID) -> None:
             await db.commit()
             return
 
-        run.status = "running"
-        run.started_at = datetime.now(timezone.utc)
+        # Fairness (R-151): one person's burst — a webhook storm, several
+        # deep-research runs — can't take every worker slot. Past the
+        # per-person limit a run waits its turn (re-queued shortly) instead
+        # of starting; it isn't failed or dropped.
+        if await _owner_busy(db, task.user_id, run.id):
+            await db.rollback()
+            from app.tasks.queue import enqueue_run
+
+            await enqueue_run(run_id, defer_by=_FAIR_RETRY_SECONDS)
+            logger.info("execute_run: owner of run %s at capacity; re-queued", run_id)
+            return
+
+        # Claim the run atomically: two deliveries of the same job (a retry
+        # racing the original) can't both pass the status check above and
+        # run the flow twice (R-147).
+        from sqlalchemy import update as _update
+
+        claimed = await db.execute(
+            _update(TaskRun)
+            .where(TaskRun.id == run.id, TaskRun.status == "pending")
+            .values(status="running", started_at=datetime.now(timezone.utc))
+        )
         await db.commit()
+        if not claimed.rowcount:
+            logger.warning("execute_run: run %s was claimed elsewhere", run_id)
+            return
+        await db.refresh(run)
 
         try:
             user = await db.get(User, task.user_id)
+            # Model calls in this run are charged to its owner (R-276).
+            from app.billing.usage_context import bill_usage_to
+
+            bill_usage_to(task.user_id)
             if user is None:
                 raise TaskRunError("Task owner no longer exists.")
             # Execute the task's flow graph — its stored Advanced graph, or the
@@ -560,6 +626,22 @@ async def execute_run(run_id: uuid.UUID) -> None:
             )
 
             graph = await load_or_derive_graph(db, task)
+            # Re-check what the owner may do *now* — model access, workspace
+            # role, private network, connector tools — and their usage
+            # budget. Saved automations used to keep whatever their owner
+            # could once do, and ran past every budget unmetered (R-007,
+            # R-011).
+            from app.billing.usage import check_budget
+            from app.tasks.policy import problems
+
+            found = await problems(db, user=user, task=task, graph=graph)
+            if found:
+                raise TaskRunError("This automation can't run: " + " ".join(found))
+            if (await check_budget(db, user)).verdict == "blocked":
+                raise TaskRunError(
+                    "Your usage budget is used up, so this automation didn't run. "
+                    "It will run again once the budget resets."
+                )
             # Size-aware run budget (A3): a big flow (a 50-item loop over a slow
             # model, deep research across pages) legitimately needs more than a
             # tiny one. We compute a per-run ceiling from the graph and pass it
@@ -576,6 +658,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 # Webhook runs (0136) carry the inbound request body; the
                 # flow reads it as {{trigger.payload}} / {{trigger.json.*}}.
                 trigger_payload=run.trigger_payload,
+                trigger_meta=run.trigger_meta,
                 time_budget=run_budget,
                 db=db,
             )
@@ -586,12 +669,49 @@ async def execute_run(run_id: uuid.UUID) -> None:
             run.prompt_tokens = usage["prompt_tokens"] or None
             run.completion_tokens = usage["completion_tokens"] or None
             run.cost_usd = usage["cost_usd"]
+            # Automations spend the owner's budget like chat does — and the
+            # admin's usage analytics now see it (R-011).
+            if usage["prompt_tokens"] or usage["completion_tokens"]:
+                from app.billing.usage import record_usage
+
+                try:
+                    await record_usage(
+                        db,
+                        user_id=user.id,
+                        prompt_tokens=usage["prompt_tokens"],
+                        completion_tokens=usage["completion_tokens"],
+                        cost_usd=usage["cost_usd"],
+                    )
+                except Exception:  # noqa: BLE001 — metering must not fail the run
+                    logger.exception("recording usage for run %s failed", run_id)
             # "warning" = the flow ran to completion but the output admits
             # it came back empty-handed (dead searches, missing data).
             run.status = "warning" if _detect_run_warning(text) else "success"
         except (TaskRunError, ProviderError) as e:
             run.status = "failed"
             run.error = str(e)
+            # A step failed: keep the steps that ran (and which one broke)
+            # and what it cost, so the run can be inspected (R-146).
+            from app.tasks.graph_runner import FlowFailed
+
+            if isinstance(e, FlowFailed):
+                run.node_runs = e.node_runs or None
+                run.prompt_tokens = e.usage.get("prompt_tokens") or None
+                run.completion_tokens = e.usage.get("completion_tokens") or None
+                run.cost_usd = e.usage.get("cost_usd")
+                if e.usage.get("prompt_tokens") or e.usage.get("completion_tokens"):
+                    from app.billing.usage import record_usage
+
+                    try:
+                        await record_usage(
+                            db,
+                            user_id=task.user_id,
+                            prompt_tokens=e.usage.get("prompt_tokens"),
+                            completion_tokens=e.usage.get("completion_tokens"),
+                            cost_usd=e.usage.get("cost_usd"),
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.exception("recording usage for failed run %s failed", run_id)
             logger.info("Task run %s failed: %s", run_id, e)
         except Exception as e:  # noqa: BLE001
             run.status = "failed"
@@ -611,6 +731,9 @@ async def execute_run(run_id: uuid.UUID) -> None:
             # ``task_complete`` notification preference.
             final_status = run.status
             notify = task.notify
+            notify_mode = task.notify_mode or "failures"
+            run_output = run.output_markdown or ""
+            run_id_done = run.id
             owner_id = task.user_id
             title = task.title
             task_id = task.id
@@ -638,6 +761,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
             except Exception:  # pragma: no cover — pruning is best-effort
                 logger.warning("task run retention sweep failed", exc_info=True)
 
+        streak_alerted = False
         # Consecutive-failure alert (5.5): three failed runs in a row is a
         # broken automation, not bad luck — say so once per streak (the
         # check fires exactly at the third, not on every later failure).
@@ -658,6 +782,7 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 if len(recent) == 3 and all(s == "failed" for s in recent):
                     from app.notifications import notify_user
 
+                    streak_alerted = True
                     await notify_user(
                         user_id=owner_id,
                         category="task_complete",
@@ -673,7 +798,14 @@ async def execute_run(run_id: uuid.UUID) -> None:
             except Exception:  # pragma: no cover — alerting is best-effort
                 logger.warning("failure-streak alert failed", exc_info=True)
 
-        if notify:
+        if notify and await _should_notify(
+            db,
+            mode=notify_mode,
+            status=final_status,
+            task_id=task_id,
+            run_id=run_id_done,
+            output=run_output,
+        ) and not (final_status == "failed" and streak_alerted):
             try:
                 from app.notifications import notify_user
 
@@ -703,6 +835,56 @@ async def execute_run(run_id: uuid.UUID) -> None:
                 )
             except Exception:  # pragma: no cover — push is never critical
                 logger.warning("task completion push failed", exc_info=True)
+
+
+async def _should_notify(
+    db, *, mode: str, status: str, task_id, run_id, output: str
+) -> bool:
+    """Whether this finished run is worth a notification (R-152). Every run
+    used to push and write an inbox row — a 5-minute automation filled the
+    inbox in under a day.
+
+    * ``failures`` (default): failed or "needs a look" runs, the first
+      success, and the first success after a failure;
+    * ``changes``: failures, plus successes whose result differs from the
+      last successful run's;
+    * ``every``; ``never``.
+    """
+    if mode == "never":
+        return False
+    if mode == "every" or status in ("failed", "warning"):
+        return mode != "never"
+    prev = (
+        await db.execute(
+            select(TaskRun.status, TaskRun.output_markdown)
+            .where(
+                TaskRun.task_id == task_id,
+                TaskRun.id != run_id,
+                TaskRun.status.in_(("success", "warning", "failed")),
+            )
+            .order_by(TaskRun.created_at.desc())
+            .limit(1)
+        )
+    ).first()
+    if prev is None:
+        return True  # the first finished run
+    if mode == "failures":
+        return prev.status in ("failed", "warning")  # recovered
+    if mode == "changes":
+        last_ok = (
+            await db.execute(
+                select(TaskRun.output_markdown)
+                .where(
+                    TaskRun.task_id == task_id,
+                    TaskRun.id != run_id,
+                    TaskRun.status == "success",
+                )
+                .order_by(TaskRun.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        return (last_ok or "").strip() != (output or "").strip()
+    return False
 
 
 __all__ = ["execute_run", "TaskRunError"]

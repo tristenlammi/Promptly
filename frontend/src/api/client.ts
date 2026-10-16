@@ -21,10 +21,26 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+/** True when the request never got a real answer: no response at all,
+ *  or the gateway/proxy reporting the backend down (502/503/504). */
+export function isServerUnavailable(err: unknown): boolean {
+  const e = err as AxiosError | undefined;
+  if (!e || !axios.isAxiosError(e)) return false;
+  if (!e.response) return true;
+  return [502, 503, 504].includes(e.response.status);
+}
+
+/** The server definitively refused the refresh cookie. */
+function refreshRefused(err: unknown): boolean {
+  const e = err as AxiosError | undefined;
+  if (!e || !axios.isAxiosError(e) || !e.response) return false;
+  return e.response.status === 401 || e.response.status === 403;
+}
+
 // ---- Response: refresh on 401 (single-flight) ----
 let refreshPromise: Promise<string | null> | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
+export async function refreshAccessToken(): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
     try {
@@ -36,8 +52,19 @@ async function refreshAccessToken(): Promise<string | null> {
       const { access_token } = res.data;
       useAuthStore.getState().setAccessToken(access_token);
       return access_token;
-    } catch {
-      useAuthStore.getState().clear();
+    } catch (err) {
+      // Only the server saying "no" (401/403) ends the session. A refresh
+      // that failed because the backend was restarting (an update), was
+      // rate-limited, or hit a server error used to log everyone out
+      // mid-work and lose their place (R-246, R-142).
+      if (refreshRefused(err)) {
+        const wasSignedIn = useAuthStore.getState().user !== null;
+        useAuthStore.getState().clear();
+        // A session that just ended: start over on a fresh page, so the
+        // next person here doesn't see this user's cached data (R-030).
+        // Not on a cold load (nobody was signed in) — that would loop.
+        if (wasSignedIn) void import("@/lib/session").then((m) => m.resetToLogin());
+      }
       return null;
     } finally {
       refreshPromise = null;

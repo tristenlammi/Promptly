@@ -3,15 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Star } from "lucide-react";
 
-import { filesApi, isDocumentFile, type FileItem } from "@/api/files";
-import { DocumentEditorModal } from "@/components/files/documents/DocumentEditorModal";
+import { filesApi, type FileItem, type ShareLinkRole, shareRolesFor, supportsEditGrant } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
-import {
-  DriveColumnsHeader,
-  DriveEmptyState,
-  DriveFileRow,
-  DriveFolderRow,
-} from "@/components/files/DriveRows";
+import { DriveEmptyState, DriveSimpleList } from "@/components/files/DriveSimpleList";
 import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
@@ -25,9 +19,10 @@ import {
   useTrashFolder,
   useUnstarFile,
   useUnstarFolder,
+  invalidateFileQueries,
 } from "@/hooks/useFiles";
 import { useDriveSelection } from "@/hooks/useDriveSelection";
-import { downloadAuthed, extractError } from "@/components/files/helpers";
+import { downloadAuthed, extractError, openFile as openInEditor } from "@/components/files/helpers";
 import { toast } from "@/store/toastStore";
 
 // Drive stage 5 — Starred is always "mine". Grantees can preview a
@@ -39,23 +34,22 @@ const SCOPE = "mine" as const;
 export function StarredFilesPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
-  const { data, isLoading } = useStarredFiles(SCOPE);
+  const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useStarredFiles(SCOPE);
   const [preview, setPreview] = useState<FileItem | null>(null);
-  // Drive Documents jump straight into the editor on click — every
-  // other file type still falls back to the generic preview modal.
-  const [editingDoc, setEditingDoc] = useState<FileItem | null>(null);
   const [shareFor, setShareFor] = useState<
     {
       kind: "file" | "folder";
       id: string;
       name: string;
       supportsEdit?: boolean;
+      roles?: ShareLinkRole[];
     } | null
   >(null);
 
+  // Documents, sheets and whiteboards open on their editor page (WP-3.4);
+  // everything else previews.
   const openFile = (f: FileItem) => {
-    if (isDocumentFile(f)) setEditingDoc(f);
-    else setPreview(f);
+    if (!openInEditor(f, navigate)) setPreview(f);
   };
 
   const unstarFile = useUnstarFile();
@@ -142,57 +136,43 @@ export function StarredFilesPage() {
           />
 
           {!empty && (
-            <div className="overflow-hidden rounded-card border border-[var(--border)] bg-[var(--surface)]">
-              <DriveColumnsHeader />
-              <ul className="divide-y divide-[var(--border)]">
-                {folders.map((f) => (
-                  <DriveFolderRow
-                    key={f.id}
-                    folder={f}
-                    selected={sel.isFolderSelected(f.id)}
-                    selectionActive={sel.count > 0}
-                    onToggleSelect={() => sel.toggleFolder(f.id)}
-                    onOpen={() => navigate(`/files/folder/${f.id}`)}
-                    actions={{
-                      onUnstar: () =>
-                        unstarFolder.mutate({ id: f.id, scope: SCOPE }),
-                      onShare: () =>
-                        setShareFor({
-                          kind: "folder",
-                          id: f.id,
-                          name: f.name,
-                        }),
-                      onTrash: () =>
-                        trashFolder.mutate({ id: f.id, scope: SCOPE }),
-                    }}
-                  />
-                ))}
-                {files.map((f) => (
-                  <DriveFileRow
-                    key={f.id}
-                    file={f}
-                    selected={sel.isFileSelected(f.id)}
-                    selectionActive={sel.count > 0}
-                    onToggleSelect={() => sel.toggleFile(f.id)}
-                    actions={{
-                      onPreview: () => openFile(f),
-                      onDownload: () => downloadAuthed(f),
-                      onUnstar: () =>
-                        unstarFile.mutate({ id: f.id, scope: SCOPE }),
+            <DriveSimpleList
+              folders={folders}
+              files={files}
+              selection={{
+                count: sel.count,
+                isFileSelected: sel.isFileSelected,
+                isFolderSelected: sel.isFolderSelected,
+                toggleFile: sel.toggleFile,
+                toggleFolder: sel.toggleFolder,
+              }}
+              open={(e) => (e.kind === "folder" ? navigate(`/files/folder/${e.folder.id}`) : openFile(e.file))}
+              actions={(e) =>
+                e.kind === "folder"
+                  ? {
+                      onUnstar: () => unstarFolder.mutate({ id: e.folder.id, scope: SCOPE }),
+                      onShare: () => setShareFor({ kind: "folder", id: e.folder.id, name: e.folder.name }),
+                      onTrash: () => trashFolder.mutate({ id: e.folder.id, scope: SCOPE }),
+                    }
+                  : {
+                      onPreview: () => openFile(e.file),
+                      onDownload: () => downloadAuthed(e.file),
+                      onUnstar: () => unstarFile.mutate({ id: e.file.id, scope: SCOPE }),
                       onShare: () =>
                         setShareFor({
                           kind: "file",
-                          id: f.id,
-                          name: f.filename,
-                          supportsEdit: isDocumentFile(f),
+                          id: e.file.id,
+                          name: e.file.filename,
+                          supportsEdit: supportsEditGrant(e.file),
+                          roles: shareRolesFor(e.file),
                         }),
-                      onTrash: () =>
-                        trashFile.mutate({ id: f.id, scope: SCOPE }),
-                    }}
-                  />
-                ))}
-              </ul>
-            </div>
+                      onTrash: () => trashFile.mutate({ id: e.file.id, scope: SCOPE }),
+                    }
+              }
+              hasMore={!!hasNextPage}
+              loadingMore={isFetchingNextPage}
+              onLoadMore={() => void fetchNextPage()}
+            />
           )}
         </div>
       </div>
@@ -208,7 +188,8 @@ export function StarredFilesPage() {
             kind: "file",
             id: f.id,
             name: f.filename,
-            supportsEdit: isDocumentFile(f),
+            supportsEdit: supportsEditGrant(f),
+                          roles: shareRolesFor(f),
           })
         }
         onToggleStar={(f) => {
@@ -225,23 +206,17 @@ export function StarredFilesPage() {
                 id: shareFor.id,
                 name: shareFor.name,
                 supports_edit: shareFor.supportsEdit ?? false,
+                roles: shareFor.roles,
               }
             : null
         }
         onClose={() => setShareFor(null)}
         onChanged={() => {
-          void qc.invalidateQueries({ queryKey: ["files"] });
-          void qc.invalidateQueries({ queryKey: ["workspace-files"] });
+          void invalidateFileQueries(qc);
+          void qc.invalidateQueries({ queryKey: ["workspaces"] });
         }}
       />
 
-      {editingDoc && (
-        <DocumentEditorModal
-          file={editingDoc}
-          onClose={() => setEditingDoc(null)}
-          onFileUpdated={(f) => setEditingDoc(f)}
-        />
-      )}
     </>
   );
 }

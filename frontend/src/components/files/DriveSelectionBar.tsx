@@ -6,6 +6,7 @@ import {
   StarOff,
   Trash2,
   X,
+  MessageSquareText,
 } from "lucide-react";
 
 import { Button } from "@/components/shared/Button";
@@ -28,6 +29,7 @@ export function DriveSelectionBar({
   onTrash,
   onRestore,
   onDeleteForever,
+  onAsk,
 }: {
   count: number;
   busy?: boolean;
@@ -39,6 +41,8 @@ export function DriveSelectionBar({
   onTrash?: () => void;
   onRestore?: () => void;
   onDeleteForever?: () => void;
+  /** "Ask about these" — a chat with the selected files (WP-3.5). */
+  onAsk?: () => void;
 }) {
   if (count === 0) return null;
   return (
@@ -57,6 +61,14 @@ export function DriveSelectionBar({
       <span className="mr-1 text-sm font-medium">{count} selected</span>
 
       <div className="ml-auto flex items-center gap-1">
+        {onAsk && (
+          <BarButton
+            icon={<MessageSquareText className="h-3.5 w-3.5" />}
+            label={count === 1 ? "Ask about this" : "Ask about these"}
+            busy={busy}
+            onClick={onAsk}
+          />
+        )}
         {onDownload && (
           <BarButton
             icon={<Download className="h-3.5 w-3.5" />}

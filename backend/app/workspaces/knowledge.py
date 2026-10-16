@@ -85,6 +85,8 @@ from app.files.storage import (
 from app.files.system_folders import get_or_create_subfolder
 from app.files.vision_extract import extract_text_via_vision
 
+from app.workspaces.visibility import conversation_shared
+
 logger = logging.getLogger("promptly.workspaces.knowledge")
 
 # Once a workspace's indexed text passes this many tokens, new chats in it
@@ -242,7 +244,7 @@ async def index_file_for_workspace(
                 return
 
             await delete_existing_chunks(
-                db, scope_kind="workspace", scope_id=workspace_id, user_file_id=file_id
+                db, scope_kind="workspace", scope_id=workspace_id, user_file_id=file_id, commit=False
             )
             await insert_chunks(
                 db,
@@ -352,6 +354,7 @@ async def index_task_attachment_for_workspace(
                 scope_kind="workspace",
                 scope_id=workspace_id,
                 user_file_id=file_id,
+                commit=False,
             )
             await insert_chunks(
                 db,
@@ -373,18 +376,45 @@ async def index_task_attachment_for_workspace(
             logger.exception("index_task_attachment_for_workspace failed")
 
 
-async def reindex_workspace(workspace_id: uuid.UUID) -> None:
-    """Re-index every text file pinned to a workspace. Used after the
-    admin changes the workspace embedding provider (dims would mismatch)."""
+async def reindex_workspace(workspace_id: uuid.UUID, *, failed_only: bool = False) -> None:
+    """Re-index a workspace's pinned files, items (every indexed kind),
+    context-enabled chats and automations digest — it used to cover pinned
+    files only (R-321). ``failed_only`` is the overview's "Retry": just
+    what's queued or failed."""
+    from app.custom_models.backfill import _ITEM_KINDS, _item_indexer
+
+    pending = ("queued", "failed")
     async with SessionLocal() as db:
-        rows = await db.execute(
-            select(WorkspaceFile.file_id).where(
-                WorkspaceFile.workspace_id == workspace_id
-            )
+        fq = select(WorkspaceFile.file_id).where(WorkspaceFile.workspace_id == workspace_id)
+        iq = select(WorkspaceItem.id, WorkspaceItem.kind).where(
+            WorkspaceItem.workspace_id == workspace_id,
+            WorkspaceItem.kind.in_(_ITEM_KINDS),
+            WorkspaceItem.trashed_at.is_(None),
         )
-        file_ids = [r[0] for r in rows.all()]
+        cq = select(Conversation.id).where(
+            Conversation.workspace_id == workspace_id,
+            Conversation.context_enabled.is_(True),
+        )
+        if failed_only:
+            fq = fq.where(WorkspaceFile.indexing_status.in_(pending))
+            iq = iq.where(WorkspaceItem.indexing_status.in_(pending))
+            cq = cq.where(Conversation.context_index_status.in_(pending))
+        file_ids = list((await db.execute(fq)).scalars())
+        items = list((await db.execute(iq)).all())
+        chat_ids = list((await db.execute(cq)).scalars())
     for fid in file_ids:
         await index_file_for_workspace(workspace_id, fid, force=True)
+    for item_id, kind in items:
+        fn = _item_indexer(kind)
+        if fn is not None:
+            try:
+                await fn(workspace_id, item_id, force=True)
+            except Exception:  # noqa: BLE001 — one bad item mustn't stop the rest
+                logger.exception("reindex: %s %s failed", kind, item_id)
+    for cid in chat_ids:
+        await index_chat_for_workspace(workspace_id, cid, force=True)
+    if not failed_only:
+        await index_automations_for_workspace(workspace_id, force=True)
 
 
 # ---------------------------------------------------------------------
@@ -508,6 +538,7 @@ async def index_note_for_workspace(
                 scope_kind="workspace",
                 scope_id=workspace_id,
                 user_file_id=file.id,
+                commit=False,
             )
             await insert_chunks(
                 db,
@@ -622,6 +653,7 @@ async def index_canvas_for_workspace(
                 scope_kind="workspace",
                 scope_id=workspace_id,
                 user_file_id=file.id,
+                commit=False,
             )
             await insert_chunks(
                 db,
@@ -750,6 +782,7 @@ async def index_sheet_for_workspace(
                 scope_kind="workspace",
                 scope_id=workspace_id,
                 user_file_id=uf.id,
+                commit=False,
             )
             await insert_chunks(
                 db,
@@ -798,6 +831,14 @@ async def index_roster_for_workspace(
             roster = await db.get(Roster, item.ref_id)
             if roster is None:
                 return
+            # Re-rendered every time: the text is a window around *today*,
+            # so it goes stale by itself (R-174).
+            from app.workspaces.items_router import roster_context_text
+
+            fresh = await roster_context_text(db, ws, roster)
+            if fresh != roster.content_text:
+                roster.content_text = fresh
+                await db.commit()
             cfg = await get_embedding_config(db)
             if cfg is None:
                 return
@@ -868,6 +909,7 @@ async def index_roster_for_workspace(
                 scope_kind="workspace",
                 scope_id=workspace_id,
                 user_file_id=uf.id,
+                commit=False,
             )
             await insert_chunks(
                 db,
@@ -912,6 +954,41 @@ def _discussion_text_file_id(item: WorkspaceItem) -> uuid.UUID | None:
         return uuid.UUID(str(raw))
     except (ValueError, AttributeError, TypeError):
         return None
+
+
+async def load_discussion_backing_file(
+    db: AsyncSession, *, owner_user_id: uuid.UUID, item: WorkspaceItem
+) -> UserFile | None:
+    """The discussion's transcript file — only if it really is one.
+
+    ``config['text_file_id']`` is a pointer into Drive, and anything that
+    writes to or trashes the file it names must first prove the file is
+    this discussion's own transcript: a ``DISCUSSION_TEXT`` file owned by
+    the workspace owner. Without that check, a pointer aimed at someone
+    else's file (the client used to be able to set it via PATCH) made the
+    indexer overwrite that file's bytes or move it to Trash.
+
+    A pointer that fails the check is treated as absent; the caller then
+    creates a fresh transcript and the bad pointer is replaced.
+    """
+    file_id = _discussion_text_file_id(item)
+    if file_id is None:
+        return None
+    uf = await db.get(UserFile, file_id)
+    if (
+        uf is None
+        or uf.source_kind != GeneratedKind.DISCUSSION_TEXT.value
+        or uf.user_id != owner_user_id
+    ):
+        if uf is not None:
+            logger.warning(
+                "Ignoring discussion %s backing pointer to file %s: not a "
+                "discussion transcript owned by the workspace owner",
+                item.id,
+                file_id,
+            )
+        return None
+    return uf
 
 
 def _set_discussion_text_file_id(
@@ -1009,10 +1086,11 @@ async def _ensure_discussion_backing_file(
     now = datetime.now(timezone.utc)
     title = (item.title or "Discussion").strip() or "Discussion"
 
-    existing_id = _discussion_text_file_id(item)
-    if existing_id is not None:
-        uf = await db.get(UserFile, existing_id)
-        if uf is not None and uf.trashed_at is None:
+    uf = await load_discussion_backing_file(
+        db, owner_user_id=owner.id, item=item
+    )
+    if uf is not None:
+        if uf.trashed_at is None:
             abs_path = absolute_path(uf.storage_path)
             abs_path.parent.mkdir(parents=True, exist_ok=True)
             with open(abs_path, "w", encoding="utf-8") as fh:
@@ -1067,13 +1145,23 @@ async def _purge_discussion_inner(
     pointer. Caller owns the commit."""
     file_id = _discussion_text_file_id(item)
     if file_id is not None:
+        # Chunks are scoped to this workspace, so dropping them is safe even
+        # for a bogus pointer. Trashing the *file* is not: only do that once
+        # it's proven to be this discussion's own transcript.
         await delete_existing_chunks(
             db,
             scope_kind="workspace",
             scope_id=workspace_id,
             user_file_id=file_id,
         )
-        uf = await db.get(UserFile, file_id)
+        ws = await db.get(Workspace, workspace_id)
+        uf = (
+            await load_discussion_backing_file(
+                db, owner_user_id=ws.user_id, item=item
+            )
+            if ws is not None
+            else None
+        )
         if uf is not None and uf.trashed_at is None:
             uf.trashed_at = datetime.now(timezone.utc)
     _set_discussion_text_file_id(item, None)
@@ -1173,6 +1261,7 @@ async def index_discussion_for_workspace(
                 scope_kind="workspace",
                 scope_id=workspace_id,
                 user_file_id=uf.id,
+                commit=False,
             )
             await insert_chunks(
                 db,
@@ -1416,6 +1505,7 @@ async def index_chat_for_workspace(
                 scope_kind="workspace",
                 scope_id=workspace_id,
                 user_file_id=uf.id,
+                commit=False,
             )
             await insert_chunks(
                 db,
@@ -1489,6 +1579,7 @@ def _flatten_board(
     tasks: list[WorkspaceTask],
     assignee_names: dict[str, str] | None = None,
     comments_by_task: dict[str, list[str]] | None = None,
+    zone=None,
 ) -> str:
     """Render a board's tasks as natural-language text for embedding.
 
@@ -1522,7 +1613,10 @@ def _flatten_board(
     def _render_task(t: WorkspaceTask) -> str:
         bits = [f"{t.priority} priority"]
         if t.due_at is not None:
-            bits.append(f"due {t.due_at.date().isoformat()}")
+            # The owner's local day, not the UTC date (R-173).
+            from app.workspaces.localtime import UTC, local_date
+
+            bits.append(f"due {local_date(t.due_at, zone or UTC)}")
         names = [
             label_names.get(lid, "")
             for lid in (t.labels or [])
@@ -1844,8 +1938,14 @@ async def index_board_for_workspace(
                     comments_by_task.setdefault(str(c.task_id), []).append(
                         c.text
                     )
+            from app.workspaces.localtime import workspace_zone
+
             text = _flatten_board(
-                item, tasks, assignee_names, comments_by_task
+                item,
+                tasks,
+                assignee_names,
+                comments_by_task,
+                zone=await workspace_zone(db, await db.get(Workspace, workspace_id)),
             )
             if not text.strip():
                 # Empty board: drop its chunks AND blank the backing file so
@@ -1914,6 +2014,7 @@ async def index_board_for_workspace(
                 scope_kind="workspace",
                 scope_id=workspace_id,
                 user_file_id=uf.id,
+                commit=False,
             )
             await insert_chunks(
                 db,
@@ -2224,6 +2325,7 @@ async def index_automations_for_workspace(
                 scope_kind="workspace",
                 scope_id=workspace_id,
                 user_file_id=uf.id,
+                commit=False,
             )
             await insert_chunks(
                 db,
@@ -2268,12 +2370,22 @@ class WorkspaceInjection:
     retrieval_active: bool = False
 
 
-async def _indexed_token_total(db: AsyncSession, workspace_id: uuid.UUID) -> int:
-    total = await db.scalar(
-        select(func.coalesce(func.sum(KnowledgeChunk.tokens), 0)).where(
-            KnowledgeChunk.workspace_id == workspace_id
-        )
+async def _indexed_token_total(
+    db: AsyncSession,
+    workspace_id: uuid.UUID,
+    file_ids: set[uuid.UUID] | None = None,
+) -> int:
+    """Indexed tokens in the workspace pool — only over ``file_ids`` when
+    given, so content the chat can't see (context-off, private, trashed,
+    excluded) doesn't push a workspace into retrieval mode (R-185)."""
+    stmt = select(func.coalesce(func.sum(KnowledgeChunk.tokens), 0)).where(
+        KnowledgeChunk.workspace_id == workspace_id
     )
+    if file_ids is not None:
+        if not file_ids:
+            return 0
+        stmt = stmt.where(KnowledgeChunk.user_file_id.in_(file_ids))
+    total = await db.scalar(stmt)
     return int(total or 0)
 
 
@@ -2369,6 +2481,165 @@ async def context_disabled_file_ids(
     return out
 
 
+def _ai_item_predicate(item, parent):
+    """SQL predicate: may this item's content reach the AI at all?
+
+    The single rule every AI surface (workspace chats, Ask, search,
+    Related) applies to workspace items. An item is eligible only when it
+    is shared with the workspace (not someone's private draft), live (not
+    trashed or archived), switched on for context, and not inside a
+    Notebook that has been switched off. The RAG pool is workspace-wide,
+    so a private draft is excluded even from its creator's own chats —
+    otherwise it would leak through shared surfaces like Ask.
+    """
+    return and_(
+        item.visibility != "private",
+        item.trashed_at.is_(None),
+        item.archived_at.is_(None),
+        item.context_enabled.is_(True),
+        or_(
+            item.parent_id.is_(None),
+            parent.kind != "container",
+            and_(
+                parent.context_enabled.is_(True),
+                parent.trashed_at.is_(None),
+                parent.archived_at.is_(None),
+            ),
+        ),
+    )
+
+
+async def ai_context_items(
+    db: AsyncSession, workspace_id: uuid.UUID
+) -> list[WorkspaceItem]:
+    """Every item in the workspace whose content may reach the AI."""
+    Parent = aliased(WorkspaceItem)
+    rows = await db.execute(
+        select(WorkspaceItem)
+        .outerjoin(Parent, Parent.id == WorkspaceItem.parent_id)
+        .where(
+            WorkspaceItem.workspace_id == workspace_id,
+            _ai_item_predicate(WorkspaceItem, Parent),
+        )
+    )
+    return list(rows.scalars().all())
+
+
+async def retrievable_workspace_file_ids(
+    db: AsyncSession, workspace_id: uuid.UUID
+) -> set[uuid.UUID]:
+    """The **allow-list** of files the AI may retrieve from in a workspace.
+
+    Retrieval used to search the whole workspace pool and then subtract an
+    exclusion list. That list missed rosters, discussions, card attachments
+    and chat transcripts, ignored archived items, and couldn't exclude a
+    canvas or sheet whose backing file didn't exist yet — so Ask returned
+    other members' private drafts and trashed content (roadmap R-033).
+    An allow-list fails safe instead: a source that isn't explicitly
+    listed here is never retrieved.
+
+    Sources: eligible items (``_ai_item_predicate``) — notes and boards via
+    ``ref_id``; canvases, sheets and rosters via their backing
+    ``text_file_id``; opted-in discussions via their validated transcript;
+    card attachments on eligible boards — plus pinned files switched on for
+    context, workspace-visible context-enabled chat transcripts, the
+    automations summary, and the memory doc when memory is on.
+    """
+    ws = await db.get(Workspace, workspace_id)
+    if ws is None:
+        return set()
+    items = await ai_context_items(db, workspace_id)
+    allowed_item_ids = {it.id for it in items}
+    out: set[uuid.UUID] = set()
+
+    by_kind: dict[str, list[WorkspaceItem]] = {}
+    for it in items:
+        by_kind.setdefault(it.kind, []).append(it)
+
+    for it in by_kind.get("note", []) + by_kind.get("board", []):
+        if it.ref_id is not None:
+            out.add(it.ref_id)
+
+    for kind, model in (
+        ("canvas", WorkspaceCanvas),
+        ("sheet", Spreadsheet),
+        ("roster", Roster),
+    ):
+        ref_ids = [it.ref_id for it in by_kind.get(kind, []) if it.ref_id]
+        if ref_ids:
+            rows = await db.execute(
+                select(model.text_file_id).where(
+                    model.id.in_(ref_ids), model.text_file_id.is_not(None)
+                )
+            )
+            out.update(r for (r,) in rows if r is not None)
+
+    for it in by_kind.get("discussion", []):
+        uf = await load_discussion_backing_file(
+            db, owner_user_id=ws.user_id, item=it
+        )
+        if uf is not None and uf.trashed_at is None:
+            out.add(uf.id)
+
+    board_ids = [it.id for it in by_kind.get("board", [])]
+    if board_ids:
+        rows = await db.execute(
+            select(WorkspaceTask.attachments).where(
+                WorkspaceTask.board_item_id.in_(board_ids)
+            )
+        )
+        for (atts,) in rows:
+            for a in atts or []:
+                if isinstance(a, dict) and a.get("file_id"):
+                    try:
+                        out.add(uuid.UUID(str(a["file_id"])))
+                    except (ValueError, TypeError):
+                        continue
+
+    pinned = await db.execute(
+        select(WorkspaceFile.file_id).where(
+            WorkspaceFile.workspace_id == workspace_id,
+            WorkspaceFile.context_enabled.is_(True),
+        )
+    )
+    out.update(r for (r,) in pinned if r is not None)
+    if ws.memory_mode == "off":
+        mem_doc = await get_workspace_memory_doc(db, workspace_id)
+        if mem_doc is not None:
+            out.discard(mem_doc.id)
+
+    if ws.automations_text_file_id is not None:
+        out.add(ws.automations_text_file_id)
+
+    # Chat transcripts: only workspace-visible, context-enabled chats, and
+    # never one whose chat-page item is trashed, archived or private.
+    blocked_convs = {
+        it.ref_id
+        for it in (
+            await db.execute(
+                select(WorkspaceItem).where(
+                    WorkspaceItem.workspace_id == workspace_id,
+                    WorkspaceItem.kind == "chat",
+                )
+            )
+        ).scalars()
+        if it.ref_id is not None and it.id not in allowed_item_ids
+    }
+    convs = await db.execute(
+        select(Conversation.id, Conversation.context_file_id).where(
+            Conversation.workspace_id == workspace_id,
+            Conversation.visibility == "workspace",
+            Conversation.context_enabled.is_(True),
+            Conversation.context_file_id.is_not(None),
+        )
+    )
+    for conv_id, file_id in convs:
+        if conv_id not in blocked_convs and file_id is not None:
+            out.add(file_id)
+
+    return out
+
+
 async def _workspace_notes(
     db: AsyncSession, workspace_id: uuid.UUID, excluded: set[uuid.UUID]
 ) -> list[tuple[WorkspaceItem, UserFile]]:
@@ -2432,6 +2703,29 @@ async def _workspace_boards(
     return [(it, uf) for it, uf in rows if uf.id not in excluded]
 
 
+async def _workspace_rosters(
+    db: AsyncSession, workspace_id: uuid.UUID, excluded: set[uuid.UUID]
+) -> list[tuple[WorkspaceItem, Roster]]:
+    """Live roster items with their roster row, minus anything excluded by
+    the roster's backing ``text_file_id``."""
+    rows = (
+        await db.execute(
+            select(WorkspaceItem, Roster)
+            .join(Roster, Roster.id == WorkspaceItem.ref_id)
+            .where(
+                WorkspaceItem.workspace_id == workspace_id,
+                WorkspaceItem.kind == "roster",
+            )
+            .order_by(WorkspaceItem.position.asc())
+        )
+    ).all()
+    return [
+        (it, r)
+        for it, r in rows
+        if r.text_file_id is None or r.text_file_id not in excluded
+    ]
+
+
 async def _workspace_sheets(
     db: AsyncSession, workspace_id: uuid.UUID, excluded: set[uuid.UUID]
 ) -> list[tuple[WorkspaceItem, Spreadsheet]]:
@@ -2460,6 +2754,7 @@ def _format_context_block(
     canvases: list[tuple[WorkspaceItem, "WorkspaceCanvas"]],
     boards: list[tuple[WorkspaceItem, UserFile]] | None = None,
     sheets: list[tuple[WorkspaceItem, "Spreadsheet"]] | None = None,
+    rosters: list[tuple[WorkspaceItem, "Roster"]] | None = None,
 ) -> tuple[str | None, list[uuid.UUID]]:
     """Full text of the workspace's notes + canvases + boards + sheets for
     full-dump mode, capped so a runaway set can't blow the context window.
@@ -2491,11 +2786,17 @@ def _format_context_block(
         text = (s.content_text or "").strip()
         if text:
             sections.append((f"{it.title} (sheet)", text, s.text_file_id))
+    # Rosters were missing from the full content, so "who's on Friday?"
+    # only worked once a workspace was big enough for retrieval (R-174).
+    for it, r in rosters or []:
+        text = (r.content_text or "").strip()
+        if text:
+            sections.append((f"{it.title} (roster)", text, r.text_file_id))
     if not sections:
         return None, []
 
     header = (
-        "The user's notes, canvases, boards, and sheets in this workspace. "
+        "The user's notes, canvases, boards, sheets, and rosters in this workspace. "
         "Treat them as authoritative context for this conversation:"
     )
     parts: list[str] = []
@@ -2654,13 +2955,44 @@ def _with_map(map_md: str | None, block: str | None) -> str | None:
     return "\n\n".join(parts) if parts else None
 
 
+async def board_live_text(db: AsyncSession, item: WorkspaceItem) -> str:
+    """A board's cards as readable text, straight from the cards."""
+    from app.workspaces.localtime import workspace_zone
+
+    tasks = list(
+        (
+            await db.execute(
+                select(WorkspaceTask)
+                .where(WorkspaceTask.board_item_id == item.id)
+                .order_by(WorkspaceTask.status.asc(), WorkspaceTask.position.asc())
+            )
+        ).scalars()
+    )
+    ids = {t.assignee_user_id for t in tasks if t.assignee_user_id}
+    names: dict[str, str] = {}
+    if ids:
+        names = {
+            str(u.id): u.username
+            for u in (await db.execute(select(User).where(User.id.in_(ids)))).scalars()
+        }
+    ws = await db.get(Workspace, item.workspace_id)
+    return _flatten_board(item, tasks, names, {}, zone=await workspace_zone(db, ws))
+
+
 async def _item_backing_text(
     db: AsyncSession, item: WorkspaceItem
 ) -> str | None:
     """Full flattened text of a single workspace item, by kind. ``None`` for
     kinds with no readable body (folder/container/chat) or a missing/trashed
     backing row."""
-    if item.kind in ("note", "board"):
+    if item.kind == "board":
+        # The backing text only exists once the board has been indexed
+        # (never, without an embedder) — render the cards directly then.
+        uf = await db.get(UserFile, item.ref_id) if item.ref_id else None
+        if uf is not None and uf.trashed_at is None and (uf.content_text or "").strip():
+            return uf.content_text.strip()
+        return (await board_live_text(db, item)).strip() or None
+    if item.kind == "note":
         uf = await db.get(UserFile, item.ref_id)
         if uf is None or uf.trashed_at is not None:
             return None
@@ -2671,6 +3003,14 @@ async def _item_backing_text(
     if item.kind == "canvas":
         c = await db.get(WorkspaceCanvas, item.ref_id)
         return ((c.content_text or "").strip() or None) if c is not None else None
+    if item.kind == "roster":
+        r = await db.get(Roster, item.ref_id)
+        if r is None:
+            return None
+        ws = await db.get(Workspace, item.workspace_id)
+        from app.workspaces.items_router import roster_context_text
+
+        return (await roster_context_text(db, ws, r)).strip() or None
     return None
 
 
@@ -2782,24 +3122,53 @@ async def build_workspace_injection(
             .order_by(WorkspaceFile.pinned_at.asc())
         )
     ).all()
-    file_rows = [(wsf, uf) for wsf, uf in file_rows if uf.id not in excluded]
-    note_rows = await _workspace_notes(db, workspace_id, excluded)
-    canvas_rows = await _workspace_canvases(db, workspace_id, excluded)
-    board_rows = await _workspace_boards(db, workspace_id, excluded)
-    sheet_rows = await _workspace_sheets(db, workspace_id, excluded)
+    # The allow-list is the authority on what the AI may see; the per-chat
+    # ``excluded`` set only narrows it further. Filtering items by id (not
+    # just by backing file) also catches a canvas or sheet whose backing
+    # file doesn't exist yet, and archived / private / trashed items.
+    allowed_files = await retrievable_workspace_file_ids(db, workspace_id)
+    allowed_items = {it.id for it in await ai_context_items(db, workspace_id)}
+    file_rows = [
+        (wsf, uf)
+        for wsf, uf in file_rows
+        if uf.id in allowed_files and uf.id not in excluded
+    ]
+
+    def _eligible(rows):
+        return [r for r in rows if r[0].id in allowed_items]
+
+    note_rows = _eligible(await _workspace_notes(db, workspace_id, excluded))
+    canvas_rows = _eligible(await _workspace_canvases(db, workspace_id, excluded))
+    board_rows = _eligible(await _workspace_boards(db, workspace_id, excluded))
+    # Boards that have never been indexed (always the case without an
+    # embedder) have no backing text file, so their cards never reached the
+    # chat at all. Render them from the cards instead.
+    from types import SimpleNamespace as _NS
+
+    indexed_boards = {it.id for it, _uf in board_rows}
+    for it in await ai_context_items(db, workspace_id):
+        if it.kind == "board" and it.id not in indexed_boards and it.ref_id is None:
+            live = await board_live_text(db, it)
+            if live.strip():
+                board_rows.append((it, _NS(id=None, content_text=live)))
+    sheet_rows = _eligible(await _workspace_sheets(db, workspace_id, excluded))
+    roster_rows = _eligible(await _workspace_rosters(db, workspace_id, excluded))
     if (
         not file_rows
         and not note_rows
         and not canvas_rows
         and not board_rows
         and not sheet_rows
+        and not roster_rows
     ):
         # No retrievable content, but the map still tells the chat what's here.
         return WorkspaceInjection(system_block=map_md)
 
     cfg = await get_embedding_config(db)
     indexed_tokens = (
-        await _indexed_token_total(db, workspace_id) if cfg is not None else 0
+        await _indexed_token_total(db, workspace_id, allowed_files - excluded)
+        if cfg is not None
+        else 0
     )
     retrieval_active = (
         cfg is not None and indexed_tokens > WORKSPACE_RETRIEVAL_TOKEN_BUDGET
@@ -2812,7 +3181,7 @@ async def build_workspace_injection(
     # dominate top-k and starve a two-task board or a small sheet out of the
     # context entirely. Retrieval then adds the large pinned files on top.
     struct_block, omitted_ids = _format_context_block(
-        note_rows, canvas_rows, board_rows, sheet_rows
+        note_rows, canvas_rows, board_rows, sheet_rows, roster_rows
     )
     # Authored items that overflowed the full-dump cap used to be silently
     # sliced off. Instead, recover the query-relevant parts of just those
@@ -2858,16 +3227,38 @@ async def build_workspace_injection(
         for wsf, uf in file_rows
         if not (is_text_extractable(uf) and wsf.indexing_status == "ready")
     ]
-    chunks = await retrieve_workspace_context(
-        db,
-        workspace_id=workspace_id,
-        query=query,
-        # Pull a few extra so post-filtering excluded files still leaves
-        # a useful slate.
-        top_k=WORKSPACE_RETRIEVAL_TOP_K + len(excluded),
+    # Retrieval is scoped to the allow-list in SQL, so excluded content is
+    # never fetched in the first place (rather than fetched then dropped).
+    # Items already injected in full above are left out too — their chunks
+    # used to compete for the top-k slots meant for the big pinned files
+    # and crowd them out (R-185). Overflowed items were recovered above.
+    in_full: set[uuid.UUID] = set()
+    for _, uf in note_rows:
+        in_full.add(uf.id)
+    for _, uf in board_rows:
+        in_full.add(uf.id)
+    for _, c in canvas_rows:
+        if c.text_file_id is not None:
+            in_full.add(c.text_file_id)
+    for _, sh in sheet_rows:
+        if sh.text_file_id is not None:
+            in_full.add(sh.text_file_id)
+    for _, ro in roster_rows:
+        if ro.text_file_id is not None:
+            in_full.add(ro.text_file_id)
+    in_full -= set(omitted_ids or ())
+    retrievable = list(allowed_files - excluded - in_full)
+    chunks = (
+        await retrieve_workspace_context(
+            db,
+            workspace_id=workspace_id,
+            query=query,
+            top_k=WORKSPACE_RETRIEVAL_TOP_K,
+            file_ids=retrievable,
+        )
+        if retrievable
+        else []
     )
-    if excluded:
-        chunks = [c for c in chunks if c.user_file_id not in excluded]
     chunks = chunks[:WORKSPACE_RETRIEVAL_TOP_K]
     retrieved_block = format_retrieved_block(chunks) if chunks else None
     # Authored items (always in full) first, then the retrieved pinned-file
@@ -2908,24 +3299,37 @@ async def workspace_context_stats(
     the instructions plus the entire pinned text.
     """
     instruction_tokens = _estimate_tokens(system_prompt)
-    pinned_file_tokens = await _indexed_token_total(db, workspace_id)
+    # Same eligibility as the chat's own retrieval-mode switch (R-185).
+    eligible = await retrievable_workspace_file_ids(db, workspace_id)
+    eligible -= await context_disabled_file_ids(db, workspace_id)
+    pinned_file_tokens = await _indexed_token_total(db, workspace_id, eligible)
     cfg = await get_embedding_config(db)
     embeddings_configured = cfg is not None
     retrieval_active = (
         embeddings_configured and pinned_file_tokens > WORKSPACE_RETRIEVAL_TOKEN_BUDGET
     )
-    # Files still mid-index — surfaced so the UI can show "indexing N…".
-    indexing_count = int(
-        await db.scalar(
-            select(func.count())
-            .select_from(WorkspaceFile)
-            .where(
-                WorkspaceFile.workspace_id == workspace_id,
-                WorkspaceFile.indexing_status.in_(("queued", "embedding")),
+    # Files still mid-index — surfaced so the UI can show "indexing N…"
+    # (and polls while it's above zero). Only what can actually progress:
+    # with no embedder nothing will, and images are never text-indexed. Both
+    # used to count, so the page polled its heaviest endpoint every 2.5 s
+    # for as long as it was open (R-178).
+    from app.files.models import UserFile
+
+    indexing_count = 0
+    if embeddings_configured:
+        indexing_count = int(
+            await db.scalar(
+                select(func.count())
+                .select_from(WorkspaceFile)
+                .join(UserFile, UserFile.id == WorkspaceFile.file_id)
+                .where(
+                    WorkspaceFile.workspace_id == workspace_id,
+                    WorkspaceFile.indexing_status.in_(("queued", "embedding")),
+                    ~UserFile.mime_type.like("image/%"),
+                )
             )
+            or 0
         )
-        or 0
-    )
     if retrieval_active:
         # ~top_k chunks of ~500 tokens each, capped by what's indexed.
         per_turn = instruction_tokens + min(
@@ -3367,6 +3771,9 @@ async def regenerate_workspace_memory(
                 .where(
                     Conversation.workspace_id == ws.id,
                     Conversation.temporary_mode.is_(None),
+                    # Shared chats only: the memory doc is read by every
+                    # member, so a private chat must never feed it (R-039).
+                    conversation_shared(),
                 )
                 .order_by(Conversation.updated_at.desc())
                 .limit(_MEMORY_SOURCE_CONV_COUNT)

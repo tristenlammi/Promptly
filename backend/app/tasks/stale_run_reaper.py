@@ -49,6 +49,15 @@ RUNNING_TIMEOUT = timedelta(minutes=90)
 # timeout because nothing is legitimately in this state for long.
 PENDING_TIMEOUT = timedelta(minutes=30)
 
+# Meeting transcription gets a 3h worker timeout (worker.py); a job that
+# hasn't moved for longer than that was orphaned by a restart. Jobs run with
+# max_tries=1, so nothing would ever pick it up again (R-240).
+MEETING_STALE_AFTER = timedelta(hours=3, minutes=30)
+_MEETING_ERROR = (
+    "Processing stopped when the server restarted. Upload the recording "
+    "again to retry."
+)
+
 _RUNNING_ERROR = (
     "The worker stopped before this run finished (it was restarted or "
     "crashed). Marked failed automatically so the automation isn't blocked "
@@ -112,6 +121,40 @@ async def reap_stale_runs() -> int:
         return len(rows)
 
 
+async def reap_stale_meetings() -> int:
+    """Fail meeting jobs a restart orphaned, so they stop blocking the
+    workspace, and drop their uploaded audio. Returns how many."""
+    from app.files.storage import delete_blob
+    from app.workspaces.meetings_models import MeetingJob
+
+    cutoff = datetime.now(timezone.utc) - MEETING_STALE_AFTER
+    async with SessionLocal() as db:
+        rows = (
+            (
+                await db.execute(
+                    select(MeetingJob).where(
+                        MeetingJob.status.in_(("pending", "transcribing", "summarising")),
+                        MeetingJob.updated_at < cutoff,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        blobs = []
+        for job in rows:
+            logger.warning("Reaping stale meeting job %s (was %s)", job.id, job.status)
+            job.status = "failed"
+            job.error = _MEETING_ERROR
+            if job.audio_path:
+                blobs.append(job.audio_path)
+                job.audio_path = None
+        await db.commit()
+    for rel in blobs:
+        delete_blob(rel)
+    return len(rows)
+
+
 async def _sweep_loop() -> None:
     """Sweep forever. Cancellation propagates up cleanly via lifespan."""
     while True:
@@ -121,6 +164,11 @@ async def _sweep_loop() -> None:
                 logger.warning(
                     "stale-run reaper failed %d orphaned automation run(s)",
                     reaped,
+                )
+            meetings = await reap_stale_meetings()
+            if meetings:
+                logger.warning(
+                    "stale-run reaper failed %d orphaned meeting job(s)", meetings
                 )
         except asyncio.CancelledError:
             raise
