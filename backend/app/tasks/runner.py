@@ -337,6 +337,12 @@ async def _generate(
     tools = (base_tools + mcp_schemas) or None
     max_hops = _MAX_HOPS_CONNECTORS if mcp_dispatch else _MAX_HOPS
     is_deepseek = provider.type == "deepseek"
+    # On a DeepSeek model, web_search / fetch_url use DeepSeek's own
+    # Search and Fetch.
+    from app.search.deepseek import mark_turn
+
+    task_turn: dict = {}
+    mark_turn(task_turn, provider)
     convo: list = [ChatMessage(role="user", content=prompt)]
     sources: list[dict] = []
     usage = {"prompt_tokens": 0, "completion_tokens": 0, "cost_usd": None}
@@ -458,6 +464,7 @@ async def _generate(
                         user=user,
                         conversation_id=_NIL_UUID,
                         user_message_id=_NIL_UUID,
+                        turn=task_turn,
                     )
                     try:
                         result = await tool.run(ctx, args)

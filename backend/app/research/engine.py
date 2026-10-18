@@ -468,6 +468,23 @@ async def gather_research_evidence(
     # --- Step 2: Search + Read (parallel angles) ---
     search_provider = await pick_search_provider(db, user)
     placeholder_msg_id = user_message_id
+    # On a DeepSeek model, search and read with DeepSeek's own Search and
+    # Fetch first (app.search.deepseek); the configured providers stay the
+    # fallback.
+    from app.search import deepseek as ds
+
+    research_turn: dict[str, Any] = {}
+    ds.mark_turn(research_turn, provider)
+
+    async def _deepseek_search(sdb, q: str, n: int) -> list:
+        pid = ds.turn_provider_id(research_turn)
+        key = await ds.api_key(sdb, pid) if pid else None
+        if not key:
+            return []
+        try:
+            return await ds.search(key, q, n)
+        except Exception:  # noqa: BLE001 — fall back to the usual chain
+            return []
 
     # Every sub-question is an independent research angle, so run them as
     # PARALLEL tasks — one per sub-question, each on its own DB session
@@ -502,6 +519,7 @@ async def gather_research_evidence(
                     user=fuser,
                     conversation_id=conversation_id,
                     user_message_id=placeholder_msg_id,
+                    turn=research_turn,
                 )
                 fr = await tfetch.run(fctx, {"url": url})
             return {
@@ -534,13 +552,15 @@ async def gather_research_evidence(
                 "index": idx,
                 "question": sq["question"],
             })
-            try:
-                results, _used = await run_search_with_failover(
-                    tdb, tuser, sq["search_query"],
-                    count=_SEARCH_RESULTS_PER_SQ,
-                )
-            except Exception:
-                results = []
+            results = await _deepseek_search(tdb, sq["search_query"], _SEARCH_RESULTS_PER_SQ)
+            if not results:
+                try:
+                    results, _used = await run_search_with_failover(
+                        tdb, tuser, sq["search_query"],
+                        count=_SEARCH_RESULTS_PER_SQ,
+                    )
+                except Exception:
+                    results = []
         event_q.put_nowait({
             "event": "research_searched",
             "index": idx,
@@ -630,7 +650,10 @@ async def gather_research_evidence(
 
     for gap in gap_queries[:2]:
         try:
-            if search_provider is not None:
+            gap_results = await _deepseek_search(db, gap["search_query"], 4)
+            if gap_results:
+                pass
+            elif search_provider is not None:
                 gap_results, _gused = await run_search_with_failover(
                     db,
                     user,

@@ -49,6 +49,7 @@ from app.net.safe_fetch import (
     safe_fetch,
 )
 from app.search.models import SearchProvider
+from app.search import deepseek
 from app.search.providers import ollama_web_fetch, tavily_extract
 
 logger = logging.getLogger("promptly.tools.fetch_url")
@@ -346,8 +347,8 @@ class FetchUrlTool(Tool):
         title: str | None = None
         final_url = url
         block_reason: str | None = None
-        # Which off-instance fetcher rescued a blocked page ("tavily" /
-        # "ollama"), or None when the direct crawl worked.
+        # Which off-instance fetcher rescued a blocked page ("deepseek" /
+        # "tavily" / "ollama"), or None when the direct crawl worked.
         recovered_via: str | None = None
         discovered_links: list[dict[str, str]] = []
 
@@ -413,7 +414,24 @@ class FetchUrlTool(Tool):
                 else:
                     block_reason = "empty body"
 
-        # --- Attempt 2: Tavily Extract fallback (1 credit / 5 URLs). ---
+        # --- Attempt 2: DeepSeek Fetch, on a DeepSeek model. ---
+        # The chat's own provider reads the page from its infrastructure
+        # (the page's content goes to DeepSeek with the chat anyway).
+        if (text is None or not text.strip()) and block_reason is not None:
+            provider_id = deepseek.turn_provider_id(ctx.turn)
+            key = await deepseek.api_key(ctx.db, provider_id) if provider_id else None
+            got = await deepseek.fetch(key, url) if key else None
+            if got:
+                title, text = got[0] or _title_from_url(url), got[1]
+                final_url = url
+                recovered_via = "deepseek"
+                logger.info(
+                    "fetch_url: direct path blocked (%s); recovered via DeepSeek Fetch for %s",
+                    block_reason,
+                    url[:120],
+                )
+
+        # --- Attempt 3: Tavily Extract fallback (1 credit / 5 URLs). ---
         # Only when the direct path was blocked/empty AND a Tavily
         # provider is configured. This is what makes tesla.com /
         # cars.com etc. — which 403 a self-hosted crawler — actually
@@ -434,7 +452,7 @@ class FetchUrlTool(Tool):
                         url[:120],
                     )
 
-        # --- Attempt 3: Ollama web_fetch fallback (free tier). ---
+        # --- Attempt 4: Ollama web_fetch fallback (free tier). ---
         # Same idea, Ollama's hosted fetch API — fires only when the
         # direct crawl was blocked and Tavily didn't (or couldn't)
         # recover the page. Ordered after Tavily because Tavily's

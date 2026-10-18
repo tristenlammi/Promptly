@@ -50,7 +50,7 @@ async def client(db, root):
         rate_limit._settings.RATE_LIMIT_ENABLED = True
 
 
-async def _device(db, user, scopes=("dav:read", "dav:write")):
+async def _device(db, user, scopes=("dav:read", "dav:write", "dav:delete")):
     from app.auth.app_passwords import AppPassword, hint, new_token, token_hash
 
     token = new_token()
@@ -372,3 +372,45 @@ async def test_a_text_file_that_is_really_binary_is_stored_not_a_500(dav, db, us
     row = await _file(db, user, "random.txt")
     assert row.content_text is None or "\x00" not in row.content_text
     assert (await dav("GET", "/random.txt")).content == data
+
+
+@pytest.mark.asyncio
+async def test_a_phone_that_may_not_delete_keeps_the_file_here(client, db, user):
+    """Without ``dav:delete`` a device's DELETE frees space on the device
+    only — the file stays in Promptly (and the app is told it went)."""
+    _row, auth = await _device(db, user, scopes=("dav:read", "dav:write"))
+
+    async def dav(method, path, **kw):
+        return await client.request(method, "/dav" + path, headers=auth, **kw)
+
+    await dav("MKCOL", "/Camera")
+    assert (await dav("PUT", "/Camera/notes.txt", content=b"phone notes")).status_code == 201
+    assert (await dav("DELETE", "/Camera/notes.txt")).status_code == 204
+    assert (await dav("DELETE", "/Camera/")).status_code == 204
+    row = await _file(db, user, "notes.txt")
+    assert row.trashed_at is None
+    assert (await dav("GET", "/Camera/notes.txt")).content == b"phone notes"
+    assert (await dav("DELETE", "/Camera/nothing.txt")).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_a_device_can_be_allowed_to_delete_later(client, db, user):
+    from tests.test_app_passwords_wp83 import _auth
+
+    row, auth = await _device(db, user, scopes=("dav:read", "dav:write"))
+    await client.request("PUT", "/dav/old.txt", headers=auth, content=b"old")
+    r = await client.patch(f"/api/auth/app-passwords/{row.id}", json={"scopes": ["dav:read", "dav:write", "dav:delete"]},
+                           headers=_auth(user))
+    assert r.status_code == 200 and r.json()["scopes"] == ["dav:delete", "dav:read", "dav:write"]
+    assert (await client.request("DELETE", "/dav/old.txt", headers=auth)).status_code == 204
+    gone = (await db.execute(select(UserFile_()).where(UserFile_().filename == "old.txt"))).scalars().one()
+    await db.refresh(gone)
+    assert gone.trashed_at is not None
+    assert (await client.patch(f"/api/auth/app-passwords/{row.id}", json={"scopes": ["root"]},
+                               headers=_auth(user))).status_code == 422
+
+
+def UserFile_():  # noqa: N802 — the model, imported late like the other tests do
+    from app.files.models import UserFile
+
+    return UserFile

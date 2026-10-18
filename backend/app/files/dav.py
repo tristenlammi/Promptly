@@ -25,7 +25,11 @@ trash, versions, quota, allowlist and workspace rules are the web app's:
   (``HIDDEN_KINDS``), and Finder's ``._*`` / ``.DS_Store``, which are
   accepted and dropped.
 
-Each device's deletes are its own (the mass-delete guard can undo them).
+Each device's deletes are its own (the mass-delete guard can undo them) —
+and only happen when its app password has ``dav:delete``. Without it a
+``DELETE`` is answered as done but the file stays: a phone that clears
+space (or a sync app told to mirror deletions) never takes the copy here
+with it. A mounted drive (Finder, ``rclone mount``) wants ``dav:delete``.
 """
 from __future__ import annotations
 
@@ -200,9 +204,12 @@ def _pick(name: str, entries: list[tuple[str, Any]]) -> Any | None:
 class Tree:
     """Name lookups for one request (and which folders are a workspace's)."""
 
-    def __init__(self, db: AsyncSession, user: User):
+    def __init__(self, db: AsyncSession, user: User, *, can_delete: bool = True):
         self.db = db
         self.user = user
+        # The app password may delete (``dav:delete``); otherwise a DELETE
+        # leaves the file where it is.
+        self.can_delete = can_delete
         self._roots: set[uuid.UUID] | None = None
 
     async def workspace_roots(self) -> set[uuid.UUID]:
@@ -930,6 +937,9 @@ async def do_delete(request: Request, tree: Tree, segs: list[str]) -> Response:
     node = await tree.resolve(segs)
     if node is None:
         raise DavError(404)
+    if not tree.can_delete:
+        # Kept: deleting on the device only frees space there.
+        return Response(status_code=204)
     if node.in_workspace or (node.kind == "file" and node.read_only):
         raise DavError(403, "Delete this in Promptly.")
     tokens = await check_if(request, tree, node, segs)
@@ -1252,11 +1262,11 @@ async def dav(request: Request, path: str = "", db: AsyncSession = Depends(get_d
     method = request.method.upper()
     if method == "OPTIONS":
         return await do_options(request)
-    user = await user_from_basic(
+    user, password = await user_from_basic(
         db, request.headers.get("authorization"), scope="dav:read" if method in _READ_METHODS else "dav:write",
-        ip=client_ip(request),
+        ip=client_ip(request), with_password=True,
     )
-    tree = Tree(db, user)
+    tree = Tree(db, user, can_delete="dav:delete" in (password.scopes or []))
     try:
         segs = split_path(path)
         if method == "PROPFIND":

@@ -4622,6 +4622,11 @@ async def _stream_generator(
         # Shared by every tool call this turn (see ToolContext.turn).
         # Attached files are outside content too.
         turn_state: dict[str, Any] = {"untrusted": bool(triggering_files)}
+        # On a DeepSeek model, web_search / fetch_url use DeepSeek's own
+        # Search and Fetch (app.search.deepseek).
+        from app.search.deepseek import mark_turn
+
+        mark_turn(turn_state, provider)
         # Memory changes made by tools this turn, surfaced to the UI.
         tool_memory_writes: list[dict] = []
         tool_memory_proposals: list[dict] = []

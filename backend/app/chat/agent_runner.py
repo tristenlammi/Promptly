@@ -252,11 +252,16 @@ async def run_agent(
                     }
                 )
 
+                from app.search.deepseek import mark_turn
+
+                sub_turn: dict = {}
+                mark_turn(sub_turn, provider)  # DeepSeek's Search/Fetch on a DeepSeek model
                 tool_ctx = ToolContext(
                     db=db,
                     user=user,
                     conversation_id=conversation_id,
                     user_message_id=user_message_id,
+                    turn=sub_turn,
                 )
                 # No ``request`` object in a headless run; the audit
                 # helper only reads ``.client`` / ``.headers`` defensively.

@@ -36,6 +36,7 @@ from typing import Any
 
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
 from app.chat.tools.validation import clean_model_text, truncate_at_word
+from app.search import deepseek
 from app.search.providers import SearchError
 from app.search.service import pick_search_provider, run_search_with_failover
 
@@ -126,6 +127,12 @@ class WebSearchTool(Tool):
                     f"`count` must be between 1 and {_MAX_RESULTS}"
                 )
 
+        # A chat on a DeepSeek model searches with DeepSeek's own engine
+        # first; the configured providers stay the fallback.
+        native = await _deepseek_results(ctx, query, count)
+        if native:
+            return _render(ctx, query, native, {"provider": "deepseek"})
+
         primary = await pick_search_provider(ctx.db, ctx.user)
         if primary is None:
             raise ToolError(
@@ -201,55 +208,73 @@ class WebSearchTool(Tool):
                 },
             )
 
-        # Render the model-facing content. Numbered list keeps the
-        # citation contract identical to the legacy "always" path so
-        # existing prompt habits (cite with [n]) keep working. Titles
-        # and snippets are third-party text — scrub control characters
-        # and invisible/bidi code points before the model (or the
-        # sources JSONB) sees them.
-        lines = [f"Search results for {query!r}:"]
-        for idx, r in enumerate(results, start=1):
-            title = clean_model_text(r.title).strip()
-            snippet = clean_model_text(r.snippet).strip().replace("\n", " ")
-            lines.append(f"[{idx}] {title}")
-            lines.append(f"    URL: {r.url}")
-            if snippet:
-                lines.append(f"    Snippet: {snippet}")
-        lines.append("")
-        lines.append(
-            "Cite the sources you actually rely on inline with [1], [2], "
-            "etc. If none of them answer the question, say so plainly."
-        )
-        content = "\n".join(lines)
-
-        sources = [
-            {
-                "title": clean_model_text(r.title).strip(),
-                "url": r.url,
-                "snippet": clean_model_text(r.snippet).strip(),
-            }
-            for r in results
-        ]
-
-        logger.info(
-            "web_search ok user=%s provider=%s n=%d q=%r",
-            ctx.user.id,
-            provider.type,
-            len(results),
-            query[:80],
-        )
-
-        meta: dict[str, Any] = {
-            "provider": provider.type,
-            "query": query,
-            "result_count": len(results),
-        }
+        meta: dict[str, Any] = {"provider": provider.type}
         if provider.id != primary.id:
             # Surfaced on the activity card so a silently-failing
             # primary is visible to the user, not just the logs.
             meta["failover"] = True
+        return _render(ctx, query, results, meta)
 
-        return ToolResult(content=content, sources=sources, meta=meta)
+
+async def _deepseek_results(ctx: ToolContext, query: str, count: int | None) -> list:
+    """DeepSeek Search's http(s) results when this turn's model is a
+    DeepSeek one — else (or on any failure) an empty list."""
+    provider_id = deepseek.turn_provider_id(ctx.turn)
+    if provider_id is None:
+        return []
+    key = await deepseek.api_key(ctx.db, provider_id)
+    if not key:
+        return []
+    try:
+        found = await deepseek.search(key, query, count or _MAX_RESULTS)
+    except SearchError as e:
+        logger.info("web_search: DeepSeek search failed (%s); using the configured providers", e)
+        return []
+    return [r for r in found if str(r.url or "").lower().startswith(("http://", "https://"))]
+
+
+def _render(ctx: ToolContext, query: str, results: list, meta: dict[str, Any]) -> ToolResult:
+    """The model-facing list and the citation rows."""
+    # Render the model-facing content. Numbered list keeps the
+    # citation contract identical to the legacy "always" path so
+    # existing prompt habits (cite with [n]) keep working. Titles
+    # and snippets are third-party text — scrub control characters
+    # and invisible/bidi code points before the model (or the
+    # sources JSONB) sees them.
+    lines = [f"Search results for {query!r}:"]
+    for idx, r in enumerate(results, start=1):
+        title = clean_model_text(r.title).strip()
+        snippet = clean_model_text(r.snippet).strip().replace("\n", " ")
+        lines.append(f"[{idx}] {title}")
+        lines.append(f"    URL: {r.url}")
+        if snippet:
+            lines.append(f"    Snippet: {snippet}")
+    lines.append("")
+    lines.append(
+        "Cite the sources you actually rely on inline with [1], [2], "
+        "etc. If none of them answer the question, say so plainly."
+    )
+    content = "\n".join(lines)
+
+    sources = [
+        {
+            "title": clean_model_text(r.title).strip(),
+            "url": r.url,
+            "snippet": clean_model_text(r.snippet).strip(),
+        }
+        for r in results
+    ]
+
+    logger.info(
+        "web_search ok user=%s provider=%s n=%d q=%r",
+        ctx.user.id,
+        meta.get("provider"),
+        len(results),
+        query[:80],
+    )
+
+    meta = {**meta, "query": query, "result_count": len(results)}
+    return ToolResult(content=content, sources=sources, meta=meta)
 
 
 __all__ = ["WebSearchTool"]

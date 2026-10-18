@@ -2,6 +2,7 @@
 
     GET    /api/auth/app-passwords          your devices (never the passwords)
     POST   /api/auth/app-passwords          a new one — the password is shown once
+    PATCH  /api/auth/app-passwords/{id}     change what it may do
     DELETE /api/auth/app-passwords/{id}     revoke it (cut off at once)
 """
 from __future__ import annotations
@@ -57,6 +58,15 @@ class AppPasswordCreate(BaseModel):
         if bad:
             raise ValueError(f"Unknown scope: {', '.join(bad)}")
         return sorted(set(v))
+
+
+class AppPasswordUpdate(BaseModel):
+    scopes: list[str] = Field(min_length=1)
+
+    @field_validator("scopes")
+    @classmethod
+    def _scopes(cls, v: list[str]) -> list[str]:
+        return AppPasswordCreate._scopes(v)
 
 
 def _out(row: AppPassword) -> AppPasswordOut:
@@ -120,6 +130,23 @@ async def create_app_password(
     await db.refresh(row)
     await _audit(db, request, user, EVENT_APP_PASSWORD_CREATED, row.name)
     return AppPasswordCreated(**_out(row).model_dump(), password=token, username=user.username)
+
+
+@router.patch("/app-passwords/{password_id}", response_model=AppPasswordOut)
+async def update_app_password(
+    password_id: uuid.UUID,
+    payload: AppPasswordUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> AppPasswordOut:
+    """Change what a device may do — e.g. let a mounted drive delete."""
+    row = await db.get(AppPassword, password_id)
+    if row is None or row.user_id != user.id or row.revoked_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such device.")
+    row.scopes = payload.scopes
+    await db.commit()
+    await db.refresh(row)
+    return _out(row)
 
 
 @router.delete("/app-passwords/{password_id}", status_code=status.HTTP_204_NO_CONTENT)

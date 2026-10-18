@@ -61,8 +61,10 @@ export function DeviceGuide() {
       </div>
       <ul className="mt-2 list-disc space-y-0.5 pl-4 text-xs text-[var(--text-muted)]">
         <li>
-          Deleting on a device sends files to Promptly&apos;s Trash. If a device deletes a lot at once you&apos;re told,
-          and can put back everything it deleted in one go.
+          Deleting a file on a device leaves it in Promptly, so you can clear space on your phone and keep the backup.
+          For a drive you open in Finder or mount with rclone, tick &quot;Deleting on this device deletes here too&quot;
+          for its app password; those deletes go to Promptly&apos;s Trash, and if it deletes a lot at once you&apos;re
+          told and can put it all back in one go.
         </li>
         <li>Docs, Sheets and Whiteboards show up as read-only copies; edit them in Promptly.</li>
         <li>Some types of file (such as .zip archives and programs) aren&apos;t accepted, so a sync app lists them as errors.</li>

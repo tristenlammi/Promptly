@@ -277,12 +277,17 @@ function stepDetail(step: ActivityStep): string | null {
     // visible in the UI, not just the server logs.
     if (meta.failover === true && typeof meta.provider === "string") {
       bits.push(`via ${meta.provider} (fallback)`);
+    } else if (meta.provider === "deepseek") {
+      // A DeepSeek model searched with DeepSeek's own engine.
+      bits.push("via DeepSeek");
     }
     // A page that hard-blocked the direct crawler was recovered through
     // an off-instance fetcher (Tavily Extract or Ollama web_fetch).
     // ``recovered_via`` supersedes the legacy ``via_tavily`` boolean —
     // check it first so a new backend labels Ollama recoveries correctly.
-    if (meta.recovered_via === "ollama") {
+    if (meta.recovered_via === "deepseek") {
+      bits.push("via DeepSeek");
+    } else if (meta.recovered_via === "ollama") {
       bits.push("via Ollama");
     } else if (meta.recovered_via === "tavily" || meta.via_tavily === true) {
       bits.push("via Tavily");

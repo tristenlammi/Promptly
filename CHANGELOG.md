@@ -21,6 +21,22 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-18
+
+### Added
+- **DeepSeek models search and read the web with DeepSeek's own engine.** When a chat's model comes
+  from a DeepSeek provider, web search goes to DeepSeek's Search API first (your other search
+  providers are the fallback, and none is needed), and a page that blocks the normal fetch is read
+  through DeepSeek's Fetch API. It uses the DeepSeek key already set up for chat, covers sub-agents,
+  scheduled tasks and Deep Research, and is never used for other models. The tool card says "via
+  DeepSeek". DeepSeek charges $0.75 per 1,000 successful searches or fetches.
+
+### Changed
+- **Deleting on your phone no longer deletes in Promptly.** A device's WebDAV deletes now leave the
+  file here, so you can clear space on a phone and keep the backup, even if its sync app mirrors
+  deletions. Account → Devices has "Deleting on this device deletes here too" per device, for a
+  drive you open in Finder or mount with rclone. Existing devices start with it off (migration 0225).
+
 ## [0.9.1] - 2026-10-18
 
 ### Added

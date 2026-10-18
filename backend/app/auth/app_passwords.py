@@ -13,7 +13,8 @@ be refused without touching the database. Only the SHA-256 is stored.
 Basic auth (``Authorization: Basic base64(username:app-password)``) accepts
 *only* app passwords — never the account password (Nextcloud's rule). Each
 password has scopes: ``dav:read`` / ``dav:write`` for WebDAV, ``upload`` for
-resumable uploads. A revoked password, a disabled account, or a deleted
+resumable uploads, and ``dav:delete`` — without it a device's deletes leave
+the file in Promptly (a phone clearing space keeps its backup). A revoked password, a disabled account, or a deleted
 one stops working on the next request. Signing out everywhere doesn't
 touch devices — that's what revoking them is for.
 """
@@ -35,7 +36,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 PREFIX = "pmt_"
-SCOPES = ("dav:read", "dav:write", "upload")
+SCOPES = ("dav:read", "dav:write", "dav:delete", "upload")
 MAX_PER_USER = 50
 _ALPHABET = string.digits + string.ascii_letters  # base62
 _BODY = 30

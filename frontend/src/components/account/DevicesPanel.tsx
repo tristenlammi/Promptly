@@ -19,8 +19,17 @@ import { DeviceGuide } from "./DeviceGuide";
 
 const SCOPE_LABEL: Record<AppPasswordScope, string> = {
   "dav:read": "See and download files",
-  "dav:write": "Add, change and delete files",
+  "dav:write": "Add and change files",
+  "dav:delete": "Delete files here when they're deleted on the device",
   upload: "Upload big files",
+};
+
+/** Short form for a device's row. */
+const SCOPE_SHORT: Record<AppPasswordScope, string> = {
+  "dav:read": "read",
+  "dav:write": "add and change",
+  "dav:delete": "delete",
+  upload: "big uploads",
 };
 
 const KEY = ["app-passwords"];
@@ -42,6 +51,19 @@ export function DevicesPanel() {
       void qc.invalidateQueries({ queryKey: KEY });
     },
     onError: (e) => toast.error(apiErrorMessage(e, "Couldn't add the device.")),
+  });
+
+  const setDeletes = useMutation({
+    mutationFn: ({ id, scopes: next }: { id: string; scopes: AppPasswordScope[] }) => appPasswordsApi.update(id, next),
+    onSuccess: (row) => {
+      toast.success(
+        row.scopes.includes("dav:delete")
+          ? `Deleting on “${row.name}” now deletes here too.`
+          : `Deleting on “${row.name}” now leaves the file here.`
+      );
+      void qc.invalidateQueries({ queryKey: KEY });
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Couldn't change it.")),
   });
 
   const revoke = async (id: string, label: string) => {
@@ -84,11 +106,28 @@ export function DevicesPanel() {
               <div className="min-w-0 flex-1">
                 <div className="truncate text-sm font-medium text-[var(--text)]">{d.name}</div>
                 <div className="truncate text-[var(--text-muted)]">
-                  <span className="font-mono">{d.hint}</span> · {d.scopes.map((s) => SCOPE_LABEL[s]).join(", ")} ·{" "}
+                  <span className="font-mono">{d.hint}</span> · {d.scopes.map((s) => SCOPE_SHORT[s] ?? s).join(", ")} ·{" "}
                   {d.last_used_at
                     ? `last used ${formatRelativeTime(d.last_used_at)}${d.last_used_ip ? ` from ${d.last_used_ip}` : ""}`
                     : "not used yet"}
                 </div>
+                {d.scopes.includes("dav:write") && (
+                  <label className="mt-1 flex items-center gap-1.5 text-[var(--text-muted)]">
+                    <input
+                      type="checkbox"
+                      checked={d.scopes.includes("dav:delete")}
+                      disabled={setDeletes.isPending}
+                      onChange={(e) =>
+                        setDeletes.mutate({
+                          id: d.id,
+                          scopes: e.target.checked ? [...d.scopes, "dav:delete"] : d.scopes.filter((s) => s !== "dav:delete"),
+                        })
+                      }
+                      className="accent-[var(--accent)]"
+                    />
+                    Deleting on this device deletes here too
+                  </label>
+                )}
               </div>
               <Button variant="ghost" size="sm" onClick={() => void revoke(d.id, d.name)}>
                 Revoke
@@ -133,6 +172,10 @@ export function DevicesPanel() {
                 {SCOPE_LABEL[s]}
               </label>
             ))}
+            <p className="text-[var(--text-muted)]">
+              Leave deleting off for a phone backup, so clearing space on the phone keeps the copy here. Turn it on for a
+              drive you open in Finder or mount with rclone.
+            </p>
           </fieldset>
           <div className="flex gap-2">
             <Button type="submit" size="sm" variant="primary" loading={create.isPending} disabled={!name.trim() || !scopes.length}>

@@ -2,7 +2,7 @@ import { apiClient } from "./client";
 
 /** App passwords — how a device signs in to sync (WP-8.3). */
 
-export type AppPasswordScope = "dav:read" | "dav:write" | "upload";
+export type AppPasswordScope = "dav:read" | "dav:write" | "dav:delete" | "upload";
 
 export interface AppPassword {
   id: string;
@@ -28,6 +28,11 @@ export const appPasswordsApi = {
   },
   async create(name: string, scopes: AppPasswordScope[]): Promise<AppPasswordCreated> {
     const { data } = await apiClient.post<AppPasswordCreated>("/auth/app-passwords", { name, scopes });
+    return data;
+  },
+  /** Change what a device may do. */
+  async update(id: string, scopes: AppPasswordScope[]): Promise<AppPassword> {
+    const { data } = await apiClient.patch<AppPassword>(`/auth/app-passwords/${id}`, { scopes });
     return data;
   },
   async revoke(id: string): Promise<void> {

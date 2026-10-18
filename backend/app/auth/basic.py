@@ -35,10 +35,13 @@ async def _note_failure(ip: str) -> None:
         await rate_limit._limiter.hit(rate_limit._LIMIT_LOGIN, _BUCKET, ip)
 
 
-async def user_from_basic(db: AsyncSession, authorization: str | None, *, scope: str, ip: str):
+async def user_from_basic(
+    db: AsyncSession, authorization: str | None, *, scope: str, ip: str, with_password: bool = False
+):
     """The user behind a Basic header with an app password allowed
     ``scope`` — or 401 (with a Basic challenge), 403 for a missing scope,
-    429 after too many wrong ones from this address."""
+    429 after too many wrong ones from this address. ``with_password``:
+    ``(user, the app password row)``."""
     from app.auth.audit import record_event, safe_dict
     from app.auth.events import EVENT_APP_PASSWORD_FAILED
 
@@ -69,7 +72,7 @@ async def user_from_basic(db: AsyncSession, authorization: str | None, *, scope:
     from app.auth.credential import set_credential
 
     set_credential(f"app_password:{row.id}")
-    return user
+    return (user, row) if with_password else user
 
 
 def client_ip(request: Request) -> str:
