@@ -136,13 +136,37 @@ function useController(): DriveListController {
 // ---------------------------------------------------------------- helpers
 
 /** A row's main button under the Drive click model (Part C §2.2). */
+/** After a click opens something, the rest of a double-click lands on
+ *  whatever took the row's place (the next folder's rows, the preview's
+ *  backdrop) — swallow it. */
+function swallowDoubleClickTail() {
+  const stop = (ev: MouseEvent) => {
+    if (ev.detail > 1) {
+      ev.stopPropagation();
+      ev.preventDefault();
+    }
+  };
+  const kinds = ["mousedown", "mouseup", "click", "dblclick"] as const;
+  kinds.forEach((k) => window.addEventListener(k, stop, true));
+  window.setTimeout(() => kinds.forEach((k) => window.removeEventListener(k, stop, true)), 600);
+}
+
+/** A click opens (a folder navigates); Ctrl/Cmd- or Shift-click selects,
+ *  as do the checkboxes. */
+function activate(e: React.MouseEvent, open: () => void, select?: (e: React.MouseEvent) => void) {
+  if (e.detail > 1) return;
+  if (select && (e.metaKey || e.ctrlKey || e.shiftKey)) {
+    select(e);
+    return;
+  }
+  open();
+  swallowDoubleClickTail();
+}
+
 function itemButtonProps(key: string, open: () => void, select?: (e: React.MouseEvent) => void) {
   return {
     "data-drive-item": key,
-    onClick: (e: React.MouseEvent) => {
-      if (!select || !window.matchMedia("(pointer: fine)").matches) open();
-      else select(e);
-    },
+    onClick: (e: React.MouseEvent) => activate(e, open, select),
     onKeyDown: (e: React.KeyboardEvent) => {
       if (e.key === "Enter") {
         e.preventDefault();
@@ -152,13 +176,12 @@ function itemButtonProps(key: string, open: () => void, select?: (e: React.Mouse
   };
 }
 
-/** Double-click anywhere on a row opens it — except on its own controls. */
-function rowDoubleClick(open: () => void) {
+/** A click anywhere on a row acts like one on its name — except on its own
+ *  controls (the name button handles its own clicks). */
+function rowClick(open: () => void, select?: (e: React.MouseEvent) => void) {
   return (e: React.MouseEvent) => {
-    const control = (e.target as HTMLElement).closest("button, input, a, [role='menu']");
-    if (control && !control.hasAttribute("data-drive-item")) return;
-    e.preventDefault();
-    open();
+    if ((e.target as HTMLElement).closest("button, input, a, label, [role='menu'], [role='checkbox']")) return;
+    activate(e, open, select);
   };
 }
 
@@ -430,7 +453,7 @@ export const DriveItemRow = memo(function DriveItemRow({
   };
   const rowHandlers = {
     ...dragProps,
-    onDoubleClick: select ? rowDoubleClick(open) : entry.kind === "file" ? () => open() : undefined,
+    onClick: editing ? undefined : rowClick(open, select),
     ...(selectable ? longPressToSelect(() => toggle(false)) : {}),
   };
 

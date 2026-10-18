@@ -1605,9 +1605,10 @@ function ContentGrid({
           ];
         }
         const folder = entry.folder;
-        // Leave a folder out of AI search (WP-5.1) — your own folders.
+        // Leave a folder out of AI search (WP-5.1) — your own folders,
+        // Generated Files and Chat Uploads too (Templates is never indexed).
         const ai: ContextMenuItem[] =
-          L.driveAi.data?.enabled && L.scope === "mine" && writable && !folder.system_kind
+          L.driveAi.data?.enabled && L.scope === "mine" && L.data.writable && folder.system_kind !== "templates"
             ? [
                 {
                   icon: <Sparkles className="h-3.5 w-3.5" />,

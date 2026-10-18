@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Loader2, Sparkles, X } from "lucide-react";
 
-import { filesShellApi, type DriveAiStatus, type DriveChatMode } from "@/api/filesShell";
+import { filesShellApi, type DriveAiKind, type DriveAiStatus, type DriveChatMode } from "@/api/filesShell";
 import { Modal } from "@/components/shared/Modal";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -11,8 +11,9 @@ import { cn } from "@/utils/cn";
 /**
  * Ask your Drive — the opt-in (WP-5.1). When it's on, the text of your
  * files is indexed so chat and search can find what's inside them; files
- * shared with you count when their owner has turned it on too. Folders can
- * be left out (from a folder's menu); turning it off removes the index.
+ * shared with you count when their owner has turned it on too. Folders
+ * (Generated Files and Chat Uploads too) and kinds of file can be left out,
+ * here or from a folder's menu; turning it off removes the index.
  */
 export const DRIVE_AI_KEY = ["drive-ai"];
 
@@ -32,14 +33,23 @@ export function useDriveAi() {
     mutationKey: DRIVE_AI_KEY,
     // One save at a time, in click order (switch, then a mode, quickly).
     scope: { id: "drive-ai" },
-    mutationFn: (body: { enabled: boolean; excluded_folder_ids: string[]; chat_mode?: DriveChatMode }) =>
-      filesShellApi.setDriveAi(body),
+    mutationFn: (body: {
+      enabled: boolean;
+      excluded_folder_ids: string[];
+      chat_mode?: DriveChatMode;
+      excluded_kinds?: DriveAiKind[];
+    }) => filesShellApi.setDriveAi(body),
     // Show the choice straight away; the server's answer (with progress and
     // folder names) replaces it, and a failure puts the old one back.
     onMutate: async (body) => {
       await qc.cancelQueries({ queryKey: DRIVE_AI_KEY });
       const before = qc.getQueryData<DriveAiStatus>(DRIVE_AI_KEY);
-      if (before) qc.setQueryData<DriveAiStatus>(DRIVE_AI_KEY, { ...before, ...body });
+      if (before)
+        qc.setQueryData<DriveAiStatus>(DRIVE_AI_KEY, {
+          ...before,
+          ...body,
+          folders: before.folders.map((f) => ({ ...f, excluded: body.excluded_folder_ids.includes(f.id) })),
+        });
       return { before };
     },
     // A save with another queued behind it doesn't write its answer — it
@@ -70,6 +80,22 @@ export function useDriveAi() {
   return { data, loading: query.isLoading, save, isExcluded, setExcluded };
 }
 
+const KINDS: { value: DriveAiKind; label: string }[] = [
+  { value: "docs", label: "Docs" },
+  { value: "sheets", label: "Sheets" },
+  { value: "whiteboards", label: "Whiteboards" },
+  { value: "pdfs", label: "PDFs" },
+  { value: "office", label: "Word, Excel & PowerPoint" },
+  { value: "text", label: "Text & other files" },
+];
+
+const SYSTEM_HINTS: Record<string, string> = {
+  generated_root: "Images, documents and files the AI made",
+  chat_uploads: "Files attached to chats",
+  camera_uploads: "Phone backups",
+  workspaces_root: "Every workspace's files",
+};
+
 const CHAT_MODES: { value: DriveChatMode; label: string; hint: string }[] = [
   { value: "auto", label: "When it's relevant", hint: "The assistant looks in your files when a question is about them." },
   { value: "always", label: "Every reply", hint: "Each answer checks your files first." },
@@ -85,6 +111,21 @@ export function DriveAiDialog({ open, onClose }: { open: boolean; onClose: () =>
   const toggle = (enabled: boolean) =>
     save.mutate({ enabled, excluded_folder_ids: data?.excluded_folder_ids ?? [] });
   const busy = save.isPending;
+  const setFolder = (id: string, include: boolean) => {
+    if (!data) return;
+    const ids = new Set(data.excluded_folder_ids);
+    if (include) ids.delete(id);
+    else ids.add(id);
+    save.mutate({ enabled: data.enabled, excluded_folder_ids: [...ids] });
+  };
+  const setKind = (kind: DriveAiKind, include: boolean) => {
+    if (!data) return;
+    const kinds = new Set(data.excluded_kinds);
+    if (include) kinds.delete(kind);
+    else kinds.add(kind);
+    save.mutate({ enabled: data.enabled, excluded_folder_ids: data.excluded_folder_ids, excluded_kinds: [...kinds] });
+  };
+  const nested = data?.excluded_folders.filter((f) => !f.top_level) ?? [];
   const done = data ? data.indexed + data.skipped + data.failed : 0;
   return (
     <Modal open={open} onClose={onClose} title="AI search of your files">
@@ -192,15 +233,59 @@ export function DriveAiDialog({ open, onClose }: { open: boolean; onClose: () =>
               </div>
             </fieldset>
           )}
-          <div>
-            <div className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Left out</div>
-            {data.excluded_folders.length === 0 ? (
-              <p className="text-xs text-[var(--text-muted)]">
-                Nothing. Use "Leave out of AI search" on a folder's menu to keep it (and everything in it) out.
-              </p>
+          <fieldset>
+            <legend className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">
+              Kinds of file
+            </legend>
+            <div className="grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2">
+              {KINDS.map((k) => (
+                <label key={k.value} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 hover:bg-[var(--hover)]">
+                  <input
+                    type="checkbox"
+                    checked={!data.excluded_kinds.includes(k.value)}
+                    onChange={(e) => setKind(k.value, e.target.checked)}
+                    className="accent-[var(--accent)]"
+                  />
+                  {k.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Folders</legend>
+            {data.folders.length === 0 ? (
+              <p className="text-xs text-[var(--text-muted)]">No folders yet — everything at the top of your Drive is included.</p>
             ) : (
+              <ul className="max-h-60 space-y-0.5 overflow-y-auto">
+                {data.folders.map((f) => (
+                  <li key={f.id}>
+                    <label className="flex cursor-pointer items-start gap-2 rounded-md px-2 py-1 hover:bg-[var(--hover)]">
+                      <input
+                        type="checkbox"
+                        checked={!f.excluded}
+                        onChange={(e) => setFolder(f.id, e.target.checked)}
+                        className="mt-0.5 accent-[var(--accent)]"
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate">{f.name}</span>
+                        {f.system_kind && SYSTEM_HINTS[f.system_kind] && (
+                          <span className="block text-xs text-[var(--text-muted)]">{SYSTEM_HINTS[f.system_kind]}</span>
+                        )}
+                      </span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              A folder further down can be left out from its menu ("Leave out of AI search").
+            </p>
+          </fieldset>
+          {nested.length > 0 && (
+            <div>
+              <div className="mb-1 text-xs font-medium uppercase tracking-wide text-[var(--text-muted)]">Also left out</div>
               <ul className="space-y-1">
-                {data.excluded_folders.map((f) => (
+                {nested.map((f) => (
                   <li key={f.id} className="flex items-center justify-between rounded-md bg-[var(--hover)] px-2.5 py-1.5">
                     <span className="truncate">{f.name}</span>
                     <button
@@ -208,12 +293,7 @@ export function DriveAiDialog({ open, onClose }: { open: boolean; onClose: () =>
                       aria-label={`Include ${f.name} again`}
                       title="Include again"
                       disabled={busy}
-                      onClick={() =>
-                        save.mutate({
-                          enabled: data.enabled,
-                          excluded_folder_ids: data.excluded_folder_ids.filter((x) => x !== f.id),
-                        })
-                      }
+                      onClick={() => setFolder(f.id, true)}
                       className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--surface)] hover:text-[var(--text)]"
                     >
                       <X className="h-3.5 w-3.5" />
@@ -221,8 +301,8 @@ export function DriveAiDialog({ open, onClose }: { open: boolean; onClose: () =>
                   </li>
                 ))}
               </ul>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
     </Modal>

@@ -59,11 +59,17 @@ export interface FileTextResponse {
  *  them; ``always`` — every reply looks first; ``off`` — chats don't. */
 export type DriveChatMode = "auto" | "always" | "off";
 
+/** Kinds of file AI search can leave out. */
+export type DriveAiKind = "docs" | "sheets" | "whiteboards" | "pdfs" | "office" | "text";
+
 export interface DriveAiStatus {
   enabled: boolean;
   excluded_folder_ids: string[];
+  excluded_kinds: DriveAiKind[];
   chat_mode: DriveChatMode;
-  excluded_folders: { id: string; name: string }[];
+  excluded_folders: { id: string; name: string; top_level: boolean }[];
+  /** The top of your Drive to pick from (system folders included). */
+  folders: { id: string; name: string; system_kind: string | null; excluded: boolean }[];
   /** "Provider · model", or null when no embedder is set up. */
   embedder: string | null;
   eligible: number;
@@ -89,6 +95,7 @@ export const filesShellApi = {
     enabled: boolean;
     excluded_folder_ids: string[];
     chat_mode?: DriveChatMode;
+    excluded_kinds?: DriveAiKind[];
   }): Promise<DriveAiStatus> {
     const { data } = await apiClient.put<DriveAiStatus>("/files/ai-index", body);
     return data;

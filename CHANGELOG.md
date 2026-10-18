@@ -21,6 +21,20 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-18
+
+### Added
+- **Choose what AI search reads.** The AI search dialog in Files now lists the top of your Drive
+  with a tick box per folder (Generated Files and Chat Uploads included) and one per kind of file
+  (Docs, Sheets, Whiteboards, PDFs, Word/Excel/PowerPoint, text and other files). Unticking one
+  takes what was already indexed out at once. Generated Files and Chat Uploads also get "Leave out
+  of AI search" on their menu.
+
+### Fixed
+- **Clicking a folder in Files only selected it.** A click anywhere on a row now opens it (a folder
+  navigates, a file previews); Ctrl/Cmd- or Shift-click and the tick boxes select. The second
+  click of a double-click no longer lands on whatever replaced the row.
+
 ## [0.9.0] - 2026-10-16
 
 ### Security

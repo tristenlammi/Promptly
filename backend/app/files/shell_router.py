@@ -17,7 +17,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
@@ -356,6 +356,8 @@ class DriveAiSettings(BaseModel):
     excluded_folder_ids: list[uuid.UUID] = []
     # How chats use it (WP-5.2); left out = unchanged.
     chat_mode: Literal["auto", "always", "off"] | None = None
+    # Kinds of file left out; left out = unchanged.
+    excluded_kinds: list[Literal["docs", "sheets", "whiteboards", "pdfs", "office", "text"]] | None = None
 
 
 async def _drive_ai_view(db: AsyncSession, user: User) -> dict:
@@ -369,8 +371,29 @@ async def _drive_ai_view(db: AsyncSession, user: User) -> dict:
         except ValueError:
             continue
         if folder is not None and folder.user_id == user.id:
-            folders.append({"id": str(folder.id), "name": folder.name})
+            folders.append({"id": str(folder.id), "name": folder.name, "top_level": folder.parent_id is None})
     out["excluded_folders"] = folders
+    # The top of your Drive, to pick from — Generated Files and Chat
+    # Uploads included (Templates is never indexed, so not offered).
+    from app.files.system_folders import SystemKind
+
+    excluded = set(out["excluded_folder_ids"])
+    top = (
+        await db.execute(
+            select(FileFolder)
+            .where(
+                FileFolder.user_id == user.id,
+                FileFolder.parent_id.is_(None),
+                FileFolder.trashed_at.is_(None),
+                or_(FileFolder.system_kind.is_(None), FileFolder.system_kind != SystemKind.TEMPLATES.value),
+            )
+            .order_by(FileFolder.system_kind.is_(None), func.lower(FileFolder.name))
+        )
+    ).scalars().all()
+    out["folders"] = [
+        {"id": str(f.id), "name": f.name, "system_kind": f.system_kind, "excluded": str(f.id) in excluded}
+        for f in top
+    ]
     return out
 
 
@@ -390,7 +413,7 @@ async def put_drive_ai(
     user: User = Depends(get_current_user),
 ) -> dict:
     """Turn AI search of your Drive on or off (off removes its index of your
-    files), and choose folders to leave out (only your own folders)."""
+    files), and choose folders (only your own) and kinds of file to leave out."""
     from app.files.drive_index import save_drive_settings
 
     own = []
@@ -399,7 +422,9 @@ async def put_drive_ai(
         if folder is None or folder.user_id != user.id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
         own.append(str(fid))
-    await save_drive_settings(db, user, enabled=body.enabled, excluded_folder_ids=own, chat_mode=body.chat_mode)
+    await save_drive_settings(
+        db, user, enabled=body.enabled, excluded_folder_ids=own, chat_mode=body.chat_mode, excluded_kinds=body.excluded_kinds
+    )
     await db.commit()
     return await _drive_ai_view(db, user)
 

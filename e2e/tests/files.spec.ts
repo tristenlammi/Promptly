@@ -855,13 +855,28 @@ test.describe("files", () => {
     await expect(dialog.getByText(/Indexing…|searchable/)).toBeVisible();
     await page.keyboard.press("Escape");
 
-    // A folder can be left out from its menu, and shows in the list.
+    // A folder can be left out from its menu, and shows unticked in the
+    // dialog's folder list; ticking it puts it back.
     const folderRow = row(page, folder);
     await folderRow.hover();
     await folderRow.getByRole("button", { name: "More actions" }).first().click();
     await page.getByRole("button", { name: "Leave out of AI search" }).click();
     await page.getByRole("button", { name: /^AI search/ }).click();
-    await expect(dialog.getByText(folder)).toBeVisible();
+    const folderBox = dialog.getByRole("checkbox", { name: folder });
+    await expect(folderBox).not.toBeChecked();
+    await folderBox.check();
+    await expect(folderBox).toBeChecked();
+
+    // A whole kind of file can be left out, and back in.
+    const pdfs = dialog.getByRole("checkbox", { name: "PDFs" });
+    await expect(pdfs).toBeChecked();
+    await pdfs.uncheck();
+    await expect(pdfs).not.toBeChecked();
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: /^AI search/ }).click();
+    await expect(pdfs).not.toBeChecked(); // saved
+    await pdfs.check();
+    await expect(pdfs).toBeChecked();
 
     // Off again: nothing of Bob's stays indexed.
     await toggle.click();

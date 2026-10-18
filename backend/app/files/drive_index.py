@@ -2,7 +2,8 @@
 
 Opt-in per person (``user.settings["drive_ai"]``), because the embedder may
 be a cloud API: turning it on sends the text of your files to it. Folders
-can be left out. What's indexed:
+(Generated Files and Chat Uploads included) and whole kinds of file can be
+left out. What's indexed:
 
 * Promptly Docs, Sheets and Whiteboards (their searchable text);
 * uploaded Office files (the text read from them in WP-4.3);
@@ -57,6 +58,8 @@ _IDLE_SLEEP = 60.0
 
 
 CHAT_MODES = ("auto", "always", "off")
+# Kinds of file a person can leave out, as ``_kind_sql`` sorts them.
+KIND_GROUPS = ("docs", "sheets", "whiteboards", "pdfs", "office", "text")
 
 
 def drive_settings(user: Any) -> dict:
@@ -65,6 +68,7 @@ def drive_settings(user: Any) -> dict:
     return {
         "enabled": bool(raw.get("enabled")),
         "excluded_folder_ids": [str(x) for x in raw.get("excluded_folder_ids") or []],
+        "excluded_kinds": [k for k in raw.get("excluded_kinds") or [] if k in KIND_GROUPS],
         # How chats use the index (WP-5.2): ``auto`` — the assistant looks
         # things up when a question is about your files; ``always`` — every
         # reply checks your files first; ``off`` — chats don't.
@@ -79,16 +83,24 @@ def chat_mode_for(user: Any) -> str:
 
 
 async def save_drive_settings(
-    db: AsyncSession, user: Any, *, enabled: bool, excluded_folder_ids: list[str], chat_mode: str | None = None
+    db: AsyncSession,
+    user: Any,
+    *,
+    enabled: bool,
+    excluded_folder_ids: list[str],
+    chat_mode: str | None = None,
+    excluded_kinds: list[str] | None = None,
 ) -> dict:
     """Store the choice; turning it off removes every Drive chunk of the
     user's files at once (nothing of theirs stays with the embedder's
-    vectors), and newly excluded folders lose theirs."""
+    vectors), and newly left-out folders and kinds lose theirs."""
     before = drive_settings(user)
+    kinds = before["excluded_kinds"] if excluded_kinds is None else [k for k in excluded_kinds if k in KIND_GROUPS]
     settings = dict(getattr(user, "settings", None) or {})
     settings[SETTINGS_KEY] = {
         "enabled": bool(enabled),
         "excluded_folder_ids": list(dict.fromkeys(excluded_folder_ids)),
+        "excluded_kinds": list(dict.fromkeys(kinds)),
         "chat_mode": chat_mode if chat_mode in CHAT_MODES else before["chat_mode"],
     }
     user.settings = settings
@@ -96,10 +108,8 @@ async def save_drive_settings(
     await db.flush()
     if not enabled:
         await forget_user(db, user.id)
-    else:
-        newly = set(excluded_folder_ids) - set(before["excluded_folder_ids"])
-        if newly:
-            await forget_folders(db, user.id, [uuid.UUID(x) for x in newly])
+    elif set(excluded_folder_ids) - set(before["excluded_folder_ids"]) or set(kinds) - set(before["excluded_kinds"]):
+        await _drop_ineligible(db, user)
     return drive_settings(user)
 
 
@@ -115,19 +125,6 @@ def _tree_cte(param: str = "roots") -> str:
             UNION
             SELECT c.id FROM file_folders AS c JOIN tree ON c.parent_id = tree.id
         )"""
-
-
-async def forget_folders(db: AsyncSession, user_id: uuid.UUID, folder_ids: list[uuid.UUID]) -> None:
-    """Drop the Drive index of the user's files under ``folder_ids``."""
-    if not folder_ids:
-        return
-    params = {"u": str(user_id), "roots": folder_ids}
-    victims = f"""{_tree_cte()}
-        SELECT f.id FROM files AS f WHERE f.user_id = :u AND f.folder_id IN (SELECT id FROM tree)"""
-    await db.execute(
-        text(f"DELETE FROM knowledge_chunks WHERE drive_user_id = :u AND user_file_id IN ({victims})"), params
-    )
-    await db.execute(text(f"DELETE FROM drive_index_state WHERE file_id IN ({victims})"), params)
 
 
 # ------------------------------------------------------------------ eligibility
@@ -153,15 +150,40 @@ async def _excluded_roots(db: AsyncSession, user: Any) -> list[uuid.UUID]:
     return ids + list(templates)
 
 
+def _kind_sql(alias: str = "f") -> str:
+    """Which of :data:`KIND_GROUPS` a file falls in."""
+    from app.files.office_formats import LEGACY_OFFICE_ALLOWLIST, OFFICE_ALLOWLIST
+
+    exts = "|".join(sorted(e.lstrip(".") for e in (*OFFICE_ALLOWLIST, *LEGACY_OFFICE_ALLOWLIST)))
+    return f"""(CASE
+        WHEN {alias}.source_kind = 'document' THEN 'docs'
+        WHEN {alias}.source_kind = 'sheet' THEN 'sheets'
+        WHEN {alias}.source_kind = 'whiteboard' THEN 'whiteboards'
+        WHEN {alias}.source_kind = 'rendered_pdf' OR {alias}.mime_type = 'application/pdf'
+             OR lower({alias}.filename) LIKE '%.pdf' THEN 'pdfs'
+        WHEN lower({alias}.filename) ~ '[.]({exts})$' THEN 'office'
+        ELSE 'text' END)"""
+
+
 def _eligible_where(alias: str = "f") -> str:
     """Files of ``:u``, not trashed, of a kind that has text, outside the
-    excluded folder trees (``excluded`` CTE)."""
+    excluded folder trees (``tree`` CTE) and the left-out kinds (``:xk``)."""
     kinds = ", ".join(f"'{k}'" for k in INDEXABLE_KINDS)
     return f"""
         {alias}.user_id = :u
         AND {alias}.trashed_at IS NULL
         AND ({alias}.source_kind IS NULL OR {alias}.source_kind IN ({kinds}))
-        AND ({alias}.folder_id IS NULL OR {alias}.folder_id NOT IN (SELECT id FROM tree))"""
+        AND ({alias}.folder_id IS NULL OR {alias}.folder_id NOT IN (SELECT id FROM tree))
+        AND NOT ({_kind_sql(alias)} = ANY(CAST(:xk AS text[])))"""
+
+
+async def _params(db: AsyncSession, user: Any) -> dict:
+    """What :func:`_tree_cte` + :func:`_eligible_where` need."""
+    return {
+        "u": str(user.id),
+        "roots": await _excluded_roots(db, user),
+        "xk": drive_settings(user)["excluded_kinds"],
+    }
 
 
 async def _candidates(db: AsyncSession, user: Any, model: str, limit: int) -> list:
@@ -169,7 +191,6 @@ async def _candidates(db: AsyncSession, user: Any, model: str, limit: int) -> li
     another embedding model — newest first."""
     from app.files.models import UserFile
 
-    roots = await _excluded_roots(db, user)
     sql = text(
         f"""{_tree_cte()}
         SELECT f.id FROM files AS f
@@ -181,7 +202,8 @@ async def _candidates(db: AsyncSession, user: Any, model: str, limit: int) -> li
         ORDER BY f.modified_at DESC
         LIMIT :lim"""
     )
-    ids = (await db.execute(sql, {"u": str(user.id), "roots": roots, "em": model, "lim": limit})).scalars().all()
+    params = {**(await _params(db, user)), "em": model, "lim": limit}
+    ids = (await db.execute(sql, params)).scalars().all()
     if not ids:
         return []
     rows = (await db.execute(select(UserFile).where(UserFile.id.in_(ids)))).scalars().all()
@@ -411,10 +433,14 @@ async def index_file(db: AsyncSession, file: Any, cfg: Any) -> str:
 
 async def prune(db: AsyncSession, user: Any) -> None:
     """Forget files that left the Drive index's reach — trashed, moved into
-    an excluded folder — so their text stops turning up (and a restored
-    file is indexed afresh)."""
-    roots = await _excluded_roots(db, user)
-    params = {"u": str(user.id), "roots": roots}
+    an excluded folder, of a left-out kind — so their text stops turning up
+    (and a restored file is indexed afresh)."""
+    await _drop_ineligible(db, user)
+    await db.commit()
+
+
+async def _drop_ineligible(db: AsyncSession, user: Any) -> None:
+    params = await _params(db, user)
     keep = f"""{_tree_cte()} SELECT f.id FROM files AS f WHERE {_eligible_where('f')}"""
     await db.execute(
         text(f"DELETE FROM knowledge_chunks WHERE drive_user_id = :u AND user_file_id NOT IN ({keep})"), params
@@ -422,7 +448,6 @@ async def prune(db: AsyncSession, user: Any) -> None:
     await db.execute(
         text(f"DELETE FROM drive_index_state WHERE user_id = :u AND file_id NOT IN ({keep})"), params
     )
-    await db.commit()
 
 
 async def _opted_in_users(db: AsyncSession) -> list:
@@ -472,8 +497,7 @@ async def status_for(db: AsyncSession, user: Any) -> dict:
     from app.chat.semantic_search import get_embedding_config
 
     cfg = await get_embedding_config(db)
-    roots = await _excluded_roots(db, user)
-    params = {"u": str(user.id), "roots": roots, "em": cfg.model_id if cfg else ""}
+    params = {**(await _params(db, user)), "em": cfg.model_id if cfg else ""}
     eligible = (
         await db.execute(text(f"{_tree_cte()} SELECT count(*) FROM files AS f WHERE {_eligible_where('f')}"), params)
     ).scalar() or 0

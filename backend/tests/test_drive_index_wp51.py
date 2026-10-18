@@ -148,7 +148,7 @@ async def test_ai_search_is_off_until_turned_on_and_only_your_folders_can_be_exc
     r = await client.put("/api/files/ai-index", json={"enabled": True, "excluded_folder_ids": [str(mine.id)]},
                          headers=_auth(user))
     body = r.json()
-    assert body["enabled"] is True and body["excluded_folders"] == [{"id": str(mine.id), "name": "Medical"}]
+    assert body["enabled"] is True and body["excluded_folders"] == [{"id": str(mine.id), "name": "Medical", "top_level": True}]
 
 
 # ---------------------------------------------------------------- indexing
