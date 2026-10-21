@@ -123,3 +123,57 @@ async def test_without_the_service_photos_wait_and_search_says_why(client, db, u
     assert (await db.get(PhotoUnderstanding, (fid, "embed"), populate_existing=True)).state == "done"
     rows = (await db.execute(select(PhotoUnderstanding).where(PhotoUnderstanding.stage == "embed"))).scalars().all()
     assert [r.input_key for r in rows] == ["fake-siglip@1"]
+
+
+@pytest.mark.asyncio
+async def test_a_batch_that_takes_the_service_down_isnt_sent_again_every_minute(db, user, root, fake_ml, monkeypatch):
+    """photos-ml dying mid-batch (out of memory) used to leave the photos
+    pending, so the next tick sent the same batch and killed it again —
+    a restart loop with the CPU never idle. Now they're failed: retried
+    after an hour, three times at most."""
+    import httpx
+
+    from app.photos import ml
+    from app.photos.models import PhotoUnderstanding
+    from app.photos.understanding import EMBED, pending, tick
+
+    fid = await _photo(db, user, preview=_webp((220, 30, 30)))
+
+    async def dies(images):  # noqa: ARG001
+        fake_ml["calls"] += 1
+        raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+
+    monkeypatch.setattr(ml, "embed_images", dies)
+    await tick(budget=10)
+    row = await db.get(PhotoUnderstanding, (fid, "embed"), populate_existing=True)
+    assert row.state == "failed" and row.attempts == 1 and "photos-ml" in row.error
+    assert fid not in await pending(db, EMBED)
+    calls = fake_ml["calls"]
+    await tick(budget=10)  # the next minute: not sent again
+    assert fake_ml["calls"] == calls
+
+
+@pytest.mark.asyncio
+async def test_a_photo_the_model_cant_read_is_tried_hourly_not_every_minute(db, user, root, fake_ml, monkeypatch):
+    """A model change redoes finished photos — but it used to wipe failed
+    ones too (they have no model on them), so an unreadable photo went
+    back to photos-ml every single minute, keeping it busy forever."""
+    from app.photos import ml
+    from app.photos.models import PhotoUnderstanding
+    from app.photos.understanding import tick
+
+    fid = await _photo(db, user, preview=_webp((220, 30, 30)))
+
+    async def unreadable(images):
+        fake_ml["calls"] += 1
+        return fake_ml["model"], [None for _ in images]
+
+    monkeypatch.setattr(ml, "embed_images", unreadable)
+    await tick(budget=10)
+    row = await db.get(PhotoUnderstanding, (fid, "embed"), populate_existing=True)
+    assert row.state == "failed" and row.attempts == 1
+    calls = fake_ml["calls"]
+    for _ in range(3):
+        await tick(budget=10)
+    assert fake_ml["calls"] == calls
+    assert (await db.get(PhotoUnderstanding, (fid, "embed"), populate_existing=True)).attempts == 1

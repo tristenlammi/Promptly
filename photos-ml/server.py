@@ -209,6 +209,11 @@ def _session(path: Path):  # noqa: ANN202
     opts.intra_op_num_threads = _threads()
     opts.inter_op_num_threads = 1
     opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    # The CPU arena keeps the biggest batch's buffers for good: with every
+    # model loaded that grew past 3.4 GB and got the container OOM-killed
+    # (then restarted, reloading everything, in a loop). Off, it settles
+    # at ~2.7 GB for the same work.
+    opts.enable_cpu_mem_arena = False
     wanted = [p.strip() for p in os.environ.get("PHOTOS_ML_PROVIDERS", "").split(",") if p.strip()]
     available = ort.get_available_providers()
     providers = [p for p in wanted if p in available] + ["CPUExecutionProvider"]

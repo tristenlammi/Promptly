@@ -115,6 +115,21 @@ async def pending(db: AsyncSession, stage: Stage, limit: int = BATCH) -> list[uu
     return [r[0] for r in rows]
 
 
+async def _service(db: AsyncSession, stage: Stage, file_ids: list[uuid.UUID], call: Awaitable[Any]) -> Any:
+    """One request to photos-ml for a chunk of photos. If it fails (the
+    service fell over mid-batch, e.g. out of memory), those photos are
+    recorded as failed — so they wait an hour and get three tries, rather
+    than the same batch being sent again every minute, forever, each time
+    taking the service down — and the stage stops for this tick."""
+    try:
+        return await call
+    except Exception as exc:
+        for fid in file_ids:
+            await record(db, fid, stage, "failed", error=f"photos-ml: {exc.__class__.__name__}: {exc}")
+        await db.commit()
+        raise
+
+
 # ------------------------------------------------------------------ stages
 
 
@@ -201,7 +216,7 @@ async def _run_embed(ids: list[uuid.UUID]) -> int:
             work.append((fid, await asyncio.to_thread(path.read_bytes)))
         for i in range(0, len(work), 16):
             chunk = work[i : i + 16]
-            model, vectors = await ml.embed_images([data for _, data in chunk])
+            model, vectors = await _service(db, EMBED, [f for f, _ in chunk], ml.embed_images([data for _, data in chunk]))
             for (fid, _), vec in zip(chunk, vectors):
                 if vec is None:
                     await record(db, fid, EMBED, "failed", error="the model couldn't read it")
@@ -236,7 +251,7 @@ async def _embed_prepare() -> None:
         return
     async with SessionLocal() as db:
         await db.execute(
-            text("DELETE FROM photo_understanding WHERE stage = 'embed' AND input_key IS DISTINCT FROM :m"),
+            text("DELETE FROM photo_understanding WHERE stage = 'embed' AND state = 'done' AND input_key IS DISTINCT FROM :m"),
             {"m": str(h["model"])[:64]},
         )
         await db.commit()
@@ -266,7 +281,7 @@ async def _run_faces(ids: list[uuid.UUID]) -> int:
             work.append((fid, asset.user_id, await asyncio.to_thread(path.read_bytes)))
         for i in range(0, len(work), 16):
             chunk = work[i : i + 16]
-            model, found = await ml.find_faces([data for _, _, data in chunk])
+            model, found = await _service(db, FACES, [f for f, _, _ in chunk], ml.find_faces([data for _, _, data in chunk]))
             for (fid, owner, _), faces in zip(chunk, found):
                 if faces is None:
                     await record(db, fid, FACES, "failed", error="the model couldn't read it")
@@ -313,7 +328,7 @@ async def _run_animals(ids: list[uuid.UUID]) -> int:
             work.append((fid, asset.user_id, await asyncio.to_thread(path.read_bytes)))
         for i in range(0, len(work), 16):
             chunk = work[i : i + 16]
-            model, found = await ml.find_animals([data for _, _, data in chunk])
+            model, found = await _service(db, ANIMALS, [f for f, _, _ in chunk], ml.find_animals([data for _, _, data in chunk]))
             for (fid, owner, _), animals in zip(chunk, found):
                 if animals is None:
                     await record(db, fid, ANIMALS, "failed", error="the model couldn't read it")
@@ -355,7 +370,7 @@ async def _animals_prepare() -> None:
         return
     async with SessionLocal() as db:
         await db.execute(
-            text("DELETE FROM photo_understanding WHERE stage = 'animals' AND input_key IS DISTINCT FROM :m"),
+            text("DELETE FROM photo_understanding WHERE stage = 'animals' AND state = 'done' AND input_key IS DISTINCT FROM :m"),
             {"m": str(model)[:64]},
         )
         await db.commit()
@@ -379,7 +394,7 @@ async def _run_text(ids: list[uuid.UUID]) -> int:
             work.append((fid, await asyncio.to_thread(path.read_bytes)))
         for i in range(0, len(work), 16):
             chunk = work[i : i + 16]
-            model, found = await ml.find_text([data for _, data in chunk])
+            model, found = await _service(db, TEXT, [f for f, _ in chunk], ml.find_text([data for _, data in chunk]))
             for (fid, _), got in zip(chunk, found):
                 if got is None:
                     await record(db, fid, TEXT, "failed", error="the model couldn't read it")
@@ -416,7 +431,7 @@ async def _text_prepare() -> None:
         return
     async with SessionLocal() as db:
         await db.execute(
-            text("DELETE FROM photo_understanding WHERE stage = 'text' AND input_key IS DISTINCT FROM :m"),
+            text("DELETE FROM photo_understanding WHERE stage = 'text' AND state = 'done' AND input_key IS DISTINCT FROM :m"),
             {"m": str(model)[:64]},
         )
         await db.commit()
@@ -497,7 +512,7 @@ async def _captions_prepare() -> None:
         if vision is None:
             return
         await db.execute(
-            text("DELETE FROM photo_understanding WHERE stage = 'captions' AND input_key IS DISTINCT FROM :m"),
+            text("DELETE FROM photo_understanding WHERE stage = 'captions' AND state = 'done' AND input_key IS DISTINCT FROM :m"),
             {"m": vision.model_id[:64]},
         )
         await db.commit()
@@ -526,7 +541,7 @@ async def _faces_prepare() -> None:
         return
     async with SessionLocal() as db:
         await db.execute(
-            text("DELETE FROM photo_understanding WHERE stage = 'faces' AND input_key IS DISTINCT FROM :m"),
+            text("DELETE FROM photo_understanding WHERE stage = 'faces' AND state = 'done' AND input_key IS DISTINCT FROM :m"),
             {"m": str(model)[:64]},
         )
         await db.commit()

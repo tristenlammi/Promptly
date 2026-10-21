@@ -850,7 +850,7 @@ services:
     container_name: Promptly-PhotosML
     logging: *default-logging
     cpus: ${PHOTOS_ML_CPUS:-2}
-    mem_limit: ${PHOTOS_ML_MEM_LIMIT:-3g}
+    mem_limit: ${PHOTOS_ML_MEM_LIMIT:-4g}  # every model loaded settles at ~2.7 GB, peaks ~3 GB
     environment:
       - PHOTOS_ML_PROVIDERS=${PHOTOS_ML_PROVIDERS:-}
       - PHOTOS_ML_THREADS=${PHOTOS_ML_THREADS:-0}  # 0 = the CPUs it's given

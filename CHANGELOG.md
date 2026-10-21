@@ -21,6 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-21
+
+### Fixed
+- **Photos kept the server's CPU busy all the time.** Three things fed each other:
+  - With every model loaded, the photo-understanding service needed more than its 3 GB of memory, so
+    it was killed mid-batch and restarted, reloading its models.
+  - The batch it died on was sent again a minute later, and again, forever.
+  - A photo it couldn't read was retried every minute instead of hourly, three times at most.
+
+  It now uses about 2.7 GB (ONNX Runtime's memory arena is off) within a 4 GB limit, and a failed
+  batch or unreadable photo waits an hour and gets three tries.
+
 ## [0.9.2] - 2026-10-18
 
 ### Added
