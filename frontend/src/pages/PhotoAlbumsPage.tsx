@@ -174,7 +174,7 @@ export function PhotoAlbumPage() {
     toast.info(`Uploading ${files.length}…`);
     for (const f of Array.from(files)) {
       try {
-        // Into your own Camera Uploads (by date), then into the album.
+        // Into your own Photos folder (by date), then into the album.
         ids.push((await filesApi.upload("mine", f, null, "camera")).id);
       } catch (e) {
         toast.error(`${f.name}: ${apiErrorMessage(e, "couldn't upload")}`);

@@ -84,45 +84,6 @@ class PhotoSettings(BaseModel):
     faces: bool | None = None
     captions: bool | None = None
     setup_done: bool | None = None
-    # Photos only from these folders (and their subfolders); [] = from
-    # everywhere; left out = unchanged.
-    only_folders: list[uuid.UUID] | None = Field(default=None, max_length=200)
-
-
-async def _folder_choices(db: AsyncSession, user: User) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """(the folders Photos is limited to, the top-level folders to pick from)."""
-    from app.files.models import FileFolder
-    from app.photos.library import EXCLUDED_SYSTEM_KINDS, FOLDERS_KEY
-
-    chosen_ids = []
-    for raw in (user.settings or {}).get(FOLDERS_KEY) or []:
-        try:
-            chosen_ids.append(uuid.UUID(str(raw)))
-        except ValueError:
-            continue
-    chosen = []
-    if chosen_ids:
-        rows = (
-            await db.execute(
-                select(FileFolder).where(FileFolder.id.in_(chosen_ids), FileFolder.user_id == user.id, FileFolder.trashed_at.is_(None))
-            )
-        ).scalars().all()
-        chosen = [{"id": str(f.id), "name": f.name} for f in sorted(rows, key=lambda f: f.name.lower())]
-    top = (
-        await db.execute(
-            select(FileFolder)
-            .where(
-                FileFolder.user_id == user.id,
-                FileFolder.parent_id.is_(None),
-                FileFolder.trashed_at.is_(None),
-                or_(FileFolder.system_kind.is_(None), FileFolder.system_kind.not_in(EXCLUDED_SYSTEM_KINDS)),
-            )
-            # Camera Uploads (and Generated Files) first: where photos land.
-            .order_by(FileFolder.system_kind.is_(None), func.lower(FileFolder.name))
-        )
-    ).scalars().all()
-    choices = [{"id": str(f.id), "name": f.name, "system_kind": f.system_kind} for f in top]
-    return chosen, choices
 
 
 async def _face_count(db: AsyncSession, user_id: uuid.UUID) -> int:
@@ -144,7 +105,12 @@ async def _settings_out(db: AsyncSession, user: User) -> dict[str, Any]:
         # "Set up Photos" (PH-7): finished or put away.
         "setup_done": bool(s.get("photos_setup_done")),
     }
-    out["only_folders"], out["folder_choices"] = await _folder_choices(db, user)
+    # The Photos folder — the library itself — made if it isn't there yet.
+    from app.files.system_folders import ensure_camera_uploads
+
+    folder = await ensure_camera_uploads(db, user)
+    await db.commit()
+    out["folder"] = {"id": str(folder.id), "name": folder.name}
     return out
 
 
@@ -169,25 +135,6 @@ async def put_settings(
         changes["photos_captions"] = body.captions
     if body.setup_done is not None:
         changes["photos_setup_done"] = body.setup_done
-    if body.only_folders is not None:
-        # Only your own folders; [] = Photos from everywhere again.
-        from app.files.models import FileFolder
-        from app.photos.library import FOLDERS_KEY
-
-        wanted = list(dict.fromkeys(body.only_folders))
-        if wanted:
-            own = set(
-                (
-                    await db.execute(
-                        select(FileFolder.id).where(
-                            FileFolder.id.in_(wanted), FileFolder.user_id == user.id, FileFolder.trashed_at.is_(None)
-                        )
-                    )
-                ).scalars()
-            )
-            if len(own) != len(wanted):
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
-        changes[FOLDERS_KEY] = [str(x) for x in wanted]
     me.settings = {**(me.settings or {}), **changes}
     forget = []
     if body.faces is False:
@@ -213,6 +160,36 @@ async def put_settings(
     await db.commit()
     await db.refresh(me)
     return await _settings_out(db, me)
+
+
+@router.post("/files/{file_id}/move-to-photos")
+async def move_to_photos(
+    file_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict[str, Any]:
+    """File a picture or video from elsewhere in My files into the Photos
+    folder (by the month it was taken), which puts it in Photos."""
+    from app.files.models import FileFolder
+    from app.files.router import _free_file_name
+    from app.files.system_folders import camera_month_folder
+    from app.photos.library import photos_folders
+
+    row = await db.get(UserFile, file_id)
+    if row is None or row.user_id != user.id or row.trashed_at is not None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    media = await db.get(FileMedia, file_id)
+    if media is None or media.kind not in ("image", "raw", "video"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only photos and videos go in Photos.")
+    tree = photos_folders(user.id)
+    if row.folder_id is not None and await db.scalar(select(tree.c.id).where(tree.c.id == row.folder_id)):
+        return {"id": str(row.id), "folder_id": str(row.folder_id), "moved": False}
+    # The month it shows under in Photos (its local time), as uploads are.
+    asset = await db.get(PhotoAsset, file_id)
+    when = (asset.taken_local if asset is not None else None) or media.taken_at_override or media.taken_at or row.created_at
+    month = await camera_month_folder(db, user, when)
+    row.filename = await _free_file_name(db, user.id, await db.get(FileFolder, month.id), row.filename)
+    row.folder_id = month.id
+    await db.commit()
+    return {"id": str(row.id), "folder_id": str(month.id), "moved": True}
 
 
 @router.get("/understanding")

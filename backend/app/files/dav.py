@@ -236,6 +236,22 @@ class Tree:
         ).scalars().all()
         if folders:
             return next((f for f in folders if f.name == name), folders[0])
+        from app.files.system_folders import LEGACY_CAMERA_NAME, SystemKind
+
+        if parent_id is None and name.lower() == LEGACY_CAMERA_NAME.lower():
+            # A phone app set up when the Photos folder was "Camera
+            # Uploads" keeps backing up into it.
+            photos = (
+                await self.db.execute(
+                    select(FileFolder).where(
+                        FileFolder.user_id == self.user.id,
+                        FileFolder.system_kind == SystemKind.CAMERA_UPLOADS.value,
+                        FileFolder.trashed_at.is_(None),
+                    )
+                )
+            ).scalars().first()
+            if photos is not None:
+                return photos
         if _JUNK.match(name):
             return None
         # Usually the name is the filename and there's one: no listing needed.

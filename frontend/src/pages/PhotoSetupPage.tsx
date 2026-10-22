@@ -118,14 +118,14 @@ function BringIn() {
     }
     setBusy(null);
     void qc.invalidateQueries({ queryKey: ["photos"] });
-    if (n) toast.success(`${n} uploaded into Camera Uploads.`);
+    if (n) toast.success(`${n} uploaded into Photos.`);
   };
   const total = data?.total ?? 0;
   return (
     <>
       <Lead title="Bring your photos in">
         {total ? `You have ${total.toLocaleString()} ${total === 1 ? "photo or video" : "photos and videos"} so far. ` : ""}
-        Everything stays an ordinary file in Files — in Camera Uploads, by month.
+        Everything stays an ordinary file in Files — in your Photos folder, by month.
       </Lead>
       <div className="space-y-2">
         <Choice icon={Upload} title="Upload from this device" text="Pick photos and videos from this computer or phone.">
@@ -138,7 +138,7 @@ function BringIn() {
           text="A Google Takeout, an Apple Photos export or a zipped folder — dates, places, albums and favourites come with it.">
           <Link to="/files/import" className="rounded-md border border-[var(--border)] px-3 py-1 text-xs hover:bg-[var(--hover)]">Import</Link>
         </Choice>
-        <Choice icon={Smartphone} title="Back up your phone" text="Camera Uploads over WebDAV with an app password — new photos arrive by themselves.">
+        <Choice icon={Smartphone} title="Back up your phone" text="the Photos folder over WebDAV with an app password — new photos arrive by themselves.">
           <Link to="/account/devices" className="rounded-md border border-[var(--border)] px-3 py-1 text-xs hover:bg-[var(--hover)]">How</Link>
         </Choice>
       </div>

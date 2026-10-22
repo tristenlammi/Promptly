@@ -82,7 +82,7 @@ async def test_a_folder_zip_is_filed_by_date_and_its_files_keep_their_folders(cl
     files = {f.filename: f for f in (await db.execute(select(UserFile).where(UserFile.user_id == user.id))).scalars()}
     assert set(files) == {"beach.jpg", "Pancakes.docx"}
     # 1 Feb 2014 07:30 on that laptop's clock, in the owner's zone.
-    assert await _path(db, files["beach.jpg"].folder_id) == ["Camera Uploads", "2014", "02"]
+    assert await _path(db, files["beach.jpg"].folder_id) == ["Photos", "2014", "02"]
     assert files["beach.jpg"].client_mtime == datetime(2014, 1, 31, 21, 30, tzinfo=timezone.utc)
     assert await _path(db, files["Pancakes.docx"].folder_id) == ["Imported – Old laptop", "Documents", "Recipes"]
 

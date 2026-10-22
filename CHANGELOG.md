@@ -21,6 +21,26 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-10-22
+
+### Changed
+- **Photos is now one locked folder, like Google Photos.** "Camera Uploads" became **Photos**:
+  - It's always in My files and can't be renamed, moved or deleted.
+  - The Photos tab shows only what's in it and the folders inside it.
+  - The Photos tab has an **Upload** button. Uploads, phone backups, shared photos and imports land in
+    it by the month each was taken.
+  - Pictures elsewhere in My files (scans, ID cards, chat attachments, AI images) stay ordinary files
+    and leave Photos. "Move to Photos" on a picture's menu files it in.
+  - A phone app still set up with the old "Camera Uploads" folder keeps backing up into Photos.
+  - Existing accounts get it from their Camera Uploads, a folder of theirs already called "Photos", or
+    a new empty one (migration 0226). Nothing is moved.
+  - The "Use photos from" choice from 0.9.4 is gone; the folder replaces it.
+
+### Fixed
+- **Photos settings were easy to miss.** The button was an unlabelled gear at the very end of the
+  Photos header, and on a narrower window that row ran off the edge. It now reads "Settings", and
+  the row wraps instead.
+
 ## [0.9.4] - 2026-10-22
 
 ### Added

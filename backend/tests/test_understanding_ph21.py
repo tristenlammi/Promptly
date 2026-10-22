@@ -105,14 +105,24 @@ def test_quality_and_near_duplicates(tmp_path):
     assert hamming(sharp.phash, black.phash) > 16
 
 
+async def _photos_folder(db, user):
+    """The user's Photos folder — the library (made if it isn't there)."""
+    from app.files.system_folders import ensure_camera_uploads
+
+    folder = await ensure_camera_uploads(db, user)
+    await db.commit()
+    return folder
+
+
 async def _photo(db, user, *, lat=None, lon=None, preview: bytes | None = None, kind="image"):
     from app.files.derivatives import rendition_path
     from app.files.models import FileMedia, UserFile
     from app.photos.library import sync
 
     fid = uuid.uuid4()
-    db.add(UserFile(id=fid, user_id=user.id, filename=f"{fid}.jpg", original_filename="x.jpg", mime_type="image/jpeg",
-                    size_bytes=1, storage_path=f"u/{fid}"))
+    folder = await _photos_folder(db, user)
+    db.add(UserFile(id=fid, user_id=user.id, folder_id=folder.id, filename=f"{fid}.jpg", original_filename="x.jpg",
+                    mime_type="image/jpeg", size_bytes=1, storage_path=f"u/{fid}"))
     await db.flush()
     now = datetime.now(timezone.utc)
     db.add(FileMedia(file_id=fid, kind=kind, taken_at=now, lat=lat, lon=lon, extracted_at=now,

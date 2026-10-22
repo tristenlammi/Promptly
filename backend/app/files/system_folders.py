@@ -59,6 +59,9 @@ class SystemKind(str, Enum):
     # WP-8.5 — where phone backups and shared photos land, sorted into
     # YYYY/MM (ordinary folders) by the date each was taken. Photos stay
     # ordinary files: movable, shareable, WebDAV-synced (Part E §4.7).
+    # Shown as "Photos": it *is* the photo library — only what's in it
+    # (and its subfolders) is in the Photos tab, like Google Photos. The
+    # value keeps its old name (it's schema).
     CAMERA_UPLOADS = "camera_uploads"
     # NOTE: a Phase-12 ``EMAIL_ATTACHMENTS`` kind used to live here, lazily
     # seeded on first email-account connect. Email/calendar integration was
@@ -73,7 +76,7 @@ DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
     SystemKind.GENERATED_MEDIA: "Media",
     SystemKind.WORKSPACES_ROOT: "Workspaces",
     SystemKind.TEMPLATES: "Templates",
-    SystemKind.CAMERA_UPLOADS: "Camera Uploads",
+    SystemKind.CAMERA_UPLOADS: "Photos",
 }
 
 # The per-type subfolders auto-created inside each workspace's Drive
@@ -173,10 +176,15 @@ async def ensure_generated_media(db: AsyncSession, user: User) -> FileFolder:
     )
 
 
+# What the Photos folder was called before it was the library; a phone app
+# may still be pointed at it (WebDAV resolves it to the Photos folder).
+LEGACY_CAMERA_NAME = "Camera Uploads"
+
+
 async def ensure_camera_uploads(db: AsyncSession, user: User) -> FileFolder:
-    """Find-or-create ``Camera Uploads`` at the top of My files. A folder
-    the user already made with that name becomes it (a phone app may
-    have been pointed there already)."""
+    """Find-or-create the ``Photos`` folder (the photo library) at the top
+    of My files. A folder the user already made called "Photos" (or
+    "Camera Uploads") becomes it."""
     existing = await _fetch(db, user.id, SystemKind.CAMERA_UPLOADS)
     if existing is not None:
         return existing
@@ -189,7 +197,9 @@ async def ensure_camera_uploads(db: AsyncSession, user: User) -> FileFolder:
                 FileFolder.parent_id.is_(None),
                 FileFolder.trashed_at.is_(None),
                 FileFolder.system_kind.is_(None),
-                func.lower(FileFolder.name) == DISPLAY_NAMES[SystemKind.CAMERA_UPLOADS].lower(),
+                func.lower(FileFolder.name).in_(
+                    [DISPLAY_NAMES[SystemKind.CAMERA_UPLOADS].lower(), LEGACY_CAMERA_NAME.lower()]
+                ),
             )
         )
     ).scalars().first()
@@ -201,7 +211,7 @@ async def ensure_camera_uploads(db: AsyncSession, user: User) -> FileFolder:
 
 
 async def camera_month_folder(db: AsyncSession, user: User, when) -> FileFolder:  # noqa: ANN001 — datetime
-    """``Camera Uploads/YYYY/MM`` for ``when``, made as needed."""
+    """``Photos/YYYY/MM`` for ``when``, made as needed."""
     root = await ensure_camera_uploads(db, user)
     year = await _child_folder(db, user.id, root.id, f"{when.year:04d}")
     return await _child_folder(db, user.id, year.id, f"{when.month:02d}")
@@ -338,6 +348,8 @@ async def seed_system_folders(db: AsyncSession, user: User) -> None:
     # get it lazily on their first workspace create (``ensure_*`` is
     # find-or-create).
     await ensure_workspaces_root(db, user)
+    # The Photos folder — the photo library — is always there.
+    await ensure_camera_uploads(db, user)
 
 
 # --------------------------------------------------------------------

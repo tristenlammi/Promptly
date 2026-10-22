@@ -254,18 +254,17 @@ async def _one_photo(r: _Run, jid: uuid.UUID, user_id: uuid.UUID, idx: int, item
         return
     try:
         async with SessionLocal() as db:
-            same = (
-                await db.execute(
-                    select(UserFile.id).where(
-                        UserFile.user_id == user_id, UserFile.content_sha256 == staged.sha256, UserFile.trashed_at.is_(None)
-                    ).limit(1)
-                )
-            ).scalar_one_or_none()
+            from app.files.router import _already_in_camera_uploads
+
+            user = await db.get(User, user_id)
+            # A duplicate only when it's already in Photos — the same picture
+            # filed elsewhere in My files isn't in the library.
+            same_row = await _already_in_camera_uploads(db, user, staged.sha256)
+            same = same_row.id if same_row is not None else None
             if same is not None:
                 r.results[idx] = str(same)
                 r.progress["duplicates"] += 1
             else:
-                user = await db.get(User, user_id)
                 zone = user_zone(user)
                 taken = item.get("taken") or _epoch(item.get("taken_naive"), zone)
                 # The date to file it by when the photo has none of its own:

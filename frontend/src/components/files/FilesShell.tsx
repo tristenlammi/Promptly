@@ -1,7 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   Bot,
-  Camera,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -147,7 +146,6 @@ function FilesRail() {
   const system = (kind: string) => root?.folders.find((f) => f.system_kind === kind);
   const chatUploads = system("chat_uploads");
   const generated = system("generated_root");
-  const camera = system("camera_uploads");
   const [chatsOpen, setChatsOpen] = useState(false);
   const [wsOpen, setWsOpen] = useState(() => /^\/files\/workspaces/.test(window.location.pathname));
   const { data: workspaces } = useWorkspaces();
@@ -169,7 +167,6 @@ function FilesRail() {
             version={treeVersion}
           />
         )}
-        {camera && <RailLink to={`/files/folder/${camera.id}`} icon={Camera} label="Camera Uploads" />}
         <RailLink to="/files/shared" icon={Share2} label="Shared" />
         <button
           type="button"

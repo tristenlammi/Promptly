@@ -3,8 +3,8 @@ import type { Page } from "@playwright/test";
 import { expect, ready, stamp, test } from "../fixtures";
 import { storageStateFile } from "../lib/stack";
 
-/** Camera Uploads (WP-8.5): a photo shared to the installed Files app goes
- *  to Camera Uploads under the month it was taken — and the same photo
+/** The Photos folder (WP-8.5; was "Camera Uploads"): a photo shared to the
+ *  installed Files app goes into Photos under the month it was taken — and the same photo
  *  shared again is still one file. */
 
 // An 8×8 JPEG whose EXIF says it was taken on 4 July 2021.
@@ -33,7 +33,7 @@ async function browse(page: Page, auth: string, folderId: string | null) {
   return (await page.request.get(`/api/files/browse?scope=mine${q}`, { headers: { Authorization: auth } })).json();
 }
 
-test("a shared photo lands in Camera Uploads under the month it was taken, once", async ({ browser }) => {
+test("a shared photo lands in the Photos folder under the month it was taken, once", async ({ browser }) => {
   test.setTimeout(90_000);
   // The share goes through the service worker, which the suite blocks.
   const context = await browser.newContext({ storageState: storageStateFile("alice"), serviceWorkers: "allow" });
@@ -53,11 +53,10 @@ test("a shared photo lands in Camera Uploads under the month it was taken, once"
   const name = `IMG_${stamp}.jpg`;
   await share(page, name);
   await page.goto("/files/?shared=1");
-  await expect(page.getByText("Uploading 1 shared photo to Camera Uploads")).toBeVisible();
+  await expect(page.getByText("Uploading 1 shared photo to Photos")).toBeVisible();
   await expect(page.getByRole("region", { name: "Uploads" }).getByText("Done")).toBeVisible({ timeout: 20_000 });
 
-  // Camera Uploads → 2021 → 07, from the rail.
-  await page.getByRole("navigation", { name: "Files sections" }).getByRole("link", { name: "Camera Uploads" }).click();
+  // Photos → 2021 → 07.
   const root = await browse(page, auth, null);
   const cam = root.folders.find((f: { system_kind: string | null }) => f.system_kind === "camera_uploads");
   const year = (await browse(page, auth, cam.id)).folders.find((f: { name: string }) => f.name === "2021");

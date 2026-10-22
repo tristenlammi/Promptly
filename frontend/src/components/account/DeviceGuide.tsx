@@ -11,7 +11,7 @@ import { useAuthStore } from "@/store/authStore";
 export function DeviceGuide() {
   const username = useAuthStore((s) => s.user?.username) ?? "you";
   const server = `${window.location.origin}/dav/`;
-  const camera = `${server}Camera%20Uploads/`;
+  const camera = `${server}Photos/`;
   const rclone = `rclone config create promptly webdav url=${server} vendor=owncloud user=${username} pass=<app password> --obscure`;
 
   return (
@@ -25,7 +25,7 @@ export function DeviceGuide() {
         <Platform title="iPhone or iPad — back up the camera roll">
           <p>
             Use <b>PhotoSync</b> (a paid app; an iPhone web page can't back up in the background). Add a{" "}
-            <b>WebDAV</b> target with the server and app password, choose <Code>Camera Uploads</Code> as its folder, and
+            <b>WebDAV</b> target with the server and app password, choose <Code>Photos</Code> as its folder, and
             turn on its year/month subfolders and auto-transfer. Photos keep their original dates, and a photo sent twice
             is kept once.
           </p>
@@ -33,8 +33,8 @@ export function DeviceGuide() {
         <Platform title="Android — back up the camera roll or any folder">
           <p>
             <b>FolderSync</b>: add a WebDAV account, then a folder pair from the phone&apos;s <Code>DCIM/Camera</Code> to{" "}
-            <Code>Camera Uploads</Code>, uploading one way. <b>PhotoSync</b> works too. To send a few photos now, share
-            them to the installed <b>Promptly Files</b> app — they go to Camera Uploads.
+            <Code>Photos</Code>, uploading one way. <b>PhotoSync</b> works too. To send a few photos now, share
+            them to the installed <b>Promptly Files</b> app — they go to Photos.
           </p>
         </Platform>
         <Platform title="Mac — open your files in Finder">
@@ -73,7 +73,8 @@ export function DeviceGuide() {
           folders at home, or over Tailscale. Big uploads in the browser aren&apos;t limited.
         </li>
         <li>
-          Camera Uploads address for apps that want the folder in the URL: <Code>{decodeURI(camera)}</Code>
+          Photos folder address for apps that want the folder in the URL: <Code>{decodeURI(camera)}</Code>. An app
+          already set up with the old <Code>Camera Uploads</Code> folder keeps working — it goes to Photos.
         </li>
       </ul>
     </div>

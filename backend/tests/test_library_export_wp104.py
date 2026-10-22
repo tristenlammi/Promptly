@@ -70,7 +70,7 @@ async def test_the_whole_library_as_a_folder_tree(client, db, user, tmp_path):
     names = set(z.namelist())
     F = "Promptly/My files/"
     assert {"Promptly/README.txt", "Promptly/albums.json"} <= names
-    beach = F + "Camera Uploads/2019/06/IMG_0001.jpg"
+    beach = F + "Photos/2019/06/IMG_0001.jpg"
     assert {beach, beach + ".json", beach + ".xmp", F + "Google Drive/Plans/Budget.xlsx",
             F + "Trips/Packing list.docx", F + "Trips/Empty for now/"} <= names
     assert not any(n.endswith("old.txt") for n in names)  # the trash isn't exported
@@ -82,10 +82,10 @@ async def test_the_whole_library_as_a_folder_tree(client, db, user, tmp_path):
     assert side["promptly"]["albums"] == ["Holiday in Noosa"]
     xmp = z.read(beach + ".xmp").decode()
     assert 'exif:GPSLatitude="26,23.400000S"' in xmp and "Noosa main beach" in xmp
-    archived = json.loads(z.read(F + "Camera Uploads/2020/08/IMG_0003.jpg.json"))
+    archived = json.loads(z.read(F + "Photos/2020/08/IMG_0003.jpg.json"))
     assert archived["archived"] is True
     albums = json.loads(z.read("Promptly/albums.json"))
-    assert albums == [{"title": "Holiday in Noosa", "description": None, "items": ["My files/Camera Uploads/2019/06/IMG_0001.jpg"]}]
+    assert albums == [{"title": "Holiday in Noosa", "description": None, "items": ["My files/Photos/2019/06/IMG_0001.jpg"]}]
 
     doc = Document(io.BytesIO(z.read(F + "Trips/Packing list.docx")))
     assert [(p.style.name, p.text) for p in doc.paragraphs] == [

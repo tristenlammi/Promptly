@@ -86,10 +86,8 @@ export interface PhotoSettings {
   captions_model: { label: string; local: boolean } | null;
   /** "Set up Photos" finished or put away (PH-7). */
   setup_done?: boolean;
-  /** Photos only from these folders (and inside them); empty = everywhere. */
-  only_folders: { id: string; name: string }[];
-  /** Your top-level folders to choose from (Camera Uploads first). */
-  folder_choices: { id: string; name: string; system_kind: string | null }[];
+  /** The Photos folder — the library: only what's in it is in Photos. */
+  folder: { id: string; name: string };
 }
 
 /** One stage of understanding the library (PH-2). */
@@ -107,11 +105,15 @@ export const photosApi = {
     const { data } = await apiClient.get("/photos/settings");
     return data;
   },
+  /** File a picture or video from elsewhere in My files into Photos. */
+  async moveToPhotos(fileId: string): Promise<{ id: string; folder_id: string; moved: boolean }> {
+    const { data } = await apiClient.post(`/photos/files/${fileId}/move-to-photos`);
+    return data;
+  },
   async saveSettings(body: {
     faces?: boolean;
     captions?: boolean;
     setup_done?: boolean;
-    only_folders?: string[];
   }): Promise<PhotoSettings> {
     const { data } = await apiClient.put("/photos/settings", body);
     return data;

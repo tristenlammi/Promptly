@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+
+import { photosApi } from "@/api/photos";
 import {
   ArrowDown,
   ArrowDownUp,
@@ -1597,9 +1599,31 @@ function ContentGrid({
           disabled: !writable,
         };
         if (entry.kind === "file") {
+          // A picture or video elsewhere in My files isn't in Photos until
+          // it's filed into the Photos folder (by the month it was taken).
+          const isMedia = /^(image|video)\//.test(entry.file.mime_type || "");
+          const toPhotos: ContextMenuItem[] =
+            isMedia && L.scope === "mine" && writable
+              ? [
+                  {
+                    icon: <Images className="h-3.5 w-3.5" />,
+                    label: "Move to Photos",
+                    onClick: () =>
+                      void photosApi
+                        .moveToPhotos(entry.file.id)
+                        .then((r) => {
+                          toast.success(r.moved ? "Moved into Photos." : "It's already in Photos.");
+                          void qcList.invalidateQueries({ queryKey: ["files-browse"] });
+                          void qcList.invalidateQueries({ queryKey: ["photos"] });
+                        })
+                        .catch((e) => toast.error(extractError(e))),
+                  },
+                ]
+              : [];
           return [
             { icon: <Eye className="h-3.5 w-3.5" />, label: "Preview", onClick: () => open(entry) },
             { icon: <Download className="h-3.5 w-3.5" />, label: "Download", onClick: () => void downloadAuthed(entry.file) },
+            ...toPhotos,
             ...common,
             trash,
           ];
@@ -2086,7 +2110,7 @@ function useSharedFilesPickup() {
       if (cancelled) return;
       navigate("/files", { replace: true });
       if (!files.length) return;
-      // Photos and videos go where the phone's backups do — Camera Uploads,
+      // Photos and videos go where the phone's backups do — the Photos folder,
       // by month taken, not twice (WP-8.5); anything else to My files.
       const isMedia = (f: File) => /^(image|video)\//.test(f.type) || /\.(heic|heif|mov)$/i.test(f.name);
       const media = files.filter(isMedia);
@@ -2096,7 +2120,7 @@ function useSharedFilesPickup() {
       const n = files.length;
       toast.info(
         other.length === 0
-          ? `Uploading ${n} shared photo${n === 1 ? "" : "s"} to Camera Uploads…`
+          ? `Uploading ${n} shared photo${n === 1 ? "" : "s"} to Photos…`
           : `Uploading ${n} shared file${n === 1 ? "" : "s"}…`,
       );
     })();

@@ -1,5 +1,5 @@
-"""Camera Uploads (WP-8.5): phone backups and shared photos land in
-Camera Uploads/YYYY/MM by when they were taken, and the same photo twice is
+"""The Photos folder (WP-8.5, was Camera Uploads): phone backups and shared
+photos land in Photos/YYYY/MM by when they were taken, and the same photo twice is
 one file. Plus the WebDAV side of a phone backup."""
 from __future__ import annotations
 
@@ -89,7 +89,7 @@ async def test_photos_are_filed_by_when_they_were_taken_and_kept_once(client, db
 
     photo = _jpeg("2021:07:04 10:00:00")
     first = await _upload(client, user, "IMG_0001.jpg", photo, route="camera")
-    assert await _path(db, first["folder_id"]) == ["Camera Uploads", "2021", "07"]
+    assert await _path(db, first["folder_id"]) == ["Photos", "2021", "07"]
 
     # The same photo again — another device, a reinstall: the one file.
     again = await _upload(client, user, "IMG_0001 (1).jpg", photo, route="camera")
@@ -100,7 +100,7 @@ async def test_photos_are_filed_by_when_they_were_taken_and_kept_once(client, db
     # No date in it: the device's modified time decides the month.
     plain = await _upload(client, user, "scan.jpg", _jpeg(None, (1, 2, 3)), route="camera",
                           last_modified=int(datetime(2019, 2, 3, tzinfo=timezone.utc).timestamp() * 1000))
-    assert await _path(db, plain["folder_id"]) == ["Camera Uploads", "2019", "02"]
+    assert await _path(db, plain["folder_id"]) == ["Photos", "2019", "02"]
 
 
 @pytest.mark.asyncio
@@ -110,7 +110,7 @@ async def test_uploading_into_camera_uploads_itself_sorts_too(client, db, user):
     cam = await ensure_camera_uploads(db, user)
     await db.commit()
     out = await _upload(client, user, "IMG_0002.jpg", _jpeg("2024:12:31 23:30:00"), folder_id=cam.id)
-    assert await _path(db, out["folder_id"]) == ["Camera Uploads", "2024", "12"]
+    assert await _path(db, out["folder_id"]) == ["Photos", "2024", "12"]
 
 
 @pytest.mark.asyncio
@@ -143,9 +143,10 @@ async def test_a_phone_backing_up_over_webdav(client, db, user):
 
     dav.locks.clear()
     auth = await _device(db, user)
-    # A device's first look finds Camera Uploads to point the phone at.
+    # A device's first look finds the Photos folder to point the phone at
+    # (and the old "Camera Uploads" path, used below, still leads there).
     r = await client.request("PROPFIND", "/dav/", headers={**auth, "Depth": "1"})
-    assert "/dav/Camera%20Uploads/" in r.text
+    assert "/dav/Photos/" in r.text
 
     # PhotoSync makes its own YYYY/MM folders and keeps the exact path.
     for p in ("/dav/Camera%20Uploads/2026", "/dav/Camera%20Uploads/2026/10"):
@@ -155,7 +156,7 @@ async def test_a_phone_backing_up_over_webdav(client, db, user):
     r = await client.put(url, headers={**auth, "X-OC-Mtime": "1759305600"}, content=photo)
     assert r.status_code == 201
     row = (await db.execute(select(UserFile).where(UserFile.filename == "IMG_0100.jpg"))).scalars().one()
-    assert await _path(db, row.folder_id) == ["Camera Uploads", "2026", "10"]
+    assert await _path(db, row.folder_id) == ["Photos", "2026", "10"]
 
     # Sent again after a reinstall: nothing stored, no version.
     r = await client.put(url, headers=auth, content=photo)

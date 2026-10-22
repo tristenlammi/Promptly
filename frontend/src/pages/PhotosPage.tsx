@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Archive, ArchiveRestore, BookImage, Download, Eraser, Heart, ImagePlus, Images, MapPin, Search, Sparkles, Settings2, Trash2, UsersRound, X } from "lucide-react";
+import { Archive, ArchiveRestore, BookImage, Download, Eraser, Heart, ImagePlus, Images, MapPin, Search, Sparkles, Settings2, Trash2, Upload, UsersRound, X } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { filesApi } from "@/api/files";
@@ -16,6 +16,7 @@ import { PhotoSettingsDialog } from "@/components/photos/PhotoSettingsDialog";
 import { UnderstandingStatus } from "@/components/photos/UnderstandingStatus";
 import { justify, rowsHeight, type JustifiedRow } from "@/lib/justify";
 import { toast } from "@/store/toastStore";
+import { useUploadStore } from "@/store/uploadStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
@@ -106,6 +107,9 @@ export function PhotosPage() {
   const { data: addToAlbum } = useQuery({ queryKey: ["album", addTo], queryFn: () => albumsApi.get(addTo!), enabled: !!addTo });
   const [albumPick, setAlbumPick] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Uploads go into the Photos folder, by the month each was taken.
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const startUploads = useUploadStore((s) => s.startUploads);
   const [familyOpen, setFamilyOpen] = useState(false);
   const view = (params.get("view") as PhotoView) || "all";
   const qc = useQueryClient();
@@ -279,7 +283,7 @@ export function PhotosPage() {
         ) : (
           <>
             <h1 className="mr-2 text-base font-semibold text-[var(--text)]">Photos</h1>
-            <nav aria-label="Photo views" className="flex gap-1">
+            <nav aria-label="Photo views" className="flex flex-wrap gap-1">
               {VIEWS.map((v) => (
                 <button
                   key={v.id}
@@ -316,17 +320,40 @@ export function PhotosPage() {
               <Link to="/files/photos/search" aria-label="Search photos" className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
                 <Search className="h-3.5 w-3.5" /> Search
               </Link>
+              {/* Labelled, not a lone gear: it's where "Use photos from",
+                  faces and descriptions live. */}
               <button
                 type="button"
                 aria-label="Photos settings"
                 onClick={() => setSettingsOpen(true)}
-                className="rounded-full p-1.5 text-[var(--text-muted)] hover:bg-[var(--hover)]"
+                className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]"
               >
-                <Settings2 className="h-3.5 w-3.5" />
+                <Settings2 className="h-3.5 w-3.5" /> Settings
               </button>
             </nav>
             <span className="ml-auto flex items-center gap-3 text-xs text-[var(--text-muted)]">
               {!phone && <UnderstandingStatus />}
+              <input
+                ref={uploadInput}
+                type="file"
+                multiple
+                accept="image/*,video/*,.heic,.heif,.dng,.mov"
+                className="hidden"
+                aria-hidden
+                tabIndex={-1}
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? []);
+                  e.target.value = "";
+                  if (files.length) startUploads({ files, scope: "mine", folderId: null, route: "camera" });
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => uploadInput.current?.click()}
+                className="flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white"
+              >
+                <Upload className="h-3.5 w-3.5" /> Upload
+              </button>
               {total ? `${total.toLocaleString()} ${total === 1 ? "item" : "items"}` : ""}
             </span>
           </>
@@ -634,7 +661,7 @@ function Empty({ view, onFamily }: { view: PhotoView; onFamily: () => void }) {
       ? "Star a photo and it shows up here."
       : view === "archive"
         ? "Archived photos are kept but left out of the timeline."
-        : "Upload photos or videos, back up a phone into Camera Uploads (Account → Devices), or share photos to the Promptly Files app.";
+        : "Upload photos or videos (they go in your Photos folder), back up a phone into it (Account → Devices), or share photos to the Promptly Files app.";
   return (
     <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
       <Images className="h-10 w-10 text-[var(--text-muted)]" />

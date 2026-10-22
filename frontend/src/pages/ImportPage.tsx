@@ -296,7 +296,7 @@ export function ImportJobPage() {
             {job.state === "failed" ? "Carry on importing" : "Import"}
           </Button>
           <p className="mt-1 text-xs text-[var(--text-muted)]">
-            Photos go to Camera Uploads by the month they were taken; anything you already have isn't copied again. You
+            Photos go to your Photos folder by the month they were taken; anything you already have isn't copied again. You
             can leave this page — you'll get a notification when it's done.
           </p>
         </div>

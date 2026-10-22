@@ -1,16 +1,15 @@
 """What's in someone's photo library, and keeping it in step (WP-9.1).
 
-The library is every photo and video a person owns (Part C §4.1), except:
+The library is the person's **Photos folder** — the locked system folder
+(``system_kind = 'camera_uploads'``, shown as "Photos") — and every
+subfolder in it, like Google Photos: uploads from the Photos tab, phone
+backups, shared-to-the-app photos and imports land there, by year and
+month. Pictures anywhere else in My files are ordinary files, not Photos
+("Move to Photos" files one in). Left out even inside it:
 
 * what's in the trash;
-* system folders — Chat Uploads, the workspaces' folders, templates —
-  except Camera Uploads and Generated Files, which are photos people keep;
 * any folder marked "Hide from Photos", and everything inside it;
-* the video half of a Live Photo (it plays behind its still);
-* when the person chose "only these folders" (``users.settings
-  ["photos_folders"]``, Photos → settings), anything outside those folders
-  and their subfolders — so a Drive full of other pictures (chat uploads,
-  screenshots, scans) needn't all be Photos, nor all be worked on.
+* the video half of a Live Photo (it plays behind its still).
 
 ``photo_assets`` holds a row per photo or video (``sync``, called when the
 media worker reads a file and when its date or place is edited); the
@@ -23,41 +22,29 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import String, and_, case, cast, exists, func, literal, or_, select
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.files.models import FileFolder, FileMedia, UserFile
 from app.photos.models import PhotoAsset
 
-# System folders whose files aren't photos people keep.
-EXCLUDED_SYSTEM_KINDS = ("chat_uploads", "workspaces_root", "templates")
-# users.settings key: the folders Photos is limited to ([] / absent = all).
-FOLDERS_KEY = "photos_folders"
+PHOTOS_KIND = "camera_uploads"
 
 # The same rule for the background stages, in SQL over ``p`` (photo_assets)
 # and ``f`` (files), for every user at once: ``LIBRARY_CTES`` goes in front
 # of the query, ``LIBRARY_WHERE`` in its WHERE.
 LIBRARY_CTES = (
-    "WITH RECURSIVE lib_hidden(id) AS ("
-    "  SELECT id FROM file_folders WHERE system_kind IN ("
-    + ", ".join(f"'{k}'" for k in EXCLUDED_SYSTEM_KINDS)
-    + ") OR hide_from_photos"
+    "WITH RECURSIVE lib_photos(user_id, id) AS ("
+    "  SELECT user_id, id FROM file_folders WHERE system_kind = '" + PHOTOS_KIND + "' AND trashed_at IS NULL"
+    "  UNION ALL SELECT lp.user_id, c.id FROM file_folders c JOIN lib_photos lp ON c.parent_id = lp.id"
+    "), lib_hidden(id) AS ("
+    "  SELECT id FROM file_folders WHERE hide_from_photos"
     "  UNION ALL SELECT c.id FROM file_folders c JOIN lib_hidden h ON c.parent_id = h.id"
-    "), lib_chosen(user_id, id) AS ("
-    "  SELECT u.id, ff.id FROM users u"
-    "  CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(u.settings -> '" + FOLDERS_KEY + "') = 'array'"
-    "    THEN u.settings -> '" + FOLDERS_KEY + "' ELSE '[]'::jsonb END) AS r(fid)"
-    "  JOIN file_folders ff ON ff.id::text = r.fid AND ff.user_id = u.id"
-    "  UNION ALL SELECT ch.user_id, c.id FROM file_folders c JOIN lib_chosen ch ON c.parent_id = ch.id"
     ") "
 )
 LIBRARY_WHERE = (
-    "(f.folder_id IS NULL OR f.folder_id NOT IN (SELECT id FROM lib_hidden))"
-    " AND (NOT EXISTS (SELECT 1 FROM users lu WHERE lu.id = p.user_id"
-    "   AND jsonb_array_length(CASE WHEN jsonb_typeof(lu.settings -> '" + FOLDERS_KEY + "') = 'array'"
-    "     THEN lu.settings -> '" + FOLDERS_KEY + "' ELSE '[]'::jsonb END) > 0)"
-    "  OR f.folder_id IN (SELECT lc.id FROM lib_chosen lc WHERE lc.user_id = p.user_id))"
+    "f.folder_id IN (SELECT lp.id FROM lib_photos lp WHERE lp.user_id = p.user_id)"
+    " AND f.folder_id NOT IN (SELECT id FROM lib_hidden)"
 )
 
 
@@ -162,18 +149,24 @@ async def refile_zoneless(db: AsyncSession, user_id: uuid.UUID, zone_name: str |
     return result.rowcount or 0
 
 
-def excluded_folders(user_id: uuid.UUID):  # noqa: ANN201 — a CTE
-    """The ids of every folder whose contents aren't in the library."""
+def photos_folders(user_id: uuid.UUID):  # noqa: ANN201 — a CTE
+    """The person's Photos folder and every folder inside it."""
     base = (
         select(FileFolder.id)
-        .where(
-            FileFolder.user_id == user_id,
-            or_(FileFolder.system_kind.in_(EXCLUDED_SYSTEM_KINDS), FileFolder.hide_from_photos.is_(True)),
-        )
-        .cte("photos_excluded", recursive=True)
+        .where(FileFolder.user_id == user_id, FileFolder.system_kind == PHOTOS_KIND, FileFolder.trashed_at.is_(None))
+        .cte("photos_tree", recursive=True)
     )
-    inner = select(FileFolder.id).join(base, FileFolder.parent_id == base.c.id)
-    return base.union_all(inner)
+    return base.union_all(select(FileFolder.id).join(base, FileFolder.parent_id == base.c.id))
+
+
+def hidden_folders(user_id: uuid.UUID):  # noqa: ANN201 — a CTE
+    """Folders marked "Hide from Photos", and everything inside them."""
+    base = (
+        select(FileFolder.id)
+        .where(FileFolder.user_id == user_id, FileFolder.hide_from_photos.is_(True))
+        .cte("photos_hidden", recursive=True)
+    )
+    return base.union_all(select(FileFolder.id).join(base, FileFolder.parent_id == base.c.id))
 
 
 # Photos in albums someone owns or was invited to — searched with their own
@@ -206,40 +199,20 @@ def shared_with(user_id: uuid.UUID):  # noqa: ANN201 — a subquery of file ids
     return albums.union(family)
 
 
-def _chosen(user_id: uuid.UUID):  # noqa: ANN201 — (has-a-choice clause, folder-ids CTE)
-    """The person's "only these folders" choice: whether there is one, and
-    those folders with everything inside them."""
-    from app.auth.models import User
-
-    raw = User.settings[FOLDERS_KEY]
-    # Anything but a list counts as no choice (and never errors); ids are
-    # compared as text, so a bad one just matches nothing.
-    picked = case((func.jsonb_typeof(raw) == "array", raw), else_=cast(literal("[]"), JSONB))
-    roots = select(func.jsonb_array_elements_text(picked).label("fid")).where(User.id == user_id).subquery("photos_roots")
-    base = (
-        select(FileFolder.id)
-        .where(FileFolder.user_id == user_id, cast(FileFolder.id, String).in_(select(roots.c.fid)))
-        .cte("photos_chosen", recursive=True)
-    )
-    tree = base.union_all(select(FileFolder.id).join(base, FileFolder.parent_id == base.c.id))
-    has_choice = exists(select(User.id).where(User.id == user_id, func.jsonb_array_length(picked) > 0))
-    return has_choice, tree
-
-
 def in_library(user_id: uuid.UUID):  # noqa: ANN201 — a WHERE clause
-    """Rows of ``photo_assets`` joined to ``files`` that are in the library."""
-    excluded = excluded_folders(user_id)
-    has_choice, chosen = _chosen(user_id)
+    """Rows of ``photo_assets`` joined to ``files`` that are in the library:
+    inside the Photos folder, not hidden, not in the trash."""
+    tree, hidden = photos_folders(user_id), hidden_folders(user_id)
     return and_(
         PhotoAsset.user_id == user_id,
         PhotoAsset.live_hidden.is_(False),
         UserFile.trashed_at.is_(None),
-        or_(UserFile.folder_id.is_(None), UserFile.folder_id.not_in(select(excluded.c.id))),
-        or_(~has_choice, UserFile.folder_id.in_(select(chosen.c.id))),
+        UserFile.folder_id.in_(select(tree.c.id)),
+        UserFile.folder_id.not_in(select(hidden.c.id)),
     )
 
 
 __all__ = [
-    "EXCLUDED_SYSTEM_KINDS", "FOLDERS_KEY", "LIBRARY_CTES", "LIBRARY_WHERE", "SHARED_SQL", "excluded_folders", "in_library", "refile_zoneless", "shared_with", "sync", "taken_local",
+    "LIBRARY_CTES", "LIBRARY_WHERE", "PHOTOS_KIND", "hidden_folders", "photos_folders", "SHARED_SQL", "in_library", "refile_zoneless", "shared_with", "sync", "taken_local",
     "user_zone",
 ]

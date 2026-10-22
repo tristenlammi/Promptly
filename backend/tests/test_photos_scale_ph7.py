@@ -22,6 +22,9 @@ async def _seed(db, user) -> None:
     """N photos over ten years: most at home (Brisbane), trips to Madrid,
     bursts, a few screenshots and big videos."""
     places = (await db.execute(text("SELECT geonameid, lat, lon FROM geo_places ORDER BY geonameid"))).all()
+    from tests.test_understanding_ph21 import _photos_folder
+
+    photos = await _photos_folder(db, user)  # the library is the Photos folder
     home = next(p for p in places if p.geonameid == 2174003)
     away = next(p for p in places if p.geonameid == 3117735)
     await db.execute(
@@ -33,8 +36,8 @@ async def _seed(db, user) -> None:
                      (i % 50 = 0) AS shot, (i % 997 = 0) AS vid, ((i / 40) % 25 = 0) AS trip
               FROM generate_series(1, CAST(:n AS int)) i
             ), f AS (
-              INSERT INTO files (id, user_id, filename, original_filename, mime_type, size_bytes, storage_path)
-              SELECT id, CAST(:u AS uuid), CASE WHEN shot THEN 'Screenshot ' || i || '.png' ELSE 'IMG_' || i || '.jpg' END, 'x',
+              INSERT INTO files (id, user_id, folder_id, filename, original_filename, mime_type, size_bytes, storage_path)
+              SELECT id, CAST(:u AS uuid), CAST(:pf AS uuid), CASE WHEN shot THEN 'Screenshot ' || i || '.png' ELSE 'IMG_' || i || '.jpg' END, 'x',
                      CASE WHEN vid THEN 'video/mp4' WHEN shot THEN 'image/png' ELSE 'image/jpeg' END,
                      CASE WHEN vid THEN 200000000 ELSE 2500000 + (i % 1000) END, 'u/' || id
               FROM g RETURNING id
@@ -57,7 +60,7 @@ async def _seed(db, user) -> None:
             FROM g
             """
         ),
-        {"n": N, "u": user.id, "hlat": home.lat, "hlon": home.lon, "alat": away.lat, "alon": away.lon,
+        {"n": N, "u": user.id, "pf": photos.id, "hlat": home.lat, "hlon": home.lon, "alat": away.lat, "alon": away.lon,
          "hp": home.geonameid, "ap": away.geonameid},
     )
     await db.commit()

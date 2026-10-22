@@ -8,6 +8,8 @@ import uuid
 
 import pytest
 
+from tests.test_understanding_ph21 import _photos_folder  # photos live in the Photos folder
+
 
 @pytest.fixture
 def root(tmp_path, monkeypatch):
@@ -86,7 +88,7 @@ async def test_photos_without_a_zone_follow_yours(db, user):
     # An older camera writes its clock with no zone: that wall time stays put.
     for name, offset, source in (("screenshot.png", None, None), ("camera.jpg", -300, "exif"), ("old.jpg", None, "exif")):
         fid = uuid.uuid4()
-        db.add(UserFile(id=fid, user_id=user.id, filename=name, original_filename=name, mime_type="image/png",
+        db.add(UserFile(id=fid, user_id=user.id, folder_id=(await _photos_folder(db, user)).id, filename=name, original_filename=name, mime_type="image/png",
                         size_bytes=1, storage_path=f"u/{fid}"))
         await db.flush()
         db.add(FileMedia(file_id=fid, kind="image", taken_at=instant, tz_offset=offset, taken_at_source=source, extracted_at=instant))
@@ -118,7 +120,7 @@ async def test_photos_without_a_zone_follow_yours(db, user):
     me = await db.get(User, user.id, populate_existing=True)
     assert me.settings["timezone"] == "Australia/Brisbane"
     fid = uuid.uuid4()
-    db.add(UserFile(id=fid, user_id=user.id, filename="later.png", original_filename="later.png", mime_type="image/png",
+    db.add(UserFile(id=fid, user_id=user.id, folder_id=(await _photos_folder(db, user)).id, filename="later.png", original_filename="later.png", mime_type="image/png",
                     size_bytes=1, storage_path=f"u/{fid}"))
     await db.flush()
     db.add(FileMedia(file_id=fid, kind="image", taken_at=instant, extracted_at=instant))

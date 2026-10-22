@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
+from tests.test_understanding_ph21 import _photos_folder  # photos live in the Photos folder
+
 
 @pytest.fixture
 async def client(db):
@@ -56,7 +58,7 @@ async def _photo(db, user, name, day):
     from app.photos.library import sync
 
     fid = uuid.uuid4()
-    db.add(UserFile(id=fid, user_id=user.id, filename=name, original_filename=name, mime_type="image/jpeg",
+    db.add(UserFile(id=fid, user_id=user.id, folder_id=(await _photos_folder(db, user)).id, filename=name, original_filename=name, mime_type="image/jpeg",
                     size_bytes=1, storage_path=f"u/{fid}"))
     await db.flush()
     db.add(FileMedia(file_id=fid, kind="image", taken_at=datetime(2026, 7, day, tzinfo=timezone.utc),

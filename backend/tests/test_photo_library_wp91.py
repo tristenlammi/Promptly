@@ -38,11 +38,17 @@ async def _folder(db, user, name, *, parent=None, system_kind=None, hide=False):
     return f
 
 
-async def _photo(db, user, name, taken: datetime | None, *, offset=None, kind="image", folder=None, mime=None,
+PHOTOS = object()  # "in the Photos folder" — the default
+
+
+async def _photo(db, user, name, taken: datetime | None, *, offset=None, kind="image", folder=PHOTOS, mime=None,
                  live_pair=None, trashed=False):
     from app.files.models import FileMedia, UserFile
+    from app.files.system_folders import ensure_camera_uploads
     from app.photos.library import sync
 
+    if folder is PHOTOS:
+        folder = await ensure_camera_uploads(db, user)
     fid = uuid.uuid4()
     mime = mime or ("video/quicktime" if kind == "video" else "image/jpeg")
     row = UserFile(id=fid, user_id=user.id, folder_id=folder.id if folder else None, filename=name, original_filename=name,
@@ -97,21 +103,29 @@ async def test_the_timeline_runs_by_when_and_where_it_was_taken(client, db, user
 
 @pytest.mark.asyncio
 async def test_what_isnt_in_the_library(client, db, user):
+    """Photos is the Photos folder (like Google Photos): what's in it and
+    the folders inside it — nothing elsewhere in My files."""
     from app.auth.models import User
+    from app.files.system_folders import ensure_camera_uploads
 
     when = _utc(2025, 3, 3)
+    photos = await ensure_camera_uploads(db, user)
+    await db.commit()
     await _photo(db, user, "kept.jpg", when)
-    cam = await _folder(db, user, "Camera Uploads", system_kind="camera_uploads")
-    await _photo(db, user, "camera.jpg", when, folder=cam)
+    month = await _folder(db, user, "2025", parent=photos)
+    await _photo(db, user, "in-a-month.jpg", when, folder=month)
+
+    await _photo(db, user, "loose.jpg", when, folder=None)  # the top of My files
+    docs = await _folder(db, user, "Important Documents")
+    await _photo(db, user, "id-card.jpg", when, folder=docs)
     gen = await _folder(db, user, "Generated Files", system_kind="generated_root")
     await _photo(db, user, "generated.png", when, folder=gen, mime="image/png")
-
     chat = await _folder(db, user, "Chat Uploads", system_kind="chat_uploads")
     await _photo(db, user, "chat.jpg", when, folder=chat)
     ws_root = await _folder(db, user, "Workspaces", system_kind="workspaces_root")
     ws = await _folder(db, user, "Team", parent=ws_root)
     await _photo(db, user, "workspace.jpg", when, folder=ws)
-    hidden = await _folder(db, user, "Scans", hide=True)
+    hidden = await _folder(db, user, "Scans", parent=photos, hide=True)
     inner = await _folder(db, user, "2020", parent=hidden)
     await _photo(db, user, "scan.jpg", when, folder=inner)
     await _photo(db, user, "binned.jpg", when, trashed=True)
@@ -128,7 +142,7 @@ async def test_what_isnt_in_the_library(client, db, user):
     await _photo(db, other, "someone-elses.jpg", when)
 
     names = set(await _names(client, user))
-    assert names == {"kept.jpg", "camera.jpg", "generated.png", "live.heic"}
+    assert names == {"kept.jpg", "in-a-month.jpg", "live.heic"}
     items = (await client.get("/api/photos/timeline", headers=_auth(user))).json()["items"]
     assert next(i for i in items if i["filename"] == "live.heic")["live"] is True
 

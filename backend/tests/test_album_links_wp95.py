@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
+from tests.test_understanding_ph21 import _photos_folder  # photos live in the Photos folder
+
 
 @pytest.fixture
 def root(tmp_path, monkeypatch):
@@ -67,7 +69,7 @@ async def _photo(db, user, name, data, day):
     fid = uuid.uuid4()
     rel = storage_path_for(user.id, fid, ".jpg")
     await blobstore.put_bytes(rel, data)
-    db.add(UserFile(id=fid, user_id=user.id, filename=name, original_filename=name, mime_type="image/jpeg",
+    db.add(UserFile(id=fid, user_id=user.id, folder_id=(await _photos_folder(db, user)).id, filename=name, original_filename=name, mime_type="image/jpeg",
                     size_bytes=len(data), storage_path=rel))
     await db.flush()
     db.add(FileMedia(file_id=fid, kind="image", taken_at=datetime(2026, 7, day, tzinfo=timezone.utc),

@@ -20,11 +20,23 @@ test("a duplicate is found and its extra copy moved to the trash", async ({ dana
   const auth = { Authorization: await bearer(page) };
   const bytes = fs.readFileSync(wordPhoto(`dup-${stamp}.jpg`, `DUP ${stamp}`));
   const ids: string[] = [];
-  // Camera Uploads skips a photo it already has, so the copy goes to My files.
+  // Uploading into Photos skips a photo it already has, so the copy goes
+  // straight into a folder inside Photos (still the library).
+  const photos = (await (await page.request.get("/api/photos/settings", { headers: auth })).json()).folder.id as string;
+  const inner = await page.request.post("/api/files/folders", {
+    headers: auth,
+    data: { name: `Dupes ${stamp}`, parent_id: photos, scope: "mine" },
+  });
+  expect(inner.ok(), await inner.text()).toBeTruthy();
+  const innerId = (await inner.json()).id as string;
   for (const [name, route] of [[`dup-${stamp}-a.jpg`, "camera"], [`dup-${stamp}-b.jpg`, ""]]) {
     const up = await page.request.post("/api/files/", {
       headers: auth,
-      multipart: { scope: "mine", ...(route ? { route } : {}), file: { name, mimeType: "image/jpeg", buffer: bytes } },
+      multipart: {
+        scope: "mine",
+        ...(route ? { route } : { folder_id: innerId }),
+        file: { name, mimeType: "image/jpeg", buffer: bytes },
+      },
     });
     expect(up.ok(), await up.text()).toBeTruthy();
     ids.push((await up.json()).id);

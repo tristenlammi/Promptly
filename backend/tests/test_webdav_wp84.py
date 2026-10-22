@@ -192,8 +192,8 @@ async def test_finder_s_empty_file_then_content_and_its_clutter(dav, db, user):
     assert (await dav("PUT", "/._photo.jpg", content=b"resource fork")).status_code == 201
     assert (await dav("PUT", "/.DS_Store", content=b"settings")).status_code == 201
     names = set(_listing(await dav("PROPFIND", "/", headers={"Depth": "1"})))
-    # (Camera Uploads is made for a device on its first look, WP-8.5.)
-    assert names == {"/dav/", "/dav/photo.jpg", "/dav/Camera%20Uploads/"}
+    # (The Photos folder is always there — it was Camera Uploads, WP-8.5.)
+    assert names == {"/dav/", "/dav/photo.jpg", "/dav/Photos/"}
     assert (await dav("DELETE", "/._photo.jpg")).status_code == 204
 
 

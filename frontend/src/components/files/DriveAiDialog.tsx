@@ -92,7 +92,7 @@ const KINDS: { value: DriveAiKind; label: string }[] = [
 const SYSTEM_HINTS: Record<string, string> = {
   generated_root: "Images, documents and files the AI made",
   chat_uploads: "Files attached to chats",
-  camera_uploads: "Phone backups",
+  camera_uploads: "Your photo library",
   workspaces_root: "Every workspace's files",
 };
 

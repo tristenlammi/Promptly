@@ -182,7 +182,7 @@ async def test_a_takeout_lands_with_its_dates_places_and_albums(client, db, user
 
     files = {f.filename: f for f in (await db.execute(select(UserFile).where(UserFile.user_id == user.id))).scalars()}
     beach = files["IMG_0001.jpg"]
-    assert await _path(db, beach.folder_id) == ["Camera Uploads", "2019", "06"]
+    assert await _path(db, beach.folder_id) == ["Photos", "2019", "06"]
     assert beach.starred_at is not None  # a Google favourite
     meta = await db.get(FileImportMeta, beach.id)
     assert (meta.lat, meta.lon, meta.description) == (-26.39, 153.09, "Noosa main beach")
