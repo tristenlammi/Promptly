@@ -138,6 +138,10 @@ async def sweep() -> int:
             await asyncio.to_thread(remove_files, job.id)
             job.state, job.parts, job.error = "cancelled", [], "Not imported within two weeks, so its uploaded parts were deleted."
             n += 1
+        # A cancelled import never keeps files (one could be left by an
+        # upload that finished after it was cancelled).
+        for jid in (await db.execute(select(ImportJob.id).where(ImportJob.state == "cancelled"))).scalars():
+            await asyncio.to_thread(remove_files, jid)
         await db.commit()
     return n
 

@@ -251,3 +251,34 @@ async def test_a_broken_part_is_said_plainly(client, db, user, tmp_path):
     await client.post(f"/api/imports/{job['id']}/check", headers=_auth(user))
     got = (await client.get(f"/api/imports/{job['id']}", headers=_auth(user))).json()
     assert got["state"] == "failed" and "isn't a complete archive" in got["error"]
+
+
+@pytest.mark.asyncio
+async def test_a_part_finishing_after_its_import_was_cancelled_is_thrown_away(client, db, user, tmp_path, root):
+    """An upload begun for an import that's since been cancelled (a resumed
+    upload still tagged with it) used to land in the cancelled import —
+    10 GB nobody could see, never deleted. Now it's refused and removed."""
+    from app.files.tus_hooks import tus_dir
+    from app.imports import jobs
+
+    old = (await client.post("/api/imports", json={"source": "takeout"}, headers=_auth(user))).json()
+    path = make_takeout(tmp_path)[0]
+    meta = {"filename": path.name, "import_job": old["id"]}
+    size = path.stat().st_size
+    uid = (await client.post("/api/internal/tus-hook", json=_hook("pre-create", user, size=size, meta=meta))).json()["ChangeFileInfo"]["ID"]
+    tus_dir().mkdir(parents=True, exist_ok=True)
+    (tus_dir() / uid).write_bytes(path.read_bytes())
+
+    assert (await client.delete(f"/api/imports/{old['id']}", headers=_auth(user))).status_code == 204
+    r = (await client.post("/api/internal/tus-hook", json=_hook("pre-finish", user, size=size, meta=meta, upload_id=uid, offset=size))).json()
+    assert r["HTTPResponse"]["StatusCode"] == 409 and "cancelled" in r["HTTPResponse"]["Body"]
+    assert not (tus_dir() / uid).exists()
+    got = (await client.get(f"/api/imports/{old['id']}", headers=_auth(user))).json()
+    assert got["parts"] == [] and not (root / ".imports" / old["id"]).exists()
+
+    # And the sweep clears anything a cancelled import was left with.
+    stray = jobs.job_dir(old["id"])
+    stray.mkdir(parents=True, exist_ok=True)
+    (stray / "part-001.zip").write_bytes(b"x")
+    await jobs.sweep()
+    assert not stray.exists()

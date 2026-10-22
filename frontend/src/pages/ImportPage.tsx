@@ -173,6 +173,7 @@ export function ImportJobPage() {
   const text = SOURCES[job.source];
 
   const send = async (files: FileList | File[]) => {
+    let added = 0;
     for (const file of Array.from(files)) {
       if (!/\.(zip|tgz|tar\.gz|tar)$/i.test(file.name)) {
         toast.error(`${file.name}: ${text.wrongFile}`);
@@ -188,12 +189,22 @@ export function ImportJobPage() {
           signal: abort.signal,
           onProgress: (sent, total) => setSending((cur) => cur.map((s) => (s === row || s.name === file.name ? { ...s, sent, total } : s))),
         });
+        added += 1;
         refresh();
       } catch (e) {
         if ((e as DOMException)?.name !== "AbortError") toast.error(`${file.name}: ${apiErrorMessage(e, "couldn't upload")}`);
       } finally {
         setSending((cur) => cur.filter((s) => s.name !== file.name));
       }
+    }
+    // The parts are in: read them straight away rather than wait for a
+    // click that's easy to miss after a long upload. Adding another part
+    // later just reads them all again.
+    if (added > 0) {
+      await importsApi
+        .check(job.id)
+        .then(refresh)
+        .catch((e) => toast.error(apiErrorMessage(e, "Couldn't read them.")));
     }
   };
 
@@ -261,7 +272,7 @@ export function ImportJobPage() {
           )}
           {job.parts.length > 0 && sending.length === 0 && job.state !== "ready" && (
             <div className="mt-4">
-              <p className="mb-2 text-sm text-[var(--text)]">2. When every part is here</p>
+              <p className="mb-2 text-sm text-[var(--text)]">2. Each upload is checked when it finishes — or check them again now</p>
               <Button
                 size="sm"
                 variant="primary"

@@ -21,6 +21,17 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-10-22
+
+### Fixed
+- **An import sat at "Adding parts" after its upload finished.** It waited for a "Check the
+  archives" click that was easy to miss after a long upload. The archives are now checked as soon as
+  the uploads finish; review what's in it and press Import.
+- **A Takeout part could land in an import you'd cancelled.** Choosing the same file again for a new
+  import carried on the old upload, which still belonged to the cancelled import. The part ended up
+  there, unseen and never deleted. An upload now only resumes for the same import. A part finishing
+  for a cancelled import is refused and deleted, and leftover files of cancelled imports are cleared.
+
 ## [0.9.5] - 2026-10-22
 
 ### Changed

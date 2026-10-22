@@ -19,7 +19,7 @@ test("a Takeout's parts are uploaded and checked, and the report says what's in 
   await expect(uploaded.getByRole("listitem")).toHaveCount(2, { timeout: 30_000 });
   await expect(uploaded).toContainText(`takeout-${stamp}-001.zip`);
 
-  await page.getByRole("button", { name: "Check the archives" }).click();
+  // The archives are checked as soon as the uploads finish.
   const report = page.getByRole("region", { name: "What's in it" });
   await expect(report).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("status")).toHaveText("Ready to import");
@@ -48,7 +48,6 @@ test("a Takeout is imported once — importing it again adds nothing", async ({ 
     await page.getByRole("button", { name: "Choose files" }).click();
     await (await chooser).setFiles(parts);
     await expect(page.getByRole("list", { name: "Uploaded parts" }).getByRole("listitem")).toHaveCount(2, { timeout: 30_000 });
-    await page.getByRole("button", { name: "Check the archives" }).click();
     await page.getByRole("button", { name: "Import", exact: true }).click({ timeout: 30_000 });
     const progress = page.getByRole("region", { name: "Import progress" });
     await expect(progress).toContainText("It's in.", { timeout: 90_000 });

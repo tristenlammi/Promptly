@@ -171,6 +171,11 @@ async def adopt_part(db: AsyncSession, user: User, job_id: str, filename: str, p
     """tusd's pre-finish: the finished upload becomes the job's next part."""
     jid = uuid.UUID(job_id)
     job = await _job(db, jid, user)
+    if job.state not in ("collecting", "ready", "failed"):
+        # Cancelled (or under way) since this upload began — e.g. a resumed
+        # upload still tagged with an import that was cancelled. The caller
+        # deletes the file rather than leave it in a dead import.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That import was cancelled — add the part to a new one.")
     n = max((p["n"] for p in job.parts or []), default=0) + 1
     ext = jobs.part_ext(filename) or ".zip"
     dest_dir = jobs.job_dir(jid)

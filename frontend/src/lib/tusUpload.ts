@@ -95,7 +95,14 @@ export function tusUpload({ file, metadata, signal, onProgress }: TusArgs): Prom
     void upload
       .findPreviousUploads()
       .then((previous) => {
-        if (previous.length) upload.resumeFromPreviousUpload(previous[0]);
+        // Only carry on an upload of this file *for the same place* (the
+        // same import, folder…): the same file chosen for a new import after
+        // the old one was cancelled must start afresh, or it lands in the
+        // cancelled one.
+        const same = previous.filter((p) =>
+          Object.entries(metadata).every(([k, v]) => (p.metadata as Record<string, string> | undefined)?.[k] === v)
+        );
+        if (same.length) upload.resumeFromPreviousUpload(same[0]);
         upload.start();
       })
       .catch(() => upload.start());

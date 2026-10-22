@@ -15,7 +15,7 @@ test("a zipped folder is imported: photos by date, other files in their folders"
   await page.getByRole("button", { name: "Choose files" }).click();
   await (await chooser).setFiles(zip);
   await expect(page.getByRole("list", { name: "Uploaded parts" }).getByRole("listitem")).toHaveCount(1, { timeout: 30_000 });
-  await page.getByRole("button", { name: "Check the archives" }).click();
+  // The archives are checked as soon as the uploads finish.
 
   const report = page.getByRole("region", { name: "What's in it" });
   await expect(report).toBeVisible({ timeout: 30_000 });
