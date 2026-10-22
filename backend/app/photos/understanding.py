@@ -10,7 +10,10 @@ which version of it ran, on which input, and whether it worked — one row in
   hour old;
 * **the tick** (the media worker, once a minute, ≤ 50 s) works through the
   pending, newest uploads first — so a new photo is understood within a
-  minute or two and a 50k-photo backfill drains in the background;
+  minute or two and a 50k-photo backfill drains in the background. It takes
+  them a small batch at a time (``Stage.batch``), each saved as it's done,
+  so a slow CPU or a cut-off tick loses at most one batch — never the
+  whole minute's work, again and again;
 * **progress** is a count over the same rows (``GET /api/photos/understanding``);
 * **change**: ``library.sync`` drops a ``place`` row whose input (the
   location) has changed, and the next tick redoes it.
@@ -52,6 +55,11 @@ class Stage:
     prepare: Callable[[], Awaitable[None]] | None = None
     # Which photos it's for at all (SQL over ``p``); the rest aren't counted.
     applies_sql: str = "TRUE"
+    # Photos per ``run`` call — each call is saved before the next starts,
+    # and the tick checks its time budget between calls. The photos-ml
+    # stages take one request's worth (reading text and describing photos
+    # can take seconds a photo on a small server).
+    batch: int = BATCH
 
 
 # ------------------------------------------------------------------ rows
@@ -100,15 +108,22 @@ async def forget_if_changed(db: AsyncSession, file_id: uuid.UUID, media: Any) ->
 
 
 async def pending(db: AsyncSession, stage: Stage, limit: int = BATCH) -> list[uuid.UUID]:
+    """What the stage still has to do — only photos in someone's library:
+    not in Chat Uploads, a hidden folder, or outside the folders they
+    limited Photos to (``library.LIBRARY_WHERE``)."""
+    from app.photos.library import LIBRARY_CTES, LIBRARY_WHERE
+
     rows = await db.execute(
         text(
-            "SELECT p.file_id FROM photo_assets p "
+            LIBRARY_CTES
+            + "SELECT p.file_id FROM photo_assets p "
             "JOIN files f ON f.id = p.file_id JOIN file_media m ON m.file_id = p.file_id "
             "LEFT JOIN photo_understanding u ON u.file_id = p.file_id AND u.stage = :stage "
-            "WHERE f.trashed_at IS NULL AND (" + stage.applies_sql + ") AND (" + stage.ready_sql + ") AND ("
+            "WHERE f.trashed_at IS NULL AND (" + LIBRARY_WHERE + ") AND (" + stage.applies_sql + ") AND ("
+            "(" + stage.ready_sql + ") AND ("
             "  u.file_id IS NULL OR u.version < :v"
             "  OR (u.state = 'failed' AND u.attempts < :max AND u.updated_at < now() - interval '1 hour')"
-            ") ORDER BY f.created_at DESC, p.file_id LIMIT :n"
+            ")) ORDER BY f.created_at DESC, p.file_id LIMIT :n"
         ),
         {"stage": stage.name, "v": stage.version, "max": MAX_ATTEMPTS, "n": limit},
     )
@@ -553,30 +568,30 @@ QUALITY = Stage("quality", 1, "Quality", "m.derivative_state IN ('ready', 'skipp
 # What's in it (WP-PH2.2): needs the photos-ml service and a preview.
 EMBED = Stage(
     "embed", 1, "Search by what's in them", "m.derivative_state = 'ready'", _run_embed,
-    waiting=_embed_waiting, prepare=_embed_prepare,
+    waiting=_embed_waiting, prepare=_embed_prepare, batch=16,
 )
 # Faces (WP-PH2.3): only for libraries whose owner turned them on.
 _FACES_ON = "COALESCE((u.settings ->> 'photos_faces')::boolean, false)"
 FACES = Stage(
     "faces", 1, "Faces", "m.derivative_state = 'ready'", _run_faces,
-    waiting=_faces_waiting, prepare=_faces_prepare,
+    waiting=_faces_waiting, prepare=_faces_prepare, batch=16,
     applies_sql="p.kind = 'image' AND EXISTS (SELECT 1 FROM users u WHERE u.id = p.user_id AND " + _FACES_ON + ")",
 )
 # Animals (WP-PH2.4): pets aren't biometric data, so no opt-in.
 ANIMALS = Stage(
     "animals", 1, "Pets and animals", "m.derivative_state = 'ready'", _run_animals,
-    waiting=_animals_waiting, prepare=_animals_prepare, applies_sql="p.kind = 'image'",
+    waiting=_animals_waiting, prepare=_animals_prepare, applies_sql="p.kind = 'image'", batch=16,
 )
 # Text in photos (WP-PH2.5): signs, menus, screenshots.
 TEXT = Stage(
     "text", 1, "Text in photos", "m.derivative_state = 'ready'", _run_text,
-    waiting=_text_waiting, prepare=_text_prepare, applies_sql="p.kind = 'image'",
+    waiting=_text_waiting, prepare=_text_prepare, applies_sql="p.kind = 'image'", batch=8,
 )
 # Describing photos (WP-PH2.6): for people who turned it on.
 _CAPTIONS_ON = "COALESCE((u.settings ->> 'photos_captions')::boolean, false)"
 CAPTIONS = Stage(
     "captions", 1, "Descriptions", "m.derivative_state = 'ready'", _run_captions,
-    waiting=_captions_waiting, prepare=_captions_prepare,
+    waiting=_captions_waiting, prepare=_captions_prepare, batch=8,
     applies_sql="p.kind = 'image' AND EXISTS (SELECT 1 FROM users u WHERE u.id = p.user_id AND " + _CAPTIONS_ON + ")",
 )
 STAGES: tuple[Stage, ...] = (PLACE, QUALITY, EMBED, FACES, ANIMALS, TEXT, CAPTIONS)
@@ -596,7 +611,7 @@ async def tick(budget: float = TICK_SECONDS) -> dict[str, int]:
             await stage.prepare()
         while time.monotonic() - started < budget:
             async with SessionLocal() as db:
-                ids = await pending(db, stage)
+                ids = await pending(db, stage, stage.batch)
             if not ids:
                 break
             try:
@@ -647,18 +662,21 @@ async def progress(db: AsyncSession, user_id: uuid.UUID | None = None) -> list[d
     """Per stage: done / total / failed over the live library (one user's,
     or everyone's for the admin)."""
     from app.photos import places
+    from app.photos.library import LIBRARY_CTES, LIBRARY_WHERE
 
     out = []
     for stage in STAGES:
         row = (
             await db.execute(
                 text(
-                    "SELECT count(*), "
+                    LIBRARY_CTES
+                    + "SELECT count(*), "
                     "count(*) FILTER (WHERE u.state IN ('done', 'skipped') AND u.version >= :v), "
                     "count(*) FILTER (WHERE u.state = 'failed' AND u.attempts >= :max) "
                     "FROM photo_assets p JOIN files f ON f.id = p.file_id "
                     "LEFT JOIN photo_understanding u ON u.file_id = p.file_id AND u.stage = :stage "
-                    "WHERE f.trashed_at IS NULL AND (" + stage.applies_sql + ")" + (" AND p.user_id = :u" if user_id else "")
+                    "WHERE f.trashed_at IS NULL AND (" + LIBRARY_WHERE + ") AND (" + stage.applies_sql + ")"
+                    + (" AND p.user_id = :u" if user_id else "")
                 ),
                 {"v": stage.version, "max": MAX_ATTEMPTS, "stage": stage.name, **({"u": user_id} if user_id else {})},
             )

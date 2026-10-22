@@ -44,7 +44,8 @@ export function PhotoSettingsDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal open onClose={onClose} title="Photos settings" widthClass="max-w-md">
-      <label className="flex items-start gap-3">
+      <Folders />
+      <label className="mt-4 flex items-start gap-3 border-t border-[var(--border)] pt-4">
         <input
           type="checkbox"
           className="mt-1"
@@ -65,6 +66,98 @@ export function PhotoSettingsDialog({ onClose }: { onClose: () => void }) {
       </label>
       <Captions />
     </Modal>
+  );
+}
+
+/** Where Photos takes its photos from: everywhere in your files (but Chat
+ *  Uploads and hidden folders), or only the folders you tick — and what's
+ *  inside them. Only those are worked on in the background, too. */
+function Folders() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["photos", "settings"], queryFn: photosApi.settings });
+  const save = useMutation({
+    mutationFn: (only_folders: string[]) => photosApi.saveSettings({ only_folders }),
+    onSuccess: (s) => {
+      qc.setQueryData(["photos", "settings"], s);
+      // The library itself changed: every Photos view reloads.
+      void qc.invalidateQueries({ queryKey: ["photos"] });
+      toast.success(s.only_folders.length ? "Photos now shows only those folders." : "Photos now shows photos from everywhere.");
+    },
+    onError: (e) => toast.error(apiErrorMessage(e, "Couldn't save that.")),
+  });
+  // "Only these folders" picked but nothing ticked yet: shown, not saved.
+  const [choosing, setChoosing] = useState(false);
+  if (!data) return null;
+  const chosen = data.only_folders.map((f) => f.id);
+  const limited = chosen.length > 0 || choosing;
+  // Folders chosen further down a tree show too, so they can be unticked.
+  const rows = [
+    ...data.folder_choices,
+    ...data.only_folders.filter((f) => !data.folder_choices.some((c) => c.id === f.id)).map((f) => ({ ...f, system_kind: null })),
+  ];
+  const toggle = (id: string, on: boolean) => {
+    // Unticking the last one is "everywhere" again — shown as such.
+    const next = on ? [...chosen, id] : chosen.filter((x) => x !== id);
+    setChoosing(false);
+    save.mutate(next);
+  };
+  return (
+    <fieldset>
+      <legend className="text-sm font-medium text-[var(--text)]">Use photos from</legend>
+      <div role="radiogroup" aria-label="Use photos from" className="mt-2 space-y-1.5 text-sm text-[var(--text)]">
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="photos-from"
+            checked={!limited}
+            disabled={save.isPending}
+            onChange={() => {
+              setChoosing(false);
+              if (chosen.length) save.mutate([]);
+            }}
+          />
+          Everywhere in my files
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="radio"
+            name="photos-from"
+            checked={limited}
+            disabled={save.isPending || rows.length === 0}
+            onChange={() => {
+              // Camera Uploads is the usual answer: start with it ticked.
+              const camera = data.folder_choices.find((f) => f.system_kind === "camera_uploads");
+              if (camera) save.mutate([camera.id]);
+              else setChoosing(true);
+            }}
+          />
+          Only these folders
+        </label>
+      </div>
+      {limited && (
+        <ul className="ml-6 mt-2 max-h-48 space-y-0.5 overflow-y-auto text-sm" aria-label="Folders Photos uses">
+          {rows.map((f) => (
+            <li key={f.id}>
+              <label className="flex items-center gap-2 rounded px-1.5 py-1 hover:bg-[var(--hover)]">
+                <input
+                  type="checkbox"
+                  checked={chosen.includes(f.id)}
+                  disabled={save.isPending}
+                  onChange={(e) => toggle(f.id, e.target.checked)}
+                />
+                <span className="truncate">{f.name}</span>
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-2 text-xs text-[var(--text-muted)]">
+        {limited
+          ? "Only photos in the ticked folders, and the folders inside them, are in Photos — and only those are searched, read for faces and text in the background."
+          : "Every photo and video you own, except Chat Uploads, workspace files and folders you've hidden from Photos."}
+        {limited && chosen.length === 0 && " Tick at least one folder."}
+      </p>
+    </fieldset>
   );
 }
 

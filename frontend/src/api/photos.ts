@@ -86,6 +86,10 @@ export interface PhotoSettings {
   captions_model: { label: string; local: boolean } | null;
   /** "Set up Photos" finished or put away (PH-7). */
   setup_done?: boolean;
+  /** Photos only from these folders (and inside them); empty = everywhere. */
+  only_folders: { id: string; name: string }[];
+  /** Your top-level folders to choose from (Camera Uploads first). */
+  folder_choices: { id: string; name: string; system_kind: string | null }[];
 }
 
 /** One stage of understanding the library (PH-2). */
@@ -103,7 +107,12 @@ export const photosApi = {
     const { data } = await apiClient.get("/photos/settings");
     return data;
   },
-  async saveSettings(body: { faces?: boolean; captions?: boolean; setup_done?: boolean }): Promise<PhotoSettings> {
+  async saveSettings(body: {
+    faces?: boolean;
+    captions?: boolean;
+    setup_done?: boolean;
+    only_folders?: string[];
+  }): Promise<PhotoSettings> {
     const { data } = await apiClient.put("/photos/settings", body);
     return data;
   },

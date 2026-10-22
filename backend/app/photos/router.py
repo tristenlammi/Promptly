@@ -84,6 +84,45 @@ class PhotoSettings(BaseModel):
     faces: bool | None = None
     captions: bool | None = None
     setup_done: bool | None = None
+    # Photos only from these folders (and their subfolders); [] = from
+    # everywhere; left out = unchanged.
+    only_folders: list[uuid.UUID] | None = Field(default=None, max_length=200)
+
+
+async def _folder_choices(db: AsyncSession, user: User) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """(the folders Photos is limited to, the top-level folders to pick from)."""
+    from app.files.models import FileFolder
+    from app.photos.library import EXCLUDED_SYSTEM_KINDS, FOLDERS_KEY
+
+    chosen_ids = []
+    for raw in (user.settings or {}).get(FOLDERS_KEY) or []:
+        try:
+            chosen_ids.append(uuid.UUID(str(raw)))
+        except ValueError:
+            continue
+    chosen = []
+    if chosen_ids:
+        rows = (
+            await db.execute(
+                select(FileFolder).where(FileFolder.id.in_(chosen_ids), FileFolder.user_id == user.id, FileFolder.trashed_at.is_(None))
+            )
+        ).scalars().all()
+        chosen = [{"id": str(f.id), "name": f.name} for f in sorted(rows, key=lambda f: f.name.lower())]
+    top = (
+        await db.execute(
+            select(FileFolder)
+            .where(
+                FileFolder.user_id == user.id,
+                FileFolder.parent_id.is_(None),
+                FileFolder.trashed_at.is_(None),
+                or_(FileFolder.system_kind.is_(None), FileFolder.system_kind.not_in(EXCLUDED_SYSTEM_KINDS)),
+            )
+            # Camera Uploads (and Generated Files) first: where photos land.
+            .order_by(FileFolder.system_kind.is_(None), func.lower(FileFolder.name))
+        )
+    ).scalars().all()
+    choices = [{"id": str(f.id), "name": f.name, "system_kind": f.system_kind} for f in top]
+    return chosen, choices
 
 
 async def _face_count(db: AsyncSession, user_id: uuid.UUID) -> int:
@@ -97,7 +136,7 @@ async def _settings_out(db: AsyncSession, user: User) -> dict[str, Any]:
 
     vision = await captions.configured(db)
     s = user.settings or {}
-    return {
+    out = {
         "faces": bool(s.get("photos_faces")), "face_count": await _face_count(db, user.id),
         "captions": bool(s.get("photos_captions")),
         # Who would describe them: offered only once an admin chose a model.
@@ -105,6 +144,8 @@ async def _settings_out(db: AsyncSession, user: User) -> dict[str, Any]:
         # "Set up Photos" (PH-7): finished or put away.
         "setup_done": bool(s.get("photos_setup_done")),
     }
+    out["only_folders"], out["folder_choices"] = await _folder_choices(db, user)
+    return out
 
 
 @router.get("/settings")
@@ -128,6 +169,25 @@ async def put_settings(
         changes["photos_captions"] = body.captions
     if body.setup_done is not None:
         changes["photos_setup_done"] = body.setup_done
+    if body.only_folders is not None:
+        # Only your own folders; [] = Photos from everywhere again.
+        from app.files.models import FileFolder
+        from app.photos.library import FOLDERS_KEY
+
+        wanted = list(dict.fromkeys(body.only_folders))
+        if wanted:
+            own = set(
+                (
+                    await db.execute(
+                        select(FileFolder.id).where(
+                            FileFolder.id.in_(wanted), FileFolder.user_id == user.id, FileFolder.trashed_at.is_(None)
+                        )
+                    )
+                ).scalars()
+            )
+            if len(own) != len(wanted):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
+        changes[FOLDERS_KEY] = [str(x) for x in wanted]
     me.settings = {**(me.settings or {}), **changes}
     forget = []
     if body.faces is False:

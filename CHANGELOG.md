@@ -21,6 +21,23 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-10-22
+
+### Added
+- **Photos can use only your photos folder.** Photos → settings → "Use photos from" is now
+  "Everywhere in my files" (as before) or "Only these folders", with your folders to tick (Camera
+  Uploads first). Subfolders count. Everything else stays out of Photos and isn't searched, or read
+  for faces or text, in the background.
+
+### Fixed
+- **Photos could keep reading the same few photos every minute, forever, on a slower server.** The
+  background work took 100 photos at a time and saved nothing until all were done. Reading the text
+  in them could take longer than the two minutes a tick was allowed, so the tick was cut off, nothing
+  was kept, and the next minute started again. It now works through a few photos at a time (8 for
+  text and descriptions), saving each batch, and a tick that's still busy makes the next one wait.
+- **Photos' background work also worked on pictures that aren't in Photos.** Chat Uploads,
+  workspace files and folders hidden from Photos were all searched and read for faces and text.
+
 ## [0.9.3] - 2026-10-21
 
 ### Fixed

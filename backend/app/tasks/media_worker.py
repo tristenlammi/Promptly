@@ -40,12 +40,23 @@ async def media_sweep(ctx) -> None:
     await sweep()
 
 
+_TICK_LOCK = "promptly:photos:understand-tick"
+
+
 async def understand_tick(ctx) -> dict:
     """Understanding photos (PH-2): up to 50 s of whatever is pending,
-    newest uploads first."""
+    newest uploads first. One at a time: a tick that's still busy (a slow
+    batch on a small CPU) makes the next minute's skip, rather than two
+    working on the same photos."""
     from app.photos.understanding import tick
+    from app.redis_client import redis
 
-    return await tick()
+    if not await redis.set(_TICK_LOCK, "1", nx=True, ex=_TICK_TIMEOUT):
+        return {"skipped": "the last tick is still running"}
+    try:
+        return await tick()
+    finally:
+        await redis.delete(_TICK_LOCK)
 
 
 async def _startup(ctx) -> None:
@@ -55,6 +66,10 @@ async def _startup(ctx) -> None:
 
 
 ingest_media_job.__name__ = MEDIA_INGEST
+# Room for the 50 s budget plus one slow batch finishing (reading the text
+# in 8 photos can take a minute on a small CPU) — cut off any sooner, the
+# batch was lost and redone every minute.
+_TICK_TIMEOUT = 300
 
 
 class MediaWorkerSettings:
@@ -67,7 +82,7 @@ class MediaWorkerSettings:
     cron_jobs = [
         cron(media_sweep, minute={5, 25, 45}, run_at_startup=True, unique=True),
         # Every minute; one at a time (``unique``), in its own slot below.
-        cron(understand_tick, minute=None, second=30, run_at_startup=False, unique=True, timeout=120),
+        cron(understand_tick, minute=None, second=30, run_at_startup=False, unique=True, timeout=_TICK_TIMEOUT),
     ]
     on_startup = _startup
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

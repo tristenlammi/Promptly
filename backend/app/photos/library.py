@@ -6,7 +6,11 @@ The library is every photo and video a person owns (Part C §4.1), except:
 * system folders — Chat Uploads, the workspaces' folders, templates —
   except Camera Uploads and Generated Files, which are photos people keep;
 * any folder marked "Hide from Photos", and everything inside it;
-* the video half of a Live Photo (it plays behind its still).
+* the video half of a Live Photo (it plays behind its still);
+* when the person chose "only these folders" (``users.settings
+  ["photos_folders"]``, Photos → settings), anything outside those folders
+  and their subfolders — so a Drive full of other pictures (chat uploads,
+  screenshots, scans) needn't all be Photos, nor all be worked on.
 
 ``photo_assets`` holds a row per photo or video (``sync``, called when the
 media worker reads a file and when its date or place is edited); the
@@ -19,7 +23,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import String, and_, case, cast, exists, func, literal, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.files.models import FileFolder, FileMedia, UserFile
@@ -27,6 +32,33 @@ from app.photos.models import PhotoAsset
 
 # System folders whose files aren't photos people keep.
 EXCLUDED_SYSTEM_KINDS = ("chat_uploads", "workspaces_root", "templates")
+# users.settings key: the folders Photos is limited to ([] / absent = all).
+FOLDERS_KEY = "photos_folders"
+
+# The same rule for the background stages, in SQL over ``p`` (photo_assets)
+# and ``f`` (files), for every user at once: ``LIBRARY_CTES`` goes in front
+# of the query, ``LIBRARY_WHERE`` in its WHERE.
+LIBRARY_CTES = (
+    "WITH RECURSIVE lib_hidden(id) AS ("
+    "  SELECT id FROM file_folders WHERE system_kind IN ("
+    + ", ".join(f"'{k}'" for k in EXCLUDED_SYSTEM_KINDS)
+    + ") OR hide_from_photos"
+    "  UNION ALL SELECT c.id FROM file_folders c JOIN lib_hidden h ON c.parent_id = h.id"
+    "), lib_chosen(user_id, id) AS ("
+    "  SELECT u.id, ff.id FROM users u"
+    "  CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(u.settings -> '" + FOLDERS_KEY + "') = 'array'"
+    "    THEN u.settings -> '" + FOLDERS_KEY + "' ELSE '[]'::jsonb END) AS r(fid)"
+    "  JOIN file_folders ff ON ff.id::text = r.fid AND ff.user_id = u.id"
+    "  UNION ALL SELECT ch.user_id, c.id FROM file_folders c JOIN lib_chosen ch ON c.parent_id = ch.id"
+    ") "
+)
+LIBRARY_WHERE = (
+    "(f.folder_id IS NULL OR f.folder_id NOT IN (SELECT id FROM lib_hidden))"
+    " AND (NOT EXISTS (SELECT 1 FROM users lu WHERE lu.id = p.user_id"
+    "   AND jsonb_array_length(CASE WHEN jsonb_typeof(lu.settings -> '" + FOLDERS_KEY + "') = 'array'"
+    "     THEN lu.settings -> '" + FOLDERS_KEY + "' ELSE '[]'::jsonb END) > 0)"
+    "  OR f.folder_id IN (SELECT lc.id FROM lib_chosen lc WHERE lc.user_id = p.user_id))"
+)
 
 
 def user_zone(user) -> ZoneInfo | None:  # noqa: ANN001 — User | None
@@ -174,18 +206,40 @@ def shared_with(user_id: uuid.UUID):  # noqa: ANN201 — a subquery of file ids
     return albums.union(family)
 
 
+def _chosen(user_id: uuid.UUID):  # noqa: ANN201 — (has-a-choice clause, folder-ids CTE)
+    """The person's "only these folders" choice: whether there is one, and
+    those folders with everything inside them."""
+    from app.auth.models import User
+
+    raw = User.settings[FOLDERS_KEY]
+    # Anything but a list counts as no choice (and never errors); ids are
+    # compared as text, so a bad one just matches nothing.
+    picked = case((func.jsonb_typeof(raw) == "array", raw), else_=cast(literal("[]"), JSONB))
+    roots = select(func.jsonb_array_elements_text(picked).label("fid")).where(User.id == user_id).subquery("photos_roots")
+    base = (
+        select(FileFolder.id)
+        .where(FileFolder.user_id == user_id, cast(FileFolder.id, String).in_(select(roots.c.fid)))
+        .cte("photos_chosen", recursive=True)
+    )
+    tree = base.union_all(select(FileFolder.id).join(base, FileFolder.parent_id == base.c.id))
+    has_choice = exists(select(User.id).where(User.id == user_id, func.jsonb_array_length(picked) > 0))
+    return has_choice, tree
+
+
 def in_library(user_id: uuid.UUID):  # noqa: ANN201 — a WHERE clause
     """Rows of ``photo_assets`` joined to ``files`` that are in the library."""
     excluded = excluded_folders(user_id)
+    has_choice, chosen = _chosen(user_id)
     return and_(
         PhotoAsset.user_id == user_id,
         PhotoAsset.live_hidden.is_(False),
         UserFile.trashed_at.is_(None),
         or_(UserFile.folder_id.is_(None), UserFile.folder_id.not_in(select(excluded.c.id))),
+        or_(~has_choice, UserFile.folder_id.in_(select(chosen.c.id))),
     )
 
 
 __all__ = [
-    "EXCLUDED_SYSTEM_KINDS", "SHARED_SQL", "excluded_folders", "in_library", "refile_zoneless", "shared_with", "sync", "taken_local",
+    "EXCLUDED_SYSTEM_KINDS", "FOLDERS_KEY", "LIBRARY_CTES", "LIBRARY_WHERE", "SHARED_SQL", "excluded_folders", "in_library", "refile_zoneless", "shared_with", "sync", "taken_local",
     "user_zone",
 ]
