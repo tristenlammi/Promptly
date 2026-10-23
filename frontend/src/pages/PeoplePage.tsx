@@ -30,9 +30,6 @@ export function PeoplePage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        <Link to="/files/photos" aria-label="Back to Photos" className="rounded p-1 hover:bg-[var(--hover)]">
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
         <h1 className="mr-2 text-base font-semibold text-[var(--text)]">People &amp; pets</h1>
         <nav aria-label="People or pets" className="flex gap-1">
           {(

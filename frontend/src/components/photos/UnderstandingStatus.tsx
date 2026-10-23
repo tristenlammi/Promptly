@@ -19,8 +19,10 @@ export function UnderstandingStatus() {
     .map((s) => `${s.label} ${s.total ? Math.floor((100 * (s.done + s.failed)) / s.total) : 100}%${s.waiting ? ` (${s.waiting.toLowerCase()})` : ""}`)
     .join(" · ");
   return (
-    <span role="status" title={detail} className="flex items-center gap-1 text-xs text-[var(--text-muted)]">
-      <Sparkles className="h-3.5 w-3.5" /> Understanding your photos · {pct}%
+    <span role="status" title={detail} className="flex items-center gap-1 whitespace-nowrap text-xs text-[var(--text-muted)]">
+      <Sparkles className="h-3.5 w-3.5" />
+      <span className="sr-only 2xl:not-sr-only">Understanding your photos · </span>
+      {pct}%
     </span>
   );
 }

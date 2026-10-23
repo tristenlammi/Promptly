@@ -67,6 +67,10 @@ const FilesShell = lazyWithRetry(
   () => import("@/components/files/FilesShell").then((m) => ({ default: m.FilesShell })),
   "FilesShell"
 );
+const PhotosShell = lazyWithRetry(
+  () => import("@/components/photos/PhotosShell").then((m) => ({ default: m.PhotosShell })),
+  "PhotosShell"
+);
 const PhotosPage = lazyWithRetry(
   () => import("@/pages/PhotosPage").then((m) => ({ default: m.PhotosPage })),
   "PhotosPage"
@@ -489,21 +493,24 @@ export default function App() {
         <Route element={<FilesShell />}>
           <Route path="/files" element={<FilesPage />} />
           <Route path="/files/home" element={<FilesHomePage />} />
-          <Route path="/files/photos" element={<PhotosPage />} />
+          {/* Photos: one menu across all its pages (PhotosShell). */}
+          <Route element={<PhotosShell />}>
+            <Route path="/files/photos" element={<PhotosPage />} />
+            <Route path="/files/photos/search" element={<PhotoSearchPage />} />
+            <Route path="/files/photos/people" element={<PeoplePage />} />
+            <Route path="/files/photos/people/:personId" element={<PersonPage />} />
+            <Route path="/files/photos/albums" element={<PhotoAlbumsPage />} />
+            <Route path="/files/photos/albums/:albumId" element={<PhotoAlbumPage />} />
+            <Route path="/files/photos/memories/:memoryId" element={<MemoryPage />} />
+            <Route path="/files/photos/setup" element={<PhotoSetupPage />} />
+            <Route path="/files/photos/cleanup" element={<PhotoCleanupPage />} />
+            <Route path="/files/photos/map" element={<PhotoMapPage />} />
+            <Route path="/files/photos/places" element={<PhotoPlacesPage />} />
+            <Route path="/files/photos/places/:country" element={<PhotoPlacesPage />} />
+            <Route path="/files/photos/places/:country/:placeId" element={<PhotoPlacesPage />} />
+          </Route>
           <Route path="/files/import" element={<ImportsPage />} />
           <Route path="/files/import/:importId" element={<ImportJobPage />} />
-          <Route path="/files/photos/search" element={<PhotoSearchPage />} />
-          <Route path="/files/photos/people" element={<PeoplePage />} />
-          <Route path="/files/photos/people/:personId" element={<PersonPage />} />
-          <Route path="/files/photos/albums" element={<PhotoAlbumsPage />} />
-          <Route path="/files/photos/albums/:albumId" element={<PhotoAlbumPage />} />
-          <Route path="/files/photos/memories/:memoryId" element={<MemoryPage />} />
-          <Route path="/files/photos/setup" element={<PhotoSetupPage />} />
-          <Route path="/files/photos/cleanup" element={<PhotoCleanupPage />} />
-          <Route path="/files/photos/map" element={<PhotoMapPage />} />
-          <Route path="/files/photos/places" element={<PhotoPlacesPage />} />
-          <Route path="/files/photos/places/:country" element={<PhotoPlacesPage />} />
-          <Route path="/files/photos/places/:country/:placeId" element={<PhotoPlacesPage />} />
           <Route path="/files/folder/:folderId" element={<FilesPage />} />
           <Route path="/files/recent" element={<RecentFilesPage />} />
           <Route path="/files/starred" element={<StarredFilesPage />} />

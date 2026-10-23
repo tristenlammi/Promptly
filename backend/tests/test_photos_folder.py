@@ -96,3 +96,58 @@ async def test_a_phone_still_pointed_at_camera_uploads_backs_up_into_photos(clie
     # Its listing shows the Photos folder by its name.
     names = (await db.execute(select(FileFolder.name).where(FileFolder.id == photos.id))).scalars().all()
     assert names == ["Photos"]
+
+
+@pytest.mark.asyncio
+async def test_storage_shows_what_photos_takes(client, db, user):
+    from app.files.models import UserFile
+
+    docs = await _folder(db, user, "Important Documents")
+    inside = await _photo(db, user, "beach.jpg", _utc(2026, 1, 1))
+    outside = await _photo(db, user, "card.jpg", _utc(2026, 1, 1), folder=docs)
+    (await db.get(UserFile, inside)).size_bytes = 3_000_000
+    (await db.get(UserFile, outside)).size_bytes = 1_000_000
+    await db.commit()
+    s = (await client.get("/api/files/storage", headers=_auth(user))).json()
+    assert s["photos_bytes"] == 3_000_000 and s["files_bytes"] >= 4_000_000
+
+
+@pytest.mark.asyncio
+async def test_faces_become_people_even_while_a_backfill_takes_the_tick(monkeypatch):
+    """The stages used the whole minute during a long backfill, so faces
+    found were never grouped into people. Grouping now always gets time."""
+    import asyncio
+
+    from app.photos import people, understanding
+
+    calls = {}
+
+    async def busy_run(ids):  # a stage with endless work
+        await asyncio.sleep(0.3)
+        return len(ids)
+
+    async def endless(db, stage, limit=100):
+        return [uuid.uuid4()]
+
+    async def cluster(budget=20.0):
+        calls["cluster"] = budget
+        return {"joined": 0, "new": 0, "deferred": 0}
+
+    async def pets(budget=15.0):
+        calls["pets"] = budget
+        return {"assigned": 0}
+
+    async def nothing(*a, **k):
+        return 0
+
+    stage = understanding.Stage("busy", 1, "Busy", "TRUE", busy_run)
+    monkeypatch.setattr(understanding, "STAGES", (stage,))
+    monkeypatch.setattr(understanding, "pending", endless)
+    monkeypatch.setattr(people, "cluster", cluster)
+    monkeypatch.setattr(people, "match_pets", pets)
+    from app.photos import family, smart
+
+    monkeypatch.setattr(smart, "refresh_due", nothing)
+    monkeypatch.setattr(family, "refresh_due", nothing)
+    await understanding.tick(budget=2.0)
+    assert calls["cluster"] >= 5 and calls["pets"] >= 3

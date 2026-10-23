@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, Maximize2, Sparkles, Trash2 } from "lucide-react";
-import { Link } from "react-router-dom";
+import { Check, Maximize2, Sparkles, Trash2 } from "lucide-react";
 
 import { filesApi } from "@/api/files";
 import { photosApi, type CleanupReason, type PhotoItem, type SizedPhoto } from "@/api/photos";
@@ -106,9 +105,6 @@ export function PhotoCleanupPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        <Link to="/files/photos" aria-label="Back to Photos" className="rounded p-1 hover:bg-[var(--hover)]">
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
         <h1 className="mr-2 text-base font-semibold text-[var(--text)]">Clean up</h1>
         <nav aria-label="Cleanup" className="flex flex-wrap gap-1">
           {TABS.map((t) => (

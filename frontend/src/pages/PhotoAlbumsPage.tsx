@@ -38,9 +38,6 @@ export function PhotoAlbumsPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        <Link to="/files/photos" aria-label="Back to Photos" className="rounded p-1 hover:bg-[var(--hover)]">
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
         <h1 className="flex-1 text-base font-semibold text-[var(--text)]">Albums</h1>
         <Button size="sm" variant="ghost" leftIcon={<Sparkles className="h-3.5 w-3.5" />} onClick={() => setSmart(true)}>
           New smart album

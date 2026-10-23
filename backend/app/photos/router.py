@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user
 from app.auth.models import User
+from app.config import get_settings as get_app_config
 from app.database import get_db
 from app.files.models import FileMedia, UserFile
 from app.photos.library import in_library, shared_with
@@ -618,6 +619,8 @@ async def photo_map(db: AsyncSession = Depends(get_db), user: User = Depends(get
         "lat": [round(float(r[1]), 5) for r in rows],
         "lon": [round(float(r[2]), 5) for r in rows],
         "basemap": "/api/photos/basemap.pmtiles" if basemap else None,
+        # No offline basemap: the browser may use OpenFreeMap's.
+        "online": bool(get_app_config().PHOTOS_ONLINE_MAP),
     }
 
 

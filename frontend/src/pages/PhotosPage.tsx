@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Archive, ArchiveRestore, BookImage, Download, Eraser, Heart, ImagePlus, Images, MapPin, Search, Sparkles, Settings2, Trash2, Upload, UsersRound, X } from "lucide-react";
+import { Archive, ArchiveRestore, BookImage, Download, Heart, ImagePlus, Images, Sparkles, Trash2, X, UsersRound } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { filesApi } from "@/api/files";
@@ -12,13 +12,9 @@ import { MemoriesStrip } from "@/components/photos/MemoriesStrip";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { FamilyDialog } from "@/components/photos/FamilyDialog";
-import { PhotoSettingsDialog } from "@/components/photos/PhotoSettingsDialog";
-import { UnderstandingStatus } from "@/components/photos/UnderstandingStatus";
 import { justify, rowsHeight, type JustifiedRow } from "@/lib/justify";
 import { toast } from "@/store/toastStore";
-import { useUploadStore } from "@/store/uploadStore";
 import { apiErrorMessage } from "@/utils/apiError";
-import { cn } from "@/utils/cn";
 
 /**
  * Photos (WP-9.2, Part E PH-1): every photo and video you own, newest
@@ -33,13 +29,6 @@ import { cn } from "@/utils/cn";
 const GAP = 4;
 const HEADER = 44; // a month's title
 const DAY_HEADER = 32;
-
-const VIEWS: { id: PhotoView; label: string }[] = [
-  { id: "all", label: "Photos" },
-  { id: "favorites", label: "Favourites" },
-  { id: "archive", label: "Archive" },
-  { id: "family", label: "Family" },
-];
 
 function useWidth(ref: React.RefObject<HTMLElement | null>): number {
   const [w, setW] = useState(0);
@@ -100,16 +89,12 @@ function layoutMonth(items: PhotoItem[], width: number, target: number): { days:
 }
 
 export function PhotosPage() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
   // Picking photos for an album (its Add photos button, WP-9.4).
   const addTo = params.get("addTo");
   const { data: addToAlbum } = useQuery({ queryKey: ["album", addTo], queryFn: () => albumsApi.get(addTo!), enabled: !!addTo });
   const [albumPick, setAlbumPick] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  // Uploads go into the Photos folder, by the month each was taken.
-  const uploadInput = useRef<HTMLInputElement>(null);
-  const startUploads = useUploadStore((s) => s.startUploads);
   const [familyOpen, setFamilyOpen] = useState(false);
   const view = (params.get("view") as PhotoView) || "all";
   const qc = useQueryClient();
@@ -248,9 +233,11 @@ export function PhotosPage() {
     }
   };
 
-  const total = data?.total ?? 0;
   return (
     <div className="flex h-full min-h-0 flex-col">
+      {/* The Photos menu is the shell's (PhotosShell); this bar is for
+          picking photos — for an album, or a selection's actions. */}
+      {(addTo || selected.size > 0) && (
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
         {addTo ? (
           <div role="toolbar" aria-label="Adding to an album" className="flex w-full flex-wrap items-center gap-2">
@@ -278,88 +265,25 @@ export function PhotosPage() {
               <ImagePlus className="h-3.5 w-3.5" /> Add
             </button>
           </div>
-        ) : selected.size > 0 ? (
-          <SelectionBar count={selected.size} view={view} onClear={() => setSelected(new Set())} onAct={act} onAlbum={() => setAlbumPick(true)} />
         ) : (
-          <>
-            <h1 className="mr-2 text-base font-semibold text-[var(--text)]">Photos</h1>
-            <nav aria-label="Photo views" className="flex flex-wrap gap-1">
-              {VIEWS.map((v) => (
-                <button
-                  key={v.id}
-                  type="button"
-                  aria-current={view === v.id ? "page" : undefined}
-                  onClick={() => setParams(v.id === "all" ? {} : { view: v.id }, { replace: true })}
-                  className={cn(
-                    "rounded-full px-3 py-1 text-xs transition",
-                    view === v.id
-                      ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-text)]"
-                      : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
-                  )}
-                >
-                  {v.label}
-                </button>
-              ))}
-              {view === "family" && (
-                <button type="button" onClick={() => setFamilyOpen(true)} className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
-                  <UsersRound className="h-3.5 w-3.5" /> Family…
-                </button>
-              )}
-              <Link to="/files/photos/albums" className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
-                <BookImage className="h-3.5 w-3.5" /> Albums
-              </Link>
-              <Link to="/files/photos/people" className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
-                <UsersRound className="h-3.5 w-3.5" /> People
-              </Link>
-              <Link to="/files/photos/places" className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
-                <MapPin className="h-3.5 w-3.5" /> Places
-              </Link>
-              <Link to="/files/photos/cleanup" className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
-                <Eraser className="h-3.5 w-3.5" /> Clean up
-              </Link>
-              <Link to="/files/photos/search" aria-label="Search photos" className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
-                <Search className="h-3.5 w-3.5" /> Search
-              </Link>
-              {/* Labelled, not a lone gear: it's where "Use photos from",
-                  faces and descriptions live. */}
-              <button
-                type="button"
-                aria-label="Photos settings"
-                onClick={() => setSettingsOpen(true)}
-                className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]"
-              >
-                <Settings2 className="h-3.5 w-3.5" /> Settings
-              </button>
-            </nav>
-            <span className="ml-auto flex items-center gap-3 text-xs text-[var(--text-muted)]">
-              {!phone && <UnderstandingStatus />}
-              <input
-                ref={uploadInput}
-                type="file"
-                multiple
-                accept="image/*,video/*,.heic,.heif,.dng,.mov"
-                className="hidden"
-                aria-hidden
-                tabIndex={-1}
-                onChange={(e) => {
-                  const files = Array.from(e.target.files ?? []);
-                  e.target.value = "";
-                  if (files.length) startUploads({ files, scope: "mine", folderId: null, route: "camera" });
-                }}
-              />
-              <button
-                type="button"
-                onClick={() => uploadInput.current?.click()}
-                className="flex items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white"
-              >
-                <Upload className="h-3.5 w-3.5" /> Upload
-              </button>
-              {total ? `${total.toLocaleString()} ${total === 1 ? "item" : "items"}` : ""}
-            </span>
-          </>
+          <SelectionBar count={selected.size} view={view} onClear={() => setSelected(new Set())} onAct={act} onAlbum={() => setAlbumPick(true)} />
         )}
       </header>
+      )}
 
+      {/* The family library's own settings live here, not in the menu. */}
+      {view === "family" && !addTo && selected.size === 0 && months.length > 0 && (
+        <div className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2 text-xs text-[var(--text-muted)]">
+          <span className="flex-1">Photos you and your family share with each other.</span>
+          <button
+            type="button"
+            onClick={() => setFamilyOpen(true)}
+            className="flex items-center gap-1 rounded-full px-3 py-1 text-[var(--text)] hover:bg-[var(--hover)]"
+          >
+            <UsersRound className="h-3.5 w-3.5" /> Family settings
+          </button>
+        </div>
+      )}
       <div className="relative min-h-0 flex-1">
         <div ref={scrollRef} className="h-full overflow-y-auto overscroll-contain" data-photos-scroller>
           {isLoading ? (
@@ -403,7 +327,6 @@ export function PhotosPage() {
         )}
       </div>
 
-      {settingsOpen && <PhotoSettingsDialog onClose={() => setSettingsOpen(false)} />}
       {familyOpen && <FamilyDialog onClose={() => setFamilyOpen(false)} />}
       {albumPick && (
         <AddToAlbumDialog

@@ -190,6 +190,8 @@ class StorageBreakdown(BaseModel):
     # What makes up ``used_bytes``: live files and what's in the trash.
     files_bytes: int
     trash_bytes: int
+    # Of ``files_bytes``: what's in the Photos folder (the photo library).
+    photos_bytes: int = 0
     # Sheets and whiteboards not yet counted (until
     # ``app_settings.office_quota_from``, WP-3.2).
     office_pending_bytes: int = 0
@@ -230,13 +232,25 @@ async def storage_breakdown(
             select(func.max(BackupRun.finished_at)).where(BackupRun.status == "ok", BackupRun.kind.in_(kinds))
         )
 
+    from app.photos.library import photos_folders
+
+    tree = photos_folders(user.id)
+    photos = await db.scalar(
+        select(func.coalesce(func.sum(UserFile.size_bytes), 0)).where(
+            UserFile.user_id == user.id,
+            UserFile.trashed_at.is_(None),
+            UserFile.folder_id.in_(select(tree.c.id)),
+        )
+    )
     trash_b = min(int(trash or 0), quota.used_bytes)
     counted_versions = quota.versions_bytes if quota.versions_counted else 0
+    files_b = max(quota.used_bytes - trash_b - counted_versions, 0)
     return StorageBreakdown(
         cap_bytes=quota.cap_bytes,
         used_bytes=quota.used_bytes,
-        files_bytes=max(quota.used_bytes - trash_b - counted_versions, 0),
+        files_bytes=files_b,
         trash_bytes=trash_b,
+        photos_bytes=min(int(photos or 0), files_b),
         office_pending_bytes=quota.office_pending_bytes,
         versions_bytes=quota.versions_bytes,
         versions_counted=quota.versions_counted,

@@ -256,6 +256,10 @@ class Settings(BaseSettings):
     # Understanding photos (PH-2): the photos-ml service (started by
     # compose by default). Empty turns it off.
     PHOTOS_ML_URL: str = "http://photos-ml:8000"
+    # The Photos map's streets and place names from OpenFreeMap (free, no
+    # key; the browser fetches the map tiles of the area on screen). Off =
+    # countries only, unless the server has an offline basemap.
+    PHOTOS_ONLINE_MAP: bool = True
     # Model the cloud path asks for when ``STT_BACKEND=openai``. ``whisper-1``
     # is the broadly-available default; ``gpt-4o-transcribe`` is newer/better
     # where the account has access.

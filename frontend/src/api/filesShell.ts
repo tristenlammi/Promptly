@@ -37,6 +37,8 @@ export interface StorageBreakdown {
   used_bytes: number;
   files_bytes: number;
   trash_bytes: number;
+  /** Of files_bytes: what's in the Photos folder. */
+  photos_bytes?: number;
   office_pending_bytes: number;
   versions_bytes: number;
   /** Versions count toward storage from ``versions_counted_from`` (WP-6.2). */

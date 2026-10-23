@@ -339,9 +339,19 @@ function StorageMeter() {
           </div>
         )}
         <dl className="mt-1.5 space-y-0.5 text-[11px]">
+          {(data.photos_bytes ?? 0) > 0 && (
+            <div className="flex justify-between">
+              <dt>
+                <Link to="/files/photos" className="hover:underline">
+                  Photos
+                </Link>
+              </dt>
+              <dd className="tabular-nums">{humanSize(data.photos_bytes ?? 0)}</dd>
+            </div>
+          )}
           <div className="flex justify-between">
-            <dt>Files</dt>
-            <dd className="tabular-nums">{humanSize(data.files_bytes)}</dd>
+            <dt>{(data.photos_bytes ?? 0) > 0 ? "Other files" : "Files"}</dt>
+            <dd className="tabular-nums">{humanSize(data.files_bytes - (data.photos_bytes ?? 0))}</dd>
           </div>
           <div className="flex justify-between">
             <dt>

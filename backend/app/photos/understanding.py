@@ -36,6 +36,10 @@ logger = logging.getLogger("promptly.photos.understanding")
 MAX_ATTEMPTS = 3
 BATCH = 100
 TICK_SECONDS = 50.0
+# Kept back from the stages every tick for who's who (faces into people,
+# animals to pets): during a long backfill the stages would otherwise use
+# the whole tick and faces found would never become people.
+PEOPLE_RESERVE = 15.0
 
 
 @dataclass(frozen=True)
@@ -604,12 +608,13 @@ async def tick(budget: float = TICK_SECONDS) -> dict[str, int]:
 
     started = time.monotonic()
     done: dict[str, int] = {}
+    stage_budget = max(budget - PEOPLE_RESERVE, budget / 2)
     for stage in STAGES:
         if stage.waiting is not None and await stage.waiting():
             continue
         if stage.prepare is not None:
             await stage.prepare()
-        while time.monotonic() - started < budget:
+        while time.monotonic() - started < stage_budget:
             async with SessionLocal() as db:
                 ids = await pending(db, stage, stage.batch)
             if not ids:
@@ -625,15 +630,15 @@ async def tick(budget: float = TICK_SECONDS) -> dict[str, int]:
     # Who's who (PH-3): new faces into people, animals to named pets.
     from app.photos import people
 
-    left = budget - (time.monotonic() - started)
-    if left > 1:
-        try:
-            got = await people.cluster(budget=left / 2)
-            done["people"] = got["joined"] + got["new"]
-            pets = await people.match_pets(budget=max(1.0, budget - (time.monotonic() - started)))
-            done["pets"] = pets["assigned"]
-        except Exception:  # noqa: BLE001 — the next tick tries again
-            logger.exception("people/pets failed")
+    # Always some time, even when a slow batch overran the stages' share.
+    left = max(budget - (time.monotonic() - started), PEOPLE_RESERVE)
+    try:
+        got = await people.cluster(budget=left * 0.6)
+        done["people"] = got["joined"] + got["new"]
+        pets = await people.match_pets(budget=max(3.0, left * 0.4))
+        done["pets"] = pets["assigned"]
+    except Exception:  # noqa: BLE001 — the next tick tries again
+        logger.exception("people/pets failed")
     # Smart albums (PH-5) catch up with whatever this tick learned.
     left = budget - (time.monotonic() - started)
     if left > 1:

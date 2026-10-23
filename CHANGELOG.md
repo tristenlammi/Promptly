@@ -21,6 +21,29 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-10-23
+
+### Added
+- **The Photos map shows streets, towns and place names.** With no offline basemap on the server,
+  it uses OpenFreeMap: free, no key, in a light or dark style to match the app. Your browser fetches
+  only the map tiles for the area on screen; nothing about your photos leaves the server.
+  `PHOTOS_ONLINE_MAP=false` keeps the map offline (countries only).
+- **Storage shows how much Photos takes.** The storage panel splits Files into Photos (your Photos
+  folder) and Other files.
+
+### Changed
+- **The Photos menu stays put, and looks the same everywhere.** Before, opening Albums or People
+  replaced the menu with a back arrow. Now every Photos page has the same single row:
+  - Photos, Favourites, Archive, Family, Albums, People, Places and Clean up, each with an icon.
+  - Search, Settings, the progress figure and Upload together on the right.
+  - It never wraps. When the labels don't fit, the sections show as icons with their names on hover.
+  - Family's settings button moved from the menu into the Family view.
+
+### Fixed
+- **Faces were found but never grouped into people while a big batch of photos was being
+  processed.** Grouping only got whatever time the other stages left in each minute, which was none
+  during a backfill. It now always gets its own share.
+
 ## [0.9.6] - 2026-10-22
 
 ### Fixed

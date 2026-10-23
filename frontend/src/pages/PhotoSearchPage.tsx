@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Search, Sparkles } from "lucide-react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Search, Sparkles } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { albumsApi } from "@/api/albums";
 
@@ -59,9 +59,6 @@ export function PhotoSearchPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        <Link to="/files/photos" aria-label="Back to Photos" className="rounded p-1 hover:bg-[var(--hover)]">
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
         <form
           role="search"
           className="flex flex-1 items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1 focus-within:border-[var(--accent)]"

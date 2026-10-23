@@ -12,9 +12,17 @@ import { useThemeStore } from "@/store/themeStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
 /** The Photos map (PH-5): where your photos were taken, clustered — click
- *  a cluster for its photos. Offline: the countries are bundled (Natural
- *  Earth, public domain); streets and towns come from a basemap the admin
- *  put on the server (a Protomaps PMTiles extract), when there is one. */
+ *  a cluster for its photos. Streets, towns and place names come from the
+ *  server's own offline basemap (a Protomaps PMTiles extract) when the admin
+ *  put one there; otherwise from OpenFreeMap (free, no key — the browser
+ *  fetches the tiles of the area on screen; ``PHOTOS_ONLINE_MAP``). With
+ *  neither, the bundled countries (Natural Earth, public domain). */
+
+// OpenFreeMap's styles (openfreemap.org): a light and a dark one.
+const ONLINE_STYLE = {
+  light: "https://tiles.openfreemap.org/styles/liberty",
+  dark: "https://tiles.openfreemap.org/styles/dark",
+};
 
 const COLORS = {
   light: { sea: "#dfe9f2", land: "#f6f3ee", border: "#c9c2b6", water: "#bcd4ea", road: "#ffffff", roadEdge: "#e2dccf", park: "#e3eedb", dot: "#c66e51" },
@@ -57,6 +65,7 @@ export function PhotoMapPage() {
           },
         },
       };
+      const online = !data.basemap && !!data.online;
       const layers: unknown[] = [
         { id: "sea", type: "background", paint: { "background-color": c.sea } },
         { id: "countries", type: "fill", source: "countries", paint: { "fill-color": c.land } },
@@ -80,7 +89,7 @@ export function PhotoMapPage() {
           { id: "base-borders", type: "line", source: "base", "source-layer": "boundaries", paint: { "line-color": c.border, "line-width": 0.8 } },
         );
       }
-      layers.push(
+      const dots: unknown[] = [
         {
           id: "clusters", type: "circle", source: "photos", filter: ["has", "point_count"],
           paint: {
@@ -92,21 +101,30 @@ export function PhotoMapPage() {
           id: "photo", type: "circle", source: "photos", filter: ["!", ["has", "point_count"]],
           paint: { "circle-color": c.dot, "circle-radius": 7, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2 },
         },
-      );
+      ];
+      if (!online) layers.push(...dots);
       if (off || !box.current) return;
       map = new maplibre.Map({
         container: box.current,
-        style: { version: 8, sources, layers } as never,
-        center: [0, 20], zoom: 1, attributionControl: { compact: true, customAttribution: "Natural Earth" },
+        // Online: OpenFreeMap's style (its attribution comes with it); the
+        // photos go on top once it's loaded.
+        style: online ? ONLINE_STYLE[theme] : ({ version: 8, sources, layers } as never),
+        center: [0, 20], zoom: 1,
+        attributionControl: online ? { compact: true } : { compact: true, customAttribution: "Natural Earth" },
       });
       mapRef.current = map;
       map.addControl(new maplibre.NavigationControl({ showCompass: false }), "top-right");
       map.on("load", () => {
-        if (!map || !data.ids.length) return;
+        if (!map) return;
+        if (online) {
+          map.addSource("photos", sources.photos as never);
+          for (const layer of dots) map.addLayer(layer as never);
+        }
+        if (!data.ids.length) return;
         const b = new maplibre.LngLatBounds();
         data.ids.forEach((_, i) => b.extend([data.lon[i], data.lat[i]]));
         // Countries only: no closer than a country fills the screen.
-        map.fitBounds(b, { padding: 60, maxZoom: data.basemap ? 12 : 4, duration: 0 });
+        map.fitBounds(b, { padding: 60, maxZoom: data.basemap || online ? 12 : 4, duration: 0 });
       });
       map.on("click", "clusters", async (e) => {
         const f = e.features?.[0];
@@ -140,7 +158,7 @@ export function PhotoMapPage() {
     // flex-1 as well as h-full: the map's box must have a real height.
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        <Link to="/files/photos" aria-label="Back to Photos" className="rounded p-1 hover:bg-[var(--hover)]">
+        <Link to="/files/photos/places" aria-label="Back to places" className="rounded p-1 hover:bg-[var(--hover)]">
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <h1 className="flex-1 text-base font-semibold text-[var(--text)]">Map</h1>
