@@ -89,10 +89,14 @@ wait_healthy() {
 }
 
 reload_nginx() {
-  if docker compose exec -T nginx nginx -t >/dev/null 2>&1; then
-    docker compose exec -T nginx nginx -s reload >/dev/null 2>&1 || docker compose restart nginx
-  else
-    docker compose restart nginx
+  # Recreated, not reloaded: nginx.conf is a single-file bind mount, and
+  # git replaces the file on update — a running container keeps the old
+  # one, so a reload (or nginx -t inside it) never saw the new config.
+  docker compose up -d --force-recreate --no-deps nginx >/dev/null 2>&1 || true
+  sleep 2
+  if ! docker compose exec -T nginx nginx -t >/dev/null 2>&1; then
+    red "  nginx didn't accept its config. Recent logs:"
+    docker compose logs --tail=20 nginx || true
   fi
 }
 

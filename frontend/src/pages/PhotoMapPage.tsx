@@ -53,7 +53,19 @@ export function PhotoMapPage() {
         // which isn't where a bundle puts it.
         import("maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url"),
       ]);
-      maplibre.setWorkerUrl(worker.default);
+      // Run it from an in-page copy (a blob URL), so it follows this page's
+      // security rules. Started from its own URL it follows the headers that
+      // file was cached with — on an update that changes the rules (letting
+      // the map's tiles in), an old copy kept the old ones and every tile
+      // was refused. The worker is one self-contained file.
+      let workerUrl = worker.default;
+      try {
+        const code = await (await fetch(worker.default)).text();
+        workerUrl = URL.createObjectURL(new Blob([code], { type: "text/javascript" }));
+      } catch {
+        /* the file's own URL still works where the rules allow it */
+      }
+      maplibre.setWorkerUrl(workerUrl);
       const c = COLORS[theme];
       const sources: Record<string, unknown> = {
         countries: { type: "geojson", data: "/maps/countries-110m.geojson" },

@@ -21,6 +21,18 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-10-23
+
+### Fixed
+- **Updates didn't apply nginx config changes on Linux.** `nginx.conf` is mounted into the nginx
+  container as a single file, and `git pull` replaces that file. The running container kept the old
+  one, and the update only reloaded it. That's why 0.9.7's map was blocked by the old security rules
+  and stayed blank. `update.sh` / `update.ps1` now recreate the nginx container. If you're on 0.9.7,
+  run `docker compose up -d --force-recreate nginx` once.
+- **The Photos map stayed blank after updating.** Its background worker ran under the security
+  rules cached with the worker file, which were the old ones, so every map tile was refused. The
+  worker now runs from a copy made inside the page, which always follows the page's current rules.
+
 ## [0.9.7] - 2026-10-23
 
 ### Added

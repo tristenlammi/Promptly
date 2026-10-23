@@ -43,12 +43,15 @@ function Wait-Db {
 }
 
 function Invoke-NginxReload {
+    # Recreated, not reloaded: nginx.conf is a single-file bind mount, and
+    # git replaces the file on update - a running container keeps the old
+    # one, so a reload never saw the new config.
+    docker compose up -d --force-recreate --no-deps nginx 2>$null | Out-Null
+    Start-Sleep -Seconds 2
     docker compose exec -T nginx nginx -t 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        docker compose exec -T nginx nginx -s reload 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { docker compose restart nginx }
-    } else {
-        docker compose restart nginx
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "nginx didn't accept its config. Recent logs:"
+        docker compose logs --tail=20 nginx
     }
 }
 
