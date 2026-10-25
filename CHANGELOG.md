@@ -21,6 +21,17 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.10] - 2026-10-26
+
+### Fixed
+- **Describing photos still failed with Qwen 3.x Flash (and other reasoning models OpenRouter
+  lists).** 0.9.9 asked for no thinking, but only for models it guessed reasoned from their id, and
+  "qwen3.7-flash" didn't match, so the request was never sent. Whether a model reasons now comes
+  from OpenRouter's own model list, with the id guess only as a fallback. Thinking is turned off the
+  way OpenRouter documents (`effort: "none"`). A model that still answers nothing gets one more try
+  with a little thinking and more room. Chat's Effort control now also applies to those models.
+  After updating, press **Try again** under Admin → Storage → Understanding photos.
+
 ## [0.9.9] - 2026-10-25
 
 ### Added

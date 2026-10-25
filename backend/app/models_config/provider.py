@@ -696,6 +696,22 @@ def _model_tool_support(provider: "ModelProvider", model_id: str) -> bool | None
     return None
 
 
+def _model_reasoning_support(provider: "ModelProvider", model_id: str) -> bool:
+    """Does this model reason natively — from the provider's own catalog
+    (OpenRouter says so per model) when it's there, else a guess from the
+    id. The guess alone missed families it doesn't name (Qwen 3.x, GLM…),
+    so their thinking was never turned off and short calls — a photo's
+    description — came back empty."""
+    if provider.type in ("deepseek", "openrouter", "openai", "gemini"):
+        for row in provider.models or []:
+            if isinstance(row, dict) and row.get("id") == model_id:
+                val = row.get("supports_native_reasoning")
+                if isinstance(val, bool):
+                    return val
+                break
+    return _detect_reasoning_by_id(provider.type, model_id)
+
+
 def _known_context_window(provider_type: str, model_id: str) -> int | None:
     """Best-effort context-window lookup for providers that don't
     return ``context_length`` on their ``/models`` endpoint.
@@ -1151,7 +1167,7 @@ class ModelRouter:
         # effort set — the UI only offers the Effort control on
         # reasoning-capable models — but we still gate the native branches
         # on this flag as defence-in-depth against a stale request.
-        native_reasoning = _detect_reasoning_by_id(provider.type, model_id)
+        native_reasoning = _model_reasoning_support(provider, model_id)
 
         payload_messages: list[dict[str, Any]] = []
         if system:
@@ -1253,7 +1269,8 @@ class ModelRouter:
             # model it routes (OpenAI/Anthropic/Gemini/DeepSeek), so one
             # mapping covers them all. ``off`` disables the thinking pass.
             if reasoning_effort == "off":
-                create_kwargs["extra_body"] = {"reasoning": {"enabled": False}}
+                # OpenRouter's documented way to turn thinking off.
+                create_kwargs["extra_body"] = {"reasoning": {"effort": "none"}}
             elif reasoning_effort in {"low", "medium", "high"}:
                 create_kwargs["extra_body"] = {
                     "reasoning": {"effort": reasoning_effort}
