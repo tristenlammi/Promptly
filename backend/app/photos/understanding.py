@@ -198,6 +198,10 @@ async def _run_quality(ids: list[uuid.UUID]) -> int:
             if asset is None:
                 continue
             if asset.kind != "image":
+                # A video: the same file again is a copy too.
+                from app.photos.duplicates import hide_if_copy
+
+                await hide_if_copy(db, asset)
                 await record(db, fid, QUALITY, "skipped")
                 continue
             path = next((p for p in (rendition_path(fid, "preview.webp"), rendition_path(fid, "thumb.webp")) if p.is_file()), None)
@@ -210,6 +214,11 @@ async def _run_quality(ids: list[uuid.UUID]) -> int:
                 await record(db, fid, QUALITY, "failed", error=f"{exc.__class__.__name__}: {exc}")
                 continue
             asset.phash, asset.sharpness, asset.brightness, asset.quality = q.phash, q.sharpness, q.brightness, q.quality
+            # Already in the library (a phone synced after a Takeout)? Then
+            # it's a copy: hidden, and nothing more is worked out for it.
+            from app.photos.duplicates import hide_if_copy
+
+            await hide_if_copy(db, asset)
             await record(db, fid, QUALITY, "done")
         await db.commit()
     return len(ids)
@@ -301,10 +310,13 @@ async def _run_faces(ids: list[uuid.UUID]) -> int:
         for i in range(0, len(work), 16):
             chunk = work[i : i + 16]
             model, found = await _service(db, FACES, [f for f, _, _ in chunk], ml.find_faces([data for _, _, data in chunk]))
-            for (fid, owner, _), faces in zip(chunk, found):
+            for (fid, owner, data), faces in zip(chunk, found):
                 if faces is None:
                     await record(db, fid, FACES, "failed", error="the model couldn't read it")
                     continue
+                # A dog's or cat's face found as a face isn't a person's.
+                faces = await _people_only(data, faces)
+                await record(db, fid, FACE_CHECK, "done")
                 await db.execute(
                     text("DELETE FROM photo_faces WHERE file_id = :f AND assigned_by IS DISTINCT FROM 'user'"),
                     {"f": fid},
@@ -321,6 +333,51 @@ async def _run_faces(ids: list[uuid.UUID]) -> int:
                          "s": face["score"], "px": face["size"], "m": model[:64], "v": vector_literal(face["embedding"])},
                     )
                 await record(db, fid, FACES, "done", input_key=model[:64])
+        await db.commit()
+    return len(ids)
+
+
+async def _people_only(preview: bytes, faces: list) -> list:
+    """The faces that are people's (``face_check``); all of them if the
+    check can't be made just now."""
+    from app.photos import face_check
+
+    try:
+        return await face_check.keep_human(preview, faces)
+    except Exception:  # noqa: BLE001 — never lose faces over the check
+        logger.warning("face check unavailable; keeping the faces", exc_info=True)
+        return faces
+
+
+async def _run_face_check(ids: list[uuid.UUID]) -> int:
+    """Faces found before the check existed: an animal's face is removed
+    (unless someone named it themselves), so it stops being a "person"."""
+    from app.database import SessionLocal
+    from app.files.derivatives import rendition_path
+    from app.photos import face_check
+
+    async with SessionLocal() as db:
+        for fid in ids:
+            path = rendition_path(fid, "preview.webp")
+            rows = (
+                await db.execute(
+                    text(
+                        "SELECT id, box_x, box_y, box_w, box_h FROM photo_faces "
+                        "WHERE file_id = :f AND assigned_by IS DISTINCT FROM 'user'"
+                    ),
+                    {"f": fid},
+                )
+            ).all()
+            if rows and path.is_file():
+                preview = await asyncio.to_thread(path.read_bytes)
+                crops = await asyncio.to_thread(
+                    lambda: [face_check.crop(preview, (r.box_x, r.box_y, r.box_w, r.box_h)) for r in rows]
+                )
+                verdicts = await _service(db, FACE_CHECK, [fid], face_check.human(crops))
+                animals = [r.id for r, ok in zip(rows, verdicts) if not ok]
+                if animals:
+                    await db.execute(text("DELETE FROM photo_faces WHERE id = ANY(:ids)"), {"ids": animals})
+            await record(db, fid, FACE_CHECK, "done")
         await db.commit()
     return len(ids)
 
@@ -458,7 +515,9 @@ async def _text_prepare() -> None:
 
 async def _run_captions(ids: list[uuid.UUID]) -> int:
     """A sentence and tags for each photo, from the Photos vision model —
-    four at a time; a cloud model stops at the month's limit."""
+    two at a time; a cloud model stops at the month's limit. Told to slow
+    down (429), the photos aren't failed: the stage waits for the next
+    tick."""
     import json
 
     from app.database import SessionLocal
@@ -473,7 +532,7 @@ async def _run_captions(ids: list[uuid.UUID]) -> int:
         if room == 0:
             return 0
         ids = ids[:room] if room is not None else ids
-        slots = asyncio.Semaphore(4)
+        slots = asyncio.Semaphore(2)
 
         async def one(fid: uuid.UUID) -> tuple[uuid.UUID, tuple[str, list[str]] | str]:
             path = rendition_path(fid, "preview.webp")
@@ -487,8 +546,12 @@ async def _run_captions(ids: list[uuid.UUID]) -> int:
                     logger.warning("captioning %s failed: %s", fid, exc)
                     return fid, f"{exc.__class__.__name__}: {exc}"
 
+        slowed = False
         for fid, got in await asyncio.gather(*(one(f) for f in ids)):
             if isinstance(got, str):
+                if _rate_limited(got):
+                    slowed = True  # not the photo's fault: it's tried again later
+                    continue
                 await record(db, fid, CAPTIONS, "failed", error=got)
                 continue
             caption, tags = got
@@ -502,7 +565,13 @@ async def _run_captions(ids: list[uuid.UUID]) -> int:
             )
             await record(db, fid, CAPTIONS, "done", input_key=vision.model_id[:64])
         await db.commit()
-    return len(ids)
+    return 0 if slowed else len(ids)
+
+
+def _rate_limited(error: str) -> bool:
+    """The provider said "too many requests" (or it's out of capacity)."""
+    low = error.lower()
+    return "429" in low or "rate limit" in low or "too many requests" in low
 
 
 async def _captions_waiting() -> str | None:
@@ -581,6 +650,16 @@ FACES = Stage(
     waiting=_faces_waiting, prepare=_faces_prepare, batch=16,
     applies_sql="p.kind = 'image' AND EXISTS (SELECT 1 FROM users u WHERE u.id = p.user_id AND " + _FACES_ON + ")",
 )
+# Faces that are really animals (face_check): new faces are checked as
+# they're found; this goes over the ones found before, once.
+FACE_CHECK = Stage(
+    "face_check", 1, "Telling faces from animals", "m.derivative_state = 'ready'", _run_face_check,
+    waiting=_embed_waiting, batch=16,
+    applies_sql=(
+        "p.kind = 'image' AND EXISTS (SELECT 1 FROM photo_faces pf WHERE pf.file_id = p.file_id "
+        "AND pf.assigned_by IS DISTINCT FROM 'user')"
+    ),
+)
 # Animals (WP-PH2.4): pets aren't biometric data, so no opt-in.
 ANIMALS = Stage(
     "animals", 1, "Pets and animals", "m.derivative_state = 'ready'", _run_animals,
@@ -598,7 +677,7 @@ CAPTIONS = Stage(
     waiting=_captions_waiting, prepare=_captions_prepare, batch=8,
     applies_sql="p.kind = 'image' AND EXISTS (SELECT 1 FROM users u WHERE u.id = p.user_id AND " + _CAPTIONS_ON + ")",
 )
-STAGES: tuple[Stage, ...] = (PLACE, QUALITY, EMBED, FACES, ANIMALS, TEXT, CAPTIONS)
+STAGES: tuple[Stage, ...] = (PLACE, QUALITY, EMBED, FACES, FACE_CHECK, ANIMALS, TEXT, CAPTIONS)
 
 
 async def tick(budget: float = TICK_SECONDS) -> dict[str, int]:
@@ -698,4 +777,4 @@ async def progress(db: AsyncSession, user_id: uuid.UUID | None = None) -> list[d
     return out
 
 
-__all__ = ["ANIMALS", "CAPTIONS", "EMBED", "FACES", "PLACE", "TEXT", "QUALITY", "STAGES", "forget_if_changed", "location_key", "pending", "progress", "record", "tick"]
+__all__ = ["ANIMALS", "CAPTIONS", "EMBED", "FACE_CHECK", "FACES", "PLACE", "TEXT", "QUALITY", "STAGES", "forget_if_changed", "location_key", "pending", "progress", "record", "tick"]

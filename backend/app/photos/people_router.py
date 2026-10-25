@@ -99,7 +99,7 @@ async def review(db: AsyncSession = Depends(get_db), user: User = Depends(get_cu
             table, col = _obs_table(kind)
             samples = (
                 await db.execute(
-                    text(f"SELECT id FROM {table} WHERE {col} = :p ORDER BY size_px * score DESC LIMIT 6"),
+                    text(f"SELECT id FROM {table} WHERE {col} = :p ORDER BY size_px * score DESC LIMIT 8"),
                     {"p": uuid.UUID(p["id"])},
                 )
             ).scalars().all()
@@ -119,7 +119,7 @@ async def review(db: AsyncSession = Depends(get_db), user: User = Depends(get_cu
             await db.execute(
                 text(
                     "SELECT a.id FROM photo_animals a JOIN files fl ON fl.id = a.file_id WHERE a.user_id = :u "
-                    "AND a.species = :s AND a.pet_id IS NULL AND fl.trashed_at IS NULL ORDER BY a.size_px * a.score DESC LIMIT 6"
+                    "AND a.species = :s AND a.pet_id IS NULL AND fl.trashed_at IS NULL ORDER BY a.size_px * a.score DESC LIMIT 12"
                 ),
                 {"u": user.id, "s": species},
             )
@@ -351,13 +351,9 @@ async def _observation(db: AsyncSession, obs_id: uuid.UUID, user: User) -> tuple
     raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
 
 
-@router.post("/faces/{obs_id}/person")
-async def set_person(
-    obs_id: uuid.UUID, body: AssignBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
-) -> dict[str, Any]:
-    """"This is …": an existing person (or pet), or a new one by name — or
-    the one of that name already in your library."""
-    kind, obs = await _observation(db, obs_id, user)
+async def _target(db: AsyncSession, user: User, kind: str, obs: Any, body: AssignBody) -> uuid.UUID:
+    """Who "this is": an existing one, or one by name (yours of that name,
+    else a new one)."""
     if body.person_id is not None:
         target = await _mine(db, body.person_id, user)
         if target.kind != kind:
@@ -376,12 +372,48 @@ async def set_person(
             )
     else:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Say who it is.")
+    return pid
+
+
+@router.post("/faces/{obs_id}/person")
+async def set_person(
+    obs_id: uuid.UUID, body: AssignBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict[str, Any]:
+    """"This is …": an existing person (or pet), or a new one by name — or
+    the one of that name already in your library."""
+    kind, obs = await _observation(db, obs_id, user)
+    pid = await _target(db, user, kind, obs, body)
     if kind == "person":
         await people.assign(db, obs_id, pid)
     else:
         await people.assign_animal(db, obs_id, pid)
     await db.commit()
     return {"person_id": str(pid)}
+
+
+class AssignManyBody(AssignBody):
+    observation_ids: list[uuid.UUID] = Field(min_length=1, max_length=200)
+
+
+@router.post("/faces/assign")
+async def assign_many(
+    body: AssignManyBody, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict[str, Any]:
+    """"These are all …" — e.g. the dogs on a review card are your Bumi.
+    The rest of them follow on their own (from these as examples)."""
+    found = [await _observation(db, oid, user) for oid in dict.fromkeys(body.observation_ids)]
+    kinds = {k for k, _ in found}
+    if len(kinds) != 1:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Those are people and animals both.")
+    kind = kinds.pop()
+    pid = await _target(db, user, kind, found[0][1], body)
+    for _k, obs in found:
+        if kind == "person":
+            await people.assign(db, obs.id, pid)
+        else:
+            await people.assign_animal(db, obs.id, pid)
+    await db.commit()
+    return {"person_id": str(pid), "assigned": len(found)}
 
 
 class NotBody(BaseModel):

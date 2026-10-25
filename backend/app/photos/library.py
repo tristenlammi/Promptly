@@ -9,7 +9,8 @@ month. Pictures anywhere else in My files are ordinary files, not Photos
 
 * what's in the trash;
 * any folder marked "Hide from Photos", and everything inside it;
-* the video half of a Live Photo (it plays behind its still).
+* the video half of a Live Photo (it plays behind its still);
+* a copy of a photo already there (``duplicate_of``, photos/duplicates).
 
 ``photo_assets`` holds a row per photo or video (``sync``, called when the
 media worker reads a file and when its date or place is edited); the
@@ -43,6 +44,7 @@ LIBRARY_CTES = (
     ") "
 )
 LIBRARY_WHERE = (
+    "p.duplicate_of IS NULL AND "
     "f.folder_id IN (SELECT lp.id FROM lib_photos lp WHERE lp.user_id = p.user_id)"
     " AND f.folder_id NOT IN (SELECT id FROM lib_hidden)"
 )
@@ -206,6 +208,7 @@ def in_library(user_id: uuid.UUID):  # noqa: ANN201 — a WHERE clause
     return and_(
         PhotoAsset.user_id == user_id,
         PhotoAsset.live_hidden.is_(False),
+        PhotoAsset.duplicate_of.is_(None),
         UserFile.trashed_at.is_(None),
         UserFile.folder_id.in_(select(tree.c.id)),
         UserFile.folder_id.not_in(select(hidden.c.id)),

@@ -21,6 +21,37 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-10-25
+
+### Added
+- **Photos you already have aren't shown twice.** A photo arriving in Photos that's the same as one
+  you already have is hidden as a copy, as when a phone syncs pictures a Google Takeout already
+  brought in. It counts as the same if it's the same file, or an image taken within a second that
+  looks the same (Google's copy and the phone's original often aren't byte-identical). The file
+  stays where the phone put it, so the phone doesn't send it again. The original keeps its albums,
+  people and descriptions. Clean up lists the hidden copies next to their originals, with "Not a
+  copy" to put one back (migration 0227).
+
+### Changed
+- **Naming people and pets is quicker.** The "Who is this?" cards are a grid instead of a sideways
+  strip, with bigger pictures. Untick any that aren't them, then tap someone you've already named
+  ("It's… Bumi") or type a new name. On a pet card that names every ticked photo at once, not just
+  the first, and the rest of that pet's photos follow on their own. Person cards have a Hide button.
+
+### Fixed
+- **Describing photos failed for every photo with a reasoning model** (Qwen 3.x Flash, DeepSeek…).
+  The model spent its whole short budget thinking before writing anything, so each photo "couldn't
+  be read". Descriptions now ask for no thinking, with a little more room. After updating, press
+  **Try again** under Admin → Storage → Understanding photos.
+- **A provider's "slow down" (429) failed the photo being described.** Three in a row and that photo
+  was never described. Now it isn't counted against the photo: describing waits for the next minute,
+  and runs two at a time instead of four.
+- **A dog could turn up under People.** The face detector finds dogs' and cats' faces too, and they
+  grouped into a "person". Each face is now checked against the photo-search model (a person's face,
+  or an animal's?) and animal faces are dropped. New faces are checked as they're found; the faces
+  already found are checked once ("Telling faces from animals"). A face you named yourself is never
+  removed.
+
 ## [0.9.8] - 2026-10-23
 
 ### Fixed

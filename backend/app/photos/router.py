@@ -474,6 +474,57 @@ async def cleanup_keep(body: KeepRequest, db: AsyncSession = Depends(get_db), us
     return {"kept": n}
 
 
+@router.get("/copies")
+async def hidden_copies(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """Photos hidden as copies of ones you already have (a phone synced
+    after a Takeout): each with its original, newest first."""
+    from sqlalchemy.orm import aliased
+
+    Orig = aliased(PhotoAsset)
+    OrigFile = aliased(UserFile)
+    OrigMedia = aliased(FileMedia)
+    base = (
+        select(PhotoAsset, UserFile, FileMedia, Orig, OrigFile, OrigMedia)
+        .join(UserFile, UserFile.id == PhotoAsset.file_id)
+        .outerjoin(FileMedia, FileMedia.file_id == PhotoAsset.file_id)
+        .join(Orig, Orig.file_id == PhotoAsset.duplicate_of)
+        .join(OrigFile, OrigFile.id == Orig.file_id)
+        .outerjoin(OrigMedia, OrigMedia.file_id == Orig.file_id)
+        .where(PhotoAsset.user_id == user.id, PhotoAsset.duplicate_of.is_not(None), UserFile.trashed_at.is_(None))
+    )
+    count = await db.scalar(select(func.count()).select_from(base.subquery()))
+    rows = (await db.execute(base.order_by(UserFile.created_at.desc()).limit(200))).all()
+    return {
+        "count": int(count or 0),
+        "items": [{"copy": _item(a, f, m, user), "original": _item(o, of, om, user)} for a, f, m, o, of, om in rows],
+    }
+
+
+class NotCopies(BaseModel):
+    file_ids: list[uuid.UUID] = Field(min_length=1, max_length=2000)
+
+
+@router.post("/copies/not")
+async def not_copies(body: NotCopies, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
+    """"These aren't copies": back in Photos, and never hidden as one again."""
+    from app.photos.duplicates import KEPT_REASON
+
+    rows = (
+        await db.execute(
+            select(PhotoAsset).where(PhotoAsset.user_id == user.id, PhotoAsset.file_id.in_(body.file_ids),
+                                     PhotoAsset.duplicate_of.is_not(None))
+        )
+    ).scalars().all()
+    for a in rows:
+        a.duplicate_of = None
+        await db.execute(
+            text("INSERT INTO photo_cleanup_kept (user_id, file_id, reason) VALUES (:u, :f, :r) ON CONFLICT DO NOTHING"),
+            {"u": user.id, "f": a.file_id, "r": KEPT_REASON},
+        )
+    await db.commit()
+    return {"restored": len(rows)}
+
+
 class CropBox(BaseModel):
     x: float = Field(ge=0, le=1)
     y: float = Field(ge=0, le=1)

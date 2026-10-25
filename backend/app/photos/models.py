@@ -26,6 +26,9 @@ class PhotoAsset(Base):
     taken_local: Mapped[_dt.datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     # The MOV half of a Live Photo: shown behind its still, not on its own.
     live_hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    # A copy of a photo already in the library (a phone synced after a
+    # Takeout): hidden from Photos, its file kept (0227, photos/duplicates).
+    duplicate_of: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
     archived_at: Mapped[_dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[_dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()

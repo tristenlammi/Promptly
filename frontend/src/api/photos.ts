@@ -166,6 +166,17 @@ export const photosApi = {
     window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
   },
   /** What you might not want (PH-7): duplicates, blurry, screenshots, large videos. */
+  /** Photos hidden as copies of ones you already have (a phone synced
+   *  after a Takeout), each with its original. */
+  async copies(): Promise<{ count: number; items: { copy: PhotoItem; original: PhotoItem }[] }> {
+    const { data } = await apiClient.get("/photos/copies");
+    return data;
+  },
+  /** "These aren't copies": back in Photos for good. */
+  async notCopies(fileIds: string[]): Promise<number> {
+    const { data } = await apiClient.post<{ restored: number }>("/photos/copies/not", { file_ids: fileIds });
+    return data.restored;
+  },
   async cleanup(): Promise<CleanupFound> {
     const { data } = await apiClient.get<CleanupFound>("/photos/cleanup");
     return data;

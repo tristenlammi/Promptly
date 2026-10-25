@@ -83,3 +83,29 @@ async def test_photos_are_described_for_those_who_asked(client, db, user, root, 
     s = (await client.put("/api/photos/settings", json={"captions": False}, headers=_auth(user))).json()
     assert s["captions"] is False and s["faces"] is False
     assert await db.scalar(text("SELECT count(*) FROM photo_captions")) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_slow_down_from_the_provider_doesnt_fail_the_photos(client, db, user, root, fake_vision, monkeypatch):
+    """A 429 used to count as the photo failing; three of those and it was
+    never described. Now the stage just waits for the next minute."""
+    from app.photos import captions
+    from app.photos.understanding import tick
+
+    fid = await _photo(db, user, preview=_webp((200, 150, 90)))
+    await client.put("/api/photos/settings", json={"captions": True}, headers=_auth(user))
+
+    async def busy(vision, preview, db_):
+        raise RuntimeError("Upstream error starting stream: Error code: 429 - rate limited")
+
+    monkeypatch.setattr(captions, "describe", busy)
+    await tick(budget=10)
+    rows = (await db.execute(text("SELECT state FROM photo_understanding WHERE file_id = :f AND stage = 'captions'"), {"f": fid})).all()
+    assert rows == []  # not failed — still to do
+
+    async def fine(vision, preview, db_):
+        return "A dog.", ["dog"]
+
+    monkeypatch.setattr(captions, "describe", fine)
+    await tick(budget=10)
+    assert await db.scalar(text("SELECT count(*) FROM photo_captions WHERE file_id = :f"), {"f": fid}) == 1

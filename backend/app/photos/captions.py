@@ -136,7 +136,11 @@ async def describe(vision: Vision, preview: bytes, db: AsyncSession) -> tuple[st
     message = ChatMessage(role="user", content=[TextPart(text=_PROMPT), ImagePart(url=url)])
     async with asyncio.timeout(TIMEOUT_SECONDS):
         parts = [t async for t in model_router.stream_chat(
-            provider=provider, model_id=model_id, messages=[message], system=_SYSTEM, temperature=0.2, max_tokens=300,
+            provider=provider, model_id=model_id, messages=[message], system=_SYSTEM, temperature=0.2,
+            # A sentence and some tags: no thinking first. A reasoning model
+            # (Qwen 3.x Flash, DeepSeek…) otherwise spent the whole budget
+            # thinking and answered nothing — every photo "couldn't be read".
+            max_tokens=500, reasoning_effort="off",
         )]
     caption, tags = parse("".join(parts))
     if not caption:

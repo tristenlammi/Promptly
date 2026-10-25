@@ -117,6 +117,13 @@ def _no_photos_ml(monkeypatch):
 
     monkeypatch.setattr(ml, "_health", (0.0, None))
 
+    # The face check's captions (face_check): a neutral answer — every face
+    # stays a face — unless a test fakes the text side itself.
+    async def neutral_texts(texts):
+        return "stub", [[0.0] * 768 for _ in texts]
+
+    monkeypatch.setattr(ml, "embed_texts", neutral_texts)
+
 
 @pytest.fixture(scope="session")
 def database():

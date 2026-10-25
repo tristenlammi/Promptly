@@ -130,6 +130,7 @@ export function PhotoCleanupPage() {
         </div>
       )}
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <HiddenCopies />
         {isLoading ? (
           <p className="text-sm text-[var(--text-muted)]">Looking through your photos…</p>
         ) : error ? (
@@ -183,5 +184,60 @@ export function PhotoCleanupPage() {
         <PhotoViewer items={viewing.items} startId={viewing.id} loadMore={async () => []} onClose={() => setViewing(null)} onChanged={refresh} />
       )}
     </div>
+  );
+}
+
+
+/** Photos hidden as copies of ones you already have — usually your phone
+ *  syncing photos a Google Takeout already brought in. Each next to the
+ *  one it matched; "Not a copy" puts it back in Photos for good. */
+function HiddenCopies() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["photos", "copies"], queryFn: photosApi.copies });
+  const [open, setOpen] = useState(false);
+  if (!data || data.count === 0) return null;
+  const restore = async (id: string) => {
+    try {
+      await photosApi.notCopies([id]);
+      toast.success("It's back in Photos.");
+      void qc.invalidateQueries({ queryKey: ["photos"] });
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't put it back."));
+    }
+  };
+  return (
+    <section aria-label="Hidden copies" className="mb-4 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3">
+      <div className="flex items-center gap-2">
+        <p className="flex-1 text-sm text-[var(--text)]">
+          <span className="font-medium">{data.count.toLocaleString()} {data.count === 1 ? "photo" : "photos"} hidden as copies</span>
+          <span className="block text-xs text-[var(--text-muted)]">
+            Ones you already had, sent again — usually your phone syncing photos a Takeout brought in. They're kept, so your
+            phone doesn't send them again, but not shown twice.
+          </span>
+        </p>
+        <Button size="sm" variant="ghost" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          {open ? "Hide" : "Show"}
+        </Button>
+      </div>
+      {open && (
+        <ul className="mt-3 grid grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] gap-3" aria-label="Copies and their originals">
+          {data.items.map(({ copy, original }) => (
+            <li key={copy.id} className="flex items-center gap-2 rounded-md border border-[var(--border)] p-2">
+              {[copy, original].map((p, i) => (
+                <figure key={p.id} className="flex flex-col items-center gap-0.5">
+                  <span className="block h-16 w-16 overflow-hidden rounded bg-[var(--hover)]">
+                    {p.thumb && <img src={p.thumb} alt="" loading="lazy" className="h-full w-full object-cover" />}
+                  </span>
+                  <figcaption className="text-[10px] text-[var(--text-muted)]">{i === 0 ? "copy" : "you had"}</figcaption>
+                </figure>
+              ))}
+              <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void restore(copy.id)}>
+                Not a copy
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

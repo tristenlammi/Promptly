@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, EyeOff, MoreHorizontal, PawPrint, UserRound } from "lucide-react";
+import { ArrowLeft, Check, EyeOff, MoreHorizontal, PawPrint, UserRound, X } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { peopleApi, type ReviewEntry, type Subject, type SubjectKind } from "@/api/people";
@@ -60,9 +60,9 @@ export function PeoplePage() {
         {unnamed.length > 0 && (
           <section aria-label="Who is this?" className="mb-6">
             <h2 className="mb-2 text-sm font-semibold text-[var(--text)]">Who is this?</h2>
-            <div className="flex gap-3 overflow-x-auto pb-2">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] gap-3">
               {unnamed.map((r) => (
-                <ReviewCard key={r.id ?? `species-${r.species}`} entry={r} known={named} />
+                <ReviewCard key={r.id ?? `species-${r.species}`} entry={r} known={named} className="w-full" />
               ))}
             </div>
           </section>
@@ -111,70 +111,170 @@ function Avatar({ subject, size }: { subject: { cover: string | null; name: stri
   );
 }
 
-/** One unnamed person (a cluster: name it once) or a species of animal
- *  nobody's named (each photo of it is named on its own: it may be
- *  different animals). */
-export function ReviewCard({ entry, known }: { entry: ReviewEntry; known: Subject[] }) {
+/** One unnamed person (a cluster) or a species of animal nobody's named
+ *  ("a dog in 21 photos" — maybe more than one dog). Untick any that
+ *  aren't them, then say who: one of your people or pets already named
+ *  (a tap), or a new name. For a pet the rest of its photos follow on
+ *  their own, from these as examples. */
+export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; known: Subject[]; className?: string }) {
   const qc = useQueryClient();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
-  const listId = `known-${entry.id ?? entry.species}`;
-  const save = async (observationId?: string) => {
-    const n = name.trim();
-    if (!n) return;
+  const [left, setLeft] = useState<Set<string>>(new Set()); // unticked: not them
+  const chosen = entry.samples.filter((s) => !left.has(s.id));
+  const cover = chosen[0]?.crop ?? entry.cover;
+  const isPerson = entry.kind === "person";
+  // The same species first ("Bumi" for a dog), then the rest.
+  const picks = known
+    .filter((k) => k.name)
+    .sort((x, y) => Number(y.species === entry.species) - Number(x.species === entry.species))
+    .slice(0, 8);
+  const done = (label: string) => {
+    void qc.invalidateQueries({ queryKey: ["people"] });
+    toast.success(label);
+  };
+
+  const save = async (who: { person_id?: string; name?: string }, label: string) => {
+    if (!chosen.length) return;
     setBusy(true);
     try {
       if (entry.id) {
-        const same = known.find((k) => k.name?.toLowerCase() === n.toLowerCase());
-        if (same?.id) await peopleApi.merge(entry.id, same.id);
-        else await peopleApi.update(entry.id, { name: n });
-      } else if (observationId) {
-        await peopleApi.name(observationId, { name: n });
+        // A cluster: the unticked ones aren't this person, the rest are.
+        for (const s of entry.samples) if (left.has(s.id)) await peopleApi.notThem(s.id, entry.id);
+        const same = who.person_id ?? known.find((k) => k.name?.toLowerCase() === who.name?.toLowerCase())?.id;
+        if (same) await peopleApi.merge(entry.id, same);
+        else await peopleApi.update(entry.id, { name: who.name ?? null });
+      } else {
+        await peopleApi.nameMany(chosen.map((s) => s.id), who);
       }
       setName("");
-      void qc.invalidateQueries({ queryKey: ["people"] });
-      toast.success(`That's ${n}.`);
+      setLeft(new Set());
+      done(isPerson ? `That's ${label}.` : `That's ${label} — the rest of their photos will follow.`);
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't save that."));
     } finally {
       setBusy(false);
     }
   };
+
+  const hide = async () => {
+    if (!entry.id) return;
+    try {
+      await peopleApi.update(entry.id, { hidden: true });
+      done("Hidden — they won't be asked about again.");
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't hide them."));
+    }
+  };
+
+  const title = isPerson
+    ? `Someone in ${entry.photos.toLocaleString()} ${entry.photos === 1 ? "photo" : "photos"}`
+    : `A ${entry.species ?? "pet"} in ${entry.photos.toLocaleString()} ${entry.photos === 1 ? "photo" : "photos"}`;
+
   return (
-    <div className="w-60 shrink-0 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3">
-      <div className="flex flex-wrap gap-1">
-        {entry.samples.map((s) => (
-          <img key={s.id} src={s.crop ?? undefined} alt="" loading="lazy" className="h-12 w-12 rounded-md object-cover" />
-        ))}
+    <article
+      aria-label={title}
+      className={cn("flex flex-col gap-3 rounded-card border border-[var(--border)] bg-[var(--surface)] p-3", className ?? "w-80")}
+    >
+      <div className="flex items-center gap-3">
+        {cover ? (
+          <img src={cover} alt="" className="h-14 w-14 shrink-0 rounded-full object-cover" />
+        ) : (
+          <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-[var(--hover)] text-[var(--text-muted)]">
+            {isPerson ? <UserRound className="h-6 w-6" /> : <PawPrint className="h-6 w-6" />}
+          </span>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-[var(--text)]">{title}</p>
+          {entry.samples.length > 1 && <p className="text-xs text-[var(--text-muted)]">Untick any that aren't them.</p>}
+        </div>
+        {entry.id && (
+          <button
+            type="button"
+            onClick={() => void hide()}
+            title="Don't ask about them again"
+            className="flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]"
+          >
+            <EyeOff className="h-3.5 w-3.5" /> Hide
+          </button>
+        )}
       </div>
-      <p className="mt-2 text-xs text-[var(--text-muted)]">
-        {entry.id ? `In ${entry.photos} photos` : `A ${entry.species} in ${entry.photos} ${entry.photos === 1 ? "photo" : "photos"}`}
-      </p>
+
+      <ul className="grid grid-cols-6 gap-1" aria-label="Their photos">
+        {entry.samples.map((s) => {
+          const out = left.has(s.id);
+          return (
+            <li key={s.id}>
+              <button
+                type="button"
+                aria-pressed={!out}
+                aria-label={out ? "Not them — tick again" : "Them — untick if not"}
+                onClick={() =>
+                  setLeft((cur) => {
+                    const next = new Set(cur);
+                    if (next.has(s.id)) next.delete(s.id);
+                    else next.add(s.id);
+                    return next;
+                  })
+                }
+                className="relative block aspect-square w-full overflow-hidden rounded-md bg-[var(--hover)]"
+              >
+                {s.crop && <img src={s.crop} alt="" loading="lazy" className={cn("h-full w-full object-cover transition", out && "opacity-25 grayscale")} />}
+                {out && (
+                  <span className="absolute inset-0 flex items-center justify-center text-[var(--text)]">
+                    <X className="h-4 w-4" />
+                  </span>
+                )}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+
+      {picks.length > 0 && (
+        <div>
+          <p className="mb-1 text-xs text-[var(--text-muted)]">{isPerson ? "It's…" : "It's…"}</p>
+          <div className="flex flex-wrap gap-1">
+            {picks.map((k) => (
+              <button
+                key={k.id}
+                type="button"
+                disabled={busy || !chosen.length}
+                onClick={() => void save({ person_id: k.id! }, k.name!)}
+                className="flex items-center gap-1.5 rounded-full border border-[var(--border)] py-0.5 pl-0.5 pr-2.5 text-xs text-[var(--text)] hover:border-[var(--accent)] hover:bg-[var(--hover)] disabled:opacity-50"
+              >
+                {k.cover ? (
+                  <img src={k.cover} alt="" className="h-5 w-5 rounded-full object-cover" />
+                ) : (
+                  <span className="h-5 w-5 rounded-full bg-[var(--hover)]" />
+                )}
+                {k.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <form
-        className="mt-2 flex items-center gap-1"
+        className="flex items-center gap-1"
         onSubmit={(e) => {
           e.preventDefault();
-          void save(entry.samples[0]?.id);
+          const n = name.trim();
+          if (n) void save({ name: n }, n);
         }}
       >
         <input
-          list={listId}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={entry.id ? "Who is this?" : "Name the first one"}
-          aria-label={entry.id ? "Who is this?" : `Name this ${entry.species}`}
-          className="min-w-0 flex-1 rounded border border-[var(--border)] bg-[var(--bg)] px-2 py-1 text-xs"
+          placeholder={picks.length ? "Or someone new…" : isPerson ? "Who is this?" : `Name this ${entry.species ?? "pet"}`}
+          aria-label={isPerson ? "Who is this?" : `Name this ${entry.species ?? "pet"}`}
+          className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-xs"
         />
-        <datalist id={listId}>
-          {known.filter((k) => k.name).map((k) => (
-            <option key={k.id} value={k.name!} />
-          ))}
-        </datalist>
-        <Button size="sm" variant="secondary" type="submit" disabled={busy || !name.trim()} aria-label="Save name">
+        <Button size="sm" variant="secondary" type="submit" disabled={busy || !name.trim() || !chosen.length} aria-label="Save name">
           <Check className="h-3.5 w-3.5" />
         </Button>
       </form>
-    </div>
+    </article>
   );
 }
 

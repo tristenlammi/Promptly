@@ -66,6 +66,11 @@ export const peopleApi = {
     const { data } = await apiClient.post<{ person_id: string }>(`/photos/faces/${observationId}/person`, who);
     return data.person_id;
   },
+  /** "These are all …" — several photos' faces or animals at once. */
+  async nameMany(observationIds: string[], who: { person_id?: string; name?: string }): Promise<string> {
+    const { data } = await apiClient.post<{ person_id: string }>("/photos/faces/assign", { observation_ids: observationIds, ...who });
+    return data.person_id;
+  },
   async setRelationship(id: string, label: string | null): Promise<void> {
     await apiClient.put(`/photos/people/${id}/relationship`, { label });
   },
