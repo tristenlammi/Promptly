@@ -1236,6 +1236,15 @@ class ModelRouter:
             if _detect_reasoning_by_id("openai", model_id):
                 create_kwargs.pop("temperature", None)
 
+        # Direct Anthropic: Claude 4.7 and later (Opus 4.7/4.8/5/5.5, Sonnet
+        # 5/5.5, Haiku 5.5, Fable) reject ``temperature`` / ``top_p`` /
+        # ``top_k`` with a 400 ("`temperature` is deprecated for this
+        # model"), and from API version 2026-10-21 every model does. So it's
+        # never sent; an older Claude samples at its default (temperature 1).
+        if provider.type == "anthropic":
+            for key in ("temperature", "top_p", "top_k"):
+                create_kwargs.pop(key, None)
+
         # DeepSeek-specific request shaping. ``thinking`` and
         # ``reasoning_effort`` are non-OpenAI fields that the DeepSeek
         # API merges into ``/chat/completions``; the OpenAI SDK passes

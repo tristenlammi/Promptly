@@ -21,6 +21,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.9.11] - 2026-10-30
+
+### Fixed
+- **Chatting with newer Claude models through the Anthropic API failed** with "`temperature` is
+  deprecated for this model". Claude 4.7 and later (Opus 4.7/4.8/5/5.5, Sonnet 5/5.5, Haiku 5.5,
+  Fable) reject `temperature`, `top_p` and `top_k`, and from Anthropic's API version 2026-10-21
+  every model does. Promptly no longer sends them to Anthropic; older Claude models use their
+  default temperature.
+
 ## [0.9.10] - 2026-10-26
 
 ### Fixed

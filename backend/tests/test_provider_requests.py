@@ -61,6 +61,16 @@ async def test_other_openai_models_keep_temperature(monkeypatch):
     assert sent["max_completion_tokens"] == 200 and "max_tokens" not in sent
 
 
+@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-sonnet-5-5", "claude-opus-4-7", "claude-sonnet-4-6"])
+async def test_anthropic_gets_no_sampling_parameters(monkeypatch, model):
+    """Claude 4.7 and later reject ``temperature`` (400 "`temperature` is
+    deprecated for this model"), and API version 2026-10-21 rejects it on
+    every model — so it's never sent to Anthropic."""
+    sent = await _sent(monkeypatch, "anthropic", model, temperature=0.7, max_tokens=500)
+    assert "temperature" not in sent and "top_p" not in sent and "top_k" not in sent
+    assert sent["max_tokens"] == 500
+
+
 async def test_other_providers_are_unchanged(monkeypatch):
     sent = await _sent(monkeypatch, "openrouter", "openai/o3", temperature=0.7, max_tokens=100)
     assert sent["temperature"] == 0.7 and sent["max_tokens"] == 100
