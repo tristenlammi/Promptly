@@ -1,9 +1,11 @@
 import { useLocation, useSearchParams, NavLink } from "react-router-dom";
 
 import { DRIVE_SUBNAV_ITEMS } from "@/components/layout/navItems";
+import { useFilesShellStore } from "@/store/filesShellStore";
 import { cn } from "@/utils/cn";
 
 import { FilesMenuButton, useInFilesShell } from "./FilesShell";
+import { NewMenu } from "./NewMenu";
 import { StorageUsageIndicator } from "./StorageUsageIndicator";
 
 /**
@@ -23,8 +25,17 @@ import { StorageUsageIndicator } from "./StorageUsageIndicator";
  * On mobile the whole row scrolls horizontally so both the tabs and
  * the right-side chips always stay reachable instead of truncating.
  */
-export function DriveSubNav({ className }: { className?: string }) {
+export function DriveSubNav({
+  className,
+  hideNew = false,
+}: {
+  className?: string;
+  /** The page shows its own New (My files / a folder, which knows where
+   *  it is) — don't add a second one to the slim bar. */
+  hideNew?: boolean;
+}) {
   const inShell = useInFilesShell();
+  const bumpTree = useFilesShellStore((s) => s.bumpTree);
   const location = useLocation();
   const [params] = useSearchParams();
   if (inShell) {
@@ -49,6 +60,13 @@ export function DriveSubNav({ className }: { className?: string }) {
         </NavLink>
         <div className="ml-auto" />
         <StorageUsageIndicator />
+        {/* 768–1023 px: the rail (and its New) is a drawer, so New sits
+            here on every Files page — into My files. Phones use the "+". */}
+        {!hideNew && (
+          <div className="hidden md:block">
+            <NewMenu folderId={null} onChanged={bumpTree} />
+          </div>
+        )}
       </div>
     );
   }

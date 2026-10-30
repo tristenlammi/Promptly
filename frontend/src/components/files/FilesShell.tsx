@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   Share2,
+  Smartphone,
   Star,
   Trash2,
   X,
@@ -194,6 +195,7 @@ function FilesRail() {
         <RailLink to="/files/recent" icon={Clock} label="Recent" />
         <RailLink to="/files/trash" icon={Trash2} label="Trash" hint="Deleted forever after 30 days" />
         <RailLink to="/files/import" icon={Import} label="Import & export" />
+        <RailLink to="/files/devices" icon={Smartphone} label="Devices" hint="Back up your phone with PromptlySync" />
 
         {(chatUploads || generated) && (
           <>

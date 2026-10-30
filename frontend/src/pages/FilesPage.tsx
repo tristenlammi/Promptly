@@ -12,7 +12,6 @@ import {
   Eye,
   Folder as FolderClosedIcon,
   FolderInput,
-  FolderPlus,
   Home,
   Images,
   LayoutGrid,
@@ -44,7 +43,7 @@ import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { MoveItemModal } from "@/components/files/MoveItemModal";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
-import { NewFolderModal, NewMenu } from "@/components/files/NewMenu";
+import { NewMenu, useNewItems, type NewItemAction } from "@/components/files/NewMenu";
 import { askAboutFiles } from "@/components/files/askAbout";
 import { useDriveAi } from "@/components/files/DriveAiDialog";
 import { isSpreadsheetFile, openSpreadsheetAsSheet } from "@/lib/office/sheetActions";
@@ -86,7 +85,6 @@ import {
   useBulkMove,
   useBulkStar,
   useBulkTrash,
-  useCreateFolder,
   useMoveFile,
   useMoveFolder,
   useRenameFile,
@@ -180,7 +178,7 @@ interface FilesPageProps {
 export function FilesPage({
   forcedScope,
   title = "Files",
-  subtitle = "Upload and organise files you can attach to any chat.",
+  subtitle = "Your documents, notes, spreadsheets, presentations, whiteboards and files.",
 }: FilesPageProps = {}) {
   const navigate = useNavigate();
   const routeParams = useParams<{ folderId?: string }>();
@@ -284,9 +282,14 @@ export function FilesPage({
   const [emptyMenu, setEmptyMenu] = useState<{ x: number; y: number } | null>(
     null
   );
-  const [showNewFolderPage, setShowNewFolderPage] = useState(false);
-  const createFolderPage = useCreateFolder();
-  const pageFileInputRef = useRef<HTMLInputElement | null>(null);
+  // The same New actions as the rail's menu, into this folder — offered
+  // on right-click and by the empty-folder state.
+  const newItems = useNewItems({ folderId, scope, onChanged: refreshAll });
+  // A workspace's folders take files from the workspace, not from here —
+  // keep Folder + uploads, drop the editors (the server would refuse).
+  const pageActions = data?.workspace_id
+    ? newItems.actions.filter((a) => a.key === "folder" || a.group === "upload")
+    : newItems.actions;
   // Drive stage 5: the single "Share" row action opens the
   // peer-to-peer grants modal. Public link sharing has been retired
   // from the UI.
@@ -772,16 +775,6 @@ export function FilesPage({
     e.preventDefault();
     setEmptyMenu({ x: e.clientX, y: e.clientY });
   };
-  const handleEmptyUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    e.target.value = "";
-    if (files.length === 0) return;
-    startUploads({ files, scope, folderId, onConflict: "ask" });
-    toast.info(
-      `Uploading ${files.length} file${files.length === 1 ? "" : "s"}…`
-    );
-    refreshAll();
-  };
 
   return (
     <>
@@ -790,7 +783,7 @@ export function FilesPage({
         subtitle={subtitle}
         actions={<FilesTopNavSearch />}
       />
-      <DriveSubNav />
+      <DriveSubNav hideNew={writable} />
       {scope === "shared" && !folderId && (
         <div role="tablist" aria-label="Shared" className="flex items-center gap-1.5 border-b border-[var(--border)] px-4 py-2 md:px-6">
           {(
@@ -1024,6 +1017,7 @@ export function FilesPage({
               hasMore={!!hasNextPage}
               loadingMore={isFetchingNextPage}
               onLoadMore={loadMore}
+              newActions={data.writable ? pageActions : []}
             />
           )}
         </div>
@@ -1104,42 +1098,19 @@ export function FilesPage({
         )}
       </div>
 
-      {/* Right-click-empty-space menu + its hidden upload input and
-          page-level New folder modal. */}
-      <input
-        ref={pageFileInputRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={handleEmptyUpload}
-      />
+      {/* Right-click-empty-space menu: every New action, into this folder
+          (the hidden inputs + modals they use come with them). */}
+      {newItems.elements}
       <ContextMenu
         open={emptyMenu !== null}
         x={emptyMenu?.x ?? 0}
         y={emptyMenu?.y ?? 0}
         onClose={() => setEmptyMenu(null)}
-        items={[
-          {
-            icon: <FolderPlus className="h-3.5 w-3.5" />,
-            label: "New folder",
-            onClick: () => setShowNewFolderPage(true),
-          },
-          {
-            icon: <Upload className="h-3.5 w-3.5" />,
-            label: "Upload files",
-            onClick: () => pageFileInputRef.current?.click(),
-          },
-        ]}
-      />
-      <NewFolderModal
-        open={showNewFolderPage}
-        onClose={() => setShowNewFolderPage(false)}
-        onSubmit={async (name) => {
-          const made = await createFolderPage.mutateAsync({ scope, name, parentId: folderId });
-          useFilesShellStore.getState().reveal(`folder:${made.id}`);
-          refreshAll();
-          setShowNewFolderPage(false);
-        }}
+        items={pageActions.map((a) => ({
+          icon: a.icon,
+          label: a.key === "folder" ? "New folder" : a.group === "create" ? `New ${a.label.toLowerCase()}` : a.label,
+          onClick: a.onSelect,
+        }))}
       />
 
       {moveModal && (
@@ -1432,6 +1403,7 @@ function ContentGrid({
   hasMore,
   loadingMore,
   onLoadMore,
+  newActions = [],
 }: {
   data: { folders: FolderItem[]; files: FileItem[]; writable: boolean };
   scope: FileScope;
@@ -1464,6 +1436,8 @@ function ContentGrid({
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  /** What the empty state offers to make here (none when read-only). */
+  newActions?: NewItemAction[];
 }) {
   // System folders are grouped into a collapsible section at the bottom,
   // collapsed by default — they're rarely what the user came to find.
@@ -1676,18 +1650,7 @@ function ContentGrid({
   }, [layout, currentFolderId, startRename]);
 
   const empty = data.folders.length === 0 && data.files.length === 0;
-  if (empty) {
-    return (
-      <div className="rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] px-6 py-12 text-center">
-        <h2 className="text-base font-semibold">Nothing here yet</h2>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">
-          {data.writable
-            ? "Upload a file or create a folder to get started."
-            : "No files have been added to this pool yet."}
-        </p>
-      </div>
-    );
-  }
+  if (empty) return <EmptyFolder writable={data.writable} actions={newActions} />;
 
   // User folders, then files, then (collapsed) the system folders. At the
   // top of My files the chat buckets live under the rail's "From chats" and
@@ -1725,9 +1688,16 @@ function ContentGrid({
 
   const menuItems = menu ? controller.menu(menu.entry) : [];
   const renaming = renameDialog?.entry;
+  // Only system folders (a fresh My files): still say how to start.
+  const nothingYours = userFolders.length === 0 && data.files.length === 0;
 
   return (
     <DriveListProvider value={controller}>
+      {nothingYours && (
+        <div className="mb-4">
+          <EmptyFolder writable={data.writable} actions={newActions} />
+        </div>
+      )}
       <DriveItemList
         ref={listRef}
         items={items}
@@ -1796,6 +1766,37 @@ function ContentGrid({
         }}
       />
     </DriveListProvider>
+  );
+}
+
+/** An empty folder: say so, and offer what New offers — one click makes
+ *  the thing here and opens it. */
+function EmptyFolder({ writable, actions }: { writable: boolean; actions: NewItemAction[] }) {
+  const quick = actions.filter((a) => a.group === "create" || a.key === "upload-files");
+  return (
+    <div className="rounded-card border border-dashed border-[var(--border)] bg-[var(--surface)] px-6 py-10 text-center">
+      <h2 className="text-base font-semibold">Nothing here yet</h2>
+      <p className="mt-1 text-sm text-[var(--text-muted)]">
+        {writable
+          ? "Create something, or drop files here to upload them."
+          : "No files have been added to this pool yet."}
+      </p>
+      {writable && quick.length > 0 && (
+        <div className="mx-auto mt-5 flex max-w-2xl flex-wrap justify-center gap-2" aria-label="Create here">
+          {quick.map((a) => (
+            <button
+              key={a.key}
+              type="button"
+              onClick={a.onSelect}
+              className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-sm font-medium transition hover:border-[var(--accent)]/50 hover:bg-[var(--hover)]"
+            >
+              {a.icon}
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

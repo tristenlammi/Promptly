@@ -110,6 +110,37 @@ async def test_a_stranger_cant_open_or_save(client, db, user):
     assert r.status_code == 404
 
 
+@pytest.mark.asyncio
+async def test_new_from_files_lands_in_the_folder_with_default_names(client, db, user):
+    """Files → New: every kind lands in the folder you're in, named so it
+    can be renamed later; a Note is a Document that starts "Untitled note"."""
+    r = await client.post("/api/files/folders", json={"scope": "mine", "name": "Plans"}, headers=_auth(user))
+    assert r.status_code == 201, r.text
+    folder_id = r.json()["id"]
+    expected = {
+        "document": ("document", "Untitled document"),
+        "note": ("document", "Untitled note"),
+        "sheet": ("sheet", "Untitled spreadsheet"),
+        "whiteboard": ("whiteboard", "Untitled whiteboard"),
+    }
+    for kind, (source_kind, title) in expected.items():
+        f = await _new(client, user, kind, folder_id=folder_id)
+        assert f["source_kind"] == source_kind, kind
+        assert f["folder_id"] == folder_id, kind
+        assert f["filename"].startswith(title), (kind, f["filename"])
+        info = (await client.get(f"/api/files/{f['id']}/office", headers=_auth(user))).json()
+        assert info["kind"] == source_kind and info["access"] == "edit"
+    r = await client.get(f"/api/files/browse?scope=mine&folder_id={folder_id}", headers=_auth(user))
+    assert r.status_code == 200, r.text
+    assert len(r.json()["files"]) == 4
+
+
+@pytest.mark.asyncio
+async def test_new_rejects_an_unknown_kind(client, user):
+    r = await client.post("/api/files/office", json={"kind": "spaceship"}, headers=_auth(user))
+    assert r.status_code == 422
+
+
 # ---------------------------------------------------------------- templates
 
 

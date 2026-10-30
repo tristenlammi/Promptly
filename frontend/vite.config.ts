@@ -245,6 +245,8 @@ export default defineConfig({
         // anyway), so precaching them would bloat first install and negate
         // the lazy-load. They're fetched on demand instead.
         globIgnores: [
+          // The PromptlySync APK (several MB): only for whoever installs it.
+          "**/downloads/**",
           "**/excalidraw-assets/**",
           "**/excalidraw-*.js",
           // The Photos map (~1 MB) and its offline country outlines: only for

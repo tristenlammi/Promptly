@@ -67,7 +67,9 @@ export function displayFileName(file: FileItem): string {
  *  extension, so hidden files (``.env``) and dotted names without a real
  *  extension (``report v1.2 draft``) are left whole. */
 export function splitFileExt(filename: string): { base: string; ext: string } {
-  const m = filename.match(/\.[A-Za-z0-9]{1,8}$/);
+  // ``.whiteboard`` (a whiteboard / presentation shell) is longer than the
+  // usual run but still an extension — without it the name showed it.
+  const m = filename.match(/\.whiteboard$/i) ?? filename.match(/\.[A-Za-z0-9]{1,8}$/);
   if (m && m.index !== undefined && m.index > 0) {
     return { base: filename.slice(0, m.index), ext: m[0] };
   }

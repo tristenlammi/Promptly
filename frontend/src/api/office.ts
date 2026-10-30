@@ -10,6 +10,9 @@ import type { SheetVersion, SpreadsheetData } from "./workspaces";
  * a workspace.
  */
 export type OfficeKind = "document" | "sheet" | "whiteboard";
+/** What ``POST /files/office`` can make: an office kind, or a "note" (a
+ *  Document that starts as "Untitled note"). */
+export type NewOfficeKind = OfficeKind | "note";
 
 export interface OfficeEditorInfo {
   kind: OfficeKind;
@@ -53,7 +56,7 @@ export interface SheetImportResult {
 
 export const officeApi = {
   async create(payload: {
-    kind?: OfficeKind;
+    kind?: NewOfficeKind;
     title?: string;
     folder_id?: string | null;
     template_id?: string;

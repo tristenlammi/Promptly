@@ -233,7 +233,9 @@ async def _target_folder(db: AsyncSession, folder_id: uuid.UUID | None, user: Us
 
 
 class _CreateOfficeRequest(BaseModel):
-    kind: Literal["document", "sheet", "whiteboard"] | None = None
+    # "note" is a Document under another name (a workspace note is one too)
+    # — it just starts as "Untitled note", so New → Note in Files reads right.
+    kind: Literal["document", "note", "sheet", "whiteboard"] | None = None
     title: str | None = Field(default=None, max_length=200)
     folder_id: uuid.UUID | None = None
     # Start from this template (any office file the caller can read).
@@ -282,9 +284,15 @@ async def create_office(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Pick a kind or a template."
             )
-        default = {"document": "Untitled document", "sheet": "Untitled spreadsheet", "whiteboard": "Untitled whiteboard"}
+        default = {
+            "document": "Untitled document",
+            "note": "Untitled note",
+            "sheet": "Untitled spreadsheet",
+            "whiteboard": "Untitled whiteboard",
+        }
+        kind = "document" if payload.kind == "note" else payload.kind
         row, _entity = await create_office_file(
-            db, kind=payload.kind, owner=user, title=title or default[payload.kind],
+            db, kind=kind, owner=user, title=title or default[payload.kind],
             folder_id=folder.id if folder else None,
         )
     await db.commit()

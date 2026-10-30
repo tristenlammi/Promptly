@@ -143,6 +143,14 @@ const OfficeEditorPage = lazyWithRetry(
   () => import("@/pages/OfficeEditorPage").then((m) => ({ default: m.OfficeEditorPage })),
   "OfficeEditorPage"
 );
+const SyncLandingPage = lazyWithRetry(
+  () => import("@/pages/SyncLandingPage").then((m) => ({ default: m.SyncLandingPage })),
+  "SyncLandingPage"
+);
+const FilesDevicesPage = lazyWithRetry(
+  () => import("@/pages/FilesDevicesPage").then((m) => ({ default: m.FilesDevicesPage })),
+  "FilesDevicesPage"
+);
 const ShareLinkLandingPage = lazyWithRetry(
   () => import("@/pages/ShareLinkLandingPage").then((m) => ({ default: m.ShareLinkLandingPage })),
   "ShareLinkLandingPage"
@@ -401,6 +409,14 @@ export default function App() {
             </Suspense>
           }
         />
+        <Route
+          path="/sync"
+          element={
+            <Suspense fallback={<FullScreenLoading />}>
+              <SyncLandingPage />
+            </Suspense>
+          }
+        />
         <Route path="*" element={<ToLogin />} />
       </Routes>
     );
@@ -460,6 +476,15 @@ export default function App() {
             </Suspense>
           }
         />
+      {/* The PromptlySync download page (the "Add device" QR lands here). */}
+      <Route
+        path="/sync"
+        element={
+          <Suspense fallback={<FullScreenLoading />}>
+            <SyncLandingPage />
+          </Suspense>
+        }
+      />
       <Route element={<AppLayout />}>
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="/chat" element={<ChatPage />} />
@@ -509,6 +534,7 @@ export default function App() {
             <Route path="/files/photos/places/:country" element={<PhotoPlacesPage />} />
             <Route path="/files/photos/places/:country/:placeId" element={<PhotoPlacesPage />} />
           </Route>
+          <Route path="/files/devices" element={<FilesDevicesPage />} />
           <Route path="/files/import" element={<ImportsPage />} />
           <Route path="/files/import/:importId" element={<ImportJobPage />} />
           <Route path="/files/folder/:folderId" element={<FilesPage />} />

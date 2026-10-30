@@ -21,6 +21,45 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-30
+
+### Added
+- **Files → New → Note**: a note is a Document that starts as "Untitled note" (`POST /api/files/office`
+  accepts `kind: "note"`). Home gets a Note tile too.
+- **Create from anywhere in Files**: right-clicking empty space in a folder now offers every New item
+  (Folder, Document, Note, Spreadsheet, Presentation, Whiteboard, From template, imports, uploads) into
+  that folder; an empty folder (or a fresh My files holding only system folders) shows one-click
+  create buttons; on tablet widths every Files page shows New in its top bar, not only My files.
+- **PromptlySync, an Android app that backs up a phone's photos and videos to Photos** (`android/`).
+  Files → Devices → Add device shows a one-time QR code (10 minutes). The phone's camera opens the
+  `/sync` download page; the app scans the same code and gets its own app password (upload + read,
+  never delete). Then it lists the phone's folders to choose from, and backs them up in the background:
+  hourly, soon after a new photo, Wi-Fi-only and charging-only options, resumable 50 MB tus chunks,
+  original files with their location. Before sending, it asks the server which files Photos already
+  has (by SHA-256, `POST /api/devices/have`), so a Takeout-imported photo isn't sent twice. Deleting
+  on the phone never deletes in Promptly. Removing a phone in Files → Devices stops it at once. The
+  APK is served from the server itself (`frontend/public/downloads/`, built and signed with
+  `android/build-release.ps1`), and the app offers its own updates. Built to be light on battery (tuned
+  for Pixels):
+  - Each run reads only the photos that changed since the last one (MediaStore generations), with a
+    full look once a day.
+  - A burst of shots is one run: 30 s after the last one, never more than 2 min late.
+  - The safety-net run is every 6 hours, and Android can fold it into other wake-ups.
+  - Nothing runs when the battery is low.
+  - A foreground notification appears only for big backups.
+  - The status screen no longer re-reads the library every few seconds.
+  - Schedules are re-registered after an app update.
+  - It warns when Android's battery setting is "Restricted" (backups would stop), and offers
+    "Unrestricted" as an opt-in for immediate backups.
+
+### Changed
+- The New menu, the right-click menu and the empty-folder state share one list of actions, so they
+  always match. Files' subtitle no longer describes it as chat attachments.
+
+### Fixed
+- Whiteboards and presentations showed a `.whiteboard` suffix in their name in Files (and renaming one
+  dropped it); the suffix is now treated as the extension like `.sheet`.
+
 ## [0.9.11] - 2026-10-30
 
 ### Fixed

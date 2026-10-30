@@ -1,9 +1,9 @@
-import { FileText, LayoutTemplate, Loader2, MessageSquareText, Presentation, Shapes, Table2, Upload } from "lucide-react";
+import { FileText, LayoutTemplate, Loader2, MessageSquareText, Presentation, Shapes, StickyNote, Table2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import type { FileItem } from "@/api/files";
-import { officeApi, type OfficeKind } from "@/api/office";
+import { officeApi, type NewOfficeKind } from "@/api/office";
 import { askAboutFiles, ASK_MAX_FILES } from "@/components/files/askAbout";
 import { DriveItemIcon } from "@/components/files/DriveItemIcon";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
@@ -30,11 +30,11 @@ export function FilesHomePage() {
   const [question, setQuestion] = useState("");
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [preview, setPreview] = useState<FileItem | null>(null);
-  const [creating, setCreating] = useState<OfficeKind | "presentation" | null>(null);
+  const [creating, setCreating] = useState<NewOfficeKind | "presentation" | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const startUploads = useUploadStore((s) => s.startUploads);
 
-  const create = async (kind: OfficeKind) => {
+  const create = async (kind: NewOfficeKind) => {
     if (creating) return;
     setCreating(kind);
     try {
@@ -60,6 +60,7 @@ export function FilesHomePage() {
 
   const tiles: { label: string; icon: typeof FileText; tint: string; onClick: () => void; busy?: boolean }[] = [
     { label: "Document", icon: FileText, tint: "text-sky-600 bg-sky-500/10", onClick: () => void create("document"), busy: creating === "document" },
+    { label: "Note", icon: StickyNote, tint: "text-yellow-600 bg-yellow-500/10", onClick: () => void create("note"), busy: creating === "note" },
     { label: "Spreadsheet", icon: Table2, tint: "text-emerald-600 bg-emerald-500/10", onClick: () => void create("sheet"), busy: creating === "sheet" },
     { label: "Whiteboard", icon: Shapes, tint: "text-violet-600 bg-violet-500/10", onClick: () => void create("whiteboard"), busy: creating === "whiteboard" },
     {
@@ -81,7 +82,7 @@ export function FilesHomePage() {
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-4xl space-y-8 px-4 py-6 sm:px-6">
           <section aria-label="Create">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {tiles.map((t) => (
                 <button
                   key={t.label}

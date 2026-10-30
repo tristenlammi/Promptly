@@ -1,0 +1,9 @@
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+# Release signing lives outside the repo (see build-release.ps1).
+*.jks
+*.keystore
+keystore.properties
