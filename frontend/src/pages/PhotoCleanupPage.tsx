@@ -13,11 +13,13 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 /** Cleanup (PH-7): what you may not want — duplicates (the one to keep
- *  marked, the rest picked), blurry shots, screenshots, large videos — moved
+ *  marked, the rest picked), similar shots (the best marked, nothing picked:
+ *  they're all real photos), blurry shots, screenshots, large videos — moved
  *  to the trash when you say so (recoverable), or kept and not asked again. */
 
 const TABS: { id: CleanupReason; label: string; empty: string }[] = [
   { id: "duplicate", label: "Duplicates", empty: "No duplicates — every photo is one of a kind." },
+  { id: "similar", label: "Similar", empty: "No similar shots to sort through." },
   { id: "blurry", label: "Blurry", empty: "Nothing blurry found." },
   { id: "screenshot", label: "Screenshots", empty: "No screenshots in your photos." },
   { id: "large_video", label: "Large videos", empty: "No videos over 100 MB." },
@@ -31,16 +33,24 @@ export function PhotoCleanupPage() {
   const [viewing, setViewing] = useState<{ items: PhotoItem[]; id: string } | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Duplicates start with every extra copy picked; the rest with nothing.
+  // Duplicates start with every extra copy picked; the rest (Similar too —
+  // those are real, different shots) with nothing.
   useEffect(() => {
     if (!data) return;
     setSelected(tab === "duplicate" ? new Set(data.duplicate.groups.flatMap((g) => g.others.map((o) => o.id))) : new Set());
   }, [data, tab]);
 
+  const grouped = tab === "duplicate" || tab === "similar" ? data?.[tab] : undefined;
   const all: SizedPhoto[] = useMemo(() => {
     if (!data) return [];
-    return tab === "duplicate" ? data.duplicate.groups.flatMap((g) => g.others) : data[tab].items;
+    return tab === "duplicate" || tab === "similar" ? data[tab].groups.flatMap((g) => g.others) : data[tab].items;
   }, [data, tab]);
+  const pickOnly = (ids: string[]) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      ids.forEach((id) => next.add(id));
+      return next;
+    });
   const chosen = all.filter((p) => selected.has(p.id));
   const bytes = chosen.reduce((n, p) => n + p.size, 0);
   const toggle = (p: PhotoItem) =>
@@ -95,7 +105,7 @@ export function PhotoCleanupPage() {
         <Maximize2 className="h-3 w-3" />
       </button>
       <p className="mt-0.5 truncate text-[11px] text-[var(--text-muted)]">
-        {kept ? <span className="font-medium text-[var(--accent-text)]">Keep · </span> : null}
+        {kept ? <span className="font-medium text-[var(--accent-text)]">{tab === "similar" ? "Best · " : "Keep · "}</span> : null}
         {humanSize(p.size)}
       </p>
     </div>
@@ -144,8 +154,10 @@ export function PhotoCleanupPage() {
           <>
             <p className="mb-3 text-xs text-[var(--text-muted)]">
               {tab === "duplicate"
-                ? `${data.duplicate.count} extra ${data.duplicate.count === 1 ? "copy" : "copies"} in ${data.duplicate.groups.length} ${data.duplicate.groups.length === 1 ? "group" : "groups"} · ${humanSize(data.duplicate.bytes)}. The best of each is kept; the rest are picked.`
-                : `${data[tab].count} · ${humanSize(data[tab].bytes)}. Pick the ones you don't want.`}{" "}
+                ? `${data.duplicate.count} extra ${data.duplicate.count === 1 ? "copy" : "copies"} in ${data.duplicate.groups.length} ${data.duplicate.groups.length === 1 ? "group" : "groups"} · ${humanSize(data.duplicate.bytes)}. The same photo saved more than once — the best of each is kept; the rest are picked.`
+                : tab === "similar"
+                  ? `${data.similar.groups.length} ${data.similar.groups.length === 1 ? "set" : "sets"} of shots taken moments apart that look almost the same (bursts, retakes) · ${humanSize(data.similar.bytes)} besides the best of each. Nothing is picked — they're all real photos.`
+                  : `${data[tab].count} · ${humanSize(data[tab].bytes)}. Pick the ones you don't want.`}{" "}
               The trash keeps them until it's emptied.{" "}
               <button type="button" className="font-medium text-[var(--accent-text)] hover:underline" onClick={() => setSelected(new Set(all.map((p) => p.id)))}>
                 Pick all
@@ -154,9 +166,9 @@ export function PhotoCleanupPage() {
                 Pick none
               </button>
             </p>
-            {tab === "duplicate" ? (
-              <ul aria-label="Duplicate groups" className="space-y-4">
-                {data.duplicate.groups.map((g) => {
+            {grouped ? (
+              <ul aria-label={tab === "similar" ? "Similar shots" : "Duplicate groups"} className="space-y-4">
+                {grouped.groups.map((g) => {
                   const pool = [g.keep, ...g.others];
                   return (
                     <li key={g.keep.id} className="rounded-lg border border-[var(--border)] p-2">
@@ -164,17 +176,25 @@ export function PhotoCleanupPage() {
                         {tile(g.keep, pool, true)}
                         {g.others.map((o) => tile(o, pool))}
                       </div>
-                      <button type="button" className="mt-1 text-xs text-[var(--text-muted)] underline-offset-2 hover:underline"
-                        onClick={() => void keep(g.others.map((o) => o.id))}>
-                        Keep all of these
-                      </button>
+                      <div className="mt-1 flex gap-3 text-xs">
+                        {tab === "similar" && (
+                          <button type="button" className="font-medium text-[var(--accent-text)] underline-offset-2 hover:underline"
+                            onClick={() => pickOnly(g.others.map((o) => o.id))}>
+                            Keep only the best
+                          </button>
+                        )}
+                        <button type="button" className="text-[var(--text-muted)] underline-offset-2 hover:underline"
+                          onClick={() => void keep(g.others.map((o) => o.id))}>
+                          Keep all of these
+                        </button>
+                      </div>
                     </li>
                   );
                 })}
               </ul>
             ) : (
               <div aria-label={current.label} className="flex flex-wrap gap-2">
-                {data[tab].items.map((p) => tile(p, data[tab].items))}
+                {tab !== "duplicate" && tab !== "similar" && data[tab].items.map((p) => tile(p, data[tab].items))}
               </div>
             )}
           </>

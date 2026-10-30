@@ -21,6 +21,28 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-30
+
+### Added
+- **Photos → Clean up → Similar**: shots taken moments apart that look almost the same (bursts,
+  retakes of one pose) now have their own tab, with the best of each set marked. Nothing is picked
+  for you, since they're all real photos; "Keep only the best" picks the rest of one set.
+
+### Changed
+- **Clean up → Duplicates now means the same photo twice**: identical files, or the same picture
+  taken at the same instant (a Takeout copy of a phone photo), or saved again much later.
+  Bursts moved to Similar.
+
+### Fixed
+- A burst from a phone (several frames a second) could be hidden as "copies" of its first frame
+  when it synced. A copy now has to be the same instant: when both files record the fraction of a
+  second (Pixels do), it must match. A copy stamped only to the whole second is matched to the one
+  frame it looks most like, not the whole burst.
+- Clean up called pictures with completely different colours "duplicates" (plain or near-plain
+  shots especially). The fingerprint only sees light and dark shapes, so matching photos (in Duplicates,
+  Similar, and when hiding copies) now also need the same average colour, read from each photo's stored
+  preview hash. A black-and-white version of a photo still counts as Similar.
+
 ## [0.10.0] - 2026-10-30
 
 ### Added

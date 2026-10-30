@@ -47,10 +47,14 @@ export interface EditOps {
   saturation: number;
 }
 
-export type CleanupReason = "duplicate" | "blurry" | "screenshot" | "large_video";
+export type CleanupReason = "duplicate" | "similar" | "blurry" | "screenshot" | "large_video";
+export type CleanupGroups = { count: number; bytes: number; groups: { keep: SizedPhoto; others: SizedPhoto[] }[] };
 export type SizedPhoto = PhotoItem & { size: number };
 export interface CleanupFound {
-  duplicate: { count: number; bytes: number; groups: { keep: SizedPhoto; others: SizedPhoto[] }[] };
+  /** The same photo twice — the extras are picked for you. */
+  duplicate: CleanupGroups;
+  /** Different shots that look almost the same — nothing picked. */
+  similar: CleanupGroups;
   blurry: { count: number; bytes: number; items: SizedPhoto[] };
   screenshot: { count: number; bytes: number; items: SizedPhoto[] };
   large_video: { count: number; bytes: number; items: SizedPhoto[] };

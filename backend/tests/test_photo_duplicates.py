@@ -83,3 +83,18 @@ async def test_a_different_photo_at_the_same_moment_isnt_a_copy(db, user):
     assert await hide_if_copy(db, a) is False
     assert uuid.UUID(str(mine))  # the original is untouched
     assert await db.scalar(text("SELECT count(*) FROM photo_assets WHERE duplicate_of IS NOT NULL")) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_burst_from_the_phone_isnt_hidden_as_copies(db, user):
+    """A Pixel shoots several frames a second and stamps each to the
+    millisecond: nearly the same picture, the same second — but each frame
+    its own photo, never hidden as a copy of the one before."""
+    from app.photos.duplicates import hide_if_copy
+
+    when = _utc(2024, 6, 1, 18, 0, 5)
+    first = await _photo(db, user, "PXL_20240601_180005100.jpg", when.replace(microsecond=100_000))
+    await _set(db, first, phash=0x0F0F_0F0F_0F0F_0F0F)
+    second = await _photo(db, user, "PXL_20240601_180005400.jpg", when.replace(microsecond=400_000))
+    a = await _set(db, second, phash=0x0F0F_0F0F_0F0F_0F0D, minutes_later=1)
+    assert await hide_if_copy(db, a) is False

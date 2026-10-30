@@ -1,5 +1,5 @@
-"""Cleanup (PH-7): duplicates (same bytes, a copy, a burst) grouped with
-the best one kept; blurry shots, screenshots and large videos suggested;
+"""Cleanup (PH-7): duplicates (same bytes, a copy) and similar shots (a
+burst) grouped with the best one first; blurry shots, screenshots and large videos suggested;
 "Keep" isn't suggested again; a favourite is never called blurry."""
 from __future__ import annotations
 
@@ -48,18 +48,22 @@ async def test_cleanup_suggestions(client, db, user, root):
 
     got = (await client.get("/api/photos/cleanup", headers=_auth(user))).json()
     groups = {g["keep"]["id"]: {o["id"] for o in g["others"]} for g in got["duplicate"]["groups"]}
-    assert groups == {str(a): {str(a_copy), str(same_bytes)}, str(b2): {str(b1)}}
-    assert got["duplicate"]["count"] == 3 and got["duplicate"]["bytes"] == 3000
+    assert groups == {str(a): {str(a_copy), str(same_bytes)}}
+    assert got["duplicate"]["count"] == 2 and got["duplicate"]["bytes"] == 2000
+    # The burst is two real shots: Similar, the better one first.
+    alike = {g["keep"]["id"]: {o["id"] for o in g["others"]} for g in got["similar"]["groups"]}
+    assert alike == {str(b2): {str(b1)}} and got["similar"]["count"] == 1
     assert [i["id"] for i in got["blurry"]["items"]] == [str(blurry)]
     assert [i["id"] for i in got["screenshot"]["items"]] == [str(shot)]
     assert [i["id"] for i in got["large_video"]["items"]] == [str(vid)] and got["large_video"]["items"][0]["size"] == 300 * 1024 * 1024
 
     # "Keep" the burst's other shot and the screenshot: not suggested again.
-    r = await client.post("/api/photos/cleanup/keep", json={"file_ids": [str(b1)], "reason": "duplicate"}, headers=_auth(user))
+    r = await client.post("/api/photos/cleanup/keep", json={"file_ids": [str(b1)], "reason": "similar"}, headers=_auth(user))
     assert r.json() == {"kept": 1}
     await client.post("/api/photos/cleanup/keep", json={"file_ids": [str(shot)], "reason": "screenshot"}, headers=_auth(user))
     got = (await client.get("/api/photos/cleanup", headers=_auth(user))).json()
     assert [g["keep"]["id"] for g in got["duplicate"]["groups"]] == [str(a)]
+    assert got["similar"]["count"] == 0
     assert got["screenshot"]["count"] == 0
 
     # Moved to the trash: gone from the suggestions.
@@ -67,3 +71,73 @@ async def test_cleanup_suggestions(client, db, user, root):
     await db.commit()
     got = (await client.get("/api/photos/cleanup", headers=_auth(user))).json()
     assert {o["id"] for g in got["duplicate"]["groups"] for o in g["others"]} == {str(same_bytes)}
+
+
+@pytest.mark.asyncio
+async def test_a_burst_is_similar_and_a_copy_is_a_duplicate(client, db, user, root):
+    """A Pixel burst: frames in the same second, nearly the same picture, each
+    with its own fraction of a second — Similar. A copy of one frame stamped
+    to the whole second (Takeout's metadata) — a Duplicate."""
+    shot = T.replace(microsecond=0)
+    f1, f2, f3, copy = [await _photo(db, user) for _ in range(4)]
+    await _set(db, f1, phash=BASE, quality=0.8, when=shot.replace(microsecond=100_000))
+    await _set(db, f2, phash=BASE ^ 0b1, quality=0.7, when=shot.replace(microsecond=400_000))
+    await _set(db, f3, phash=BASE ^ 0b11, quality=0.6, when=shot.replace(microsecond=700_000))
+    # A copy of the middle frame, stamped to the whole second (Takeout).
+    await _set(db, copy, phash=BASE ^ 0b1, quality=0.5, when=shot)
+    await db.execute(text("UPDATE file_media SET make = 'Pixel'"))
+    await db.commit()
+
+    got = (await client.get("/api/photos/cleanup", headers=_auth(user))).json()
+    # The copy joins only the frame it's closest to — the burst doesn't chain
+    # into one "duplicate".
+    dupes = {g["keep"]["id"]: {o["id"] for o in g["others"]} for g in got["duplicate"]["groups"]}
+    assert dupes == {str(f2): {str(copy)}}
+    # The three frames are Similar, the best first.
+    alike = {g["keep"]["id"]: {o["id"] for o in g["others"]} for g in got["similar"]["groups"]}
+    assert alike == {str(f1): {str(f2), str(f3)}}
+    # Frames that both keep their fraction are never duplicates of each other.
+    from app.photos.duplicates import same_moment
+
+    assert not same_moment(shot.replace(microsecond=100_000), shot.replace(microsecond=400_000))
+    assert same_moment(shot.replace(microsecond=100_000), shot)
+    assert same_moment(shot.replace(microsecond=100_000), shot.replace(microsecond=100_400))
+
+
+def test_a_fingerprint_needs_detail_and_the_same_colour():
+    """A pHash sees only light and dark shapes, so every plain picture gets
+    about the same one: plain squares of different colours aren't alike.
+    A re-compressed copy keeps its colour; a black-and-white version is
+    Similar but not a Duplicate; a recoloured one is neither."""
+    import io
+
+    from PIL import Image, ImageDraw, ImageOps
+
+    from app.files.thumbhash import image_to_thumbhash
+    from app.photos.duplicates import look, looks_alike
+
+    def th(img):
+        return image_to_thumbhash(img)
+
+    teal, purple = Image.new("RGB", (200, 150), (10, 120, 140)), Image.new("RGB", (200, 150), (120, 50, 100))
+    blue, olive, pale = (Image.new("RGB", (200, 150), c) for c in [(30, 60, 170), (120, 110, 20), (220, 235, 160)])
+    assert not looks_alike(th(teal), th(purple))
+    assert not looks_alike(th(teal), th(blue))
+    assert not looks_alike(th(olive), th(pale))
+    assert look(th(teal)) is not None
+
+    scene = Image.new("RGB", (400, 300), (60, 110, 170))
+    d = ImageDraw.Draw(scene)
+    d.rectangle([0, 200, 400, 300], fill=(50, 140, 60))
+    d.ellipse([150, 80, 250, 180], fill=(240, 200, 60))
+    buf = io.BytesIO()
+    scene.save(buf, "JPEG", quality=60)
+    recompressed = Image.open(io.BytesIO(buf.getvalue())).convert("RGB")
+    mono = ImageOps.grayscale(scene).convert("RGB")
+    recoloured = Image.merge("RGB", scene.split()[::-1])  # red and blue swapped
+
+    assert looks_alike(th(scene), th(recompressed))
+    assert not looks_alike(th(scene), th(mono))
+    assert looks_alike(th(scene), th(mono), mono_ok=True)
+    assert not looks_alike(th(scene), th(recoloured), mono_ok=True)
+    assert looks_alike(None, th(scene))  # nothing to go on yet: the pHash decides

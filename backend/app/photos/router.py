@@ -422,14 +422,16 @@ async def places_list(
 
 @router.get("/cleanup")
 async def cleanup_list(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
-    """What you might not want (PH-7): duplicates (each group with the one
-    to keep first), blurry shots, screenshots and large videos — with how
-    much space moving them to the trash would free."""
+    """What you might not want (PH-7): duplicates and similar shots (each
+    group with the one to keep first), blurry shots, screenshots and large
+    videos — with how much space moving them to the trash would free."""
     from app.photos import cleanup
 
     found = await cleanup.find(db, user)
-    ids = {g["keep"].file_id for g in found["duplicate"]["groups"]}
-    ids |= {r.file_id for g in found["duplicate"]["groups"] for r in g["others"]}
+    ids: set[uuid.UUID] = set()
+    for grouped in ("duplicate", "similar"):
+        ids |= {g["keep"].file_id for g in found[grouped]["groups"]}
+        ids |= {r.file_id for g in found[grouped]["groups"] for r in g["others"]}
     for reason in ("blurry", "screenshot", "large_video"):
         ids |= {r.file_id for r in found[reason]["items"]}
     rows = {
@@ -448,9 +450,12 @@ async def cleanup_list(db: AsyncSession = Depends(get_db), user: User = Depends(
         return {**_item(*rows[r.file_id], user), "size": r.size}
 
     return {
-        "duplicate": {
-            "count": found["duplicate"]["count"], "bytes": found["duplicate"]["bytes"],
-            "groups": [{"keep": out(g["keep"]), "others": [out(r) for r in g["others"]]} for g in found["duplicate"]["groups"]],
+        **{
+            grouped: {
+                "count": found[grouped]["count"], "bytes": found[grouped]["bytes"],
+                "groups": [{"keep": out(g["keep"]), "others": [out(r) for r in g["others"]]} for g in found[grouped]["groups"]],
+            }
+            for grouped in ("duplicate", "similar")
         },
         **{
             reason: {"count": found[reason]["count"], "bytes": found[reason]["bytes"], "items": [out(r) for r in found[reason]["items"]]}
@@ -461,7 +466,7 @@ async def cleanup_list(db: AsyncSession = Depends(get_db), user: User = Depends(
 
 class KeepRequest(BaseModel):
     file_ids: list[uuid.UUID] = Field(min_length=1, max_length=2000)
-    reason: Literal["duplicate", "blurry", "screenshot", "large_video"]
+    reason: Literal["duplicate", "similar", "blurry", "screenshot", "large_video"]
 
 
 @router.post("/cleanup/keep")
