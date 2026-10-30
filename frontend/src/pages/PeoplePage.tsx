@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Check, EyeOff, MoreHorizontal, PawPrint, UserRound, X } from "lucide-react";
+import { ArrowLeft, Check, EyeOff, MoreHorizontal, PawPrint, Plus, UserRound, X } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { peopleApi, type ReviewEntry, type Subject, type SubjectKind } from "@/api/people";
@@ -124,11 +124,23 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
   const chosen = entry.samples.filter((s) => !left.has(s.id));
   const cover = chosen[0]?.crop ?? entry.cover;
   const isPerson = entry.kind === "person";
-  // The same species first ("Bumi" for a dog), then the rest.
-  const picks = known
-    .filter((k) => k.name)
-    .sort((x, y) => Number(y.species === entry.species) - Number(x.species === entry.species))
-    .slice(0, 8);
+  const [active, setActive] = useState(0);
+  // Everyone already named, searched as you type: names starting with what's
+  // typed first, then ones containing it (the same species first for a pet).
+  const typed = name.trim().toLowerCase();
+  const exact = typed ? known.find((k) => k.name?.toLowerCase() === typed) : undefined;
+  const matches = typed
+    ? known
+        .filter((k) => k.name?.toLowerCase().includes(typed))
+        .sort(
+          (x, y) =>
+            Number(y.name!.toLowerCase().startsWith(typed)) - Number(x.name!.toLowerCase().startsWith(typed)) ||
+            Number(y.species === entry.species) - Number(x.species === entry.species) ||
+            x.name!.localeCompare(y.name!),
+        )
+        .slice(0, 6)
+    : [];
+  const rows = typed ? matches.length + (exact ? 0 : 1) : 0;
   const done = (label: string) => {
     void qc.invalidateQueries({ queryKey: ["people"] });
     toast.success(label);
@@ -136,12 +148,17 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
 
   const save = async (who: { person_id?: string; name?: string }, label: string) => {
     if (!chosen.length) return;
+    // A name you already use is that person — never a second one.
+    if (!who.person_id && who.name) {
+      const same = known.find((k) => k.name?.toLowerCase() === who.name!.toLowerCase());
+      if (same?.id) who = { person_id: same.id };
+    }
     setBusy(true);
     try {
       if (entry.id) {
         // A cluster: the unticked ones aren't this person, the rest are.
         for (const s of entry.samples) if (left.has(s.id)) await peopleApi.notThem(s.id, entry.id);
-        const same = who.person_id ?? known.find((k) => k.name?.toLowerCase() === who.name?.toLowerCase())?.id;
+        const same = who.person_id;
         if (same) await peopleApi.merge(entry.id, same);
         else await peopleApi.update(entry.id, { name: who.name ?? null });
       } else {
@@ -231,48 +248,93 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
         })}
       </ul>
 
-      {picks.length > 0 && (
-        <div>
-          <p className="mb-1 text-xs text-[var(--text-muted)]">{isPerson ? "It's…" : "It's…"}</p>
-          <div className="flex flex-wrap gap-1">
-            {picks.map((k) => (
-              <button
-                key={k.id}
-                type="button"
-                disabled={busy || !chosen.length}
-                onClick={() => void save({ person_id: k.id! }, k.name!)}
-                className="flex items-center gap-1.5 rounded-full border border-[var(--border)] py-0.5 pl-0.5 pr-2.5 text-xs text-[var(--text)] hover:border-[var(--accent)] hover:bg-[var(--hover)] disabled:opacity-50"
-              >
-                {k.cover ? (
-                  <img src={k.cover} alt="" className="h-5 w-5 rounded-full object-cover" />
-                ) : (
-                  <span className="h-5 w-5 rounded-full bg-[var(--hover)]" />
-                )}
-                {k.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       <form
-        className="flex items-center gap-1"
+        className="flex flex-col gap-1"
         onSubmit={(e) => {
           e.preventDefault();
-          const n = name.trim();
-          if (n) void save({ name: n }, n);
+          // Enter takes the highlighted row: someone you've named, or "new".
+          const pick = matches[active];
+          if (pick?.id) void save({ person_id: pick.id }, pick.name!);
+          else if (name.trim()) void save({ name: name.trim() }, name.trim());
         }}
       >
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={picks.length ? "Or someone new…" : isPerson ? "Who is this?" : `Name this ${entry.species ?? "pet"}`}
-          aria-label={isPerson ? "Who is this?" : `Name this ${entry.species ?? "pet"}`}
-          className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-xs"
-        />
-        <Button size="sm" variant="secondary" type="submit" disabled={busy || !name.trim() || !chosen.length} aria-label="Save name">
-          <Check className="h-3.5 w-3.5" />
-        </Button>
+        <div className="flex items-center gap-1">
+          <input
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              setActive(0);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "ArrowDown" && rows) {
+                e.preventDefault();
+                setActive((a) => (a + 1) % rows);
+              } else if (e.key === "ArrowUp" && rows) {
+                e.preventDefault();
+                setActive((a) => (a - 1 + rows) % rows);
+              } else if (e.key === "Escape" && name) {
+                e.preventDefault();
+                setName("");
+              }
+            }}
+            placeholder={isPerson ? "Who is this? Type a name…" : `Name this ${entry.species ?? "pet"}…`}
+            aria-label={isPerson ? "Who is this?" : `Name this ${entry.species ?? "pet"}`}
+            role="combobox"
+            aria-expanded={rows > 0}
+            aria-autocomplete="list"
+            className="min-w-0 flex-1 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 py-1.5 text-xs"
+          />
+          <Button size="sm" variant="secondary" type="submit" disabled={busy || !typed || !chosen.length} aria-label="Save name">
+            <Check className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        {rows > 0 && (
+          <ul role="listbox" aria-label="People you've named" className="overflow-hidden rounded-md border border-[var(--border)]">
+            {matches.map((k, i) => (
+              <li key={k.id} role="option" aria-selected={i === active}>
+                <button
+                  type="button"
+                  disabled={busy || !chosen.length}
+                  onMouseEnter={() => setActive(i)}
+                  onClick={() => void save({ person_id: k.id! }, k.name!)}
+                  className={cn(
+                    "flex w-full items-center gap-2 px-2 py-1 text-left text-xs text-[var(--text)] disabled:opacity-50",
+                    i === active && "bg-[var(--hover)]",
+                  )}
+                >
+                  {k.cover ? (
+                    <img src={k.cover} alt="" className="h-6 w-6 rounded-full object-cover" />
+                  ) : (
+                    <span className="h-6 w-6 rounded-full bg-[var(--hover)]" />
+                  )}
+                  <span className="flex-1 truncate">{k.name}</span>
+                  <span className="text-[var(--text-muted)]">{k.photos.toLocaleString()}</span>
+                </button>
+              </li>
+            ))}
+            {!exact && (
+              <li role="option" aria-selected={active === matches.length}>
+                <button
+                  type="button"
+                  disabled={busy || !chosen.length}
+                  onMouseEnter={() => setActive(matches.length)}
+                  onClick={() => void save({ name: name.trim() }, name.trim())}
+                  className={cn(
+                    "flex w-full items-center gap-2 px-2 py-1 text-left text-xs text-[var(--text)] disabled:opacity-50",
+                    active === matches.length && "bg-[var(--hover)]",
+                  )}
+                >
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[var(--hover)]">
+                    <Plus className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="flex-1 truncate">
+                    New {isPerson ? "person" : (entry.species ?? "pet")} “{name.trim()}”
+                  </span>
+                </button>
+              </li>
+            )}
+          </ul>
+        )}
       </form>
     </article>
   );

@@ -21,6 +21,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-10-30
+
+### Changed
+- **People → "Who is this?"** is a search now. The row of up to 8 name buttons is gone. The name box
+  matches everyone you've named as you type (names that start with it first). An exact name, in any
+  case, adds the photos to that person instead of making a second one. "+ New person …" is always
+  the explicit way to add someone new. Arrow keys and Enter work.
+
 ## [0.10.3] - 2026-10-30
 
 ### Added
