@@ -4,7 +4,8 @@
     GET  /api/devices/pair/{code}     has the phone claimed it yet? (for the page)
     POST /api/devices/pair/claim      the phone, with the code: an app password
     POST /api/devices/have            the phone (app password): which of these
-                                      files (SHA-256) are already in Photos
+                                      files (SHA-256) are already in Photos, and
+                                      which you deleted (don't send them back)
 
 The QR is a link — ``<server>/sync?code=…`` — so the phone's camera opens
 the download page for the app, and the app scans the same code to pair.
@@ -150,30 +151,57 @@ class HaveBody(BaseModel):
 
 @router.post("/have")
 async def have(body: HaveBody, request: Request, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    """Which of these files (by SHA-256) are already in this person's
-    Photos — the phone skips those instead of sending them again."""
-    from sqlalchemy import select
+    """Of these files (by SHA-256): ``have`` — in this person's Photos now,
+    so the phone needn't send them (and, being safely here, may free the
+    space they take on the phone); ``skip`` — photos they deleted (in the
+    trash, or deleted for good), never to be sent back. Only ``have`` is
+    proof of a backup."""
+    from sqlalchemy import select, text
 
     from app.auth.basic import client_ip, user_from_basic
     from app.files.models import UserFile
     from app.photos.library import photos_folders
+    from app.photos.models import PhotoAsset
 
     user = await user_from_basic(db, request.headers.get("authorization"), scope="upload", ip=client_ip(request))
     wanted = {h.strip().lower() for h in body.sha256 if len(h.strip()) == 64}
     if not wanted:
-        return {"have": []}
+        return {"have": [], "skip": []}
     tree = photos_folders(user.id)
-    found = (
-        await db.execute(
-            select(UserFile.content_sha256).where(
-                UserFile.user_id == user.id,
-                UserFile.trashed_at.is_(None),
-                UserFile.content_sha256.in_(wanted),
-                UserFile.folder_id.in_(select(tree.c.id)),
+    found = set(
+        (
+            await db.execute(
+                select(UserFile.content_sha256).where(
+                    UserFile.user_id == user.id,
+                    UserFile.trashed_at.is_(None),
+                    UserFile.content_sha256.in_(wanted),
+                    UserFile.folder_id.in_(select(tree.c.id)),
+                )
             )
-        )
-    ).scalars().all()
-    return {"have": sorted(set(found))}
+        ).scalars().all()
+    )
+    trashed = set(
+        (
+            await db.execute(
+                select(UserFile.content_sha256)
+                .join(PhotoAsset, PhotoAsset.file_id == UserFile.id)
+                .where(
+                    UserFile.user_id == user.id,
+                    UserFile.trashed_at.is_not(None),
+                    UserFile.content_sha256.in_(wanted),
+                )
+            )
+        ).scalars().all()
+    )
+    gone = set(
+        (
+            await db.execute(
+                text("SELECT sha256 FROM photo_deleted_hashes WHERE user_id = :u AND sha256 = ANY(:h)"),
+                {"u": user.id, "h": list(wanted)},
+            )
+        ).scalars().all()
+    )
+    return {"have": sorted(found), "skip": sorted((trashed | gone) - found)}
 
 
 __all__ = ["router"]

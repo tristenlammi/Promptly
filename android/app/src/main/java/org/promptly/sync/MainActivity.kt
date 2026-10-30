@@ -14,6 +14,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -63,6 +64,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.work.WorkInfo
@@ -362,6 +364,7 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
     val running = infos.firstOrNull { it.state == WorkInfo.State.RUNNING }
     var counts by remember { mutableStateOf<Pair<Int, Int>?>(null) } // backed up, total
     var refused by remember { mutableIntStateOf(0) }
+    var deleted by remember { mutableIntStateOf(0) }
     var update by remember { mutableStateOf<Api.Update?>(null) }
     var wifiOnly by remember { mutableStateOf(store.wifiOnly) }
     var chargingOnly by remember { mutableStateOf(store.chargingOnly) }
@@ -377,7 +380,9 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
             val items = Media.items(ctx, store.buckets)
             val ledger = Ledger(ctx)
             val ids = items.map { it.id }
-            counts = Pair(ledger.count("done", ids), items.size)
+            // Deleted in Promptly: not waiting to be sent — they stay deleted.
+            deleted = ledger.count("deleted", ids)
+            counts = Pair(ledger.count("done", ids), items.size - deleted)
             refused = ledger.count("refused", ids)
         }
     }
@@ -451,6 +456,13 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
                     )
                 }
                 if (c != null) Text("${c.first} of ${c.second} photos and videos backed up", style = MaterialTheme.typography.bodyMedium)
+                if (deleted > 0) {
+                    Text(
+                        "$deleted you deleted in Promptly — not sent again.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (refused > 0) {
                     Text("$refused couldn't be backed up (the server refused them).", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error)
@@ -492,6 +504,13 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
             }
         }
 
+        if (Build.VERSION.SDK_INT >= 30 && !store.unlinked) FreeUpCard(store, account) { tick++ }
+
+        OutlinedButton(
+            onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("${account.server}/files/photos"))) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Open Promptly Photos") }
+
         TextButton(onClick = { confirmUnlink = true }) { Text("Unlink this phone", color = MaterialTheme.colorScheme.error) }
         Text(
             "PromptlySync ${BuildConfig.VERSION_NAME}",
@@ -508,6 +527,120 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
             confirmButton = { TextButton(onClick = { confirmUnlink = false; onUnlink() }) { Text("Unlink") } },
             dismissButton = { TextButton(onClick = { confirmUnlink = false }) { Text("Cancel") } },
         )
+    }
+}
+
+/** Remove what's safely in Promptly from the phone (Android 11+). */
+@RequiresApi(30)
+@Composable
+private fun FreeUpCard(store: Store, account: Store.Account, onFreed: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var keepRecent by remember { mutableStateOf(true) }
+    var checking by remember { mutableStateOf(false) }
+    var plan by remember { mutableStateOf<FreeUp.Plan?>(null) }
+    var progress by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var freeing by remember { mutableStateOf(0L) }
+    var queue by remember { mutableStateOf<List<IntentSenderRequest>>(emptyList()) }
+    var message by remember { mutableStateOf<String?>(null) }
+    val gb = { bytes: Long ->
+        when {
+            bytes >= 1L shl 30 -> "%.1f GB".format(bytes / 1073741824.0)
+            bytes >= 10L shl 20 -> "%.0f MB".format(bytes / 1048576.0)
+            bytes >= 1L shl 20 -> "%.1f MB".format(bytes / 1048576.0)
+            else -> "%.0f KB".format(maxOf(bytes, 1024L) / 1024.0)
+        }
+    }
+
+    val confirm = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+        val rest = queue.drop(1)
+        if (result.resultCode == android.app.Activity.RESULT_OK && rest.isNotEmpty()) {
+            queue = rest
+        } else {
+            message = if (result.resultCode == android.app.Activity.RESULT_OK) {
+                "Freed ${gb(freeing)} on this phone. They're still in Promptly Photos."
+            } else {
+                "Nothing more was removed."
+            }
+            queue = emptyList()
+            plan = null
+            onFreed()
+        }
+    }
+    LaunchedEffect(queue) { queue.firstOrNull()?.let { confirm.launch(it) } }
+
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Free up space", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "Remove photos and videos from this phone that are safely in Promptly — the server checks each one " +
+                    "first. They stay in Promptly Photos.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val p = plan
+            when {
+                checking -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                    val pr = progress
+                    Text(
+                        if (pr != null && pr.second > 0) "Checking ${pr.first} of ${pr.second} with Promptly…" else "Checking with Promptly…",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                p != null && p.items.isEmpty() -> Text(
+                    if (keepRecent) "Nothing older than 30 days to remove yet." else "Nothing to remove yet.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                p != null -> {
+                    Text(
+                        "${p.items.size} photos and videos · ${gb(p.bytes)} can be removed from this phone.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            // Checked again now: unchanged on the phone, still in Promptly.
+                            message = null
+                            checking = true
+                            progress = null
+                            scope.launch {
+                                val r = withContext(Dispatchers.IO) {
+                                    runCatching { FreeUp.recheck(ctx, account, p, store.buckets ?: emptySet()) }
+                                }
+                                checking = false
+                                r.onSuccess { items ->
+                                    if (items.isEmpty()) {
+                                        plan = null
+                                        message = "Nothing to remove — things changed since the check. Try again."
+                                    } else {
+                                        freeing = items.sumOf { it.size }
+                                        queue = FreeUp.requests(ctx, items)
+                                    }
+                                }.onFailure { message = it.message ?: "Couldn't check with Promptly — nothing was removed." }
+                            }
+                        }) { Text("Free up ${gb(p.bytes)}") }
+                        TextButton(onClick = { plan = null }) { Text("Cancel") }
+                    }
+                }
+                else -> {
+                    Setting("Keep the last 30 days on this phone", null, keepRecent) { keepRecent = it }
+                    OutlinedButton(onClick = {
+                        message = null
+                        checking = true
+                        scope.launch {
+                            val r = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    FreeUp.plan(ctx, account, store.buckets ?: emptySet(), if (keepRecent) 30 else 0) { i, n -> progress = i to n }
+                                }
+                            }
+                            checking = false
+                            r.onSuccess { plan = it }.onFailure { message = it.message ?: "Couldn't check with Promptly." }
+                        }
+                    }) { Text("See what can go") }
+                }
+            }
+            message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
     }
 }
 

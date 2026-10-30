@@ -94,15 +94,18 @@ class SyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(c
                     ledger.savePending(item, sha, ledger.pending(item)?.location)
                     hashes[item] = sha
                 }
-                val there = Api.have(account, hashes.values.toList())
+                val known = Api.have(account, hashes.values.toList())
                 for ((item, sha) in hashes) {
                     if (isStopped) return Result.retry()
-                    if (sha in there) {
-                        ledger.settle(item, "done", "already there")
+                    if (sha in known.have) {
+                        ledger.settle(item, "done", "already there", sha)
+                    } else if (sha in known.skip) {
+                        // Deleted in Promptly: stays deleted.
+                        ledger.settle(item, "deleted", "deleted in Promptly", sha)
                     } else {
                         try {
                             send(account, ledger, item, sha) { sent -> bytes(done, todo.size, item, sent) }
-                            ledger.settle(item, "done")
+                            ledger.settle(item, "done", sha = sha)
                         } catch (e: Refused) {
                             if (e.status == 507) throw e // the server is full: stop, not skip
                             ledger.settle(item, "refused", e.message)

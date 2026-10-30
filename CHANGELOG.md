@@ -21,6 +21,25 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-10-30
+
+### Added
+- **PromptlySync 0.1.2 → Free up space**: removes photos and videos from the phone that are safely in
+  Promptly, and nothing else. A file only goes if all of these hold:
+  - the app backed it up, from a chosen folder;
+  - it's hashed on the phone at the time of the check;
+  - the server confirms it holds those exact bytes in Photos (not in the trash, not deleted);
+  - when you tap Free up, both checks pass again: the file is unchanged on the phone and still stored.
+
+  Anything not backed up, edited since, or deleted in Promptly stays. Android's own "Allow … to
+  delete?" dialog confirms. An option keeps the last 30 days on the phone (on by default). An "Open
+  Promptly Photos" button opens the library.
+- **A photo you delete in Promptly stays deleted**: a phone never sends it back, even after being
+  re-linked from scratch. Photos in the trash, and the SHA-256 of photos deleted for good (new
+  `photo_deleted_hashes`, migration 0228), are reported to the phone as "skip"
+  (`POST /api/devices/have` now returns `have` and `skip`). The app counts them as "deleted in
+  Promptly", not as waiting.
+
 ## [0.10.2] - 2026-10-30
 
 ### Fixed

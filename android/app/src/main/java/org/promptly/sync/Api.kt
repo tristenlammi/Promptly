@@ -88,16 +88,23 @@ object Api {
         if (code >= 500) throw IOException("The server had a problem ($code).")
     }
 
-    /** Which of these SHA-256s are already in Photos. */
-    fun have(a: Store.Account, hashes: List<String>): Set<String> {
-        if (hashes.isEmpty()) return emptySet()
+    /** Of some SHA-256s: [have] — in Photos now (the only proof of a backup);
+     *  [skip] — deleted there (in the trash or for good): never send it back. */
+    data class Known(val have: Set<String>, val skip: Set<String>)
+
+    fun have(a: Store.Account, hashes: List<String>): Known {
+        if (hashes.isEmpty()) return Known(emptySet(), emptySet())
         val body = JSONObject().put("sha256", JSONArray(hashes)).toString().toRequestBody(JSON)
         val req = Request.Builder().url("${a.server}/api/devices/have").auth(a).post(body).build()
         http.newCall(req).execute().use { r ->
             val text = r.body.string()
             check(r.code, text)
-            val arr = JSONObject(text).getJSONArray("have")
-            return (0 until arr.length()).map { arr.getString(it) }.toSet()
+            val j = JSONObject(text)
+            fun set(key: String): Set<String> {
+                val arr = j.optJSONArray(key) ?: return emptySet()
+                return (0 until arr.length()).map { arr.getString(it) }.toSet()
+            }
+            return Known(set("have"), set("skip"))
         }
     }
 

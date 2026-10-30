@@ -6,7 +6,9 @@ agree on two rules:
 
 * blobs are tombstoned (:mod:`app.files.tombstones`), never unlinked on the
   spot — every permanent delete is recoverable for 14 days;
-* a document's inline images and audio go with the document (R-027).
+* a document's inline images and audio go with the document (R-027);
+* a photo's SHA-256 is remembered (``photo_deleted_hashes``), so a phone
+  never sends back what you deleted.
 
 Nothing here commits; callers commit once for the whole operation.
 """
@@ -118,6 +120,7 @@ async def purge_file_rows(db: AsyncSession, rows, *, reason: str = "purge") -> i
         seen = {r.id for r in rows}
         rows.extend(a for a in await document_asset_rows(db, doc_ids) if a.id not in seen)
     tombstone_files(db, rows, reason=reason)
+    await remember_deleted_photos(db, rows)
     from app.files.derivatives import remove_derived
 
     for r in rows:
@@ -125,6 +128,27 @@ async def purge_file_rows(db: AsyncSession, rows, *, reason: str = "purge") -> i
         remove_derived(r.id)
         await db.delete(r)
     return len(rows)
+
+
+async def remember_deleted_photos(db: AsyncSession, rows) -> None:
+    """Note the SHA-256 of each photo among ``rows`` (a file in someone's
+    Photos library), so their phone is told to skip it from now on."""
+    from sqlalchemy import text as _text
+
+    hashed = {r.id: (r.user_id, r.content_sha256) for r in rows if r.content_sha256}
+    if not hashed:
+        return
+    photos = (
+        await db.execute(_text("SELECT file_id FROM photo_assets WHERE file_id = ANY(:ids)"), {"ids": list(hashed)})
+    ).scalars().all()
+    for fid in photos:
+        user_id, sha = hashed[fid]
+        await db.execute(
+            _text(
+                "INSERT INTO photo_deleted_hashes (user_id, sha256) VALUES (:u, :h) ON CONFLICT DO NOTHING"
+            ),
+            {"u": user_id, "h": sha},
+        )
 
 
 async def purge_folder_subtree(db: AsyncSession, folder: FileFolder, *, reason: str = "purge") -> int:

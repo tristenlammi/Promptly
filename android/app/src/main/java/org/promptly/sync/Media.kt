@@ -20,6 +20,8 @@ data class Item(
     /** Seconds. */
     val modified: Long,
     val bucket: String,
+    /** When it was taken (ms), if the phone knows. */
+    val taken: Long? = null,
 ) {
     /** Changes when the file does — an edited photo is sent again. */
     val sig: String get() = "$size:$modified"
@@ -74,6 +76,7 @@ object Media {
             MediaStore.MediaColumns.DATE_MODIFIED,
             "bucket_id",
             "bucket_display_name",
+            "datetaken",
         )
         val clauses = ArrayList<String>()
         val args = ArrayList<String>()
@@ -101,6 +104,7 @@ object Media {
                             size = size,
                             modified = c.getLong(4),
                             bucket = bucket,
+                            taken = if (c.isNull(7)) null else c.getLong(7).takeIf { it > 0 },
                         )
                     }
                 }
@@ -133,14 +137,30 @@ object Media {
 }
 
 /** What's been sent (or refused), and uploads under way. */
-class Ledger(context: Context) : SQLiteOpenHelper(context.applicationContext, "ledger.db", null, 1) {
+class Ledger(context: Context) : SQLiteOpenHelper(context.applicationContext, "ledger.db", null, 2) {
     override fun onCreate(db: SQLiteDatabase) {
-        // state: 'done' (on the server) or 'refused' (the server said no; not retried until it changes).
-        db.execSQL("CREATE TABLE sent (media_id INTEGER PRIMARY KEY, sig TEXT NOT NULL, state TEXT NOT NULL, note TEXT)")
+        // state: 'done' (on the server), 'refused' (the server said no; not
+        // retried until it changes) or 'deleted' (deleted in Promptly).
+        db.execSQL("CREATE TABLE sent (media_id INTEGER PRIMARY KEY, sig TEXT NOT NULL, state TEXT NOT NULL, note TEXT, sha TEXT)")
         db.execSQL("CREATE TABLE pending (media_id INTEGER PRIMARY KEY, sig TEXT NOT NULL, sha TEXT, location TEXT)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, old: Int, new: Int) {
+        if (old < 2) db.execSQL("ALTER TABLE sent ADD COLUMN sha TEXT")
+    }
+
+    /** media id → SHA-256 of what was sent, for those that are on the server. */
+    fun doneHashes(): Map<Long, Pair<String, String?>> {
+        val out = HashMap<Long, Pair<String, String?>>()
+        readableDatabase.rawQuery("SELECT media_id, sig, sha FROM sent WHERE state = 'done'", null).use { c ->
+            while (c.moveToNext()) out[c.getLong(0)] = Pair(c.getString(1), c.getString(2))
+        }
+        return out
+    }
+
+    fun saveHash(item: Item, sha: String) {
+        writableDatabase.execSQL("UPDATE sent SET sha = ? WHERE media_id = ? AND sig = ?", arrayOf<Any>(sha, item.id, item.sig))
+    }
 
     /** media id → sig, for everything settled. */
     fun settled(): Map<Long, String> {
@@ -165,10 +185,10 @@ class Ledger(context: Context) : SQLiteOpenHelper(context.applicationContext, "l
         return n
     }
 
-    fun settle(item: Item, state: String, note: String? = null) {
+    fun settle(item: Item, state: String, note: String? = null, sha: String? = null) {
         val db = writableDatabase
         db.insertWithOnConflict("sent", null, ContentValues().apply {
-            put("media_id", item.id); put("sig", item.sig); put("state", state); put("note", note)
+            put("media_id", item.id); put("sig", item.sig); put("state", state); put("note", note); put("sha", sha)
         }, SQLiteDatabase.CONFLICT_REPLACE)
         db.delete("pending", "media_id = ?", arrayOf(item.id.toString()))
     }

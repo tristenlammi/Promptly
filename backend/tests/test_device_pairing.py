@@ -80,7 +80,7 @@ async def test_claim_makes_an_upload_password_once(client, db, user):
 
     # And the new password signs the phone in.
     r = await client.post("/api/devices/have", headers=_basic(got["username"], got["password"]), json={"sha256": ["0" * 64]})
-    assert r.status_code == 200 and r.json() == {"have": []}
+    assert r.status_code == 200 and r.json() == {"have": [], "skip": []}
 
 
 async def test_status_is_private_to_the_owner(client, db, user):
@@ -119,9 +119,50 @@ async def test_have_finds_only_photos_files(client, db, user):
         json={"sha256": [in_photos.upper(), elsewhere, "short"]},
     )
     assert r.status_code == 200, r.text
-    assert r.json() == {"have": [in_photos]}
+    assert r.json() == {"have": [in_photos], "skip": []}
 
 
 async def test_have_needs_an_app_password(client, user):
     r = await client.post("/api/devices/have", json={"sha256": ["0" * 64]})
     assert r.status_code == 401
+
+
+async def test_a_photo_you_deleted_is_never_sent_back(client, db, user):
+    """In the trash, or deleted for good: the phone is told to skip it — even
+    a phone re-linked from scratch. Only what's really in Photos is "have"
+    (the proof the phone may free up space)."""
+    import hashlib
+
+    from sqlalchemy import text
+
+    from app.files.models import UserFile
+    from app.files.purge import purge_file_rows
+    from tests.test_photo_library_wp91 import _photo, _utc
+
+    p = await _start(client, user)
+    got = (await client.post("/api/devices/pair/claim", json={"code": p["code"], "device_name": "Phone"})).json()
+    auth = _basic(got["username"], got["password"])
+    kept, binned, purged = (hashlib.sha256(n.encode()).hexdigest() for n in ("kept", "binned", "purged"))
+    ids = {}
+    for name, sha in (("kept", kept), ("binned", binned), ("purged", purged)):
+        fid = await _photo(db, user, f"{name}.jpg", _utc(2026, 5, 1))
+        await db.execute(text("UPDATE files SET content_sha256 = :h WHERE id = :f"), {"h": sha, "f": fid})
+        ids[name] = fid
+    await db.execute(text("UPDATE files SET trashed_at = now() WHERE id = ANY(:f)"), {"f": [ids["binned"], ids["purged"]]})
+    await db.commit()
+
+    r = await client.post("/api/devices/have", headers=auth, json={"sha256": [kept, binned, purged]})
+    assert r.json() == {"have": [kept], "skip": sorted([binned, purged])}
+
+    # Empty the trash: the purged one is remembered.
+    await purge_file_rows(db, [await db.get(UserFile, ids["purged"])])
+    await db.commit()
+    assert await db.get(UserFile, ids["purged"]) is None
+    r = await client.post("/api/devices/have", headers=auth, json={"sha256": [kept, binned, purged]})
+    assert r.json() == {"have": [kept], "skip": sorted([binned, purged])}
+
+    # Restored from the trash: it's a backup again.
+    await db.execute(text("UPDATE files SET trashed_at = NULL WHERE id = :f"), {"f": ids["binned"]})
+    await db.commit()
+    r = await client.post("/api/devices/have", headers=auth, json={"sha256": [binned]})
+    assert r.json() == {"have": [binned], "skip": []}
