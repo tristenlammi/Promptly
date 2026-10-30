@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-10-30
+
+### Fixed
+- **PromptlySync 0.1.1**: tapping "Scan QR code" crashed the app. The release build's code shrinker
+  removed the constructors Google's QR scanner (ML Kit) creates by reflection; they're kept now.
+
 ## [0.10.1] - 2026-10-30
 
 ### Added
