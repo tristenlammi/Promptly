@@ -169,8 +169,8 @@ body,
    (i.e. devices without hover capability). Desktop sits unchanged
    because dense affordances are part of the visual identity there. */
 @media (hover: none) and (pointer: coarse) {
-  button[aria-label],
-  a[aria-label] {
+  html:not([data-item-app]) button[aria-label],
+  html:not([data-item-app]) a[aria-label] {
     min-height: 40px;
     min-width: 40px;
   }

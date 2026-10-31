@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, BookImage, MoreHorizontal, Play } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { usePhotosPath } from "@/components/photos/photosPath";
 import { memoriesApi } from "@/api/memories";
 import type { PhotoItem } from "@/api/photos";
 import { PhotoTile } from "@/components/photos/PhotoTile";
@@ -15,6 +16,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 /** One memory (PH-5): its photos, played from the start or opened one by
  *  one; kept as an album, or put away. */
 export function MemoryPage() {
+  const photosPath = usePhotosPath();
   const { memoryId = "" } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -42,7 +44,7 @@ export function MemoryPage() {
       await act();
       toast.success(done);
       void qc.invalidateQueries({ queryKey: ["photo-memories"] });
-      navigate("/files/photos");
+      navigate(photosPath());
     } catch (e) {
       toast.error(apiErrorMessage(e, "That didn't work."));
     }
@@ -54,7 +56,7 @@ export function MemoryPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        <Link to="/files/photos" aria-label="Back to Photos" className="rounded p-1 hover:bg-[var(--hover)]">
+        <Link to={photosPath()} aria-label="Back to Photos" className="rounded p-1 hover:bg-[var(--hover)]">
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <div className="min-w-0 flex-1">
@@ -71,7 +73,7 @@ export function MemoryPage() {
           try {
             const a = await memoriesApi.saveAsAlbum(memoryId);
             void qc.invalidateQueries({ queryKey: ["albums"] });
-            navigate(`/files/photos/albums/${a.id}`);
+            navigate(photosPath(`/albums/${a.id}`));
           } catch (e) {
             toast.error(apiErrorMessage(e, "Couldn't make the album."));
           }

@@ -1,8 +1,12 @@
-import { useLayoutEffect, useRef, useState } from "react";
-import { Archive, BookImage, Eraser, Heart, Home, Images, MapPin, Search, Settings2, Upload, UsersRound } from "lucide-react";
+import { Suspense, useLayoutEffect, useRef, useState } from "react";
+import { Archive, BookImage, Eraser, Heart, Home, Images, Loader2, MapPin, Search, Settings2, Upload, UsersRound } from "lucide-react";
 import { Link, Outlet, useLocation, useSearchParams } from "react-router-dom";
 
 import { PhotoSettingsDialog } from "@/components/photos/PhotoSettingsDialog";
+import { PhotosAppTabs } from "@/components/photos/PhotosAppTabs";
+import { usePhotosBase, usePhotosPath } from "@/components/photos/photosPath";
+import { RouteBoundary } from "@/components/system/RouteBoundary";
+import { useIsMobile } from "@/hooks/useIsMobile";
 import { UnderstandingStatus } from "@/components/photos/UnderstandingStatus";
 import { useUploadStore } from "@/store/uploadStore";
 import { cn } from "@/utils/cn";
@@ -18,12 +22,13 @@ const VIEWS = [
   { id: "family", label: "Family", icon: Home },
 ] as const;
 
+// Sub-paths under the Photos base (``/files/photos`` or ``/photos``).
 const SECTIONS = [
-  { to: "/files/photos/albums", label: "Albums", icon: BookImage },
-  { to: "/files/photos/people", label: "People", icon: UsersRound },
+  { sub: "/albums", label: "Albums", icon: BookImage },
+  { sub: "/people", label: "People", icon: UsersRound },
   // The map lives under Places (its List / Map switch).
-  { to: "/files/photos/places", label: "Places", icon: MapPin, also: "/files/photos/map" },
-  { to: "/files/photos/cleanup", label: "Clean up", icon: Eraser },
+  { sub: "/places", label: "Places", icon: MapPin, also: "/map" },
+  { sub: "/cleanup", label: "Clean up", icon: Eraser },
 ] as const;
 
 // Search and Settings sit by Upload, always in view.
@@ -39,14 +44,20 @@ const pill = (active: boolean) =>
     active ? "bg-[var(--accent-soft)] font-medium text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]",
   );
 
-export function PhotosShell() {
+/** ``app``: inside the standalone Promptly Photos app — on a phone the menu
+ *  row gives way to bottom tabs (PhotosAppTabs). */
+export function PhotosShell({ app = false }: { app?: boolean } = {}) {
   const { pathname } = useLocation();
+  const base = usePhotosBase();
+  const photosPath = usePhotosPath();
+  const isPhone = useIsMobile();
+  const phoneApp = app && isPhone;
   const [params] = useSearchParams();
   const [settingsOpen, setSettingsOpen] = useState(false);
   // Uploads go into the Photos folder, by the month each was taken.
   const uploadInput = useRef<HTMLInputElement>(null);
   const startUploads = useUploadStore((s) => s.startUploads);
-  const onTimeline = pathname === "/files/photos" || pathname === "/files/photos/";
+  const onTimeline = pathname === base || pathname === `${base}/`;
   // The menu shows icons only when its labels don't fit the space it has
   // (the sidebar, the window) — then labels again once they would.
   const nav = useRef<HTMLElement>(null);
@@ -67,7 +78,7 @@ export function PhotosShell() {
     const ro = new ResizeObserver(check);
     ro.observe(el);
     return () => ro.disconnect();
-  }, [compact]);
+  }, [compact, phoneApp]);
   const view = onTimeline ? params.get("view") || "all" : null;
 
   return (
@@ -80,17 +91,22 @@ export function PhotosShell() {
         {onTimeline ? (
           <h1 className="mr-2 shrink-0 text-base font-semibold text-[var(--text)]">Photos</h1>
         ) : (
-          <Link to="/files/photos" className="mr-2 shrink-0 text-base font-semibold text-[var(--text)]">
+          <Link to={photosPath()} className="mr-2 shrink-0 text-base font-semibold text-[var(--text)]">
             Photos
           </Link>
         )}
-        <nav ref={nav} aria-label="Photos" className="flex min-w-0 flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none]">
+        {phoneApp && <span className="flex-1" />}
+        <nav
+          ref={nav}
+          aria-label="Photos"
+          className={cn("min-w-0 flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none]", phoneApp ? "hidden" : "flex")}
+        >
           {VIEWS.map((v) => {
             const Icon = v.icon;
             return (
               <Link
                 key={v.id}
-                to={v.id === "all" ? "/files/photos" : `/files/photos?view=${v.id}`}
+                to={v.id === "all" ? photosPath() : photosPath(`?view=${v.id}`)}
                 aria-current={view === v.id ? "page" : undefined}
                 title={v.label}
                 className={pill(view === v.id)}
@@ -102,11 +118,11 @@ export function PhotosShell() {
             );
           })}
           {SECTIONS.map((s) => {
-            const active =
-              pathname.startsWith(s.to) || ("also" in s && pathname.startsWith(s.also));
+            const to = photosPath(s.sub);
+            const active = pathname.startsWith(to) || ("also" in s && pathname.startsWith(photosPath(s.also)));
             const Icon = s.icon;
             return (
-              <Link key={s.to} to={s.to} aria-current={active ? "page" : undefined} title={s.label} className={pill(active)}>
+              <Link key={s.sub} to={to} aria-current={active ? "page" : undefined} title={s.label} className={pill(active)}>
                 <Icon className="h-3.5 w-3.5" />
                 <span className={compact ? "sr-only" : undefined}>{s.label}</span>
               </Link>
@@ -117,24 +133,29 @@ export function PhotosShell() {
           <span className="mr-1.5 inline-flex">
             <UnderstandingStatus />
           </span>
-          <Link
-            to="/files/photos/search"
-            aria-label="Search photos"
-            title="Search photos"
-            aria-current={pathname.startsWith("/files/photos/search") ? "page" : undefined}
-            className={iconButton(pathname.startsWith("/files/photos/search"))}
-          >
-            <Search className="h-4 w-4" />
-          </Link>
-          <button
-            type="button"
-            aria-label="Photos settings"
-            title="Photos settings"
-            onClick={() => setSettingsOpen(true)}
-            className={iconButton(false)}
-          >
-            <Settings2 className="h-4 w-4" />
-          </button>
+          {/* On a phone in the app, Search and Settings live in the tabs. */}
+          {!phoneApp && (
+            <>
+              <Link
+                to={photosPath("/search")}
+                aria-label="Search photos"
+                title="Search photos"
+                aria-current={pathname.startsWith(photosPath("/search")) ? "page" : undefined}
+                className={iconButton(pathname.startsWith(photosPath("/search")))}
+              >
+                <Search className="h-4 w-4" />
+              </Link>
+              <button
+                type="button"
+                aria-label="Photos settings"
+                title="Photos settings"
+                onClick={() => setSettingsOpen(true)}
+                className={iconButton(false)}
+              >
+                <Settings2 className="h-4 w-4" />
+              </button>
+            </>
+          )}
           <input
             ref={uploadInput}
             type="file"
@@ -159,8 +180,26 @@ export function PhotosShell() {
         </span>
       </header>
       <div className="flex min-h-0 flex-1 flex-col">
-        <Outlet />
+        {/* In Files, AppLayout's boundary catches a page's chunk loading;
+            the standalone app has none above it, so it brings its own. */}
+        {app ? (
+          <RouteBoundary>
+            <Suspense
+              fallback={
+                <div className="flex h-full items-center justify-center text-sm text-[var(--text-muted)]">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading…
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </RouteBoundary>
+        ) : (
+          <Outlet />
+        )}
       </div>
+      {phoneApp && <PhotosAppTabs onSettings={() => setSettingsOpen(true)} />}
       {settingsOpen && <PhotoSettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   );

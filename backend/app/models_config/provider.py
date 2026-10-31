@@ -696,6 +696,19 @@ def _model_tool_support(provider: "ModelProvider", model_id: str) -> bool | None
     return None
 
 
+def _model_takes_temperature(provider: "ModelProvider", model_id: str) -> bool:
+    """Does an OpenRouter model accept ``temperature``? From the cached
+    catalog's ``supports_temperature`` when it's there; otherwise every
+    model except Anthropic's, whose current API rejects sampling params."""
+    for row in provider.models or []:
+        if isinstance(row, dict) and row.get("id") == model_id:
+            val = row.get("supports_temperature")
+            if isinstance(val, bool):
+                return val
+            break
+    return not model_id.lower().startswith("anthropic/")
+
+
 def _model_reasoning_support(provider: "ModelProvider", model_id: str) -> bool:
     """Does this model reason natively — from the provider's own catalog
     (OpenRouter says so per model) when it's there, else a guess from the
@@ -1242,6 +1255,15 @@ class ModelRouter:
         # model"), and from API version 2026-10-21 every model does. So it's
         # never sent; an older Claude samples at its default (temperature 1).
         if provider.type == "anthropic":
+            for key in ("temperature", "top_p", "top_k"):
+                create_kwargs.pop(key, None)
+        # The same Claude models through OpenRouter: with
+        # ``require_parameters`` (below) OpenRouter won't route a
+        # ``temperature`` to an endpoint that can't take it, so the request
+        # 404s ("No endpoints found that can handle the requested
+        # parameters"). Go by the catalog's ``supported_parameters`` when we
+        # have it, else assume Claude rejects sampling params.
+        elif provider.type == "openrouter" and not _model_takes_temperature(provider, model_id):
             for key in ("temperature", "top_p", "top_k"):
                 create_kwargs.pop(key, None)
 
@@ -1812,6 +1834,13 @@ class ModelRouter:
                 # prompting, which leaks the tool-call markup into content — so
                 # the chat path drops tools for them (see _model_tool_support).
                 "supports_tools": "tools" in (m.get("supported_parameters") or []),
+                # Claude 4.7+ rejects ``temperature``; sending it to a model
+                # that can't take it makes OpenRouter's routing fail.
+                **(
+                    {"supports_temperature": "temperature" in m["supported_parameters"]}
+                    if isinstance(m.get("supported_parameters"), list)
+                    else {}
+                ),
             }
             # Only include the privacy key when we actually fetched
             # endpoint data — an explicit ``null`` would look like

@@ -150,6 +150,11 @@ class AppSettings(Base):
     public_origins: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, default=list, server_default="'[]'::jsonb"
     )
+    # Item Store kinds an admin hid from everyone (0229). Files people
+    # already made stay readable.
+    disabled_items: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="'[]'::jsonb"
+    )
 
     # ----- Chat tool limits -----
     # Per-turn cap on how many ``web_search`` calls a single assistant

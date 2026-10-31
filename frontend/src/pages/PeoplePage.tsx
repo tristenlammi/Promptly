@@ -3,7 +3,8 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { ArrowLeft, Check, EyeOff, MoreHorizontal, PawPrint, Plus, UserRound, X } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import { peopleApi, type ReviewEntry, type Subject, type SubjectKind } from "@/api/people";
+import { usePhotosPath } from "@/components/photos/photosPath";
+import { peopleApi, reviewKey, type ReviewEntry, type Subject, type SubjectKind } from "@/api/people";
 import type { PhotoItem } from "@/api/photos";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
@@ -16,6 +17,7 @@ import { cn } from "@/utils/cn";
 /** People & Pets (PH-3): who's in your photos — name them once, and
  *  "Who is this?" for the ones not named yet. */
 export function PeoplePage() {
+  const photosPath = usePhotosPath();
   const [params, setParams] = useSearchParams();
   const kind: SubjectKind = params.get("kind") === "pet" ? "pet" : "person";
   const [showHidden, setShowHidden] = useState(false);
@@ -62,7 +64,7 @@ export function PeoplePage() {
             <h2 className="mb-2 text-sm font-semibold text-[var(--text)]">Who is this?</h2>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(18rem,1fr))] gap-3">
               {unnamed.map((r) => (
-                <ReviewCard key={r.id ?? `species-${r.species}`} entry={r} known={named} className="w-full" />
+                <ReviewCard key={reviewKey(r)} entry={r} known={named} className="w-full" />
               ))}
             </div>
           </section>
@@ -79,7 +81,7 @@ export function PeoplePage() {
           <ul aria-label={kind === "person" ? "People" : "Pets"} className="grid grid-cols-[repeat(auto-fill,minmax(7.5rem,1fr))] gap-4">
             {named.map((p) => (
               <li key={p.id}>
-                <Link to={`/files/photos/people/${p.id}`} className="group flex flex-col items-center gap-1.5 text-center">
+                <Link to={photosPath(`/people/${p.id}`)} className="group flex flex-col items-center gap-1.5 text-center">
                   <Avatar subject={p} size="lg" />
                   <span className="text-sm font-medium text-[var(--text)] group-hover:underline">
                     {p.name}
@@ -155,18 +157,41 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
     }
     setBusy(true);
     try {
-      if (entry.id) {
-        // A cluster: the unticked ones aren't this person, the rest are.
+      if (entry.id && isPerson) {
+        // A cluster: the unticked ones aren't this person; the ticked ones
+        // are (confirmed by you), and the rest of the cluster — and their
+        // look-alikes — follow from them.
+        for (const s of entry.samples) if (left.has(s.id)) await peopleApi.notThem(s.id, entry.id);
+        await peopleApi.nameMany(chosen.map((s) => s.id), who);
+      } else if (entry.id) {
         for (const s of entry.samples) if (left.has(s.id)) await peopleApi.notThem(s.id, entry.id);
         const same = who.person_id;
         if (same) await peopleApi.merge(entry.id, same);
         else await peopleApi.update(entry.id, { name: who.name ?? null });
       } else {
+        // Loose faces (or a species of animal): the unticked ones aren't a
+        // suggested person, the ticked ones are who you said.
+        if (entry.suggest) for (const s of entry.samples) if (left.has(s.id)) await peopleApi.notThem(s.id, entry.suggest.id);
         await peopleApi.nameMany(chosen.map((s) => s.id), who);
       }
       setName("");
       setLeft(new Set());
       done(isPerson ? `That's ${label}.` : `That's ${label} — the rest of their photos will follow.`);
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't save that."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // "Is this Sarah?" — No: none of these are them, and they won't be asked about them again.
+  const notSuggested = async () => {
+    if (!entry.suggest) return;
+    setBusy(true);
+    try {
+      for (const s of entry.samples) await peopleApi.notThem(s.id, entry.suggest.id);
+      setLeft(new Set());
+      done(`Got it — not ${entry.suggest.name ?? "them"}.`);
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't save that."));
     } finally {
@@ -184,7 +209,10 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
     }
   };
 
-  const title = isPerson
+  const suggest = entry.suggest;
+  const title = suggest
+    ? `Is this ${suggest.name ?? "them"}?`
+    : isPerson
     ? `Someone in ${entry.photos.toLocaleString()} ${entry.photos === 1 ? "photo" : "photos"}`
     : `A ${entry.species ?? "pet"} in ${entry.photos.toLocaleString()} ${entry.photos === 1 ? "photo" : "photos"}`;
 
@@ -203,6 +231,11 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
         )}
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-[var(--text)]">{title}</p>
+          {suggest && (
+            <p className="text-xs text-[var(--text-muted)]">
+              {entry.photos.toLocaleString()} {entry.photos === 1 ? "photo" : "photos"} that look like them
+            </p>
+          )}
           {entry.samples.length > 1 && <p className="text-xs text-[var(--text-muted)]">Untick any that aren't them.</p>}
         </div>
         {entry.id && (
@@ -248,6 +281,24 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
         })}
       </ul>
 
+      {suggest && (
+        <div className="flex items-center gap-2" role="group" aria-label={title}>
+          {suggest.cover && <img src={suggest.cover} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />}
+          <Button
+            size="sm"
+            variant="primary"
+            className="h-9 flex-1"
+            disabled={busy || !chosen.length}
+            onClick={() => void save({ person_id: suggest.id }, suggest.name ?? "them")}
+          >
+            <Check className="h-4 w-4" /> Yes{chosen.length < entry.samples.length ? ` (${chosen.length})` : ""}
+          </Button>
+          <Button size="sm" variant="secondary" className="h-9 flex-1" disabled={busy} onClick={() => void notSuggested()}>
+            <X className="h-4 w-4" /> No
+          </Button>
+        </div>
+      )}
+
       <form
         className="flex flex-col gap-1"
         onSubmit={(e) => {
@@ -277,7 +328,7 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
                 setName("");
               }
             }}
-            placeholder={isPerson ? "Who is this? Type a name…" : `Name this ${entry.species ?? "pet"}…`}
+            placeholder={suggest ? "Someone else? Type a name…" : isPerson ? "Who is this? Type a name…" : `Name this ${entry.species ?? "pet"}…`}
             aria-label={isPerson ? "Who is this?" : `Name this ${entry.species ?? "pet"}`}
             role="combobox"
             aria-expanded={rows > 0}
@@ -343,6 +394,7 @@ export function ReviewCard({ entry, known, className }: { entry: ReviewEntry; kn
 /** One person or pet: their photos, and naming, hiding, "this is me",
  *  merging. */
 export function PersonPage() {
+  const photosPath = usePhotosPath();
   const { personId = "" } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -392,7 +444,7 @@ export function PersonPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center gap-3 border-b border-[var(--border)] px-4 py-3">
-        <Link to={`/files/photos/people${kind === "pet" ? "?kind=pet" : ""}`} aria-label="Back to people" className="rounded p-1 hover:bg-[var(--hover)]">
+        <Link to={photosPath(`/people${kind === "pet" ? "?kind=pet" : ""}`)} aria-label="Back to people" className="rounded p-1 hover:bg-[var(--hover)]">
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <Avatar subject={person} size="md" />
@@ -471,7 +523,7 @@ export function PersonPage() {
                   await peopleApi.merge(personId, o.id!);
                   refresh();
                   toast.success(`Merged into ${o.name}.`);
-                  navigate(`/files/photos/people/${o.id}`, { replace: true });
+                  navigate(photosPath(`/people/${o.id}`), { replace: true });
                 } catch (e) {
                   toast.error(apiErrorMessage(e, "Couldn't merge them."));
                 }

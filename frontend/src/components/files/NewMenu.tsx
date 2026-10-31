@@ -39,7 +39,7 @@ export interface NewItemAction {
   key: string;
   label: string;
   icon: ReactNode;
-  group: "create" | "import" | "upload";
+  group: "create" | "items" | "import" | "upload";
   onSelect: () => void;
 }
 
@@ -71,7 +71,6 @@ export function useNewItems({
   const sheetInputRef = useRef<HTMLInputElement | null>(null);
   const startUploads = useUploadStore((s) => s.startUploads);
   const changed = () => onChanged?.();
-
   const newOffice = async (kind: NewOfficeKind) => {
     if (creating) return;
     setCreating(true);

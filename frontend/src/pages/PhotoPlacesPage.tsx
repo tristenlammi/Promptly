@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Map as MapIcon, MapPin } from "lucide-react";
 import { Link, useParams } from "react-router-dom";
 
+import { usePhotosPath } from "@/components/photos/photosPath";
 import { photosApi, type PhotoItem } from "@/api/photos";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
@@ -34,18 +35,19 @@ function Header({ back, label, title, sub, action }: { back: string; label: stri
 }
 
 function PlaceList({ country }: { country?: string }) {
+  const photosPath = usePhotosPath();
   const { data, isLoading, error } = useQuery({ queryKey: ["photo-places", country ?? ""], queryFn: () => photosApi.places(country) });
   const cards = country
-    ? (data?.places ?? []).map((p) => ({ key: String(p.id), to: `/files/photos/places/${country}/${p.id}`, name: p.name, sub: p.admin1, count: p.count, cover: p.cover }))
-    : (data?.countries ?? []).map((c) => ({ key: c.code, to: `/files/photos/places/${c.code}`, name: c.name, sub: null, count: c.count, cover: c.cover }));
+    ? (data?.places ?? []).map((p) => ({ key: String(p.id), to: photosPath(`/places/${country}/${p.id}`), name: p.name, sub: p.admin1, count: p.count, cover: p.cover }))
+    : (data?.countries ?? []).map((c) => ({ key: c.code, to: photosPath(`/places/${c.code}`), name: c.name, sub: null, count: c.count, cover: c.cover }));
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header
-        back={country ? "/files/photos/places" : "/files/photos"}
+        back={country ? photosPath("/places") : photosPath()}
         label={country ? "Back to places" : "Back to Photos"}
         title={country ? data?.country?.name ?? country : "Places"}
         action={
-          <Link to="/files/photos/map" className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
+          <Link to={photosPath("/map")} className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
             <MapIcon className="h-3.5 w-3.5" /> Map
           </Link>
         }
@@ -85,6 +87,7 @@ function PlaceList({ country }: { country?: string }) {
 }
 
 function PlacePhotos({ country, placeId }: { country: string; placeId: number }) {
+  const photosPath = usePhotosPath();
   const { data: towns } = useQuery({ queryKey: ["photo-places", country], queryFn: () => photosApi.places(country) });
   const town = towns?.places?.find((p) => p.id === placeId);
   const pages = useInfiniteQuery({
@@ -110,7 +113,7 @@ function PlacePhotos({ country, placeId }: { country: string; placeId: number })
   return (
     <div className="flex h-full min-h-0 flex-col">
       <Header
-        back={`/files/photos/places/${country}`}
+        back={photosPath(`/places/${country}`)}
         label={`Back to ${towns?.country?.name ?? "the country"}`}
         title={town?.name ?? "Photos"}
         sub={[town?.admin1, towns?.country?.name].filter(Boolean).join(", ")}

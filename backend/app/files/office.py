@@ -49,6 +49,9 @@ Access = Literal["none", "read", "comment", "edit"]
 _SHELLS: dict[str, tuple[str, str]] = {
     GeneratedKind.SHEET.value: (SHEET_MIME, ".sheet"),
     GeneratedKind.WHITEBOARD.value: (WHITEBOARD_MIME, ".whiteboard"),
+    # Item Store files (app/items). Each kind has its own suffix (.workout),
+    # which a rename keeps — see item_filename.
+    "item": ("application/vnd.promptly.item+json", ".item"),
 }
 
 OFFICE_SOURCE_KINDS = frozenset(
@@ -66,10 +69,28 @@ def shell_filename(kind: str, title: str) -> str:
     from app.files.safety import sanitize_filename
 
     suffix = _SHELLS[kind][1]
+    if kind == "item":
+        return item_filename(title)
     clean = (title or "Untitled").strip()[:240] or "Untitled"
     try:
         return sanitize_filename(f"{clean}{suffix}")
     except Exception:  # noqa: BLE001 — an odd title still gets a shell
+        return f"Untitled{suffix}"
+
+
+def item_filename(name: str, suffix: str | None = None) -> str:
+    """An item file's name: ``name`` keeping (or given) its kind's suffix."""
+    from app.files.safety import sanitize_filename
+    from app.items.registry import get_spec, kind_for_filename
+
+    if suffix is None:
+        spec = get_spec(kind_for_filename(name))
+        suffix = spec.suffix if spec is not None else ".item"
+    stem = name[: -len(suffix)] if name.lower().endswith(suffix.lower()) else name
+    stem = stem.strip()[:200] or "Untitled"
+    try:
+        return sanitize_filename(f"{stem}{suffix}")
+    except Exception:  # noqa: BLE001 — an odd title still gets a name
         return f"Untitled{suffix}"
 
 
@@ -186,6 +207,10 @@ async def content_for_shell(db: AsyncSession, row: UserFile) -> Any | None:
     """The ``Spreadsheet`` / ``WorkspaceCanvas`` behind a shell."""
     from app.chat.models import Spreadsheet, WorkspaceCanvas
 
+    if row.source_kind == "item":
+        from app.items.models import ItemDocument
+
+        return await db.get(ItemDocument, row.id)
     model = {
         GeneratedKind.SHEET.value: Spreadsheet,
         GeneratedKind.WHITEBOARD.value: WorkspaceCanvas,
@@ -301,6 +326,11 @@ def export_for_download(row: UserFile, entity: Any) -> tuple[bytes, str, str]:
     """(bytes, filename, MIME) for downloading a shell — exported on demand.
     Synchronous (openpyxl / the scene decoder); run it off the event loop."""
     base = (row.filename or "Untitled").rsplit(".", 1)[0] or "Untitled"
+    if row.source_kind == "item":
+        from app.items.service import export_json
+
+        ext = (row.filename or "x.item").rsplit(".", 1)[-1]
+        return export_json(row, entity), f"{base}.{ext}.json", "application/json"
     if row.source_kind == GeneratedKind.SHEET.value:
         from app.workspaces.sheet_io import to_xlsx
 

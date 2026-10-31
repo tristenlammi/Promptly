@@ -295,6 +295,14 @@ export function NotificationsPanel() {
                 onChange={(v) => toggle("invite", v)}
                 dimmed={!prefs.enabled}
               />
+              <CategoryRow
+                title="Item reminders"
+                subtitle="Reminders your items set — habits, medication, trips, birthdays."
+                checked={prefs.item_reminder ?? true}
+                busy={prefsBusy === "item_reminder"}
+                onChange={(v) => toggle("item_reminder", v)}
+                dimmed={!prefs.enabled}
+              />
             </div>
           )}
           {prefsError && (

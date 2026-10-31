@@ -47,6 +47,7 @@ class PreferencesSchema(BaseModel):
     mention: bool
     assignment: bool
     invite: bool
+    item_reminder: bool = True
 
 
 class PreferencesUpdate(BaseModel):
@@ -62,6 +63,7 @@ class PreferencesUpdate(BaseModel):
     mention: bool | None = None
     assignment: bool | None = None
     invite: bool | None = None
+    item_reminder: bool | None = None
 
 
 class NotificationActor(BaseModel):

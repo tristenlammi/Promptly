@@ -185,7 +185,11 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
             counts["documents"] += 1
         elif is_shell(f):
             stem = f.filename.rsplit(".", 1)[0] if "." in f.filename else f.filename
-            ext = ".xlsx" if f.source_kind == GeneratedKind.SHEET.value else ".excalidraw"
+            ext = (
+                ".xlsx" if f.source_kind == GeneratedKind.SHEET.value
+                else "." + f.filename.rsplit(".", 1)[-1] + ".json" if f.source_kind == "item"
+                else ".excalidraw"
+            )
             arc = unique(folder + _safe(stem or "Untitled") + ext)
             entries.append({"a": arc, "k": "shell", "f": str(f.id), "s": int(f.size_bytes or 0), "t": mtime})
             counts["documents"] += 1

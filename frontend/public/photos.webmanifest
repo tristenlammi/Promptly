@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest.json",
+  "name": "Promptly Photos",
+  "short_name": "Photos",
+  "description": "Your Promptly photo library as its own app — timeline, albums, people and pets, places, and search that understands what's in your photos.",
+  "id": "/photos/",
+  "start_url": "/photos/?source=pwa",
+  "scope": "/photos/",
+  "display": "standalone",
+  "background_color": "#FAF9F7",
+  "theme_color": "#D97757",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "photo",
+    "lifestyle",
+    "utilities"
+  ],
+  "icons": [
+    {
+      "src": "/pwa-photos-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-photos-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-photos-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Albums",
+      "short_name": "Albums",
+      "url": "/photos/albums?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/pwa-photos-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "People & pets",
+      "short_name": "People",
+      "url": "/photos/people?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/pwa-photos-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Search photos",
+      "short_name": "Search",
+      "url": "/photos/search?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/pwa-photos-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

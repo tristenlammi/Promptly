@@ -182,7 +182,10 @@ async def test_relationships_are_yours_and_a_wrong_merge_is_split(client, db, us
     faces = [await _face(db, user, 3) for _ in range(6)]
     await people.cluster(budget=20)
     pid = await _person_of(db, faces[0])
-    other = (await client.post(f"/api/photos/faces/{faces[0]}/person", json={"name": "Ana"}, headers=_auth(user))).json()
+    # Someone else, named (a face of their own — naming one of the cluster's
+    # faces would bring the whole cluster along).
+    ana = await _face(db, user, 4)
+    other = (await client.post(f"/api/photos/faces/{ana}/person", json={"name": "Ana"}, headers=_auth(user))).json()
 
     # "My wife" — and only one person is.
     r = await client.put(f"/api/photos/people/{pid}/relationship", json={"label": "my wife"}, headers=_auth(user))

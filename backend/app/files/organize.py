@@ -241,13 +241,17 @@ async def _ensure_path(db: AsyncSession, user: Any, path: str) -> Any | None:
 async def _rename_file(db: AsyncSession, row: Any, name: str) -> None:
     """As Drive's rename: a Promptly Doc / Sheet / Whiteboard keeps its
     suffix and its editor title follows the name."""
-    from app.files.office import content_for_shell, is_shell, shell_filename
+    from app.files.office import content_for_shell, is_shell, item_filename, shell_filename
     from app.files.office_templates import office_title
 
     row.filename = name
     if is_shell(row):
         title = office_title(row).strip() or "Untitled"
-        row.filename = row.original_filename = shell_filename(row.source_kind, title)
+        row.filename = row.original_filename = (
+            item_filename(name, "." + row.original_filename.rsplit(".", 1)[-1])
+            if row.source_kind == "item"
+            else shell_filename(row.source_kind, title)
+        )
         entity = await content_for_shell(db, row)
         if entity is not None:
             entity.title = title[:200]

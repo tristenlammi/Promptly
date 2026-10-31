@@ -30,7 +30,8 @@ export type SystemFolderKind =
   | "generated_media"
   | "workspaces_root"
   | "templates"
-  | "camera_uploads";
+  | "camera_uploads"
+  | "apps";
 
 /** Compact representation of one grantee on a file/folder.
  *  Mirrors :class:`GranteeBrief` on the backend. ``grant_id`` is

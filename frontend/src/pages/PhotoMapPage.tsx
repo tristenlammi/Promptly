@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import type { GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
+import { usePhotosPath } from "@/components/photos/photosPath";
 import { photosApi, type PhotoItem } from "@/api/photos";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { useAuthStore } from "@/store/authStore";
@@ -30,6 +31,7 @@ const COLORS = {
 };
 
 export function PhotoMapPage() {
+  const photosPath = usePhotosPath();
   const { data, error, isLoading } = useQuery({ queryKey: ["photo-map"], queryFn: photosApi.map, staleTime: 5 * 60_000 });
   const theme = useThemeStore((s) => s.resolved());
   const box = useRef<HTMLDivElement>(null);
@@ -170,14 +172,14 @@ export function PhotoMapPage() {
     // flex-1 as well as h-full: the map's box must have a real height.
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        <Link to="/files/photos/places" aria-label="Back to places" className="rounded p-1 hover:bg-[var(--hover)]">
+        <Link to={photosPath("/places")} aria-label="Back to places" className="rounded p-1 hover:bg-[var(--hover)]">
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <h1 className="flex-1 text-base font-semibold text-[var(--text)]">Map</h1>
         <span className="text-xs text-[var(--text-muted)]">
           {data ? `${data.ids.length.toLocaleString()} ${data.ids.length === 1 ? "photo" : "photos"} with a place` : ""}
         </span>
-        <Link to="/files/photos/places" className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
+        <Link to={photosPath("/places")} className="flex items-center gap-1 rounded-full px-3 py-1 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]">
           <List className="h-3.5 w-3.5" /> List
         </Link>
       </header>

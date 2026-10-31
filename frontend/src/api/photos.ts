@@ -45,6 +45,28 @@ export interface EditOps {
   brightness: number;
   contrast: number;
   saturation: number;
+  /** Drawn on top, last: coordinates 0-1 of the finished picture, widths
+   *  and sizes a fraction of its shorter side. */
+  markup?: MarkupShape[];
+}
+
+export type MarkupType =
+  | "pen" | "highlighter" | "line" | "arrow" | "rect" | "ellipse" | "text" | "blur" | "emoji" | "sticker";
+
+/** One mark on a photo. pen/highlighter: points = the stroke; line, arrow,
+ *  rect, ellipse, blur: points = [start, end]; text, emoji, sticker:
+ *  points = [anchor] (text: top-left, emoji/sticker: centre). */
+export interface MarkupShape {
+  type: MarkupType;
+  points: [number, number][];
+  color?: string;
+  width?: number;
+  size?: number;
+  text?: string;
+  emoji?: string;
+  sticker?: string;
+  /** Degrees, clockwise (emoji, stickers). */
+  rotation?: number;
 }
 
 export type CleanupReason = "duplicate" | "similar" | "blurry" | "screenshot" | "large_video";
@@ -157,6 +179,17 @@ export const photosApi = {
   },
   async revertEdit(fileId: string): Promise<{ ops: null; item: PhotoItem | null }> {
     const { data } = await apiClient.delete(`/photos/files/${fileId}/edit`);
+    return data;
+  },
+  /** These (unsaved) edits made now: a PNG (at most 2560 px; Copy) or the
+   *  full-size JPEG (Download / Share). Nothing is kept. */
+  async render(fileId: string, ops: EditOps, format: "png" | "jpeg" = "png"): Promise<Blob> {
+    const { data } = await apiClient.post(`/photos/files/${fileId}/render`, ops, { params: { format }, responseType: "blob" });
+    return data as Blob;
+  },
+  /** These edits as a new photo beside the original (which isn't changed). */
+  async saveAsNew(fileId: string, ops: EditOps): Promise<{ file_id: string; filename: string }> {
+    const { data } = await apiClient.post(`/photos/files/${fileId}/save-as-new`, ops);
     return data;
   },
   /** The edited photo, full size, as a JPEG download. */

@@ -1,0 +1,23 @@
+/* The item UI kit's motion (imported by the item shell). */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes itemPop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.item-pop { animation: itemPop 260ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="animate-["], .item-pop { animation: none !important; }
+}
+@keyframes appWiggle {
+  from { transform: rotate(-1.5deg); }
+  to { transform: rotate(1.5deg); }
+}

@@ -1,12 +1,13 @@
 """People and pets (PH-3) — the owner's API.
 
     GET   /api/photos/people?kind=person|pet     who's in your photos, most photos first
-    GET   /api/photos/people/review              "Who is this?" — the biggest unnamed people
+    GET   /api/photos/people/review              "Who is this?" — the biggest unnamed people, and
+                                                 "Is this Sarah?" (``suggest``) for look-alikes
     GET   /api/photos/people/{id}                one, with its photos (keyset pages)
     PATCH /api/photos/people/{id}                name, hide, cover, "this is me"
     POST  /api/photos/people/{id}/merge          {"into": id} — the same person twice
     GET   /api/photos/files/{file_id}/people     the faces and animals in a photo, and who
-    POST  /api/photos/faces/{id}/person          {"person_id"} or {"name"} — "this is …"
+    POST  /api/photos/faces/{id}/person          {"person_id"} or {"name"} — "this is …" (spreads)
     POST  /api/photos/faces/{id}/not             {"person_id"} — "not them"
     PUT   /api/photos/people/{id}/relationship   {"label"} — "my wife"; yours only
     GET   /api/photos/people/{id}/faces          their faces (or a pet's photos), for splitting
@@ -104,6 +105,30 @@ async def review(db: AsyncSession = Depends(get_db), user: User = Depends(get_cu
                 )
             ).scalars().all()
             out.append({**p, "kind": kind, "samples": [{"id": str(s), "crop": _crop(s, user)} for s in samples]})
+    # Questions, not answers: an unnamed group, or faces nobody's yet, that
+    # look like someone you've named but not surely enough to be filed —
+    # "Is this Sarah?" (yes = "these are Sarah", no = "not Sarah").
+    named = {x["id"]: x for x in await _list(db, user, "person", hidden=False) if x["name"]}
+    if named:
+        groups = {uuid.UUID(e["id"]): [uuid.UUID(s["id"]) for s in e["samples"]] for e in out if e["kind"] == "person"}
+        group_q, loose = await people.suggestions(db, user.id, groups)
+        brief = lambda pid: {k: named[str(pid)][k] for k in ("id", "name", "cover")}  # noqa: E731
+        for e in out:
+            pid = group_q.get(uuid.UUID(e["id"])) if e["kind"] == "person" else None
+            if pid is not None and str(pid) in named:
+                e["suggest"] = brief(pid)
+        for pid, faces in loose.items():
+            if str(pid) not in named:
+                continue
+            n = await db.scalar(
+                text("SELECT count(DISTINCT file_id) FROM photo_faces WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                {"ids": [str(f) for f in faces]},
+            )
+            out.append({
+                "id": None, "kind": "person", "species": None, "name": None, "photos": int(n or 0), "hidden": False,
+                "me": False, "cover": _crop(faces[0], user), "suggest": brief(pid),
+                "samples": [{"id": str(f), "crop": _crop(f, user)} for f in faces],
+            })
     # Animals nobody's named (or that weren't clearly any named pet), by
     # species: "A dog in 214 photos — who is this?"
     for species, n in (
@@ -129,7 +154,8 @@ async def review(db: AsyncSession = Depends(get_db), user: User = Depends(get_cu
             "cover": _crop(samples[0], user) if samples else None,
             "samples": [{"id": str(s), "crop": _crop(s, user)} for s in samples],
         })
-    out.sort(key=lambda p: -p["photos"])
+    # Quick yes/no questions first, then the biggest.
+    out.sort(key=lambda p: ("suggest" not in p, -p["photos"]))
     return {"people": out}
 
 
@@ -237,6 +263,8 @@ async def merge_people(
     if src.id == dst.id or src.kind != dst.kind:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Those can't be merged.")
     moved = await people.merge(db, src.id, dst.id)
+    if dst.kind == "person":
+        await people.relook(db, dst.id)
     await db.commit()
     return {"moved": moved, "into": str(dst.id)}
 
@@ -409,9 +437,12 @@ async def assign_many(
     pid = await _target(db, user, kind, found[0][1], body)
     for _k, obs in found:
         if kind == "person":
-            await people.assign(db, obs.id, pid)
+            await people.assign(db, obs.id, pid, spread=False)
         else:
             await people.assign_animal(db, obs.id, pid)
+    if kind == "person":
+        # Once, from all of them as examples.
+        await people.relook(db, pid)
     await db.commit()
     return {"person_id": str(pid), "assigned": len(found)}
 

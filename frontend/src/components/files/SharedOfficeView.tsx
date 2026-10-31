@@ -11,9 +11,10 @@ const SharedWhiteboardCanvas = lazy(() =>
 
 export const SHEET_MIME = "application/vnd.promptly.sheet+json";
 export const WHITEBOARD_MIME = "application/vnd.promptly.whiteboard+json";
+export const ITEM_MIME = "application/vnd.promptly.item+json";
 
 export function isOfficeShellMime(mime: string | null | undefined): boolean {
-  return mime === SHEET_MIME || mime === WHITEBOARD_MIME;
+  return mime === SHEET_MIME || mime === WHITEBOARD_MIME || mime === ITEM_MIME;
 }
 
 /** A shared spreadsheet or whiteboard, read-only, on the share-link
@@ -68,6 +69,14 @@ export function PublicOfficePreview({
           </div>
         )}
         {view?.kind === "sheet" && <SheetTable sheets={view.data} />}
+        {view?.kind === "item" && (
+          <div className="h-full overflow-y-auto">
+            <div className="mx-auto max-w-3xl px-5 py-6">
+              {view.app && <p className="mb-3 text-xs font-medium text-[var(--text-muted)]">{view.app}</p>}
+              <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-[var(--text)]">{view.text}</pre>
+            </div>
+          </div>
+        )}
         {view?.kind === "whiteboard" && (
           <Suspense
             fallback={

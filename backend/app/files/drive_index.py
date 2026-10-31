@@ -42,7 +42,7 @@ from app.database import SessionLocal
 logger = logging.getLogger("promptly.files.drive_index")
 
 SETTINGS_KEY = "drive_ai"
-INDEXABLE_KINDS = ("document", "sheet", "whiteboard", "rendered_pdf")
+INDEXABLE_KINDS = ("document", "sheet", "whiteboard", "rendered_pdf", "item")
 MAX_TEXT_CHARS = 400_000
 # Bumped when what's stored with a chunk changes (v2: PDF page, sheet tab
 # and row for citations — WP-5.2), so every file is rebuilt once.
@@ -217,7 +217,7 @@ def _file_text(file: Any) -> str | None:
     from app.files.office_formats import office_ext
 
     kind = file.source_kind or ""
-    if kind in ("document", "sheet", "whiteboard") or office_ext(file.filename):
+    if kind in ("document", "sheet", "whiteboard", "item") or office_ext(file.filename):
         return (file.content_text or "").strip() or None
     if is_text_extractable(file):
         try:

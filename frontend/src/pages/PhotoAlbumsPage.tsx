@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { ArrowLeft, Download, ImagePlus, LogOut, MoreHorizontal, Plus, Share2, Sparkles, Star, Trash2, Upload, Users, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
+import { usePhotosPath } from "@/components/photos/photosPath";
 import { albumsApi, type Album, type AlbumPhoto } from "@/api/albums";
 import { filesApi } from "@/api/files";
 import { AlbumMembersDialog, Cover } from "@/components/photos/AlbumDialogs";
@@ -20,6 +21,7 @@ import { apiErrorMessage } from "@/utils/apiError";
  *  photos, its people, adding and taking out. */
 
 export function PhotoAlbumsPage() {
+  const photosPath = usePhotosPath();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data: albums, isLoading } = useQuery({ queryKey: ["albums"], queryFn: albumsApi.list });
@@ -30,7 +32,7 @@ export function PhotoAlbumsPage() {
     try {
       const a = await albumsApi.create(title.trim());
       void qc.invalidateQueries({ queryKey: ["albums"] });
-      navigate(`/files/photos/albums/${a.id}`);
+      navigate(photosPath(`/albums/${a.id}`));
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't make the album."));
     }
@@ -61,7 +63,7 @@ export function PhotoAlbumsPage() {
           <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5" aria-label="Albums">
             {albums.map((a) => (
               <li key={a.id}>
-                <Link to={`/files/photos/albums/${a.id}`} className="group block">
+                <Link to={photosPath(`/albums/${a.id}`)} className="group block">
                   <div className="overflow-hidden rounded-lg transition group-hover:opacity-90">
                     <Cover album={a} />
                   </div>
@@ -85,7 +87,7 @@ export function PhotoAlbumsPage() {
               const a = await albumsApi.create(title, [], { rules });
               void qc.invalidateQueries({ queryKey: ["albums"] });
               setSmart(false);
-              navigate(`/files/photos/albums/${a.id}`);
+              navigate(photosPath(`/albums/${a.id}`));
             } catch (e) {
               toast.error(apiErrorMessage(e, "Couldn't make the album."));
             }
@@ -111,6 +113,7 @@ function useWidth(): [(el: HTMLDivElement | null) => void, number] {
 }
 
 export function PhotoAlbumPage() {
+  const photosPath = usePhotosPath();
   const { albumId = "" } = useParams();
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -219,7 +222,7 @@ export function PhotoAlbumPage() {
           </div>
         ) : (
           <>
-            <Link to="/files/photos/albums" aria-label="Back to albums" className="rounded p-1 hover:bg-[var(--hover)]">
+            <Link to={photosPath("/albums")} aria-label="Back to albums" className="rounded p-1 hover:bg-[var(--hover)]">
               <ArrowLeft className="h-4 w-4" />
             </Link>
             <div className="min-w-0 flex-1">
@@ -251,7 +254,7 @@ export function PhotoAlbumPage() {
             </div>
             {canAdd && (
               <>
-                <Button size="sm" variant="secondary" leftIcon={<ImagePlus className="h-3.5 w-3.5" />} onClick={() => navigate(`/files/photos?addTo=${album.id}`)}>
+                <Button size="sm" variant="secondary" leftIcon={<ImagePlus className="h-3.5 w-3.5" />} onClick={() => navigate(photosPath(`?addTo=${album.id}`))}>
                   Add photos
                 </Button>
                 <input ref={fileInput} type="file" multiple accept="image/*,video/*,.heic,.heif" hidden onChange={(e) => void upload(e.target.files)} />
@@ -301,7 +304,7 @@ export function PhotoAlbumPage() {
                       if (!(await confirm({ title: `Delete “${album.title}”?`, message: "The photos stay in Photos and Files — only the album goes.", confirmLabel: "Delete album", danger: true }))) return;
                       await albumsApi.remove(album.id);
                       void qc.invalidateQueries({ queryKey: ["albums"] });
-                      navigate("/files/photos/albums");
+                      navigate(photosPath("/albums"));
                     }}>
                       Delete album
                     </button>
@@ -313,7 +316,7 @@ export function PhotoAlbumPage() {
                       if (!me) return;
                       await albumsApi.removeMember(album.id, me);
                       void qc.invalidateQueries({ queryKey: ["albums"] });
-                      navigate("/files/photos/albums");
+                      navigate(photosPath("/albums"));
                     }}>
                       <LogOut className="h-3.5 w-3.5" /> Leave album
                     </button>

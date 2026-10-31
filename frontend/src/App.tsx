@@ -147,6 +147,18 @@ const SyncLandingPage = lazyWithRetry(
   () => import("@/pages/SyncLandingPage").then((m) => ({ default: m.SyncLandingPage })),
   "SyncLandingPage"
 );
+const ItemPage = lazyWithRetry(() => import("@/items/ItemPage").then((m) => ({ default: m.ItemPage })), "ItemPage");
+const ItemAppPage = lazyWithRetry(
+  () => import("@/items/ItemAppPage").then((m) => ({ default: m.ItemAppPage })),
+  "ItemAppPage"
+);
+const AppsPage = lazyWithRetry(() => import("@/items/AppsPage").then((m) => ({ default: m.AppsPage })), "AppsPage");
+const AppLaunch = lazyWithRetry(() => import("@/items/AppsPage").then((m) => ({ default: m.AppLaunch })), "AppLaunch");
+const InstallAppsPage = lazyWithRetry(() => import("@/items/InstallAppsPage").then((m) => ({ default: m.InstallAppsPage })), "InstallAppsPage");
+const ItemStorePage = lazyWithRetry(
+  () => import("@/items/StorePage").then((m) => ({ default: m.StorePage })),
+  "ItemStorePage"
+);
 const FilesDevicesPage = lazyWithRetry(
   () => import("@/pages/FilesDevicesPage").then((m) => ({ default: m.FilesDevicesPage })),
   "FilesDevicesPage"
@@ -183,6 +195,34 @@ const WorkspacesPage = lazyWithRetry(
   () => import("@/pages/WorkspacesPage").then((m) => ({ default: m.WorkspacesPage })),
   "WorkspacesPage"
 );
+
+const PhotosAppShell = lazyWithRetry(
+  () => import("@/components/photos/PhotosAppShell").then((m) => ({ default: m.PhotosAppShell })),
+  "PhotosAppShell"
+);
+
+/** The Photos pages, relative to wherever Photos is mounted —
+ *  ``/files/photos`` (inside Files) or ``/photos`` (the standalone app).
+ *  Links inside them come from ``usePhotosPath()``. */
+function photoPageRoutes() {
+  return (
+    <>
+      <Route index element={<PhotosPage />} />
+      <Route path="search" element={<PhotoSearchPage />} />
+      <Route path="people" element={<PeoplePage />} />
+      <Route path="people/:personId" element={<PersonPage />} />
+      <Route path="albums" element={<PhotoAlbumsPage />} />
+      <Route path="albums/:albumId" element={<PhotoAlbumPage />} />
+      <Route path="memories/:memoryId" element={<MemoryPage />} />
+      <Route path="setup" element={<PhotoSetupPage />} />
+      <Route path="cleanup" element={<PhotoCleanupPage />} />
+      <Route path="map" element={<PhotoMapPage />} />
+      <Route path="places" element={<PhotoPlacesPage />} />
+      <Route path="places/:country" element={<PhotoPlacesPage />} />
+      <Route path="places/:country/:placeId" element={<PhotoPlacesPage />} />
+    </>
+  );
+}
 
 /** Full-screen pending state for lazy routes rendered outside AppLayout
  *  (which hosts its own boundary). Matches the auth-bootstrap screen so a
@@ -476,6 +516,27 @@ export default function App() {
             </Suspense>
           }
         />
+      {/* An item file installed as its own app: no Promptly chrome at all. */}
+      <Route
+        path="/app/:fileId/*"
+        element={
+          <Suspense fallback={<FullScreenLoading />}>
+            <ItemAppPage />
+          </Suspense>
+        }
+      />
+      {/* Promptly Photos installed as its own app: the same Photos pages
+          as /files/photos, without Promptly's sidebar or the Files rail. */}
+      <Route
+        path="/photos"
+        element={
+          <Suspense fallback={<FullScreenLoading />}>
+            <PhotosAppShell />
+          </Suspense>
+        }
+      >
+        {photoPageRoutes()}
+      </Route>
       {/* The PromptlySync download page (the "Add device" QR lands here). */}
       <Route
         path="/sync"
@@ -519,22 +580,11 @@ export default function App() {
           <Route path="/files" element={<FilesPage />} />
           <Route path="/files/home" element={<FilesHomePage />} />
           {/* Photos: one menu across all its pages (PhotosShell). */}
-          <Route element={<PhotosShell />}>
-            <Route path="/files/photos" element={<PhotosPage />} />
-            <Route path="/files/photos/search" element={<PhotoSearchPage />} />
-            <Route path="/files/photos/people" element={<PeoplePage />} />
-            <Route path="/files/photos/people/:personId" element={<PersonPage />} />
-            <Route path="/files/photos/albums" element={<PhotoAlbumsPage />} />
-            <Route path="/files/photos/albums/:albumId" element={<PhotoAlbumPage />} />
-            <Route path="/files/photos/memories/:memoryId" element={<MemoryPage />} />
-            <Route path="/files/photos/setup" element={<PhotoSetupPage />} />
-            <Route path="/files/photos/cleanup" element={<PhotoCleanupPage />} />
-            <Route path="/files/photos/map" element={<PhotoMapPage />} />
-            <Route path="/files/photos/places" element={<PhotoPlacesPage />} />
-            <Route path="/files/photos/places/:country" element={<PhotoPlacesPage />} />
-            <Route path="/files/photos/places/:country/:placeId" element={<PhotoPlacesPage />} />
+          <Route path="/files/photos" element={<PhotosShell />}>
+            {photoPageRoutes()}
           </Route>
           <Route path="/files/devices" element={<FilesDevicesPage />} />
+          <Route path="/files/store" element={<Navigate to="/apps/store" replace />} />
           <Route path="/files/import" element={<ImportsPage />} />
           <Route path="/files/import/:importId" element={<ImportJobPage />} />
           <Route path="/files/folder/:folderId" element={<FilesPage />} />
@@ -551,6 +601,14 @@ export default function App() {
         <Route path="/files/doc/:fileId" element={<OfficeEditorPage />} />
         <Route path="/files/sheet/:fileId" element={<OfficeEditorPage />} />
         <Route path="/files/whiteboard/:fileId" element={<OfficeEditorPage />} />
+        <Route path="/files/item/:fileId" element={<ItemPage />} />
+        {/* Apps: the launcher, the store, and each app (its file). Every
+            app's data lives in My files › Apps › <App>. */}
+        <Route path="/apps" element={<AppsPage />} />
+        <Route path="/apps/store" element={<ItemStorePage />} />
+        <Route path="/apps/install" element={<InstallAppsPage />} />
+        <Route path="/apps/:kind" element={<AppLaunch />} />
+        <Route path="/apps/:kind/:fileId" element={<ItemPage />} />
         <Route path="/archive" element={<ArchivePage />} />
         {/* /account opens at the top (Profile); /account/<section> deep-
             links to one section — /account/security used to be the only

@@ -86,6 +86,10 @@ async def lifespan(_: FastAPI):
     from app.files.drive_index import start_drive_indexer
 
     drive_indexer_task = start_drive_indexer()
+    # Item Store: reminders an item asked for, and each kind's periodic job.
+    from app.items.loops import start_item_loops
+
+    item_loops_task = start_item_loops()
     # Hourly retry of anything queued or failed for the embedder (R-321).
     from app.custom_models.backfill import start_embedding_reconciler
 
@@ -144,6 +148,7 @@ async def lifespan(_: FastAPI):
             scheduler_task,
             indexer_task,
             drive_indexer_task,
+            item_loops_task,
             reconcile_task,
             chat_upload_sweeper_task,
             stale_run_reaper_task,
@@ -606,6 +611,13 @@ app.include_router(pairing_router, prefix="/api/devices", tags=["devices"])
 from app.files.dav import router as dav_router  # noqa: E402
 
 app.include_router(dav_router, prefix="/dav")
+# The Item Store: small apps whose whole state is one file (app/items).
+from app.items.ai import router as items_ai_router  # noqa: E402
+from app.items.router import mount_kind_routers, router as items_router  # noqa: E402
+
+mount_kind_routers(items_router)
+app.include_router(items_router, prefix="/api/items", tags=["items"])
+app.include_router(items_ai_router, prefix="/api/items", tags=["items"])
 # Photos (Part E): the library over Files (WP-9.1).
 # The family library (PH-5).
 from app.photos.family_router import router as photo_family_router  # noqa: E402

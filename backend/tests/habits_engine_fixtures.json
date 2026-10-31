@@ -1,0 +1,3486 @@
+[
+ {
+  "name": "daily_basic",
+  "habit": {
+   "id": "a",
+   "name": "a",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "yes_no",
+   "target": 1.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "daily",
+    "days": [],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-06-01",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-06-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-02",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-05",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-06",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-07",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-08",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-09",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-10",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-12",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-13",
+     "value": 0.0,
+     "note": "",
+     "skipped": true,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-14",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-15",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-16",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 4,
+   "best": 10,
+   "units": "done,done,done,done,done,done,done,done,done,done,missed,done,skipped,done,done,done,pending",
+   "days": "ddddddddddmdsdddp",
+   "score": 0.5086,
+   "rate_all": 0.9333,
+   "rate_30": 0.9333,
+   "weekdays": "3/3 3/3 2/2 1/2 2/2 1/1 2/2"
+  }
+ },
+ {
+  "name": "weekdays",
+  "habit": {
+   "id": "b",
+   "name": "b",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "yes_no",
+   "target": 1.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "weekdays",
+    "days": [
+     0,
+     2,
+     4
+    ],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-06-01",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-06-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-02",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-05",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-06",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-07",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-08",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-09",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-10",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-11",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-12",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-13",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-14",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-15",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-16",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 7,
+   "best": 7,
+   "units": "done,off,done,off,done,off,off,done,off,done,off,done,off,off,done,off,pending",
+   "days": "dododoodododoodop",
+   "score": 0.4345,
+   "rate_all": 1.0,
+   "rate_30": 1.0,
+   "weekdays": "3/3 0/0 2/2 0/0 2/2 0/0 0/0"
+  }
+ },
+ {
+  "name": "every3_backfilled_anchor",
+  "habit": {
+   "id": "c",
+   "name": "c",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "yes_no",
+   "target": 1.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "every_n_days",
+    "days": [],
+    "times": 3,
+    "every": 3
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-05-28",
+   "anchor_date": "2026-06-01",
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-05-28",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-07",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-10",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-16",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 1,
+   "best": 3,
+   "units": "off,missed,off,off,missed,off,off,done,off,off,done,off,off,done,off,off,missed,off,off,done,off",
+   "days": "omoomoodoodoodoomoodo",
+   "score": 0.2894,
+   "rate_all": 0.5714,
+   "rate_30": 0.5714,
+   "weekdays": "0/1 1/1 1/1 1/1 0/1 0/1 1/1"
+  }
+ },
+ {
+  "name": "per_week_3",
+  "habit": {
+   "id": "d",
+   "name": "d",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "yes_no",
+   "target": 1.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "per_week",
+    "days": [],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-05-04",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-05-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-06",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-08",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-12",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-18",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-19",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-20",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-02",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-15",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 0,
+   "best": 1,
+   "units": "done,missed,done,missed,done,missed,pending",
+   "days": "dododooodooooodddooooooooooodddooooooooooodoo",
+   "score": 0.3774,
+   "rate_all": 0.5789,
+   "rate_30": 0.5385,
+   "weekdays": "4/7 3/7 3/6 0/6 1/6 0/6 0/6"
+  }
+ },
+ {
+  "name": "per_week_sunday_start",
+  "habit": {
+   "id": "e",
+   "name": "e",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "yes_no",
+   "target": 1.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "per_week",
+    "days": [],
+    "times": 2,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-05-01",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-05-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-05",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-07",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-09",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-11",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-13",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-15",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-17",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-19",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-21",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-23",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-25",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-27",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-29",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-31",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-02",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-06",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-08",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-10",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-12",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-14",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-16",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 6,
+  "expected": {
+   "current": 8,
+   "best": 8,
+   "units": "done,done,done,done,done,done,done,done",
+   "days": "dodododododododododododododododododododododododo",
+   "score": 0.7303,
+   "rate_all": 1.0,
+   "rate_30": 1.0,
+   "weekdays": "3/7 4/7 3/6 3/6 4/7 3/7 4/7"
+  }
+ },
+ {
+  "name": "per_month_8",
+  "habit": {
+   "id": "f",
+   "name": "f",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "yes_no",
+   "target": 1.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "per_month",
+    "days": [],
+    "times": 8,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-03-01",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-03-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-03-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-03-07",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-03-10",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-03-13",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-03-16",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-03-19",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-03-22",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-03-25",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-03-28",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-03-31",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-06",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-09",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-12",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-15",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-18",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-21",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-24",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-27",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-30",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-06",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-09",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-12",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-15",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-18",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-21",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-24",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-27",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-30",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-02",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-05",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-08",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-11",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-14",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 3,
+   "best": 3,
+   "units": "done,done,done,pending",
+   "days": "doodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodoodooo",
+   "score": 0.9292,
+   "rate_all": 1.0,
+   "rate_30": 1.0,
+   "weekdays": "5/16 5/16 5/15 5/15 5/15 5/15 6/16"
+  }
+ },
+ {
+  "name": "avoid_limit",
+  "habit": {
+   "id": "g",
+   "name": "g",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "avoid",
+   "target": 1.0,
+   "unit": "",
+   "limit": 1,
+   "schedule": {
+    "kind": "daily",
+    "days": [],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-06-01",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-06-03",
+     "value": 2.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-05",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-10",
+     "value": 3.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-12",
+     "value": 0.0,
+     "note": "",
+     "skipped": true,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-17",
+     "value": 0.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 6,
+   "best": 6,
+   "units": "done,done,missed,done,done,done,done,done,done,missed,done,skipped,done,done,done,done,done",
+   "days": "ddmddddddmdsddddd",
+   "score": 0.5102,
+   "rate_all": 0.875,
+   "rate_30": 0.875,
+   "weekdays": "3/3 3/3 1/3 2/2 1/1 2/2 2/2"
+  }
+ },
+ {
+  "name": "count_partial",
+  "habit": {
+   "id": "h",
+   "name": "h",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "count",
+   "target": 8.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "daily",
+    "days": [],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-06-01",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-06-01",
+     "value": 8.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-02",
+     "value": 4.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-03",
+     "value": 8.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-05",
+     "value": 10.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-16",
+     "value": 2.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-17",
+     "value": 3.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 0,
+   "best": 1,
+   "units": "done,missed,done,missed,done,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,pending",
+   "days": "dmdmdmmmmmmmmmmmp",
+   "score": 0.1035,
+   "rate_all": 0.1875,
+   "rate_30": 0.1875,
+   "weekdays": "1/3 0/3 1/2 0/2 1/2 0/2 0/2"
+  }
+ },
+ {
+  "name": "duration",
+  "habit": {
+   "id": "i",
+   "name": "i",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "duration",
+   "target": 20.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "daily",
+    "days": [],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-05-20",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-05-20",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-22",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-24",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-26",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-28",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-30",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-01",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-03",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-05",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-07",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-09",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-11",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-13",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-15",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-17",
+     "value": 15.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 0,
+   "best": 0,
+   "units": "missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,pending",
+   "days": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmp",
+   "score": 0.283,
+   "rate_all": 0.0,
+   "rate_30": 0.0,
+   "weekdays": "0/4 0/4 0/4 0/4 0/4 0/4 0/4"
+  }
+ },
+ {
+  "name": "era_daily_then_weekly",
+  "habit": {
+   "id": "j",
+   "name": "j",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "yes_no",
+   "target": 1.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "per_week",
+    "days": [],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-05-01",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [
+    {
+     "until": "2026-06-03",
+     "type": "yes_no",
+     "target": 1.0,
+     "limit": 0,
+     "schedule": {
+      "kind": "daily",
+      "days": [],
+      "times": 3,
+      "every": 2
+     },
+     "anchor_date": null
+    }
+   ],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-05-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-05",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-07",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-09",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-11",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-13",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-15",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-17",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-19",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-21",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-23",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-25",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-27",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-29",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-31",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-02",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-06",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-08",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-10",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-12",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-14",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-16",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 1,
+   "best": 1,
+   "units": "done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,missed,done,pending",
+   "days": "dmdmdmdmdmdmdmdmdmdmdmdmdmdmdmdmdodododododododo",
+   "score": 0.5812,
+   "rate_all": 0.575,
+   "rate_30": 0.6364,
+   "weekdays": "3/7 4/7 3/6 3/6 4/7 3/7 4/7"
+  }
+ },
+ {
+  "name": "era_yesno_then_count",
+  "habit": {
+   "id": "k",
+   "name": "k",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "count",
+   "target": 8.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "daily",
+    "days": [],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-05-25",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [
+    {
+     "until": "2026-06-06",
+     "type": "yes_no",
+     "target": 1.0,
+     "limit": 0,
+     "schedule": {
+      "kind": "daily",
+      "days": [],
+      "times": 3,
+      "every": 2
+     },
+     "anchor_date": null
+    }
+   ],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-05-25",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-26",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-27",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-28",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-29",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-30",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-31",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-02",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-05",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-06",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-07",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-08",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-09",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-10",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-11",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-12",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-13",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-14",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-15",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-16",
+     "value": 5.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 0,
+   "best": 12,
+   "units": "done,done,done,done,done,done,done,done,done,done,done,done,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,pending",
+   "days": "ddddddddddddmmmmmmmmmmmp",
+   "score": 0.5402,
+   "rate_all": 0.5217,
+   "rate_30": 0.5217,
+   "weekdays": "2/4 2/4 2/3 2/3 2/3 1/3 1/3"
+  }
+ },
+ {
+  "name": "era_every2_then_every3",
+  "habit": {
+   "id": "l",
+   "name": "l",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "yes_no",
+   "target": 1.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "every_n_days",
+    "days": [],
+    "times": 3,
+    "every": 3
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-05-01",
+   "anchor_date": "2026-06-01",
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [
+    {
+     "until": "2026-06-01",
+     "type": "yes_no",
+     "target": 1.0,
+     "limit": 0,
+     "schedule": {
+      "kind": "every_n_days",
+      "days": [],
+      "times": 3,
+      "every": 2
+     },
+     "anchor_date": "2026-05-01"
+    }
+   ],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-05-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-05",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-07",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-09",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-11",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-13",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-15",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-17",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-19",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-21",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-23",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-25",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-27",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-29",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-31",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-07",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-10",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-13",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-16",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 22,
+   "best": 22,
+   "units": "done,off,done,off,done,off,done,off,done,off,done,off,done,off,done,off,done,off,done,off,done,off,done,off,done,off,done,off,done,off,done,done,off,off,done,off,off,done,off,off,done,off,off,done,off,off,done,off",
+   "days": "dodododododododododododododododdoodoodoodoodoodo",
+   "score": 0.8281,
+   "rate_all": 1.0,
+   "rate_30": 1.0,
+   "weekdays": "3/3 3/3 3/3 3/3 3/3 3/3 4/4"
+  }
+ },
+ {
+  "name": "era_weekly_then_weekdays_mid_week",
+  "habit": {
+   "id": "m",
+   "name": "m",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "yes_no",
+   "target": 1.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "weekdays",
+    "days": [
+     0,
+     1,
+     2,
+     3,
+     4
+    ],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-05-04",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [
+    {
+     "until": "2026-05-28",
+     "type": "yes_no",
+     "target": 1.0,
+     "limit": 0,
+     "schedule": {
+      "kind": "per_week",
+      "days": [],
+      "times": 4,
+      "every": 2
+     },
+     "anchor_date": null
+    }
+   ],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-05-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-06",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-08",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-10",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-12",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-14",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-16",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-18",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-20",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-22",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-24",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-26",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-28",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-30",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-05",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-07",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-09",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-11",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-13",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-15",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 0,
+   "best": 1,
+   "units": "done,missed,done,missed,done,missed,off,off,done,missed,done,missed,done,off,off,missed,done,missed,done,missed,off,off,done,missed,pending",
+   "days": "dododododododododododododmoodmdmdoomdmdmoodmp",
+   "score": 0.4922,
+   "rate_all": 0.6786,
+   "rate_30": 0.6,
+   "weekdays": "4/7 3/7 3/6 3/6 3/6 1/3 2/3"
+  }
+ },
+ {
+  "name": "ended_archive_copy",
+  "habit": {
+   "id": "n",
+   "name": "n",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "yes_no",
+   "target": 1.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "daily",
+    "days": [],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-04-01",
+   "anchor_date": null,
+   "end_date": "2026-04-30",
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-04-01",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-02",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-03",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-04",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-05",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-06",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-07",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-08",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-09",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-10",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-11",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-12",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-13",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-14",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-15",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-16",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-17",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-18",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-19",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-20",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-21",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-22",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-23",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-24",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-25",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-26",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-27",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-28",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-29",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-30",
+     "value": 1.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 30,
+   "best": 30,
+   "units": "done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done",
+   "days": "dddddddddddddddddddddddddddddd",
+   "score": 0.798,
+   "rate_all": 1.0,
+   "rate_30": null,
+   "weekdays": "4/4 4/4 5/5 5/5 4/4 4/4 4/4"
+  }
+ },
+ {
+  "name": "three_eras",
+  "habit": {
+   "id": "o",
+   "name": "o",
+   "emoji": "",
+   "color": "#7B6CD9",
+   "area": "",
+   "type": "count",
+   "target": 5.0,
+   "unit": "",
+   "limit": 0,
+   "schedule": {
+    "kind": "daily",
+    "days": [],
+    "times": 3,
+    "every": 2
+   },
+   "time_of_day": "anytime",
+   "reminders": [],
+   "start_date": "2026-04-01",
+   "anchor_date": null,
+   "end_date": null,
+   "reminder_days": [],
+   "remind_when_behind": false,
+   "active_timer": null,
+   "history": [
+    {
+     "until": "2026-05-01",
+     "type": "count",
+     "target": 10.0,
+     "limit": 0,
+     "schedule": {
+      "kind": "daily",
+      "days": [],
+      "times": 3,
+      "every": 2
+     },
+     "anchor_date": null
+    },
+    {
+     "until": "2026-05-20",
+     "type": "yes_no",
+     "target": 1.0,
+     "limit": 0,
+     "schedule": {
+      "kind": "per_month",
+      "days": [],
+      "times": 10,
+      "every": 2
+     },
+     "anchor_date": null
+    }
+   ],
+   "archived": false,
+   "intention": "",
+   "identity": "",
+   "why": "",
+   "notes": "",
+   "created_at": "",
+   "logs": [
+    {
+     "day": "2026-04-01",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-02",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-03",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-04",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-05",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-06",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-07",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-08",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-09",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-10",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-11",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-12",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-13",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-14",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-15",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-16",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-17",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-18",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-19",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-20",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-21",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-22",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-23",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-24",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-25",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-26",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-27",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-28",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-29",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-04-30",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-01",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-02",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-03",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-04",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-05",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-06",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-07",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-08",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-09",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-10",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-11",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-12",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-13",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-14",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-15",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-16",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-17",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-18",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-19",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-20",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-21",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-22",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-23",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-24",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-25",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-26",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-27",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-28",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-29",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-30",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-05-31",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-01",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-02",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-03",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-04",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-05",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-06",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-07",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-08",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-09",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-10",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-11",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-12",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-13",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-14",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-15",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-16",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    },
+    {
+     "day": "2026-06-17",
+     "value": 6.0,
+     "note": "",
+     "skipped": false,
+     "reason": "",
+     "at": ""
+    }
+   ]
+  },
+  "today": "2026-06-17",
+  "week_start": 0,
+  "expected": {
+   "current": 30,
+   "best": 30,
+   "units": "missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,missed,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done,done",
+   "days": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmdddddddddddddddddddddddddddddddddddddddddddddddd",
+   "score": 0.9198,
+   "rate_all": 0.5455,
+   "rate_30": 1.0,
+   "weekdays": "7/11 7/11 7/12 6/11 7/11 7/11 7/11"
+  }
+ }
+]

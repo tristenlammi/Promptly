@@ -17,6 +17,7 @@ export interface NotificationPreferences {
   mention: boolean;
   assignment: boolean;
   invite: boolean;
+  item_reminder: boolean;
 }
 
 export interface NotificationRow {

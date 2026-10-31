@@ -19,6 +19,7 @@ from app.chat.tools.fetch_url import FetchUrlTool
 from app.chat.tools.files import ListMyFilesTool, ProposeFileChangesTool, ReadFileTool
 from app.chat.tools.generate_image import GenerateImageTool
 from app.chat.tools.generate_pdf import GeneratePdfTool
+from app.chat.tools.items import ListMyItemsTool, ReadItemTool, UseItemTool
 from app.chat.tools.memory import ForgetTool, RecallTool, RememberTool
 from app.chat.tools.photos import InspectPhotosTool, ProposePhotoActionTool, RefinePhotoResultsTool, SearchPhotosTool
 from app.chat.tools.query_board import QueryBoardCardsTool
@@ -91,6 +92,11 @@ REGISTRY: list[Tool] = [
     InspectPhotosTool(),
     # Albums, sharing, relationships from a chat — proposals only.
     ProposePhotoActionTool(),
+    # Item Store files (category "items"): workout log, budget, habits… —
+    # read them and run their actions from any chat.
+    ListMyItemsTool(),
+    ReadItemTool(),
+    UseItemTool(),
 ]
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the

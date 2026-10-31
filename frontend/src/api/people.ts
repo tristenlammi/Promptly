@@ -25,6 +25,14 @@ export interface Subject {
 export interface ReviewEntry extends Subject {
   kind: SubjectKind;
   samples: { id: string; crop: string | null }[];
+  /** "Is this Sarah?" — they look like someone you've named, but not surely
+   *  enough to be filed. Yes names the ticked samples; No says "not them". */
+  suggest?: { id: string; name: string | null; cover: string | null };
+}
+
+/** A stable key for a review card (a group, a question about loose faces, or a species). */
+export function reviewKey(r: ReviewEntry): string {
+  return r.id ?? (r.suggest ? `suggest-${r.suggest.id}` : `species-${r.species}`);
 }
 
 export interface Observation {

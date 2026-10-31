@@ -773,3 +773,54 @@ def test_provider_errors_are_explained(message, status, code):
     from app.chat.router import _classify_upstream_error
 
     assert _classify_upstream_error(message, provider_type="openai", status_code=status)["error_code"] == code
+
+
+async def test_openrouter_claude_gets_no_temperature(monkeypatch):
+    """Claude 4.7+ (e.g. Haiku 5.5) doesn't take ``temperature``. Through
+    OpenRouter with ``require_parameters`` the request then had no endpoint
+    left and 404'd ("No endpoints found that can handle the requested
+    parameters") — every tool-using chat with those models failed."""
+    from app.models_config import provider as prov
+    from app.models_config.models import ModelProvider
+
+    sent: list[dict] = []
+
+    class _Stream:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            raise StopAsyncIteration
+
+    class _Client:
+        class chat:
+            class completions:
+                @staticmethod
+                async def create(**kw):
+                    sent.append(kw)
+                    return _Stream()
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(prov, "_client_for", lambda p: _Client())
+    tools = [{"type": "function", "function": {"name": "t", "parameters": {"type": "object", "properties": {}}}}]
+
+    async def run(models: list[dict], model_id: str) -> dict:
+        p = ModelProvider(name="or", type="openrouter", base_url=None, api_key="k", models=models)
+        async for _ in prov.model_router.stream_chat_events(
+            provider=p, model_id=model_id, messages=[], system=None, temperature=0.4, tools=tools
+        ):
+            pass
+        return sent[-1]
+
+    # Catalog says no temperature → not sent, routing still strict.
+    kw = await run([{"id": "anthropic/claude-haiku-5.5", "supports_tools": True, "supports_temperature": False}], "anthropic/claude-haiku-5.5")
+    assert "temperature" not in kw
+    assert kw["extra_body"]["provider"]["require_parameters"] is True
+    # Stale catalog without the flag: Claude still gets none, others keep theirs.
+    assert "temperature" not in await run([], "anthropic/claude-haiku-5.5")
+    assert (await run([], "deepseek/deepseek-v4"))["temperature"] == 0.4
+    # Catalog says yes → sent.
+    kw = await run([{"id": "x/y", "supports_temperature": True}], "x/y")
+    assert kw["temperature"] == 0.4

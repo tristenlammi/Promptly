@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import {
+  Blocks,
   Bot,
   ChevronDown,
   ChevronRight,
@@ -147,6 +148,7 @@ function FilesRail() {
   const system = (kind: string) => root?.folders.find((f) => f.system_kind === kind);
   const chatUploads = system("chat_uploads");
   const generated = system("generated_root");
+  const appsFolder = system("apps");
   const [chatsOpen, setChatsOpen] = useState(false);
   const [wsOpen, setWsOpen] = useState(() => /^\/files\/workspaces/.test(window.location.pathname));
   const { data: workspaces } = useWorkspaces();
@@ -196,6 +198,10 @@ function FilesRail() {
         <RailLink to="/files/trash" icon={Trash2} label="Trash" hint="Deleted forever after 30 days" />
         <RailLink to="/files/import" icon={Import} label="Import & export" />
         <RailLink to="/files/devices" icon={Smartphone} label="Devices" hint="Back up your phone with PromptlySync" />
+        {appsFolder && (
+          <RailLink to={`/files/folder/${appsFolder.id}`} icon={Blocks} label="Apps" hint="Each app's data, one folder per app" />
+        )}
+
 
         {(chatUploads || generated) && (
           <>

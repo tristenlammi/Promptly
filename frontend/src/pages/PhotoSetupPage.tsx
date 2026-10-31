@@ -3,8 +3,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, FolderInput, MessageSquare, PawPrint, Search, Smartphone, Upload, UserRound } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 
+import { usePhotosPath } from "@/components/photos/photosPath";
 import { filesApi } from "@/api/files";
-import { peopleApi } from "@/api/people";
+import { peopleApi, reviewKey } from "@/api/people";
 import { photosApi } from "@/api/photos";
 import { Button } from "@/components/shared/Button";
 import { ReviewCard } from "@/pages/PeoplePage";
@@ -19,6 +20,7 @@ import { cn } from "@/utils/cn";
 const STEPS = ["Bring them in", "Understand them", "Who's who", "Pets", "Ask"] as const;
 
 export function PhotoSetupPage() {
+  const photosPath = usePhotosPath();
   const [step, setStep] = useState(0);
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -34,11 +36,11 @@ export function PhotoSetupPage() {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
-        <Link to="/files/photos" aria-label="Back to Photos" className="rounded p-1 hover:bg-[var(--hover)]">
+        <Link to={photosPath()} aria-label="Back to Photos" className="rounded p-1 hover:bg-[var(--hover)]">
           <ArrowLeft className="h-4 w-4" />
         </Link>
         <h1 className="flex-1 text-base font-semibold text-[var(--text)]">Set up Photos</h1>
-        <button type="button" className="text-xs text-[var(--text-muted)] hover:underline" onClick={() => void finish("/files/photos")}>
+        <button type="button" className="text-xs text-[var(--text-muted)] hover:underline" onClick={() => void finish(photosPath())}>
           Skip setup
         </button>
       </header>
@@ -70,7 +72,7 @@ export function PhotoSetupPage() {
         {step < STEPS.length - 1 ? (
           <Button size="sm" variant="primary" onClick={() => setStep((s) => s + 1)}>Next</Button>
         ) : (
-          <Button size="sm" variant="primary" onClick={() => void finish("/files/photos")}>Done</Button>
+          <Button size="sm" variant="primary" onClick={() => void finish(photosPath())}>Done</Button>
         )}
       </footer>
     </div>
@@ -254,7 +256,7 @@ function WhosWho() {
         <>
           <h3 className="mb-2 text-sm font-medium text-[var(--text)]">Who is this?</h3>
           <div role="region" aria-label="Who is this?" className="flex flex-wrap gap-3">
-            {unnamed.map((r) => <ReviewCard key={r.id ?? r.species} entry={r} known={people ?? []} />)}
+            {unnamed.map((r) => <ReviewCard key={reviewKey(r)} entry={r} known={people ?? []} />)}
           </div>
         </>
       )}
@@ -279,7 +281,7 @@ function Pets() {
       )}
       {unnamed.length ? (
         <div role="region" aria-label="Name your pets" className="flex flex-wrap gap-3">
-          {unnamed.map((r) => <ReviewCard key={r.id ?? r.species} entry={r} known={pets ?? []} />)}
+          {unnamed.map((r) => <ReviewCard key={reviewKey(r)} entry={r} known={pets ?? []} />)}
         </div>
       ) : (
         <p className="text-xs text-[var(--text-muted)]">No animals to name yet.</p>
@@ -289,6 +291,7 @@ function Pets() {
 }
 
 function Ask({ onGo }: { onGo: (to: string) => void }) {
+  const photosPath = usePhotosPath();
   const { data: people } = useQuery({ queryKey: ["people", "person", false], queryFn: () => peopleApi.list("person") });
   const { data: pets } = useQuery({ queryKey: ["people", "pet", false], queryFn: () => peopleApi.list("pet") });
   const someone = (people ?? []).find((p) => p.name && !p.me)?.name;
@@ -309,7 +312,7 @@ function Ask({ onGo }: { onGo: (to: string) => void }) {
       </Lead>
       <div className="flex flex-wrap gap-2">
         {tries.map((q) => (
-          <button key={q} type="button" onClick={() => onGo(`/files/photos/search?q=${encodeURIComponent(q)}`)}
+          <button key={q} type="button" onClick={() => onGo(photosPath(`/search?q=${encodeURIComponent(q)}`))}
             className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-sm hover:bg-[var(--hover)]">
             <Search className="h-3.5 w-3.5 text-[var(--text-muted)]" /> {q}
           </button>

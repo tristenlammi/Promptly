@@ -227,8 +227,8 @@ export function PhotoViewer({
             <button type="button" aria-label="Info" aria-pressed={info} onClick={() => setInfo((v) => !v)} className={btn}>
               <Info className="h-5 w-5" />
             </button>
-            {photo.kind === "image" && photo.mine !== false && (
-              <button type="button" aria-label="Edit" onClick={() => { setPlaying(false); setEditing(true); }} className={btn}>
+            {photo.kind === "image" && (
+              <button type="button" aria-label={photo.mine !== false ? "Edit" : "Mark up"} title={photo.mine !== false ? "Edit" : "Mark up and copy"} onClick={() => { setPlaying(false); setEditing(true); }} className={btn}>
                 <SlidersHorizontal className="h-5 w-5" />
               </button>
             )}
@@ -273,6 +273,18 @@ export function PhotoViewer({
             setEditing(false);
             if (item) setItems((cur) => cur.map((p) => (p.id === item.id ? { ...p, ...item } : p)));
             void qc.invalidateQueries({ queryKey: ["signed-urls", photo.id] });
+            onChanged();
+          }}
+          onSavedAsNew={(item) => {
+            setEditing(false);
+            // The new photo, right after the original.
+            if (item) {
+              setItems((cur) => {
+                const at = cur.findIndex((p) => p.id === photo.id);
+                return [...cur.slice(0, at + 1), item, ...cur.slice(at + 1).filter((p) => p.id !== item.id)];
+              });
+              setIndex((i) => i + 1);
+            }
             onChanged();
           }}
         />

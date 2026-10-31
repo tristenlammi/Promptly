@@ -21,7 +21,8 @@ import type {
 /** A shared spreadsheet or whiteboard, read-only (WP-3.4). */
 export type ShareOfficeView =
   | { kind: "sheet"; title: string; data: unknown[] }
-  | { kind: "whiteboard"; title: string; scene: { elements?: unknown[]; files?: Record<string, unknown> } };
+  | { kind: "whiteboard"; title: string; scene: { elements?: unknown[]; files?: Record<string, unknown> } }
+  | { kind: "item"; title: string; app: string; text: string };
 
 /** Header name the landing page uses to carry an unlock token. */
 export const SHARE_UNLOCK_HEADER = "X-Share-Unlock";

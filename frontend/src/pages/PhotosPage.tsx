@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { Archive, ArchiveRestore, BookImage, Download, Heart, ImagePlus, Images, Sparkles, Trash2, X, UsersRound } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
+import { usePhotosPath } from "@/components/photos/photosPath";
 import { filesApi } from "@/api/files";
 import { albumsApi } from "@/api/albums";
 import { photosApi, type PhotoBucket, type PhotoItem, type PhotoView } from "@/api/photos";
@@ -89,6 +90,7 @@ function layoutMonth(items: PhotoItem[], width: number, target: number): { days:
 }
 
 export function PhotosPage() {
+  const photosPath = usePhotosPath();
   const [params] = useSearchParams();
   const navigate = useNavigate();
   // Picking photos for an album (its Add photos button, WP-9.4).
@@ -241,7 +243,7 @@ export function PhotosPage() {
       <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
         {addTo ? (
           <div role="toolbar" aria-label="Adding to an album" className="flex w-full flex-wrap items-center gap-2">
-            <button type="button" aria-label="Cancel" onClick={() => navigate(`/files/photos/albums/${addTo}`)} className="rounded-md p-1 hover:bg-[var(--hover)]">
+            <button type="button" aria-label="Cancel" onClick={() => navigate(photosPath(`/albums/${addTo}`))} className="rounded-md p-1 hover:bg-[var(--hover)]">
               <X className="h-4 w-4" />
             </button>
             <span className="flex-1 text-sm text-[var(--text)]">
@@ -255,7 +257,7 @@ export function PhotosPage() {
                   const n = await albumsApi.addItems(addTo, [...selected]);
                   toast.success(n ? `Added ${n} to “${addToAlbum?.title ?? "the album"}”.` : "Only your own photos can be added.");
                   void qc.invalidateQueries({ queryKey: ["album", addTo] });
-                  navigate(`/files/photos/albums/${addTo}`);
+                  navigate(photosPath(`/albums/${addTo}`));
                 } catch (e) {
                   toast.error(apiErrorMessage(e, "Couldn't add them."));
                 }
@@ -558,6 +560,7 @@ function Scrubber({ months, onJump }: { months: PhotoBucket[]; onJump: (index: n
 
 /** "Set up Photos" (PH-7) until it's done or put away. */
 function SetupBanner() {
+  const photosPath = usePhotosPath();
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["photos", "settings"], queryFn: photosApi.settings });
   if (!data || data.setup_done) return null;
@@ -567,7 +570,7 @@ function SetupBanner() {
       <p className="min-w-0 flex-1 text-sm text-[var(--text)]">
         <b>Set up Photos</b> — bring your photos in, name the people and pets, then ask for anything in them.
       </p>
-      <Link to="/files/photos/setup" className="rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white">Start</Link>
+      <Link to={photosPath("/setup")} className="rounded-md bg-[var(--accent)] px-3 py-1 text-xs font-medium text-white">Start</Link>
       <button type="button" aria-label="Not now" className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)]"
         onClick={() => void photosApi.saveSettings({ setup_done: true }).then((s) => qc.setQueryData(["photos", "settings"], s))}>
         <X className="h-4 w-4" />
@@ -577,6 +580,7 @@ function SetupBanner() {
 }
 
 function Empty({ view, onFamily }: { view: PhotoView; onFamily: () => void }) {
+  const photosPath = usePhotosPath();
   const text =
     view === "family"
       ? "A family library pools photos with people on this server — each chooses what of theirs goes in."
@@ -591,7 +595,7 @@ function Empty({ view, onFamily }: { view: PhotoView; onFamily: () => void }) {
       <p className="text-sm font-medium text-[var(--text)]">{view === "all" ? "No photos yet" : "Nothing here yet"}</p>
       <p className="max-w-sm text-xs text-[var(--text-muted)]">{text}</p>
       {view === "all" && (
-        <Link to="/files/photos/setup" className="mt-2 rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white">
+        <Link to={photosPath("/setup")} className="mt-2 rounded-md bg-[var(--accent)] px-3 py-1.5 text-xs font-medium text-white">
           Set up Photos
         </Link>
       )}

@@ -21,6 +21,95 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-31
+
+### Added
+- **Photos — mark up a photo:** a new **Mark up** tab in the photo editor with pen, highlighter, arrow, line, circle, rectangle, text and a blur box for hiding things, plus an **emoji** picker (search and recents) and 16 built-in **stickers** (hand-drawn circle, arrows, tick, cross, speech and thought bubbles, NEW, SOLD, price tag…). Six colours, three thicknesses, undo/redo, and select to move, resize, turn or delete. The server draws the marks exactly as the editor shows them, so the grid, viewer and downloads match.
+- **Photos — more ways out of the editor:** **Copy** puts the edited picture on the clipboard without saving anything. **Share** (on a phone) or **Download** gives it as a file. **Save as new photo** files a copy next to the original ("IMG_1234 (edited).jpg", same date and place), leaving the original untouched. **Close** asks before throwing changes away. You can also mark up and copy a photo someone shared with you.
+- **Apps:** a new **Apps** section in the main menu. It's a launcher of app tiles you arrange yourself (drag to reorder in Edit, or long-press on a phone). Tap a tile to open the app. Apps with several files, like trips, have a switcher in the header. **Get apps** opens the Store. Everything is free, nothing is on by default, and removing an app keeps its files. Admins can hide an app from everyone.
+- **Every app's data lives in Files:** under My files › Apps › <App> (a protected system folder). App files are shareable, starrable and trashable like any other file, with version history. They download as JSON and import back. Drive AI search indexes them like everything else.
+- **The app view**: a phone-first layout with a bottom tab bar and bottom sheets, and a proper desktop
+  layout with tabs and a side panel. Saves happen as you go. A change made on another device, by the
+  assistant or from a chat is merged in rather than overwritten.
+- **The assistant inside every item** ("Ask" on a phone, a side panel on desktop) works *in* the app
+  through the item's own actions. It can also read your other files and, where it helps, the web.
+  Every change it makes comes with one-tap Undo.
+- **Item reminders**: habits, medication, trips and birthdays arrive as push notifications, with their
+  own switch under Notifications.
+- **Eleven items in the Store:**
+  - **Workout:**
+    - A tracker and coach: the assistant plans your week as sets × reps × load, using double progression and volume landmarks (no RIR or RPE to rate).
+    - Program templates (Full body, Upper/Lower, Push/Pull/Legs, 5×5, Minimalist) fitted to your equipment, for when you'd rather not ask the coach.
+    - A live logger with a rest timer, plate calculator, warm-ups and supersets.
+    - Progression that a lifter can trust: assisted lifts progress by taking help away, weighted dips/pull-ups add plates, timed holds add time, and a lift that stalls twice resets about 10%. One PR per lift per workout.
+    - Tell the coach your recent bests and the first weights come from them (with a couple of reps in hand) until you've logged the lift.
+    - PRs, e1RM charts and weekly sets per muscle.
+  - **Body & Health:**
+    - Weight trend, blood pressure (AHA categories), glucose, sleep, symptoms and labs.
+    - Medications with dose reminders, adherence and refills.
+    - Appointments with visit summaries, and optional cycle tracking.
+  - **Meals & Macros:**
+    - A food diary with macro targets.
+    - Barcode scanning and Open Food Facts lookup.
+    - Describe-a-meal logging, and an adaptive maintenance-calorie estimate.
+  - **Meal Planner:**
+    - A recipe box with import from links and cook mode.
+    - A weekly plan with leftovers.
+    - A merged, aisle-grouped grocery list with a pantry and shop mode.
+    - Strict allergy rules.
+  - **Habits:** one-tap check-off, every kind of schedule, streaks and habit strength, weekly reviews and reminders.
+  - **Budget:**
+    - Up Bank sync: the token is stored encrypted, sync runs every 30 minutes, and webhooks are used when the server is public.
+    - Automatic subscription and bill detection with price-change alerts.
+    - Budgets with payday months, CSV import, rules and goals.
+  - **Contacts:**
+    - An address book plus a personal CRM: keep-in-touch rhythms, birthdays, interactions, gift ideas.
+    - vCard and CSV import and export, and duplicate merging.
+  - **Trip Planner:**
+    - All your trips in one place: upcoming, someday and past, with duplicate and archive.
+    - A day-by-day itinerary with an ideas list.
+    - Bookings with correct time zones.
+    - Packing lists, expenses with settle-up, documents, and check-in reminders.
+  - **Journal:**
+    - A writing room with templates (gratitude, CBT thought record…), moods and emotions.
+    - A calendar, insights and "On this day".
+    - Private by default in chat.
+  - **Game Night:**
+    - A pass-the-phone score pad with official score sheets for 34 games.
+    - Plays log, Elo ratings, head-to-head and stats.
+  - **Flashcards:**
+    - FSRS spaced repetition and cloze cards with maths.
+    - A swipeable study flow, import from Anki, Quizlet or CSV, and stats.
+    - The assistant writes cards from your notes.
+- **Items work offline:**
+  - An item you've opened on a device opens again with no connection.
+  - Changes are kept on the device, even if the app is closed, and save when the connection is back. A banner says when you're working from the device copy.
+- **Items stay fast as they grow:**
+  - Saves send only what changed.
+  - Past 75% full, an item offers to move older data into an archive file next to it.
+- **Undo is safer:** Undo reverses only your last change, never edits from other devices or the assistant. When the server refuses one change, only that change is lost, not everything saved with it.
+- **Install apps** (Apps › Install apps): one place to install Promptly, Photos and each of your apps on your home screen or desktop. Each app's icon wears its own colour.
+- **Install any item as its own app** (⋯ → Install as an app). Your workout log or budget gets its own
+  name, icon and window on your phone or desktop, with none of Promptly's navigation. It's still the
+  same file in your Promptly, so chats and search keep seeing it. On iPhone and iPad, use Share → Add
+  to Home Screen.
+- **Apps fit the space they get:** every app lays out by its own width, so desktop views stay
+  readable with the assistant panel open, and phone views are tuned for one-handed use (today-first
+  plans, sticky actions, nothing scrolling sideways). Links like `/apps/budget?tab=subscriptions` open that tab.
+- **Items from any chat**: with tools on, chat can list your item files, read one, and run its actions
+  ("log 3×8 bench at 80"). It won't change a file on a turn that read outside content.
+- **Promptly Photos as its own app:** install Photos with its own icon and window (`/photos`). It opens straight into your library with none of Promptly's menus: bottom tabs on a phone (Photos · Albums · People · Search · More), the Photos menu on desktop, and Upload always at hand. Open `/photos/?install=1` for install steps (an Install button, or Share → Add to Home Screen on iPhone/iPad). Photos inside Files works as before.
+
+### Changed
+- **Promptly Files is no longer offered as a separate app:** Files pages now install as Promptly itself. Photos is the separate app. An already-installed Files app keeps working.
+- **Photos: naming a face now spreads.** Tag one face as Sarah and the rest of its unnamed group comes with it, and her look-alikes (faces nobody's yet, and other unnamed groups that are mostly her) are filed too — only when they're clearly her and clearly not someone else you've named. New faces now join a named person over an unnamed group, and people you named before (even without tagging single faces) are looked at again in the background, so look-alike groups found since join them. "Not them" and faces you confirmed are never changed.
+- **Photos: automatic tags look tagged.** A person or pet matched automatically now shows their name with a small "Auto" label and a × to remove it, instead of ✓/✗ buttons that read like an unanswered question.
+- **People → "Is this Sarah?"**: faces that look like someone you've named, but not surely enough to be filed, are now asked about in the review with Yes / No, instead of being guessed or left unasked.
+
+### Fixed
+- **The assistant inside apps failed with Claude models:** some tool definitions had blanked fields, which Anthropic rejects as invalid JSON Schema.
+- **Claude through OpenRouter:** newer Claude models (e.g. Haiku 5.5) failed with "No endpoints found that can handle the requested parameters". Promptly no longer sends them a temperature they don't accept.
+
 ## [0.10.4] - 2026-10-30
 
 ### Changed

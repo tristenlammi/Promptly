@@ -15,13 +15,15 @@ import { useAuthStore } from "@/store/authStore";
 /** localStorage keys that hold one person's data (not device preferences
  *  like theme or note width, which stay). */
 const USER_SCOPED_KEYS = [
+  // Who to open items for with no connection (useAuthBootstrap).
+  "promptly.offline-user",
   "promptly.composer-drafts",
   "promptly.model-selection",
   "promptly.chat-folders-ui",
   "promptly.autoCompact",
   "promptly.ws.contextBannerDismissed",
 ];
-const USER_SCOPED_PREFIXES = ["promptly.ws.recents."];
+const USER_SCOPED_PREFIXES = ["promptly.ws.recents.", "promptly.journal-draft."];
 const LAST_USER_KEY = "promptly.last-user";
 
 function purgeUserData(): void {
@@ -37,6 +39,8 @@ function purgeUserData(): void {
   } catch {
     // Storage blocked (private mode) — nothing persisted to purge.
   }
+  // Item files kept on this device for offline use, and their unsaved changes.
+  void import("@/items/offlineStore").then((m) => m.offlineStore.wipe());
 }
 
 /** Drop everything this tab knows about the signed-in user and start over

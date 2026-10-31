@@ -65,7 +65,7 @@ export function UploadProgressPanel() {
   // The full panel where files are (Files, and a workspace's drive);
   // elsewhere a small pill while anything is still going (WP-8.2).
   const isDriveRoute = useMemo(
-    () => /^\/(files|workspaces)(\/|$)/.test(location.pathname),
+    () => /^\/(files|workspaces|photos)(\/|$)/.test(location.pathname),
     [location.pathname]
   );
   const [pillOpen, setPillOpen] = useState(false);

@@ -1,0 +1,85 @@
+/* Habits — check-off motion. Colours come from tokens / the habit's own
+   colour (--hb), so light and dark themes both work. */
+
+.hb-check {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+  touch-action: manipulation;
+  transition: transform 140ms ease;
+}
+.hb-check:active { transform: scale(0.9); }
+.hb-check-done { animation: hbPop 420ms cubic-bezier(.2, 1.6, .4, 1); }
+.hb-tick {
+  stroke-dasharray: 26;
+  stroke-dashoffset: 0;
+}
+.hb-check-done .hb-tick { animation: hbTick 320ms 60ms ease-out both; }
+
+@keyframes hbPop {
+  0% { transform: scale(0.85); }
+  45% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes hbTick {
+  from { stroke-dashoffset: 26; }
+  to { stroke-dashoffset: 0; }
+}
+
+/* The burst of dots around a completed check. */
+.hb-burst { position: absolute; inset: 0; pointer-events: none; }
+.hb-burst i {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin: -3px 0 0 -3px;
+  border-radius: 9999px;
+  background: var(--hb, var(--item-accent));
+  animation: hbBurst 560ms cubic-bezier(.15, .7, .3, 1) forwards;
+}
+@keyframes hbBurst {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0.2); opacity: 0; }
+}
+
+/* The ring around the check fills in. */
+.hb-ring { transition: stroke-dashoffset 420ms cubic-bezier(.2, .8, .2, 1); }
+
+/* Rows settle when done. */
+.hb-row { transition: background-color 200ms ease, opacity 200ms ease; }
+.hb-row-done .hb-title { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-muted) 60%, transparent); }
+
+/* Perfect-day confetti. */
+.hb-confetti { position: fixed; inset: 0; pointer-events: none; z-index: 80; overflow: hidden; }
+.hb-confetti i {
+  position: absolute;
+  top: -12px;
+  width: 8px;
+  height: 12px;
+  border-radius: 2px;
+  animation: hbFall var(--t, 1400ms) cubic-bezier(.3, .6, .4, 1) var(--d, 0ms) forwards;
+}
+@keyframes hbFall {
+  0% { transform: translate(0, 0) rotate(0); opacity: 1; }
+  100% { transform: translate(var(--x, 0), 105vh) rotate(var(--r, 540deg)); opacity: 0.9; }
+}
+
+.hb-snack { animation: hbSnack 220ms cubic-bezier(.2, .8, .2, 1); }
+@keyframes hbSnack {
+  from { transform: translateY(16px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.hb-glow { animation: hbGlow 900ms ease-out; }
+@keyframes hbGlow {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--item-accent) 45%, transparent); }
+  100% { box-shadow: 0 0 0 18px transparent; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hb-check-done, .hb-check-done .hb-tick, .hb-burst i, .hb-confetti i, .hb-snack, .hb-glow { animation: none !important; }
+  .hb-burst, .hb-confetti { display: none; }
+  .hb-ring { transition: none; }
+}

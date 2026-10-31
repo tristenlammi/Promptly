@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 
 import type { SystemFolderKind } from "@/api/files";
+import { itemLook } from "@/items/hooks";
+import { itemIcon } from "@/items/registry";
 import { classifyMime } from "./helpers";
 import { cn } from "@/utils/cn";
 
@@ -133,6 +135,21 @@ export function DriveItemIcon({
   /** Render inside a pastel tinted square (matches the navigator tree). */
   tile?: boolean;
 }) {
+  // An Item Store file wears its app's own icon and colour.
+  const look = !folder && file?.source_kind === "item" ? itemLook(file.filename) : null;
+  if (look) {
+    const Glyph = itemIcon(look.icon);
+    return tile ? (
+      <span
+        className={cn("grid shrink-0 place-items-center rounded-md", className ?? "h-5 w-5")}
+        style={{ background: `color-mix(in srgb, ${look.color} 18%, transparent)` }}
+      >
+        <Glyph className="h-3 w-3" style={{ color: look.color }} />
+      </span>
+    ) : (
+      <Glyph className={cn("shrink-0", className ?? "h-5 w-5")} style={{ color: look.color }} />
+    );
+  }
   const t = folder ? folderTint(folder.system_kind) : file ? fileTint(file) : NEUTRAL;
 
   if (tile) {

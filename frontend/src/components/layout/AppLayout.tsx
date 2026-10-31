@@ -2,6 +2,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
+import { InstallFromLink } from "@/components/pwa/InstallFromLink";
 import { RouteBoundary } from "@/components/system/RouteBoundary";
 
 import { SearchPalette } from "@/components/chat/SearchPalette";
@@ -201,6 +202,7 @@ export function AppLayout() {
             }
           >
             <Outlet />
+            <InstallFromLink appName="Promptly" iconSrc="/pwa-192.png" description="Promptly as its own app, with its own icon and window." />
           </Suspense>
         </RouteBoundary>
       </main>

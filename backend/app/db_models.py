@@ -61,5 +61,6 @@ from app.models_config.models import ModelProvider  # noqa: F401
 from app.notifications.models import PushPreferences, PushSubscription  # noqa: F401
 from app.search.models import SearchProvider  # noqa: F401
 from app.secrets.models import UserSecret  # noqa: F401
+from app.items.models import ItemDocument, ItemInstall, ItemReminder, ItemState  # noqa: F401
 from app.tasks.models import Task, TaskConnector, TaskRun  # noqa: F401
 from app.workspaces.meetings_models import MeetingJob  # noqa: F401

@@ -5,6 +5,7 @@
  * boilerplate.
  */
 import { apiClient } from "@/api/client";
+import { itemLook } from "@/items/hooks";
 import { filesApi, type FileItem } from "@/api/files";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -310,6 +311,12 @@ export function openFile(
   navigate: (to: string) => void
 ): boolean {
   if (file.trashed_at) return false;
+  if (file.source_kind === "item") {
+    // An app's file opens in Apps (the app's own view).
+    const kind = itemLook((file as { filename?: string }).filename ?? "")?.kind;
+    navigate(kind ? `/apps/${kind}/${file.id}` : `/files/item/${file.id}`);
+    return true;
+  }
   const seg =
     file.source_kind === "document"
       ? "doc"

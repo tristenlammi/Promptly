@@ -37,6 +37,7 @@ _KIND = {
     GeneratedKind.DOCUMENT.value: "document",
     GeneratedKind.SHEET.value: "sheet",
     GeneratedKind.WHITEBOARD.value: "whiteboard",
+    "item": "item",
 }
 
 
@@ -53,6 +54,11 @@ async def current_state(db: AsyncSession, row: UserFile) -> tuple[bytes, Any]:
     if kind == "document":
         ds = await db.get(DocumentState, row.id)
         return (ds.yjs_update if ds is not None else b"") or b"", None
+    if kind == "item":
+        from app.items.models import ItemDocument
+
+        doc = await db.get(ItemDocument, row.id)
+        return b"", (doc.data if doc is not None else None)
     model = Spreadsheet if kind == "sheet" else WorkspaceCanvas
     entity = (await db.execute(select(model).where(model.file_id == row.id))).scalar_one_or_none()
     if entity is None:

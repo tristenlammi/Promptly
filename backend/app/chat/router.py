@@ -5023,6 +5023,12 @@ async def _stream_generator(
                 # not on the chat having once been in the workspace.
                 # Find / open / organise the user's files (WP-5.3).
                 enabled_categories.add("files")
+                # Item Store files (workout log, budget…): for anyone who
+                # added an item.
+                from app.chat.tools.items import has_items
+
+                if await has_items(db, user.id):
+                    enabled_categories.add("items")
                 # Ask your photos (PH-4): for anyone with a photo library.
                 from app.chat.tools.photos import has_library
 

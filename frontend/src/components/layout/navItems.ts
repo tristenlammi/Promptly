@@ -1,4 +1,5 @@
 import {
+  Blocks,
   LayoutGrid,
   FolderOpen,
   ListTodo,
@@ -120,6 +121,12 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Files",
     section: "drive",
     exact: true,
+  },
+  {
+    to: "/apps",
+    icon: Blocks,
+    label: "Apps",
+    section: "chat",
   },
 ];
 

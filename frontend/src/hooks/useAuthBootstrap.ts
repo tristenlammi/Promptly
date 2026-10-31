@@ -46,9 +46,35 @@ export function useAuthBootstrap() {
           if (cancelled) return;
           setUser(user);
           setStatus("authenticated");
+          try {
+            localStorage.setItem(
+              "promptly.offline-user",
+              JSON.stringify({ id: user.id, username: user.username, email: user.email, role: user.role, settings: user.settings }),
+            );
+          } catch {
+            /* storage blocked */
+          }
           return;
         } catch (err) {
           if (cancelled) return;
+          // No connection, on an item (or an item installed as its own app):
+          // open it for the person who last used it here — it works from the
+          // copy on this device and saves when the connection is back.
+          if (!navigator.onLine || isServerUnavailable(err)) {
+            const path = window.location.pathname;
+            if (path.startsWith("/app/") || path.startsWith("/files/item/")) {
+              try {
+                const cached = JSON.parse(localStorage.getItem("promptly.offline-user") || "null");
+                if (cached?.id) {
+                  setUser(cached);
+                  setStatus("authenticated");
+                  return;
+                }
+              } catch {
+                /* nothing cached */
+              }
+            }
+          }
           // Retry what's temporary — a restart, a rate limit, a server
           // error — rather than show the login page for it (R-142).
           const statusCode = (err as { response?: { status?: number } })?.response?.status;

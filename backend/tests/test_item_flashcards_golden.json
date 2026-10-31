@@ -1,0 +1,342 @@
+{
+ "about": "FSRS-6 golden run shared by fsrs.py and fsrs.ts (backend/tests/test_item_flashcards.py::test_golden_fixture; frontend/src/items/kinds/flashcards/golden.ts). Regenerate with FLASHCARDS_REGEN_GOLDEN=1 pytest.",
+ "tz": "Etc/GMT-10",
+ "steps": [
+  {
+   "at": "2026-10-31T20:17:05+10:00",
+   "rating": 3,
+   "seed": "kab0/f",
+   "labels": [
+    "1m",
+    "6m",
+    "10m",
+    "8d"
+   ],
+   "due": "2026-10-31T20:27:05+10:00",
+   "state": "learning",
+   "stability": 2.3065,
+   "difficulty": 2.11810397,
+   "log": {
+    "r": 3,
+    "s": "n",
+    "e": 0,
+    "i": 0.0069
+   }
+  },
+  {
+   "at": "2026-10-31T20:40:05+10:00",
+   "rating": 3,
+   "seed": "kab1/f",
+   "labels": [
+    "1m",
+    "10m",
+    "2d",
+    "4d"
+   ],
+   "due": "2026-11-02T04:00:00+10:00",
+   "state": "review",
+   "stability": 2.3065,
+   "difficulty": 2.111214236,
+   "log": {
+    "r": 3,
+    "s": "l",
+    "e": 0,
+    "i": 2.0
+   }
+  },
+  {
+   "at": "2026-11-02T11:13:00+10:00",
+   "rating": 3,
+   "seed": "kab2/f",
+   "labels": [
+    "10m",
+    "8d",
+    "11d",
+    "19d"
+   ],
+   "due": "2026-11-13T04:00:00+10:00",
+   "state": "review",
+   "stability": 10.971048263,
+   "difficulty": 2.104331391,
+   "log": {
+    "r": 3,
+    "s": "r",
+    "e": 2,
+    "i": 11.0
+   }
+  },
+  {
+   "at": "2026-11-13T18:13:00+10:00",
+   "rating": 1,
+   "seed": "kab0/f",
+   "labels": [
+    "10m",
+    "1mo",
+    "1.4mo",
+    "2.4mo"
+   ],
+   "due": "2026-11-13T18:23:00+10:00",
+   "state": "relearning",
+   "stability": 1.53901253,
+   "difficulty": 7.389975788,
+   "log": {
+    "r": 1,
+    "s": "r",
+    "e": 11,
+    "i": 0.0069
+   }
+  },
+  {
+   "at": "2026-11-14T15:36:00+10:00",
+   "rating": 3,
+   "seed": "kab1/f",
+   "labels": [
+    "10m",
+    "15m",
+    "3d",
+    "4d"
+   ],
+   "due": "2026-11-17T04:00:00+10:00",
+   "state": "review",
+   "stability": 3.555894508,
+   "difficulty": 7.377814182,
+   "log": {
+    "r": 3,
+    "s": "x",
+    "e": 1,
+    "i": 3.0
+   }
+  },
+  {
+   "at": "2026-11-18T08:13:00+10:00",
+   "rating": 2,
+   "seed": "kab2/f",
+   "labels": [
+    "10m",
+    "7d",
+    "10d",
+    "15d"
+   ],
+   "due": "2026-11-25T04:00:00+10:00",
+   "state": "review",
+   "stability": 7.22637318,
+   "difficulty": 8.244499229,
+   "log": {
+    "r": 2,
+    "s": "r",
+    "e": 4,
+    "i": 7.0
+   }
+  },
+  {
+   "at": "2026-11-25T09:13:00+10:00",
+   "rating": 4,
+   "seed": "kab0/f",
+   "labels": [
+    "10m",
+    "14d",
+    "17d",
+    "24d"
+   ],
+   "due": "2026-12-19T04:00:00+10:00",
+   "state": "review",
+   "stability": 21.352488371,
+   "difficulty": 7.643121047,
+   "log": {
+    "r": 4,
+    "s": "r",
+    "e": 7,
+    "i": 24.0
+   }
+  },
+  {
+   "at": "2026-12-19T16:13:00+10:00",
+   "rating": 3,
+   "seed": "kab1/f",
+   "labels": [
+    "10m",
+    "1.1mo",
+    "1.5mo",
+    "2.2mo"
+   ],
+   "due": "2027-02-02T04:00:00+10:00",
+   "state": "review",
+   "stability": 46.534108315,
+   "difficulty": 7.630706295,
+   "log": {
+    "r": 3,
+    "s": "r",
+    "e": 24,
+    "i": 45.0
+   }
+  },
+  {
+   "at": "2027-02-02T23:13:00+10:00",
+   "rating": 1,
+   "seed": "kab2/f",
+   "labels": [
+    "10m",
+    "2.2mo",
+    "2.8mo",
+    "3.9mo"
+   ],
+   "due": "2027-02-02T23:23:00+10:00",
+   "state": "relearning",
+   "stability": 2.707200987,
+   "difficulty": 9.20645764,
+   "log": {
+    "r": 1,
+    "s": "r",
+    "e": 45,
+    "i": 0.0069
+   }
+  },
+  {
+   "at": "2027-02-04T01:36:00+10:00",
+   "rating": 1,
+   "seed": "kab0/f",
+   "labels": [
+    "10m",
+    "15m",
+    "4d",
+    "5d"
+   ],
+   "due": "2027-02-04T01:46:00+10:00",
+   "state": "relearning",
+   "stability": 0.574785559,
+   "difficulty": 9.724396392,
+   "log": {
+    "r": 1,
+    "s": "x",
+    "e": 1,
+    "i": 0.0069
+   }
+  },
+  {
+   "at": "2027-02-04T04:59:00+10:00",
+   "rating": 3,
+   "seed": "kab1/f",
+   "labels": [
+    "10m",
+    "15m",
+    "1d",
+    "2d"
+   ],
+   "due": "2027-02-05T04:00:00+10:00",
+   "state": "review",
+   "stability": 1.201771232,
+   "difficulty": 9.709900364,
+   "log": {
+    "r": 3,
+    "s": "x",
+    "e": 1,
+    "i": 1.0
+   }
+  },
+  {
+   "at": "2027-02-05T14:13:00+10:00",
+   "rating": 4,
+   "seed": "kab2/f",
+   "labels": [
+    "10m",
+    "2d",
+    "3d",
+    "4d"
+   ],
+   "due": "2027-02-09T04:00:00+10:00",
+   "state": "review",
+   "stability": 2.528593292,
+   "difficulty": 9.598190954,
+   "log": {
+    "r": 4,
+    "s": "r",
+    "e": 1,
+    "i": 4.0
+   }
+  },
+  {
+   "at": "2027-02-09T21:13:00+10:00",
+   "rating": 3,
+   "seed": "kab0/f",
+   "labels": [
+    "10m",
+    "4d",
+    "5d",
+    "7d"
+   ],
+   "due": "2027-02-14T04:00:00+10:00",
+   "state": "review",
+   "stability": 4.759438191,
+   "difficulty": 9.583821133,
+   "log": {
+    "r": 3,
+    "s": "r",
+    "e": 4,
+    "i": 5.0
+   }
+  },
+  {
+   "at": "2027-02-15T04:13:00+10:00",
+   "rating": 3,
+   "seed": "kab1/f",
+   "labels": [
+    "10m",
+    "8d",
+    "9d",
+    "12d"
+   ],
+   "due": "2027-02-24T04:00:00+10:00",
+   "state": "review",
+   "stability": 8.048984051,
+   "difficulty": 9.569465681,
+   "log": {
+    "r": 3,
+    "s": "r",
+    "e": 6,
+    "i": 9.0
+   }
+  },
+  {
+   "at": "2027-02-24T05:13:00+10:00",
+   "rating": 2,
+   "seed": "kab2/f",
+   "labels": [
+    "10m",
+    "10d",
+    "12d",
+    "15d"
+   ],
+   "due": "2027-03-06T04:00:00+10:00",
+   "state": "review",
+   "stability": 10.900783072,
+   "difficulty": 9.699419625,
+   "log": {
+    "r": 2,
+    "s": "r",
+    "e": 9,
+    "i": 10.0
+   }
+  },
+  {
+   "at": "2027-03-06T12:13:00+10:00",
+   "rating": 3,
+   "seed": "kab0/f",
+   "labels": [
+    "10m",
+    "15d",
+    "18d",
+    "22d"
+   ],
+   "due": "2027-03-24T04:00:00+10:00",
+   "state": "review",
+   "stability": 15.721547297,
+   "difficulty": 9.684948575,
+   "log": {
+    "r": 3,
+    "s": "r",
+    "e": 10,
+    "i": 18.0
+   }
+  }
+ ]
+}

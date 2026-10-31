@@ -792,6 +792,16 @@ async def _office_view(db: AsyncSession, file: UserFile) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nothing to show")
     if file.source_kind == GeneratedKind.SHEET.value:
         return {"kind": "sheet", "title": office_title(file), "data": entity.data or []}
+    if file.source_kind == "item":
+        # An Item Store file: its readable text (the app itself needs an account).
+        from app.items.registry import get_spec
+
+        spec = get_spec(entity.kind)
+        try:
+            body = spec.to_text(entity.data or {}) if spec is not None else ""
+        except Exception:  # noqa: BLE001
+            body = ""
+        return {"kind": "item", "title": office_title(file), "app": spec.name if spec else "", "text": body}
     scene = await asyncio.to_thread(canvas_scene_json, entity.yjs_update or b"")
     return {
         "kind": "whiteboard",

@@ -2628,14 +2628,18 @@ async def update_file(
 
     if payload.filename is not None:
         row.filename = payload.filename.strip()
-        from app.files.office import content_for_shell, is_shell, shell_filename
+        from app.files.office import content_for_shell, is_shell, item_filename, shell_filename
 
         if is_shell(row):
             # Keep the office suffix; the editor's title is the name.
             from app.files.office_templates import office_title
 
             title = office_title(row).strip() or "Untitled"
-            row.filename = row.original_filename = shell_filename(row.source_kind, title)
+            row.filename = row.original_filename = (
+                item_filename(payload.filename.strip(), "." + row.original_filename.rsplit(".", 1)[-1])
+                if row.source_kind == "item"
+                else shell_filename(row.source_kind, title)
+            )
             entity = await content_for_shell(db, row)
             if entity is not None:
                 entity.title = title[:200]
@@ -4059,7 +4063,9 @@ async def _assert_can_edit_allowed(
     row = await db.get(UserFile, resource_id)
     # Documents, spreadsheets and whiteboards take editors (WP-3.2), and
     # uploaded PDFs — fill in, annotate, reorganise (WP-6.5).
-    if row is None or (row.source_kind not in OFFICE_SOURCE_KINDS and not is_editable_pdf(row)):
+    if row is None or (
+        row.source_kind not in OFFICE_SOURCE_KINDS and row.source_kind != "item" and not is_editable_pdf(row)
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(

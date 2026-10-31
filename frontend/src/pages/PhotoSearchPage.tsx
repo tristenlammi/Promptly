@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, Sparkles } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { usePhotosPath } from "@/components/photos/photosPath";
 import { albumsApi } from "@/api/albums";
 
 import { photosApi, type PhotoItem, type PhotoSearchResult } from "@/api/photos";
@@ -16,6 +17,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 /** Photos by what's in them (PH-2): "dog on a beach", "birthday cake",
  *  "snow" — best matches first, from the photos-ml service's SigLIP 2. */
 export function PhotoSearchPage() {
+  const photosPath = usePhotosPath();
   const [params, setParams] = useSearchParams();
   const q = (params.get("q") ?? "").trim();
   const [draft, setDraft] = useState(q);
@@ -50,7 +52,7 @@ export function PhotoSearchPage() {
     try {
       const a = await albumsApi.create(title.trim(), [], { q });
       void qc.invalidateQueries({ queryKey: ["albums"] });
-      navigate(`/files/photos/albums/${a.id}`);
+      navigate(photosPath(`/albums/${a.id}`));
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't make the album."));
     }

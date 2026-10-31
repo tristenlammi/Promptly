@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { usePhotosPath } from "@/components/photos/photosPath";
 import { peopleApi, type Observation } from "@/api/people";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -31,6 +32,7 @@ export function PeopleInPhoto({ fileId }: { fileId: string }) {
 }
 
 function Who({ obs, onChange }: { obs: Observation; onChange: () => void }) {
+  const photosPath = usePhotosPath();
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const { data: known } = useQuery({
@@ -88,31 +90,28 @@ function Who({ obs, onChange }: { obs: Observation; onChange: () => void }) {
         </form>
       ) : obs.person?.name ? (
         <span className="flex flex-1 items-center gap-1">
-          <Link to={`/files/photos/people/${obs.person.id}`} className="font-medium text-[var(--accent-text)] hover:underline">
+          <Link to={photosPath(`/people/${obs.person.id}`)} className="font-medium text-[var(--accent-text)] hover:underline">
             {obs.person.name}
           </Link>
+          {/* Matched automatically = tagged (it's on their page already);
+              "Auto" says who did it. The × takes the tag off either way. */}
           {!obs.confirmed && (
-            <>
-              <button
-                type="button"
-                title={`Yes, that's ${obs.person.name}`}
-                aria-label={`Yes, that's ${obs.person.name}`}
-                onClick={() => void act(() => peopleApi.name(obs.id, { person_id: obs.person!.id }))}
-                className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--hover)]"
-              >
-                <Check className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                title={`Not ${obs.person.name}`}
-                aria-label={`Not ${obs.person.name}`}
-                onClick={() => void act(() => peopleApi.notThem(obs.id, obs.person!.id))}
-                className="rounded p-0.5 text-[var(--text-muted)] hover:bg-[var(--hover)]"
-              >
-                <X className="h-3 w-3" />
-              </button>
-            </>
+            <span
+              title="Tagged automatically — it's already on their page"
+              className="rounded bg-[var(--hover)] px-1 py-px text-[10px] text-[var(--text-muted)]"
+            >
+              Auto
+            </span>
           )}
+          <button
+            type="button"
+            title={`Not ${obs.person.name} — take the tag off`}
+            aria-label={`Not ${obs.person.name}`}
+            onClick={() => void act(() => peopleApi.notThem(obs.id, obs.person!.id))}
+            className="ml-auto rounded p-1 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </span>
       ) : (
         <button type="button" onClick={() => setNaming(true)} className="flex-1 text-left text-[var(--accent-text)] hover:underline">

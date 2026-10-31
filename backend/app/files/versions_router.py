@@ -314,6 +314,20 @@ async def version_diff(
     row, _access = await _file(db, file_id, user)
     v = await _version(db, row, version_id)
     kind = _kind(row)
+    if kind == "item":
+        from app.items.models import ItemDocument
+        from app.items.registry import get_spec
+
+        doc = await db.get(ItemDocument, row.id)
+        spec = get_spec(doc.kind) if doc is not None else None
+
+        def _txt(data: Any) -> str:
+            try:
+                return spec.to_text(data or {}) if spec is not None else ""
+            except Exception:  # noqa: BLE001 — an old shape the kind can't read
+                return ""
+
+        return {"kind": kind, **_text_diff(_txt(v.data), _txt(doc.data if doc is not None else {}))}
     if kind == "blob":
         return await asyncio.to_thread(_blob_diff, row, v)
     if kind == "pdf":
@@ -402,6 +416,18 @@ async def restore(
     row, access = await _file(db, file_id, user)
     _edit_only(access)
     v = await _version(db, row, version_id)
+    if _kind(row) == "item":
+        # An Item Store file (app/items): its JSON goes back, through the
+        # one save path (validated, versioned, reminders recomputed).
+        from app.items import service as item_service
+
+        try:
+            row, doc, _a = await item_service.load(db, user, row.id, need="edit", lock=True)
+            await item_service.restore(db, user, row, doc, v)
+        except (item_service.ItemNotFound, item_service.ItemError) as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc) or "Can't restore that") from exc
+        await db.commit()
+        return {"ok": True, "epoch": row.collab_epoch, "revision": doc.revision}
     if _bytes_kind(_kind(row)):
         from app.files.blob_versions import VersionError, restore_bytes
 

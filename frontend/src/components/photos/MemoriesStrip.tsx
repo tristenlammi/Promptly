@@ -2,11 +2,13 @@ import { forwardRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
+import { usePhotosPath } from "@/components/photos/photosPath";
 import { memoriesApi } from "@/api/memories";
 
 /** The memories along the top of the Photos home (PH-5) — nothing at all
  *  when there are none. */
 export const MemoriesStrip = forwardRef<HTMLDivElement>(function MemoriesStrip(_, ref) {
+  const photosPath = usePhotosPath();
   const { data } = useQuery({ queryKey: ["photo-memories"], queryFn: memoriesApi.list, staleTime: 5 * 60_000, retry: false });
   if (!data?.length) return <div ref={ref} />;
   return (
@@ -15,7 +17,7 @@ export const MemoriesStrip = forwardRef<HTMLDivElement>(function MemoriesStrip(_
         {data.map((m) => (
           <li key={m.id} className="shrink-0">
             <Link
-              to={`/files/photos/memories/${m.id}`}
+              to={photosPath(`/memories/${m.id}`)}
               className="relative block h-36 w-28 overflow-hidden rounded-xl bg-[var(--hover)] sm:h-44 sm:w-36"
             >
               {m.cover?.thumb && <img src={m.cover.thumb} alt="" className="h-full w-full object-cover" loading="lazy" />}

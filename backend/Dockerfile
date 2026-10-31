@@ -38,6 +38,8 @@ RUN apt-get update \
         fonts-liberation \
         fonts-dejavu-core \
         fonts-noto-cjk \
+        # Colour emoji for photo markup (PH-7), drawn as the editor shows them.
+        fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
 
 # pg_dump for the built-in database backups (before every migration and

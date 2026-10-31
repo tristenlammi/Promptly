@@ -69,6 +69,9 @@ Category = Literal[
     # Admin-facing operational alerts (0153) — e.g. a search provider was
     # auto-paused after a quota/auth failure. Only sent to admins.
     "system_alert",
+    # Item Store reminders (0229): a habit, a med dose, a trip — asked for
+    # by an item file (app/items).
+    "item_reminder",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -86,6 +89,7 @@ CATEGORIES: tuple[str, ...] = (
     "email_brief",
     "email_action",
     "system_alert",
+    "item_reminder",
     "test",
 )
 

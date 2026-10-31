@@ -63,6 +63,10 @@ class SystemKind(str, Enum):
     # (and its subfolders) is in the Photos tab, like Google Photos. The
     # value keeps its old name (it's schema).
     CAMERA_UPLOADS = "camera_uploads"
+    # The Apps (Item Store) data: ``My files/Apps/<App>/`` — every app's
+    # files live here (ordinary files: shareable, searchable, indexed for
+    # AI like any other folder).
+    APPS = "apps"
     # NOTE: a Phase-12 ``EMAIL_ATTACHMENTS`` kind used to live here, lazily
     # seeded on first email-account connect. Email/calendar integration was
     # removed, and migration ``0106_remove_email_attachments_folder`` deletes
@@ -77,6 +81,7 @@ DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
     SystemKind.WORKSPACES_ROOT: "Workspaces",
     SystemKind.TEMPLATES: "Templates",
     SystemKind.CAMERA_UPLOADS: "Photos",
+    SystemKind.APPS: "Apps",
 }
 
 # The per-type subfolders auto-created inside each workspace's Drive
@@ -239,6 +244,17 @@ async def _child_folder(db: AsyncSession, user_id, parent_id, name: str) -> File
         return (await db.execute(find())).scalars().one()
 
 
+async def ensure_apps_root(db: AsyncSession, user: User) -> FileFolder:
+    """The protected ``Apps`` folder at the top of My files."""
+    return await _ensure(db, user.id, SystemKind.APPS)
+
+
+async def app_folder(db: AsyncSession, user: User, app_name: str) -> FileFolder:
+    """``Apps/<App name>`` — where that app's files are made."""
+    root = await ensure_apps_root(db, user)
+    return await _child_folder(db, user.id, root.id, app_name[:120] or "App")
+
+
 async def ensure_workspaces_root(db: AsyncSession, user: User) -> FileFolder:
     """Find-or-create the single protected ``Workspaces`` root folder.
 
@@ -350,6 +366,7 @@ async def seed_system_folders(db: AsyncSession, user: User) -> None:
     await ensure_workspaces_root(db, user)
     # The Photos folder — the photo library — is always there.
     await ensure_camera_uploads(db, user)
+    await ensure_apps_root(db, user)
 
 
 # --------------------------------------------------------------------

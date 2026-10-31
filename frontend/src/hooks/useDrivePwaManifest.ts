@@ -5,8 +5,8 @@ import { useLocation } from "react-router-dom";
  * Swaps the active ``<link rel="manifest">`` based on the current
  * route so the browser's install prompt targets the right PWA:
  *
- *   - ``/files*``           → ``/files.webmanifest``  (Promptly Files)
- *   - anywhere else        → ``/manifest.webmanifest`` (Promptly)
+ *   - ``/photos*``  → ``/photos.webmanifest``   (Promptly Photos)
+ *   - anywhere else → ``/manifest.webmanifest`` (Promptly — Files included)
  *
  * Why two manifests? Chrome's install UI lets a site register multiple
  * distinct "app identities" as long as each manifest has a unique
@@ -16,16 +16,20 @@ import { useLocation } from "react-router-dom";
  *
  * Scopes are intentionally disjoint:
  *   - Promptly (main): ``scope: "/"``
- *   - Promptly Files:  ``scope: "/files/"``
+ *   - Promptly Photos: ``scope: "/photos/"`` — the standalone app at
+ *     ``/photos``; ``/files/photos`` is Photos inside Promptly's Files and
+ *     belongs to the main app.
  *
- * Without this Chrome treats any already-installed Promptly PWA as
- * "the app that owns /files" and refuses to fire a second
- * ``beforeinstallprompt`` for the Files manifest. Narrowing the Files
- * scope to just ``/files/`` lets Chrome consider them two separate
- * installable apps. The trade-off is that non-Drive URLs (``/login``,
- * ``/settings``, etc.) opened from inside the Files PWA will open in
- * a Chrome browser tab instead of inside the Files PWA — which is the
- * correct UX since those belong to Promptly Chat, not to the Drive.
+ * Without a narrow scope Chrome treats an already-installed Promptly PWA
+ * as "the app that owns /photos" and refuses to fire a second
+ * ``beforeinstallprompt`` for the Photos manifest. Non-Photos URLs opened
+ * from inside the Photos app open in the browser instead — correct, since
+ * they belong to Promptly.
+ *
+ * Promptly Files used to be its own installable app (``/files.webmanifest``,
+ * scope ``/files/``). It's no longer advertised — Photos is the separate
+ * app now and Files is part of Promptly — but ``public/files.webmanifest``
+ * stays on disk so anyone who already installed it keeps a working app.
  *
  * On iOS Safari the manifest is largely ignored for "Add to Home
  * Screen", so we also swap a couple of apple-specific meta tags
@@ -37,17 +41,13 @@ export function useDrivePwaManifest(): void {
   const location = useLocation();
 
   useEffect(() => {
-    const onDrive =
-      location.pathname === "/files" ||
-      location.pathname.startsWith("/files/");
-
-    setManifestHref(
-      onDrive ? "/files.webmanifest" : "/manifest.webmanifest"
-    );
-    setAppleTouchIconHref(
-      onDrive ? "/apple-touch-icon-files.png" : "/apple-touch-icon.png"
-    );
-    setAppleMobileTitle(onDrive ? "Promptly Files" : "Promptly");
+    // An item installed as its own app (/app/<id>/) sets its own manifest.
+    if (location.pathname.startsWith("/app/")) return;
+    const onPhotos =
+      location.pathname === "/photos" || location.pathname.startsWith("/photos/");
+    setManifestHref(onPhotos ? "/photos.webmanifest" : "/manifest.webmanifest");
+    setAppleTouchIconHref(onPhotos ? "/apple-touch-icon-photos.png" : "/apple-touch-icon.png");
+    setAppleMobileTitle(onPhotos ? "Promptly Photos" : "Promptly");
   }, [location.pathname]);
 }
 

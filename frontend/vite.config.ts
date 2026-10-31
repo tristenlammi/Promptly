@@ -247,6 +247,9 @@ export default defineConfig({
         globIgnores: [
           // The PromptlySync APK (several MB): only for whoever installs it.
           "**/downloads/**",
+          // Item Store app icons: fetched by the browser when an item is
+          // installed as its own app, never needed offline up front.
+          "**/item-icons/**",
           "**/excalidraw-assets/**",
           "**/excalidraw-*.js",
           // The Photos map (~1 MB) and its offline country outlines: only for

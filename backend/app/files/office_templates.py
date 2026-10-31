@@ -45,6 +45,10 @@ def office_kind_of(row: UserFile) -> str | None:
 def office_title(row: UserFile) -> str:
     """The file's name without its office suffix."""
     name = row.filename or "Untitled"
+    if row.source_kind == "item":
+        from app.items.service import title_of
+
+        return title_of(row)
     for suffix in (".html", ".sheet", ".whiteboard"):
         if name.lower().endswith(suffix):
             return name[: -len(suffix)] or "Untitled"
