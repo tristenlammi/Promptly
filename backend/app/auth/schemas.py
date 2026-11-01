@@ -363,7 +363,7 @@ class UserPreferencesUpdate(BaseModel):
     def _clean_hidden_nav(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return None
-        allowed = {"projects", "tasks"}
+        allowed = {"projects", "tasks", "rooms"}
         # Preserve order, dedupe, and drop anything outside the optional
         # set (Chat + Files are core and can never be hidden).
         seen: list[str] = []

@@ -100,7 +100,7 @@ export function SearchPanel({
             onChange={(e) => setQ(e.target.value)}
             placeholder={roomId ? "Search this conversation" : "Search all your rooms"}
             aria-label="Search messages"
-            className="h-full min-w-0 flex-1 bg-transparent text-base text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] md:text-sm"
+            className="h-full min-w-0 flex-1 bg-transparent text-base text-[var(--text)] !outline-none placeholder:text-[var(--text-muted)] md:text-sm"
           />
           {isFetching && <Loader2 className="h-4 w-4 animate-spin text-[var(--text-muted)]" />}
         </label>

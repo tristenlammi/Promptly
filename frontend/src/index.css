@@ -212,9 +212,12 @@ body,
 /* Keyboard-only focus ring. ``:focus-visible`` means pointer users never
    see it, but keyboard navigators get a clear, consistent accent outline
    on any control that doesn't define its own focus style. Components that
-   opt out with ``focus:outline-none`` (and usually supply their own ring)
-   keep precedence via class specificity, so this never double-rings. */
-:focus-visible {
+   opt out with ``outline-none`` / ``focus:outline-none`` (and usually
+   supply their own ring or border) win. ``:where`` keeps this at zero
+   specificity: it comes after Tailwind's utilities, and as a plain
+   ``:focus-visible`` it beat ``outline-none``, so text fields with their
+   own focus border got a second, orange outline on top. */
+:where(:focus-visible) {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

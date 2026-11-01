@@ -415,7 +415,7 @@ export const Composer = forwardRef<
         </div>
       )}
 
-      <div className="flex items-end gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-1 focus-within:border-[var(--item-accent)]">
+      <div className="flex items-end gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-1 transition-colors focus-within:border-[color-mix(in_srgb,var(--item-accent)_45%,var(--border))]">
         {!editing && (
           <button type="button" aria-label="Attach files" onClick={() => fileInput.current?.click()} className={iconBtn}>
             <Paperclip className="h-5 w-5" />
@@ -442,7 +442,7 @@ export const Composer = forwardRef<
           placeholder={editing ? "Edit your message" : placeholder}
           aria-label={editing ? "Edit message" : placeholder}
           enterKeyHint={isPhone ? "enter" : "send"}
-          className="max-h-[40vh] min-h-[44px] flex-1 resize-none bg-transparent px-1 py-[11px] text-base leading-[22px] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] md:min-h-[40px] md:py-[9px] md:text-sm"
+          className="max-h-[40vh] min-h-[44px] flex-1 resize-none bg-transparent px-1 py-[11px] text-base leading-[22px] text-[var(--text)] !outline-none placeholder:text-[var(--text-muted)] md:min-h-[40px] md:py-[9px] md:text-sm"
         />
         <button
           ref={emojiBtn}

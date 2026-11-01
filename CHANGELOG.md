@@ -21,6 +21,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-01
+
+### Changed
+- Rooms on desktop now opens inside Promptly, with the usual sidebar (and a new **Rooms** item in it, which you can hide in Account → Features). On a phone, and in the installed Rooms app, it's still its own full-screen app.
+
+### Fixed
+- Text fields across Promptly (Rooms, the Item Store apps, sheets) showed two focus outlines at once — an orange box inside their own blue highlight — because the global keyboard-focus outline overrode each field's own; now each field shows just its own.
+
 ## [0.13.0] - 2026-11-01
 
 ### Added

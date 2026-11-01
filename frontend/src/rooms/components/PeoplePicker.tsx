@@ -47,7 +47,7 @@ export function PeoplePicker({
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search people"
           aria-label="Search people"
-          className="h-full min-w-0 flex-1 bg-transparent text-base text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] md:text-sm"
+          className="h-full min-w-0 flex-1 bg-transparent text-base text-[var(--text)] !outline-none placeholder:text-[var(--text-muted)] md:text-sm"
         />
         {isLoading && <Loader2 className="h-4 w-4 animate-spin text-[var(--text-muted)]" />}
       </label>

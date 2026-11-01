@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bell, Download, Home, Loader2, MessageSquarePlus, MessagesSquare, Plus, Search, Settings, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useMatch, useNavigate } from "react-router-dom";
 
 import { roomsApi, type Bootstrap, type Space } from "@/api/rooms";
@@ -45,6 +45,10 @@ function writeLS(key: string, v: unknown) {
   }
 }
 
+/** Rooms inside Promptly's own layout (desktop browser): Promptly's
+ *  sidebar is right there, so no "Back to Promptly" buttons of our own. */
+const EmbeddedContext = createContext(false);
+
 function isStandalone() {
   return typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)").matches;
 }
@@ -74,7 +78,7 @@ function useVisualViewport(enabled: boolean) {
  * ``/rooms/*`` — Promptly Rooms as its own app (own manifest, scope
  * ``/rooms/``): spaces of text rooms + direct messages. No Promptly chrome.
  */
-export function RoomsApp() {
+export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const isPhone = useIsMobile(767);
@@ -297,7 +301,7 @@ export function RoomsApp() {
           )}
           <SideFooter />
         </div>
-        <main id="main" className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--bg)]">
+        <main id={embedded ? undefined : "main"} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--bg)]">
           {roomId ? (
             <RoomView key={roomId} roomId={roomId} b={b} isPhone={false} />
           ) : (
@@ -312,9 +316,14 @@ export function RoomsApp() {
   const newRoomSpace = b?.spaces.find((s) => s.id === newRoomIn) ?? null;
 
   return (
+    <EmbeddedContext.Provider value={embedded}>
     <div
-      style={rootStyle}
-      className={cn("flex flex-col overflow-hidden bg-[var(--bg)] text-[var(--text)] pl-safe pr-safe pt-safe", !vv && "h-[100dvh]")}
+      style={embedded ? undefined : rootStyle}
+      className={cn(
+        "flex flex-col overflow-hidden bg-[var(--bg)] text-[var(--text)]",
+        embedded ? "h-full min-h-0" : "pl-safe pr-safe pt-safe",
+        !embedded && !vv && "h-[100dvh]",
+      )}
     >
       {body}
       <CreateSpaceSheet open={createSpace} onClose={() => setCreateSpace(false)} />
@@ -338,13 +347,18 @@ export function RoomsApp() {
           </div>
         </Sheet>
       )}
-      <InstallFromLink
-        appName="Promptly Rooms"
-        iconSrc="/item-icons/rooms-192.png"
-        description="Chat with your family and friends — spaces, rooms and messages as their own app."
-      />
-      <NetworkStatusToast />
+      {!embedded && (
+        <>
+          <InstallFromLink
+            appName="Promptly Rooms"
+            iconSrc="/item-icons/rooms-192.png"
+            description="Chat with your family and friends — spaces, rooms and messages as their own app."
+          />
+          <NetworkStatusToast />
+        </>
+      )}
     </div>
+    </EmbeddedContext.Provider>
   );
 }
 
@@ -409,6 +423,7 @@ function Rail({
   onCreateSpace: () => void;
   onSearch: () => void;
 }) {
+  const embedded = useContext(EmbeddedContext);
   const plainBtn =
     "flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface)] text-[var(--text-muted)] transition hover:bg-[var(--item-accent)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]";
   return (
@@ -439,7 +454,7 @@ function Rail({
         <button type="button" aria-label="Search all rooms" title="Search all rooms" onClick={onSearch} className={plainBtn}>
           <Search className="h-5 w-5" />
         </button>
-        {!isStandalone() && (
+        {!isStandalone() && !embedded && (
           <Link to="/" aria-label="Back to Promptly" title="Back to Promptly" className={plainBtn}>
             <Home className="h-5 w-5" />
           </Link>
@@ -566,13 +581,14 @@ function PhoneHome({
   onNewRoom: (id: string) => void;
   onSearch: () => void;
 }) {
+  const embedded = useContext(EmbeddedContext);
   const navigate = useNavigate();
   const spaceMentions = Object.values(t.spaces).reduce((n, s) => n + s.mentions, 0);
   const iconBtn = "flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-1 px-2">
-        {!isStandalone() && (
+        {!isStandalone() && !embedded && (
           <Link to="/" aria-label="Back to Promptly" className={iconBtn}>
             <Home className="h-5 w-5" />
           </Link>

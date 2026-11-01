@@ -2,6 +2,8 @@ import { Suspense, useEffect } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 
 import { AppLayout } from "@/components/layout/AppLayout";
+import { useIsMobile } from "@/hooks/useIsMobile";
+import { launchedAppKey } from "@/lib/installPrompt";
 import { ToastViewport } from "@/components/shared/ToastViewport";
 import { UpdateBanner } from "@/components/layout/UpdateBanner";
 import { ConfirmHost } from "@/components/shared/ConfirmDialog";
@@ -200,6 +202,21 @@ const RoomsApp = lazyWithRetry(
   () => import("@/rooms/RoomsApp").then((m) => ({ default: m.RoomsApp })),
   "RoomsApp"
 );
+
+/** Rooms is its own app on a phone and when launched as the installed
+ *  Rooms app; in a desktop browser (or the installed Promptly window) it
+ *  sits inside Promptly's layout, sidebar and all. */
+function RoomsGate() {
+  const isMobile = useIsMobile();
+  if (isMobile || launchedAppKey() === "rooms") {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <RoomsApp />
+      </Suspense>
+    );
+  }
+  return <AppLayout />;
+}
 
 const PhotosAppShell = lazyWithRetry(
   () => import("@/components/photos/PhotosAppShell").then((m) => ({ default: m.PhotosAppShell })),
@@ -542,15 +559,13 @@ export default function App() {
       >
         {photoPageRoutes()}
       </Route>
-      {/* Promptly Rooms (spaces + messages) as its own installed app. */}
-      <Route
-        path="/rooms/*"
-        element={
-          <Suspense fallback={<FullScreenLoading />}>
-            <RoomsApp />
-          </Suspense>
-        }
-      />
+      {/* Promptly Rooms (spaces + messages): on its own on a phone and in
+          the installed Rooms app; inside Promptly, with its sidebar, in a
+          desktop browser. */}
+      <Route path="/rooms" element={<RoomsGate />}>
+        <Route index element={<RoomsApp embedded />} />
+        <Route path="*" element={<RoomsApp embedded />} />
+      </Route>
       {/* The PromptlySync download page (the "Add device" QR lands here). */}
       <Route
         path="/sync"
