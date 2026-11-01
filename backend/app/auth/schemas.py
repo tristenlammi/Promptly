@@ -241,6 +241,11 @@ class UserPreferencesUpdate(BaseModel):
     # the Study feature (the only such surface) was removed; retained for
     # API-shape stability. Absent / ``[]`` = nothing opted in.
     enabled_nav: list[str] | None = None
+    # Apps the user pinned to their sidebar, in order: a built-in app
+    # ("rooms") or an Item Store kind. Lets someone use an app from inside
+    # Promptly without installing it. Apps they no longer have are skipped
+    # when the sidebar draws. ``[]`` = none pinned.
+    nav_apps: list[str] | None = None
     # One-shot flag: the org admin has finished (or skipped) the post-signup
     # onboarding wizard. Gates the wizard so it shows once and never nags again,
     # even if they later remove every provider. Purely a client-driven marker.
@@ -363,15 +368,30 @@ class UserPreferencesUpdate(BaseModel):
     def _clean_hidden_nav(cls, v: list[str] | None) -> list[str] | None:
         if v is None:
             return None
-        allowed = {"projects", "tasks", "rooms"}
+        allowed = {"workspaces", "tasks"}
         # Preserve order, dedupe, and drop anything outside the optional
         # set (Chat + Files are core and can never be hidden).
         seen: list[str] = []
         for item in v:
             key = str(item).strip().lower()
+            # Pre-rename key from when Workspaces were "Projects".
+            if key == "projects":
+                key = "workspaces"
             if key in allowed and key not in seen:
                 seen.append(key)
         return seen
+
+    @field_validator("nav_apps")
+    @classmethod
+    def _clean_nav_apps(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        seen: list[str] = []
+        for item in v:
+            key = str(item).strip().lower()
+            if re.fullmatch(r"[a-z0-9_-]{1,40}", key) and key not in seen:
+                seen.append(key)
+        return seen[:20]
 
     @field_validator("enabled_nav")
     @classmethod

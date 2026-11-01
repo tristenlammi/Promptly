@@ -11,7 +11,7 @@ import {
 import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, Loader2, Minus, Pencil, Plus, Sparkles } from "lucide-react";
+import { Check, Download, Loader2, Minus, Pencil, Pin, Plus, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -21,13 +21,15 @@ import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 import { itemsApi, type LauncherApp } from "./api";
+import { BUILT_IN_APPS, useNavApps } from "./navApps";
 import "./ui/items.css";
 
 /**
  * ``/apps`` — the launcher: the apps this person added, as tiles they
  * arrange (drag in Edit, or long-press a tile on a phone). Tap a tile to
  * open the app; the last tile gets more apps. Each app's data lives in
- * ``My files/Apps/<App>``.
+ * ``My files/Apps/<App>``. In Edit, the pin on a tile puts that app in the
+ * sidebar — so it can be used from Promptly without installing it.
  */
 export function AppsPage() {
   const navigate = useNavigate();
@@ -35,6 +37,8 @@ export function AppsPage() {
   const { data, isLoading } = useQuery({ queryKey: ["apps-launcher"], queryFn: itemsApi.launcher });
   const [order, setOrder] = useState<LauncherApp[]>([]);
   const [editing, setEditing] = useState(false);
+  const nav = useNavApps();
+  const pinProps = (id: string) => ({ editing, pinned: nav.pinned.includes(id), onTogglePin: () => void nav.toggle(id) });
 
   useEffect(() => {
     if (data) setOrder(data);
@@ -85,22 +89,20 @@ export function AppsPage() {
               <span className="hidden sm:inline">Install apps</span>
               <span className="sm:hidden">Install</span>
             </button>
-            {order.length > 0 && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEditing((v) => !v);
-                }}
-                className={cn(
-                  "inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium transition",
-                  editing ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]",
-                )}
-              >
-                {editing ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-                {editing ? "Done" : "Edit"}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditing((v) => !v);
+              }}
+              className={cn(
+                "inline-flex h-9 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium transition",
+                editing ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]",
+              )}
+            >
+              {editing ? <Check className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+              {editing ? "Done" : "Edit"}
+            </button>
           </>
         }
       />
@@ -113,7 +115,9 @@ export function AppsPage() {
       ) : order.length === 0 ? (
         <>
         <ul className="grid grid-cols-4 gap-x-2 gap-y-6 sm:grid-cols-5 md:grid-cols-6" aria-label="Built-in apps">
-          <BuiltInTile name="Rooms" icon="/item-icons/rooms-192.png" onOpen={() => navigate("/rooms/")} />
+          {BUILT_IN_APPS.map((app) => (
+            <BuiltInTile key={app.id} name={app.name} icon={app.icon} onOpen={() => navigate(`${app.to}/`)} onLongPress={() => setEditing(true)} {...pinProps(app.id)} />
+          ))}
         </ul>
         <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-[var(--border)] px-6 py-16 text-center">
           <span className="flex h-16 w-16 items-center justify-center rounded-3xl bg-[var(--accent)] text-white shadow-[var(--shadow-md)]">
@@ -139,15 +143,17 @@ export function AppsPage() {
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={order.map((a) => a.kind)} strategy={rectSortingStrategy}>
             <ul className="grid grid-cols-4 gap-x-2 gap-y-6 sm:grid-cols-5 md:grid-cols-6" aria-label="Your apps">
-              <BuiltInTile name="Rooms" icon="/item-icons/rooms-192.png" onOpen={() => navigate("/rooms/")} />
+              {BUILT_IN_APPS.map((app) => (
+                <BuiltInTile key={app.id} name={app.name} icon={app.icon} onOpen={() => navigate(`${app.to}/`)} onLongPress={() => setEditing(true)} {...pinProps(app.id)} />
+              ))}
               {order.map((app) => (
                 <Tile
                   key={app.kind}
                   app={app}
-                  editing={editing}
                   onLongPress={() => setEditing(true)}
                   onOpen={() => navigate(`/apps/${app.kind}`)}
                   onRemove={() => void remove(app)}
+                  {...pinProps(app.kind)}
                 />
               ))}
               <li className="flex flex-col items-center gap-2">
@@ -169,7 +175,9 @@ export function AppsPage() {
         </DndContext>
       )}
       {editing && (
-        <p className="text-center text-xs text-[var(--text-muted)]">Drag to arrange · tap − to remove · their files stay in My files › Apps</p>
+        <p className="text-center text-xs text-[var(--text-muted)]">
+          Drag to arrange · tap the pin to show an app in your sidebar · tap − to remove (its files stay in My files › Apps)
+        </p>
       )}
     </div>
       </div>
@@ -177,16 +185,57 @@ export function AppsPage() {
   );
 }
 
+interface PinProps {
+  editing: boolean;
+  pinned: boolean;
+  onTogglePin: () => void;
+}
+
+/** In Edit: the corner button that adds an app to (or takes it off) the sidebar. */
+function PinButton({ name, pinned, onTogglePin }: { name: string; pinned: boolean; onTogglePin: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onTogglePin();
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      aria-pressed={pinned}
+      aria-label={pinned ? `Remove ${name} from the sidebar` : `Show ${name} in the sidebar`}
+      title={pinned ? "In your sidebar — tap to remove" : "Show in sidebar"}
+      className={cn(
+        "absolute -top-1.5 right-1 flex h-6 w-6 items-center justify-center rounded-full shadow-[var(--shadow-md)] sm:right-2",
+        pinned ? "bg-[var(--accent)] text-white" : "bg-[var(--surface-2)] text-[var(--text)]",
+      )}
+    >
+      <Pin className={cn("h-3.5 w-3.5", pinned && "fill-current")} />
+    </button>
+  );
+}
+
 /** An app that's part of Promptly itself (not a file-backed item): always
- *  there, not arrangeable or removable. */
-function BuiltInTile({ name, icon, onOpen }: { name: string; icon: string; onOpen: () => void }) {
+ *  there, not arrangeable or removable — but it can be pinned. */
+function BuiltInTile({
+  name,
+  icon,
+  onOpen,
+  onLongPress,
+  editing,
+  pinned,
+  onTogglePin,
+}: { name: string; icon: string; onOpen: () => void; onLongPress: () => void } & PinProps) {
   return (
     <li className="relative flex flex-col items-center gap-2">
       <button
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          onOpen();
+          if (!editing) onOpen();
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onLongPress();
         }}
         aria-label={`Open ${name}`}
         className="relative rounded-[22px] shadow-[var(--shadow-sm)] transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
@@ -194,6 +243,7 @@ function BuiltInTile({ name, icon, onOpen }: { name: string; icon: string; onOpe
         <img src={icon} alt="" className="h-16 w-16 select-none rounded-[22px] md:h-[72px] md:w-[72px]" draggable={false} />
       </button>
       <span className="w-full truncate px-1 text-center text-xs font-medium text-[var(--text)]">{name}</span>
+      {editing && <PinButton name={name} pinned={pinned} onTogglePin={onTogglePin} />}
     </li>
   );
 }
@@ -204,13 +254,14 @@ function Tile({
   onOpen,
   onRemove,
   onLongPress,
+  pinned,
+  onTogglePin,
 }: {
   app: LauncherApp;
-  editing: boolean;
   onOpen: () => void;
   onRemove: () => void;
   onLongPress: () => void;
-}) {
+} & PinProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: app.kind, disabled: !editing });
   const press = useRef<number | null>(null);
   const longPressed = useRef(false);
@@ -269,6 +320,7 @@ function Tile({
           <Minus className="h-3.5 w-3.5" />
         </button>
       )}
+      {editing && <PinButton name={app.name} pinned={pinned} onTogglePin={onTogglePin} />}
     </li>
   );
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, useNavigate, useParams } from "react-router-dom";
+import { NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   Archive,
   ChevronDown,
@@ -58,6 +58,7 @@ import { NewChatButton } from "./NewChatButton";
 import { FolderEditModal } from "./FolderEditModal";
 import { useChatFoldersQuery, useDeleteFolder } from "@/hooks/useChatFolders";
 import { useFolderUiStore } from "@/store/folderUiStore";
+import { useNavApps } from "@/items/navApps";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import type { ChatFolder } from "@/api/folders";
 
@@ -76,6 +77,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   // Opt-in surfaces ship hidden and appear only once enabled here.
   const enabledNav = useAuthStore((s) => s.user?.settings?.enabled_nav);
   const isMobile = useIsMobile();
+  // Apps the user pinned to their sidebar (from Apps → Edit).
+  const { apps: navApps } = useNavApps();
+  const { pathname } = useLocation();
+  // While a pinned app is open, its own row lights up — not "Apps" too.
+  const inNavApp = navApps.some((a) => pathname === a.to || pathname.startsWith(`${a.to}/`));
   const {
     isLoading: convLoading,
     hasNextPage: moreChats,
@@ -192,9 +198,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                 to={item.to}
                 icon={<Icon className="h-4 w-4" />}
                 label={item.label}
+                inactive={inNavApp && item.to === "/apps"}
               />
             );
           })}
+          {navApps.map((app) => (
+            <SideIcon key={app.id} to={app.to} icon={<AppIcon src={app.icon} />} label={app.name} />
+          ))}
           <SideIcon
             to="/archive"
             icon={<Archive className="h-4 w-4" />}
@@ -255,9 +265,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               icon={<Icon className="h-4 w-4" />}
               label={item.label}
               end={item.exact}
+              inactive={inNavApp && item.to === "/apps"}
             />
           );
         })}
+        {navApps.map((app) => (
+          <NavItem key={app.id} to={app.to} icon={<AppIcon src={app.icon} />} label={app.name} />
+        ))}
       </nav>
 
       {/* Search across all conversations. Activates a panel that
@@ -465,16 +479,24 @@ function TemporaryCountdownBadge({ expiresAt }: { expiresAt: string | null }) {
   );
 }
 
+/** A pinned app's own icon, shrunk to sit with the line icons. */
+function AppIcon({ src }: { src: string }) {
+  return <img src={src} alt="" className="h-4 w-4 rounded-[4px]" draggable={false} />;
+}
+
 function NavItem({
   to,
   icon,
   label,
   end,
+  inactive,
 }: {
   to: string;
   icon: React.ReactNode;
   label: string;
   end?: boolean;
+  /** Never show as the current page (another row owns this path). */
+  inactive?: boolean;
 }) {
   return (
     <NavLink
@@ -483,7 +505,7 @@ function NavItem({
       className={({ isActive }) =>
         cn(
           "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition",
-          isActive
+          isActive && !inactive
             ? "bg-[var(--accent)]/10 text-[var(--text)] font-medium"
             : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
         )
@@ -499,10 +521,12 @@ function SideIcon({
   to,
   icon,
   label,
+  inactive,
 }: {
   to: string;
   icon: React.ReactNode;
   label: string;
+  inactive?: boolean;
 }) {
   return (
     <NavLink
@@ -512,7 +536,7 @@ function SideIcon({
       className={({ isActive }) =>
         cn(
           "inline-flex h-9 w-9 items-center justify-center rounded-md transition",
-          isActive
+          isActive && !inactive
             ? "bg-[var(--accent)]/10 text-[var(--text)]"
             : "text-[var(--text-muted)] hover:bg-black/[0.04] hover:text-[var(--text)] dark:hover:bg-white/[0.06]"
         )

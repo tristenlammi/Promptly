@@ -57,6 +57,9 @@ export interface UserSettings {
    *  by default and appear once listed here.
    *  Absent / ``[]`` = none opted in → they stay hidden. */
   enabled_nav?: string[];
+  /** Apps pinned to the sidebar, in order: ``"rooms"`` or an Item Store
+   *  kind. Absent / ``[]`` = none. */
+  nav_apps?: string[];
   /** One-shot marker: the org admin has finished (or skipped) the
    *  post-signup onboarding wizard. Absent/false = still to onboard. */
   onboarding_completed?: boolean;
@@ -113,6 +116,8 @@ export interface UserPreferencesUpdate {
   /** Replace the full set of opt-in (default-hidden) surfaces the user has
    *  enabled. ``[]`` = none → they stay hidden. */
   enabled_nav?: string[];
+  /** Replace the apps pinned to the sidebar. ``[]`` = none. */
+  nav_apps?: string[];
   /** Mark the post-signup onboarding wizard as finished/skipped. */
   onboarding_completed?: boolean;
   /** Toggle cross-chat memory capture + injection (legacy). */

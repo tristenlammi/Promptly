@@ -3,7 +3,6 @@ import {
   LayoutGrid,
   FolderOpen,
   ListTodo,
-  MessageCircle,
   MessagesSquare,
   Star,
   Trash2,
@@ -32,7 +31,7 @@ export type NavSection = "chat" | "drive" | "admin";
 /** Stable identifiers for the *optional* nav surfaces a user can hide
  *  from their sidebar (Phase 2 — per-user feature visibility). Chat and
  *  Files are core and intentionally absent. */
-export type OptionalNavKey = "workspaces" | "tasks" | "rooms";
+export type OptionalNavKey = "workspaces" | "tasks";
 
 export const OPTIONAL_NAV_KEYS: {
   key: OptionalNavKey;
@@ -46,11 +45,6 @@ export const OPTIONAL_NAV_KEYS: {
     key: "workspaces",
     label: "Workspaces",
     description: "Group chats, files, and context into shared workspaces.",
-  },
-  {
-    key: "rooms",
-    label: "Rooms",
-    description: "Chat with the other people on this Promptly — spaces, rooms and direct messages.",
   },
   {
     key: "tasks",
@@ -89,13 +83,6 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Chat",
     section: "chat",
     exact: true,
-  },
-  {
-    to: "/rooms",
-    icon: MessageCircle,
-    label: "Rooms",
-    section: "chat",
-    optionalKey: "rooms",
   },
   {
     to: "/workspaces",

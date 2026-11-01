@@ -21,6 +21,17 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-01
+
+### Added
+- Pin any app to your sidebar — Apps → Edit → tap the pin on a tile — to use it from inside Promptly without installing it. Per user; unpin the same way.
+
+### Changed
+- Rooms is back to being an app only — removed from the default sidebar menu; open it from Apps or pin it (it still shows inside Promptly with the sidebar on desktop).
+
+### Fixed
+- Hiding Workspaces from the sidebar (Account → Features) now sticks — the server was dropping the "workspaces" key and only accepting the old "projects" name.
+
 ## [0.13.1] - 2026-11-01
 
 ### Changed
