@@ -72,6 +72,8 @@ Category = Literal[
     # Item Store reminders (0229): a habit, a med dose, a trip — asked for
     # by an item file (app/items).
     "item_reminder",
+    # A message in Rooms (0230) — push only, never an inbox row.
+    "room_message",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -90,6 +92,7 @@ CATEGORIES: tuple[str, ...] = (
     "email_action",
     "system_alert",
     "item_reminder",
+    "room_message",
     "test",
 )
 
@@ -114,9 +117,12 @@ class PushPayload:
     # ``notificationclick`` handler for analytics / dedupe. Not
     # surfaced to the user.
     category: str | None = None
+    # Extra fields for the service worker (Rooms: the sender's icon, the
+    # line to stack, the unread count for the app badge). Push only.
+    extra: dict[str, Any] | None = None
 
     def to_json(self) -> str:
-        payload: dict[str, Any] = {"title": self.title, "body": self.body}
+        payload: dict[str, Any] = {**(self.extra or {}), "title": self.title, "body": self.body}
         if self.url:
             payload["url"] = self.url
         if self.tag:
@@ -136,6 +142,8 @@ async def notify_user(
     tag: str | None = None,
     actor_user_id: UUID | None = None,
     workspace_id: UUID | None = None,
+    inbox: bool = True,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     """Schedule a push for every active subscription on ``user_id`` and
     write the durable inbox row.
@@ -147,7 +155,7 @@ async def notify_user(
     the record); ``test`` pushes are the one category that never
     persists."""
     payload = PushPayload(
-        title=title, body=body, url=url, tag=tag, category=category
+        title=title, body=body, url=url, tag=tag, category=category, extra=extra
     )
     coro = _dispatch(
         user_id=user_id,
@@ -155,6 +163,7 @@ async def notify_user(
         payload=payload,
         actor_user_id=actor_user_id,
         workspace_id=workspace_id,
+        inbox=inbox,
     )
     # Check for a loop up front rather than letting ``spawn`` report it:
     # ``spawn`` closes the coroutine when there's none, and this path wants
@@ -190,6 +199,7 @@ async def _dispatch(
     payload: PushPayload,
     actor_user_id: UUID | None = None,
     workspace_id: UUID | None = None,
+    inbox: bool = True,
 ) -> dict[str, int]:
     """Write the inbox row and push to every device. Returns what happened
     to the pushes: ``{"delivered", "failed", "removed"}``."""
@@ -197,7 +207,9 @@ async def _dispatch(
     async with _session_maker() as db:
         # 1) Durable inbox row first — it must land even when the user
         #    has push muted or owns no subscriptions.
-        if category != "test":
+        # ``inbox=False``: a push only (a chat message — the app is its own
+        # inbox, and a busy room would bury everything else).
+        if category != "test" and inbox:
             try:
                 # An automation keeps one rolling inbox row — its latest
                 # result — instead of one per run (R-152).

@@ -9,6 +9,7 @@ import {
   Layers,
   LayoutGrid,
   ListChecks,
+  ListTodo,
   Plane,
   Salad,
   Wallet,
@@ -55,6 +56,7 @@ const ICONS: Record<string, LucideIcon> = {
   dices: Dices,
   layers: Layers,
   "list-checks": ListChecks,
+  "list-todo": ListTodo,
 };
 
 export function itemIcon(name: string | null | undefined): LucideIcon {

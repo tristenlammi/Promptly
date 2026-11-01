@@ -618,6 +618,10 @@ from app.items.router import mount_kind_routers, router as items_router  # noqa:
 mount_kind_routers(items_router)
 app.include_router(items_router, prefix="/api/items", tags=["items"])
 app.include_router(items_ai_router, prefix="/api/items", tags=["items"])
+# Rooms: spaces of text rooms + direct messages between people (app/rooms).
+from app.rooms.router import router as rooms_router  # noqa: E402
+
+app.include_router(rooms_router, prefix="/api/rooms", tags=["rooms"])
 # Photos (Part E): the library over Files (WP-9.1).
 # The family library (PH-5).
 from app.photos.family_router import router as photo_family_router  # noqa: E402

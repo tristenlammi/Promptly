@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest.json",
+  "name": "Promptly Rooms",
+  "short_name": "Rooms",
+  "description": "Chat with your family and friends on your own Promptly — spaces with rooms, direct messages, and @promptly when you need an answer.",
+  "id": "/rooms/",
+  "start_url": "/rooms/?source=pwa",
+  "scope": "/rooms/",
+  "display": "standalone",
+  "background_color": "#FAF9F7",
+  "theme_color": "#5865F2",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "social",
+    "communication"
+  ],
+  "icons": [
+    {
+      "src": "/item-icons/rooms-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/rooms-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/rooms-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Messages",
+      "short_name": "Messages",
+      "url": "/rooms/dm?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/item-icons/rooms-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

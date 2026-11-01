@@ -111,6 +111,10 @@ export function AppsPage() {
           <Loader2 className="h-5 w-5 animate-spin" />
         </div>
       ) : order.length === 0 ? (
+        <>
+        <ul className="grid grid-cols-4 gap-x-2 gap-y-6 sm:grid-cols-5 md:grid-cols-6" aria-label="Built-in apps">
+          <BuiltInTile name="Rooms" icon="/item-icons/rooms-192.png" onOpen={() => navigate("/rooms/")} />
+        </ul>
         <div className="flex flex-col items-center gap-4 rounded-3xl border border-dashed border-[var(--border)] px-6 py-16 text-center">
           <span className="flex h-16 w-16 items-center justify-center rounded-3xl bg-[var(--accent)] text-white shadow-[var(--shadow-md)]">
             <Sparkles className="h-8 w-8" />
@@ -130,10 +134,12 @@ export function AppsPage() {
             <Plus className="h-4 w-4" /> Get apps
           </button>
         </div>
+        </>
       ) : (
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
           <SortableContext items={order.map((a) => a.kind)} strategy={rectSortingStrategy}>
             <ul className="grid grid-cols-4 gap-x-2 gap-y-6 sm:grid-cols-5 md:grid-cols-6" aria-label="Your apps">
+              <BuiltInTile name="Rooms" icon="/item-icons/rooms-192.png" onOpen={() => navigate("/rooms/")} />
               {order.map((app) => (
                 <Tile
                   key={app.kind}
@@ -168,6 +174,27 @@ export function AppsPage() {
     </div>
       </div>
     </div>
+  );
+}
+
+/** An app that's part of Promptly itself (not a file-backed item): always
+ *  there, not arrangeable or removable. */
+function BuiltInTile({ name, icon, onOpen }: { name: string; icon: string; onOpen: () => void }) {
+  return (
+    <li className="relative flex flex-col items-center gap-2">
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpen();
+        }}
+        aria-label={`Open ${name}`}
+        className="relative rounded-[22px] shadow-[var(--shadow-sm)] transition active:scale-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+      >
+        <img src={icon} alt="" className="h-16 w-16 select-none rounded-[22px] md:h-[72px] md:w-[72px]" draggable={false} />
+      </button>
+      <span className="w-full truncate px-1 text-center text-xs font-medium text-[var(--text)]">{name}</span>
+    </li>
   );
 }
 

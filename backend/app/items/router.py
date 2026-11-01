@@ -281,7 +281,7 @@ async def app_manifest(
 # frontend/scripts/gen-item-icons.cjs); others use the generic one.
 _ICON_KINDS = frozenset(
     {"workout", "health", "meals", "mealplan", "habits", "budget", "contacts", "trip", "journal",
-     "boardgames", "flashcards", "example"}
+     "boardgames", "flashcards", "tasks", "example"}
 )
 
 

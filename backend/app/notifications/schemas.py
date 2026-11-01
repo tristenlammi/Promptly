@@ -48,6 +48,7 @@ class PreferencesSchema(BaseModel):
     assignment: bool
     invite: bool
     item_reminder: bool = True
+    room_message: bool = True
 
 
 class PreferencesUpdate(BaseModel):
@@ -64,6 +65,7 @@ class PreferencesUpdate(BaseModel):
     assignment: bool | None = None
     invite: bool | None = None
     item_reminder: bool | None = None
+    room_message: bool | None = None
 
 
 class NotificationActor(BaseModel):

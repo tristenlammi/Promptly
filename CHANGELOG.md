@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-01
+
+### Added
+- **Rooms** — chat for the people on your Promptly, installable as its own app (`/rooms`): spaces (e.g. Family, The Lads) with text rooms, plus direct and group messages. Replies, reactions, edits, pins, photos and files, @-mentions and @everyone, unread counts and badges, typing indicators, message search, per-space/room notification levels, and push notifications like a messaging app's — they arrive with the app closed, show the sender's picture, stack a room's messages into one notification ("Family · #general (4 new)"), keep the unread count on the app icon, clear when you read the room, and open straight into it. Private by default: messages and attachments are never indexed or shown to the AI — `@promptly` is the only AI, and it sees just the message that mentions it unless a room admin turns on "Promptly can read this room" (a DM needs everyone's OK).
+- Item Store: **Tasks & Reminders** — lists of to-dos with due days and times, reminder pushes (at the time, or minutes to a week before), repeats (daily, weekdays, chosen weekdays, monthly on a date, yearly, or N days after it's done), priorities, tags, steps and notes; a morning digest push; Today / Upcoming / Lists (drag to reorder, High priority, Completed log, search) / Settings tabs; quick add that understands plain words (“Pay rent every month on the 1st #home !3”); undo on complete and delete; works offline; the assistant can add, reschedule, plan your day and review your week, and normal chats can use it ("remind me to…"). Shared lists remind everyone who can edit them.
+
 ## [0.12.0] - 2026-11-01
 
 ### Added

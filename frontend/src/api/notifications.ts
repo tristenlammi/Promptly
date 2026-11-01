@@ -18,6 +18,7 @@ export interface NotificationPreferences {
   assignment: boolean;
   invite: boolean;
   item_reminder: boolean;
+  room_message: boolean;
 }
 
 export interface NotificationRow {

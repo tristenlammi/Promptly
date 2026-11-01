@@ -95,6 +95,7 @@ export function isStandaloneDisplay(): boolean {
 /** Which of Promptly's apps a path belongs to (each installs separately). */
 export function appKeyFor(path: string): string {
   if (path === "/photos" || path.startsWith("/photos/")) return "photos";
+  if (path === "/rooms" || path.startsWith("/rooms/")) return "rooms";
   const m = /^\/app\/([^/]+)/.exec(path);
   return m ? `app:${m[1]}` : "promptly";
 }

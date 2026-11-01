@@ -6,6 +6,7 @@ import { useLocation } from "react-router-dom";
  * route so the browser's install prompt targets the right PWA:
  *
  *   - ``/photos*``  → ``/photos.webmanifest``   (Promptly Photos)
+ *   - ``/rooms*``   → ``/rooms.webmanifest``    (Promptly Rooms)
  *   - anywhere else → ``/manifest.webmanifest`` (Promptly — Files included)
  *
  * Why two manifests? Chrome's install UI lets a site register multiple
@@ -45,6 +46,15 @@ export function useDrivePwaManifest(): void {
     if (location.pathname.startsWith("/app/")) return;
     const onPhotos =
       location.pathname === "/photos" || location.pathname.startsWith("/photos/");
+    const onRooms =
+      location.pathname === "/rooms" || location.pathname.startsWith("/rooms/");
+    if (onRooms) {
+      // Promptly Rooms — its own app, scope ``/rooms/``.
+      setManifestHref("/rooms.webmanifest");
+      setAppleTouchIconHref("/item-icons/rooms-apple-180.png");
+      setAppleMobileTitle("Promptly Rooms");
+      return;
+    }
     setManifestHref(onPhotos ? "/photos.webmanifest" : "/manifest.webmanifest");
     setAppleTouchIconHref(onPhotos ? "/apple-touch-icon-photos.png" : "/apple-touch-icon.png");
     setAppleMobileTitle(onPhotos ? "Promptly Photos" : "Promptly");

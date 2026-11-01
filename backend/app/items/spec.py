@@ -81,7 +81,7 @@ def text_now() -> datetime:
 
     return _TEXT_NOW.get() or datetime.now(timezone.utc)
 
-CATEGORIES = ("Health & fitness", "Food", "Habits & journal", "Money", "People", "Travel", "Fun", "Learning")
+CATEGORIES = ("Health & fitness", "Food", "Habits & journal", "Money", "People", "Travel", "Fun", "Learning", "Productivity")
 
 
 class ActionError(Exception):

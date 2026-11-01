@@ -303,6 +303,14 @@ export function NotificationsPanel() {
                 onChange={(v) => toggle("item_reminder", v)}
                 dimmed={!prefs.enabled}
               />
+              <CategoryRow
+                title="Rooms"
+                subtitle="New messages in your rooms and conversations (each room's own setting still applies)."
+                checked={prefs.room_message ?? true}
+                busy={prefsBusy === "room_message"}
+                onChange={(v) => toggle("room_message", v)}
+                dimmed={!prefs.enabled}
+              />
             </div>
           )}
           {prefsError && (

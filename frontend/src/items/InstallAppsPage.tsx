@@ -45,6 +45,13 @@ const CORE: Installable[] = [
     icon: "/pwa-photos-192.png",
     href: "/photos/",
   },
+  {
+    id: "rooms",
+    name: "Promptly Rooms",
+    blurb: "Chat with your family and friends — spaces, rooms and messages.",
+    icon: "/item-icons/rooms-192.png",
+    href: "/rooms/",
+  },
 ];
 
 function withInstall(href: string): string {

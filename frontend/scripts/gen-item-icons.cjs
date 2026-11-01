@@ -1,7 +1,7 @@
 // Generates the home-screen icons for Item Store apps (each item file can be
 // installed as its own app): public/item-icons/<kind>-{192,512,maskable-512,apple-180}.png
 //
-//   cd frontend && node scripts/gen-item-icons.cjs
+//   cd frontend && node scripts/gen-item-icons.cjs [kind …]   (no kinds = all)
 //
 // Needs Playwright from ../e2e (already installed for the e2e suite). Re-run it
 // when an item kind is added or its icon changes (the table below
@@ -28,6 +28,8 @@ const KINDS = [
   ["journal", "BookOpen", "#B5835A"],
   ["boardgames", "Dices", "#C2557A"],
   ["flashcards", "Layers", "#5B6DD9"],
+  ["tasks", "ListTodo", "#DB4C3F"],
+  ["rooms", "MessagesSquare", "#5865F2"],
   ["example", "ListChecks", "#4F8A8B"],
   ["item", "LayoutGrid", TERRACOTTA], // fallback for a kind without its own
 ];
@@ -61,7 +63,9 @@ function html(name, color, size, shape, glyphRatio) {
     ["maskable-512", 512, "full", 0.42],
     ["apple-180", 180, "full", 0.54],
   ];
+  const only = process.argv.slice(2);
   for (const [kind, icon, color] of KINDS) {
+    if (only.length && !only.includes(kind)) continue;
     for (const [suffix, size, shape, ratio] of variants) {
       await page.setViewportSize({ width: size, height: size });
       await page.setContent(html(icon, color, size, shape, ratio));

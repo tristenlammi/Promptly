@@ -196,6 +196,11 @@ const WorkspacesPage = lazyWithRetry(
   "WorkspacesPage"
 );
 
+const RoomsApp = lazyWithRetry(
+  () => import("@/rooms/RoomsApp").then((m) => ({ default: m.RoomsApp })),
+  "RoomsApp"
+);
+
 const PhotosAppShell = lazyWithRetry(
   () => import("@/components/photos/PhotosAppShell").then((m) => ({ default: m.PhotosAppShell })),
   "PhotosAppShell"
@@ -537,6 +542,15 @@ export default function App() {
       >
         {photoPageRoutes()}
       </Route>
+      {/* Promptly Rooms (spaces + messages) as its own installed app. */}
+      <Route
+        path="/rooms/*"
+        element={
+          <Suspense fallback={<FullScreenLoading />}>
+            <RoomsApp />
+          </Suspense>
+        }
+      />
       {/* The PromptlySync download page (the "Add device" QR lands here). */}
       <Route
         path="/sync"

@@ -115,7 +115,17 @@ interface PushPayload {
   url?: string;
   tag?: string;
   category?: string;
+  /** Rooms: the sender's picture (else the app's icon). */
+  icon?: string;
+  /** Rooms: stack this ``line`` under the room's earlier unread ones. */
+  stack?: boolean;
+  line?: string;
+  /** Rooms: unread messages in all — the number on the app icon. */
+  app_badge?: number;
 }
+
+/** How many stacked lines a room's notification shows before "+N more". */
+const STACK_SHOWN = 5;
 
 self.addEventListener("push", (event) => {
   // Be defensive — payload may arrive as JSON (the happy path), as a
@@ -140,30 +150,65 @@ self.addEventListener("push", (event) => {
     // Keep the fallback payload.
   }
 
-  // ``renotify`` is a valid Notification spec field (tells Chrome to
-  // vibrate / sound again even when the tag already exists) but the
-  // TypeScript DOM lib hasn't caught up. Build as a loose object and
-  // cast at the call site.
-  const options = {
-    body: payload.body,
-    // Lean on the maskable icon as the primary display — it's what
-    // Chrome / Android prefer for rich notifications. Falling back
-    // to the regular 192 icon keeps iOS-Safari-via-home-screen
-    // happy too.
-    icon: "/pwa-192.png",
-    badge: "/pwa-192.png",
-    tag: payload.tag,
-    // Notifications with the same ``tag`` replace previous ones
-    // rather than stacking — so "export ready" twice in a row
-    // doesn't clutter the tray.
-    renotify: Boolean(payload.tag),
-    data: {
-      url: payload.url ?? "/",
-      category: payload.category,
-    },
-  } as NotificationOptions;
-
-  event.waitUntil(self.registration.showNotification(payload.title, options));
+  event.waitUntil(
+    (async () => {
+      let title = payload.title;
+      let body = payload.body;
+      let lines: string[] = [];
+      let count = 1;
+      // A room's messages stack in one notification, like a messaging app:
+      // the newest few lines, and "+N more" for the rest. Tapping it (or
+      // reading the room in the app) clears the stack.
+      if (payload.stack && payload.tag) {
+        const line = payload.line || payload.body;
+        try {
+          const prev = (await self.registration.getNotifications({ tag: payload.tag }))[0];
+          const data = (prev?.data ?? {}) as { lines?: string[]; count?: number };
+          lines = [...(data.lines ?? []), line].slice(-STACK_SHOWN);
+          count = (data.count ?? 0) + 1;
+        } catch {
+          lines = [line];
+        }
+        if (count > 1) {
+          title = `${payload.title} (${count} new)`;
+          const hidden = count - lines.length;
+          body = (hidden > 0 ? `+${hidden} earlier\n` : "") + lines.join("\n");
+        }
+      }
+      if (typeof payload.app_badge === "number") {
+        const nav = self.navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+        try {
+          if (payload.app_badge > 0) await nav.setAppBadge?.(payload.app_badge);
+          else await nav.clearAppBadge?.();
+        } catch {
+          // Not supported here.
+        }
+      }
+      // ``renotify`` is a valid Notification spec field (tells Chrome to
+      // vibrate / sound again even when the tag already exists) but the
+      // TypeScript DOM lib hasn't caught up. Build as a loose object and
+      // cast at the call site.
+      const options = {
+        body,
+        // The sender's picture for a message; Promptly's icon otherwise.
+        icon: payload.icon || "/pwa-192.png",
+        badge: "/pwa-192.png",
+        tag: payload.tag,
+        // Notifications with the same ``tag`` replace previous ones
+        // rather than stacking — so "export ready" twice in a row
+        // doesn't clutter the tray.
+        renotify: Boolean(payload.tag),
+        timestamp: Date.now(),
+        data: {
+          url: payload.url ?? "/",
+          category: payload.category,
+          lines,
+          count,
+        },
+      } as NotificationOptions;
+      await self.registration.showNotification(title, options);
+    })(),
+  );
 });
 
 self.addEventListener("notificationclick", (event) => {
@@ -180,18 +225,24 @@ self.addEventListener("notificationclick", (event) => {
         type: "window",
         includeUncontrolled: true,
       });
-      for (const win of wins) {
-        const winUrl = new URL(win.url);
-        if (winUrl.origin === self.location.origin) {
-          try {
-            await win.focus();
-            if ("navigate" in win) {
-              await (win as WindowClient).navigate(url);
-            }
-            return;
-          } catch {
-            // Ignore — falls through to ``openWindow`` below.
+      // Rooms and Photos install as their own apps: a push for one goes to
+      // a window already in that app, else opens fresh (so the installed
+      // app, which owns that scope, handles it) — never hijacks Promptly.
+      const scope = ["/rooms/", "/photos/"].find((s) => url.startsWith(s)) ?? null;
+      const inScope = (w: WindowClient | Client) => {
+        const p = new URL(w.url).pathname;
+        return scope ? p.startsWith(scope) : !p.startsWith("/rooms/") && !p.startsWith("/photos/");
+      };
+      const target = wins.find((w) => new URL(w.url).origin === self.location.origin && inScope(w));
+      if (target) {
+        try {
+          await (target as WindowClient).focus();
+          if ("navigate" in target) {
+            await (target as WindowClient).navigate(url);
           }
+          return;
+        } catch {
+          // Ignore — falls through to ``openWindow`` below.
         }
       }
       await self.clients.openWindow(url);
