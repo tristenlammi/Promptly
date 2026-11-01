@@ -8,10 +8,9 @@ import { cn } from "@/utils/cn";
 
 import { libraryFor } from "./catalog";
 import { Logger, fmtSet } from "./Logger";
-import { ProfileSheet } from "./Profile";
 import { ArchiveCard, nearlyFull } from "./Archive";
 import { TemplatesSheet } from "./Templates";
-import { PR_LABEL, bestSet, buildActive, estimateMinutes, fmtBig, fmtMinutes, fmtRecord, fmtW, historyIndex, isHard, isoWithOffset, streakWeeks, weekStartOf } from "./science";
+import { PR_LABEL, bestSet, buildActive, estimateMinutes, fmtBig, fmtMinutes, fmtRecord, historyIndex, isHard, isoWithOffset, streakWeeks, weekStartOf } from "./science";
 import { ExerciseBadge, Pill, useWorkoutCtx, type Ctx } from "./shared";
 import type { PlannedSession, Prescription, Routine, Settings, WorkoutData } from "./types";
 
@@ -40,15 +39,15 @@ export function todaysSession(data: WorkoutData): PlannedSession | null {
   return data.planned.find((p) => p.date === t && p.status === "planned") ?? null;
 }
 
-export function rxSummary(rx: Prescription, s: Settings, log: string): string {
+/** "3×8–10" — plans are sets × reps; weights are only ever suggested in the
+ *  logger (an older plan's stored load still feeds that suggestion). */
+export function rxSummary(rx: Prescription, _s: Settings, log: string): string {
   const reps = log === "duration" ? `${rx.seconds ?? "?"}s` : log === "distance" ? `${rx.meters ?? "?"} m` : rx.reps_min === rx.reps_max ? `${rx.reps_min}` : `${rx.reps_min}–${rx.reps_max}`;
-  const load = rx.load_kg != null ? ` @ ${fmtW(rx.load_kg, s)}` : rx.load_pct ? ` @ ${rx.load_pct}%` : "";
-  return `${rx.sets}×${reps}${load}`;
+  return `${rx.sets}×${reps}`;
 }
 
 export function Today({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData>) {
   const { ctx } = useWorkoutCtx(item);
-  const [profile, setProfile] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const data = item.data;
 
@@ -57,15 +56,14 @@ export function Today({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData>) 
       {data.active ? (
         <Logger item={item} ctx={ctx} isPhone={isPhone} ask={ask} onFinished={(id) => setSummary(id)} />
       ) : (
-        <Home item={item} ctx={ctx} isPhone={isPhone} ask={ask} goTo={goTo} onProfile={() => setProfile(true)} />
+        <Home item={item} ctx={ctx} isPhone={isPhone} ask={ask} goTo={goTo} />
       )}
-      <ProfileSheet open={profile} onClose={() => setProfile(false)} item={item} ctx={ctx} />
       <SummarySheet id={summary} onClose={() => setSummary(null)} data={data} ctx={ctx} ask={ask} />
     </Page>
   );
 }
 
-function Home({ item, ctx, isPhone, ask, goTo, onProfile }: { item: ItemHandle<WorkoutData>; ctx: Ctx; isPhone: boolean; ask: (p: string) => void; goTo: (t: string) => void; onProfile: () => void }) {
+function Home({ item, ctx, isPhone, ask, goTo }: { item: ItemHandle<WorkoutData>; ctx: Ctx; isPhone: boolean; ask: (p: string) => void; goTo: (t: string) => void }) {
   const [templates, setTemplates] = useState(false);
   const data = item.data;
   const s = data.settings;
@@ -99,7 +97,7 @@ function Home({ item, ctx, isPhone, ask, goTo, onProfile }: { item: ItemHandle<W
             </p>
           )}
         </div>
-        <IconButton label="Profile & equipment" icon={Settings2} onClick={onProfile} />
+        <IconButton label="Settings" icon={Settings2} onClick={() => goTo("settings")} />
       </div>
 
       <div className={cn("grid gap-5", isPhone ? "grid-cols-[minmax(0,1fr)]" : "grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]")}>

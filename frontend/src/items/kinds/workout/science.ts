@@ -165,17 +165,11 @@ export function roundLoad(kg: number | null | undefined, ex: Exercise, s: Settin
 }
 
 /** The next / previous loadable weight (for steppers). */
-export function stepLoad(kg: number | null | undefined, ex: Exercise, s: Settings, dir: 1 | -1): number {
-  const got = achievable(ex, s);
-  const cur = kg ?? 0;
-  if (!got || !got[1].length) {
-    const step = s.units === "lb" ? 5 * LB : 2.5;
-    return Math.max(0, +(cur + dir * step).toFixed(4));
-  }
-  const loads = got[1];
-  if (dir > 0) return loads.find((x) => x > cur + 1e-6) ?? loads[loads.length - 1];
-  const below = loads.filter((x) => x < cur - 1e-6);
-  return below.length ? below[below.length - 1] : loads[0];
+/** The logger's − / +: the person's own step (Settings → weight step,
+ *  2.5 kg unless they change it), not snapped to their kit. */
+export function stepLoad(kg: number | null | undefined, _ex: Exercise, s: Settings, dir: 1 | -1): number {
+  const step = s.weight_step_kg && s.weight_step_kg > 0 ? s.weight_step_kg : 2.5;
+  return Math.max(0, +((kg ?? 0) + dir * step).toFixed(4));
 }
 
 export function increment(ex: Exercise, s: Settings): number {
@@ -595,7 +589,7 @@ export function progressCall(ex: Exercise, lo: number, hi: number, hist: Session
  *  a stall reset / double progression on the last recent non-deload session
  *  of a similar range; else the recent e1RM; else a calibration estimate.
  *  Assisted / bodyweight lifts: progression, else last time's load. */
-export function nextLoad(ex: Exercise, lo: number, hi: number, hist: Session[] | undefined, s: Settings): { kg: number | null; basis: "progression" | "reset" | "e1rm" | "baseline" | "estimate" | "last" | "none" } {
+export function nextLoad(ex: Exercise, lo: number, hi: number, hist: Session[] | undefined, s: Settings, guess = true): { kg: number | null; basis: "progression" | "reset" | "e1rm" | "baseline" | "estimate" | "last" | "none" } {
   const call = progressCall(ex, lo, hi, hist, s);
   if (call && call.kg !== null) return { kg: call.kg, basis: call.action === "reset" ? "reset" : "progression" };
   if (ex.log === "assisted" || ex.log === "bodyweight_reps") {
@@ -609,6 +603,9 @@ export function nextLoad(ex: Exercise, lo: number, hi: number, hist: Session[] |
   const one = recentE1rm(hist, ex, s);
   const mid = Math.floor((lo + hi) / 2);
   if (one) return { kg: roundLoad(loadFor(one, mid, RESERVE, s.e1rm_formula), ex, s), basis: trainingSessions(hist).length ? "e1rm" : "baseline" };
+  // Nothing known about this lift: a bodyweight-norm guess, unless the
+  // caller wants real numbers only (the logger's suggestions).
+  if (!guess) return { kg: null, basis: "none" };
   return { kg: roundLoad(startingLoad(ex, s, mid), ex, s, "down"), basis: "estimate" };
 }
 
@@ -631,7 +628,7 @@ export function dropLoad(kg: number | null, ex: Exercise, s: Settings): number |
  *  deload (or ~10% under last time when there's no planned load); a % of
  *  the strict e1RM; or progression / e1RM / a calibration estimate.
  *  Assisted lifts: "better" = less assistance. */
-export function prefill(ex: Exercise, rx: Prescription | null | undefined, hist: Session[] | undefined, s: Settings, deload = false): number | null {
+export function prefill(ex: Exercise, rx: Prescription | null | undefined, hist: Session[] | undefined, s: Settings, deload = false, guess = true): number | null {
   const lo = rx?.reps_min ?? 8;
   const hi = rx?.reps_max ?? lo;
   const planned = rx?.load_kg ?? null;
@@ -643,7 +640,7 @@ export function prefill(ex: Exercise, rx: Prescription | null | undefined, hist:
       const work = last ? workSets(last.we) : [];
       return work.length ? deloadLoad(level(work, assisted), ex, s) : null;
     }
-    const nl = nextLoad(ex, lo, hi, hist, s);
+    const nl = nextLoad(ex, lo, hi, hist, s, guess);
     if (planned === null) return nl.kg;
     const call = nl.basis === "progression" ? nl.kg : null;
     if (call === null) return planned;
@@ -677,15 +674,7 @@ export function prefill(ex: Exercise, rx: Prescription | null | undefined, hist:
     const work = last ? workSets(last.we) : [];
     if (work.length && level(work, false) > 0) return deloadLoad(level(work, false), ex, s);
   }
-  return nextLoad(ex, lo, hi, hist, s).kg;
-}
-
-/** Double progression's call for a prescription (null when last time isn't
- *  a comparable, recent session) — shown next to a planned load. Loaded
- *  lifts only (a stall reset comes back as the lower load). */
-export function progressionSuggestion(ex: Exercise, rx: Prescription, hist: Session[] | undefined, s: Settings): number | null {
-  if (ex.log !== "weight_reps") return null;
-  return progressCall(ex, rx.reps_min, rx.reps_max, hist, s)?.kg ?? null;
+  return nextLoad(ex, lo, hi, hist, s, guess).kg;
 }
 
 /** Rest after a set: the explicit one, else none for cardio (one bout), else the compound / isolation default. */
@@ -705,11 +694,13 @@ export function newSetsFor(
   uid: (p: string) => string,
   { warm, deload = false }: { warm: boolean; deload?: boolean },
 ): SetLog[] {
-  const kg = prefill(ex, rx, hist, s, deload);
+  // Never a filled-in load: each set carries the suggested one (from logged
+  // sessions or a stated best — never a guess), shown small; a tick adopts it.
+  const kg = prefill(ex, rx, hist, s, deload, false);
   const prevSession = lastSession(hist);
   const last = prevSession ? prevSession.we.sets.filter((x) => setType(x) === "working" && isDone(x)) : [];
   const out: SetLog[] = [];
-  if (warm && kg) for (const w of warmups(kg, ex, s)) out.push({ id: uid("t"), type: "warmup", kg: w.kg, reps: w.reps, done: false });
+  if (warm && kg) for (const w of warmups(kg, ex, s)) out.push({ id: uid("t"), type: "warmup", kg: null, suggest_kg: w.kg, reps: w.reps, done: false });
   const cardio = isCardio(ex);
   const n = rx?.sets ?? (cardio ? 1 : 3); // cardio: one bout
   for (let i = 0; i < n; i++) {
@@ -718,14 +709,15 @@ export function newSetsFor(
     out.push({
       id: uid("t"),
       type: "working",
-      kg,
+      kg: null,
+      suggest_kg: kg,
       reps: ex.log === "duration" || ex.log === "distance" ? null : sameLoad ? prev.reps : rx?.reps_min ?? (prev?.reps ?? null),
       seconds: rx?.seconds ?? (ex.log === "duration" ? prev?.seconds ?? (cardio ? CARDIO_SECONDS : 30) : null),
       meters: rx?.meters ?? null,
       done: false,
     });
   }
-  for (let i = 0; i < (rx?.drop_sets ?? 0); i++) out.push({ id: uid("t"), type: "drop", kg: dropLoad(kg, ex, s), reps: rx?.reps_max ?? null, done: false });
+  for (let i = 0; i < (rx?.drop_sets ?? 0); i++) out.push({ id: uid("t"), type: "drop", kg: null, suggest_kg: dropLoad(kg, ex, s), reps: rx?.reps_max ?? null, done: false });
   return out;
 }
 
@@ -776,6 +768,12 @@ export function finishActive(d: WorkoutData, notes: string, endedAt: string): st
   for (const we of w.exercises) we.sets = we.sets.filter(isDone);
   w.exercises = w.exercises.filter((we) => we.sets.length);
   if (!w.exercises.length) return null;
+  // Suggestions are live-only: a ticked set with no load typed took its suggestion.
+  for (const we of w.exercises)
+    for (const st of we.sets) {
+      if (st.kg == null && st.suggest_kg != null) st.kg = st.suggest_kg;
+      delete st.suggest_kg;
+    }
   w.ended_at = endedAt;
   w.duration_s = w.started_at ? Math.max(0, Math.min(86_400, Math.round((new Date(endedAt).getTime() - new Date(w.started_at).getTime()) / 1000))) : null;
   w.rest_until = null;

@@ -5,6 +5,8 @@ import { useNavigate } from "react-router-dom";
 
 import { extractError } from "@/components/files/helpers";
 import { TopNav } from "@/components/layout/TopNav";
+import { OpenInBrowserGuide } from "@/components/pwa/OpenInBrowserGuide";
+import { isStandaloneDisplay } from "@/lib/installPrompt";
 import { toast } from "@/store/toastStore";
 
 import { itemsApi } from "./api";
@@ -57,6 +59,9 @@ export function InstallAppsPage() {
   const navigate = useNavigate();
   const { data: apps, isLoading } = useQuery({ queryKey: ["apps-launcher"], queryFn: itemsApi.launcher });
   const [busy, setBusy] = useState<string | null>(null);
+  // Inside an installed app a page just opens in the same app window, where
+  // the browser won't offer an install: hand it to the browser instead.
+  const [handoff, setHandoff] = useState<{ row: Installable; url: string } | null>(null);
 
   const appRows: Installable[] = (apps ?? []).map((a) => ({
     id: `item:${a.kind}`,
@@ -71,6 +76,11 @@ export function InstallAppsPage() {
     setBusy(row.id + (install ? ":i" : ":o"));
     try {
       const href = typeof row.href === "string" ? row.href : await row.href();
+      if (install && isStandaloneDisplay()) {
+        setHandoff({ row, url: withInstall(href) });
+        setBusy(null);
+        return;
+      }
       // A full page load: the browser must read that app's manifest.
       window.location.assign(install ? withInstall(href) : href);
     } catch (err) {
@@ -154,6 +164,25 @@ export function InstallAppsPage() {
           </section>
         </div>
       </div>
+      {handoff && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => setHandoff(null)}>
+          <div
+            role="dialog"
+            aria-label={`Install ${handoff.row.name}`}
+            className="flex w-full max-w-md flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <img src={handoff.row.icon} alt="" className="h-12 w-12 shrink-0 rounded-2xl" />
+              <h2 className="flex-1 text-base font-semibold text-[var(--text)]">Install {handoff.row.name}</h2>
+              <button type="button" onClick={() => setHandoff(null)} className="rounded-lg px-2 py-1 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)]">
+                Close
+              </button>
+            </div>
+            <OpenInBrowserGuide appName={handoff.row.name} url={handoff.url} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

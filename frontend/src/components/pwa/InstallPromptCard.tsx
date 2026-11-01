@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { CheckCircle2, Download, MoreVertical, Share, SquarePlus, X } from "lucide-react";
 
-import { useInstallPrompt } from "@/lib/installPrompt";
+import { OpenInBrowserGuide } from "@/components/pwa/OpenInBrowserGuide";
+import { appKeyFor, launchedAppKey, useInstallPrompt } from "@/lib/installPrompt";
 import { cn } from "@/utils/cn";
 
 export interface InstallPromptCardProps {
@@ -21,7 +22,8 @@ export interface InstallPromptCardProps {
  * caller makes sure the page's ``<link rel="manifest">`` is the app's own
  * (the browser installs whatever manifest the page links).
  *
- *  - inside the installed app            → "You're using the app"
+ *  - inside this app, installed          → "You're using the app"
+ *  - inside another installed app        → open it in the browser (guide)
  *  - the browser offered an install      → Install button (its dialog)
  *  - iPhone / iPad                       → Share → Add to Home Screen steps
  *  - otherwise (already installed, or the browser hasn't offered yet)
@@ -32,7 +34,12 @@ export function InstallPromptCard({ appName, iconSrc, description, onClose, clas
   const [outcome, setOutcome] = useState<"accepted" | "dismissed" | null>(null);
 
   let body: ReactNode;
-  if (standalone) {
+  if (standalone && launchedAppKey() !== appKeyFor(location.pathname)) {
+    // Inside a different installed app (e.g. Photos opened in Promptly's window).
+    const here = new URL(location.href);
+    here.searchParams.set("install", "1");
+    body = <OpenInBrowserGuide appName={appName} url={here.pathname + here.search} />;
+  } else if (standalone) {
     body = (
       <p className="flex items-center gap-1.5 text-sm text-[var(--text)]">
         <CheckCircle2 className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />

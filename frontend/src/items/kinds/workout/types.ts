@@ -34,6 +34,8 @@ export interface Settings {
   days_per_week: number;
   session_minutes: number;
   training_days: number[];
+  /** What each training day is for: weekday ("0" = Monday) → "Upper", "Legs", … */
+  day_focus?: Record<string, string>;
   equipment: Equip[];
   dumbbells_kg: number[];
   dumbbell_step_kg: number;
@@ -57,6 +59,10 @@ export interface Settings {
   reminders: boolean;
   reminder_time: string;
   remind_before_min: number;
+  /** Count down rest after each ticked set (off → no timer, no alerts). */
+  rest_timer?: boolean;
+  /** How much the logger's − / + change the weight (stored in kg). */
+  weight_step_kg?: number;
   vibrate: boolean;
   sound: boolean;
   warmups: boolean;
@@ -141,6 +147,9 @@ export interface SetLog {
   id: string;
   type?: SetType;
   kg?: number | null;
+  /** Live workout only: the load the logger suggests — shown in the empty
+   *  weight box; ticking the set without typing one adopts it. */
+  suggest_kg?: number | null;
   reps?: number | null;
   seconds?: number | null;
   meters?: number | null;

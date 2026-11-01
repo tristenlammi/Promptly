@@ -1,10 +1,10 @@
-import { CalendarDays, Dumbbell, History as HistoryIcon, LineChart, Play } from "lucide-react";
+import { CalendarDays, Dumbbell, History as HistoryIcon, LineChart, Play, Settings2 } from "lucide-react";
 
 import type { ItemModule } from "@/items/types";
 
 import { History } from "./History";
 import { Plan } from "./Plan";
-import { Onboarding } from "./Profile";
+import { Onboarding, SettingsView } from "./Profile";
 import { Progress } from "./Progress";
 import { Today, startWorkout, todaysSession } from "./Today";
 import type { WorkoutData } from "./types";
@@ -16,6 +16,7 @@ import type { WorkoutData } from "./types";
  * kept in the file, so it survives reloads). Plan: the week, programs and
  * routines with a session editor. History: calendar + every set, editable.
  * Progress: e1RM charts, PRs, weekly sets per muscle vs landmarks.
+ * Settings: your week (what you train on which day), profile, kit, logging.
  */
 const module: ItemModule<WorkoutData> = {
   kind: "workout",
@@ -25,6 +26,7 @@ const module: ItemModule<WorkoutData> = {
     { id: "plan", label: "Plan", icon: CalendarDays, View: Plan },
     { id: "history", label: "History", icon: HistoryIcon, View: History },
     { id: "progress", label: "Progress", icon: LineChart, View: Progress },
+    { id: "settings", label: "Settings", icon: Settings2, View: SettingsView },
   ],
   primaryAction: (item, { goTo }) => {
     if (!item.canEdit || item.data.active) return null;

@@ -21,6 +21,25 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-01
+
+### Added
+- Workout: a weight step setting (Settings → Logging) — the set editor's − / + change the weight by it; 2.5 kg by default, any value to 2 decimals (follows a kg ↔ lb switch).
+- Workout: a Rest timer on/off switch in Settings → Logging — off means no countdown, beep or vibration after a set.
+- Workout: a Settings tab — "Your week" at the top sets what you do on each day (Rest, Upper body, Legs, Push, Pull… or let the coach decide), followed by profile, equipment, logging and reminders. Replaces the gear icon's Profile & equipment sheet.
+- Workout: setup now asks which days you train and what each day is for — Upper body, Legs, Push, Pull, Full body, Cardio… or "let the coach decide" — and the coach builds your week around it.
+
+### Changed
+- Workout: in an empty workout, an exercise you add starts with no sets — tap Add set for each one you do (the first starts from last time's numbers). Planned workouts still come with their sets.
+- Workout (phone): the live logger is easier one-handed — tapping a set opens the big editor instead of popping the keyboard on a tiny box; set type (Warm-up / Working / Drop set / To failure) is picked there rather than by tapping the little badge, which changed sets by accident; the weight in the editor can be typed; "Last time" with a Use button replaces the narrow Previous column, so the weight and reps boxes are wider; tapping a done set reopens it to fix.
+- Workout: plans no longer contain weights — they're sets × reps. Each set in the live logger shows a small suggested weight instead (from what you've actually lifted, or a best you told it), and ticking a set without typing one uses it. A lift you've never logged gets no suggestion at all — no more guessed starting weights; the coach tells you how to find yours on the first session.
+
+### Removed
+- Workout: the "re-fit loads" banner and action (plans have no loads to re-fit; the suggestions keep up by themselves).
+
+### Fixed
+- Install apps: tapping Install inside the installed Promptly app just opened the page in Promptly's own window (where phones won't offer an install) — it now opens the page in your browser with a short how-to-install guide and a Copy link fallback.
+
 ## [0.11.0] - 2026-10-31
 
 ### Added

@@ -81,6 +81,10 @@ def to_text(data: dict) -> str:
         f"Goal: {st.get('goal', 'general')}", f"experience: {st.get('experience', 'beginner')}",
         f"{st.get('days_per_week', 3)} days/week, {st.get('session_minutes', 60)} min", f"units: {unit}",
     ]
+    days = "Mon Tue Wed Thu Fri Sat Sun".split()
+    if st.get("training_days"):
+        focus = st.get("day_focus") or {}
+        prof.append("day plan: " + ", ".join(days[d] + (f" {focus[str(d)]}" if focus.get(str(d)) else " (coach's choice)") for d in st["training_days"] if 0 <= d <= 6))
     if st.get("bodyweight_kg"):
         prof.append(f"bodyweight {sci.fmt_kg(st['bodyweight_kg'], st)}")
     prof.append("equipment: " + ", ".join(st.get("equipment") or ["full_gym"]))
@@ -95,7 +99,7 @@ def to_text(data: dict) -> str:
             ex = exs.get(b["exercise_id"], {"name": b["exercise_id"]})
             v = sci.to_unit(b.get("kg") or 0, st)
             bits.append(f"{ex['name']} {v:g}×{b.get('reps')}" + (" (now logged — the log is used)" if b["exercise_id"] in logged else ""))
-        lines.append(f"Stated bests (loads calibrate from these until a lift is logged; {unit}): " + "; ".join(bits))
+        lines.append(f"Stated bests (the logger's suggestions start from these until a lift is logged; {unit}): " + "; ".join(bits))
     if data.get("active"):
         a = data["active"]
         done = sum(1 for we in a["exercises"] for s in we["sets"] if s.get("done", True) and s.get("type") != "warmup")
@@ -267,9 +271,9 @@ SPEC = ItemSpec(
     router=router,
     replaces="A Strong/Hevy-style logger with an AI coach",
     highlights=[
-        "Live logger with last time's numbers, prefilled loads, warm-ups and a rest timer — works offline",
-        "AI coach plans your week with real weights from your history — sets × reps × load, double progression, deloads",
-        "Re-fit a plan's loads to what you're actually lifting, in one tap or one sentence",
+        "Live logger with last time's numbers, a suggested weight on every set, warm-ups and a rest timer — works offline",
+        "AI coach plans your week around the days you pick — sets × reps, double progression, deloads",
+        "Suggested weights come only from what you've actually lifted (or a best you tell it) — never a guess",
         "Programs: mesocycles, routines, scheduled sessions and reminders before each workout",
         "~170 built-in exercises (names and muscles) plus your own, filtered to the equipment you have",
         "Plate calculator rounded to your bar and plates (kg or lb)",

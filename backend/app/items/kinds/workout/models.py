@@ -90,6 +90,8 @@ class Settings(BaseModel):
     session_minutes: int = Field(default=60, ge=15, le=240)
     # Preferred training weekdays, 0 = Monday … 6 = Sunday.
     training_days: list[int] = Field(default_factory=list, max_length=7)
+    # What each training day is for: weekday ("0" = Monday) → "Upper", "Legs", …
+    day_focus: dict[str, str] = Field(default_factory=dict)
     equipment: list[Equip] = Field(default_factory=lambda: ["full_gym"], max_length=30)
     # Home gyms: the exact dumbbells / kettlebells there are (empty = a full
     # rack in ``dumbbell_step_kg`` steps up to ``dumbbell_max_kg``).
@@ -115,6 +117,8 @@ class Settings(BaseModel):
     reminders: bool = True
     reminder_time: str = Field(default="08:00", pattern=HHMM)
     remind_before_min: int = Field(default=60, ge=0, le=720)
+    rest_timer: bool = True
+    weight_step_kg: float = Field(default=2.5, gt=0, le=50)  # the logger's − / + step
     vibrate: bool = True
     sound: bool = True
     warmups: bool = True
@@ -130,6 +134,11 @@ class Settings(BaseModel):
     @classmethod
     def _days(cls, v: list[int]) -> list[int]:
         return sorted({d for d in v if 0 <= d <= 6})
+
+    @field_validator("day_focus")
+    @classmethod
+    def _focus(cls, v: dict[str, str]) -> dict[str, str]:
+        return {k: str(f).strip()[:40] for k, f in v.items() if k in {"0", "1", "2", "3", "4", "5", "6"} and str(f).strip()}
 
     @field_validator("dumbbells_kg", "kettlebells_kg")
     @classmethod
@@ -233,11 +242,13 @@ class SetLog(Compact):
     machine's assistance for assisted ones. Serialised without empty fields
     (sets are most of a file's bytes)."""
 
-    omit: ClassVar[dict[str, Any]] = {"type": "working", "kg": None, "reps": None, "seconds": None, "meters": None, "rir": None, "at": None}
+    omit: ClassVar[dict[str, Any]] = {"type": "working", "kg": None, "suggest_kg": None, "reps": None, "seconds": None, "meters": None, "rir": None, "at": None}
 
     id: str = Field(max_length=24)
     type: SetType = "working"
     kg: float | None = Field(default=None, ge=0, le=1500)
+    # Live workout only: the load the logger suggests (a tick adopts it).
+    suggest_kg: float | None = Field(default=None, ge=0, le=1500)
     reps: int | None = Field(default=None, ge=0, le=1000)
     seconds: int | None = Field(default=None, ge=0, le=86_400)
     meters: float | None = Field(default=None, ge=0, le=1_000_000)

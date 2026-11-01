@@ -92,6 +92,55 @@ export function isStandaloneDisplay(): boolean {
   );
 }
 
+/** Which of Promptly's apps a path belongs to (each installs separately). */
+export function appKeyFor(path: string): string {
+  if (path === "/photos" || path.startsWith("/photos/")) return "photos";
+  const m = /^\/app\/([^/]+)/.exec(path);
+  return m ? `app:${m[1]}` : "promptly";
+}
+
+// An installed app's window can't tell which app it is from the display
+// mode alone, so remember the app the window opened as (the first page an
+// installed window loads is its start_url). sessionStorage lives as long
+// as the window does.
+const LAUNCH_KEY = "promptly:launched-app";
+if (typeof window !== "undefined" && isStandaloneDisplay()) {
+  try {
+    if (!sessionStorage.getItem(LAUNCH_KEY)) sessionStorage.setItem(LAUNCH_KEY, appKeyFor(location.pathname));
+  } catch {
+    /* storage blocked: treat the window as Promptly */
+  }
+}
+
+/** The app this installed window was launched as ("promptly", "photos", "app:<id>"). */
+export function launchedAppKey(): string | null {
+  if (!isStandaloneDisplay()) return null;
+  try {
+    return sessionStorage.getItem(LAUNCH_KEY) ?? "promptly";
+  } catch {
+    return "promptly";
+  }
+}
+
+export function isAndroidDevice(): boolean {
+  return typeof navigator !== "undefined" && /android/i.test(navigator.userAgent);
+}
+
+/** Open a page in the browser rather than inside this installed app — a
+ *  browser only offers to install from one of its own tabs. Every page here
+ *  is inside the installed Promptly app's scope, so on Android a plain link
+ *  would just stay in the app; an ``intent://`` link hands it to Chrome
+ *  (falling back to the system's handler when Chrome isn't there). */
+export function openInBrowser(url: string): void {
+  const u = new URL(url, location.href);
+  if (isAndroidDevice()) {
+    const fallback = encodeURIComponent(u.href);
+    location.href = `intent://${u.host}${u.pathname}${u.search}#Intent;scheme=${u.protocol.replace(":", "")};package=com.android.chrome;S.browser_fallback_url=${fallback};end`;
+    return;
+  }
+  window.open(u.href, "_blank", "noopener");
+}
+
 /** iPhone / iPad (including iPadOS reporting itself as a Mac). */
 export function isIosDevice(): boolean {
   if (typeof navigator === "undefined") return false;

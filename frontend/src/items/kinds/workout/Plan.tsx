@@ -7,9 +7,8 @@ import { Card, EmptyState, Field, IconButton, ItemButton, List, ListRow, Page, S
 import { cn } from "@/utils/cn";
 
 import { ExercisePicker } from "./ExercisePicker";
-import { toast } from "@/store/toastStore";
 
-import { estimateMinutes, fmtW, fmtWeekRange, fromUnit, progressionSuggestion, toUnit, weekStartOf, weeklyVolume } from "./science";
+import { estimateMinutes, fmtW, fmtWeekRange, prefill, weekStartOf, weeklyVolume } from "./science";
 import { ActiveBanner, ExerciseBadge, Pill, recentIds, useWorkoutCtx, type Ctx } from "./shared";
 import { rxSummary, startWorkout } from "./Today";
 import type { Exercise, PlannedSession, Prescription, Routine, Settings, WorkoutData } from "./types";
@@ -100,7 +99,6 @@ export function Plan({ item, isPhone, ask, goTo }: ItemViewProps<WorkoutData>) {
             </ItemButton>
           )}
           {program && <ProgramCard item={item} ctx={ctx} programId={program.id} ask={ask} />}
-          {item.canEdit && <RefitBanner item={item} ctx={ctx} />}
           {/* The week as one list (Strong/Hevy-style): a date column, the
               session(s) beside it; rest days stay a single quiet line. */}
           <div className="flex flex-col divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]" role="list" aria-label="This week's plan">
@@ -584,7 +582,9 @@ function NumField({ label, value, onChange, step = 1, min = 0, max = 999, disabl
 
 function RxEditor({ rx, ex, lib, s, ro, first, last, onChange, onMove, onRemove, onSwap }: { rx: Prescription; ex: Exercise; lib: Ctx; s: Settings; ro: boolean; first: boolean; last: boolean; onChange: (fn: (rx: Prescription) => void) => void; onMove: (d: 1 | -1) => void; onRemove: () => void; onSwap: () => void }) {
   const [more, setMore] = useState(false);
-  const loadMode = rx.load_pct ? "pct" : "abs";
+  // Plans are sets × reps — the weight is whatever they actually lift. Show
+  // what the logger will suggest (real numbers only, never a guess).
+  const sug = ex.log === "weight_reps" || ex.log === "assisted" || ex.log === "bodyweight_reps" ? prefill(ex, rx, lib.hist.get(ex.id), s, false, false) : null;
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
       <div className="flex items-center gap-2">
@@ -611,31 +611,6 @@ function RxEditor({ rx, ex, lib, s, ro, first, last, onChange, onMove, onRemove,
           </>
         )}
       </div>
-      {ex.log !== "duration" && ex.log !== "distance" && (
-        <div className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2">
-          <Segmented
-            size="sm"
-            value={loadMode}
-            onChange={(m) => onChange((x) => { if (m === "pct") { x.load_pct = x.load_pct ?? 75; x.load_kg = null; } else { x.load_pct = null; } })}
-            options={[{ value: "abs", label: s.units }, { value: "pct", label: "%1RM" }]}
-          />
-          {loadMode === "pct" ? (
-            <NumField label="% of e1RM" value={rx.load_pct} min={20} max={110} step={2.5} disabled={ro} onChange={(v) => onChange((x) => { x.load_pct = v; })} suffix="%" />
-          ) : (
-            <NumField
-              label={ex.log === "assisted" ? "Assistance" : ex.log === "bodyweight_reps" ? "Added load" : "Load"}
-              value={toUnit(rx.load_kg, s)}
-              min={0}
-              max={3000}
-              step={s.units === "lb" ? 5 : 2.5}
-              disabled={ro}
-              onChange={(v) => onChange((x) => { x.load_kg = v == null ? null : fromUnit(v, s); })}
-              suffix={s.units}
-              placeholder="from history"
-            />
-          )}
-        </div>
-      )}
       <div className="mt-1 flex items-center gap-1">
         <button type="button" onClick={() => setMore((m) => !m)} className="min-h-9 min-w-0 flex-1 truncate text-left text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text)]" aria-expanded={more}>
           {more ? "Less" : `Rest, superset, notes${rx.rest_s ? ` · ${rx.rest_s}s rest` : ""}${rx.notes ? " · note" : ""}`}
@@ -669,50 +644,10 @@ function RxEditor({ rx, ex, lib, s, ro, first, last, onChange, onMove, onRemove,
           </div>
         </div>
       )}
-      {rx.load_kg != null && ex.log === "weight_reps" && <p className="mt-1 text-[11px] text-[var(--text-muted)]">Working load {fmtW(rx.load_kg, s)}</p>}
+      <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+        {sug != null ? `Suggested ${ex.log === "assisted" ? "assistance " : ""}${fmtW(sug, s)} — from what you've lifted` : "No weight yet — log what you lift and it'll suggest the next one"}
+      </p>
     </div>
   );
 }
 
-/** "You've out-lifted N planned loads" → re-fit them from recent history
- *  (the refit_upcoming_loads action; keeps a program's steps and deloads). */
-function RefitBanner({ item, ctx }: { item: ItemHandle<WorkoutData>; ctx: Ctx }) {
-  const [busy, setBusy] = useState(false);
-  const data = item.data;
-  const behind = useMemo(() => {
-    const today = todayISO();
-    let n = 0;
-    for (const p of data.planned) {
-      if (p.status !== "planned" || p.date < today || p.deload) continue;
-      for (const rx of p.exercises) {
-        if (rx.load_kg == null) continue;
-        const sug = progressionSuggestion(ctx.lib.get(rx.exercise_id), rx, ctx.hist.get(rx.exercise_id), data.settings);
-        if (sug !== null && sug > rx.load_kg + 1e-6) n++;
-      }
-    }
-    return n;
-  }, [data.planned, data.settings, ctx]);
-  if (!behind) return null;
-  const run = async () => {
-    setBusy(true);
-    try {
-      const out = await item.runAction("refit_upcoming_loads", { only_increase: true });
-      toast.success(out.summary);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Couldn't re-fit the plan.");
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Card className="flex items-center gap-3">
-      <p className="min-w-0 flex-1 text-sm text-[var(--text)]">
-        You've out-lifted {behind} planned load{behind === 1 ? "" : "s"}.
-        <span className="block text-xs text-[var(--text-muted)]">{item.connected ? "Raise the plan to match your recent training (the logger already starts you heavier)." : "Re-fitting needs a connection — the logger starts you at the heavier load anyway."}</span>
-      </p>
-      <ItemButton size="sm" variant="primary" disabled={busy || !item.connected} onClick={() => void run()}>
-        {busy ? "Re-fitting…" : "Re-fit loads"}
-      </ItemButton>
-    </Card>
-  );
-}

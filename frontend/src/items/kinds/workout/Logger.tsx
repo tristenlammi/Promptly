@@ -39,7 +39,6 @@ import {
   isoWithOffset,
   loadEquipment,
   newSetsFor,
-  progressionSuggestion,
   restFor,
   setType,
   stepLoad,
@@ -138,8 +137,10 @@ function NumBox({
   className,
   decimal = true,
   placeholder,
+  readOnly,
 }: {
   placeholder?: number | null;
+  readOnly?: boolean;
   value: number | null;
   onCommit: (v: number | null) => void;
   label: string;
@@ -174,8 +175,11 @@ function NumBox({
       aria-label={label}
       data-set-input={dataKey}
       value={text}
+      readOnly={readOnly}
+      tabIndex={readOnly ? -1 : undefined}
       placeholder={placeholder != null ? String(placeholder) : "–"}
       onFocus={(e) => {
+        if (readOnly) return;
         focused.current = true;
         e.currentTarget.select();
       }}
@@ -322,7 +326,7 @@ export function Logger({ item, ctx, isPhone, ask, onFinished }: { item: ItemHand
     const next = target ? nextOpenAfter(cur, curIdx, setId) : null;
     const partnerOpen = !!curWe.superset && cur.exercises.some((x, i) => i !== curIdx && x.superset === curWe.superset && x.sets.some((y) => !y.done));
     const rest = setType(curSet) === "warmup" ? Math.min(60, restFor(curWe, ex, s)) : restFor(curWe, ex, s);
-    const restUntil = target && !partnerOpen && rest > 0 ? new Date(t0 + rest * 1000).toISOString() : null;
+    const restUntil = target && !partnerOpen && rest > 0 && s.rest_timer !== false ? new Date(t0 + rest * 1000).toISOString() : null;
     mutate((w) => {
       const we = w.exercises.find((x) => x.id === weId);
       const st = we?.sets.find((x) => x.id === setId);
@@ -337,9 +341,9 @@ export function Logger({ item, ctx, isPhone, ask, onFinished }: { item: ItemHand
       st.at = at;
       // Empty boxes take the hints they showed (only boxes still empty).
       for (const k of ["kg", "reps", "seconds", "meters"] as const) if (st[k] == null && fill[k] != null) st[k] = fill[k];
-      // Carry the load forward to the next unticked set of the same type if it's empty.
+      // The next unticked set of the same type suggests what they just used.
       const after = we.sets.slice(we.sets.indexOf(st) + 1).find((x) => !x.done && setType(x) === setType(st));
-      if (after && after.kg == null && st.kg != null) after.kg = st.kg;
+      if (after && after.kg == null && st.kg != null) after.suggest_kg = st.kg;
       if (restUntil) {
         w.rest_total_s = rest;
         w.rest_until = restUntil;
@@ -353,7 +357,11 @@ export function Logger({ item, ctx, isPhone, ask, onFinished }: { item: ItemHand
 
   const addExercises = (exs: Exercise[]) => {
     const patterns = new Set(a.exercises.map((x) => lib.get(x.exercise_id).pattern));
+    // An empty workout (nothing planned in it): new exercises start with no
+    // sets — they add the ones they do. Planned workouts keep the prefill.
+    const adHoc = a.exercises.every((x) => !x.rx);
     const made: WorkoutExercise[] = exs.map((ex) => {
+      if (adHoc) return { id: uid("e"), exercise_id: ex.id, sets: [], notes: "", superset: null, rest_s: null, rx: null };
       const warm = s.warmups && ex.compound && ex.log === "weight_reps" && !patterns.has(ex.pattern);
       patterns.add(ex.pattern);
       let sets = newSetsFor(ex, null, hist.get(ex.id), s, uid, { warm });
@@ -370,13 +378,13 @@ export function Logger({ item, ctx, isPhone, ask, onFinished }: { item: ItemHand
   const swap = (weId: string, ex: Exercise) => {
     const old = a.exercises.find((x) => x.id === weId);
     const rx = old?.rx ? { ...old.rx, exercise_id: ex.id, load_kg: null } : null;
-    const kg = newSetsFor(ex, rx, hist.get(ex.id), s, uid, { warm: false, deload: !!a.deload }).find((x) => setType(x) === "working")?.kg ?? null;
+    const kg = newSetsFor(ex, rx, hist.get(ex.id), s, uid, { warm: false, deload: !!a.deload }).find((x) => setType(x) === "working")?.suggest_kg ?? null;
     mutate((w) => {
       const we = w.exercises.find((x) => x.id === weId);
       if (!we) return;
       we.exercise_id = ex.id;
       we.rx = rx ? { ...rx } : null;
-      we.sets = we.sets.filter((x) => x.done || setType(x) !== "warmup").map((x) => (x.done ? x : { ...x, kg }));
+      we.sets = we.sets.filter((x) => x.done || setType(x) !== "warmup").map((x) => (x.done ? x : { ...x, kg: null, suggest_kg: kg }));
     });
   };
 
@@ -660,13 +668,12 @@ function ExerciseCard({
       if (st) fn(st);
     });
   const counters: Record<string, number> = {};
-  const deload = !!ctx.deload;
-  const suggested = rx && rx.load_kg != null && !deload ? progressionSuggestion(ex, rx, hist.get(ex.id), s) : null;
-  const ahead = suggested !== null && rx?.load_kg != null && suggested > rx.load_kg + 1e-6;
+  // A phone has the "Last time" line and the editor's "Use" instead — the boxes get the width.
+  const showPrev = !!last && !isPhone;
+  const grid = setGrid(cols.length, showPrev);
   const rxLine = rx
     ? [
         `${rx.sets} × ${ex.log === "duration" ? fmtSecs(rx.seconds ?? 0) : ex.log === "distance" ? fmtMeters(rx.meters ?? 0) : rx.reps_min === rx.reps_max ? rx.reps_min : `${rx.reps_min}–${rx.reps_max}`}`,
-        rx.load_kg != null ? fmtW(rx.load_kg, s) : rx.load_pct ? `${rx.load_pct}% 1RM` : null,
       ]
         .filter(Boolean)
         .join(" · ")
@@ -688,11 +695,6 @@ function ExerciseCard({
               · <Timer className="h-3 w-3" /> {fmtSecs(rest)}
             </span>
           </div>
-          {ahead && (
-            <p className="mt-0.5 text-xs text-[var(--item-accent)]">
-              Plan {fmtW(rx!.load_kg, s)} · last time earns {fmtW(suggested, s)} — sets start at the heavier one
-            </p>
-          )}
           {(rx?.notes || we.notes) && <p className="mt-1 text-xs italic text-[var(--text-muted)]">{[rx?.notes, we.notes].filter(Boolean).join(" · ")}</p>}
         </div>
         {!ro && (
@@ -709,9 +711,13 @@ function ExerciseCard({
                     label="Add warm-up sets"
                     onClick={() => {
                       setMenu(false);
-                      const work = we.sets.find((x) => setType(x) === "working")?.kg;
-                      if (!work) return;
-                      const ws = warmups(work, ex, s).map((x) => ({ id: uid("t"), type: "warmup" as const, kg: x.kg, reps: x.reps, done: false }));
+                      const first = we.sets.find((x) => setType(x) === "working");
+                      const work = first?.kg ?? first?.suggest_kg;
+                      if (!work) {
+                        toast.info("Enter your working weight first — the warm-ups ramp up to it.");
+                        return;
+                      }
+                      const ws = warmups(work, ex, s).map((x) => ({ id: uid("t"), type: "warmup" as const, kg: null, suggest_kg: x.kg, reps: x.reps, done: false }));
                       mutate((w) => {
                         const target = w.exercises.find((x) => x.id === we.id);
                         if (!target) return;
@@ -720,7 +726,7 @@ function ExerciseCard({
                     }}
                   />
                 )}
-                {barbellish && <MenuBtn icon={Calculator} label="Plate calculator" onClick={() => { setMenu(false); onPlates(focused && we.sets.some((x) => x.id === focused) ? focused : we.sets[0]?.id ?? "", we.sets.find((x) => !x.done)?.kg ?? null); }} />}
+                {barbellish && <MenuBtn icon={Calculator} label="Plate calculator" onClick={() => { setMenu(false); onPlates(focused && we.sets.some((x) => x.id === focused) ? focused : we.sets[0]?.id ?? "", (() => { const o = we.sets.find((x) => !x.done); return o?.kg ?? o?.suggest_kg ?? null; })()); }} />}
                 <MenuBtn icon={NotebookPen} label="Notes & rest time" onClick={() => { setMenu(false); onNotes(); }} />
                 {hist.get(ex.id)?.length ? <MenuBtn icon={LineChart} label="History & records" onClick={() => { setMenu(false); onHistory(); }} /> : null}
                 <MenuBtn
@@ -761,9 +767,9 @@ function ExerciseCard({
       )}
 
       <div className="px-2 pb-2" role="group" aria-label={`${ex.name} sets`}>
-        <div aria-hidden className="grid items-center gap-1.5 px-1 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]" style={{ gridTemplateColumns: setGrid(cols.length) }}>
+        <div aria-hidden className="grid items-center gap-1.5 px-1 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]" style={{ gridTemplateColumns: grid }}>
           <span>Set</span>
-          <span>Previous</span>
+          {showPrev && <span>Previous</span>}
           {cols.map((c) => (
             <span key={c} className="text-center">
               {colLabel(c, ex, s)}
@@ -777,25 +783,27 @@ function ExerciseCard({
           const n = counters[t];
           const prev = lastByType[t]?.[n - 1];
           const isFocus = focused === st.id && !ro;
+          const removeSet = () => mutate((w) => { const target = w.exercises.find((x) => x.id === we.id); if (target) target.sets = target.sets.filter((x) => x.id !== st.id); });
           const fill = fillFrom(st, cols, prev, rx, s);
           return (
             <div key={st.id} data-set-row={st.id} className="scroll-mb-32">
               <div
                 role="group"
                 aria-label={`${t === "working" ? `Set ${n}` : `${SET_NAME[t]} ${n}`}${st.done ? ", done" : ""}`}
-                onClick={() => !st.done && setFocus(st.id)}
+                onClick={() => !ro && (isPhone || !st.done) && setFocus(isPhone && isFocus ? null : st.id)}
                 className={cn(
                   "grid items-center gap-1.5 rounded-xl px-1 py-1 transition",
                   st.done && "bg-[color-mix(in_srgb,var(--success)_10%,transparent)]",
-                  isFocus && !st.done && "bg-[var(--hover)]",
+                  isFocus && (isPhone || !st.done) && "ring-1 ring-[var(--item-accent)]",
                 )}
-                style={{ gridTemplateColumns: setGrid(cols.length) }}
+                style={{ gridTemplateColumns: grid }}
               >
                 <SetBadge
                   s={st}
                   n={t === "working" ? n : 0}
-                  onClick={ro ? undefined : () => { const nextType = TYPES[(TYPES.indexOf(t) + 1) % TYPES.length]; editSet(st.id, (x) => { x.type = nextType; }); }}
+                  onClick={ro || isPhone ? undefined : () => { const nextType = TYPES[(TYPES.indexOf(t) + 1) % TYPES.length]; editSet(st.id, (x) => { x.type = nextType; }); }}
                 />
+                {showPrev && (
                 <button
                   type="button"
                   disabled={ro || !prev}
@@ -808,13 +816,14 @@ function ExerciseCard({
                 >
                   {prev ? fmtSet(prev, ex, s) : "—"}
                 </button>
+                )}
                 {cols.map((c, ci) => (
                   <NumBox
                     key={c}
                     dataKey={`${st.id}-${ci}`}
                     label={`${t === "working" ? "Set" : SET_NAME[t]} ${n} ${colLabel(c, ex, s)}`}
                     value={getVal(st, c, s)}
-                    placeholder={st.done ? null : hintFor(c, prev, rx, s)}
+                    placeholder={st.done ? null : hintFor(c, prev, rx, s, st)}
                     decimal={c !== "reps" && c !== "seconds"}
                     onCommit={(v) => {
                       // A new number also replaces the same old number in the sets
@@ -844,7 +853,8 @@ function ExerciseCard({
                         onTick(we.id, st.id, { ...fillFrom(st, cols, prev, rx, s), ...own });
                       }
                     }}
-                    className={cn(ro && "pointer-events-none", st.done && "bg-transparent")}
+                    readOnly={isPhone}
+                    className={cn((ro || isPhone) && "pointer-events-none", st.done && "bg-transparent")}
                   />
                 ))}
                 <button
@@ -864,17 +874,18 @@ function ExerciseCard({
                   <Check className="h-5 w-5" />
                 </button>
               </div>
-              {isFocus && !st.done && isPhone && (
+              {isFocus && isPhone && (
                 <FocusEditor
                   st={st}
                   ex={ex}
                   s={s}
                   cols={cols}
-                  hint={(c) => hintFor(c, prev, rx, s)}
+                  prev={prev}
+                  hint={(c) => hintFor(c, prev, rx, s, st)}
                   onChange={(fn) => editSet(st.id, fn)}
-                  onDone={() => onTick(we.id, st.id, fill)}
-                  onPlates={barbellish ? () => onPlates(st.id, st.kg ?? null) : undefined}
-                  onDelete={() => mutate((w) => { const target = w.exercises.find((x) => x.id === we.id); if (target) target.sets = target.sets.filter((x) => x.id !== st.id); })}
+                  onDone={() => (st.done ? setFocus(null) : onTick(we.id, st.id, fill))}
+                  onPlates={barbellish ? () => onPlates(st.id, st.kg ?? st.suggest_kg ?? null) : undefined}
+                  onDelete={removeSet}
                 />
               )}
               {isFocus && !st.done && !isPhone && (
@@ -885,7 +896,7 @@ function ExerciseCard({
                       <Calculator className="h-3.5 w-3.5" /> Plates
                     </button>
                   ) : null}
-                  <button type="button" aria-label="Delete set" onClick={() => mutate((w) => { const target = w.exercises.find((x) => x.id === we.id); if (target) target.sets = target.sets.filter((x) => x.id !== st.id); })} className={cn("inline-flex items-center rounded-lg p-1 text-[var(--text-muted)] hover:text-[var(--danger)]", !(barbellish && st.kg) && "ml-auto")}>
+                  <button type="button" aria-label="Delete set" onClick={removeSet} className={cn("inline-flex items-center rounded-lg p-1 text-[var(--text-muted)] hover:text-[var(--danger)]", !(barbellish && st.kg) && "ml-auto")}>
                     <X className="h-4 w-4" />
                   </button>
                 </div>
@@ -898,11 +909,14 @@ function ExerciseCard({
             type="button"
             onClick={() => {
               const id = uid("t");
+              if (isPhone) setFocus(id);
               mutate((w) => {
                 const target = w.exercises.find((x) => x.id === we.id);
                 if (!target) return;
-                const lastSet = [...target.sets].reverse().find((x) => setType(x) !== "warmup") ?? target.sets[target.sets.length - 1];
-                target.sets.push({ id, type: "working", kg: lastSet?.kg ?? null, reps: lastSet?.reps ?? null, seconds: lastSet?.seconds ?? null, meters: lastSet?.meters ?? null, done: false });
+                // Copy the last set; the first set of an empty exercise starts
+                // from the suggestion (last time / progression), like a planned one.
+                const lastSet = [...target.sets].reverse().find((x) => setType(x) !== "warmup") ?? target.sets[target.sets.length - 1] ?? newSetsFor(ex, rx ?? null, hist.get(ex.id), s, uid, { warm: false }).find((x) => setType(x) === "working");
+                target.sets.push({ id, type: "working", kg: null, suggest_kg: lastSet?.kg ?? lastSet?.suggest_kg ?? null, reps: lastSet?.reps ?? null, seconds: lastSet?.seconds ?? null, meters: lastSet?.meters ?? null, done: false });
               });
             }}
             className="mt-1 flex h-10 w-full items-center justify-center gap-1.5 rounded-xl text-sm font-medium text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
@@ -915,9 +929,12 @@ function ExerciseCard({
   );
 }
 
-/** The greyed hint an empty box shows — last time's number for this set,
- *  else the plan's target — and what ticking the set saves into it. */
-function hintFor(c: Col, prev: SetLog | undefined, rx: WorkoutExercise["rx"], s: Settings): number | null {
+/** The greyed hint an empty box shows — for the weight, the suggested load
+ *  (progression on what they've lifted / a stated best); else last time's
+ *  number for this set, else the plan's target — and what ticking the set
+ *  saves into it. Nothing known → no weight hint: they enter what they did. */
+function hintFor(c: Col, prev: SetLog | undefined, rx: WorkoutExercise["rx"], s: Settings, st?: SetLog): number | null {
+  if (c === "kg" && st?.suggest_kg != null) return getVal({ id: "", kg: st.suggest_kg }, c, s);
   const fromPrev = prev ? getVal(prev, c, s) : null;
   if (fromPrev != null) return fromPrev;
   if (!rx) return null;
@@ -929,7 +946,7 @@ function fillFrom(st: SetLog, cols: Col[], prev: SetLog | undefined, rx: Workout
   const out: SetLog = { id: st.id };
   for (const c of cols) {
     if (getVal(st, c, s) != null) continue;
-    const h = hintFor(c, prev, rx, s);
+    const h = hintFor(c, prev, rx, s, st);
     if (h != null) setVal(out, c, h, s);
   }
   const { id: _id, ...rest } = out;
@@ -938,17 +955,44 @@ function fillFrom(st: SetLog, cols: Col[], prev: SetLog | undefined, rx: Workout
 
 /** The set table's columns: badge · previous · the value boxes · tick. The
  *  value boxes share the width with "previous" (Strong's layout), so a wide
- *  screen doesn't strand the numbers at the far right. */
-function setGrid(n: number): string {
-  return `2rem minmax(4.5rem,1.1fr) ${Array.from({ length: n }, () => "minmax(3.6rem,1fr)").join(" ")} 2.75rem`;
+ *  screen doesn't strand the numbers at the far right. No history for the
+ *  lift → no "previous" column, and the boxes get the room. */
+function setGrid(n: number, prev = true): string {
+  return `2rem ${prev ? "minmax(4.5rem,1.1fr) " : ""}${Array.from({ length: n }, () => "minmax(3.6rem,1fr)").join(" ")} 2.75rem`;
 }
 
-/** The phone's big editor under the current set: steppers + done. Empty
- *  boxes start from their greyed hint, so + on "last time 8" makes 9. */
-function FocusEditor({ st, ex, s, cols, hint, onChange, onDone, onPlates, onDelete }: { st: SetLog; ex: Exercise; s: Settings; cols: Col[]; hint: (c: Col) => number | null; onChange: (fn: (x: SetLog) => void) => void; onDone: () => void; onPlates?: () => void; onDelete: () => void }) {
+/** The phone's big editor under the tapped set — the only place a phone
+ *  edits a set (the rows don't pop the keyboard): steppers (tap the number
+ *  to type it), the set type, last time's set, done. Empty boxes start from
+ *  their greyed hint, so + on "last time 8" makes 9. */
+function FocusEditor({ st, ex, s, cols, prev, hint, onChange, onDone, onPlates, onDelete }: { st: SetLog; ex: Exercise; s: Settings; cols: Col[]; prev?: SetLog; hint: (c: Col) => number | null; onChange: (fn: (x: SetLog) => void) => void; onDone: () => void; onPlates?: () => void; onDelete: () => void }) {
   const t = setType(st);
   return (
     <div className="mx-1 mb-2 mt-1 flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-3">
+      <div className="grid grid-cols-4 gap-1 rounded-xl bg-[var(--surface-2)] p-1" role="radiogroup" aria-label="Set type">
+        {(["warmup", "working", "drop", "failure"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            role="radio"
+            aria-checked={t === k}
+            onClick={() => onChange((x) => { x.type = k; })}
+            className={cn("h-9 rounded-lg text-xs font-medium transition", t === k ? "bg-[var(--surface)] text-[var(--text)] shadow-sm" : "text-[var(--text-muted)]")}
+          >
+            {SET_NAME[k]}
+          </button>
+        ))}
+      </div>
+      {prev && (
+        <button
+          type="button"
+          onClick={() => onChange((x) => { x.kg = prev.kg ?? x.kg; x.reps = prev.reps ?? x.reps; x.seconds = prev.seconds ?? x.seconds; x.meters = prev.meters ?? x.meters; })}
+          className="-my-1 flex items-center justify-between rounded-lg px-1 py-1 text-xs text-[var(--text-muted)]"
+        >
+          <span>Last time: <span className="font-medium tabular-nums text-[var(--text)]">{fmtSet(prev, ex, s)}</span></span>
+          <span className="font-medium text-[var(--item-accent)]">Use</span>
+        </button>
+      )}
       <div className={cn("grid gap-2", cols.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
         {cols.map((c) => {
           const shown = getVal(st, c, s) ?? hint(c);
@@ -959,7 +1003,14 @@ function FocusEditor({ st, ex, s, cols, hint, onChange, onDone, onPlates, onDele
                 <span className="text-xs font-medium text-[var(--text-muted)]">{colLabel(c, ex, s)}</span>
                 <div className="flex items-center rounded-xl border border-[var(--border)] bg-[var(--surface)]">
                   <button type="button" aria-label="Lighter" onClick={() => onChange((x) => { x.kg = stepLoad(x.kg ?? base, ex, s, -1); })} className="flex h-12 w-11 items-center justify-center text-lg font-semibold text-[var(--text-muted)] active:bg-[var(--hover-strong)]">−</button>
-                  <span className={cn("flex-1 text-center text-xl font-semibold tabular-nums", st.kg == null ? "text-[var(--text-muted)]" : "text-[var(--text)]")} aria-live="polite">{shown != null ? fmtW(fromUnit(shown, s), s, false) : "–"}</span>
+                  <NumBox
+                    dataKey={`${st.id}-big`}
+                    label={colLabel(c, ex, s)}
+                    value={getVal(st, c, s)}
+                    placeholder={hint(c)}
+                    onCommit={(v) => onChange((x) => setVal(x, c, v, s))}
+                    className="h-12 flex-1 bg-transparent text-xl focus:bg-transparent"
+                  />
                   <button type="button" aria-label="Heavier" onClick={() => onChange((x) => { x.kg = stepLoad(x.kg ?? base, ex, s, 1); })} className="flex h-12 w-11 items-center justify-center text-lg font-semibold text-[var(--text-muted)] active:bg-[var(--hover-strong)]">+</button>
                 </div>
               </div>
@@ -987,7 +1038,7 @@ function FocusEditor({ st, ex, s, cols, hint, onChange, onDone, onPlates, onDele
           <Trash2 className="h-4 w-4" />
         </button>
         <ItemButton variant="primary" size="lg" block icon={<Check className="h-5 w-5" />} onClick={onDone} className="min-w-0 flex-1 whitespace-nowrap">
-          {t === "working" ? "Done" : `Done · ${SET_NAME[t]}`}
+          {st.done ? "Save" : t === "working" ? "Done" : `Done · ${SET_NAME[t]}`}
         </ItemButton>
       </div>
     </div>

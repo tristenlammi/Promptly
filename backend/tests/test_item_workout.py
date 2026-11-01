@@ -262,13 +262,18 @@ def test_set_profile_and_unit_switch():
     _refused(d, "set_profile", {}, "Nothing to change")
 
 
-def test_plan_week_fills_loads_and_replaces_the_week():
+def _work(d: dict, i: int = 0, kind: str = "working") -> list[dict]:
+    """The live workout's sets of one type for its ``i``-th exercise."""
+    return [s for s in d["active"]["exercises"][i]["sets"] if s["type"] == kind]
+
+
+def test_plan_week_stores_no_loads_and_replaces_the_week():
     d = _history(_fresh(bodyweight_kg=80))
     args = {"sessions": [
         {"date": "2026-11-03", "name": "Upper A", "time": "18:00", "exercises": [
             {"exercise": "bench_press", "sets": 3, "reps_min": 6, "reps_max": 8},
             {"exercise": "One-Arm Row (Dumbbell)", "sets": 3, "reps_min": 8, "reps_max": 12},
-            {"exercise": "lateral raise", "sets": 3, "reps": 15, "load": 8, "superset": "a"},
+            {"exercise": "lateral raise", "sets": 3, "reps": 15, "superset": "a"},
         ]},
         {"date": "2026-11-05", "name": "Lower A", "exercises": [{"exercise": "squat", "sets": 3, "reps": 5}]},
     ]}
@@ -276,12 +281,19 @@ def test_plan_week_fills_loads_and_replaces_the_week():
     assert "Planned 2 sessions" in out.summary
     up = next(s for s in d["planned"] if s["name"] == "Upper A")
     bench, row, lat = up["exercises"]
-    assert bench["load_kg"] == sci.round_load(sci.load_for(sci.e1rm(80, 10, 2), 7, 2), builtin()["bench_press"], d["settings"])
+    # Plans hold sets × reps only — never a load, never a calibration note.
+    assert all(rx["load_kg"] is None and rx["load_pct"] is None for s in d["planned"] for rx in s["exercises"])
     assert bench.get("target_rir") is None and "rir" not in out.result["sessions"][0]["exercises"][0]
-    assert row.get("target_rir") is None and row["load_kg"] and "Calibration" in row["notes"]  # no history → calibration
-    assert lat["load_kg"] == 8 and lat["superset"] == "A"
+    assert row.get("target_rir") is None and "Calibration" not in row["notes"]
+    assert lat["superset"] == "A"
     sess = out.result["sessions"][0]
-    assert sess["est_minutes"] > 10 and sess["exercises"][0]["load"].endswith("kg")
+    assert sess["est_minutes"] > 10 and all("load" not in x for x in sess["exercises"])
+    # The logger suggests the load instead: 80 × 10 vs a 6-8 range → via the e1RM.
+    run(d, "start_session", {"session_id": up["id"]})
+    want = sci.round_load(sci.load_for(sci.e1rm(80, 10, 2), 7, 2), builtin()["bench_press"], d["settings"])
+    assert {(s["kg"], s["suggest_kg"]) for s in _work(d, 0)} == {(None, want)}
+    assert {s["suggest_kg"] for s in _work(d, 1)} == {None}  # a never-logged row: no guess
+    run(d, "discard_session", {})
     # Planning the same week again replaces it.
     run(d, "plan_week", {"sessions": [{"date": "2026-11-04", "name": "Full body", "exercises": [{"exercise": "deadlift", "sets": 2, "reps": 5}]}]})
     assert [s["name"] for s in d["planned"]] == ["Full body"]
@@ -304,24 +316,29 @@ def test_create_program_double_progression_and_deloads():
     assert prog["status"] == "active" and [w["deload"] for w in prog["weeks"]] == [False] * 4 + [True]
     uppers = [s for s in d["planned"] if s["name"].startswith("Upper")]
     assert len(uppers) == 5 and uppers[0]["date"] == "2026-11-02" and uppers[1]["date"] == "2026-11-09"
-    loads = [u["exercises"][0]["load_kg"] for u in uppers[:4]]
-    assert loads[0] == 82.5  # 80 × 10, 10, 10 at the top of 8-10 → + the increment
-    assert loads == [loads[0]] * 4  # double progression: the logger raises it once it's earned
+    # No loads in any week: the logger works out each one when it's trained.
+    assert all(rx["load_kg"] is None for s in d["planned"] for rx in s["exercises"])
     assert all(rx.get("target_rir") is None for s in d["planned"] for rx in s["exercises"])
+    run(d, "start_session", {"session_id": uppers[0]["id"]})
+    assert {(s["kg"], s["suggest_kg"]) for s in _work(d)} == {(None, 82.5)}  # 80 × 10, 10, 10 at the top of 8-10 → + the increment
+    run(d, "discard_session", {})
     sets_lat = [u["exercises"][1]["sets"] for u in uppers[:4]]
     assert sets_lat[0] == 3 and sets_lat[-1] > 3  # isolation work gains sets
     dl = uppers[4]
     assert dl["deload"] and dl["exercises"][0]["sets"] == 2  # deload: half the sets ...
-    assert dl["exercises"][0]["load_kg"] < loads[0] and "lighter" in dl["exercises"][0]["notes"]  # ... and lighter
+    assert "lighter" in dl["exercises"][0]["notes"]
+    run(d, "start_session", {"session_id": dl["id"]})
+    assert d["active"]["deload"] is True and all(s["suggest_kg"] < 80 for s in _work(d))  # ... and lighter than last time
+    run(d, "discard_session", {})
     # The old progression name still works.
     run(d, "create_program", {"name": "Old", "weeks": 1, "progression": "rir_ramp", "start_date": "2027-03-01",
-                              "days": [{"weekday": 0, "name": "Day", "exercises": [{"exercise": "squat", "sets": 3, "reps": 5, "load": 100}]}]})
-    # A new program finishes the old one; linear progression adds a step each week.
+                              "days": [{"weekday": 0, "name": "Day", "exercises": [{"exercise": "squat", "sets": 3, "reps": 5}]}]})
+    # A new program finishes the old one; linear keeps the same sets × reps (the logger adds the load).
     run(d, "create_program", {"name": "LP", "weeks": 3, "progression": "linear", "start_date": "2026-12-07",
-                              "days": [{"weekday": 0, "name": "Day", "exercises": [{"exercise": "squat", "sets": 3, "reps": 5, "load": 100}]}]})
+                              "days": [{"weekday": 0, "name": "Day", "exercises": [{"exercise": "squat", "sets": 3, "reps": 5}]}]})
     assert d["programs"][0]["status"] == "done"
-    lp = [s["exercises"][0]["load_kg"] for s in d["planned"] if s.get("program_id") == d["programs"][2]["id"]]
-    assert lp == [100, 102.5, 105]
+    lp = [s["exercises"][0] for s in d["planned"] if s.get("program_id") == d["programs"][2]["id"]]
+    assert [(rx["sets"], rx["reps_min"], rx["load_kg"]) for rx in lp] == [(3, 5, None)] * 3
 
 
 def test_routines_and_scheduling():
@@ -343,15 +360,17 @@ def test_routines_and_scheduling():
 
 def test_edit_and_delete_sessions():
     d = _fresh()
-    run(d, "plan_week", {"sessions": [{"date": "2026-11-03", "name": "Upper", "exercises": [{"exercise": "bench", "sets": 3, "reps": 8, "load": 60}, {"exercise": "ohp", "sets": 3, "reps": 8}]}]})
+    run(d, "plan_week", {"sessions": [{"date": "2026-11-03", "name": "Upper", "exercises": [{"exercise": "bench", "sets": 3, "reps": 8}, {"exercise": "ohp", "sets": 3, "reps": 8}]}]})
     sid = d["planned"][0]["id"]
     out = run(d, "edit_session", {"session_id": sid, "date": "2026-11-04", "time": "17:30",
-                                  "changes": [{"exercise": "bench", "sets": 4, "load": 62.5}],
+                                  "changes": [{"exercise": "bench", "sets": 4, "reps": 6}],
                                   "remove": ["ohp"], "add": [{"exercise": "pull ups", "sets": 3, "reps_min": 5, "reps_max": 8}]})
     s = d["planned"][0]
     assert s["date"] == "2026-11-04" and s["time"] == "17:30" and "moved" in out.summary
     assert [rx["exercise_id"] for rx in s["exercises"]] == ["bench_press", "pullup"]
-    assert s["exercises"][0]["sets"] == 4 and s["exercises"][0]["load_kg"] == 62.5 and s["exercises"][0].get("target_rir") is None
+    assert s["exercises"][0]["sets"] == 4 and s["exercises"][0]["reps_max"] == 6 and s["exercises"][0].get("target_rir") is None
+    assert all(rx["load_kg"] is None for rx in s["exercises"])
+    _refused(d, "edit_session", {"session_id": sid, "changes": [{"exercise": "bench", "load": 62.5}]}, "Unknown field 'load'")
     _refused(d, "edit_session", {"session_id": sid, "changes": [{"exercise": "deadlift", "sets": 2}]}, "isn't in that session")
     _refused(d, "edit_session", {"session_id": sid}, "Nothing to change")
     _refused(d, "edit_session", {"session_id": "nope", "name": "x"}, "No planned session")
@@ -395,21 +414,25 @@ def test_log_workout_from_chat_shorthand_links_the_plan_and_reports_prs():
 def test_live_session_start_log_finish():
     d = _history(_fresh(bodyweight_kg=80))
     run(d, "plan_week", {"sessions": [{"date": "2026-11-02", "name": "Upper", "exercises": [
-        {"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}, {"exercise": "db curl", "sets": 2, "reps": 12, "load": 12}]}]})
+        {"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}, {"exercise": "db curl", "sets": 2, "reps": 12}]}]})
     out = run(d, "start_session", {})
     a = d["active"]
     assert "Started Upper" in out.summary and a["session_id"] == d["planned"][0]["id"]
     bench = a["exercises"][0]
     warm = [s for s in bench["sets"] if s.get("type") == "warmup"]
     work = [s for s in bench["sets"] if s.get("type", "working") == "working"]
-    assert warm and warm[0]["kg"] == 20 and len(work) == 3 and all(not s["done"] for s in bench["sets"])
-    assert work[0]["kg"] == d["planned"][0]["exercises"][0]["load_kg"]
-    assert a["exercises"][1]["sets"][0]["kg"] == 12 and not any(s["type"] == "warmup" for s in a["exercises"][1]["sets"])
+    assert warm and warm[0]["suggest_kg"] == 20 and warm[0]["kg"] is None
+    assert len(work) == 3 and all(not s["done"] for s in bench["sets"])
+    assert {(s["kg"], s["suggest_kg"]) for s in work} == {(None, 82.5)}  # 80 × 10 at the top of 8-10 → + the increment
+    # A never-logged curl: no suggestion, no warm-ups.
+    assert {(s["kg"], s["suggest_kg"]) for s in a["exercises"][1]["sets"]} == {(None, None)}
+    assert not any(s["type"] == "warmup" for s in a["exercises"][1]["sets"])
     _refused(d, "start_session", {}, "already running")
-    # From chat during the workout: fills the unticked sets.
+    # From chat during the workout: fills the unticked sets (and drops their suggestion).
     run(d, "log_sets", {"exercise": "bench", "set_count": 2, "reps": 10, "load": 82.5})
     work = [s for s in d["active"]["exercises"][0]["sets"] if s["type"] == "working"]
     assert [s["done"] for s in work] == [True, True, False] and work[0]["kg"] == 82.5
+    assert work[0]["suggest_kg"] is None and work[2]["suggest_kg"] == 82.5
     run(d, "log_sets", {"exercise": "plank", "sets": [{"seconds": 45}]})
     assert d["active"]["exercises"][-1]["exercise_id"] == "plank"
     out = run(d, "finish_session", {"notes": "felt strong"}, now=NOW + timedelta(minutes=55))
@@ -447,10 +470,11 @@ def test_swap_exercise_everywhere():
     run(d, "create_program", {"name": "B", "weeks": 2, "days": [{"weekday": 1, "name": "Day", "exercises": [{"exercise": "ohp", "sets": 3, "reps": 8}]}]})
     out = run(d, "swap_exercise", {"from_exercise": "ohp", "to_exercise": "landmine press"})
     assert out.result["swapped"] == 2
-    assert all(s["exercises"][0]["exercise_id"] == "landmine_press" and s["exercises"][0]["load_kg"] for s in d["planned"])
+    assert all(s["exercises"][0]["exercise_id"] == "landmine_press" and s["exercises"][0]["load_kg"] is None for s in d["planned"])
     run(d, "start_session", {"session_id": d["planned"][0]["id"]})
     run(d, "swap_exercise", {"from_exercise": "landmine press", "to_exercise": "db shoulder press", "scope": "active"})
     assert d["active"]["exercises"][0]["exercise_id"] == "db_shoulder_press"
+    assert {(s["kg"], s["suggest_kg"]) for s in _work(d)} == {(None, None)}  # never logged: no guess
     _refused(d, "swap_exercise", {"from_exercise": "ohp", "to_exercise": "ohp"}, "same exercise")
     _refused(d, "swap_exercise", {"from_exercise": "deadlift", "to_exercise": "rdl", "scope": "active"}, "isn't in")
 
@@ -531,11 +555,12 @@ def test_planned_list_makes_room_by_dropping_old_sessions():
 
 def test_to_text_has_the_facts_newest_first():
     d = _history(_fresh(bodyweight_kg=80, injuries="left knee — no deep lunges"))
-    run(d, "plan_week", {"sessions": [{"date": "2026-11-03", "name": "Upper A", "exercises": [{"exercise": "bench", "sets": 3, "reps": 5, "load": 85}]}]})
+    run(d, "plan_week", {"sessions": [{"date": "2026-11-03", "name": "Upper A", "exercises": [{"exercise": "bench", "sets": 3, "reps": 5}]}]})
     run(d, "start_session", {"empty": True, "name": "Arms"})
     t = to_text(d)
     assert "left knee" in t and "bodyweight 80 kg" in t
-    assert "IN PROGRESS: Arms" in t and "2026-11-03 Upper A: Bench Press (Barbell) 3×5 @ 85 kg" in t
+    assert "IN PROGRESS: Arms" in t and "2026-11-03 Upper A: Bench Press (Barbell) 3×5" in t
+    assert "Bench Press (Barbell) 3×5 @" not in t  # plans carry no load
     assert t.index("2026-10-29") < t.index("2026-10-26")  # newest first
     assert "80×10" in t and "RIR" not in t and "Best estimated 1RMs" in t
     big = _fresh()
@@ -548,8 +573,8 @@ def test_reminders_before_sessions():
     d = _fresh(reminder_time="07:15", remind_before_min=45)
     run(d, "plan_week", {"replace_existing": False, "sessions": [
         {"date": "2026-11-02", "name": "Too late today", "exercises": []},   # 07:15 already passed
-        {"date": "2026-11-02", "name": "Evening", "time": "18:00", "exercises": [{"exercise": "bench", "sets": 3, "reps": 5, "load": 80}]},
-        {"date": "2026-11-04", "name": "Legs", "exercises": [{"exercise": "squat", "sets": 3, "reps": 5, "load": 100}]},
+        {"date": "2026-11-02", "name": "Evening", "time": "18:00", "exercises": [{"exercise": "bench", "sets": 3, "reps": 5}]},
+        {"date": "2026-11-04", "name": "Legs", "exercises": [{"exercise": "squat", "sets": 3, "reps": 5}]},
         {"date": "2026-11-30", "name": "Far away", "exercises": []},
     ]})
     rs = reminders(d, _ctx())
@@ -557,7 +582,8 @@ def test_reminders_before_sessions():
     assert set(by) == {"Evening at 18:00", "Legs today"}
     assert by["Evening at 18:00"].due_at == datetime(2026, 11, 2, 17, 15, tzinfo=TZ)
     assert by["Legs today"].due_at == datetime(2026, 11, 4, 7, 15, tzinfo=TZ)
-    assert "Back Squat (Barbell) 3×5 @ 100 kg" in by["Legs today"].body and "~" in by["Legs today"].body
+    assert "Back Squat (Barbell) 3×5" in by["Legs today"].body and "~" in by["Legs today"].body
+    assert "@" not in by["Legs today"].body  # no load in a plan, so none in its reminder
     # Moving a session changes its key (so it's sent again); done ones are quiet.
     keys = {r.key for r in rs}
     legs = next(s for s in d["planned"] if s["name"] == "Legs")
@@ -586,6 +612,11 @@ def test_tools_have_no_refs_and_cover_the_actions():
     for a in SPEC.actions:
         assert a.name in names
     assert {"read_other_item", "update_data", "read_data"} <= names and "web_search" not in names
+    assert "refit_upcoming_loads" not in names and SPEC.action("refit_upcoming_loads") is None  # plans hold no loads to re-fit
+    # No action that writes a plan takes a load any more.
+    plan_args = json.dumps([t["function"]["parameters"] for t in tools if t["function"]["name"] in
+                            {"plan_week", "create_program", "save_routine", "schedule_sessions", "edit_session"}])
+    assert '"load"' not in plan_args and '"load_pct"' not in plan_args and '"fill_loads"' not in plan_args
     assert "$ref" not in json.dumps(tools)
     reader = {t["function"]["name"] for t in tools_for(SPEC, can_edit=False)}
     assert "plan_week" not in reader and {"suggest_loads", "get_progress", "weekly_volume_by_muscle"} <= reader
@@ -593,7 +624,8 @@ def test_tools_have_no_refs_and_cover_the_actions():
     assert set(other["function"]["parameters"]["properties"]["kind"]["enum"]) == {"health", "meals"}
     assert SPEC.kind == "workout" and SPEC.suffix == ".workout" and SPEC.color == "#E2725B" and SPEC.icon == "dumbbell"
     assert SPEC.category == "Health & fitness" and 5 <= len(SPEC.highlights) <= 8 and 4 <= len(SPEC.ai_suggestions) <= 6
-    for word in ("sets × reps × load", "MEV", "MRV", "deload", "double progression", "medical"):
+    assert "sets × reps × load" not in SPEC.ai_brief and "never weights" in SPEC.ai_brief
+    for word in ("sets × reps", "MEV", "MRV", "deload", "double progression", "medical"):
         assert word.lower() in SPEC.ai_brief.lower()
 
 
@@ -647,7 +679,7 @@ async def test_end_to_end_api_flow(client, db, user):
                           json={"args": {"sessions": [{"date": tomorrow, "name": "Heavy", "exercises": [{"exercise": "bench", "sets": 5, "reps": 5}]}]}})
     assert r.status_code == 200, r.text
     planned = r.json()["data"]["planned"][0]
-    assert planned["exercises"][0]["load_kg"] is not None
+    assert planned["exercises"][0].get("load_kg") is None  # plans never carry a load
     r = await client.post(f"/api/items/{fid}/actions/suggest_loads", headers=_auth(user), json={"args": {"items": [{"exercise": "bench", "reps": 3}]}})
     assert r.status_code == 200 and r.json()["result"]["suggestions"][0]["basis"] == "recent"
     r = await client.post(f"/api/items/{fid}/actions/edit_session", headers=_auth(user), json={"args": {"session_id": "nope", "name": "x"}})
@@ -707,7 +739,7 @@ async def test_the_coach_plans_a_week_from_the_ai_panel(client, db, user, monkey
     fake = _FakeModel([
         {"tools": [("read_other_item", {"kind": "health"}), ("suggest_loads", {"items": [{"exercise": "squat", "reps": 5}]})]},
         {"tools": [("plan_week", {"sessions": [{"date": day, "name": "Lower", "exercises": [{"exercise": "squat", "sets": 5, "reps": 5}]}]})]},
-        {"text": "Planned Lower with squats at 100 kg."},
+        {"text": "Planned Lower: squats 5×5 (about 100 kg, from last time)."},
     ])
     monkeypatch.setattr(prov, "model_router", fake)
     events = [ev async for ev in ai.run_turn(db, user, uuid.UUID(fid), "plan my week", object(), "m", can_edit=True)]
@@ -716,11 +748,12 @@ async def test_the_coach_plans_a_week_from_the_ai_panel(client, db, user, monkey
     done = events[-1]
     assert done["type"] == "done" and done["changed"] and done["version_id"]
     lower = done["data"]["planned"][0]
-    assert lower["exercises"][0]["load_kg"] == 100.0  # 100×5 → its e1RM → 100 for 5 again
+    assert lower["exercises"][0].get("load_kg") is None and lower["exercises"][0]["sets"] == 5  # sets × reps only
     system = fake.calls[0]["system"]
     assert "double progression" in system.lower() and '"workouts"' in system
     tool_msgs = [m["content"] for m in fake.calls[1]["messages"] if m.get("role") == "tool"]
     assert any("health" in m for m in tool_msgs) and any("e1rm" in m for m in tool_msgs)
+    assert any("100 kg" in m for m in tool_msgs)  # suggest_loads still answers "what should I lift": 100×5 → 100 for 5 again
 
 
 # ------------------------------------------------------------ fix pass
@@ -759,12 +792,14 @@ def test_planning_uses_double_progression_not_a_regressing_back_calc():
     _log(d, "2026-10-29", "bench", [(80, 10)] * 3)  # the top of 8-10
     args = {"sessions": [{"date": "2026-11-03", "name": "Upper", "exercises": [{"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}]}]}
     run(d, "plan_week", args)
-    assert d["planned"][0]["exercises"][0]["load_kg"] == 82.5  # 80 x 10 -> + the increment (was 77.5)
+    run(d, "start_session", {"session_id": d["planned"][0]["id"]})
+    assert {(s["kg"], s["suggest_kg"]) for s in _work(d)} == {(None, 82.5)}  # 80 x 10 -> + the increment (was 77.5)
     # Short of the top: same load, beat the reps.
     d2 = _fresh(bodyweight_kg=80)
     _log(d2, "2026-10-29", "bench", [(80, 10), (80, 9), (80, 8)])
     run(d2, "plan_week", args)
-    assert d2["planned"][0]["exercises"][0]["load_kg"] == 80
+    run(d2, "start_session", {"session_id": d2["planned"][0]["id"]})
+    assert {s["suggest_kg"] for s in _work(d2)} == {80}
     # 10 reps against a 6-8 range is out of range -> via the e1RM, upward.
     out = sci.next_load(d2, builtin()["bench_press"], 6, 8, today=NOW.date())
     assert out["basis"] == "e1rm" and out["load_kg"] >= 80
@@ -772,12 +807,19 @@ def test_planning_uses_double_progression_not_a_regressing_back_calc():
     d3 = _fresh(bodyweight_kg=80)
     _log(d3, "2026-10-29", "bench", [(80, 10)] * 3)
     run(d3, "create_program", {"name": "B", "weeks": 2, "progression": "none", "days": [{"weekday": 2, "name": "Day", "exercises": [{"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}]}]})
-    assert d3["planned"][0]["exercises"][0]["load_kg"] == 82.5
+    assert d3["planned"][0]["exercises"][0]["load_kg"] is None
+    run(d3, "start_session", {"session_id": d3["planned"][0]["id"]})
+    assert {s["suggest_kg"] for s in _work(d3)} == {82.5}
+    run(d3, "discard_session", {})
     _log(d3, "2026-10-30", "incline bench", [(60, 10)] * 3)
-    run(d3, "plan_week", {"sessions": [{"date": "2026-11-06", "name": "Push", "exercises": [{"exercise": "ohp", "sets": 3, "reps_min": 8, "reps_max": 10, "load": 40}]}], "replace_existing": False})
+    run(d3, "plan_week", {"sessions": [{"date": "2026-11-06", "name": "Push", "exercises": [{"exercise": "ohp", "sets": 3, "reps_min": 8, "reps_max": 10}]}], "replace_existing": False})
     push = next(s for s in d3["planned"] if s["name"] == "Push")
+    push["exercises"][0]["load_kg"] = 40  # a legacy planned load for the old lift ...
     run(d3, "swap_exercise", {"from_exercise": "ohp", "to_exercise": "incline bench", "scope": "session", "session_id": push["id"]})
-    assert next(s for s in d3["planned"] if s["name"] == "Push")["exercises"][0]["load_kg"] == 62.5
+    push = next(s for s in d3["planned"] if s["name"] == "Push")
+    assert push["exercises"][0]["load_kg"] is None  # ... means nothing for the new one
+    run(d3, "start_session", {"session_id": push["id"]})
+    assert {s["suggest_kg"] for s in _work(d3)} == {62.5}
     # A long break: no blind progression off a session from months ago.
     d4 = _fresh(bodyweight_kg=80)
     _log(d4, "2026-05-01", "bench", [(80, 10)] * 3)
@@ -788,7 +830,7 @@ def test_progression_skips_a_deload_week():
     d = _fresh(bodyweight_kg=80)
     bench = builtin()["bench_press"]
     _log(d, "2026-10-20", "bench", [(80, 10)] * 3)
-    run(d, "plan_week", {"sessions": [{"date": "2026-10-27", "name": "Deload", "deload": True, "exercises": [{"exercise": "bench", "sets": 2, "reps": 8, "load": 70}]}], "replace_existing": False})
+    run(d, "plan_week", {"sessions": [{"date": "2026-10-27", "name": "Deload", "deload": True, "exercises": [{"exercise": "bench", "sets": 2, "reps": 8}]}], "replace_existing": False})
     _log(d, "2026-10-27", "bench", [(70, 8)] * 2)
     w = d["workouts"][-1]
     assert w["deload"] is True and sci.is_deload(d, w)
@@ -803,51 +845,22 @@ def test_progression_skips_a_deload_week():
 def test_logger_prefers_the_better_of_plan_and_progression():
     d = _fresh(bodyweight_kg=80)
     _log(d, "2026-10-29", "bench", [(80, 10)] * 3)
-    run(d, "plan_week", {"sessions": [{"date": "2026-11-02", "name": "Upper", "exercises": [{"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10, "load": 75}]}]})
+    run(d, "plan_week", {"sessions": [{"date": "2026-11-02", "name": "Upper", "exercises": [{"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}]}]})
+    rx = d["planned"][0]["exercises"][0]
+    rx["load_kg"] = 75  # a legacy planned load (old files): stored data, no action writes one now
     run(d, "start_session", {})
-    work = [s for s in d["active"]["exercises"][0]["sets"] if s["type"] == "working"]
-    assert {s["kg"] for s in work} == {82.5}
+    assert {(s["kg"], s["suggest_kg"]) for s in _work(d)} == {(None, 82.5)}
     run(d, "discard_session", {})
     # A heavier plan wins; a deload keeps its planned load.
-    sid = d["planned"][0]["id"]
-    run(d, "edit_session", {"session_id": sid, "changes": [{"exercise": "bench", "load": 90}]})
+    d["planned"][0]["exercises"][0]["load_kg"] = 90
     run(d, "start_session", {})
-    assert [s for s in d["active"]["exercises"][0]["sets"] if s["type"] == "working"][0]["kg"] == 90
+    assert _work(d)[0]["suggest_kg"] == 90 and _work(d)[0]["kg"] is None
     run(d, "discard_session", {})
     d["planned"][0]["deload"] = True
-    run(d, "edit_session", {"session_id": sid, "changes": [{"exercise": "bench", "load": 70}]})
+    d["planned"][0]["exercises"][0]["load_kg"] = 70
     run(d, "start_session", {})
     assert d["active"]["deload"] is True
-    assert [s for s in d["active"]["exercises"][0]["sets"] if s["type"] == "working"][0]["kg"] == 70
-
-
-def test_refit_upcoming_loads_from_recent_history():
-    d = _fresh(bodyweight_kg=80)
-    _log(d, "2026-10-20", "bench", [(70, 10)] * 3)
-    run(d, "create_program", {"name": "Block", "weeks": 4, "start_date": "2026-10-26", "days": [
-        {"weekday": 0, "name": "Day", "exercises": [{"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}, {"exercise": "plank", "sets": 3, "seconds": 45}]}]})
-    assert d["planned"][0]["exercises"][0]["load_kg"] == 72.5  # 70 × 10s at the top of 8-10 → + the increment
-    # They out-lift the plan.
-    _log(d, "2026-10-29", "bench", [(85, 10)] * 3)
-    future = [s for s in d["planned"] if s["date"] >= "2026-11-02"]
-    old = [s["exercises"][0]["load_kg"] for s in future]
-    out = run(d, "refit_upcoming_loads", {"apply": False})
-    assert out.result["applied"] is False and out.result["changes"] and "Would re-fit" in out.summary
-    future = [s for s in d["planned"] if s["date"] >= "2026-11-02"]
-    assert [s["exercises"][0]["load_kg"] for s in future] == old  # a preview changes nothing
-    out = run(d, "refit_upcoming_loads", {})
-    future = [s for s in d["planned"] if s["date"] >= "2026-11-02"]
-    new = [s["exercises"][0]["load_kg"] for s in future]
-    assert new[0] == 87.5 and "Re-fitted" in out.summary
-    assert new[1] >= new[0]  # the program's week-to-week steps are kept ...
-    assert future[-1]["deload"] and new[-1] < new[0]  # ... and the deload stays lighter
-    assert all(c["exercise"] == "Bench Press (Barbell)" for c in out.result["changes"])  # the plank has no load
-    # Already in line -> nothing to do; only_increase never lowers.
-    assert "already match" in run(d, "refit_upcoming_loads", {}).summary
-    _log(d, "2026-10-31", "bench", [(60, 6)] * 3)
-    run(d, "refit_upcoming_loads", {"only_increase": True})
-    assert [s["exercises"][0]["load_kg"] for s in d["planned"] if s["date"] >= "2026-11-02"] == new
-    _refused(_fresh(), "refit_upcoming_loads", {}, "No upcoming")
+    assert _work(d)[0]["suggest_kg"] == 70
 
 
 def test_landmark_labels():
@@ -1073,10 +1086,9 @@ def test_deload_without_a_planned_load_is_lighter_than_last_time():
     bench = builtin()["bench_press"]
     assert sci.prefill(d, bench, {"reps_min": 8, "reps_max": 10}, today=NOW.date()) == 102.5  # earned
     assert sci.prefill(d, bench, {"reps_min": 8, "reps_max": 10}, today=NOW.date(), deload=True) == 90
-    run(d, "plan_week", {"fill_loads": False, "sessions": [{"date": "2026-11-02", "deload": True, "exercises": [{"exercise": "bench", "sets": 2, "reps_min": 8, "reps_max": 10}]}]})
+    run(d, "plan_week", {"sessions": [{"date": "2026-11-02", "deload": True, "exercises": [{"exercise": "bench", "sets": 2, "reps_min": 8, "reps_max": 10}]}]})
     run(d, "start_session", {})
-    work = [s for s in d["active"]["exercises"][0]["sets"] if s["type"] == "working"]
-    assert {s["kg"] for s in work} == {90}
+    assert {(s["kg"], s["suggest_kg"]) for s in _work(d)} == {(None, 90)}
 
 
 def test_percent_prescriptions_use_the_e1rm_the_person_sees():
@@ -1161,13 +1173,14 @@ def test_action_guards():
     _refused(d, "log_workout", {"exercises": [{"exercise": "bench", "set_count": 3, "reps": 5, "load": 2000}]}, "plausible")
     _refused(d, "log_workout", {"exercises": [{"exercise": "bench", "set_count": 3, "reps": 5, "load": -5}]}, "Bad arguments")
     _refused(d, "log_workout", {"exercises": [{"exercise": "bench", "set_count": 0, "reps": 5}]}, "Bad arguments")
-    _refused(d, "plan_week", {"sessions": [{"date": "2026-11-03", "exercises": [{"exercise": "bench", "load": 2000}]}]}, "plausible")
+    # Plans take no load at all (the logger suggests one).
+    _refused(d, "plan_week", {"sessions": [{"date": "2026-11-03", "exercises": [{"exercise": "bench", "load": 2000}]}]}, "Unknown field 'load'")
     _refused(d, "plate_math", {"load": 30, "exercise": "db curl"}, "isn't loaded on a bar")
     assert run(d, "plate_math", {"load": 40, "exercise": "ez bar curl"}).result["bar"] == "10 kg"
     run(d, "plan_week", {"sessions": [{"date": "2026-11-02", "exercises": [{"exercise": "bench", "sets": 3, "reps": 8}]}]})
     sid = d["planned"][0]["id"]
-    run(d, "edit_session", {"session_id": sid, "changes": [{"exercise": "bench", "load": 81}]})
-    assert d["planned"][0]["exercises"][0]["load_kg"] == 80  # rounded to the plates
+    _refused(d, "edit_session", {"session_id": sid, "changes": [{"exercise": "bench", "load": 81}]}, "Unknown field 'load'")
+    assert d["planned"][0]["exercises"][0]["load_kg"] is None
     run(d, "log_workout", {"session_id": sid, "exercises": [{"exercise": "bench", "set_count": 3, "reps": 8, "load": 80}]})
     _refused(d, "start_session", {"session_id": sid}, "already done")
 
@@ -1180,8 +1193,9 @@ def test_swapping_a_lift_mid_workout_rebuilds_its_warmups():
     we = d["active"]["exercises"][0]
     warm = [s for s in we["sets"] if s["type"] == "warmup"]
     work = [s for s in we["sets"] if s["type"] == "working"]
-    assert we["exercise_id"] == "front_squat" and warm and all(s["kg"] for s in warm)
-    assert max(s["kg"] for s in warm) < work[0]["kg"] and work[0]["kg"] < 100
+    assert we["exercise_id"] == "front_squat" and warm and all(s["suggest_kg"] and s["kg"] is None for s in warm)
+    assert all(s["kg"] is None for s in work)
+    assert max(s["suggest_kg"] for s in warm) < work[0]["suggest_kg"] and work[0]["suggest_kg"] < 100
 
 
 def test_legacy_rir_and_rpe_never_come_back():
@@ -1195,13 +1209,16 @@ def test_legacy_rir_and_rpe_never_come_back():
 
 
 def test_program_deload_weeks_ease_assisted_lifts_too():
-    d = _fresh()
+    d = _with(_w("2026-10-29", "assisted_pullup", [(30, 10)] * 4), _w("2026-10-29", "bench_press", [(80, 10)] * 4, wid="wb"))
     out = run(d, "create_program", {"name": "Block", "weeks": 4, "days": [{"weekday": 0, "name": "Day", "exercises": [
-        {"exercise": "assisted pull up", "sets": 4, "reps_min": 8, "reps_max": 10, "load": 30},
-        {"exercise": "bench", "sets": 4, "reps_min": 8, "reps_max": 10, "load": 80}]}]})
-    deload = [s for s in d["planned"] if s.get("deload")][0]["exercises"]
-    assert deload[0]["load_kg"] > 30 and deload[1]["load_kg"] == 70 and deload[0]["sets"] == 2
+        {"exercise": "assisted pull up", "sets": 4, "reps_min": 8, "reps_max": 10},
+        {"exercise": "bench", "sets": 4, "reps_min": 8, "reps_max": 10}]}]})
+    dl = [s for s in d["planned"] if s.get("deload")][0]
+    assert dl["exercises"][0]["sets"] == 2 and all(rx["load_kg"] is None for rx in dl["exercises"])
     assert out.result["volume_warnings"] == []
+    # The deload's suggestions: more assistance, a lighter bench.
+    run(d, "start_session", {"session_id": dl["id"]})
+    assert all(s["suggest_kg"] > 30 for s in _work(d, 0)) and {s["suggest_kg"] for s in _work(d, 1)} == {70}
 
 
 def test_stated_bests_calibrate_loads_until_history_exists():
@@ -1224,8 +1241,11 @@ def test_stated_bests_calibrate_loads_until_history_exists():
     prog = run(d, "create_program", {"name": "Block", "weeks": 4, "days": [{"weekday": 0, "name": "Day", "exercises": [
         {"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}, {"exercise": "lat pulldown", "sets": 3, "reps_min": 10, "reps_max": 12}]}]})
     first = prog.result["first_week"][0]["exercises"]
-    assert first[0]["load"] == "77.5 kg" and first[1]["load"] == "65 kg"
+    assert "load" not in first[0] and "load" not in first[1]  # the plan holds no load ...
     assert "Calibration" not in d["planned"][0]["exercises"][0].get("notes", "")
+    run(d, "start_session", {"session_id": d["planned"][0]["id"]})
+    assert {s["suggest_kg"] for s in _work(d, 0)} == {77.5} and {s["suggest_kg"] for s in _work(d, 1)} == {65}  # ... the logger suggests it
+    run(d, "discard_session", {})
     s = sci.suggest(d, bench, 5, today=NOW.date())
     assert s["basis"] == "baseline" and s["calibrate"] is False and s["e1rm_kg"] == 105.0
     text = to_text(d)
@@ -1279,7 +1299,7 @@ def test_cardio_is_one_bout_without_rest_or_volume():
 
 def test_finishing_a_session_on_another_day_moves_it_there():
     d = _fresh()
-    run(d, "plan_week", {"sessions": [{"date": "2026-11-05", "name": "Thursday", "exercises": [{"exercise": "bench", "sets": 2, "reps": 8, "load": 60}]}]})
+    run(d, "plan_week", {"sessions": [{"date": "2026-11-05", "name": "Thursday", "exercises": [{"exercise": "bench", "sets": 2, "reps": 8}]}]})
     sid = d["planned"][0]["id"]
     run(d, "start_session", {"session_id": sid})
     for s in d["active"]["exercises"][0]["sets"]:
@@ -1288,7 +1308,79 @@ def test_finishing_a_session_on_another_day_moves_it_there():
     s = d["planned"][0]
     assert s["status"] == "done" and s["date"] == "2026-11-02" == d["workouts"][-1]["date"] and s["workout_id"] == d["workouts"][-1]["id"]
     # Logging against a planned session on another day moves it too.
-    run(d, "plan_week", {"replace_existing": False, "sessions": [{"date": "2026-11-06", "name": "Friday", "exercises": [{"exercise": "squat", "sets": 2, "reps": 5, "load": 60}]}]})
+    run(d, "plan_week", {"replace_existing": False, "sessions": [{"date": "2026-11-06", "name": "Friday", "exercises": [{"exercise": "squat", "sets": 2, "reps": 5}]}]})
     fid = next(p["id"] for p in d["planned"] if p["name"] == "Friday")
     run(d, "log_workout", {"date": "2026-11-01", "session_id": fid, "exercises": [{"exercise": "squat", "set_count": 2, "reps": 5, "load": 60}]})
     assert next(p for p in d["planned"] if p["id"] == fid)["date"] == "2026-11-01"
+
+
+# ------------------------------------------------- suggested loads, not planned
+
+
+def test_plans_never_store_a_load_even_with_history():
+    d = _history(_fresh(bodyweight_kg=80))
+    run(d, "plan_week", {"sessions": [{"date": "2026-11-03", "name": "Upper", "exercises": [
+        {"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}, {"exercise": "barbell row", "sets": 3, "reps": 10}]}]})
+    run(d, "create_program", {"name": "B", "weeks": 2, "start_date": "2026-11-09", "replace_existing": False,
+                              "days": [{"weekday": 0, "name": "Day", "exercises": [{"exercise": "bench", "sets": 3, "reps": 8}]}]})
+    rid = run(d, "save_routine", {"name": "Push", "exercises": [{"exercise": "bench", "sets": 3, "reps": 8}]}).result["routine_id"]
+    run(d, "schedule_sessions", {"routine_id": rid, "dates": ["2026-11-30"]})
+    run(d, "edit_session", {"session_id": d["planned"][0]["id"], "add": [{"exercise": "ohp", "sets": 3, "reps": 8}]})
+    rxs = [rx for s in d["planned"] for rx in s["exercises"]] + d["routines"][0]["exercises"]
+    assert len(rxs) >= 7 and all(rx["load_kg"] is None and rx["load_pct"] is None for rx in rxs)
+    for bad in ({"load": 80}, {"load_pct": 75}):
+        _refused(d, "plan_week", {"sessions": [{"date": "2026-11-04", "exercises": [{"exercise": "bench", **bad}]}]}, "Unknown field")
+    _refused(d, "plan_week", {"fill_loads": True, "sessions": [{"date": "2026-11-04", "exercises": []}]}, "Unknown field 'fill_loads'")
+
+
+def test_a_never_logged_lift_has_no_suggestion_but_a_stated_best_does():
+    d = _fresh(bodyweight_kg=84, sex="male")
+    run(d, "set_profile", {"baselines": [{"exercise": "bench", "load": 90, "reps": 5}]})
+    run(d, "plan_week", {"sessions": [{"date": "2026-11-02", "name": "Day", "exercises": [
+        {"exercise": "squat", "sets": 3, "reps": 5}, {"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}]}]})
+    run(d, "start_session", {})
+    squat, bench = d["active"]["exercises"]
+    # No bodyweight-norm guess in the logger: nothing to suggest, nothing to warm up to.
+    assert squat["exercise_id"] == "back_squat" and {(s["kg"], s["suggest_kg"]) for s in squat["sets"]} == {(None, None)}
+    assert not any(s["type"] == "warmup" for s in squat["sets"])
+    # The stated best does give one (and a warm-up ramp to it).
+    assert {(s["kg"], s["suggest_kg"]) for s in _work(d, 1)} == {(None, 77.5)}
+    assert _work(d, 1, "warmup") and all(s["suggest_kg"] and s["kg"] is None for s in _work(d, 1, "warmup"))
+    # suggest_loads (asked "what should I lift?") still flags its estimate as a calibration.
+    assert run(d, "suggest_loads", {"items": [{"exercise": "squat", "reps": 5}]}).result["suggestions"][0]["calibrate"] is True
+
+
+def test_finishing_adopts_suggestions_and_strips_them():
+    from app.items.kinds.workout.actions import finish_active
+
+    d = _with(_w("2026-10-29", "bench_press", [(80, 10)] * 3))
+    run(d, "plan_week", {"sessions": [{"date": "2026-11-02", "name": "Bench", "exercises": [{"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}]}]})
+    run(d, "start_session", {})
+    warm, work = _work(d, 0, "warmup"), _work(d)
+    assert warm and {s["suggest_kg"] for s in work} == {82.5}
+    warm[-1]["done"] = True  # ticked as suggested
+    for s in work:
+        s["done"] = True
+    work[0]["kg"] = 85  # typed a weight: that wins over the suggestion
+    raw = copy.deepcopy(d)
+    w, _ = finish_active(raw, NOW + timedelta(minutes=40))
+    sets = w["exercises"][0]["sets"]
+    assert all("suggest_kg" not in s for s in sets)
+    assert [s["kg"] for s in sets] == [warm[-1]["suggest_kg"], 85, 82.5, 82.5]
+    # Through the action too: what's saved is the adopted load, no suggestion left.
+    run(d, "finish_session", {}, now=NOW + timedelta(minutes=40))
+    saved = d["workouts"][-1]["exercises"][0]["sets"]
+    assert [s["kg"] for s in saved if s["type"] == "working"] == [85, 82.5, 82.5]
+    assert all(s.get("suggest_kg") is None for s in saved) and "suggest_kg" not in json.dumps(SPEC.validate(d)["workouts"])
+
+
+def test_day_focus_is_stored_trimmed_and_shown():
+    d = _fresh()
+    out = run(d, "set_profile", {"training_days": [0, 3, 5], "day_focus": {"0": "Upper body", "3": "  Legs  ", "9": "x"}})
+    assert "day plan" in out.summary
+    assert d["settings"]["day_focus"] == {"0": "Upper body", "3": "Legs"}  # weekday 9 isn't one
+    t = to_text(d)
+    assert "day plan: Mon Upper body, Thu Legs, Sat (coach's choice)" in t
+    # It replaces the whole map, trimmed to 40 characters.
+    run(d, "set_profile", {"day_focus": {"5": "y" * 60}})
+    assert d["settings"]["day_focus"] == {"5": "y" * 40}

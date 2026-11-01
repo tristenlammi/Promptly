@@ -742,7 +742,7 @@ def progress_call(data: dict, ex: dict, lo: int, hi: int, today: date | None = N
     return progression(data, ex, last[1], (lo, hi))
 
 
-def next_load(data: dict, ex: dict, lo: int, hi: int, today: date | None = None) -> dict:
+def next_load(data: dict, ex: dict, lo: int, hi: int, today: date | None = None, guess: bool = True) -> dict:
     """The load for the next session of a lift at ``lo``-``hi`` reps.
 
     1. Double progression on the last non-deload session when it trained a
@@ -751,7 +751,8 @@ def next_load(data: dict, ex: dict, lo: int, hi: int, today: date | None = None)
        that has stalled (see :func:`stall_reset`) resets ~10%.
     2. Else the recent e1RM (working sets read as stopping ~2 reps short)
        -> the load for the middle of the range with the same margin.
-    3. Else a conservative calibration load from bodyweight norms.
+    3. Else a conservative calibration load from bodyweight norms — unless
+       ``guess`` is off (the logger: nothing known → no suggestion).
 
     Assisted / bodyweight lifts: the assistance / added load double
     progression calls for, else last time's.
@@ -782,6 +783,8 @@ def next_load(data: dict, ex: dict, lo: int, hi: int, today: date | None = None)
     if s.get("load_kg") is None:
         return {"load_kg": None, "basis": "none", "why": "", "calibrate": False}
     if s.get("calibrate"):
+        if not guess:
+            return {"load_kg": None, "basis": "none", "why": "Nothing logged for this lift yet.", "calibrate": False}
         return {"load_kg": s["load_kg"], "basis": "estimate", "why": s.get("note", ""), "calibrate": True}
     if s.get("basis") == "baseline":
         b = baseline_for(settings, ex["id"]) or {}
@@ -804,7 +807,7 @@ def deload_load(kg: float | None, ex: dict, settings: dict) -> float | None:
     return round_load(kg * DELOAD_FACTOR, ex, settings, "down")
 
 
-def prefill(data: dict, ex: dict, rx: dict | None, today: date | None = None, deload: bool = False) -> float | None:
+def prefill(data: dict, ex: dict, rx: dict | None, today: date | None = None, deload: bool = False, guess: bool = True) -> float | None:
     """The load a set starts at in the logger: the better of the prescribed
     load and what double progression makes of last time (a plan written
     weeks ago shouldn't hold someone back) — but a stalled lift's reset wins
@@ -825,7 +828,7 @@ def prefill(data: dict, ex: dict, rx: dict | None, today: date | None = None, de
             prev = last_session(data, ex)
             work = _work_sets(prev[1]) if prev else []
             return deload_load(_level(work, assisted), ex, settings) if work else None
-        nl = next_load(data, ex, reps_lo, reps_hi, today=today)
+        nl = next_load(data, ex, reps_lo, reps_hi, today=today, guess=guess)
         if planned is None:
             return nl.get("load_kg")
         call = nl.get("load_kg") if nl.get("basis") == "progression" else None
@@ -863,7 +866,7 @@ def prefill(data: dict, ex: dict, rx: dict | None, today: date | None = None, de
         work = _work_sets(prev[1]) if prev else []
         if work and _level(work, False) > 0:
             return deload_load(_level(work, False), ex, settings)
-    return next_load(data, ex, reps_lo, reps_hi, today=today).get("load_kg")
+    return next_load(data, ex, reps_lo, reps_hi, today=today, guess=guess).get("load_kg")
 
 
 # --------------------------------------------------------------------- volume

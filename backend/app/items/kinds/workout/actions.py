@@ -27,6 +27,7 @@ from app.items.kinds.workout.models import (
     Muscle,
     Pattern,
     SetType,
+    Settings,
     default_plates,
     expand_in_place,
 )
@@ -206,8 +207,6 @@ class PrescriptionIn(BaseModel):
     reps: int | None = Field(default=None, ge=1, le=100, description="A single rep target (sets reps_min = reps_max).")
     reps_min: int | None = Field(default=None, ge=1, le=100, description="Bottom of the rep range (double progression).")
     reps_max: int | None = Field(default=None, ge=1, le=100, description="Top of the rep range.")
-    load: float | None = Field(default=None, ge=0, le=3000, description="Working load in `unit` (for bodyweight lifts: added load; assisted: assistance). Omit to have it filled from their history.")
-    load_pct: float | None = Field(default=None, ge=20, le=110, description="Load as % of their current estimated 1RM (instead of `load`).")
     seconds: int | None = Field(default=None, ge=1, le=86_400, description="Target time per set (planks, cardio).")
     meters: float | None = Field(default=None, gt=0, le=1_000_000, description="Target distance (runs, carries).")
     rest_s: int | None = Field(default=None, ge=0, le=900, description="Rest after each set; default from settings (compound vs isolation).")
@@ -217,7 +216,9 @@ class PrescriptionIn(BaseModel):
     notes: str = Field(default="", max_length=300, description="Cue or instruction, e.g. 'pause 1 s on chest'.")
 
 
-def _rx(data: dict, p: PrescriptionIn, ids: Ids, unit: str, *, fill: bool, today: date) -> dict:
+def _rx(data: dict, p: PrescriptionIn, ids: Ids) -> dict:
+    """A planned exercise: sets × reps (or time / distance) — never a load.
+    The logger suggests one per set from what they've actually lifted."""
     ex = _ex(data, p.exercise)
     lo = p.reps_min or p.reps or p.reps_max or (8 if ex["log"] in ("weight_reps", "bodyweight_reps", "assisted") else 1)
     hi = p.reps_max or p.reps or lo
@@ -234,22 +235,14 @@ def _rx(data: dict, p: PrescriptionIn, ids: Ids, unit: str, *, fill: bool, today
         "reps_max": max(lo, hi),
         "seconds": seconds,
         "meters": p.meters,
-        "load_kg": _load(p.load, unit),
-        "load_pct": p.load_pct,
+        "load_kg": None,
+        "load_pct": None,
         "rest_s": p.rest_s,
         "superset": p.superset.upper() if p.superset else None,
         "warmup": p.warmup,
         "drop_sets": p.drop_sets,
         "notes": p.notes,
     }
-    if rx["load_kg"] is not None:
-        rx["load_kg"] = sci.round_load(rx["load_kg"], ex, _settings(data)) if ex["log"] == "weight_reps" else rx["load_kg"]
-    if fill and rx["load_kg"] is None and not rx["load_pct"] and ex["log"] == "weight_reps":
-        s = sci.next_load(data, ex, rx["reps_min"], rx["reps_max"], today=today)
-        rx["load_kg"] = s.get("load_kg")
-        if s.get("calibrate") and rx["load_kg"] is not None and "calibrat" not in rx["notes"].lower():
-            rx["notes"] = (rx["notes"] + " · " if rx["notes"] else "") + "Calibration load — adjust after the first set"
-            rx["notes"] = rx["notes"][:300]
     return rx
 
 
@@ -262,14 +255,14 @@ class SessionIn(BaseModel):
     exercises: list[PrescriptionIn] = Field(default_factory=list, max_length=30)
 
 
-def _new_session(data: dict, s: SessionIn, ids: Ids, unit: str, *, fill: bool, today: date, program_id: str | None = None, week: int | None = None) -> dict:
+def _new_session(data: dict, s: SessionIn, ids: Ids, *, program_id: str | None = None, week: int | None = None) -> dict:
     return {
         "id": ids("s"),
         "date": s.date,
         "time": s.time,
         "name": s.name,
         "notes": s.notes,
-        "exercises": [_rx(data, e, ids, unit, fill=fill, today=today) for e in s.exercises],
+        "exercises": [_rx(data, e, ids) for e in s.exercises],
         "program_id": program_id,
         "week": week,
         "deload": s.deload,
@@ -302,6 +295,7 @@ class SetProfile(BaseModel):
     days_per_week: int | None = Field(default=None, ge=1, le=7)
     session_minutes: int | None = Field(default=None, ge=15, le=240)
     training_days: list[int] | None = Field(default=None, description="Preferred weekdays, 0 = Monday … 6 = Sunday.")
+    day_focus: dict[str, str] | None = Field(default=None, description="What each training day is for, weekday ('0' = Monday … '6' = Sunday) → focus, e.g. {'0': 'Upper', '2': 'Lower', '4': 'Full body'}. Replaces the whole map.")
     equipment: list[Equip] | None = Field(default=None, description="What they can use. 'full_gym' = everything.")
     dumbbells: list[float] | None = Field(default=None, description="Exact dumbbells they own (per hand, in units) — home gyms.")
     dumbbell_max: float | None = Field(default=None, gt=0, le=300, description="Heaviest dumbbell (per hand, in units).")
@@ -358,6 +352,9 @@ def set_profile(ctx: ItemContext, data: dict, p: SetProfile) -> ActionOutcome:
     put("days_per_week", p.days_per_week, f"{p.days_per_week} days/week")
     put("session_minutes", p.session_minutes, f"{p.session_minutes} min sessions")
     put("training_days", p.training_days, "training days")
+    if p.day_focus is not None:
+        st["day_focus"] = Settings.model_validate({"day_focus": p.day_focus}).day_focus
+        changed.append("day plan")
     put("equipment", p.equipment, "equipment")
     put("dumbbells_kg", [_kg(x, unit) for x in p.dumbbells] if p.dumbbells is not None else None, "dumbbells")
     put("dumbbell_max_kg", _kg(p.dumbbell_max, unit), "heaviest dumbbell")
@@ -424,14 +421,11 @@ def _profile_out(data: dict) -> dict:
 class PlanWeek(BaseModel):
     sessions: list[SessionIn] = Field(min_length=1, max_length=14, description="The week's sessions, each with its exercises and prescriptions.")
     replace_existing: bool = Field(default=True, description="Remove not-yet-done planned sessions in the weeks these dates fall in first.")
-    fill_loads: bool = Field(default=True, description="Fill any missing load from their history (or a calibration estimate).")
     program_id: str | None = Field(default=None, description="Attach to a program (from create_program).")
     week: int | None = Field(default=None, ge=1, le=52, description="Which program week this is.")
-    unit: Unitish = Field(default=None, description="Unit of the loads given (default: their display unit).")
 
 
 def plan_week(ctx: ItemContext, data: dict, p: PlanWeek) -> ActionOutcome:
-    unit = _unit(data, p.unit)
     if p.program_id and not any(pr["id"] == p.program_id for pr in data.get("programs", [])):
         raise ActionError(f"No program with id {p.program_id!r}.")
     st = _settings(data)
@@ -443,7 +437,7 @@ def plan_week(ctx: ItemContext, data: dict, p: PlanWeek) -> ActionOutcome:
     _make_room(data, len(p.sessions), ctx.today.isoformat())
     ids = Ids(ctx, data, "plan_week", p.model_dump())
     made = [
-        _new_session(data, s, ids, unit, fill=p.fill_loads, today=ctx.today, program_id=p.program_id, week=p.week)
+        _new_session(data, s, ids, program_id=p.program_id, week=p.week)
         for s in p.sessions
     ]
     data["planned"].extend(made)
@@ -473,12 +467,10 @@ class CreateProgram(BaseModel):
     days: list[ProgramDayIn] = Field(min_length=1, max_length=7, description="The weekly template: one entry per training day with week-1 prescriptions.")
     progression: Literal["double", "linear", "none"] = Field(
         default="double",
-        description="double: double progression — week-1 loads stay planned and each lift earns its next increment by hitting the top of its rep range (the logger raises the load when it's earned), while isolation work gains a set every 2 weeks (volume accumulation). linear: + the smallest increment every week (novices). none: repeat week 1.",
+        description="double: double progression — each lift earns its next increment by hitting the top of its rep range (the logger's suggested load rises when it's earned), while isolation work gains a set every 2 weeks (volume accumulation). linear: the same sets × reps every week (novices: the suggestion adds the smallest increment whenever every set hit the reps). none: repeat week 1.",
     )
     notes: str = Field(default="", max_length=2000)
     replace_existing: bool = Field(default=True, description="Remove not-yet-done planned sessions in the program's date range first.")
-    fill_loads: bool = True
-    unit: Unitish = None
 
     @field_validator("progression", mode="before")
     @classmethod
@@ -487,7 +479,6 @@ class CreateProgram(BaseModel):
 
 
 def create_program(ctx: ItemContext, data: dict, p: CreateProgram) -> ActionOutcome:
-    unit = _unit(data, p.unit)
     st = _settings(data)
     start = date.fromisoformat(p.start_date) if p.start_date else ctx.today
     origin = sci.week_start(start, st)
@@ -503,10 +494,10 @@ def create_program(ctx: ItemContext, data: dict, p: CreateProgram) -> ActionOutc
         if pr.get("status") == "active":
             pr["status"] = "done"
     first = 6 if st.get("week_start") == "sun" else 0
-    # Week-1 prescriptions (loads filled once), then each week derived.
+    # Week-1 prescriptions, then each week derived.
     templates = []
     for d in p.days:
-        rxs = [_rx(data, e, ids, unit, fill=p.fill_loads, today=ctx.today) for e in d.exercises]
+        rxs = [_rx(data, e, ids) for e in d.exercises]
         templates.append((d, rxs))
     sessions: list[dict] = []
     exs = sci.all_exercises(data)
@@ -581,14 +572,11 @@ class SaveRoutine(BaseModel):
     exercises: list[PrescriptionIn] = Field(min_length=1, max_length=30)
     notes: str = Field(default="", max_length=1000)
     routine_id: str | None = Field(default=None, description="Replace this routine instead of adding a new one.")
-    fill_loads: bool = Field(default=False, description="Routines usually leave loads to history; set true to bake them in.")
-    unit: Unitish = None
 
 
 def save_routine(ctx: ItemContext, data: dict, p: SaveRoutine) -> ActionOutcome:
-    unit = _unit(data, p.unit)
     ids = Ids(ctx, data, "save_routine", p.model_dump())
-    rxs = [_rx(data, e, ids, unit, fill=p.fill_loads, today=ctx.today) for e in p.exercises]
+    rxs = [_rx(data, e, ids) for e in p.exercises]
     routines = data.setdefault("routines", [])
     if p.routine_id:
         r = next((r for r in routines if r["id"] == p.routine_id), None)
@@ -611,7 +599,6 @@ class ScheduleSessions(BaseModel):
     weeks: int = Field(default=1, ge=1, le=16, description="… for this many weeks from start_date.")
     start_date: str | None = Field(default=None, pattern=DAY)
     time: str | None = Field(default=None, pattern=HHMM)
-    fill_loads: bool = True
 
 
 def schedule_sessions(ctx: ItemContext, data: dict, p: ScheduleSessions) -> ActionOutcome:
@@ -631,16 +618,10 @@ def schedule_sessions(ctx: ItemContext, data: dict, p: ScheduleSessions) -> Acti
         raise ActionError("Give dates, or weekdays (+ weeks).")
     _make_room(data, len(days), ctx.today.isoformat())
     ids = Ids(ctx, data, "schedule", p.model_dump())
-    exs = sci.all_exercises(data)
     made = []
     for d in days:
-        rxs = []
-        for rx in r["exercises"]:
-            nr = dict(rx, id=ids("x"))
-            ex = exs.get(rx["exercise_id"])
-            if p.fill_loads and nr.get("load_kg") is None and not nr.get("load_pct") and ex and ex["log"] == "weight_reps":
-                nr["load_kg"] = sci.prefill(data, ex, rx, today=ctx.today)
-            rxs.append(nr)
+        # An older routine may carry a baked-in load: plans never hold one.
+        rxs = [dict(rx, id=ids("x"), load_kg=None, load_pct=None) for rx in r["exercises"]]
         made.append({"id": ids("s"), "date": d, "time": p.time, "name": r["name"], "notes": r.get("notes", ""), "exercises": rxs,
                      "program_id": None, "week": None, "deload": False, "status": "planned", "workout_id": None})
     data["planned"].extend(made)
@@ -654,7 +635,6 @@ class RxChange(BaseModel):
     reps: int | None = Field(default=None, ge=1, le=100)
     reps_min: int | None = Field(default=None, ge=1, le=100)
     reps_max: int | None = Field(default=None, ge=1, le=100)
-    load: float | None = Field(default=None, ge=0, le=3000)
     rest_s: int | None = Field(default=None, ge=0, le=900)
     notes: str | None = Field(default=None, max_length=300)
 
@@ -669,16 +649,13 @@ class EditSession(BaseModel):
     exercises: list[PrescriptionIn] | None = Field(default=None, max_length=30, description="Replace every exercise.")
     add: list[PrescriptionIn] | None = Field(default=None, max_length=30, description="Append exercises.")
     remove: list[str] | None = Field(default=None, description="Exercises to take out (names or ids).")
-    changes: list[RxChange] | None = Field(default=None, description="Change sets / reps / load of exercises already in it.")
-    fill_loads: bool = True
-    unit: Unitish = None
+    changes: list[RxChange] | None = Field(default=None, description="Change sets / reps of exercises already in it.")
 
 
 def edit_session(ctx: ItemContext, data: dict, p: EditSession) -> ActionOutcome:
     s = _session(data, p.session_id)
     if s.get("status") == "done":
         raise ActionError("That session is already done — edit the logged workout instead.")
-    unit = _unit(data, p.unit)
     ids = Ids(ctx, data, "edit_session", p.model_dump())
     what: list[str] = []
     if p.date:
@@ -690,7 +667,7 @@ def edit_session(ctx: ItemContext, data: dict, p: EditSession) -> ActionOutcome:
             s[key] = v
             what.append(key)
     if p.exercises is not None:
-        s["exercises"] = [_rx(data, e, ids, unit, fill=p.fill_loads, today=ctx.today) for e in p.exercises]
+        s["exercises"] = [_rx(data, e, ids) for e in p.exercises]
         what.append(f"{len(s['exercises'])} exercises")
     if p.remove:
         gone = {_ex(data, r)["id"] for r in p.remove}
@@ -700,7 +677,7 @@ def edit_session(ctx: ItemContext, data: dict, p: EditSession) -> ActionOutcome:
     if p.add:
         if len(s["exercises"]) + len(p.add) > 30:
             raise ActionError("A session holds at most 30 exercises.")
-        s["exercises"].extend(_rx(data, e, ids, unit, fill=p.fill_loads, today=ctx.today) for e in p.add)
+        s["exercises"].extend(_rx(data, e, ids) for e in p.add)
         what.append(f"added {len(p.add)}")
     for c in p.changes or []:
         eid = _ex(data, c.exercise)["id"]
@@ -717,11 +694,6 @@ def edit_session(ctx: ItemContext, data: dict, p: EditSession) -> ActionOutcome:
             rx["reps_max"] = c.reps_max
         if rx["reps_max"] < rx["reps_min"]:
             rx["reps_min"], rx["reps_max"] = rx["reps_max"], rx["reps_min"]
-        if c.load is not None:
-            ex = _ex(data, rx["exercise_id"])
-            kg = _load(c.load, unit)
-            rx["load_kg"] = sci.round_load(kg, ex, _settings(data)) if ex["log"] == "weight_reps" else kg
-            rx["load_pct"] = None
         if c.rest_s is not None:
             rx["rest_s"] = c.rest_s
         if c.notes is not None:
@@ -976,6 +948,7 @@ def log_sets(ctx: ItemContext, data: dict, p: LogSets) -> ActionOutcome:
             slot = next((x for x in we["sets"] if not x.get("done", True) and (x.get("type") == "warmup") == (s["type"] == "warmup")), None)
             if slot is not None:
                 slot.update({k: v for k, v in s.items() if k != "id"})
+                slot.pop("suggest_kg", None)
             else:
                 we["sets"].append(s)
     else:
@@ -1013,8 +986,10 @@ def drop_load(kg: float | None, ex: dict, st: dict) -> float | None:
 
 
 def build_active(data: dict, ctx: ItemContext, ids: Ids, *, name: str, rxs: list[dict], session: dict | None) -> dict:
-    """A live session from prescriptions: each set prefilled with the load
-    to use, warm-ups ahead of the first heavy compound for each pattern."""
+    """A live session from prescriptions, warm-ups ahead of the first heavy
+    compound for each pattern. Loads are never filled in: each set carries a
+    ``suggest_kg`` from what they've actually lifted (logged sessions or a
+    stated best, never a guess) that the logger shows and a tick adopts."""
     st = _settings(data)
     exs = sci.all_exercises(data)
     out = []
@@ -1024,14 +999,14 @@ def build_active(data: dict, ctx: ItemContext, ids: Ids, *, name: str, rxs: list
         ex = exs.get(rx["exercise_id"])
         if ex is None:
             continue
-        kg = sci.prefill(data, ex, rx, today=ctx.today, deload=deload)
+        kg = sci.prefill(data, ex, rx, today=ctx.today, deload=deload, guess=False)
         sets = []
         want_warm = rx.get("warmup")
         if want_warm is None:
             want_warm = bool(st.get("warmups", True)) and ex["compound"] and ex["log"] == "weight_reps" and ex["pattern"] not in warmed
         if want_warm and kg:
             for wu in sci.warmups(kg, ex, st):
-                sets.append({"id": ids("t"), "type": "warmup", "kg": wu["kg"], "reps": wu["reps"], "done": False})
+                sets.append({"id": ids("t"), "type": "warmup", "kg": None, "suggest_kg": wu["kg"], "reps": wu["reps"], "done": False})
         if ex["compound"]:
             warmed.add(ex["pattern"])
         prev_s = sci.last_session(data, ex)
@@ -1045,11 +1020,11 @@ def build_active(data: dict, ctx: ItemContext, ids: Ids, *, name: str, rxs: list
             if secs is None and sci.is_cardio(ex) and ex["log"] == "duration":
                 secs = (prev or {}).get("seconds") or sci.CARDIO_SECONDS
             sets.append({
-                "id": ids("t"), "type": "working", "kg": kg, "reps": reps if ex["log"] not in ("duration", "distance") else None,
+                "id": ids("t"), "type": "working", "kg": None, "suggest_kg": kg, "reps": reps if ex["log"] not in ("duration", "distance") else None,
                 "seconds": secs, "meters": rx.get("meters"), "done": False,
             })
         for _ in range(rx.get("drop_sets", 0)):
-            sets.append({"id": ids("t"), "type": "drop", "kg": drop_load(kg, ex, st), "reps": rx.get("reps_max"), "done": False})
+            sets.append({"id": ids("t"), "type": "drop", "kg": None, "suggest_kg": drop_load(kg, ex, st), "reps": rx.get("reps_max"), "done": False})
         out.append({"id": ids("e"), "exercise_id": ex["id"], "sets": sets, "notes": "", "superset": rx.get("superset"), "rest_s": rx.get("rest_s"), "rx": dict(rx)})
     return {
         "id": ids("w"), "name": name, "date": ctx.today.isoformat(), "started_at": ctx.now.isoformat(), "ended_at": None,
@@ -1104,6 +1079,10 @@ def finish_active(data: dict, now: datetime, notes: str | None = None) -> tuple[
         raise ActionError(FULL_MSG)
     for we in w["exercises"]:
         we["sets"] = [s for s in we["sets"] if s.get("done", True)]
+        for s in we["sets"]:
+            hint = s.pop("suggest_kg", None)
+            if s.get("kg") is None and hint is not None:
+                s["kg"] = hint
     w["exercises"] = [we for we in w["exercises"] if we["sets"]]
     if not w["exercises"]:
         raise ActionError("No sets are ticked yet — tick at least one, or discard the workout.")
@@ -1159,7 +1138,7 @@ class SwapExercise(BaseModel):
     )
     session_id: str | None = None
     routine_id: str | None = None
-    reload: bool = Field(default=True, description="Recompute the load for the new exercise from history (or a calibration estimate).")
+    reload: bool = Field(default=True, description="Live workout: re-suggest loads for the new exercise from their history.")
 
 
 def swap_exercise(ctx: ItemContext, data: dict, p: SwapExercise) -> ActionOutcome:
@@ -1170,10 +1149,8 @@ def swap_exercise(ctx: ItemContext, data: dict, p: SwapExercise) -> ActionOutcom
 
     def swap_rx(rx: dict) -> None:
         rx["exercise_id"] = b["id"]
-        if p.reload:
-            rx["load_kg"] = None
-            if b["log"] == "weight_reps" and not rx.get("load_pct"):
-                rx["load_kg"] = sci.next_load(data, b, rx.get("reps_min", 8), rx.get("reps_max", 8), today=ctx.today).get("load_kg")
+        rx["load_kg"] = None  # the old lift's load means nothing for the new one
+        rx["load_pct"] = None
 
     n = 0
     if p.scope == "active":
@@ -1185,17 +1162,18 @@ def swap_exercise(ctx: ItemContext, data: dict, p: SwapExercise) -> ActionOutcom
                 we["exercise_id"] = b["id"]
                 if we.get("rx"):
                     swap_rx(we["rx"])
-                kg = sci.prefill(data, b, we.get("rx"), today=ctx.today, deload=bool(w.get("deload"))) if p.reload else None
+                kg = sci.prefill(data, b, we.get("rx"), today=ctx.today, deload=bool(w.get("deload")), guess=False) if p.reload else None
                 had_warmups = any(s.get("type") == "warmup" and not s.get("done", True) for s in we["sets"])
                 for s in we["sets"]:
                     if not s.get("done", True) and s.get("type") != "warmup" and p.reload:
-                        s["kg"] = drop_load(kg, b, st) if s.get("type") == "drop" else kg
+                        s["kg"] = None
+                        s["suggest_kg"] = drop_load(kg, b, st) if s.get("type") == "drop" else kg
                 # The old lift's unticked warm-ups don't fit the new one: a
                 # fresh ramp to the new load (heavy compounds only).
                 we["sets"] = [s for s in we["sets"] if s.get("done", True) or s.get("type") != "warmup"]
                 if had_warmups and kg and b["compound"] and b["log"] == "weight_reps":
                     wids = Ids(ctx, data, "swap_warmups", we["id"], b["id"])
-                    ramp = [{"id": wids("t"), "type": "warmup", "kg": x["kg"], "reps": x["reps"], "done": False} for x in sci.warmups(kg, b, st)]
+                    ramp = [{"id": wids("t"), "type": "warmup", "kg": None, "suggest_kg": x["kg"], "reps": x["reps"], "done": False} for x in sci.warmups(kg, b, st)]
                     first = next((i for i, s in enumerate(we["sets"]) if not s.get("done", True)), len(we["sets"]))
                     we["sets"][first:first] = ramp
                 n += 1
@@ -1507,78 +1485,11 @@ def get_summary(ctx: ItemContext, data: dict, p: NoArgs) -> ActionOutcome:
     })
 
 
-class RefitLoads(BaseModel):
-    from_date: str | None = Field(default=None, pattern=DAY, description="First day to re-fit (default today).")
-    to_date: str | None = Field(default=None, pattern=DAY, description="Last day (default: every upcoming session).")
-    program_id: str | None = Field(default=None, description="Only this program's sessions.")
-    exercises: list[str] | None = Field(default=None, max_length=40, description="Only these exercises (names or ids).")
-    only_increase: bool = Field(default=False, description="Never lower a planned load (raise the ones they've outgrown).")
-    apply: bool = Field(default=True, description="False = preview the changes without saving them.")
-
-
-def refit_upcoming_loads(ctx: ItemContext, data: dict, p: RefitLoads) -> ActionOutcome:
-    """Bring the plan's loads in line with what they've actually been
-    lifting: for each exercise and rep range, the first upcoming
-    (non-deload) prescription gets the load double progression / the
-    recent e1RM calls for, and the later ones keep their planned step
-    from it (a program's linear steps and deload stay intact)."""
-    st = _settings(data)
-    lo = p.from_date or ctx.today.isoformat()
-    only = {_ex(data, e)["id"] for e in p.exercises} if p.exercises else None
-    exs = sci.all_exercises(data)
-    groups: dict[tuple, list[tuple[dict, dict]]] = {}
-    for s in data.get("planned", []):
-        if s.get("status") != "planned" or s["date"] < lo or (p.to_date and s["date"] > p.to_date):
-            continue
-        if p.program_id and s.get("program_id") != p.program_id:
-            continue
-        for rx in s.get("exercises", []):
-            ex = exs.get(rx["exercise_id"])
-            if ex is None or ex["log"] != "weight_reps" or rx.get("load_pct") or (only and ex["id"] not in only):
-                continue
-            groups.setdefault((ex["id"], rx["reps_min"], rx["reps_max"]), []).append((s, rx))
-    if not groups:
-        raise ActionError("No upcoming planned sessions with loaded lifts to re-fit" + (" in that range." if p.to_date or p.from_date else "."))
-    changes = []
-    for (eid, rmin, rmax), rows in groups.items():
-        ex = exs[eid]
-        rows.sort(key=lambda t: t[0]["date"])
-        anchor = next(((s, rx) for s, rx in rows if not s.get("deload")), rows[0])
-        base = sci.next_load(data, ex, rmin, rmax, today=ctx.today)
-        if base.get("load_kg") is None or base.get("basis") == "estimate":
-            continue  # nothing logged to fit to
-        old_anchor = anchor[1].get("load_kg")
-        for s, rx in rows:
-            old = rx.get("load_kg")
-            if old is not None and old_anchor:
-                new = sci.round_load(old * base["load_kg"] / old_anchor, ex, st)
-            elif s.get("deload"):
-                new = sci.round_load(base["load_kg"] * 0.9, ex, st, "down")
-            else:
-                new = base["load_kg"]
-            if p.only_increase and old is not None and new is not None and new < old:
-                new = old
-            if new is None or (old is not None and abs(new - old) < 1e-6):
-                continue
-            changes.append({"session_id": s["id"], "date": s["date"], "session": s.get("name"), "exercise": ex["name"],
-                            "from": _fmt(old, data) if old is not None else None, "to": _fmt(new, data), "basis": base["basis"]})
-            if p.apply:
-                rx["load_kg"] = new
-    if not changes:
-        return ActionOutcome(summary="The planned loads already match your recent training", result={"changes": [], "applied": p.apply})
-    n_s = len({c["session_id"] for c in changes})
-    verb = "Re-fitted" if p.apply else "Would re-fit"
-    return ActionOutcome(
-        summary=f"{verb} {len(changes)} load{'s' if len(changes) != 1 else ''} across {n_s} session{'s' if n_s != 1 else ''} from your recent training",
-        result={"changes": changes[:80], "applied": p.apply},
-    )
-
-
 # ------------------------------------------------------------------- registry
 
 ACTIONS = [
-    ItemAction("set_profile", "Update their profile & settings: units, bodyweight, experience, goal, days/week, session length, equipment (and exact dumbbells / plates / bar), injuries, exercises to avoid, stated bests (baselines: 'bench 90×5' — loads calibrate from them until a lift is logged), rest times, reminders. Only pass what changes.", SetProfile, set_profile),
-    ItemAction("plan_week", "Plan a whole week (or any set of days) in one call: sessions with dates, exercises, sets, rep ranges and loads (no RIR/RPE). Missing loads are filled from their history (or a conservative calibration estimate). Replaces that week's not-yet-done plan by default. Returns every session with the loads to use.", PlanWeek, plan_week),
+    ItemAction("set_profile", "Update their profile & settings: units, bodyweight, experience, goal, days/week, session length, equipment (and exact dumbbells / plates / bar), injuries, exercises to avoid, stated bests (baselines: 'bench 90×5' — the logger's suggested loads start from them until a lift is logged), what each training day is for (day_focus), rest times, reminders. Only pass what changes.", SetProfile, set_profile),
+    ItemAction("plan_week", "Plan a whole week (or any set of days) in one call: sessions with dates, exercises, sets and rep ranges — no loads (the logger suggests one per set from what they've actually lifted) and no RIR/RPE. Replaces that week's not-yet-done plan by default.", PlanWeek, plan_week),
     ItemAction("create_program", "Create a mesocycle (program): a weekly template materialised over N weeks with progression (double progression + isolation volume ramp, or linear load steps) and deload week(s) (half the sets, ~10% lighter). Use for 'plan my next 6 weeks' / 'make me a program'.", CreateProgram, create_program),
     ItemAction("save_routine", "Save (or replace) a reusable routine / template, like Strong's routines.", SaveRoutine, save_routine),
     ItemAction("schedule_sessions", "Put a routine on the calendar: exact dates, or weekdays for N weeks.", ScheduleSessions, schedule_sessions),
@@ -1589,20 +1500,19 @@ ACTIONS = [
     ItemAction("log_workout", "Log a workout they did (from chat: 'I did 3×8 bench at 80 and 3×10 rows at 60'). Shorthand per exercise (set_count/reps/load) or each set. Links to that day's planned session. Reports PRs.", LogWorkout, log_workout),
     ItemAction("log_sets", "Add sets of one exercise to the live session (fills unticked sets), or to today's / a given workout.", LogSets, log_sets),
     ItemAction("delete_workout", "Delete a logged workout.", DeleteWorkout, delete_workout),
-    ItemAction("start_session", "Start the live workout logger: today's planned session by default, or a given session / routine, or empty. Sets are prefilled with the loads to use and warm-ups.", StartSession, start_session),
+    ItemAction("start_session", "Start the live workout logger: today's planned session by default, or a given session / routine, or empty. Sets show a suggested load from their history (empty when there's none yet) and warm-ups.", StartSession, start_session),
     ItemAction("finish_session", "Finish the live workout: unticked sets are dropped, it's saved to history, the planned session is marked done. Reports PRs, volume, duration.", FinishSession, finish_session),
     ItemAction("discard_session", "Throw away the live workout without saving it.", NoArgs, discard_session),
-    ItemAction("swap_exercise", "Replace an exercise with another (injury, missing kit, preference) in the live workout, one session, every future session, or a routine; loads are recomputed.", SwapExercise, swap_exercise),
+    ItemAction("swap_exercise", "Replace an exercise with another (injury, missing kit, preference) in the live workout, one session, every future session, or a routine.", SwapExercise, swap_exercise),
     ItemAction("add_custom_exercise", "Add an exercise that isn't in the library.", AddCustomExercise, add_custom_exercise),
     ItemAction("delete_custom_exercise", "Delete a custom exercise (archived instead if it's in their history).", DeleteCustomExercise, delete_custom_exercise),
     ItemAction("list_exercises", "Search the exercise library (built-in + custom) by words, muscle, equipment or pattern; by default only what their equipment allows.", ListExercises, list_exercises, writes=False),
     ItemAction("get_progress", "One exercise's history: each session's sets, e1RM, best set, volume; the e1RM trend and whether it has stalled; its records.", GetProgress, get_progress, writes=False),
     ItemAction("get_prs", "Personal records: e1RM, 1/3/5/10RM, heaviest, best session volume, max reps, longest, farthest — for one exercise or all.", GetPrs, get_prs, writes=False),
     ItemAction("weekly_volume_by_muscle", "Hard sets per muscle per week vs MEV / MAV / MRV landmarks — logged, planned, or both. Check a plan with source='planned'.", WeeklyVolume, weekly_volume_by_muscle, writes=False),
-    ItemAction("suggest_loads", "Loads for a target rep count, from their recent e1RM, rounded to their plates / dumbbells / machine steps (with plates per side), plus last time's sets and the double-progression call. Use before prescribing loads.", SuggestLoads, suggest_loads, writes=False),
+    ItemAction("suggest_loads", "Loads for a target rep count, from their recent e1RM, rounded to their plates / dumbbells / machine steps (with plates per side), plus last time's sets and the double-progression call. Use when they ask what to lift; `calibrate: true` means nothing is known about that lift yet — don't quote that number.", SuggestLoads, suggest_loads, writes=False),
     ItemAction("plate_math", "Plates per side for a bar load, and a warm-up ramp to it.", PlateMath, plate_math, writes=False),
     ItemAction("get_summary", "Consistency and status: workouts per week (8 weeks), streak, last workout, next session, active program & week, last deload, stalled lifts.", NoArgs, get_summary, writes=False),
-    ItemAction("refit_upcoming_loads", "Re-fit the loads of upcoming planned sessions to their recent training (double progression from the last non-deload session, else the recent e1RM), keeping a program's week-to-week steps and deloads. Use when they've out-lifted the plan, after a break, or when a plan was written from old numbers. apply=false previews.", RefitLoads, refit_upcoming_loads),
 ]
 
 
