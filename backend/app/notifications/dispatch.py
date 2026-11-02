@@ -74,6 +74,8 @@ Category = Literal[
     "item_reminder",
     # A message in Rooms (0230) — push only, never an inbox row.
     "room_message",
+    # Calendar (0231): invites, changes, cancellations, answers, reminders.
+    "calendar",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -93,6 +95,7 @@ CATEGORIES: tuple[str, ...] = (
     "system_alert",
     "item_reminder",
     "room_message",
+    "calendar",
     "test",
 )
 

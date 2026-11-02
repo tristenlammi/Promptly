@@ -217,6 +217,32 @@ export function warmups(workKg: number, ex: Exercise, s: Settings): { kg: number
   return out;
 }
 
+/** The ramp before there's a working weight (mirrors science.py
+ *  warmups_blank): reps only, except the empty bar. Filled in by
+ *  ``rampWarmups`` once a working weight is entered. */
+export function warmupsBlank(ex: Exercise, s: Settings): { kg: number | null; reps: number }[] {
+  const got = achievable(ex, s);
+  if (!got) return [];
+  if (["barbell", "ez_bar", "trap_bar", "smith"].includes(got[0])) {
+    const bar = barFor(got[0], s);
+    return [...(bar ? [{ kg: bar, reps: 10 }] : []), { kg: null, reps: 5 }, { kg: null, reps: 3 }];
+  }
+  return [{ kg: null, reps: 10 }, { kg: null, reps: 5 }];
+}
+
+/** Re-point an exercise's unticked, untyped warm-ups at a working weight
+ *  (in place — no new sets, so no new ids). */
+export function rampWarmups(sets: SetLog[], workKg: number, ex: Exercise, s: Settings): void {
+  const ramp = warmups(workKg, ex, s);
+  const open = sets.filter((x) => setType(x) === "warmup" && !x.done && x.kg == null);
+  open.forEach((x, i) => {
+    const r = ramp[i];
+    if (!r) return;
+    x.suggest_kg = r.kg;
+    x.reps = r.reps;
+  });
+}
+
 // ------------------------------------------------------------- history
 
 /** A set that counts: done, not a warm-up, not a 0-rep miss (mirrors science.py is_hard). */
@@ -700,7 +726,8 @@ export function newSetsFor(
   const prevSession = lastSession(hist);
   const last = prevSession ? prevSession.we.sets.filter((x) => setType(x) === "working" && isDone(x)) : [];
   const out: SetLog[] = [];
-  if (warm && kg) for (const w of warmups(kg, ex, s)) out.push({ id: uid("t"), type: "warmup", kg: null, suggest_kg: w.kg, reps: w.reps, done: false });
+  // No working weight yet: the ramp's reps, its weights once one is entered.
+  if (warm) for (const w of kg ? warmups(kg, ex, s) : warmupsBlank(ex, s)) out.push({ id: uid("t"), type: "warmup", kg: null, suggest_kg: w.kg, reps: w.reps, done: false });
   const cardio = isCardio(ex);
   const n = rx?.sets ?? (cardio ? 1 : 3); // cardio: one bout
   for (let i = 0; i < n; i++) {

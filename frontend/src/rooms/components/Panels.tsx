@@ -1,6 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { Crown, Loader2, Pin, Search, Shield, X } from "lucide-react";
+import { CalendarDays, CalendarPlus, ChevronRight, Crown, Loader2, Pin, Search, Shield, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
+
+import { calendarApi, type CalEvent } from "@/api/calendar";
+import { StatusBadge } from "@/calendar/components/ui";
+import { addDays, fmt, parseYmd, sameDay, timeLabel } from "@/calendar/dates";
+import { CAL_ACCENT } from "@/calendar/model";
+import { ItemButton } from "@/items/ui";
 
 import { roomsApi, type Bootstrap, type Message, type Space } from "@/api/rooms";
 import { cn } from "@/utils/cn";
@@ -177,5 +184,85 @@ export function MembersPanel({ b, memberIds, space }: { b: Bootstrap; memberIds:
         );
       })}
     </ul>
+  );
+}
+
+/** "Fri, Nov 14 · 7:00 PM" — a row's short when, in my time zone. */
+function upcomingWhen(ev: CalEvent): { start: Date; text: string } {
+  const now = new Date();
+  const day = (d: Date) => (sameDay(d, now) ? "Today" : sameDay(d, addDays(now, 1)) ? "Tomorrow" : fmt(d, { weekday: "short", month: "short", day: "numeric" }));
+  if (ev.all_day) {
+    const start = parseYmd(ev.start);
+    const last = parseYmd(ev.end);
+    return { start, text: sameDay(start, last) ? `${day(start)} · All day` : `${day(start)} – ${day(last)}` };
+  }
+  const start = new Date(ev.start);
+  return { start, text: `${day(start)} · ${timeLabel(start)}` };
+}
+
+/** Events planned in / shared to this room, from now on — plus "Plan an event". */
+export function UpcomingPanel({ roomId, meId, onPlan }: { roomId: string; meId: string; onPlan: () => void }) {
+  const navigate = useNavigate();
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["calendar", "room-upcoming", roomId],
+    queryFn: () => calendarApi.roomUpcoming(roomId),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const events = data?.events ?? [];
+  return (
+    <div className="flex flex-col">
+      <div className="p-3">
+        <ItemButton block icon={<CalendarPlus className="h-4 w-4" />} onClick={onPlan}>
+          Plan an event
+        </ItemButton>
+      </div>
+      {isLoading ? (
+        <div className="flex justify-center py-8 text-[var(--text-muted)]">
+          <Loader2 className="h-5 w-5 animate-spin" />
+        </div>
+      ) : isError ? (
+        <p className="px-4 py-6 text-center text-sm text-[var(--danger)]">Couldn&apos;t load events.</p>
+      ) : events.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 px-6 pb-10 pt-4 text-center text-sm text-[var(--text-muted)]">
+          <CalendarDays className="h-6 w-6" />
+          Nothing planned here yet. Plan something and everyone here gets it on their calendar.
+        </div>
+      ) : (
+        <section aria-label="Upcoming">
+          <h3 className="px-4 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Upcoming</h3>
+          <ul className="flex flex-col pb-2">
+            {events.map((ev) => {
+              const w = upcomingWhen(ev);
+              const color = ev.color ?? CAL_ACCENT;
+              // The organiser isn't an attendee; their own events need no badge.
+              const status = ev.created_by === meId ? null : ev.my_status;
+              return (
+                <li key={ev.id}>
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/calendar/?event=${encodeURIComponent(ev.event_id)}`)}
+                    className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] focus-visible:outline-none"
+                  >
+                    <span aria-hidden className="flex h-10 w-10 shrink-0 flex-col items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--bg)]">
+                      <span className="text-[9px] font-bold uppercase leading-none" style={{ color }}>
+                        {fmt(w.start, { month: "short" })}
+                      </span>
+                      <span className="text-base font-semibold leading-tight tabular-nums text-[var(--text)]">{w.start.getDate()}</span>
+                    </span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-sm font-medium text-[var(--text)]">{ev.title}</span>
+                      <span className="truncate text-xs text-[var(--text-muted)]">{w.text}</span>
+                    </span>
+                    {status && <StatusBadge status={status} />}
+                    <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+    </div>
   );
 }

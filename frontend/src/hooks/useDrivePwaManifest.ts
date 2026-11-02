@@ -7,6 +7,7 @@ import { useLocation } from "react-router-dom";
  *
  *   - ``/photos*``  → ``/photos.webmanifest``   (Promptly Photos)
  *   - ``/rooms*``   → ``/rooms.webmanifest``    (Promptly Rooms)
+ *   - ``/calendar*`` → ``/calendar.webmanifest`` (Promptly Calendar)
  *   - anywhere else → ``/manifest.webmanifest`` (Promptly — Files included)
  *
  * Why two manifests? Chrome's install UI lets a site register multiple
@@ -53,6 +54,15 @@ export function useDrivePwaManifest(): void {
       setManifestHref("/rooms.webmanifest");
       setAppleTouchIconHref("/item-icons/rooms-apple-180.png");
       setAppleMobileTitle("Promptly Rooms");
+      return;
+    }
+    const onCalendar =
+      location.pathname === "/calendar" || location.pathname.startsWith("/calendar/");
+    if (onCalendar) {
+      // Promptly Calendar — its own app, scope ``/calendar/``.
+      setManifestHref("/calendar.webmanifest");
+      setAppleTouchIconHref("/item-icons/calendar-apple-180.png");
+      setAppleMobileTitle("Promptly Calendar");
       return;
     }
     setManifestHref(onPhotos ? "/photos.webmanifest" : "/manifest.webmanifest");

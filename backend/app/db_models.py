@@ -71,5 +71,14 @@ from app.rooms.models import (  # noqa: F401
     RoomSpace,
     RoomSpaceMember,
 )
+from app.calendars.models import (  # noqa: F401
+    CalAttendee,
+    CalCalendar,
+    CalEvent,
+    CalEventRoom,
+    CalFeed,
+    CalMember,
+    CalReminderSent,
+)
 from app.tasks.models import Task, TaskConnector, TaskRun  # noqa: F401
 from app.workspaces.meetings_models import MeetingJob  # noqa: F401

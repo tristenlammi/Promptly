@@ -1,4 +1,4 @@
-import { ArrowLeft, Hash, Pin, Search, Settings, Sparkles, Upload, Users } from "lucide-react";
+import { ArrowLeft, CalendarDays, Hash, Pin, Search, Settings, Sparkles, Upload, Users } from "lucide-react";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -12,11 +12,12 @@ import { Composer, type ComposerHandle } from "./Composer";
 import { MessageActionSheet } from "./MessageActionSheet";
 import type { MessageCtx } from "./MessageItem";
 import { MessageList } from "./MessageList";
-import { MembersPanel, PanelFrame, PinsPanel, SearchPanel } from "./Panels";
+import { MembersPanel, PanelFrame, PinsPanel, SearchPanel, UpcomingPanel } from "./Panels";
+import { PlanEventSheet } from "./PlanEventSheet";
 import { DmSettingsSheet, RoomSettingsSheet } from "./RoomSheets";
 import { UserAvatar } from "./ui";
 
-type Panel = "members" | "pins" | "search" | null;
+type Panel = "members" | "pins" | "search" | "events" | null;
 
 const NO_TYPING: Record<string, number> = {};
 
@@ -25,6 +26,7 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
   const found = findRoom(b, roomId);
   const [panel, setPanel] = useState<Panel>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [planning, setPlanning] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [editing, setEditing] = useState<Message | null>(null);
   const [actionsFor, setActionsFor] = useState<Message | null>(null);
@@ -64,6 +66,8 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
     }),
     [b.me.id, b.me.username, b.users, usernames, canModerate, isPhone, onReply, onEdit],
   );
+
+  const closePlanning = useCallback(() => setPlanning(false), []);
 
   const jumpTo = useCallback(
     (rid: string, seq: number) => {
@@ -107,8 +111,18 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
       <PinsPanel b={b} roomId={roomId} onJump={jumpTo} />
     ) : panel === "members" ? (
       <MembersPanel b={b} memberIds={memberIds} space={space} />
+    ) : panel === "events" ? (
+      <UpcomingPanel
+        roomId={roomId}
+        meId={b.me.id}
+        onPlan={() => {
+          if (isPhone) setPanel(null);
+          setPlanning(true);
+        }}
+      />
     ) : null;
-  const panelTitle = panel === "search" ? "Search" : panel === "pins" ? "Pinned messages" : panel === "members" ? `Members (${memberIds.length})` : "";
+  const panelTitle =
+    panel === "search" ? "Search" : panel === "pins" ? "Pinned messages" : panel === "members" ? `Members (${memberIds.length})` : panel === "events" ? "Events" : "";
 
   const headerBtn = (p: Exclude<Panel, null>, label: string, Icon: typeof Pin) => (
     <button
@@ -192,6 +206,7 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
           )}
           <div className="ml-auto flex shrink-0 items-center">
             {headerBtn("search", "Search this conversation", Search)}
+            {headerBtn("events", "Events", CalendarDays)}
             {headerBtn("pins", "Pinned messages", Pin)}
             {(!isPhone || space) && headerBtn("members", "Members", Users)}
             <button
@@ -229,6 +244,7 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
           editing={editing}
           onEdit={onEdit}
           users={b.users}
+          onPlanEvent={() => setPlanning(true)}
         />
       </section>
 
@@ -250,6 +266,14 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
       ) : (
         <DmSettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} room={room} b={b} />
       )}
+
+      <PlanEventSheet
+        open={planning}
+        onClose={closePlanning}
+        room={{ id: room.id, name: space ? `#${title}` : title }}
+        members={members}
+        meId={b.me.id}
+      />
 
       <MessageActionSheet
         m={actionsFor}

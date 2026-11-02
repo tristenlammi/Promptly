@@ -188,6 +188,27 @@ export function PeopleView({ item, isPhone, ask }: ItemViewProps<ContactsData>) 
     return () => window.removeEventListener("keydown", onKey);
   }, [isPhone, contactRows, rows, selected, select, virtualizer, item.canEdit]);
 
+  // Links from other apps (Photos, Calendar) may say ?contact=<id>: the same as ?c=.
+  useEffect(() => {
+    const alias = params.get("contact");
+    if (!alias) return;
+    const p = new URLSearchParams(window.location.search);
+    p.delete("contact");
+    p.set("c", alias);
+    setParams(p, { replace: true });
+  }, [params, setParams]);
+
+  // Opened on someone (a link from another app): show them in the list too.
+  const openedOn = useRef(lastOffset.has(item.fileId) ? null : selected ?? params.get("contact"));
+  useEffect(() => {
+    const id = openedOn.current;
+    if (isPhone || !id) return;
+    const i = rows.findIndex((r) => r.kind === "contact" && r.c.id === id);
+    if (i < 0) return;
+    openedOn.current = null;
+    virtualizer.scrollToIndex(i, { align: "center" });
+  }, [isPhone, rows, virtualizer]);
+
   // Desktop: something is always open.
   useEffect(() => {
     if (isPhone || selected || !visible.length) return;

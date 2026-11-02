@@ -4,7 +4,8 @@
     GET   /api/photos/people/review              "Who is this?" — the biggest unnamed people, and
                                                  "Is this Sarah?" (``suggest``) for look-alikes
     GET   /api/photos/people/{id}                one, with its photos (keyset pages)
-    PATCH /api/photos/people/{id}                name, hide, cover, "this is me"
+    PATCH /api/photos/people/{id}                name, hide, cover, "this is me", their contact
+    GET   /api/photos/people/contacts?file_id=   a Contacts file's people who are in Photos
     POST  /api/photos/people/{id}/merge          {"into": id} — the same person twice
     GET   /api/photos/files/{file_id}/people     the faces and animals in a photo, and who
     POST  /api/photos/faces/{id}/person          {"person_id"} or {"name"} — "this is …" (spreads)
@@ -57,6 +58,7 @@ async def _list(db: AsyncSession, user: User, kind: str, *, hidden: bool, unname
         await db.execute(
             text(
                 f"SELECT p.id, p.name, p.hidden, p.memories_hidden, p.linked_user_id, p.species, r.label AS relation, "
+                f"p.contact_file_id, p.contact_id, "
                 f"COALESCE(p.cover_id, (SELECT o2.id FROM {table} o2 WHERE o2.{col} = p.id "
                 f"  ORDER BY o2.size_px * o2.score DESC LIMIT 1)) AS cover, "
                 f"count(DISTINCT o.file_id) AS n "
@@ -77,6 +79,7 @@ async def _list(db: AsyncSession, user: User, kind: str, *, hidden: bool, unname
             "relationship": r.relation,
             "memories": not r.memories_hidden,
             "cover": _crop(r.cover, user),
+            "contact": {"file_id": str(r.contact_file_id), "contact_id": r.contact_id} if r.contact_file_id and r.contact_id else None,
         }
         for r in rows
     ]
@@ -168,6 +171,25 @@ async def _mine(db: AsyncSession, person_id: uuid.UUID, user: User) -> Any:
     return row
 
 
+@router.get("/people/contacts")
+async def contact_links(
+    file_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict[str, Any]:
+    """The people in a Contacts file who are someone in your Photos — their
+    face, for the contact's picture and a "Photos" link."""
+    rows = (
+        await db.execute(
+            text(
+                "SELECT p.id, p.name, p.contact_id, COALESCE(p.cover_id, (SELECT f.id FROM photo_faces f WHERE f.person_id = p.id "
+                "ORDER BY f.size_px * f.score DESC LIMIT 1)) AS cover FROM photo_people p "
+                "WHERE p.user_id = :u AND p.contact_file_id = :f AND p.contact_id IS NOT NULL"
+            ),
+            {"u": user.id, "f": file_id},
+        )
+    ).all()
+    return {"links": {r.contact_id: {"person_id": str(r.id), "name": r.name, "face": _crop(r.cover, user)} for r in rows}}
+
+
 @router.get("/people/{person_id}")
 async def get_person(
     person_id: uuid.UUID, before: str | None = None, limit: int = Query(default=150, ge=1, le=500),
@@ -204,6 +226,23 @@ async def get_person(
     }
 
 
+class ContactRef(BaseModel):
+    file_id: uuid.UUID
+    contact_id: str = Field(min_length=1, max_length=40)
+
+
+async def _check_contact(db: AsyncSession, user: User, ref: ContactRef) -> None:
+    """The contact exists in a Contacts file you can read."""
+    from app.items import service as items
+
+    try:
+        _row, doc, _access = await items.load(db, user, ref.file_id)
+    except items.ItemNotFound:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Contact not found")
+    if doc.kind != "contacts" or not any(c.get("id") == ref.contact_id for c in (doc.data or {}).get("contacts", [])):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Contact not found")
+
+
 class PersonPatch(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     hidden: bool | None = None
@@ -212,6 +251,8 @@ class PersonPatch(BaseModel):
     me: bool | None = None
     # Memories of them (PH-5): false = "don't show me memories of them".
     memories: bool | None = None
+    # They're this contact (null = not linked to one).
+    contact: ContactRef | None = None
 
 
 @router.patch("/people/{person_id}")
@@ -227,6 +268,20 @@ async def patch_person(
         sets["hidden"] = body.hidden
     if "cover_id" in fields:
         sets["cover_id"] = body.cover_id
+    if "contact" in fields:
+        if body.contact is None:
+            sets["contact_file_id"], sets["contact_id"] = None, None
+        else:
+            if p.kind != "person":
+                raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only a person can be a contact.")
+            await _check_contact(db, user, body.contact)
+            # One person per contact: whoever had it lets go.
+            await db.execute(
+                text("UPDATE photo_people SET contact_file_id = NULL, contact_id = NULL "
+                     "WHERE user_id = :u AND contact_file_id = :f AND contact_id = :c AND id <> :p"),
+                {"u": user.id, "f": body.contact.file_id, "c": body.contact.contact_id, "p": person_id},
+            )
+            sets["contact_file_id"], sets["contact_id"] = body.contact.file_id, body.contact.contact_id
     if body.memories is not None:
         from app.photos import memories
 

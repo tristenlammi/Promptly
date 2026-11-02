@@ -20,6 +20,23 @@ export interface Subject {
   relationship?: string | null;
   /** Memories of them are made (false: "don't show me memories of them"). */
   memories?: boolean;
+  /** The contact they are (people only; yours only), or null. */
+  contact?: ContactRef | null;
+}
+
+/** One contact in a Contacts item file. */
+export interface ContactRef {
+  file_id: string;
+  contact_id: string;
+}
+
+/** A contact who's someone in your Photos: their face for the contact's
+ *  picture, and the person page for "See all photos". */
+export interface ContactPhotosLink {
+  person_id: string;
+  name: string | null;
+  /** A signed link to a square crop of their face. */
+  face: string | null;
 }
 
 export interface ReviewEntry extends Subject {
@@ -58,9 +75,23 @@ export const peopleApi = {
     const { data } = await apiClient.get(`/photos/people/${id}`, { params: { before: before || undefined } });
     return data;
   },
-  async update(id: string, patch: { name?: string | null; hidden?: boolean; me?: boolean; cover_id?: string | null; memories?: boolean }): Promise<Subject> {
+  async update(
+    id: string,
+    patch: { name?: string | null; hidden?: boolean; me?: boolean; cover_id?: string | null; memories?: boolean; contact?: ContactRef | null },
+  ): Promise<Subject> {
     const { data } = await apiClient.patch<Subject>(`/photos/people/${id}`, patch);
     return data;
+  },
+  /** Link a person to a contact (null unlinks). One person per contact:
+   *  linking takes the contact from whoever had it. */
+  async setContact(id: string, contact: ContactRef | null): Promise<Subject> {
+    const { data } = await apiClient.patch<Subject>(`/photos/people/${id}`, { contact });
+    return data;
+  },
+  /** The contacts in this Contacts file who are someone in your Photos, by contact id. */
+  async contactLinks(fileId: string): Promise<Record<string, ContactPhotosLink>> {
+    const { data } = await apiClient.get<{ links: Record<string, ContactPhotosLink> }>("/photos/people/contacts", { params: { file_id: fileId } });
+    return data.links ?? {};
   },
   async merge(id: string, into: string): Promise<void> {
     await apiClient.post(`/photos/people/${id}/merge`, { into });

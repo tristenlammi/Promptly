@@ -52,6 +52,13 @@ const CORE: Installable[] = [
     icon: "/item-icons/rooms-192.png",
     href: "/rooms/",
   },
+  {
+    id: "calendar",
+    name: "Promptly Calendar",
+    blurb: "Your calendar, shared with family and friends — events, invites and reminders.",
+    icon: "/item-icons/calendar-192.png",
+    href: "/calendar/",
+  },
 ];
 
 function withInstall(href: string): string {

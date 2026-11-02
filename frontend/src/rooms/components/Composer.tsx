@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AtSign, CornerUpLeft, Loader2, Paperclip, Pencil, SendHorizontal, Smile, Sparkles, Users, X } from "lucide-react";
+import { AtSign, CalendarPlus, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, SendHorizontal, Smile, Sparkles, Users, X, type LucideIcon } from "lucide-react";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { roomsApi, type Attachment, type Message, type RoomUser } from "@/api/rooms";
@@ -53,8 +53,10 @@ export const Composer = forwardRef<
     editing: Message | null;
     onEdit: (m: Message | null) => void;
     users: Record<string, RoomUser>;
+    /** "Plan an event" in the + menu (opens the calendar's editor in room mode). */
+    onPlanEvent?: () => void;
   }
->(function Composer({ roomId, placeholder, members, meId, isPhone, replyTo, onCancelReply, editing, onEdit, users }, ref) {
+>(function Composer({ roomId, placeholder, members, meId, isPhone, replyTo, onCancelReply, editing, onEdit, users, onPlanEvent }, ref) {
   const qc = useQueryClient();
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -62,6 +64,8 @@ export const Composer = forwardRef<
   const [text, setText] = useState(() => drafts.get(roomId) ?? "");
   const [uploads, setUploads] = useState<Upload[]>([]);
   const [emojiOpen, setEmojiOpen] = useState(false);
+  const plusBtn = useRef<HTMLButtonElement>(null);
+  const [plusOpen, setPlusOpen] = useState(false);
   const [caret, setCaret] = useState(0);
   const [mentionIdx, setMentionIdx] = useState(0);
   const [mentionDismissed, setMentionDismissed] = useState<string | null>(null);
@@ -283,7 +287,7 @@ export const Composer = forwardRef<
       const mine = win?.messages
         .slice()
         .reverse()
-        .find((m) => m.kind === "user" && m.author_id === meId && !m.deleted && m.body);
+        .find((m) => m.kind === "user" && m.author_id === meId && !m.deleted && m.body && !m.meta?.event_id);
       if (mine) {
         e.preventDefault();
         onEdit(mine);
@@ -416,11 +420,25 @@ export const Composer = forwardRef<
       )}
 
       <div className="flex items-end gap-1 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-1 transition-colors focus-within:border-[color-mix(in_srgb,var(--item-accent)_45%,var(--border))]">
-        {!editing && (
-          <button type="button" aria-label="Attach files" onClick={() => fileInput.current?.click()} className={iconBtn}>
-            <Paperclip className="h-5 w-5" />
-          </button>
-        )}
+        {!editing &&
+          (onPlanEvent ? (
+            <button
+              ref={plusBtn}
+              type="button"
+              aria-label="Add a file or event"
+              title="Add a file or event"
+              aria-haspopup="menu"
+              aria-expanded={plusOpen}
+              onClick={() => setPlusOpen((v) => !v)}
+              className={cn(iconBtn, plusOpen && "bg-[var(--hover)] !text-[var(--text)]")}
+            >
+              <Plus className={cn("h-5 w-5 transition-transform", plusOpen && "rotate-45")} />
+            </button>
+          ) : (
+            <button type="button" aria-label="Attach files" onClick={() => fileInput.current?.click()} className={iconBtn}>
+              <Paperclip className="h-5 w-5" />
+            </button>
+          ))}
         <input
           ref={fileInput}
           type="file"
@@ -473,6 +491,41 @@ export const Composer = forwardRef<
         </button>
       </div>
 
+      {onPlanEvent &&
+        (() => {
+          const items = (
+            <div role="menu" aria-label="Add" className="flex flex-col gap-0.5 p-1">
+              <PlusRow
+                icon={Paperclip}
+                label="Upload a file"
+                hint={isPhone ? "Photos, documents, anything" : "Or drop / paste it here"}
+                onClick={() => {
+                  setPlusOpen(false);
+                  fileInput.current?.click();
+                }}
+              />
+              <PlusRow
+                icon={CalendarPlus}
+                label="Plan an event"
+                hint="Everyone here gets it on their calendar"
+                onClick={() => {
+                  setPlusOpen(false);
+                  onPlanEvent();
+                }}
+              />
+            </div>
+          );
+          return isPhone ? (
+            <Sheet open={plusOpen} onClose={() => setPlusOpen(false)} title="Add">
+              <div className="-mx-2 pb-2">{items}</div>
+            </Sheet>
+          ) : (
+            <Popover anchor={plusBtn.current} open={plusOpen} onClose={() => setPlusOpen(false)} width={300} align="start">
+              {items}
+            </Popover>
+          );
+        })()}
+
       {isPhone ? (
         <Sheet open={emojiOpen} onClose={() => setEmojiOpen(false)} title="Emoji">
           <EmojiGrid
@@ -490,3 +543,22 @@ export const Composer = forwardRef<
     </div>
   );
 });
+
+function PlusRow({ icon: Icon, label, hint, onClick }: { icon: LucideIcon; label: string; hint: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="menuitem"
+      onClick={onClick}
+      className="flex min-h-[52px] w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] focus-visible:outline-none"
+    >
+      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_srgb,var(--item-accent)_14%,transparent)] text-[var(--item-accent)]">
+        <Icon className="h-[18px] w-[18px]" />
+      </span>
+      <span className="flex min-w-0 flex-col">
+        <span className="text-sm font-medium text-[var(--text)]">{label}</span>
+        <span className="truncate text-xs text-[var(--text-muted)]">{hint}</span>
+      </span>
+    </button>
+  );
+}

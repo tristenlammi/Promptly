@@ -3,6 +3,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-quer
 import { ArrowLeft, Check, EyeOff, MoreHorizontal, PawPrint, Plus, UserRound, X } from "lucide-react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
+import { PersonContact, useLinkedContact } from "@/components/photos/PersonContact";
 import { usePhotosPath } from "@/components/photos/photosPath";
 import { peopleApi, reviewKey, type ReviewEntry, type Subject, type SubjectKind } from "@/api/people";
 import type { PhotoItem } from "@/api/photos";
@@ -11,6 +12,7 @@ import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { Button } from "@/components/shared/Button";
 import { justify } from "@/lib/justify";
 import { toast } from "@/store/toastStore";
+import { birthdayLabel } from "@/items/kinds/contacts/photosLink";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
@@ -427,6 +429,9 @@ export function PersonPage() {
   const [merging, setMerging] = useState(false);
   const [view, setView] = useState<"photos" | "faces">("photos");
   const { data: others } = useQuery({ queryKey: ["people", kind, false], queryFn: () => peopleApi.list(kind), enabled: merging });
+  // Their contact (when linked): the birthday shows by their name.
+  const linked = useLinkedContact(kind === "person" ? person?.contact : null);
+  const bday = birthdayLabel(linked.contact?.birthday);
 
   const refresh = () => void qc.invalidateQueries({ queryKey: ["people"] });
   const update = async (patch: Parameters<typeof peopleApi.update>[1], done?: string) => {
@@ -478,6 +483,7 @@ export function PersonPage() {
             {person.photos.toLocaleString()} {person.photos === 1 ? "photo" : "photos"}
             {person.species ? ` · ${person.species}` : ""}
             {person.hidden ? " · hidden from People" : ""}
+            {bday ? ` · ${bday.short}` : ""}
           </p>
           {kind === "person" && !person.me && <Relationship id={personId} value={person.relationship ?? null} onSaved={refresh} />}
         </div>
@@ -513,6 +519,7 @@ export function PersonPage() {
           )}
         </div>
       </header>
+      {kind === "person" && <PersonContact personId={personId} person={person} />}
       {merging && (
         <div className="border-b border-[var(--border)] px-4 py-2 text-sm">
           <span className="mr-2 text-[var(--text-muted)]">Merge into:</span>
@@ -581,7 +588,9 @@ const RELATIONS = ["my wife", "my husband", "my partner", "my son", "my daughter
 /** Who they are to you — your words; nobody else sees them. */
 function Relationship({ id, value, onSaved }: { id: string; value: string | null; onSaved: () => void }) {
   const [draft, setDraft] = useState(value ?? "");
-  useEffect(() => setDraft(value ?? ""), [value]);
+  useEffect(() => {
+    setDraft(value ?? "");
+  }, [value]);
   const save = async () => {
     const next = draft.trim() || null;
     if (next === (value ?? null)) return;

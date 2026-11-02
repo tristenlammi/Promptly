@@ -1340,9 +1340,10 @@ def test_a_never_logged_lift_has_no_suggestion_but_a_stated_best_does():
         {"exercise": "squat", "sets": 3, "reps": 5}, {"exercise": "bench", "sets": 3, "reps_min": 8, "reps_max": 10}]}]})
     run(d, "start_session", {})
     squat, bench = d["active"]["exercises"]
-    # No bodyweight-norm guess in the logger: nothing to suggest, nothing to warm up to.
-    assert squat["exercise_id"] == "back_squat" and {(s["kg"], s["suggest_kg"]) for s in squat["sets"]} == {(None, None)}
-    assert not any(s["type"] == "warmup" for s in squat["sets"])
+    # No bodyweight-norm guess in the logger: no working weight to suggest…
+    assert squat["exercise_id"] == "back_squat" and {(s["kg"], s["suggest_kg"]) for s in _work(d, 0)} == {(None, None)}
+    # …but still a warm-up ramp: the empty bar, then reps to fill in once there's a working weight.
+    assert [(s["kg"], s["suggest_kg"], s["reps"]) for s in _work(d, 0, "warmup")] == [(None, 20, 10), (None, None, 5), (None, None, 3)]
     # The stated best does give one (and a warm-up ramp to it).
     assert {(s["kg"], s["suggest_kg"]) for s in _work(d, 1)} == {(None, 77.5)}
     assert _work(d, 1, "warmup") and all(s["suggest_kg"] and s["kg"] is None for s in _work(d, 1, "warmup"))
@@ -1384,3 +1385,23 @@ def test_day_focus_is_stored_trimmed_and_shown():
     # It replaces the whole map, trimmed to 40 characters.
     run(d, "set_profile", {"day_focus": {"5": "y" * 60}})
     assert d["settings"]["day_focus"] == {"5": "y" * 40}
+
+
+def test_warmups_only_before_the_first_heavy_lift_of_each_pattern():
+    """Real practice: ramp up before the first heavy compound of a movement;
+    a second press after bench, or an isolation lift, starts straight away.
+    "On" in the plan forces one; "Off" drops it."""
+    d = _fresh(bodyweight_kg=84, sex="male")
+    run(d, "plan_week", {"sessions": [{"date": "2026-11-02", "name": "Day", "exercises": [
+        {"exercise": "bench", "sets": 3, "reps": 5},
+        {"exercise": "incline bench", "sets": 3, "reps": 8},
+        {"exercise": "squat", "sets": 3, "reps": 5},
+        {"exercise": "leg press", "sets": 3, "reps": 10, "warmup": True},
+        {"exercise": "db curl", "sets": 2, "reps": 12}]}]})
+    run(d, "start_session", {})
+    warm = [bool(_work(d, i, "warmup")) for i in range(5)]
+    assert warm == [True, False, True, True, False]
+    d = _fresh(bodyweight_kg=84, sex="male")
+    run(d, "plan_week", {"sessions": [{"date": "2026-11-02", "name": "Day", "exercises": [{"exercise": "bench", "sets": 3, "reps": 5, "warmup": False}]}]})
+    run(d, "start_session", {})
+    assert not _work(d, 0, "warmup")

@@ -311,6 +311,14 @@ export function NotificationsPanel() {
                 onChange={(v) => toggle("room_message", v)}
                 dimmed={!prefs.enabled}
               />
+              <CategoryRow
+                title="Calendar"
+                subtitle="Event invitations, guests' answers, changes and your event reminders."
+                checked={prefs.calendar ?? true}
+                busy={prefsBusy === "calendar"}
+                onChange={(v) => toggle("calendar", v)}
+                dimmed={!prefs.enabled}
+              />
             </div>
           )}
           {prefsError && (

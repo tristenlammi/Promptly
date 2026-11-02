@@ -131,6 +131,7 @@ export function Popover({
   children,
   width = 320,
   className,
+  align = "end",
 }: {
   anchor: HTMLElement | null;
   open: boolean;
@@ -138,6 +139,8 @@ export function Popover({
   children: ReactNode;
   width?: number;
   className?: string;
+  /** Line the panel up with the anchor's right edge ("end") or left edge ("start"). */
+  align?: "start" | "end";
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
@@ -149,10 +152,10 @@ export function Popover({
     const r = anchor.getBoundingClientRect();
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const left = Math.max(8, Math.min(vw - width - 8, r.right - width));
+    const left = Math.max(8, Math.min(vw - width - 8, align === "start" ? r.left : r.right - width));
     if (r.top > vh / 2) setPos({ left, bottom: vh - r.top + 6 });
     else setPos({ left, top: r.bottom + 6 });
-  }, [open, anchor, width]);
+  }, [open, anchor, width, align]);
 
   useEffect(() => {
     if (!open) return;

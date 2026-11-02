@@ -613,7 +613,7 @@ function RxEditor({ rx, ex, lib, s, ro, first, last, onChange, onMove, onRemove,
       </div>
       <div className="mt-1 flex items-center gap-1">
         <button type="button" onClick={() => setMore((m) => !m)} className="min-h-9 min-w-0 flex-1 truncate text-left text-xs font-medium text-[var(--text-muted)] hover:text-[var(--text)]" aria-expanded={more}>
-          {more ? "Less" : `Rest, superset, notes${rx.rest_s ? ` · ${rx.rest_s}s rest` : ""}${rx.notes ? " · note" : ""}`}
+          {more ? "Less" : `Rest, superset, warm-up, notes${rx.rest_s ? ` · ${rx.rest_s}s rest` : ""}${rx.warmup === true ? " · warm-up on" : rx.warmup === false ? " · no warm-up" : ""}${rx.notes ? " · note" : ""}`}
         </button>
         {!ro && (
           <>
@@ -625,7 +625,7 @@ function RxEditor({ rx, ex, lib, s, ro, first, last, onChange, onMove, onRemove,
         )}
       </div>
       {more && (
-        <div className="mt-2 grid grid-cols-3 gap-2">
+        <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
           <NumField label="Rest (s)" value={rx.rest_s} min={0} max={900} step={15} disabled={ro} onChange={(v) => onChange((x) => { x.rest_s = v; })} placeholder="auto" />
           <label className="flex flex-col gap-0.5">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Superset</span>
@@ -639,7 +639,22 @@ function RxEditor({ rx, ex, lib, s, ro, first, last, onChange, onMove, onRemove,
             </Select>
           </label>
           <NumField label="Drop sets" value={rx.drop_sets ?? 0} min={0} max={3} disabled={ro} onChange={(v) => onChange((x) => { x.drop_sets = v ?? 0; })} />
-          <div className="col-span-3">
+          {ex.log === "weight_reps" && (
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Warm-up</span>
+              <Select
+                value={rx.warmup == null ? "auto" : rx.warmup ? "on" : "off"}
+                disabled={ro}
+                onChange={(e) => onChange((x) => { x.warmup = e.target.value === "auto" ? null : e.target.value === "on"; })}
+                className="h-10"
+              >
+                <option value="auto">Auto</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </Select>
+            </label>
+          )}
+          <div className="col-span-2 sm:col-span-4">
             <TextInput value={rx.notes ?? ""} disabled={ro} maxLength={300} onChange={(e) => { const v = e.target.value.slice(0, 300); onChange((x) => { x.notes = v; }); }} placeholder="Cue, tempo, setup…" aria-label="Exercise notes" />
           </div>
         </div>

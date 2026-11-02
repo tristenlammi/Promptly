@@ -187,7 +187,7 @@ export function ContactForm({
               aria-label={c.photo ? "Change photo" : "Add a photo"}
               className="relative rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
             >
-              <ContactAvatar contact={c} size={56} />
+              <ContactAvatar contact={c} size={56} linked={false} />
               <span className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)]">
                 <Camera className="h-3.5 w-3.5" />
               </span>

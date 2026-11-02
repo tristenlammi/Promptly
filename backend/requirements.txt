@@ -141,6 +141,11 @@ aiosmtplib==3.0.2
 # above, so it doesn't add any system-library baggage to the image.
 pywebpush==2.0.0
 
+# ---- Calendar ----
+# Repeating events (RRULE expansion). Already a transitive dependency;
+# pinned because app/calendars uses it directly.
+python-dateutil==3.0.0
+
 # ---- Drive documents (Y.js server-side snapshot rendering) ----
 # ``pycrdt`` is the Python binding for the Rust y-crdt core — same
 # wire format as the Hocuspocus / y-prosemirror clients, so the

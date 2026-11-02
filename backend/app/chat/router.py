@@ -5029,6 +5029,8 @@ async def _stream_generator(
 
                 if await has_items(db, user.id):
                     enabled_categories.add("items")
+                # The calendar: everyone has one.
+                enabled_categories.add("calendar")
                 # Ask your photos (PH-4): for anyone with a photo library.
                 from app.chat.tools.photos import has_library
 

@@ -21,6 +21,26 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-11-02
+
+### Added
+- **Calendar** — a shared calendar for friends and family, in Apps (pinnable to the sidebar, installable as its own app). Private by default: you see only events on your calendars or ones you're invited to. Invite people per event (they answer Going / Maybe / Can't go), or make shared calendars like "Family" with owner/editor/viewer roles. Month, week, day and agenda views; repeating events (edit or delete just one, this-and-following, or all); reminders and invite/change/cancel notifications; a private read-only subscribe link for Google/Apple Calendar on your phone.
+- Chat can read and add to your calendar ("what's on this weekend?", "add dinner at Mum's Sunday 6pm and invite Sam", "when are Sam and I both free Saturday?") — only events you can see; never on a turn that read outside content.
+- "Calendar" toggle in notification settings.
+- Calendar: share your own calendar with someone — your partner, family — so you're in sync ("Share my calendar"). Pick what each person gets: free/busy only (just "Busy", never what or where), see all details, or make changes. It shows next to theirs under "Other people's" as "<you>'s calendar"; they don't get your reminders. People in your Contacts are suggested first, with what they are to you from Photos ("Bea · Wife").
+- Calendar: drag events to move them, or drag the bottom edge to change how long they last (week, day and month views; asks "just this one / following / all" for repeating events).
+- Calendar: quick add — type "Dinner with Sam Fri 7-9pm at Mum's" and it's on your calendar (same date wording as Tasks).
+- Calendar: search your events.
+- Calendar: see who's free when inviting — each guest shows "Not available" for that time (never what they're doing), and "Find a time" lines everyone up on one day to pick a slot. You can still invite people who are busy.
+- Calendar: your Tasks with due dates and your Contacts' birthdays and anniversaries show on the calendar (tick tasks off right there); turn either off under "Also show".
+- Rooms: plan an event right in a room — everyone in it gets it on their calendar, and the room gets a card to answer Going / Maybe / Can't go (people who join the room later can add themselves). Share any event to a room from the event. A room's info panel lists its upcoming events.
+- Contacts and Photos link up: link a contact to a person in Photos (or add someone from Photos to Contacts) — their face becomes the contact's picture, their photos are a tap away, and their contact card and birthday show on their Photos page.
+- Workout: a Warm-up setting per exercise in the plan (Auto / On / Off, under "Rest, superset, warm-up, notes"). Auto warms up only before the first heavy compound of each movement — not before a second press after bench, or isolation lifts.
+
+### Fixed
+- Calendar: people on a shared calendar can set their own reminders for its events, answer, or take one off their own calendar (before, only invited guests could).
+- Workout: warm-up sets are back in planned workouts for lifts you haven't logged yet (they went missing when plans stopped carrying weights). Before there's a working weight they show the ramp's reps (and the empty bar); type your working weight and the warm-up weights fill in.
+
 ## [0.14.0] - 2026-11-01
 
 ### Added

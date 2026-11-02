@@ -75,7 +75,7 @@ export function MessageActionSheet({
           </div>
           <div className="flex flex-col overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
             <Row icon={CornerUpLeft} label="Reply" onClick={act(() => onReply(m))} />
-            {own && <Row icon={Pencil} label="Edit" onClick={act(() => onEdit(m))} />}
+            {own && typeof m.meta?.event_id !== "string" && <Row icon={Pencil} label="Edit" onClick={act(() => onEdit(m))} />}
             <Row icon={Pin} label={m.pinned ? "Unpin" : "Pin"} onClick={act(() => void togglePin(m))} />
             {m.body && <Row icon={Copy} label="Copy text" onClick={act(() => void copyText(m))} />}
             {(own || canModerate) && <Row icon={Trash2} label="Delete" danger onClick={act(() => void deleteMessage(m))} />}

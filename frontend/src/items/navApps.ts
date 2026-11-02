@@ -17,7 +17,10 @@ export interface NavApp {
 }
 
 /** Apps that are part of Promptly itself (not file-backed items). */
-export const BUILT_IN_APPS: NavApp[] = [{ id: "rooms", name: "Rooms", icon: "/item-icons/rooms-192.png", to: "/rooms" }];
+export const BUILT_IN_APPS: NavApp[] = [
+  { id: "rooms", name: "Rooms", icon: "/item-icons/rooms-192.png", to: "/rooms" },
+  { id: "calendar", name: "Calendar", icon: "/item-icons/calendar-192.png", to: "/calendar" },
+];
 
 /**
  * The apps this person pinned to their sidebar (``settings.nav_apps``) —

@@ -10,6 +10,7 @@ import { QUICK_REACTIONS } from "../emoji";
 import { fullDate, plainSnippet, timeOf } from "../format";
 import type { PendingMessage } from "../store";
 import { AttachmentList } from "./Attachments";
+import { EventCard } from "./EventCard";
 import { MessageBody } from "./MessageBody";
 import { EmojiGrid, Popover, PromptlyAvatar, UserAvatar } from "./ui";
 
@@ -138,7 +139,11 @@ export const MessageItem = memo(function MessageItem({
           <p className="text-sm italic text-[var(--text-muted)]">Message deleted</p>
         ) : (
           <>
-            {m.body && <MessageBody body={m.body} usernames={ctx.usernames} me={ctx.meName} />}
+            {typeof m.meta?.event_id === "string" ? (
+              <EventCard eventId={m.meta.event_id} fallback={m.body} meId={ctx.meId} users={ctx.users} />
+            ) : (
+              m.body && <MessageBody body={m.body} usernames={ctx.usernames} me={ctx.meName} />
+            )}
             {m.edited_at && <span className="text-[10px] text-[var(--text-muted)]" title={fullDate(m.edited_at)}>(edited)</span>}
             {m.pinned && (
               <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] text-[var(--text-muted)]">
@@ -169,7 +174,7 @@ export const MessageItem = memo(function MessageItem({
           <ToolButton label="Reply" onClick={() => ctx.onReply(m)}>
             <CornerUpLeft className="h-4 w-4" />
           </ToolButton>
-          {own && (
+          {own && typeof m.meta?.event_id !== "string" && (
             <ToolButton label="Edit" onClick={() => ctx.onEdit(m)}>
               <Pencil className="h-4 w-4" />
             </ToolButton>

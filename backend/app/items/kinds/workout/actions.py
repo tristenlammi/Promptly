@@ -1004,8 +1004,9 @@ def build_active(data: dict, ctx: ItemContext, ids: Ids, *, name: str, rxs: list
         want_warm = rx.get("warmup")
         if want_warm is None:
             want_warm = bool(st.get("warmups", True)) and ex["compound"] and ex["log"] == "weight_reps" and ex["pattern"] not in warmed
-        if want_warm and kg:
-            for wu in sci.warmups(kg, ex, st):
+        if want_warm:
+            # No working weight yet (a lift never logged): the ramp's reps, weights to follow.
+            for wu in (sci.warmups(kg, ex, st) if kg else sci.warmups_blank(ex, st)):
                 sets.append({"id": ids("t"), "type": "warmup", "kg": None, "suggest_kg": wu["kg"], "reps": wu["reps"], "done": False})
         if ex["compound"]:
             warmed.add(ex["pattern"])

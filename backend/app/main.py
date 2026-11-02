@@ -90,6 +90,10 @@ async def lifespan(_: FastAPI):
     from app.items.loops import start_item_loops
 
     item_loops_task = start_item_loops()
+    # Calendar reminders (app/calendars/loops.py).
+    from app.calendars.loops import start_calendar_loops
+
+    calendar_loops_task = start_calendar_loops()
     # Hourly retry of anything queued or failed for the embedder (R-321).
     from app.custom_models.backfill import start_embedding_reconciler
 
@@ -149,6 +153,7 @@ async def lifespan(_: FastAPI):
             indexer_task,
             drive_indexer_task,
             item_loops_task,
+            calendar_loops_task,
             reconcile_task,
             chat_upload_sweeper_task,
             stale_run_reaper_task,
@@ -622,6 +627,12 @@ app.include_router(items_ai_router, prefix="/api/items", tags=["items"])
 from app.rooms.router import router as rooms_router  # noqa: E402
 
 app.include_router(rooms_router, prefix="/api/rooms", tags=["rooms"])
+# Calendar: events shared per event or via group calendars (app/calendars).
+from app.calendars.router import public_router as calendar_feed_router  # noqa: E402
+from app.calendars.router import router as calendar_router  # noqa: E402
+
+app.include_router(calendar_router, prefix="/api/calendar", tags=["calendar"])
+app.include_router(calendar_feed_router, prefix="/api/calendar", tags=["calendar"])
 # Photos (Part E): the library over Files (WP-9.1).
 # The family library (PH-5).
 from app.photos.family_router import router as photo_family_router  # noqa: E402

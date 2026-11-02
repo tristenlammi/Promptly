@@ -43,7 +43,9 @@ import {
   setType,
   stepLoad,
   toUnit,
+  rampWarmups,
   warmups,
+  warmupsBlank,
 } from "./science";
 import { ExerciseBadge, Pill, SET_NAME, SetBadge, muscleLine, recentIds, type Ctx } from "./shared";
 import type { Exercise, SetLog, SetType, Settings, WorkoutData, WorkoutExercise } from "./types";
@@ -664,8 +666,13 @@ function ExerciseCard({
 
   const editSet = (setId: string, fn: (st: SetLog) => void) =>
     mutate((w) => {
-      const st = w.exercises.find((x) => x.id === we.id)?.sets.find((x) => x.id === setId);
-      if (st) fn(st);
+      const target = w.exercises.find((x) => x.id === we.id);
+      const st = target?.sets.find((x) => x.id === setId);
+      if (!target || !st) return;
+      const before = st.kg;
+      fn(st);
+      // A working weight on the first working set: the warm-ups ramp to it.
+      if (st.kg && st.kg !== before && ex.log === "weight_reps" && target.sets.find((x) => setType(x) === "working") === st) rampWarmups(target.sets, st.kg, ex, s);
     });
   const counters: Record<string, number> = {};
   // A phone has the "Last time" line and the editor's "Use" instead — the boxes get the width.
@@ -713,11 +720,8 @@ function ExerciseCard({
                       setMenu(false);
                       const first = we.sets.find((x) => setType(x) === "working");
                       const work = first?.kg ?? first?.suggest_kg;
-                      if (!work) {
-                        toast.info("Enter your working weight first — the warm-ups ramp up to it.");
-                        return;
-                      }
-                      const ws = warmups(work, ex, s).map((x) => ({ id: uid("t"), type: "warmup" as const, kg: null, suggest_kg: x.kg, reps: x.reps, done: false }));
+                      // No working weight yet: the ramp's reps; entering one fills in the weights.
+                      const ws = (work ? warmups(work, ex, s) : warmupsBlank(ex, s)).map((x) => ({ id: uid("t"), type: "warmup" as const, kg: null, suggest_kg: x.kg, reps: x.reps, done: false }));
                       mutate((w) => {
                         const target = w.exercises.find((x) => x.id === we.id);
                         if (!target) return;
@@ -835,6 +839,8 @@ function ExerciseCard({
                         const i = target ? target.sets.findIndex((x) => x.id === st.id) : -1;
                         if (!target || i < 0) return;
                         setVal(target.sets[i], c, v, s);
+                        const typedKg = target.sets[i].kg;
+                        if (c === "kg" && typedKg && ex.log === "weight_reps" && target.sets.find((x) => setType(x) === "working") === target.sets[i]) rampWarmups(target.sets, typedKg, ex, s);
                         if (st.done || v === null) return;
                         for (const x of target.sets.slice(i + 1)) {
                           if (x.done || setType(x) !== t) continue;

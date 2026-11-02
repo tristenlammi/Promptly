@@ -283,6 +283,21 @@ def warmups(work_kg: float, ex: dict, settings: dict) -> list[dict]:
     return out
 
 
+def warmups_blank(ex: dict, settings: dict) -> list[dict]:
+    """The warm-up ramp before there's a working weight to ramp to: the same
+    sets, reps only — except the empty bar, whose weight is known. The
+    logger fills the rest in once a working weight is entered."""
+    got = achievable(ex, settings)
+    if got is None:
+        return []
+    eq, _ = got
+    if eq in ("barbell", "ez_bar", "trap_bar", "smith"):
+        bar = {"ez_bar": settings.get("ez_bar_kg", 10), "trap_bar": settings.get("trap_bar_kg", 25)}.get(eq, settings.get("bar_kg", 20))
+        bar = float(bar or 0) if eq != "smith" else 0.0
+        return ([{"kg": bar, "reps": 10}] if bar else []) + [{"kg": None, "reps": 5}, {"kg": None, "reps": 3}]
+    return [{"kg": None, "reps": 10}, {"kg": None, "reps": 5}]
+
+
 # -------------------------------------------------------------------- history
 
 

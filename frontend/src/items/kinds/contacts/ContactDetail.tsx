@@ -35,6 +35,7 @@ import { cn } from "@/utils/cn";
 
 import { ContactForm } from "./ContactForm";
 import { LogSheet } from "./LogSheet";
+import { PhotosPanel } from "./PhotosPanel";
 import {
   CADENCES,
   addressLines,
@@ -305,6 +306,7 @@ export function ContactDetail({
           <KeepInTouch item={item} c={c} />
           <DatesPanel item={item} c={c} />
           <RelationsPanel item={item} c={c} onOpen={onOpen} />
+          <PhotosPanel item={item} c={c} name={name} first={first} />
           {(c.met_how || c.met_where || c.met_date) && (
             <Panel title="How you met" icon={Handshake}>
               <p className="text-sm text-[var(--text)]">{c.met_how || "Met"}</p>

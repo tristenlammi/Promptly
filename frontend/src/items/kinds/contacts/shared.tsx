@@ -6,6 +6,7 @@ import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 import { avatarColor, homeCountry, initials } from "./model";
+import { useLinkedPerson } from "./photosLink";
 import type { Contact, ContactsData, InteractionType } from "./types";
 
 /* Contacts — small shared pieces: the initials avatar, the edit helper,
@@ -13,11 +14,18 @@ import type { Contact, ContactsData, InteractionType } from "./types";
 
 export type Handle = ItemHandle<ContactsData>;
 
-export function ContactAvatar({ contact, size = 40, className }: { contact: Contact; size?: number; className?: string }) {
-  if (contact.photo) {
+/** Their photo — or, with none of their own, their face from Photos when
+ *  they're linked to someone there (``linked={false}``: only their own,
+ *  e.g. the edit form's photo picker) — else coloured initials. */
+export function ContactAvatar({ contact, size = 40, className, linked = true }: { contact: Contact; size?: number; className?: string; linked?: boolean }) {
+  const person = useLinkedPerson(contact.id);
+  const src = contact.photo || (linked ? person?.face : null) || null;
+  // A face link that's gone stale falls back to the initials.
+  const [broken, setBroken] = useState<string | null>(null);
+  if (src && src !== broken) {
     return (
       <img
-        src={contact.photo}
+        src={src}
         alt=""
         aria-hidden
         width={size}
@@ -25,6 +33,7 @@ export function ContactAvatar({ contact, size = 40, className }: { contact: Cont
         loading="lazy"
         decoding="async"
         draggable={false}
+        onError={() => setBroken(src)}
         className={cn("inline-block shrink-0 select-none rounded-full object-cover", className)}
         style={{ width: size, height: size, background: avatarColor(contact) }}
       />

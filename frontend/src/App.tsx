@@ -218,6 +218,24 @@ function RoomsGate() {
   return <AppLayout />;
 }
 
+const CalendarApp = lazyWithRetry(
+  () => import("@/calendar/CalendarApp").then((m) => ({ default: m.CalendarApp })),
+  "CalendarApp"
+);
+
+/** Calendar sits inside Promptly's layout (desktop and phone browsers);
+ *  only the installed Calendar app shows it on its own. */
+function CalendarGate() {
+  if (launchedAppKey() === "calendar") {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <CalendarApp />
+      </Suspense>
+    );
+  }
+  return <AppLayout />;
+}
+
 const PhotosAppShell = lazyWithRetry(
   () => import("@/components/photos/PhotosAppShell").then((m) => ({ default: m.PhotosAppShell })),
   "PhotosAppShell"
@@ -565,6 +583,11 @@ export default function App() {
       <Route path="/rooms" element={<RoomsGate />}>
         <Route index element={<RoomsApp embedded />} />
         <Route path="*" element={<RoomsApp embedded />} />
+      </Route>
+      {/* Promptly Calendar: inside Promptly, except as the installed Calendar app. */}
+      <Route path="/calendar" element={<CalendarGate />}>
+        <Route index element={<CalendarApp embedded />} />
+        <Route path="*" element={<CalendarApp embedded />} />
       </Route>
       {/* The PromptlySync download page (the "Add device" QR lands here). */}
       <Route

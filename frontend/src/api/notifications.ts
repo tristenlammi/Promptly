@@ -19,6 +19,7 @@ export interface NotificationPreferences {
   invite: boolean;
   item_reminder: boolean;
   room_message: boolean;
+  calendar: boolean;
 }
 
 export interface NotificationRow {

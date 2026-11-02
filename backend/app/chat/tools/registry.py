@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.chat.tools.base import Tool
+from app.chat.tools.calendar import CalendarAddEventTool, CalendarChangeEventTool, CalendarEventsTool, CalendarFreeTimesTool
 from app.chat.tools.code_interpreter import CodeInterpreterTool
 from app.chat.tools.deep_research import DeepResearchTool
 from app.chat.tools.echo import EchoTool
@@ -97,6 +98,12 @@ REGISTRY: list[Tool] = [
     ListMyItemsTool(),
     ReadItemTool(),
     UseItemTool(),
+    # The calendar (category "calendar"): read events the user can see, add
+    # and change them — with the Tools toggle, for everyone.
+    CalendarEventsTool(),
+    CalendarAddEventTool(),
+    CalendarChangeEventTool(),
+    CalendarFreeTimesTool(),
 ]
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the
