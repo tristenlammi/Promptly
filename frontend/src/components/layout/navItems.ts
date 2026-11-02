@@ -10,6 +10,7 @@ import {
   Share2,
   Clock,
   Search,
+  Sun,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
@@ -31,7 +32,7 @@ export type NavSection = "chat" | "drive" | "admin";
 /** Stable identifiers for the *optional* nav surfaces a user can hide
  *  from their sidebar (Phase 2 — per-user feature visibility). Chat and
  *  Files are core and intentionally absent. */
-export type OptionalNavKey = "workspaces" | "tasks";
+export type OptionalNavKey = "today" | "workspaces" | "tasks";
 
 export const OPTIONAL_NAV_KEYS: {
   key: OptionalNavKey;
@@ -41,6 +42,12 @@ export const OPTIONAL_NAV_KEYS: {
    *  here (persisted to ``settings.enabled_nav``, not ``hidden_nav``). */
   defaultHidden?: boolean;
 }[] = [
+  {
+    key: "today",
+    label: "Today",
+    description:
+      "Your day on one page — events, tasks due, habits, your workout and meals, unread rooms and your cards.",
+  },
   {
     key: "workspaces",
     label: "Workspaces",
@@ -77,6 +84,13 @@ export interface NavItem {
 }
 
 export const NAV_ITEMS: NavItem[] = [
+  {
+    to: "/today",
+    icon: Sun,
+    label: "Today",
+    section: "chat",
+    optionalKey: "today",
+  },
   {
     to: "/chat",
     icon: MessagesSquare,

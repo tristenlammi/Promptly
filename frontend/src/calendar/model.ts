@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-import type { CalBirthday, CalEvent, Calendar, CalTask, Repeat, RsvpStatus } from "@/api/calendar";
+import type { CalBill, CalBirthday, CalEvent, CalExtras, CalHoliday, Calendar, CalMeal, CalTask, CalTrip, CalWorkout, Repeat, RsvpStatus } from "@/api/calendar";
 
 import { addDays, DAY_MS, dayDiff, fmt, ordinal, parseYmd, sameDay, shortTime, startOfDay, timeLabel, WEEKDAYS_MON, weekdayIndexMon } from "./dates";
 
@@ -14,8 +14,19 @@ export type View = "month" | "week" | "day" | "agenda";
 
 export type Look = "solid" | "invited" | "pending" | "declined";
 
-/** A task or birthday drawn among the events (not an event itself). */
-export type Extra = { kind: "task"; task: CalTask } | { kind: "birthday"; b: CalBirthday };
+/** Something from another app drawn among the events (not an event itself).
+ *  Meals come one chip per day (``meals``: that day's, in slot order). */
+export type Extra =
+  | { kind: "task"; task: CalTask }
+  | { kind: "birthday"; b: CalBirthday }
+  | { kind: "workout"; w: CalWorkout }
+  | { kind: "meals"; day: string; meals: CalMeal[] }
+  | { kind: "bill"; bill: CalBill }
+  | { kind: "trip"; trip: CalTrip }
+  | { kind: "holiday"; h: CalHoliday };
+
+/** The colours of the other apps on the calendar. */
+export const EXTRA_COLORS = { workout: "#E2725B", meals: "#4E9F5B", bill: "#D9902F", holiday: "#7C83A0" } as const;
 
 /** An occurrence ready to draw: local Dates, ``end`` exclusive. */
 export interface ViewEvent {
@@ -94,10 +105,46 @@ export function birthdayLabel(b: CalBirthday): string {
   return `${b.name}'s ${what}${b.years ? ` (${b.years} ${b.years === 1 ? "year" : "years"})` : ""}`;
 }
 
-/** Tasks and birthdays as drawable items: all-day ones in the all-day row,
- *  a timed task as a 30-minute marker. */
-export function extrasToView(tasks: CalTask[], birthdays: CalBirthday[]): ViewEvent[] {
+/** "Lower A" / "Legs · training day" / "Dinner: Lasagne" / "Netflix · $15.99" — a chip's words. */
+export function extraLabel(x: Extra): string {
+  switch (x.kind) {
+    case "task":
+      return x.task.title;
+    case "birthday":
+      return birthdayLabel(x.b);
+    case "workout":
+      return x.w.kind === "day" ? (x.w.name === "Training day" ? "Training day" : `${x.w.name} · training day`) : x.w.name;
+    case "meals":
+      return x.meals.length === 1 ? `${slotLabel(x.meals[0].slot)}: ${x.meals[0].title}` : x.meals.map((m) => m.title).join(" · ");
+    case "bill":
+      return `${x.bill.name} · ${x.bill.amount}`;
+    case "trip":
+      return x.trip.title;
+    case "holiday":
+      return x.h.name;
+  }
+}
+
+export function slotLabel(slot: string): string {
+  return slot.charAt(0).toUpperCase() + slot.slice(1);
+}
+
+/** Every "Also show" item as drawable items: all-day ones in the all-day
+ *  row, a timed task as a 30-minute marker, a trip as a bar over its days. */
+export function extrasToView(x: Partial<CalExtras>): ViewEvent[] {
+  const { tasks = [], birthdays = [], workouts = [], meals = [], bills = [], trips = [], holidays = [] } = x;
   const out: ViewEvent[] = [];
+  const allDay = (id: string, extra: Extra, day: string, color: string, last = day) => {
+    const start = parseYmd(day);
+    out.push({ ev: standIn(id, extraLabel(extra), true, day, last), extra, start, end: addDays(parseYmd(last), 1), allDay: true, spanning: true, color, look: "solid" });
+  };
+  for (const h of holidays) allDay(`hol:${h.country}:${h.day}:${h.name}`, { kind: "holiday", h }, h.day, EXTRA_COLORS.holiday);
+  for (const t of trips) allDay(`trip:${t.file_id}:${t.trip_id}`, { kind: "trip", trip: t }, t.start, t.color || "#2C9CC8", t.end < t.start ? t.start : t.end);
+  for (const w of workouts) allDay(`wo:${w.file_id}:${w.id ?? "day"}:${w.day}`, { kind: "workout", w }, w.day, EXTRA_COLORS.workout);
+  const byDay = new Map<string, CalMeal[]>();
+  for (const m of meals) byDay.set(m.day, [...(byDay.get(m.day) ?? []), m]);
+  for (const [day, list] of byDay) allDay(`meals:${day}`, { kind: "meals", day, meals: list }, day, EXTRA_COLORS.meals);
+  for (const b of bills) allDay(`bill:${b.file_id}:${b.id}:${b.day}`, { kind: "bill", bill: b }, b.day, EXTRA_COLORS.bill);
   for (const b of birthdays) {
     const start = parseYmd(b.day);
     const id = `bday:${b.file_id}:${b.contact_id}:${b.kind}:${b.label}:${b.day}`;
@@ -154,11 +201,13 @@ export function onDay(v: ViewEvent, day: Date): boolean {
   return v.start < e && v.end > s;
 }
 
-const extraRank = (v: ViewEvent) => (v.extra?.kind === "birthday" ? 0 : v.extra?.kind === "task" ? 2 : 1);
+// All-day order: holidays and trips, birthdays, events, the other apps, tasks.
+const EXTRA_RANK: Record<Extra["kind"], number> = { holiday: 0, trip: 1, birthday: 2, workout: 4, meals: 4, bill: 4, task: 5 };
+const extraRank = (v: ViewEvent) => (v.extra ? EXTRA_RANK[v.extra.kind] : 3);
 
 export function sortEvents(a: ViewEvent, b: ViewEvent): number {
   if (a.spanning !== b.spanning) return a.spanning ? -1 : 1;
-  // All-day: birthdays, then events, then tasks.
+  // All-day: holidays, trips, birthdays, then events, then the other apps and tasks.
   const r = a.spanning ? extraRank(a) - extraRank(b) : 0;
   if (r) return r;
   const d = a.start.getTime() - b.start.getTime();

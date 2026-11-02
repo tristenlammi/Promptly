@@ -60,6 +60,7 @@ FRAMEWORK_PROMPT = """You are the built-in assistant of "{name}", an app inside 
 
 How you work:
 - Do what's asked *in the app* using your tools — don't just describe what you would do. When the person asks you to plan, log, organise, add or fix something, make the change.
+- Keep going until the job is done: never end your reply on "I'll check…" or "next I'll…" — make that call now. If a tool returns an error, read it, fix the arguments and try again.
 - Prefer the app's own actions (they keep the data consistent). Use update_data only for changes no action covers; its paths are JSON Pointers into the data shown below.
 - Never invent the person's own history or numbers. If you need a fact you don't have (a goal, a weight, a budget), ask one short question — or make a sensible, clearly-labelled assumption when they asked you to just do it.
 - After changing things, reply in a few short lines: what you changed and anything they should check. Use the person's units, currency and language. Markdown is fine; keep it tight — this is a side panel on a phone as often as a desktop.
@@ -471,9 +472,12 @@ async def run_turn(
     history.append({"role": "user", "content": message})
 
     text_parts: list[str] = []
+    sep_pending = False
     try:
         for hop in range(MAX_HOPS):
             final = hop == MAX_HOPS - 1
+            if hop:
+                yield {"type": "status", "text": "Thinking…"}
             system = build_system(spec, user, title, working, ctx)
             if final:
                 system += "\n\n[No more tool calls are available — reply now with what you did.]"
@@ -492,6 +496,9 @@ async def run_turn(
             ):
                 if isinstance(ev, TextDelta):
                     if ev.text:
+                        if sep_pending and not hop_text:
+                            # A new step's words after the last step's — not "first.September".
+                            yield {"type": "text", "text": "\n\n"}
                         hop_text.append(ev.text)
                         yield {"type": "text", "text": ev.text}
                 elif isinstance(ev, ToolCallDelta):
@@ -507,6 +514,7 @@ async def run_turn(
             text = "".join(hop_text)
             if text:
                 text_parts.append(text)
+                sep_pending = True
             if final or not pending:
                 break
             calls = _build_tool_calls_payload(pending)
@@ -522,8 +530,7 @@ async def run_turn(
                 except ValueError:
                     result, ok, summary = "Error: the arguments weren't valid JSON.", False, None
                 else:
-                    if name in ("web_search", "fetch_page"):
-                        yield {"type": "status", "text": "Searching the web…" if name == "web_search" else "Reading a page…"}
+                    yield {"type": "status", "text": _doing(name)}
                     result, ok, summary, working = await _run_tool(ctx, spec, working, name, args, writes, can_edit)
                 if summary or not ok:
                     entry = {"name": name, "summary": summary or result[:200], "ok": ok}
@@ -556,7 +563,7 @@ async def run_turn(
             yield {"type": "error", "message": f"Couldn't save the changes: {e}"}
             changed = False
 
-    answer = "".join(text_parts).strip()
+    answer = "\n\n".join(p.strip() for p in text_parts if p.strip())
     now = datetime.now(timezone.utc).isoformat()
     thread = await load_thread(db, file_id, user)
     thread.append({"role": "user", "content": message, "at": now})
@@ -628,6 +635,31 @@ async def _run_tool(
     result = out.result if out.result is not None else "Done."
     text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False, default=str)
     return text[:MAX_TOOL_RESULT_CHARS], True, (out.summary if action.writes else None), nxt
+
+
+_VERBS = {
+    "find": "Finding", "get": "Getting", "list": "Listing", "read": "Reading", "search": "Searching", "add": "Adding",
+    "set": "Setting", "update": "Updating", "edit": "Updating", "delete": "Removing", "remove": "Removing", "move": "Moving",
+    "mark": "Marking", "log": "Logging", "plan": "Planning", "create": "Creating", "categorise": "Categorising",
+    "import": "Importing", "complete": "Ticking off", "rename": "Renaming", "build": "Building", "send": "Sending",
+}
+
+
+def _doing(name: str) -> str:
+    """What the panel says while a tool runs — "find_transactions" → "Finding transactions…"."""
+    if name == "web_search":
+        return "Searching the web…"
+    if name == "fetch_page":
+        return "Reading a page…"
+    if name in ("read_data", "read_other_item", "read_my_file", "find_my_files"):
+        return "Reading your data…"
+    if name == "update_data":
+        return "Making changes…"
+    head, _, rest = name.partition("_")
+    verb = _VERBS.get(head)
+    if verb is None:
+        return f"{name.replace('_', ' ').capitalize()}…"
+    return f"{verb} {rest.replace('_', ' ')}…".replace(" …", "…")
 
 
 async def _replay(ctx: Any, spec: ItemSpec, data: dict, writes: list) -> dict:

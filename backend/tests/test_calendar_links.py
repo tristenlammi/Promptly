@@ -168,7 +168,7 @@ async def test_tasks_and_birthdays_on_the_calendar(client, db, people, pushes):
     x = (await client.get("/api/calendar/extras", headers=H(ann), params={"start": "2026-11-01", "end": "2026-12-01"})).json()
     assert x["tasks"] == [] and len(x["birthdays"]) == 3
     boot = (await client.get("/api/calendar/bootstrap", headers=H(ann))).json()
-    assert boot["prefs"] == {"tasks": False, "birthdays": True}
+    assert boot["prefs"]["tasks"] is False and boot["prefs"]["birthdays"] is True
 
     # Link Sam to a person in Photos: their face shows with the birthday.
     pid = (await db.execute(text("INSERT INTO photo_people (user_id, kind, name) VALUES (:u, 'person', 'Sam') RETURNING id"), {"u": ann.id})).scalar_one()

@@ -1,8 +1,31 @@
+import { useQuery } from "@tanstack/react-query";
 import { memo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import { Link } from "react-router-dom";
 import remarkGfm from "remark-gfm";
 
+import { photosApi } from "@/api/photos";
 import { cn } from "@/utils/cn";
+
+const PHOTO_SRC = /^\/photos\?photo=([0-9a-f-]{36})$/i;
+
+/* A photo added from "Your day" (``![Photo](/photos?photo=<id>)``): a
+   thumbnail with a fresh link (links to your library expire), opening Photos. */
+function EntryPhoto({ id, alt }: { id: string; alt?: string }) {
+  const { data, isError } = useQuery({
+    queryKey: ["journal-photo", id],
+    queryFn: () => photosApi.items([id]),
+    staleTime: 10 * 60_000,
+    retry: false,
+  });
+  const p = data?.[0];
+  if (isError || (data && !p)) return <span className="text-[var(--text-muted)]">[{alt || "photo"} — no longer in your library]</span>;
+  return (
+    <Link to="/photos" className="my-2 mr-2 inline-block h-40 overflow-hidden rounded-xl bg-[var(--surface-2)] align-top md:h-48" style={{ aspectRatio: p?.width && p?.height ? `${p.width} / ${p.height}` : "1" }}>
+      {p?.thumb && <img src={p.thumb} alt={alt || p.filename} loading="lazy" className="h-full w-full object-cover" />}
+    </Link>
+  );
+}
 
 /* An entry's Markdown, typeset for reading: a calm serif-free column. */
 
@@ -38,7 +61,10 @@ const components: Components = {
   input: ({ checked }) => (
     <input type="checkbox" checked={!!checked} readOnly disabled className="mr-2 h-4 w-4 translate-y-0.5 accent-[var(--item-accent)]" />
   ),
-  img: ({ alt }) => <span className="text-[var(--text-muted)]">[{alt || "image"}]</span>,
+  img: ({ alt, src }) => {
+    const m = typeof src === "string" ? PHOTO_SRC.exec(src) : null;
+    return m ? <EntryPhoto id={m[1]} alt={alt} /> : <span className="text-[var(--text-muted)]">[{alt || "image"}]</span>;
+  },
 };
 
 export const Markdown = memo(function Markdown({ text, className }: { text: string; className?: string }) {

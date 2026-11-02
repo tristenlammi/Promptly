@@ -3,7 +3,7 @@ import { Check, Images, UserRound, X } from "lucide-react";
 import { useState, type MouseEvent } from "react";
 import { useNavigate } from "react-router-dom";
 
-import type { CalBirthday, CalTask } from "@/api/calendar";
+import type { CalBirthday, CalExtras, CalTask } from "@/api/calendar";
 import { extractError } from "@/components/files/helpers";
 import { FILES_PHOTOS_BASE, joinPhotosPath } from "@/components/photos/photosPath";
 import { itemsApi } from "@/items/api";
@@ -13,10 +13,11 @@ import { cn } from "@/utils/cn";
 
 import { EXTRAS_KEY } from "../data";
 import { parseYmd, shortDay, shortTime } from "../dates";
-import { birthdayLabel, type ViewEvent } from "../model";
+import { birthdayLabel, extraLabel, type ViewEvent } from "../model";
 import { openFrom, type OpenEvent } from "./EventChip";
+import { extraEmoji } from "./ExtraDetail";
 
-type ExtrasData = { tasks: CalTask[]; birthdays: CalBirthday[] };
+type ExtrasData = CalExtras;
 
 /** Tick a task off (from the Tasks app's own action), hiding it at once. */
 export function useCompleteTask() {
@@ -105,19 +106,62 @@ export function BirthdayAvatar({ b, size = 16 }: { b: CalBirthday; size?: number
 
 const emoji = (b: CalBirthday) => (b.kind === "birthday" ? "🎂" : "💍");
 
-/** A task / birthday in a month cell or the all-day row. */
-export function ExtraChip({ v, onOpen, compact }: { v: ViewEvent; onOpen: OpenEvent; compact?: boolean }) {
+/** A task / birthday / workout / meals / bill / trip / holiday in a month
+ *  cell or the all-day row. A planned task is dimmed (it has its own event). */
+export function ExtraChip({
+  v,
+  onOpen,
+  compact,
+  continuesLeft,
+  continuesRight,
+}: {
+  v: ViewEvent;
+  onOpen: OpenEvent;
+  compact?: boolean;
+  continuesLeft?: boolean;
+  continuesRight?: boolean;
+}) {
   const x = v.extra!;
   if (x.kind === "task") {
     const t = x.task;
     return (
-      <div className={cn("flex h-full w-full min-w-0 items-center gap-1 rounded-md px-1 hover:bg-[var(--hover)]", compact ? "text-[10px]" : "text-[11px]")}>
+      <div className={cn("flex h-full w-full min-w-0 items-center gap-1 rounded-md px-1 hover:bg-[var(--hover)]", compact ? "text-[10px]" : "text-[11px]", t.planned && "opacity-55")}>
         <TaskCheck task={t} size={compact ? 11 : 13} />
-        <button type="button" onClick={(e) => openFrom(e, v, onOpen)} title={`${t.title} · ${t.list}`} className="flex min-w-0 flex-1 items-center gap-1 text-left">
+        <button
+          type="button"
+          onClick={(e) => openFrom(e, v, onOpen)}
+          title={`${t.title} · ${t.list}${t.planned ? " · planned" : " · drag onto a time to plan it"}`}
+          className="flex min-w-0 flex-1 items-center gap-1 text-left"
+        >
           {t.time && !compact && <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{shortTime(v.start)}</span>}
           <span className="truncate text-[var(--text)]">{t.title}</span>
+          {t.planned && !compact && <span className="shrink-0 text-[var(--text-muted)]">· Planned</span>}
         </button>
       </div>
+    );
+  }
+  if (x.kind !== "birthday") {
+    const label = extraLabel(x);
+    const done = (x.kind === "workout" && x.w.done) || (x.kind === "meals" && x.meals.every((m) => m.cooked));
+    const bar = x.kind === "trip";
+    return (
+      <button
+        type="button"
+        onClick={(e) => openFrom(e, v, onOpen)}
+        aria-label={label}
+        title={label}
+        className={cn(
+          "flex h-full w-full min-w-0 items-center gap-1 px-1 text-left text-[var(--text)] hover:brightness-95",
+          compact ? "text-[10px]" : "text-[11px]",
+          bar ? cn("font-medium", continuesLeft ? "rounded-l-none" : "rounded-l-md", continuesRight ? "rounded-r-none" : "rounded-r-md") : "rounded-md",
+          x.kind === "workout" && x.w.kind === "day" && "border border-dashed",
+          done && "opacity-60",
+        )}
+        style={{ background: `color-mix(in srgb, ${v.color} ${bar ? 22 : 12}%, var(--surface))`, borderColor: v.color }}
+      >
+        {!compact || bar ? <span aria-hidden className="shrink-0">{extraEmoji(x)}</span> : null}
+        <span className="truncate">{label}</span>
+      </button>
     );
   }
   const b = x.b;

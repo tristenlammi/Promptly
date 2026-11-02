@@ -7,7 +7,7 @@ import { Card, Field, ItemButton, Page, Section, Segmented, TextInput, Toggle } 
 import type { Settings, TasksData } from "./types";
 
 /* Settings: reminders (this device's push, default times, the morning
- * digest), the week, and a cheat sheet for quick add. */
+ * morning summary), the week, and a cheat sheet for quick add. */
 export function SettingsView({ item }: ItemViewProps<TasksData>) {
   const s = item.data.settings;
   const set = (fn: (st: Settings) => void) => item.update((d) => fn(d.settings));
@@ -42,11 +42,11 @@ export function SettingsView({ item }: ItemViewProps<TasksData>) {
             <Field label="All-day tasks remind at" hint="When an all-day task has a reminder, this is when it goes off.">
               <TextInput type="time" value={s.default_time} onChange={(e) => e.target.value && set((st) => void (st.default_time = e.target.value))} className="max-w-[10rem]" />
             </Field>
-            <Row label="Morning digest" hint="One push with what's due today and what's overdue.">
-              <Toggle label="Morning digest" checked={s.digest} onChange={(v) => set((st) => void (st.digest = v))} />
+            <Row label="Morning summary" hint="One push each morning with your day — tasks due and overdue, plus your events, workout and more. Opens Today.">
+              <Toggle label="Morning summary" checked={s.digest} onChange={(v) => set((st) => void (st.digest = v))} />
             </Row>
             {s.digest && (
-              <Field label="Digest at">
+              <Field label="Send at">
                 <TextInput type="time" value={s.digest_time} onChange={(e) => e.target.value && set((st) => void (st.digest_time = e.target.value))} className="max-w-[10rem]" />
               </Field>
             )}

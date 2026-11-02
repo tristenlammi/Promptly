@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
+  CalendarDays,
+  CheckSquare,
+  Contact as ContactIcon,
   LayoutGrid,
   Search,
   Sparkles,
@@ -12,6 +15,7 @@ import {
 
 import { chatApi } from "@/api/chat";
 import { workspacesApi } from "@/api/workspaces";
+import { todayApi, type EverydaySearch } from "@/api/today";
 import type { ConversationSearchHit } from "@/api/types";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -59,6 +63,10 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   const [wsGroups, setWsGroups] = useState<
     Awaited<ReturnType<typeof workspacesApi.searchAll>>["groups"]
   >([]);
+  // Your calendar events, contacts and tasks (#U11) — never Rooms
+  // messages, which stay private to each room. Mouse-driven like the
+  // workspace hits.
+  const [everyday, setEveryday] = useState<EverydaySearch | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
@@ -73,6 +81,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   // the user has kept typing.
   const fetchSeq = useRef(0);
   const wsAbort = useRef<AbortController | null>(null);
+  const dayAbort = useRef<AbortController | null>(null);
 
   // Reset state on close so the next open starts fresh (no stale
   // results flashing before the new query fires).
@@ -82,6 +91,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
       setDateRange(null);
       setHits([]);
       setWsGroups([]);
+      setEveryday(null);
       setError(null);
       setCursor(0);
       setLoading(false);
@@ -101,6 +111,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
     if (!trimmed && !dateRange) {
       setHits([]);
       setWsGroups([]);
+      setEveryday(null);
       setError(null);
       setLoading(false);
       return;
@@ -124,8 +135,20 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
           .catch(() => {
             if (seq === fetchSeq.current) setWsGroups([]);
           });
+        dayAbort.current?.abort();
+        const dctrl = new AbortController();
+        dayAbort.current = dctrl;
+        void todayApi
+          .search(trimmed, dctrl.signal)
+          .then((res) => {
+            if (seq === fetchSeq.current) setEveryday(res);
+          })
+          .catch(() => {
+            if (seq === fetchSeq.current) setEveryday(null);
+          });
       } else {
         setWsGroups([]);
+        setEveryday(null);
       }
       try {
         const results = await chatApi.search(trimmed, 30, {
@@ -160,6 +183,8 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   // Flat list for keyboard navigation — keeps the cursor maths simple
   // without having to worry about section boundaries.
   const flat = useMemo(() => [...owned, ...shared], [owned, shared]);
+  const everydayCount =
+    (everyday?.events.length ?? 0) + (everyday?.contacts.length ?? 0) + (everyday?.tasks.length ?? 0);
 
   // Handle global keyboard inside the modal. Keep arrow keys from
   // reaching the underlying page (e.g. scrolling the chat log).
@@ -231,7 +256,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search your conversations…"
+            placeholder="Search chats, events, people, tasks…"
             className={cn(
               "flex-1 bg-transparent text-sm focus:outline-none",
               "placeholder:text-[var(--text-muted)]"
@@ -270,6 +295,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
             !loading &&
             flat.length === 0 &&
             wsGroups.length === 0 &&
+            everydayCount === 0 &&
             (query.trim() || dateRange) && (
               <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
                 {query.trim() ? (
@@ -284,8 +310,8 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
             )}
           {!error && !query.trim() && !dateRange && (
             <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
-              Type to search across your messages, or filter by date to
-              browse your chats.
+              Type to search your chats, workspaces, calendar, contacts and
+              tasks — or filter by date to browse your chats.
             </div>
           )}
 
@@ -369,6 +395,15 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
               ))}
             </div>
           )}
+          {!dateRange && everyday && everydayCount > 0 && (
+            <EverydaySection
+              data={everyday}
+              onOpen={(url) => {
+                onClose();
+                navigate(url);
+              }}
+            />
+          )}
         </div>
 
         <div
@@ -385,6 +420,67 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
           <span>Keyword + meaning · ranked</span>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Calendar events, contacts and tasks matching the query (#U11). */
+function EverydaySection({ data, onOpen }: { data: EverydaySearch; onOpen: (url: string) => void }) {
+  const row = (key: string, icon: React.ReactNode, title: string, detail: string, url: string, muted = false) => (
+    <button
+      key={key}
+      type="button"
+      onClick={() => onOpen(url)}
+      className="flex w-full items-start gap-2 px-3 py-1.5 text-left transition hover:bg-[var(--surface-2)]"
+    >
+      <span className="mt-0.5 shrink-0 text-[var(--text-muted)]">{icon}</span>
+      <span className="min-w-0 flex-1">
+        <span className={cn("block truncate text-sm", muted ? "text-[var(--text-muted)] line-through" : "text-[var(--text)]")}>{title}</span>
+        {detail && <span className="mt-0.5 block truncate text-xs text-[var(--text-muted)]">{detail}</span>}
+      </span>
+    </button>
+  );
+  const when = (start: string, allDay: boolean) =>
+    allDay
+      ? new Date(`${start}T12:00:00`).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", year: "numeric" })
+      : new Date(start).toLocaleString([], { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+  const label = (text: string, icon: React.ReactNode) => (
+    <div className="flex items-center gap-1.5 px-3 pb-1 pt-2 text-[10px] uppercase tracking-wider text-[var(--text-muted)]">
+      {icon}
+      {text}
+    </div>
+  );
+  return (
+    <div className="border-t border-[var(--border)] pb-1">
+      {data.events.length > 0 && (
+        <>
+          {label("Calendar", <CalendarDays className="h-3 w-3" />)}
+          {data.events.map((e) =>
+            row(`ev-${e.id}`, <CalendarDays className="h-3.5 w-3.5" />, e.title, [when(e.start, e.all_day), e.location].filter(Boolean).join(" · "), e.url),
+          )}
+        </>
+      )}
+      {data.contacts.length > 0 && (
+        <>
+          {label("Contacts", <ContactIcon className="h-3 w-3" />)}
+          {data.contacts.map((c) => row(`c-${c.id}`, <UserIcon className="h-3.5 w-3.5" />, c.name, c.detail, c.url))}
+        </>
+      )}
+      {data.tasks.length > 0 && (
+        <>
+          {label("Tasks", <CheckSquare className="h-3 w-3" />)}
+          {data.tasks.map((t) =>
+            row(
+              `t-${t.id}`,
+              <CheckSquare className="h-3.5 w-3.5" />,
+              t.title,
+              [t.done ? "Done" : t.due ? `Due ${new Date(`${t.due}T12:00:00`).toLocaleDateString([], { day: "numeric", month: "short" })}` : "", t.time, t.list !== "Inbox" ? t.list : ""].filter(Boolean).join(" · "),
+              t.url,
+              t.done,
+            ),
+          )}
+        </>
+      )}
     </div>
   );
 }

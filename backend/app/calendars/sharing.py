@@ -83,46 +83,14 @@ async def rooms_out(db: AsyncSession, ev: CalEvent, user: User) -> list[dict]:
 async def contact_people(db: AsyncSession, user: User) -> list[dict]:
     """Promptly people who are in your Contacts — matched by an email on the
     contact, else by name — with what they are to you when Photos knows
-    ("Wife": the relationship you gave the person linked to that contact)."""
-    from sqlalchemy import text
+    ("Wife": the relationship you gave the person linked to that contact).
+    The matching itself is shared with the person page (app/people)."""
+    from app.people.directory import directory
 
-    from app.items import service as items
-    from app.items.kinds.contacts.logic import display_name
-
-    others = list((await db.execute(select(User).where(User.disabled.is_(False), User.id != user.id))).scalars())
-    if not others:
-        return []
-    by_email = {(u.email or "").lower(): u for u in others if u.email}
-    by_name = {(u.username or "").lower(): u for u in others}
     found: dict[uuid.UUID, dict] = {}
-    for row, doc in await items.list_items(db, user, "contacts", archives=False):
-        for c in (doc.data or {}).get("contacts", []):
-            u = next((by_email[e.get("value", "").lower()] for e in c.get("emails", []) if e.get("value", "").lower() in by_email), None)
-            name = display_name(c)
-            if u is None:
-                u = by_name.get(name.lower()) or by_name.get((c.get("first") or "").lower()) or by_name.get((c.get("nickname") or "").lower())
-            if u is None or u.id in found:
-                continue
-            found[u.id] = {"user": core.user_out(u), "contact_name": name, "label": None, "file_id": str(row.id), "contact_id": c["id"]}
-    if not found:
-        return []
-    # What Photos calls them: the person linked to that contact (or to that
-    # Promptly account), and the relationship you gave them.
-    rows = (
-        await db.execute(
-            text(
-                "SELECT p.contact_file_id, p.contact_id, p.linked_user_id, r.label FROM photo_people p "
-                "JOIN photo_relationships r ON r.person_id = p.id AND r.viewer_user_id = :u "
-                "WHERE p.user_id = :u AND r.label IS NOT NULL AND r.label <> ''"
-            ),
-            {"u": user.id},
-        )
-    ).all()
-    for r in rows:
-        for f in found.values():
-            if (str(r.contact_file_id), r.contact_id) == (f["file_id"], f["contact_id"]) or (r.linked_user_id and str(r.linked_user_id) == f["user"]["id"]):
-                f["label"] = r.label
+    for p in await directory(db, user):
+        if p.user is None or p.contact is None or p.user.id in found:
+            continue
+        found[p.user.id] = {"user": core.user_out(p.user), "contact_name": p.contact_name or p.user.username, "label": p.label}
     out = sorted(found.values(), key=lambda f: (f["label"] is None, f["contact_name"].lower()))
-    for f in out:
-        f.pop("file_id"), f.pop("contact_id")
     return out[:30]

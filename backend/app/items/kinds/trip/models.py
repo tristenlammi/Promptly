@@ -348,6 +348,11 @@ class Trip(BaseModel):
     me_by_user: dict[Annotated[str, Field(max_length=64)], Annotated[str, Field(max_length=48)]] = Field(
         default_factory=dict, max_length=40
     )
+    # Each traveller's own Photos album of the trip (user id → album id): a
+    # smart album of their photos taken between the trip's dates.
+    photo_albums: dict[Annotated[str, Field(max_length=64)], Annotated[str, Field(max_length=64)]] = Field(
+        default_factory=dict, max_length=40
+    )
 
     @model_validator(mode="after")
     def _tidy(self) -> Trip:

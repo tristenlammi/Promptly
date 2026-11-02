@@ -1,8 +1,9 @@
-import { ArrowLeft, CalendarPlus, Check, ChefHat, Clock, Copy, ExternalLink, Pencil, ShoppingCart, Sparkles, Trash2, TriangleAlert, Users } from "lucide-react";
+import { ArrowLeft, CalendarPlus, Check, ChefHat, Clock, Copy, ExternalLink, Pencil, Send, ShoppingCart, Sparkles, Trash2, TriangleAlert, Users } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { cn } from "@/utils/cn";
 
+import { SendToSheet } from "@/components/share/SendToSheet";
 import type { ItemHandle } from "@/items/useItem";
 import { Card, Chip, ItemButton, Section, Segmented, Stepper, fmtDay, safeHref, todayISO, uid } from "@/items/ui";
 import { toast } from "@/store/toastStore";
@@ -37,6 +38,7 @@ export function RecipeDetail({
   const prefs = item.data.preferences;
   const [servings, setServings] = useState(recipe.servings);
   const [system, setSystem] = useState<UnitSystem>("keep");
+  const [sending, setSending] = useState(false);
   const factor = servings / recipe.servings;
   const ingredients = useMemo(() => recipe.ingredients.map((i) => scaleIngredient(i, factor, system)), [recipe.ingredients, factor, system]);
   const report = useMemo(() => allergenReport(recipe.ingredients, prefs.allergies), [recipe.ingredients, prefs.allergies]);
@@ -299,6 +301,10 @@ export function RecipeDetail({
         <ItemButton variant="ghost" size="sm" icon={<Sparkles className="h-4 w-4 text-[var(--item-accent)]" />} onClick={() => ask(`Estimate the nutrition per serving for “${recipe.title}” and save it.`)}>
           {n ? "Check nutrition" : "Estimate nutrition"}
         </ItemButton>
+        <ItemButton variant="ghost" size="sm" icon={<Send className="h-4 w-4" />} onClick={() => setSending(true)}>
+          Send to…
+        </ItemButton>
+        <SendToSheet open={sending} onClose={() => setSending(false)} target={{ kind: "recipe", id: recipe.id, file_id: item.fileId, title: recipe.title }} />
         {can && (
           <>
             <ItemButton variant="ghost" size="sm" icon={<Pencil className="h-4 w-4" />} onClick={onEdit}>

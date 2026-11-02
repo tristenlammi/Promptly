@@ -8,6 +8,7 @@ from .actions import ACTIONS
 from .brief import AI_BRIEF, AI_SUGGESTIONS
 from .logic import archive, reminders, to_text
 from .models import JournalData, builtin_templates
+from .routes import router
 
 
 def template(ctx: ItemContext) -> dict:
@@ -26,7 +27,7 @@ SPEC = ItemSpec(
         "“On this day” and insights show how you've been, and a warm assistant helps you reflect on a week, "
         "notice patterns (with humility) and connect your mood to sleep and habits. Private by default: other "
         "chats in Promptly see only an outline (dates, titles, moods, tags), and you choose whether they see "
-        "short excerpts. Not yet: photos in entries, importing from Day One, end-to-end encryption or an app lock."
+        "short excerpts. Writing about a day shows that day's events and photos to add in a tap. Not yet: importing from Day One, end-to-end encryption or an app lock."
     ),
     category="Habits & journal",
     icon="book-open",
@@ -46,6 +47,8 @@ SPEC = ItemSpec(
     # Normal chats get the outline (to_text) and the chat-visible actions,
     # never the raw JSON with every entry's text.
     chat_raw=False,
+    # GET /api/items/k/journal/{id}/day — that day's events and photos.
+    router=router,
     replaces="Replaces Day One, Journey and Reflectly",
     highlights=[
         "Distraction-free, full-screen writing with Markdown; unsaved text is kept on your device",

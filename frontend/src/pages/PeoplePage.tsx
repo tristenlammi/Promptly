@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { PersonContact, useLinkedContact } from "@/components/photos/PersonContact";
 import { usePhotosPath } from "@/components/photos/photosPath";
 import { peopleApi, reviewKey, type ReviewEntry, type Subject, type SubjectKind } from "@/api/people";
+import { personPath } from "@/api/peopleHub";
 import type { PhotoItem } from "@/api/photos";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
@@ -486,6 +487,14 @@ export function PersonPage() {
             {bday ? ` · ${bday.short}` : ""}
           </p>
           {kind === "person" && !person.me && <Relationship id={personId} value={person.relationship ?? null} onSaved={refresh} />}
+          {kind === "person" && (
+            <Link
+              to={personPath({ kind: "p", personId })}
+              className="mt-1 inline-flex h-7 items-center gap-1 text-xs font-medium text-[var(--accent-text,var(--accent))] hover:underline"
+            >
+              <UserRound className="h-3 w-3" /> Open person page
+            </Link>
+          )}
         </div>
         <div className="relative">
           <button type="button" aria-label="More" onClick={() => setMenu((m) => !m)} className="rounded p-1.5 hover:bg-[var(--hover)]">

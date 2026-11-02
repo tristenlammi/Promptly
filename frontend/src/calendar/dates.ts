@@ -154,3 +154,76 @@ export function timeRange(a: Date, b: Date): string {
 export function shortDay(d: Date): string {
   return fmt(d, { weekday: "short", month: "short", day: "numeric", ...(d.getFullYear() !== new Date().getFullYear() ? { year: "numeric" } : {}) });
 }
+
+// ------------------------------------------------------------------ time zones
+
+/** "Asia/Tokyo" → "Tokyo"; "America/Argentina/Buenos_Aires" → "Buenos Aires". */
+export function zoneCity(tz: string): string {
+  if (!tz || tz === "UTC" || tz === "Etc/UTC") return "UTC";
+  return (tz.split("/").pop() || tz).replace(/_/g, " ");
+}
+
+const zoneFmt = new Map<string, Intl.DateTimeFormat>();
+
+/** Minutes ``tz`` is ahead of UTC at ``at`` (0 for an unknown zone). */
+export function zoneOffset(tz: string, at: Date): number {
+  try {
+    let f = zoneFmt.get(tz);
+    if (!f) {
+      f = new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric" });
+      zoneFmt.set(tz, f);
+    }
+    const p: Record<string, number> = {};
+    for (const x of f.formatToParts(at)) if (x.type !== "literal") p[x.type] = Number(x.value);
+    const asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour % 24, p.minute);
+    return Math.round((asUtc - Math.floor(at.getTime() / 60_000) * 60_000) / 60_000);
+  } catch {
+    return 0;
+  }
+}
+
+/** Is ``tz`` on a different clock from this browser at ``at``? */
+export function differsFromLocal(tz: string | null | undefined, at: Date = new Date()): boolean {
+  if (!tz) return false;
+  return zoneOffset(tz, at) !== -at.getTimezoneOffset();
+}
+
+/** A time as the clock reads in ``tz``: "9:00 AM" (with the weekday when ``withDay``). */
+export function timeInZone(d: Date, tz: string, withDay = false): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: "numeric", minute: "2-digit", ...(withDay ? { weekday: "short" } : {}) }).format(d);
+  } catch {
+    return timeLabel(d);
+  }
+}
+
+/** An event in its own time zone, when that isn't the viewer's:
+ *  "9:00 AM Tokyo time · 1:00 AM your time" (weekdays added when the days
+ *  differ). ``null`` when the clocks agree, for all-day events, or no zone.
+ *  For event chips' tooltips, the agenda and the event's details. */
+export function zoneNote(start: Date, tz: string | null | undefined, allDay = false): string | null {
+  if (allDay || !tz || !differsFromLocal(tz, start)) return null;
+  const local = new Date(start.getTime() + (zoneOffset(tz, start) + start.getTimezoneOffset()) * 60_000);
+  const otherDay = !sameDay(local, start);
+  return `${timeInZone(start, tz, otherDay)} ${zoneCity(tz)} time · ${otherDay ? fmt(start, { weekday: "short", hour: "numeric", minute: "2-digit" }) : timeLabel(start)} your time`;
+}
+
+/** Short zone name for a column header: "GMT+9", "PST" (the locale's choice). */
+export function zoneShort(tz: string, at: Date = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat(undefined, { timeZone: tz, timeZoneName: "short" }).formatToParts(at).find((p) => p.type === "timeZoneName")?.value ?? zoneCity(tz);
+  } catch {
+    return zoneCity(tz);
+  }
+}
+
+/** Every IANA zone the browser knows (for a picker), or a short fallback list. */
+export function allZones(): string[] {
+  try {
+    const f = (Intl as unknown as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf;
+    if (f) return f("timeZone");
+  } catch {
+    /* older browsers */
+  }
+  return ["UTC", "Europe/London", "Europe/Paris", "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles", "Asia/Tokyo", "Asia/Singapore", "Asia/Kolkata", "Australia/Sydney", "Australia/Perth", "Pacific/Auckland"];
+}

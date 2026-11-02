@@ -1,14 +1,15 @@
-import { ArrowLeft, Cake, Check, CircleCheck, Mail, MoreHorizontal, Plus, Rss, Share2 } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, Cake, Check, CircleCheck, Dumbbell, Globe, Mail, MoreHorizontal, PartyPopper, Plane, Plus, Receipt, Rss, Share2, UtensilsCrossed } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
 
-import { calendarApi, type CalEvent, type Calendar, type CalendarBootstrap, type RsvpStatus } from "@/api/calendar";
+import { calendarApi, type CalEvent, type Calendar, type CalendarBootstrap, type CalendarPrefs, type RsvpStatus } from "@/api/calendar";
 import { extractError } from "@/components/files/helpers";
 import { Toggle } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 import { addUsers, useCalUsers, useInvites, useRefreshCalendars, useRefreshEvents, useSetPrefs } from "../data";
-import { fmt, parseYmd, shortTime } from "../dates";
+import { allZones, fmt, parseYmd, shortTime } from "../dates";
 import { PALETTE } from "../model";
 import { MiniMonth } from "./MiniMonth";
 import { Popover, RsvpButtons } from "./ui";
@@ -221,12 +222,32 @@ function Invitations({ onOpen }: { onOpen: (ev: CalEvent) => void }) {
   );
 }
 
-/** Tasks (from Tasks) and birthdays (from Contacts) on the calendar. */
+/** What else shows on the calendar, each with its own switch: tasks,
+ *  birthdays, workouts, the meal plan, bills, trips (only for apps this
+ *  person has) and public holidays (with a country) — plus an optional
+ *  second time zone for week / day view. */
 function AlsoShow({ b }: { b: CalendarBootstrap }) {
   const setPrefs = useSetPrefs();
-  if (!b.apps.tasks && !b.apps.contacts) return null;
-  const flip = (patch: Partial<CalendarBootstrap["prefs"]>) => {
+  const p = b.prefs;
+  const [picking, setPicking] = useState(false);
+  const wantCountries = picking || p.holidays;
+  const { data: countries } = useQuery({ queryKey: ["calendar", "holiday-countries"], queryFn: calendarApi.holidayCountries, staleTime: Infinity, enabled: wantCountries });
+  const [zonePick, setZonePick] = useState(false);
+  const zones = useMemo(() => (zonePick || p.second_tz ? allZones() : []), [zonePick, p.second_tz]);
+  const flip = (patch: Partial<CalendarPrefs>) => {
     setPrefs(patch).catch((err) => toast.error(extractError(err)));
+  };
+  const holidaysOn = async (on: boolean) => {
+    if (!on || p.holiday_country) return flip({ holidays: on });
+    // First time on: the country from my time zone, else ask.
+    try {
+      const c = countries ?? (await calendarApi.holidayCountries());
+      if (c.guess) return flip({ holidays: true, holiday_country: c.guess });
+    } catch {
+      /* ask instead */
+    }
+    setPicking(true);
+    flip({ holidays: true });
   };
   const row = (icon: ReactNode, label: string, checked: boolean, onChange: (v: boolean) => void) => (
     <div className="flex h-10 items-center gap-2.5 rounded-lg px-2">
@@ -235,11 +256,77 @@ function AlsoShow({ b }: { b: CalendarBootstrap }) {
       <Toggle checked={checked} onChange={onChange} label={`Show ${label.toLowerCase()}`} />
     </div>
   );
+  const selectCls = "h-9 w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-sm text-[var(--text)]";
   return (
     <section className="flex flex-col gap-0.5">
       <h3 className="pl-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">Also show</h3>
-      {b.apps.tasks && row(<CircleCheck className="h-4 w-4" />, "Tasks", b.prefs.tasks, (v) => flip({ tasks: v }))}
-      {b.apps.contacts && row(<Cake className="h-4 w-4" />, "Birthdays", b.prefs.birthdays, (v) => flip({ birthdays: v }))}
+      {b.apps.tasks && row(<CircleCheck className="h-4 w-4" />, "Tasks", p.tasks, (v) => flip({ tasks: v }))}
+      {b.apps.contacts && row(<Cake className="h-4 w-4" />, "Birthdays", p.birthdays, (v) => flip({ birthdays: v }))}
+      {b.apps.workout && row(<Dumbbell className="h-4 w-4" />, "Workouts", p.workouts, (v) => flip({ workouts: v }))}
+      {b.apps.mealplan && row(<UtensilsCrossed className="h-4 w-4" />, "Meal plan", p.meals, (v) => flip({ meals: v }))}
+      {b.apps.budget && row(<Receipt className="h-4 w-4" />, "Bills", p.bills, (v) => flip({ bills: v }))}
+      {b.apps.trip && row(<Plane className="h-4 w-4" />, "Trips", p.trips, (v) => flip({ trips: v }))}
+      {row(<PartyPopper className="h-4 w-4" />, "Holidays", p.holidays, (v) => void holidaysOn(v))}
+      {p.holidays && (
+        <div className="flex flex-col gap-1 px-2 pb-1 pl-[34px]">
+          {!p.holiday_country && <span className="text-xs text-[var(--text-muted)]">Which country's public holidays?</span>}
+          <select
+            aria-label="Country for public holidays"
+            className={selectCls}
+            value={p.holiday_country}
+            onChange={(e) => {
+              setPicking(false);
+              flip({ holiday_country: e.target.value });
+            }}
+          >
+            {!p.holiday_country && <option value="">Pick a country…</option>}
+            {!countries && p.holiday_country && <option value={p.holiday_country}>{p.holiday_country}</option>}
+            {countries?.countries.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <div className="flex h-10 items-center gap-2.5 rounded-lg px-2">
+        <span className="shrink-0 text-[var(--text-muted)]">
+          <Globe className="h-4 w-4" />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">Second time zone</span>
+        <Toggle
+          checked={!!p.second_tz || zonePick}
+          onChange={(v) => {
+            if (v) setZonePick(true);
+            else {
+              setZonePick(false);
+              if (p.second_tz) flip({ second_tz: "" });
+            }
+          }}
+          label="Show a second time zone"
+        />
+      </div>
+      {(zonePick || p.second_tz) && (
+        <div className="flex flex-col gap-1 px-2 pb-1 pl-[34px]">
+          <select
+            aria-label="Second time zone"
+            className={selectCls}
+            value={p.second_tz}
+            onChange={(e) => {
+              setZonePick(false);
+              flip({ second_tz: e.target.value });
+            }}
+          >
+            {!p.second_tz && <option value="">Pick a time zone…</option>}
+            {zones.map((z) => (
+              <option key={z} value={z}>
+                {z.replace(/_/g, " ")}
+              </option>
+            ))}
+          </select>
+          <span className="text-[11px] text-[var(--text-muted)]">Shown beside the hours in week and day view.</span>
+        </div>
+      )}
     </section>
   );
 }

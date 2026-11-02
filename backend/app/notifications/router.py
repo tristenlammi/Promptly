@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -390,3 +391,38 @@ async def unsubscribe_all(
     )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------
+# A push's button ("Going", "Done", "Snooze 1 hour") — no session
+# ---------------------------------------------------------------------
+
+
+class _ActionIn(BaseModel):
+    token: str = Field(min_length=10, max_length=2000)
+
+
+async def _action_limit(request: Request) -> None:
+    from limits import parse
+
+    from app.rate_limit import rate_limit
+
+    await rate_limit(parse("60/minute"), bucket="notification_action")(request)
+
+
+@router.post("/action", dependencies=[Depends(_action_limit)])
+async def notification_action(body: _ActionIn, db: AsyncSession = Depends(get_db)) -> dict:
+    """Tapped from a notification. The service worker can't sign in, so the
+    signed token (one person, one action, one target, a week) is the key —
+    see ``app/notifications/actions.py``."""
+    from app.notifications.actions import ActionRefused, perform
+
+    try:
+        message = await perform(db, body.token)
+    except ActionRefused as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE if str(exc) == "gone" else status.HTTP_401_UNAUTHORIZED,
+            detail="That button doesn't work any more — open Promptly instead.",
+        ) from exc
+    return {"ok": True, "message": message}

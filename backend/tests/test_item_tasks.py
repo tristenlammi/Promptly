@@ -279,18 +279,15 @@ async def test_reminders():
         {"title": "Late one", "due": "2026-10-31"},
     ]})
     rs = reminders(d, ctx_at())
-    alerts = {(r.title, r.body) for r in rs if not r.key.startswith("digest")}
+    alerts = {(r.title, r.body) for r in rs}
     assert alerts == {("Call", "Due now"), ("Call", "Due in 30 min"), ("Rego", "Due tomorrow")}
     rego = next(r for r in rs if r.title == "Rego")
     assert rego.due_at == datetime(2026, 11, 4, 9, 0, tzinfo=TZ)
-    digests = [r for r in rs if r.key.startswith("digest")]
-    today = digests[0]
-    assert today.key == "digest:2026-11-02" and today.due_at == datetime(2026, 11, 2, 8, 0, tzinfo=TZ)
-    assert today.title == "2 tasks today · 1 overdue" and "18:00 Call" in today.body
-    assert {r.key for r in digests} == {"digest:2026-11-02", "digest:2026-11-05"}
-    # Ticking off removes its alerts; the digest can be turned off.
+    # The morning list moved into the one Today summary push (app/today):
+    # Tasks no longer schedules a digest of its own, so nobody gets two.
+    assert not any(r.key.startswith("digest") for r in rs)
+    # Ticking off removes its alerts.
     await act(d, "complete_tasks", {"tasks": ["Call"]})
-    d["settings"]["digest"] = False
     assert {r.title for r in reminders(d, ctx_at())} == {"Rego"}
 
 

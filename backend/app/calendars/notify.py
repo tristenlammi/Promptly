@@ -5,12 +5,13 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
+from app.notifications import actions
 
 from . import recur
 from .models import CalEvent
@@ -43,19 +44,24 @@ def _url(ev: CalEvent) -> str:
     return f"/calendar/?event={ev.id}"
 
 
-async def _send(user: User, title: str, body: str, ev_id: uuid.UUID, url: str, actor: uuid.UUID | None, inbox: bool = True) -> None:
+async def _send(
+    user: User, title: str, body: str, ev_id: uuid.UUID, url: str, actor: uuid.UUID | None, inbox: bool = True,
+    extra: dict | None = None,
+) -> None:
     from app.notifications.dispatch import notify_user
 
     await notify_user(
         user_id=user.id, category="calendar", title=title, body=body, url=url,
-        tag=f"cal:{ev_id}", actor_user_id=actor, inbox=inbox,
+        tag=f"cal:{ev_id}", actor_user_id=actor, inbox=inbox, extra=extra,
     )
 
 
 async def invited(db: AsyncSession, ev: CalEvent, actor: User, user_ids: set[uuid.UUID]) -> None:
     for u in await _users(db, user_ids - {actor.id}):
         when = when_text(ev.start_at, ev.end_at, ev.all_day, _tz(u))
-        await _send(u, f"{actor.username} invited you", f"{ev.title} · {when}", ev.id, _url(ev), actor.id)
+        # Answer from the notification itself (app/notifications/actions.py).
+        buttons = actions.buttons(u, ("cal_going", str(ev.id)), ("cal_declined", str(ev.id)))
+        await _send(u, f"{actor.username} invited you", f"{ev.title} · {when}", ev.id, _url(ev), actor.id, extra=buttons)
 
 
 async def added_to_calendar(db: AsyncSession, cal_name: str, actor: User, user_ids: set[uuid.UUID], own: bool = False) -> None:
@@ -103,7 +109,19 @@ async def reminder(user: User, ev: CalEvent, start: datetime, minutes: int) -> N
     else:
         lead = f"In {minutes // 60} h" + (f" {minutes % 60} min" if minutes % 60 else "")
     body = f"{lead} · {when}" + (f" · {ev.location}" if ev.location else "")
-    await _send(user, ev.title, body, ev.id, _url(ev), None, inbox=False)
+    # "Snooze 10 min" while there's still something to be reminded of.
+    extra = None
+    if not ev.all_day and start > datetime.now(timezone.utc) + timedelta(minutes=10):
+        extra = actions.buttons(user, ("cal_snooze", f"{ev.id}|{recur.stamp(start)}"))
+    await _send(user, ev.title, body, ev.id, _url(ev), None, inbox=False, extra=extra)
+
+
+async def answered_by_email(db: AsyncSession, ev: CalEvent, who: str, status: str) -> None:
+    """Someone invited by email answered from the link in it."""
+    if ev.created_by is None or status not in _ANSWER:
+        return
+    for u in await _users(db, {ev.created_by}):
+        await _send(u, f"{who} {_ANSWER[status]}", ev.title, ev.id, _url(ev), None)
 
 
 def _tz(u: User) -> str:

@@ -8,6 +8,7 @@ import { cn } from "@/utils/cn";
 import { errorText } from "./api";
 import { CatBadge, CategoryPicker, Pill, useMoney, type H } from "./common";
 import { catIndex, currencySymbol, parseMoney } from "./logic";
+import { TripTag } from "./TripTag";
 import type { Split, Txn } from "./types";
 
 /** Re-categorise one or more transactions; "always for this payee" saves a rule. */
@@ -53,7 +54,7 @@ export function RecategoriseSheet({ item, txns, open, onClose }: { item: H; txns
       value={txns.length === 1 ? txns[0].category_id : undefined}
       allowNone
       title={txns.length === 1 ? txns[0].payee || "Category" : `${txns.length} transactions`}
-      footer={
+      header={
         payees.length > 0 && payees.length <= 5 ? (
           <label className="flex w-full items-center justify-between gap-3 text-sm text-[var(--text)]">
             <span className="min-w-0">
@@ -370,6 +371,7 @@ export function TxnSheet({ item, txn, open, onClose }: { item: H; txn: Txn | nul
             </span>
             <Toggle checked={d.transfer} onChange={(v) => set({ transfer: v, splits: v ? [] : d.splits })} label="Transfer between my accounts" />
           </div>
+          {txn && !d.transfer && <TripTag item={item} txn={txn} date={d.date} />}
           {!more && (
             <button
               type="button"

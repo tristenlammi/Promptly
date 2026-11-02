@@ -137,3 +137,49 @@ def new_token() -> str:
     import secrets
 
     return secrets.token_urlsafe(32)
+
+
+def invite(
+    ev: CalEvent,
+    *,
+    method: str,
+    guest_email: str,
+    guest_name: str = "",
+    organiser_name: str,
+    organiser_email: str,
+    status: str = "invited",
+    url: str | None = None,
+    occurrence: datetime | None = None,
+) -> str:
+    """One event for one person invited by email (``method`` REQUEST or
+    CANCEL; ``occurrence`` cancels just that one of a series). Only that
+    guest is named in it — never the others."""
+    now = datetime.now(UTC)
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Promptly//Calendar//EN", "CALSCALE:GREGORIAN", f"METHOD:{method}"]
+    body = _vevent(ev, None, [], {}, now)
+    if occurrence is not None:
+        # Just that one: its own times, no rule.
+        body = [x for x in body if not x.startswith(("RRULE", "EXDATE"))]
+        occ_end = occurrence + (ev.end_at - ev.start_at)
+        body[3], body[4] = (
+            (f"DTSTART;VALUE=DATE:{_date(occurrence)}", f"DTEND;VALUE=DATE:{_date(occ_end)}")
+            if ev.all_day else (f"DTSTART:{_utc(occurrence)}", f"DTEND:{_utc(occ_end)}")
+        )
+    # A change goes out with a higher SEQUENCE so their calendar replaces it.
+    seq = int((ev.updated_at or ev.created_at or now).timestamp()) - 1_700_000_000
+    extra = [f"SEQUENCE:{max(0, seq)}"]
+    if occurrence is not None:
+        extra.append(f"RECURRENCE-ID;VALUE=DATE:{_date(occurrence)}" if ev.all_day else f"RECURRENCE-ID:{_utc(occurrence)}")
+    cn = (organiser_name or "Promptly").replace('"', "")
+    extra.append(f'ORGANIZER;CN="{cn}":mailto:{organiser_email}')
+    part = {"going": "ACCEPTED", "maybe": "TENTATIVE", "declined": "DECLINED"}.get(status, "NEEDS-ACTION")
+    gname = (guest_name or guest_email).replace('"', "")
+    extra.append(f'ATTENDEE;CN="{gname}";ROLE=REQ-PARTICIPANT;PARTSTAT={part};RSVP=FALSE:mailto:{guest_email}')
+    if url:
+        extra.append(f"URL:{url}")
+    if method == "CANCEL":
+        extra.append("STATUS:CANCELLED")
+    body[3:3] = extra
+    lines += body
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(_fold(line) for line in lines) + "\r\n"

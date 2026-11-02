@@ -1,8 +1,9 @@
 import { ChevronDown, Loader2, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useLocation, useSearchParams } from "react-router-dom";
 
-import { calendarApi, type CalEvent, type Calendar } from "@/api/calendar";
+import { calendarApi, type CalEvent, type Calendar, type CalUser } from "@/api/calendar";
+import { peopleHubApi } from "@/api/peopleHub";
 import { extractError } from "@/components/files/helpers";
 import { NetworkStatusToast } from "@/components/layout/NetworkStatusToast";
 import { InstallFromLink } from "@/components/pwa/InstallFromLink";
@@ -17,6 +18,7 @@ import { CalendarSettingsSheet, NewCalendarSheet } from "./components/CalendarDi
 import type { OpenEvent } from "./components/EventChip";
 import { EventDetail } from "./components/EventDetail";
 import { EventEditor, type EditorTarget } from "./components/EventEditor";
+import { ExtraDetail, usePlanTask } from "./components/ExtraDetail";
 import { BirthdayDetail } from "./components/ExtrasChips";
 import { Header } from "./components/Header";
 import { MiniMonth } from "./components/MiniMonth";
@@ -26,6 +28,7 @@ import { SearchPanel } from "./components/SearchPanel";
 import { SidePanel } from "./components/SidePanel";
 import { SubscribeSheet } from "./components/SubscribeDialog";
 import { TimeGridView } from "./components/TimeGridView";
+import { TravelNotice } from "./components/TravelNotice";
 import { Popover, ScopeHost } from "./components/ui";
 import { addUsers, useBootstrap, useCalendarsMap, useEvents, useExtras, useRefreshEventsAsync } from "./data";
 import { applyMoves, commitMove, useMoved, useTouchDragGuard } from "./drag";
@@ -65,7 +68,6 @@ function defaultStart(day: Date): Date {
  */
 export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   const location = useLocation();
-  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const isPhone = useIsMobile(767);
   // Below this the calendars panel becomes a sheet (Promptly's own sidebar is beside us).
@@ -141,6 +143,8 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   const events = useMemo(() => [...applyMoves(fetched, moved), ...extras], [fetched, moved, extras]);
   const refreshAsync = useRefreshEventsAsync();
   const moveEvent = useCallback((v: ViewEvent, start: Date, end: Date) => void commitMove(v, start, end, refreshAsync), [refreshAsync]);
+  // A task dragged onto a time: an event for it on my calendar.
+  const planTask = usePlanTask();
 
   // Dots on the phone's mini month.
   const miniGrid = monthGrid(miniMonth);
@@ -182,11 +186,11 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
 
   const openEvent: OpenEvent = useCallback(
     (v, anchor) => {
-      // A task opens in Tasks; everything else opens here.
-      if (v.extra?.kind === "task") navigate(`/apps/tasks/${v.extra.task.file_id}`);
-      else setDetail({ v, anchor: isPhone ? null : anchor });
+      // Tasks, birthdays and the other apps' items open a small card here
+      // (with a way into their own app); events open their details.
+      setDetail({ v, anchor: isPhone ? null : anchor });
     },
-    [isPhone, navigate],
+    [isPhone],
   );
   const openNew = (start: Date, allDay: boolean) => {
     setDetail(null);
@@ -252,6 +256,35 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
     setParams(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkEvent, b ? 1 : 0]);
+  // From a person page: ``?invite=<user id>`` starts a new event with them as
+  // a guest; ``?share=1`` opens who your own calendar is shared with.
+  const inviteId = params.get("invite");
+  const shareMine = params.get("share");
+  useEffect(() => {
+    if ((!inviteId && !shareMine) || !b) return;
+    const next = new URLSearchParams(params);
+    next.delete("invite");
+    next.delete("share");
+    setParams(next, { replace: true });
+    if (shareMine) {
+      const mine = b.calendars.find((c) => c.personal && c.role === "owner");
+      if (mine) setSettingsId(mine.id);
+    }
+    if (inviteId && inviteId !== b.me.id) {
+      const go = (u: CalUser) => {
+        addUsers({ [u.id]: u });
+        setEditor({ mode: "new", start: defaultStart(cursor), allDay: false, prefill: { guests: [u] } });
+      };
+      const known = (location.state as { inviteUser?: CalUser } | null)?.inviteUser;
+      if (known?.id === inviteId) go(known);
+      else
+        void peopleHubApi
+          .get({ kind: "u", userId: inviteId })
+          .then((p) => p.user && go(p.user))
+          .catch(() => toast.error("Couldn't find that person."));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inviteId, shareMine, b ? 1 : 0]);
 
   // Keyboard (desktop): t d w m a ← → c, q quick add, / search.
   useEffect(() => {
@@ -369,6 +402,8 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
           onCreate={createAt}
           onDay={goDay}
           onMove={moveEvent}
+          onPlanTask={(t, start, end) => void planTask(t, start, end)}
+          secondTz={b.prefs.second_tz}
         />
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -426,6 +461,7 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
             quickAdd={!isPhone && <QuickAddBar ref={quickBox} b={b} onOpen={showEvent} onMore={quickMore} />}
             onQuickAdd={() => setQuick(true)}
           />
+          <TravelNotice b={b} />
           {viewEl}
           <SearchPanel open={search} onClose={() => setSearch(false)} b={b} calMap={calMap} onPick={(v) => showEvent(v.ev)} phone={isPhone} />
           {isPhone && (
@@ -448,6 +484,15 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
     b &&
     (detail.v.extra?.kind === "birthday" ? (
       <BirthdayDetail b={detail.v.extra.b} onClose={() => setDetail(null)} />
+    ) : detail.v.extra ? (
+      <ExtraDetail
+        v={detail.v}
+        onClose={() => setDetail(null)}
+        onOpenEvent={(id) => {
+          setDetail(null);
+          void openById(id);
+        }}
+      />
     ) : (
       <EventDetail
         v={detail.v}

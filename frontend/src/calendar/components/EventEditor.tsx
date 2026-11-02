@@ -1,6 +1,8 @@
 import { CalendarSearch, Loader2, MapPin, Plus, Users, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { calendarReachApi } from "@/api/calendarReach";
 import { calendarApi, type CalEvent, type CalendarBootstrap, type CalUser, type EditScope, type EventPatch, type Repeat, type RsvpStatus } from "@/api/calendar";
 import { extractError } from "@/components/files/helpers";
 import { Chip, Field, ItemButton, Select, Sheet, TextArea, TextInput, Toggle } from "@/items/ui";
@@ -12,6 +14,7 @@ import { addDays, combine, dayDiff, hm, localZone, parseYmd, startOfDay, weekday
 import { addUsers, useCalUsers, useRefreshEvents } from "../data";
 import { REMINDER_OPTIONS, type ViewEvent } from "../model";
 import type { EventPrefill } from "../prefill";
+import { EmailGuestsField, type DraftEmailGuest } from "./EmailGuestsField";
 import { AvailabilityTag, availabilityText, FREE_COLOR, BUSY_COLOR, overlaps, useBusy } from "./Availability";
 import { FindTime } from "./FindTime";
 import { RepeatPicker } from "./RepeatPicker";
@@ -103,6 +106,37 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
   const [saving, setSaving] = useState(false);
   const set = (patch: Partial<Draft>) => setD((x) => ({ ...x, ...patch }));
   const ev = target.mode === "edit" ? target.v.ev : null;
+
+  // Guests invited by email (people not on Promptly): saved ones load in.
+  const [emailGuests, setEmailGuests] = useState<DraftEmailGuest[]>([]);
+  const { data: savedEmail } = useQuery({
+    queryKey: ["calendar", "email-guests", ev?.event_id],
+    queryFn: () => calendarReachApi.emailGuests(ev!.event_id),
+    enabled: !!ev && ev.can_edit,
+  });
+  const emailLoaded = useRef(false);
+  useEffect(() => {
+    if (savedEmail && !emailLoaded.current) {
+      emailLoaded.current = true;
+      setEmailGuests(savedEmail.guests.map((g) => ({ id: g.id, email: g.email, status: g.status })));
+    }
+  }, [savedEmail]);
+
+  /** After the event is saved: email the new ones, uninvite the removed. */
+  const syncEmailGuests = async (eventId: string) => {
+    const fresh = emailGuests.filter((g) => !g.id).map((g) => g.email);
+    const keep = new Set(emailGuests.map((g) => g.id).filter(Boolean));
+    const gone = (savedEmail?.guests ?? []).filter((g) => !keep.has(g.id));
+    try {
+      for (const g of gone) await calendarReachApi.removeEmailGuest(eventId, g.id);
+      if (fresh.length) {
+        await calendarReachApi.inviteByEmail(eventId, fresh);
+        toast.success(fresh.length === 1 ? `Invitation emailed to ${fresh[0]}` : `Invitations emailed to ${fresh.length} people`);
+      }
+    } catch (err) {
+      toast.error(`The event is saved, but: ${extractError(err)}`);
+    }
+  };
 
   const writable = b.calendars.filter((c) => c.role === "owner" || c.role === "editor" || c.id === ev?.calendar_id);
   const canMove = !ev || (ev.on_my_calendar && ev.can_delete);
@@ -201,6 +235,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
         });
         addUsers(r.users);
         toast.success(room ? `Event posted in ${room.name}` : guestIds.length ? "Event saved — guests invited" : "Event saved");
+        await syncEmailGuests(r.event.event_id);
         refresh();
         onSaved(r.event);
         return;
@@ -220,9 +255,16 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
       const newEndExcl = d.allDay ? addDays(end, 1) : end;
       const timesChanged = d.allDay !== ev.all_day || start.getTime() !== v.start.getTime() || newEndExcl.getTime() !== v.end.getTime();
 
+      // Email guests belong to the whole event (saved separately, below).
+      const emailChanged =
+        emailGuests.some((g) => !g.id) || (savedEmail?.guests ?? []).some((g) => !emailGuests.some((x) => x.id === g.id));
       let scope: EditScope = "all";
       if (ev.repeat) {
         if (!timesChanged && !repeatChanged && Object.keys(patch).length === 0) {
+          if (emailChanged) {
+            await syncEmailGuests(ev.event_id);
+            refresh();
+          }
           onClose();
           return;
         }
@@ -251,6 +293,10 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
         }
       }
       if (Object.keys(patch).length === 0) {
+        if (emailChanged) {
+          await syncEmailGuests(ev.event_id);
+          refresh();
+        }
         onClose();
         return;
       }
@@ -261,6 +307,7 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
       const r = await calendarApi.update(ev.event_id, patch);
       addUsers(r.users);
       toast.success("Event updated");
+      if (emailChanged) await syncEmailGuests(ev.event_id);
       refresh();
       onSaved(r.event);
     } catch (err) {
@@ -379,6 +426,14 @@ function EditorBody({ target, b, onClose, onSaved }: { target: EditorTarget; b: 
                 </li>
               ))}
             </ul>
+          )}
+          {!room && (!ev || ev.can_edit) && (
+            <EmailGuestsField
+              guests={emailGuests}
+              onChange={setEmailGuests}
+              onAddUser={(u) => set({ guests: [...d.guests, u] })}
+              takenUserIds={[b.me.id, organiserId, ...d.guests.map((g) => g.id)]}
+            />
           )}
           {d.guests.length > 0 && !d.allDay && (
             <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-3 gap-y-1">

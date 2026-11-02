@@ -92,6 +92,8 @@ export interface CalEvent {
   can_delete: boolean;
   /** On someone's calendar shared with me as free/busy only: just "Busy" and the time. */
   busy_only?: boolean;
+  /** What it was made from: a task planned into a time slot. */
+  source?: EventSource | null;
   /** Rooms (that I'm in) it was planned in or shared to — only on single-event fetches. */
   rooms?: EventRoom[];
 }
@@ -106,6 +108,22 @@ export interface EventRoom {
 export interface CalendarPrefs {
   tasks: boolean;
   birthdays: boolean;
+  workouts: boolean;
+  meals: boolean;
+  bills: boolean;
+  trips: boolean;
+  holidays: boolean;
+  /** ISO country code for public holidays ("" = not picked yet). */
+  holiday_country: string;
+  /** A second time zone column in week / day view ("" = off). */
+  second_tz: string;
+}
+
+/** A task planned into a time slot (an event's ``source``). */
+export interface EventSource {
+  kind: "task";
+  file_id: string;
+  task_id: string;
 }
 
 /** An open task with a due day, from the Tasks app. Tick it off with
@@ -122,6 +140,70 @@ export interface CalTask {
   color: string;
   priority: number;
   repeats: boolean;
+  /** Planned into a time slot: that event. */
+  planned?: { event_id: string; start: string; end: string } | null;
+}
+
+/** A planned workout session, or a usual training day with nothing planned yet (``kind: "day"``). */
+export interface CalWorkout {
+  kind: "session" | "day";
+  file_id: string;
+  id: string | null;
+  day: string;
+  time: string | null;
+  name: string;
+  done: boolean;
+  exercises: number;
+}
+
+/** One meal on the meal plan. */
+export interface CalMeal {
+  file_id: string;
+  id: string;
+  day: string;
+  slot: "breakfast" | "lunch" | "dinner" | "snack";
+  title: string;
+  cooked: boolean;
+}
+
+/** A bill / subscription falling due (from Budget). ``amount`` is formatted. */
+export interface CalBill {
+  file_id: string;
+  id: string;
+  day: string;
+  name: string;
+  kind: "bill" | "subscription";
+  cadence: string;
+  amount: string;
+}
+
+/** A trip's dates (``end`` inclusive). */
+export interface CalTrip {
+  file_id: string;
+  trip_id: string;
+  title: string;
+  emoji: string;
+  color: string;
+  start: string;
+  end: string;
+  status: string;
+}
+
+export interface CalHoliday {
+  day: string;
+  name: string;
+  country: string;
+}
+
+/** Everything "Also show" puts beside the events (each empty when switched off). */
+export interface CalExtras {
+  tasks: CalTask[];
+  birthdays: CalBirthday[];
+  workouts: CalWorkout[];
+  meals: CalMeal[];
+  bills: CalBill[];
+  trips: CalTrip[];
+  holidays: CalHoliday[];
 }
 
 /** A birthday or anniversary from Contacts. */
@@ -152,7 +234,7 @@ export interface CalendarBootstrap {
   feed_token: string | null;
   prefs: CalendarPrefs;
   /** Which other apps this person has (so the Tasks / Birthdays toggles only show when useful). */
-  apps: { tasks: boolean; contacts: boolean };
+  apps: { tasks: boolean; contacts: boolean; workout?: boolean; mealplan?: boolean; budget?: boolean; trip?: boolean };
 }
 
 export interface EventInput {
@@ -171,6 +253,8 @@ export interface EventInput {
   color?: string | null;
   /** Planned in a room: everyone in it is invited and a card is posted there (create only). */
   room_id?: string | null;
+  /** What it's made from: a task planned into a time slot (create only). */
+  source?: EventSource | null;
 }
 
 export type EventPatch = Partial<Omit<EventInput, "room_id">> & { scope?: EditScope; occurrence?: string };
@@ -223,8 +307,16 @@ export const calendarApi = {
     return (await apiClient.get("/calendar/search", { params: { q } })).data;
   },
   /** Tasks due and birthdays in [start, end) — local days ``YYYY-MM-DD`` — as my prefs allow. */
-  async extras(start: string, end: string): Promise<{ tasks: CalTask[]; birthdays: CalBirthday[] }> {
+  async extras(start: string, end: string): Promise<CalExtras> {
     return (await apiClient.get("/calendar/extras", { params: { start, end } })).data;
+  },
+  /** A planned task's title and whether it's done (an event's "Done" box). */
+  async taskStatus(fileId: string, taskId: string): Promise<{ exists: boolean; done: boolean; title: string; repeats: boolean }> {
+    return (await apiClient.get("/calendar/extras/task", { params: { file_id: fileId, task_id: taskId } })).data;
+  },
+  /** Countries with public holidays, and a guess at mine (from my time zone). */
+  async holidayCountries(): Promise<{ countries: { code: string; name: string }[]; guess: string | null }> {
+    return (await apiClient.get("/calendar/holiday-countries")).data;
   },
   /** People on this Promptly who are in my Contacts, with what they are to me ("Wife", from Photos). */
   async peopleSuggestions(): Promise<{ people: { user: CalUser; contact_name: string; label: string | null }[] }> {

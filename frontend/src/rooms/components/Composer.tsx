@@ -287,7 +287,7 @@ export const Composer = forwardRef<
       const mine = win?.messages
         .slice()
         .reverse()
-        .find((m) => m.kind === "user" && m.author_id === meId && !m.deleted && m.body && !m.meta?.event_id);
+        .find((m) => m.kind === "user" && m.author_id === meId && !m.deleted && m.body && !m.meta?.event_id && !m.meta?.event_reminder && !m.meta?.share);
       if (mine) {
         e.preventDefault();
         onEdit(mine);

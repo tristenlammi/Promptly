@@ -78,31 +78,65 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
         "users": await core.users_map(db, people),
         "feed_token": feed.token if feed else None,
         "prefs": _prefs(user),
-        # Which other apps can show on the calendar (tasks, birthdays).
-        "apps": {"tasks": "tasks" in kinds, "contacts": "contacts" in kinds},
+        # Which other apps can show on the calendar ("Also show").
+        "apps": {k: k in kinds for k in ("tasks", "contacts", "workout", "mealplan", "budget", "trip")},
     }
 
 
-_PREF_DEFAULTS = {"tasks": True, "birthdays": True}
+# What shows on the calendar besides events ("Also show"). Holidays stay off
+# until a country is picked; ``second_tz`` adds a second time column.
+_PREF_DEFAULTS: dict[str, bool] = {"tasks": True, "birthdays": True, "workouts": False, "meals": False, "bills": False, "trips": False, "holidays": False}
 
 
-def _prefs(user: User) -> dict[str, bool]:
+def _prefs(user: User) -> dict[str, Any]:
     saved = (user.settings or {}).get("calendar") or {}
-    return {k: bool(saved.get(k, v)) for k, v in _PREF_DEFAULTS.items()}
+    out: dict[str, Any] = {k: bool(saved.get(k, v)) for k, v in _PREF_DEFAULTS.items()}
+    out["holiday_country"] = str(saved.get("holiday_country") or "")
+    out["second_tz"] = str(saved.get("second_tz") or "")
+    return out
 
 
 class PrefsIn(BaseModel):
     tasks: bool | None = None
     birthdays: bool | None = None
+    workouts: bool | None = None
+    meals: bool | None = None
+    bills: bool | None = None
+    trips: bool | None = None
+    holidays: bool | None = None
+    holiday_country: str | None = Field(default=None, max_length=8)  # "" = none
+    second_tz: str | None = Field(default=None, max_length=64)  # "" = off
 
 
 @router.patch("/prefs")
 async def set_prefs(body: PrefsIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    """Show or hide your tasks / birthdays on the calendar."""
-    prefs = {**_prefs(user), **body.model_dump(exclude_none=True)}
+    """What else shows on the calendar (tasks, birthdays, workouts, meals,
+    bills, trips, holidays and their country), and a second time zone."""
+    patch = body.model_dump(exclude_none=True)
+    if patch.get("holiday_country"):
+        patch["holiday_country"] = patch["holiday_country"].upper()
+        if patch["holiday_country"] not in extras.holiday_countries():
+            raise service.bad("We don't have holidays for that country.")
+    if patch.get("second_tz"):
+        from zoneinfo import ZoneInfo
+
+        try:
+            ZoneInfo(patch["second_tz"])
+        except Exception as exc:  # noqa: BLE001 — ZoneInfoNotFoundError / ValueError
+            raise service.bad("Unknown time zone.") from exc
+    prefs = {**_prefs(user), **patch}
     user.settings = {**(user.settings or {}), "calendar": prefs}
     await db.commit()
     return prefs
+
+
+@router.get("/holiday-countries")
+async def holiday_countries(user: User = Depends(get_current_user)) -> dict:
+    """Countries we have public holidays for, and a guess at yours (from your time zone)."""
+    return {
+        "countries": [{"code": c, "name": n} for c, n in extras.holiday_countries().items()],
+        "guess": extras.guess_country(core.user_tz(user)),
+    }
 
 
 # ================================================================== calendars
@@ -301,6 +335,10 @@ async def get_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db), use
     if out.get("busy_only"):
         return {"event": out, "users": {}}
     out["rooms"] = await sharing.rooms_out(db, ev, user)
+    # Guests invited by email, and each room's "starting soon" post (reach.py).
+    from . import reach
+
+    out.update(await reach.detail_extra(db, ev, user, out["can_edit"]))
     people = {a.user_id for a in atts} | ({ev.created_by} if ev.created_by else set())
     return {"event": out, "users": await core.users_map(db, people)}
 
@@ -331,6 +369,17 @@ class EventIn(BaseModel):
     color: str | None = Field(default=None, pattern=_HEX)
     # Planned in a room: everyone in it is invited, and a card is posted there.
     room_id: uuid.UUID | None = None
+    # What it was made from: a task planned into a time slot.
+    source: "EventSource | None" = None
+
+
+class EventSource(BaseModel):
+    kind: Literal["task"]
+    file_id: uuid.UUID
+    task_id: str = Field(min_length=1, max_length=64)
+
+
+EventIn.model_rebuild()
 
 
 class EventPatch(BaseModel):
@@ -353,9 +402,11 @@ class EventPatch(BaseModel):
 
 @router.post("/events", status_code=201)
 async def create_event(body: EventIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    f = service.EventFields(**body.model_dump(exclude={"repeat", "color", "room_id"}), repeat=body.repeat, repeat_set=True, color=body.color, color_set=True)
+    f = service.EventFields(**body.model_dump(exclude={"repeat", "color", "room_id", "source"}), repeat=body.repeat, repeat_set=True, color=body.color, color_set=True)
     # In a room, the card (and its push) is the invitation — no second ping.
     ev = await service.create_event(db, user, f, ping_guests=body.room_id is None)
+    if body.source is not None:
+        ev.source = body.source.model_dump(mode="json")
     card = await sharing.share_to_room(db, user, ev, body.room_id, invite_all=True) if body.room_id else None
     await db.commit()
     if card:
@@ -542,19 +593,44 @@ async def extras_in(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    """Tasks due and birthdays in a range of days (``YYYY-MM-DD``), as your
-    calendar settings allow."""
+    """What else is on in a range of days (``YYYY-MM-DD``) — tasks due,
+    birthdays, workouts, meals, bills, trips and holidays — as your calendar
+    settings allow (and only from apps you have)."""
     try:
         s, e = date.fromisoformat(start[:10]), date.fromisoformat(end[:10])
     except ValueError as exc:
         raise service.bad("Bad range.") from exc
     if e <= s or (e - s).days > 400:
         raise service.bad("The range must be under 400 days.")
+    from app.items.service import installed_kinds
+
     prefs = _prefs(user)
+    kinds = await installed_kinds(db, user)
+
+    def on(pref: str, kind: str | None = None) -> bool:
+        return bool(prefs[pref]) and (kind is None or kind in kinds)
+
+    country = prefs["holiday_country"]
     return {
-        "tasks": await extras.tasks_in(db, user, s, e) if prefs["tasks"] else [],
-        "birthdays": await extras.birthdays_in(db, user, s, e) if prefs["birthdays"] else [],
+        "tasks": await extras.tasks_in(db, user, s, e) if on("tasks") else [],
+        "birthdays": await extras.birthdays_in(db, user, s, e) if on("birthdays") else [],
+        "workouts": await extras.workouts_in(db, user, s, e) if on("workouts", "workout") else [],
+        "meals": await extras.meals_in(db, user, s, e) if on("meals", "mealplan") else [],
+        "bills": await extras.bills_in(db, user, s, e) if on("bills", "budget") else [],
+        "trips": await extras.trips_in(db, user, s, e) if on("trips", "trip") else [],
+        "holidays": extras.holidays_in(country, s, e) if on("holidays") and country else [],
     }
+
+
+@router.get("/extras/task")
+async def extras_task(
+    file_id: uuid.UUID = Query(...),
+    task_id: str = Query(..., min_length=1, max_length=64),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """A planned task's title and whether it's done (for the event's "Done" box)."""
+    return await extras.task_status(db, user, file_id, task_id)
 
 
 # ================================================================== feed

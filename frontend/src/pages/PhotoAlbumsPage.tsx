@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Download, ImagePlus, LogOut, MoreHorizontal, Plus, Share2, Sparkles, Star, Trash2, Upload, Users, X } from "lucide-react";
+import { ArrowLeft, Download, ImagePlus, LogOut, MoreHorizontal, Plus, Send, Share2, Sparkles, Star, Trash2, Upload, Users, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { usePhotosPath } from "@/components/photos/photosPath";
@@ -9,6 +9,7 @@ import { filesApi } from "@/api/files";
 import { AlbumMembersDialog, Cover } from "@/components/photos/AlbumDialogs";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
+import { SendToSheet } from "@/components/share/SendToSheet";
 import { SmartAlbumDialog } from "@/components/photos/SmartAlbumDialog";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -132,6 +133,7 @@ export function PhotoAlbumPage() {
   );
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sharing, setSharing] = useState(false);
+  const [sending, setSending] = useState(false);
   const [viewing, setViewing] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -266,6 +268,9 @@ export function PhotoAlbumPage() {
             <Button size="sm" variant="ghost" leftIcon={<Share2 className="h-3.5 w-3.5" />} onClick={() => setSharing(true)}>
               {owner ? "Share" : "People"}
             </Button>
+            <Button size="sm" variant="ghost" leftIcon={<Send className="h-3.5 w-3.5" />} onClick={() => setSending(true)}>
+              Send to…
+            </Button>
             <div className="relative">
               <button type="button" aria-label="More" aria-expanded={menu} onClick={() => setMenu((v) => !v)} className="rounded p-1.5 hover:bg-[var(--hover)]">
                 <MoreHorizontal className="h-4 w-4" />
@@ -360,6 +365,7 @@ export function PhotoAlbumPage() {
         </div>
       </div>
       {sharing && <AlbumMembersDialog album={album} onClose={() => setSharing(false)} />}
+      <SendToSheet open={sending} onClose={() => setSending(false)} target={{ kind: "album", id: album.id, title: album.title }} canGrant={owner} />
       {editing && (
         <SmartAlbumDialog
           initial={album.smart?.rules}

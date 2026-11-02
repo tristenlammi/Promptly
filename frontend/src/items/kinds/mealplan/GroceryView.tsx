@@ -1,6 +1,7 @@
-import { Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Share2, ShoppingBasket, ShoppingCart, Sparkles, Store, Trash2, X } from "lucide-react";
+import { ListChecks, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Share2, ShoppingBasket, ShoppingCart, Sparkles, Store, Trash2, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useNavigate } from "react-router-dom";
 
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import type { ItemViewProps } from "@/items/types";
@@ -80,6 +81,24 @@ export function GroceryView({ item, isPhone, ask, goTo }: ItemViewProps<MealPlan
   const menuRef = useRef<HTMLDivElement>(null);
   usePopoverDismiss(menu, menuRef, () => setMenu(false));
   const can = item.canEdit;
+  const navigate = useNavigate();
+  const [sending, setSending] = useState(false);
+
+  // "Send to Tasks": the list as a Groceries list in Tasks (the same list
+  // each time), so it's on the phone with everything else to do.
+  const sendToTasks = async () => {
+    setSending(true);
+    try {
+      const r = await item.runAction<{ href: string }>("send_grocery_list_to_tasks");
+      toast.success(`${r.summary}. To shop together, share your Tasks from Tasks.`, {
+        action: { label: "Open Tasks", onClick: () => navigate(r.result.href) },
+      });
+    } catch (e) {
+      toast.error(errDetail(e, "Couldn't send the list to Tasks."));
+    } finally {
+      setSending(false);
+    }
+  };
 
   const toggle = (i: GroceryItem) => setChecked(item, i.id, !i.checked);
 
@@ -146,6 +165,14 @@ export function GroceryView({ item, isPhone, ask, goTo }: ItemViewProps<MealPlan
           <span className="shrink-0 text-xs tabular-nums text-[var(--text-muted)]">
             {done.length} of {total} in the cart
           </span>
+        </div>
+      )}
+      {open.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <ItemButton size="sm" variant="ghost" icon={sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListChecks className="h-4 w-4" />} disabled={sending} onClick={() => void sendToTasks()}>
+            Send to Tasks
+          </ItemButton>
+          <span className="text-xs text-[var(--text-muted)]">Makes a Groceries list in Tasks, by aisle. Share the list from Tasks.</span>
         </div>
       )}
       {isPhone && (regenBtn || shopBtn) && (

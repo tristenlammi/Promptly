@@ -44,6 +44,8 @@ export interface Txn {
   transfer_by: SetBy;
   /** Why it needs a look (a bank amount change under a split); "" = fine. */
   review: string;
+  /** The trip it was spent on ("<trip file id>:<trip id>"), for the trip's "Spent so far". */
+  trip_ref?: string | null;
 }
 
 export interface Account {

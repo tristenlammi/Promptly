@@ -2,6 +2,7 @@ import type { MouseEvent } from "react";
 
 import { cn } from "@/utils/cn";
 
+import { zoneNote } from "../dates";
 import { chipTime, lookStyle, type ViewEvent } from "../model";
 import { ExtraChip } from "./ExtrasChips";
 
@@ -29,8 +30,11 @@ export function EventChip({
   continuesRight?: boolean;
   compact?: boolean;
 }) {
-  if (v.extra) return <ExtraChip v={v} onOpen={onOpen} compact={compact} />;
+  if (v.extra) return <ExtraChip v={v} onOpen={onOpen} compact={compact} continuesLeft={continuesLeft} continuesRight={continuesRight} />;
   const label = `${v.ev.title}${v.allDay ? "" : `, ${chipTime(v)}`}`;
+  // In its own time zone too, when that isn't mine.
+  const tip = zoneNote(v.start, v.ev.tz, v.allDay);
+  const title = tip ? `${v.ev.title} · ${tip}` : undefined;
   if (!v.spanning) {
     const faded = v.look === "declined";
     const outlined = v.look === "pending";
@@ -39,6 +43,7 @@ export function EventChip({
         type="button"
         onClick={(e) => openFrom(e, v, onOpen)}
         aria-label={label}
+        title={title}
         className={cn(
           "flex h-full w-full min-w-0 items-center gap-1 rounded-md px-1 text-left hover:bg-[var(--hover)]",
           compact ? "text-[10px]" : "text-[11px]",

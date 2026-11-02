@@ -7,6 +7,8 @@ names, allergens, diets), ``grocery`` (merge/sum/subtract), ``actions``,
 ``text`` (to_text + reminders), ``web`` (URL import + endpoints)."""
 from __future__ import annotations
 
+from pydantic import BaseModel
+
 from app.items.kinds.mealplan import actions as A
 from app.items.kinds.mealplan.models import MealPlanData
 from app.items.kinds.mealplan.text import reminders, to_text
@@ -16,6 +18,17 @@ from app.items.spec import ItemAction, ItemContext, ItemSpec
 
 def template(ctx: ItemContext) -> dict:
     return MealPlanData().model_dump(mode="json")
+
+
+class _SendToTasks(BaseModel):
+    pass
+
+
+async def _send_to_tasks(ctx: ItemContext, data: dict, p: _SendToTasks):  # noqa: ANN202
+    # Imported when run: app.crossapp reaches into the items service.
+    from app.crossapp.groceries import send_action
+
+    return await send_action(ctx, data, p)
 
 
 AI_BRIEF = """
@@ -94,6 +107,7 @@ SPEC = ItemSpec(
         ItemAction("set_preferences", "Change household size, diets, allergies, dislikes, cuisines, time limits, budget, skill, equipment, week start, meal slots, units, nutrition targets or reminders. Lists replace the whole list.", A.SetPreferences, A.set_preferences),
         ItemAction("add_starter_recipes", "Add six reliable starter recipes (fajitas, dal, salmon, stir-fry, overnight oats, chickpea salad).", A.AddStarters, A.add_starter_recipes),
         ItemAction("what_can_i_make", "Rank saved recipes by what's on hand (given ingredients, or the pantry): what's missing for each. Read-only.", A.WhatCanIMake, A.what_can_i_make, writes=False),
+        ItemAction("send_grocery_list_to_tasks", "Send the grocery list to the person's Tasks app as a \"Groceries\" list, ordered by aisle (sending again updates the same list). Changes their Tasks, not this file.", _SendToTasks, _send_to_tasks, writes=False, chat=False),
         ItemAction("plan_summary", "A date range of the plan in numbers: meals per day, empty slots, repeats, cuisines, time-limit breaches, allergy/diet warnings, per-person calories/protein from recipes vs targets (incl. the Meals & Macros item). Read-only.", A.PlanSummary, A.plan_summary, writes=False),
         ItemAction("recipe_nutrition", "A recipe's nutrition per serving and for N servings, with % of daily targets and the macro split. Read-only.", A.RecipeNutrition, A.recipe_nutrition, writes=False),
     ],

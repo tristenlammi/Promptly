@@ -57,6 +57,14 @@ const MyWorkPage = lazyWithRetry(
   () => import("@/pages/MyWorkPage").then((m) => ({ default: m.MyWorkPage })),
   "MyWorkPage"
 );
+const TodayPage = lazyWithRetry(
+  () => import("@/pages/TodayPage").then((m) => ({ default: m.TodayPage })),
+  "TodayPage"
+);
+const PersonHubPage = lazyWithRetry(
+  () => import("@/pages/PersonHubPage").then((m) => ({ default: m.PersonHubPage })),
+  "PersonHubPage"
+);
 const RecentFilesPage = lazyWithRetry(
   () => import("@/pages/RecentFilesPage").then((m) => ({ default: m.RecentFilesPage })),
   "RecentFilesPage"
@@ -148,6 +156,11 @@ const OfficeEditorPage = lazyWithRetry(
 const SyncLandingPage = lazyWithRetry(
   () => import("@/pages/SyncLandingPage").then((m) => ({ default: m.SyncLandingPage })),
   "SyncLandingPage"
+);
+// An emailed calendar invitation's answer page — public, no sign-in.
+const CalendarAnswerPage = lazyWithRetry(
+  () => import("@/pages/CalendarAnswerPage").then((m) => ({ default: m.CalendarAnswerPage })),
+  "CalendarAnswerPage"
 );
 const ItemPage = lazyWithRetry(() => import("@/items/ItemPage").then((m) => ({ default: m.ItemPage })), "ItemPage");
 const ItemAppPage = lazyWithRetry(
@@ -497,6 +510,14 @@ export default function App() {
             </Suspense>
           }
         />
+        <Route
+          path="/calendar/answer/:token"
+          element={
+            <Suspense fallback={<FullScreenLoading />}>
+              <CalendarAnswerPage />
+            </Suspense>
+          }
+        />
         <Route path="*" element={<ToLogin />} />
       </Routes>
     );
@@ -584,6 +605,15 @@ export default function App() {
         <Route index element={<RoomsApp embedded />} />
         <Route path="*" element={<RoomsApp embedded />} />
       </Route>
+      {/* An emailed invitation's answer page (no Promptly chrome) — beats /calendar/*. */}
+      <Route
+        path="/calendar/answer/:token"
+        element={
+          <Suspense fallback={<FullScreenLoading />}>
+            <CalendarAnswerPage />
+          </Suspense>
+        }
+      />
       {/* Promptly Calendar: inside Promptly, except as the installed Calendar app. */}
       <Route path="/calendar" element={<CalendarGate />}>
         <Route index element={<CalendarApp embedded />} />
@@ -611,6 +641,10 @@ export default function App() {
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route path="/work" element={<MyWorkPage />} />
+        <Route path="/today" element={<TodayPage />} />
+        {/* One person, everywhere: /people/u/<user>, /people/c/<file>/<contact>, /people/p/<photos person>. */}
+        <Route path="/people/:kind/:a" element={<PersonHubPage />} />
+        <Route path="/people/:kind/:a/:b" element={<PersonHubPage />} />
         {/* Models management lives inside the Settings (admin) tabs
             now. Keep the legacy ``/models`` URL working by redirecting
             straight to the relevant tab so old bookmarks don't 404. */}

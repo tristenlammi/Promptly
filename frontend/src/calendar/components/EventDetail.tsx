@@ -1,18 +1,22 @@
-import { useQuery } from "@tanstack/react-query";
-import { Bell, CalendarDays, Clock, EyeOff, Hash, MapPin, Pencil, Repeat as RepeatIcon, Send, Text, Trash2, Users, X } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Bell, BellOff, CalendarDays, Clock, EyeOff, Hash, Mail, MapPin, Pencil, Repeat as RepeatIcon, Send, Text, Trash2, Users, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { calendarApi, type CalendarBootstrap, type RsvpStatus } from "@/api/calendar";
+import { calendarReachApi, ROOM_REMIND_OPTIONS, type EventReachFields } from "@/api/calendarReach";
 import { extractError } from "@/components/files/helpers";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { Chip } from "@/items/ui";
 import { UserAvatar } from "@/rooms/components/ui";
 import { toast } from "@/store/toastStore";
 
+import { zoneNote } from "../dates";
 import { addUsers, useCalUsers, useRefreshEvents } from "../data";
 import { describeRepeat, describeWhen, REMINDER_OPTIONS, reminderLabel, type ViewEvent } from "../model";
+import { EventPhotos } from "./EventPhotos";
 import { ShareToRoomSheet } from "./ShareToRoomSheet";
+import { TaskSourceBadge } from "./TaskSourceBadge";
 import { askScope, RsvpButtons, StatusBadge } from "./ui";
 
 /** What one event looks like when you open it (popover / bottom sheet body). */
@@ -55,6 +59,22 @@ export function EventDetail({
     enabled: !v.extra,
   });
   const rooms = full?.event.rooms ?? [];
+  // "9 am in Sydney" when the event was set in another time zone.
+  const zone = zoneNote(v.start, v.ev.tz, v.allDay);
+  const reachFields = (full?.event ?? {}) as EventReachFields;
+  const emailGuests = reachFields.email_guests ?? [];
+  const roomLinks = new Map((reachFields.room_links ?? []).map((l) => [l.room_id, l]));
+  // The room whose "starting soon" post options are open.
+  const [roomMenu, setRoomMenu] = useState<string | null>(null);
+  const qc = useQueryClient();
+
+  const setRoomReminder = (roomId: string, minutes: number | null) =>
+    run(async () => {
+      await calendarReachApi.setRoomReminder(ev.event_id, roomId, minutes);
+      await qc.invalidateQueries({ queryKey: ["calendar", "event", ev.event_id] });
+      setRoomMenu(null);
+      toast.success(minutes == null ? "No reminder in the room" : "The room gets a reminder");
+    });
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -125,6 +145,7 @@ export function EventDetail({
 
       <Row icon={<Clock className="h-4 w-4" />}>
         <div>{describeWhen(v)}</div>
+        {zone && <div className="text-xs text-[var(--text-muted)]">{zone}</div>}
         {ev.repeat && (
           <div className="flex items-center gap-1 text-xs text-[var(--text-muted)]">
             <RepeatIcon className="h-3 w-3" />
@@ -132,6 +153,7 @@ export function EventDetail({
           </div>
         )}
       </Row>
+      {ev.source?.kind === "task" && <TaskSourceBadge source={ev.source} onNavigate={onClose} />}
 
       {ev.location && (
         <Row icon={<MapPin className="h-4 w-4" />}>
@@ -160,17 +182,42 @@ export function EventDetail({
       {rooms.length > 0 && (
         <Row icon={<Hash className="h-4 w-4" />}>
           <div className="flex flex-wrap gap-1.5">
-            {rooms.map((r) => (
-              <Link
-                key={r.room_id}
-                to={`/rooms/r/${r.room_id}`}
-                className="inline-flex h-7 max-w-full items-center gap-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 text-xs text-[var(--text)] hover:bg-[var(--hover)]"
-              >
-                <span className="shrink-0 text-[var(--text-muted)]">{r.name.startsWith("#") ? "Planned in" : "Shared with"}</span>
-                <span className="truncate font-medium">{r.name}</span>
-              </Link>
-            ))}
+            {rooms.map((r) => {
+              const link = roomLinks.get(r.room_id);
+              return (
+                <span key={r.room_id} className="inline-flex h-7 max-w-full items-center rounded-full border border-[var(--border)] bg-[var(--surface)] text-xs text-[var(--text)]">
+                  <Link to={`/rooms/r/${r.room_id}`} className="inline-flex h-full min-w-0 items-center gap-1 rounded-full pl-2.5 pr-2 hover:bg-[var(--hover)]">
+                    <span className="shrink-0 text-[var(--text-muted)]">{r.name.startsWith("#") ? "Planned in" : "Shared with"}</span>
+                    <span className="truncate font-medium">{r.name}</span>
+                  </Link>
+                  {link?.can_change && (
+                    <button
+                      type="button"
+                      onClick={() => setRoomMenu(roomMenu === r.room_id ? null : r.room_id)}
+                      aria-label={`Reminder in ${r.name}`}
+                      aria-expanded={roomMenu === r.room_id}
+                      title={link.remind_minutes == null ? "No reminder in the room" : `Reminds the room ${roomRemindLabel(link.remind_minutes)} before`}
+                      className="flex h-full items-center rounded-full px-2 text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]"
+                    >
+                      {link.remind_minutes == null ? <BellOff className="h-3.5 w-3.5" /> : <Bell className="h-3.5 w-3.5" />}
+                    </button>
+                  )}
+                </span>
+              );
+            })}
           </div>
+          {roomMenu && roomLinks.get(roomMenu) && (
+            <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-2.5">
+              <div className="mb-1.5 text-xs text-[var(--text-muted)]">Post “Starting soon · who's going” in the room</div>
+              <div className="flex flex-wrap gap-1.5">
+                {ROOM_REMIND_OPTIONS.map((o) => (
+                  <Chip key={String(o.value)} active={roomLinks.get(roomMenu)!.remind_minutes === o.value} onClick={() => !busy && setRoomReminder(roomMenu, o.value)}>
+                    {o.value == null ? o.label : `${o.label} before`}
+                  </Chip>
+                ))}
+              </div>
+            </div>
+          )}
         </Row>
       )}
 
@@ -189,7 +236,7 @@ export function EventDetail({
               return (
                 <li key={a.user_id} className="flex items-center gap-2">
                   <UserAvatar user={u ?? { id: a.user_id, username: "?", avatar_url: null, color: null }} size={24} />
-                  <span className="min-w-0 flex-1 truncate">{a.user_id === b.me.id ? "You" : (u?.username ?? "Someone")}</span>
+                  {a.user_id === b.me.id ? <span className="min-w-0 flex-1 truncate">You</span> : <Link to={`/people/u/${a.user_id}`} className="min-w-0 flex-1 truncate hover:underline">{u?.username ?? "Someone"}</Link>}
                   <StatusBadge status={a.status} />
                 </li>
               );
@@ -197,6 +244,25 @@ export function EventDetail({
           </ul>
         </Row>
       )}
+
+      {emailGuests.length > 0 && (
+        <Row icon={<Mail className="h-4 w-4" />}>
+          <div className="mb-1.5 text-xs text-[var(--text-muted)]">Invited by email</div>
+          <ul className="flex flex-col gap-1.5">
+            {emailGuests.map((g) => (
+              <li key={g.id} className="flex items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--text-muted)]">
+                  <Mail className="h-3.5 w-3.5" />
+                </span>
+                <span className="min-w-0 flex-1 truncate">{g.name || g.email}</span>
+                <StatusBadge status={g.status} />
+              </li>
+            ))}
+          </ul>
+        </Row>
+      )}
+
+      {!v.extra && !ev.busy_only && <EventPhotos eventId={ev.event_id} occurrence={ev.occurrence} start={v.start} />}
 
       {(isGuest || isMember) && (
         <Row icon={<Bell className="h-4 w-4" />}>
@@ -245,6 +311,12 @@ export function EventDetail({
       {ev.can_edit && <ShareToRoomSheet ev={ev} open={sharing} onClose={() => setSharing(false)} sharedIds={rooms.map((r) => r.room_id)} />}
     </div>
   );
+}
+
+function roomRemindLabel(m: number): string {
+  if (m % 1440 === 0) return m === 1440 ? "a day" : `${m / 1440} days`;
+  if (m % 60 === 0) return m === 60 ? "an hour" : `${m / 60} hours`;
+  return `${m} min`;
 }
 
 function HeadButton({ label, icon, onClick, disabled }: { label: string; icon: ReactNode; onClick: () => void; disabled?: boolean }) {

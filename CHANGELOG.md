@@ -21,6 +21,36 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-02
+
+### Added
+- **Today** (sidebar → Today): your events, tasks due, habits, today's workout and meals, "on this day" photos, unread rooms and assigned cards/shifts on one page — tick tasks and habits right there.
+- One **Morning summary** push built from Today ("3 events · 4 tasks due · Leg day"); turn it on and pick the time on the Today page or in Tasks settings.
+- **Person pages**: one page per person — their contact card, photos of them, plans together, your conversations and files shared between you — with Message, Invite to event and Share my calendar. Open it from Contacts, Photos, a room's members or an event's guests.
+- One people picker across Calendar and Rooms: searches Promptly accounts, your Contacts and the people in your Photos, with labels like "Bea · Wife" and suggestions first.
+- **Send to…**: share a Drive file or folder, photo, album, task, recipe or trip into a room or to a person as a card. It only opens for people who already have access, unless you tick "Also give everyone in the room access".
+- Calendar "Also show": workouts, your meal plan, bills due, trips and public holidays for a country you pick, each with its own switch; tap one to open it in its app.
+- Calendar: plan a task into a time slot — drag it onto week or day view, or tap it → "Plan a time". The event has a "Done" box that ticks the task off.
+- Calendar: "Photos from this event" — your own photos taken while it was on, with "Make an album".
+- Calendar: invite people who aren't on Promptly by email — they get the details, a calendar invite and Going / Maybe / Can't go links; changes and cancellations are emailed too.
+- Calendar: rooms an event was planned in get a "Starting in 1 hour · N going" post (change or turn it off from the bell on the "Planned in" chip).
+- Calendar: an optional second time zone beside the hours, both times for events set in another zone ("9:00 AM Tokyo time · 1:00 AM your time"), and a notice when you're travelling.
+- Buttons on notifications: Going / Can't go on invites, Done / Snooze 1 hour on task reminders, Snooze 10 min on event reminders.
+- Journal shows that day's events and your photos while you write — tap to add them to the entry.
+- Search (Ctrl+K) also finds your calendar events, contacts and tasks.
+- Trip Planner: make a trip album of your photos from the trip's dates (keeps itself up to date), and see "Spent so far" from Budget purchases tagged to the trip (Budget suggests the tag for purchases in a trip's dates).
+- Meal Planner: "Send to Tasks" turns the grocery list into a Groceries list in Tasks, by aisle, updated in place when you send it again.
+
+### Changed
+- The Tasks morning digest is replaced by the combined Morning summary (no double pushes).
+- Tapping a task on the calendar opens a small card (tick it off, plan a time, open in Tasks).
+- Tasks and Calendar quick add share one way of reading dates, times and repeats.
+- Budget: "Always for this payee" now sits at the top of the category picker, so you can switch it on before picking.
+
+### Fixed
+- App assistants (Ask Budget and the rest) no longer stop after saying what they'll do next — they carry on, and when a step fails they're told what it needs and retry. Their replies no longer run two steps' sentences together ("first.September").
+- App assistants show what they're doing the whole time they work ("Finding transactions…", "Thinking…") with a running timer, instead of going quiet after their first sentence.
+
 ## [0.15.0] - 2026-11-02
 
 ### Added

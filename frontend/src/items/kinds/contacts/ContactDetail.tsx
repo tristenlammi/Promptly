@@ -24,11 +24,14 @@ import {
   Star,
   StickyNote,
   Trash2,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 
+import { personPath } from "@/api/peopleHub";
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import { Chip, Field, ItemButton, Select, Sheet, TextArea, TextInput, todayISO, uid } from "@/items/ui";
 import { cn } from "@/utils/cn";
@@ -223,6 +226,12 @@ export function ContactDetail({
             </h2>
             {c.nickname && c.nickname !== name && <p className="text-sm text-[var(--text-muted)]">“{c.nickname}”</p>}
             {sub && <p className="mt-0.5 text-sm text-[var(--text-muted)]">{sub}</p>}
+            <Link
+              to={personPath({ kind: "c", fileId: item.fileId, contactId: c.id })}
+              className="mt-1 inline-flex h-8 items-center gap-1 rounded-lg text-sm font-medium text-[var(--item-accent)] hover:underline"
+            >
+              <UserRound className="h-3.5 w-3.5" /> Open person page
+            </Link>
             {(c.tags.length > 0 || c.groups.length > 0) && (
               <div className={cn("mt-2.5 flex flex-wrap gap-1.5", narrow ? "justify-center" : "justify-start")}>
                 {c.groups.map((g) => (

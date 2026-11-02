@@ -474,7 +474,11 @@ async def run_action(
     except ValidationError as e:
         first = e.errors()[0] if e.errors() else {}
         where = ".".join(str(p) for p in first.get("loc", ()))
-        raise ActionError(f"Bad arguments ({where}: {first.get('msg', 'invalid')}).") from e
+        # Say what it takes, so an AI can fix the call and retry.
+        props = action_schema(action).get("properties", {})
+        req = action_schema(action).get("required", [])
+        takes = ", ".join(f"{k}{' (required)' if k in req else ''}" for k in props)
+        raise ActionError(f"Bad arguments for {name} ({where}: {first.get('msg', 'invalid')}). It takes: {takes}.") from e
     try:
         out = action.run(ctx, data, params)
         if inspect.isawaitable(out):
@@ -582,7 +586,12 @@ async def refresh_reminders(db: AsyncSession, row: UserFile, doc: ItemDocument, 
             )
         ).all()
     )
-    await db.execute(delete(ItemReminder).where(ItemReminder.file_id == row.id, ItemReminder.sent_at.is_(None)))
+    # A snoozed one ("Snooze 1 hour" on a push) isn't the data's to drop.
+    await db.execute(
+        delete(ItemReminder).where(
+            ItemReminder.file_id == row.id, ItemReminder.sent_at.is_(None), ~ItemReminder.key.startswith("snooze:")
+        )
+    )
     for uid in recipients:
         seen: set[str] = set()
         for r in wanted[:200]:

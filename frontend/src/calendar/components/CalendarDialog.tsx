@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { LogOut, Trash2, UserPlus, X } from "lucide-react";
 import { useState } from "react";
 
@@ -109,14 +108,6 @@ function SettingsBody({ cal, onClose, b }: { cal: Calendar; onClose: () => void;
   const [busy, setBusy] = useState(false);
   // Your own calendar lists who you shared it with (you're implied).
   const members = Object.entries(cal.member_roles).filter(([uid]) => !(own && uid === b.me.id));
-  // People in your Contacts who are on this Promptly ("Bea · Wife") — one tap to add.
-  const { data: suggested } = useQuery({
-    queryKey: ["calendar", "people-suggestions"],
-    queryFn: calendarApi.peopleSuggestions,
-    enabled: owner && adding,
-    staleTime: 60_000,
-  });
-  const suggestions = (suggested?.people ?? []).filter((p) => !(p.user.id in cal.member_roles) && !toAdd.some((u) => u.id === p.user.id)).slice(0, 6);
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true);
@@ -223,25 +214,6 @@ function SettingsBody({ cal, onClose, b }: { cal: Calendar; onClose: () => void;
           </div>
           {adding && (
             <div className="flex flex-col gap-2.5 rounded-xl border border-[var(--border)] p-2.5">
-              {suggestions.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  <span className="text-[11px] font-medium text-[var(--text-muted)]">From your Contacts</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {suggestions.map((p) => (
-                      <button
-                        key={p.user.id}
-                        type="button"
-                        onClick={() => setToAdd((cur) => [...cur, p.user])}
-                        className="flex h-8 items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] pl-1 pr-3 text-xs text-[var(--text)] hover:bg-[var(--hover)]"
-                      >
-                        <UserAvatar user={p.user} size={22} />
-                        <span className="font-medium">{p.contact_name}</span>
-                        {p.label && <span className="text-[var(--text-muted)]">· {p.label}</span>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
               <PeoplePicker selected={toAdd} onChange={setToAdd} exclude={Object.keys(cal.member_roles)} />
               <Field label="They can">
                 <Select value={addRole} onChange={(e) => setAddRole(e.target.value as ShareRole)}>

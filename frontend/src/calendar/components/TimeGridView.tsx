@@ -1,25 +1,42 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
+import type { CalTask } from "@/api/calendar";
 import { cn } from "@/utils/cn";
 
 import { beginPress, snap15 } from "../drag";
-import { addDays, fmt, hourLabel, sameDay, shortTime, startOfDay, timeRange } from "../dates";
+import { addDays, fmt, hourLabel, localZone, sameDay, shortTime, startOfDay, timeRange, zoneCity, zoneNote, zoneShort } from "../dates";
 import { layoutDay, layoutSpans, lookStyle, onDay, withTimes, type ViewEvent } from "../model";
 import { EventChip, openFrom, type OpenEvent } from "./EventChip";
 import { TaskMarker } from "./ExtrasChips";
 
 const HOUR = 48;
 const GUTTER = 52;
+/** The extra hour column for a second time zone. */
+const GUTTER2 = 44;
 const LANE = 22;
 const MIN_LEN = 15 * 60_000;
+/** How long a task dragged onto the grid is planned for. */
+const PLAN_MIN = 60;
 
-/** A timed event being dragged: where it would land. */
+/** A timed event being dragged (or a task being planned): where it would land. */
 interface GridDrag {
   v: ViewEvent;
-  mode: "move" | "resize";
+  mode: "move" | "resize" | "plan";
   origin: { day: number; min: number };
   start: Date;
   end: Date;
+  /** Planning a task: the pointer is over the hour grid (else it drops nowhere). */
+  over?: boolean;
+}
+
+/** "9am" / "9:30am" as the clock reads in ``tz``. */
+function hourIn(d: Date, tz: string): string {
+  try {
+    const s = new Intl.DateTimeFormat(undefined, { timeZone: tz, hour: "numeric", minute: "2-digit" }).format(d);
+    return s.replace(/:00(?=\D|$)/, "").replace(/\s?([AP])M$/i, (_m, p: string) => p.toLowerCase() + "m");
+  } catch {
+    return "";
+  }
 }
 
 /** An all-day / multi-day bar being moved by whole days. */
@@ -41,6 +58,8 @@ export function TimeGridView({
   onCreate,
   onDay,
   onMove,
+  onPlanTask,
+  secondTz,
 }: {
   from: Date;
   days: number;
@@ -51,7 +70,13 @@ export function TimeGridView({
   onDay: (d: Date) => void;
   /** An event was dragged to [start, end). */
   onMove: (v: ViewEvent, start: Date, end: Date) => void;
+  /** A task chip was dragged onto the hour grid: plan it for [start, end). */
+  onPlanTask?: (t: CalTask, start: Date, end: Date) => void;
+  /** Show a second column of hours in this zone (IANA name). */
+  secondTz?: string;
 }) {
+  const tz2 = secondTz && secondTz !== localZone() ? secondTz : "";
+  const gutter = tz2 ? GUTTER + GUTTER2 : GUTTER;
   const cols = useMemo(() => Array.from({ length: days }, (_, i) => addDays(from, i)), [from, days]);
   const [dayDrag, setDayDragState] = useState<DayDrag | null>(null);
   const spanEvents = useMemo(() => {
@@ -111,6 +136,16 @@ export function TimeGridView({
     if (!d || !grid.current) return;
     lastPt.current = { x, y };
     const s = slotAt(x, y);
+    if (d.mode === "plan") {
+      const sr = scroller.current!.getBoundingClientRect();
+      const gr = grid.current.getBoundingClientRect();
+      const over = y >= sr.top && y <= sr.bottom && x >= gr.left && x <= gr.right;
+      const start = startOfDay(addDays(from, s.day));
+      start.setMinutes(clamp(snap15(s.min - PLAN_MIN / 2), 0, 24 * 60 - PLAN_MIN));
+      const end = new Date(start.getTime() + PLAN_MIN * 60_000);
+      if (over !== d.over || start.getTime() !== d.start.getTime()) setDrag({ ...d, start, end, over });
+      return;
+    }
     let start = d.v.start;
     let end: Date;
     if (d.mode === "move") {
@@ -151,8 +186,14 @@ export function TimeGridView({
     const tick = () => {
       const el = scroller.current;
       const p = lastPt.current;
+      const planning = dragRef.current?.mode === "plan";
       if (el && p) {
         const r = el.getBoundingClientRect();
+        // A task on its way down from the all-day row doesn't scroll the hours.
+        if (planning && (p.y < r.top || p.y > r.bottom)) {
+          raf = requestAnimationFrame(tick);
+          return;
+        }
         const edge = 44;
         let dy = 0;
         if (p.y < r.top + edge) dy = -Math.ceil((r.top + edge - p.y) / 3);
@@ -182,7 +223,25 @@ export function TimeGridView({
     const r = allDayRow.current!.getBoundingClientRect();
     return clamp(Math.floor((x - r.left) / (r.width / days)), 0, days - 1);
   };
+  // A task chip dragged down onto the hours: plan it there.
+  const pressTask = (e: ReactPointerEvent<HTMLElement>, v: ViewEvent, task: CalTask) => {
+    beginPress(e, {
+      start: (x, y) => {
+        lastPt.current = { x, y };
+        setDrag({ v: { ...v, allDay: false, spanning: false }, mode: "plan", origin: { day: 0, min: 0 }, start: v.start, end: v.start, over: false });
+        follow(x, y);
+      },
+      move: follow,
+      drop: () => {
+        const d = dragRef.current;
+        setDrag(null);
+        if (d?.over) onPlanTask?.(task, d.start, d.end);
+      },
+      cancel: () => setDrag(null),
+    });
+  };
   const pressSpan = (e: ReactPointerEvent<HTMLElement>, v: ViewEvent) => {
+    if (v.extra?.kind === "task" && onPlanTask) return pressTask(e, v, v.extra.task);
     if (!v.ev.can_edit || v.extra) return;
     beginPress(e, {
       start: (x) => setDayDrag({ v, origin: dayAt(x), shift: 0 }),
@@ -204,7 +263,18 @@ export function TimeGridView({
       {/* Day headers + all-day row */}
       <div className="shrink-0 border-b border-[var(--border)]" style={{ paddingRight: sbw }}>
         <div className="flex">
-          <div style={{ width: GUTTER }} className="shrink-0" />
+          <div style={{ width: gutter }} className="flex shrink-0 items-end justify-end pb-1 text-[9px] font-medium uppercase leading-none text-[var(--text-muted)]">
+            {tz2 && (
+              <>
+                <span style={{ width: GUTTER2 }} className="truncate pr-1 text-right" title={`${zoneCity(tz2)} time`}>
+                  {zoneShort(tz2, from)}
+                </span>
+                <span style={{ width: GUTTER }} className="truncate pr-2 text-right" title="Your time">
+                  {zoneShort(localZone(), from)}
+                </span>
+              </>
+            )}
+          </div>
           <div className="grid flex-1" style={gridCols}>
             {cols.map((d, i) => {
               const isToday = sameDay(d, now);
@@ -233,7 +303,7 @@ export function TimeGridView({
           </div>
         </div>
         <div className="flex">
-          <div style={{ width: GUTTER }} className="flex shrink-0 items-start justify-end pr-2 pt-1 text-[10px] text-[var(--text-muted)]">
+          <div style={{ width: gutter }} className="flex shrink-0 items-start justify-end pr-2 pt-1 text-[10px] text-[var(--text-muted)]">
             {lanes > 3 ? (
               <button type="button" onClick={() => setExpanded((x) => !x)} className="rounded px-1 hover:bg-[var(--hover)] hover:text-[var(--text)]">
                 {expanded ? "less" : `+${hiddenSpans}`}
@@ -264,6 +334,7 @@ export function TimeGridView({
                   className={cn(
                     "absolute select-none px-[2px] [-webkit-touch-callout:none]",
                     dayDrag?.v.ev.id === s.v.ev.id && "z-20 drop-shadow-[0_4px_10px_rgba(0,0,0,0.25)]",
+                    drag?.mode === "plan" && drag.v.ev.id === s.v.ev.id && "opacity-40",
                   )}
                   style={{ top: 3 + s.lane * LANE, height: LANE - 2, left: `${(s.col / days) * 100}%`, width: `${(s.span / days) * 100}%` }}
                 >
@@ -277,6 +348,15 @@ export function TimeGridView({
       {/* Hour grid */}
       <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="flex" style={{ height: 24 * HOUR }}>
+          {tz2 && (
+            <div style={{ width: GUTTER2 }} className="relative shrink-0" aria-label={`${zoneCity(tz2)} time`}>
+              {Array.from({ length: 23 }, (_, i) => (
+                <span key={i} className="absolute right-1 -translate-y-1/2 text-[10px] tabular-nums text-[var(--text-muted)] opacity-80" style={{ top: (i + 1) * HOUR }}>
+                  {hourIn(new Date(from.getFullYear(), from.getMonth(), from.getDate(), i + 1), tz2)}
+                </span>
+              ))}
+            </div>
+          )}
           <div style={{ width: GUTTER }} className="relative shrink-0">
             {Array.from({ length: 23 }, (_, i) => (
               <span key={i} className="absolute right-2 -translate-y-1/2 text-[10px] tabular-nums text-[var(--text-muted)]" style={{ top: (i + 1) * HOUR }}>
@@ -352,7 +432,7 @@ function DayColumn({
   }, [markers, day, dayStart]);
   // Where the dragged event would land, on this day.
   let ghost: { top: number; height: number } | null = null;
-  if (drag && drag.start.getTime() < dayEnd && drag.end.getTime() > dayStart) {
+  if (drag && (drag.mode !== "plan" || drag.over) && drag.start.getTime() < dayEnd && drag.end.getTime() > dayStart) {
     const top = ((Math.max(drag.start.getTime(), dayStart) - dayStart) / 3_600_000) * HOUR;
     const bottom = ((Math.min(drag.end.getTime(), dayEnd) - dayStart) / 3_600_000) * HOUR;
     ghost = { top, height: Math.max(HOUR / 4, bottom - top) };
@@ -383,6 +463,10 @@ function DayColumn({
             onClick={(e) => openFrom(e, v, onOpen)}
             onPointerDown={(e) => onPress(e, v, "move")}
             aria-label={`${v.ev.title}, ${shortTime(v.start)} – ${shortTime(v.end)}`}
+            title={(() => {
+              const z = zoneNote(v.start, v.ev.tz, v.allDay);
+              return z ? `${v.ev.title} · ${z}` : undefined;
+            })()}
             className={cn(
               "group/block absolute select-none overflow-hidden rounded-md px-1.5 text-left text-[11px] leading-tight shadow-[0_0_0_1px_var(--bg)] transition-opacity [-webkit-touch-callout:none] hover:z-10 hover:brightness-95",
               short ? "py-0" : "py-1",

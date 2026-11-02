@@ -70,6 +70,10 @@ class CalEvent(UUIDPKMixin, TimestampMixin, Base):
     reminders: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")  # minutes before
     color: Mapped[str | None] = mapped_column(String(9), nullable=True)
     guests_can_edit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    # What it was made from — a task planned into a time slot:
+    # {"kind": "task", "file_id": ..., "task_id": ...}.
+    source: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    album_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("albums.id", ondelete="SET NULL"), nullable=True)  # made from its photos
 
 
 class CalAttendee(Base):
@@ -121,4 +125,33 @@ class CalEventRoom(Base):
     room_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("rooms.id", ondelete="CASCADE"), primary_key=True, index=True)
     message_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("room_messages.id", ondelete="SET NULL"), nullable=True)
     shared_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    remind_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True, default=60, server_default="60")  # "starting in 1 hour" in the room; NULL = off
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CalRoomReminderSent(Base):
+    """A room's "starting soon" post already made, so it goes once."""
+
+    __tablename__ = "cal_room_reminders_sent"
+
+    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cal_events.id", ondelete="CASCADE"), primary_key=True)
+    room_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("rooms.id", ondelete="CASCADE"), primary_key=True)
+    occurrence: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class CalExternalGuest(UUIDPKMixin, Base):
+    """Someone invited by email who isn't on this Promptly; they answer from
+    the link in the email (``token``)."""
+
+    __tablename__ = "cal_external_guests"
+    __table_args__ = (UniqueConstraint("event_id", "email", name="uq_cal_external_guests_event_email"),)
+
+    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cal_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False, default="", server_default="")
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="invited", server_default="invited")  # invited/going/maybe/declined
+    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    invited_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())

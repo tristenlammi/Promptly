@@ -36,6 +36,7 @@ import { cn } from "@/utils/cn";
 
 import { ENERGY, moodInfo } from "./constants";
 import { entryWords, fmtClock, fmtFullDay, fmtShortDay, nowHHMM, promptOfDay, tagCounts, visibleTemplates } from "./lib";
+import { DayStrip } from "./DayStrip";
 import { Markdown } from "./Markdown";
 import { EmotionChip, EmotionPicker, EnergyPicker, MoodPicker, TagInput } from "./Pickers";
 import {
@@ -546,6 +547,20 @@ function Editor({ req, item, isPhone }: { req: EditorRequest; item: ItemHandle<J
 
   const setBody = (body: string) => patch({ body });
 
+  /** "Your day" → a line (an event) or a photo reference, at the end. */
+  const addToBody = (text: string) => {
+    const cur = latest.current.draft.body;
+    const next = cur.trim() ? `${cur.trimEnd()}
+${text}
+` : `${text}
+`;
+    if (next.length > MAX_BODY) {
+      setNotice({ kind: "limit" });
+      return;
+    }
+    setBody(next);
+  };
+
   /** Replace [s, e) with text, keeping the browser's undo where possible. */
   const replaceRange = (s: number, e: number, text: string, selStart: number, selEnd: number) => {
     const el = ta.current;
@@ -979,6 +994,8 @@ function Editor({ req, item, isPhone }: { req: EditorRequest; item: ItemHandle<J
               </button>
             </div>
           )}
+
+          <DayStrip fileId={fileId} date={draft.date} body={draft.body} onAdd={addToBody} />
 
           {preview ? (
             <div className="min-h-[320px]" onDoubleClick={() => setPreview(false)}>

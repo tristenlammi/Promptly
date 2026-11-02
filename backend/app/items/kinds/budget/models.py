@@ -76,6 +76,9 @@ class Transaction(BaseModel):
     # Why this one needs a look ("the bank amount changed, so the split was
     # reset"); cleared when the person edits it.
     review: str = Field(default="", max_length=160)
+    # The trip it was spent on ("<trip file id>:<trip id>"), for the trip's
+    # "Spent so far" — set by hand or from the trip's dates.
+    trip_ref: str | None = Field(default=None, max_length=120)
 
     @model_serializer(mode="wrap")
     def _slim(self, handler: Any) -> dict:

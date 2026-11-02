@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { calendarApi, type CalEvent } from "@/api/calendar";
+import { personUserPath } from "@/api/peopleHub";
 import { StatusBadge } from "@/calendar/components/ui";
 import { addDays, fmt, parseYmd, sameDay, timeLabel } from "@/calendar/dates";
 import { CAL_ACCENT } from "@/calendar/model";
@@ -161,6 +162,7 @@ export function PinsPanel({ b, roomId, onJump }: { b: Bootstrap; roomId: string;
 }
 
 export function MembersPanel({ b, memberIds, space }: { b: Bootstrap; memberIds: string[]; space: Space | null }) {
+  const navigate = useNavigate();
   const roleOf = (id: string) => space?.member_roles?.[id];
   const sorted = [...memberIds].sort((x, y) => {
     const rank = (id: string) => (roleOf(id) === "owner" ? 0 : roleOf(id) === "admin" ? 1 : 2);
@@ -172,14 +174,22 @@ export function MembersPanel({ b, memberIds, space }: { b: Bootstrap; memberIds:
         const u = b.users[id];
         const role = roleOf(id);
         return (
-          <li key={id} className="flex h-12 items-center gap-2.5 px-4">
-            <UserAvatar user={u} size={32} />
-            <span className={cn("min-w-0 flex-1 truncate text-sm", id === b.me.id ? "font-semibold" : "", "text-[var(--text)]")}>
-              {u?.username ?? "Someone"}
-              {id === b.me.id && <span className="font-normal text-[var(--text-muted)]"> (you)</span>}
-            </span>
-            {role === "owner" && <Crown className="h-4 w-4 text-[#C08B2C]" aria-label="Owner" />}
-            {role === "admin" && <Shield className="h-4 w-4 text-[var(--item-accent)]" aria-label="Admin" />}
+          <li key={id}>
+            {/* Tap someone for their person page (contact card, photos, plans together). */}
+            <button
+              type="button"
+              onClick={() => navigate(personUserPath(id))}
+              aria-label={`View ${u?.username ?? "their"} profile`}
+              className="flex h-12 w-full items-center gap-2.5 px-4 text-left hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] focus-visible:outline-none"
+            >
+              <UserAvatar user={u} size={32} />
+              <span className={cn("min-w-0 flex-1 truncate text-sm", id === b.me.id ? "font-semibold" : "", "text-[var(--text)]")}>
+                {u?.username ?? "Someone"}
+                {id === b.me.id && <span className="font-normal text-[var(--text-muted)]"> (you)</span>}
+              </span>
+              {role === "owner" && <Crown className="h-4 w-4 text-[#C08B2C]" aria-label="Owner" />}
+              {role === "admin" && <Shield className="h-4 w-4 text-[var(--item-accent)]" aria-label="Admin" />}
+            </button>
           </li>
         );
       })}

@@ -44,6 +44,10 @@ async def send_due(db) -> int:  # noqa: ANN001
         rem.sent_at = now
         if f.trashed_at is not None or now - rem.due_at > _LATE:
             continue
+        # A Tasks morning digest queued before it moved into the one Today
+        # summary push (app/today/push.py) — dropped, never sent twice.
+        if rem.key.startswith("digest:") and (f.filename or "").lower().endswith(".tasks"):
+            continue
         await notify_user(
             user_id=rem.user_id,
             category="item_reminder",
@@ -51,10 +55,24 @@ async def send_due(db) -> int:  # noqa: ANN001
             body=rem.body,
             url=f"/files/item/{f.id}",
             tag=f"item:{rem.key}"[:120],
+            # A Tasks reminder gets "Done" / "Snooze 1 hour" buttons.
+            extra=await _buttons(db, rem, f),
         )
         n += 1
     await db.commit()
     return n
+
+
+async def _buttons(db, rem, f) -> dict | None:  # noqa: ANN001
+    from app.auth.models import User
+    from app.items.models import ItemDocument
+    from app.notifications.actions import task_buttons
+
+    doc = await db.get(ItemDocument, f.id)
+    user = await db.get(User, rem.user_id)
+    if doc is None or doc.kind != "tasks" or user is None:
+        return None
+    return task_buttons(user, f.id, rem.key)
 
 
 async def refresh_all(db) -> None:  # noqa: ANN001

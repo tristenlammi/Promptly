@@ -70,6 +70,7 @@ export function CategoryPicker({
   title = "Category",
   kinds = ["expense", "income"],
   footer,
+  header,
   allowNone,
 }: {
   data: BudgetData;
@@ -80,6 +81,8 @@ export function CategoryPicker({
   title?: string;
   kinds?: ("expense" | "income")[];
   footer?: ReactNode;
+  /** Above the search box (e.g. "Always for this payee"), so it's seen before picking. */
+  header?: ReactNode;
   allowNone?: boolean;
 }) {
   const [q, setQ] = useState("");
@@ -97,6 +100,7 @@ export function CategoryPicker({
   return (
     <Sheet open={open} onClose={onClose} title={title} footer={footer} size="md">
       <div className="sticky top-0 z-10 -mx-5 bg-[var(--bg)] px-5 pb-2">
+        {header && <div className="mb-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5">{header}</div>}
         <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-muted)]" />
           <TextInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find a category" className="pl-9" aria-label="Find a category" />

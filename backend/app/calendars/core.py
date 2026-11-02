@@ -234,6 +234,8 @@ def event_out(ev: CalEvent, m: CalMember | None, my_att: CalAttendee | None, att
         "on_my_calendar": m is not None,
         "can_edit": can_edit(ev, m, my_att, user),
         "can_delete": can_delete(ev, m, user),
+        # What it was made from (a task planned into a time slot), else None.
+        "source": ev.source,
     }
 
 

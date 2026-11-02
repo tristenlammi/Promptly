@@ -36,7 +36,7 @@ class NewTask(BaseModel):
     time: str | None = Field(default=None, description="Due time HH:MM, 24-hour; omit for all day")
     alerts: builtins.list[int] | None = Field(
         default=None,
-        description="Reminder pushes, minutes before the due moment (0 = at the time; an all-day task's moment is the default time on the day). Omit for the default: at the time for timed tasks, none for all-day ones (the morning digest covers them).",
+        description="Reminder pushes, minutes before the due moment (0 = at the time; an all-day task's moment is the default time on the day). Omit for the default: at the time for timed tasks, none for all-day ones (the morning summary covers them).",
     )
     repeat: Repeat | None = None
     priority: int = Field(default=0, ge=0, le=3, description="0 none, 1 low, 2 medium, 3 high")

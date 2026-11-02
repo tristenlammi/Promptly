@@ -31,10 +31,13 @@ import {
   MapPin,
   Pencil,
   Plus,
+  Send,
   Sparkles,
   TriangleAlert,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+
+import { SendToSheet } from "@/components/share/SendToSheet";
 
 import type { ItemViewProps } from "@/items/types";
 import type { ItemHandle } from "@/items/useItem";
@@ -42,6 +45,7 @@ import { Avatar, Card, Chip, EmptyState, Fab, IconButton, ItemButton, List, Page
 import { cn } from "@/utils/cn";
 
 import { requestBooking, takeDay } from "./bus";
+import { TripAlbumStrip } from "./CrossApp";
 import {
   bookingEvents,
   bookingLabel,
@@ -87,6 +91,7 @@ function phaseText(p: Phase): string {
 export function TripHero({ item, title, issues, onIssues, compact }: { item: ItemHandle<Trip>; title: string; issues: Issue[]; onIssues: () => void; compact?: boolean }) {
   const t = item.data;
   const [edit, setEdit] = useState(false);
+  const [sending, setSending] = useState(false);
   const p = phaseOf(t, todayISO());
   const serious = issues.filter((i) => i.severity !== "info").length;
   return (
@@ -110,11 +115,16 @@ export function TripHero({ item, title, issues, onIssues, compact }: { item: Ite
               </h1>
               <p className="text-sm text-white/90 tabular-nums">{fmtRange(t.start, t.end)}</p>
             </div>
-            {item.canEdit && (
-              <button type="button" aria-label="Edit trip details" onClick={() => setEdit(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/15 hover:bg-white/25">
-                <Pencil className="h-4 w-4" />
+            <div className="flex shrink-0 gap-1.5">
+              <button type="button" aria-label="Send to a room or person" title="Send to…" onClick={() => setSending(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/15 hover:bg-white/25">
+                <Send className="h-4 w-4" />
               </button>
-            )}
+              {item.canEdit && (
+                <button type="button" aria-label="Edit trip details" onClick={() => setEdit(true)} className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/15 hover:bg-white/25">
+                  <Pencil className="h-4 w-4" />
+                </button>
+              )}
+            </div>
           </div>
           <p className="text-base font-semibold" aria-live="polite">
             {phaseText(p)}
@@ -145,7 +155,9 @@ export function TripHero({ item, title, issues, onIssues, compact }: { item: Ite
           </div>
         </div>
       </div>
+      <TripAlbumStrip item={item} />
       {item.canEdit && <TripSheet item={item} open={edit} onClose={() => setEdit(false)} fallbackTitle={title} />}
+      <SendToSheet open={sending} onClose={() => setSending(false)} target={{ kind: "trip", id: t.id, file_id: item.fileId, title: t.title || title }} />
     </>
   );
 }

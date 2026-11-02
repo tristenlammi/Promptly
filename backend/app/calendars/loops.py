@@ -108,7 +108,10 @@ def _due(start: datetime, minutes: int, all_day: bool, tz_name: str, user) -> da
 async def _prune(db) -> None:  # noqa: ANN001
     from .models import CalReminderSent
 
+    from .reach import prune_room_sent
+
     await db.execute(delete(CalReminderSent).where(CalReminderSent.sent_at < datetime.now(timezone.utc) - timedelta(days=30)))
+    await prune_room_sent(db)
     await db.commit()
 
 
@@ -119,6 +122,11 @@ async def _loop() -> None:
         try:
             async with SessionLocal() as db:
                 await send_due(db)
+            # "Starting in 1 hour" in the rooms events were planned in.
+            async with SessionLocal() as db:
+                from .reach import send_room_due
+
+                await send_room_due(db)
             if datetime.now(timezone.utc) - last_prune > timedelta(days=1):
                 last_prune = datetime.now(timezone.utc)
                 async with SessionLocal() as db:

@@ -83,11 +83,27 @@ export function useInvites() {
   return q;
 }
 
-/** Tasks due and birthdays in [from, to) (local days), as my prefs allow. */
+/** Which "Also show" switches are on (holidays only once a country is picked). */
+function shownExtras(prefs: CalendarPrefs | undefined) {
+  return {
+    tasks: !!prefs?.tasks,
+    birthdays: !!prefs?.birthdays,
+    workouts: !!prefs?.workouts,
+    meals: !!prefs?.meals,
+    bills: !!prefs?.bills,
+    trips: !!prefs?.trips,
+    holidays: !!prefs?.holidays && !!prefs?.holiday_country,
+  };
+}
+
+/** Tasks due, birthdays, workouts, meals, bills, trips and holidays in
+ *  [from, to) (local days), as my "Also show" switches allow. */
 export function useExtras(from: Date, to: Date, prefs: CalendarPrefs | undefined, enabled = true) {
   const start = ymd(from);
   const end = ymd(to);
-  const on = enabled && !!prefs && (prefs.tasks || prefs.birthdays);
+  const shown = shownExtras(prefs);
+  const key = Object.values(shown).map(Number).join("");
+  const on = enabled && !!prefs && key.includes("1");
   const q = useQuery({
     queryKey: [...EXTRAS_KEY, start, end],
     queryFn: () => calendarApi.extras(start, end),
@@ -97,12 +113,23 @@ export function useExtras(from: Date, to: Date, prefs: CalendarPrefs | undefined
     refetchOnWindowFocus: true,
     placeholderData: (prev) => prev,
   });
-  const showTasks = !!prefs?.tasks;
-  const showBirthdays = !!prefs?.birthdays;
   const items: ViewEvent[] = useMemo(() => {
     if (!on || !q.data) return [];
-    return extrasToView(showTasks ? q.data.tasks : [], showBirthdays ? q.data.birthdays : []);
-  }, [on, q.data, showTasks, showBirthdays]);
+    // Switched off a moment ago: hidden at once, before the refetch.
+    const d = q.data;
+    const pick = <T,>(flag: boolean, list: T[] | undefined) => (flag ? (list ?? []) : []);
+    const s = shownExtras(prefs);
+    return extrasToView({
+      tasks: pick(s.tasks, d.tasks),
+      birthdays: pick(s.birthdays, d.birthdays),
+      workouts: pick(s.workouts, d.workouts),
+      meals: pick(s.meals, d.meals),
+      bills: pick(s.bills, d.bills),
+      trips: pick(s.trips, d.trips),
+      holidays: pick(s.holidays, d.holidays),
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [on, q.data, key]);
   return items;
 }
 
@@ -135,7 +162,7 @@ export function useRefreshCalendars() {
   }, [qc]);
 }
 
-/** Turn tasks / birthdays on the calendar on or off (applies at once). */
+/** Change what "Also show" shows, or the second time zone (applies at once). */
 export function useSetPrefs() {
   const qc = useQueryClient();
   return useCallback(

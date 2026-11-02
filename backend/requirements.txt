@@ -144,7 +144,9 @@ pywebpush==2.0.0
 # ---- Calendar ----
 # Repeating events (RRULE expansion). Already a transitive dependency;
 # pinned because app/calendars uses it directly.
-python-dateutil==3.0.0
+python-dateutil==2.9.0.post0
+# Public holidays by country (the calendar's optional Holidays row). MIT.
+holidays==0.106
 
 # ---- Drive documents (Y.js server-side snapshot rendering) ----
 # ``pycrdt`` is the Python binding for the Rust y-crdt core — same

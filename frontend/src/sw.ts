@@ -122,6 +122,10 @@ interface PushPayload {
   line?: string;
   /** Rooms: unread messages in all — the number on the app icon. */
   app_badge?: number;
+  /** Buttons on the notification ("Going", "Done", "Snooze 1 hour"): each
+   * carries a signed token the worker POSTs to ``/api/notifications/action``
+   * (it has no sign-in of its own). See ``app/notifications/actions.py``. */
+  actions?: { action: string; title: string; token: string }[];
 }
 
 /** How many stacked lines a room's notification shows before "+N more". */
@@ -188,8 +192,13 @@ self.addEventListener("push", (event) => {
       // vibrate / sound again even when the tag already exists) but the
       // TypeScript DOM lib hasn't caught up. Build as a loose object and
       // cast at the call site.
+      // Platforms without notification buttons (iOS, some desktops) just
+      // show the notification; tapping it opens the link as always.
+      const maxActions = (Notification as unknown as { maxActions?: number }).maxActions ?? 2;
+      const buttons = (payload.actions ?? []).slice(0, maxActions);
       const options = {
         body,
+        actions: buttons.map((a) => ({ action: a.action, title: a.title })),
         // The sender's picture for a message; Promptly's icon otherwise.
         icon: payload.icon || "/pwa-192.png",
         badge: "/pwa-192.png",
@@ -204,6 +213,7 @@ self.addEventListener("push", (event) => {
           category: payload.category,
           lines,
           count,
+          tokens: Object.fromEntries(buttons.map((a) => [a.action, a.token])),
         },
       } as NotificationOptions;
       await self.registration.showNotification(title, options);
@@ -211,10 +221,48 @@ self.addEventListener("push", (event) => {
   );
 });
 
+/** A notification's button: do it in the background and say so briefly;
+ * if it can't be done (expired, gone, offline), open the app instead. */
+async function runAction(token: string, note: Notification): Promise<boolean> {
+  try {
+    const res = await fetch("/api/notifications/action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+      credentials: "omit",
+    });
+    if (!res.ok) return false;
+    const out = (await res.json().catch(() => ({}))) as { message?: string };
+    const tag = `${note.tag || "promptly"}:done`;
+    await self.registration.showNotification(out.message || "Done", {
+      tag,
+      icon: "/pwa-192.png",
+      badge: "/pwa-192.png",
+      silent: true,
+      data: { url: (note.data?.url as string) || "/" },
+    } as NotificationOptions);
+    // Clear the confirmation after a moment.
+    await new Promise((r) => setTimeout(r, 4000));
+    for (const n of await self.registration.getNotifications({ tag })) n.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data ?? {};
   let url = (data.url as string) || "/";
+  const token = event.action ? (data.tokens as Record<string, string> | undefined)?.[event.action] : undefined;
+  if (token) {
+    event.waitUntil(
+      runAction(token, event.notification).then(async (ok) => {
+        if (!ok) await self.clients.openWindow(new URL(url, self.location.origin).href);
+      }),
+    );
+    return;
+  }
 
   event.waitUntil(
     (async () => {

@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 
-from . import core, notify, recur
+from . import core, notify, reach, recur
 from .models import CalAttendee, CalCalendar, CalEvent, CalMember
 
 UTC = timezone.utc
@@ -187,6 +187,7 @@ async def update_event(
         await notify.invited(db, ev, user, new_guests)
     if any(before[k] != getattr(ev, k) for k in _TIME_FIELDS):
         await notify.changed(db, ev, user, (await _guests_seeing(db, ev)) - new_guests)
+        await reach.email_changed(db, ev, user)  # guests invited by email
     return ev
 
 
@@ -329,12 +330,15 @@ async def delete_event(db: AsyncSession, user: User, event_id: uuid.UUID, *, sco
         if scope == "following" and occ != ev.start_at:
             _end_before(ev, occ)
             await notify.cancelled(db, ev, user, seeing, occurrence=occ)
+            await reach.email_changed(db, ev, user)  # the series ends sooner
             return
         if scope == "this":
             ev.exdates = [*ev.exdates, recur.stamp(occ)]
             await notify.cancelled(db, ev, user, seeing, occurrence=occ)
+            await reach.email_cancelled(db, ev, user, occurrence=occ)
             return
     await notify.cancelled(db, ev, user, seeing)
+    await reach.email_cancelled(db, ev, user)  # before its email guests go with it
     await db.delete(ev)
 
 

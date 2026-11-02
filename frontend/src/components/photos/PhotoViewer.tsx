@@ -14,6 +14,7 @@ import {
   Pause,
   SlidersHorizontal,
   Play,
+  Send,
   Trash2,
   X,
 } from "lucide-react";
@@ -26,6 +27,7 @@ import { photosApi, type PhotoItem } from "@/api/photos";
 import { MediaDetails } from "@/components/files/MediaDetails";
 import { PeopleInPhoto } from "@/components/photos/PeopleInPhoto";
 import { PhotoEditor } from "@/components/photos/PhotoEditor";
+import { SendToSheet } from "@/components/share/SendToSheet";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -114,6 +116,7 @@ export function PhotoViewer({
   // length (at most 30 s) — and stops at the end. Space pauses it.
   const [playing, setPlaying] = useState(slideshow);
   const [editing, setEditing] = useState(false);
+  const [sending, setSending] = useState(false);
   useEffect(() => {
     const p = items[index];
     if (!playing || !p) return;
@@ -129,7 +132,7 @@ export function PhotoViewer({
   // Keys: ← → to move, Esc to close, i for info.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (editing || (e.target as HTMLElement)?.closest("input, textarea, select, [contenteditable]")) return;
+      if (editing || sending || (e.target as HTMLElement)?.closest("input, textarea, select, [contenteditable]")) return;
       if (e.key === "ArrowRight") void go(1);
       else if (e.key === "ArrowLeft") void go(-1);
       else if (e.key === "Escape") onClose();
@@ -141,7 +144,7 @@ export function PhotoViewer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [go, onClose, slideshow, editing]);
+  }, [go, onClose, slideshow, editing, sending]);
 
   // The next and previous photos load while you look at this one.
   useEffect(() => {
@@ -232,6 +235,9 @@ export function PhotoViewer({
                 <SlidersHorizontal className="h-5 w-5" />
               </button>
             )}
+            <button type="button" aria-label="Send to…" title="Send to a room or person" onClick={() => { setPlaying(false); setSending(true); }} className={btn}>
+              <Send className="h-5 w-5" />
+            </button>
             <DownloadButton id={photo.id} className={btn} />
             {photo.edited && (
               <button type="button" aria-label="Download edited" title="Download edited" className={cn(btn, "hidden sm:block")}
@@ -265,6 +271,12 @@ export function PhotoViewer({
       </div>
 
       {info && <InfoPanel photo={photo} onClose={() => setInfo(false)} />}
+      <SendToSheet
+        open={sending}
+        onClose={() => setSending(false)}
+        target={{ kind: "photo", id: photo.id, title: photo.filename }}
+        canGrant={photo.mine !== false}
+      />
       {editing && (
         <PhotoEditor
           photo={photo}

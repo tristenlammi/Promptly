@@ -1,6 +1,7 @@
-import { Bell, CalendarDays, Clock, Flag, ListChecks, Plus, Repeat as RepeatIcon, Trash2, X } from "lucide-react";
+import { Bell, CalendarDays, Clock, Flag, ListChecks, Plus, Repeat as RepeatIcon, Send, Trash2, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
+import { SendToSheet } from "@/components/share/SendToSheet";
 import type { ItemHandle } from "@/items/useItem";
 import { Chip, Field, ItemButton, Segmented, Select, Sheet, Stepper, TextArea, TextInput, Toggle, fmtDay, todayISO, uid } from "@/items/ui";
 import { toast } from "@/store/toastStore";
@@ -37,6 +38,7 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
   const [tagText, setTagText] = useState("");
   const toggle = useToggle(item);
   const ro = !item.canEdit;
+  const [sending, setSending] = useState(false);
   useEffect(() => {
     if (task) {
       setTitle(task.title);
@@ -131,12 +133,16 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
               Delete
             </ItemButton>
           )}
+          <ItemButton variant="ghost" icon={<Send className="h-4 w-4" />} onClick={() => setSending(true)}>
+            Send to…
+          </ItemButton>
           <ItemButton variant="primary" className="ml-auto" onClick={close}>
             Done
           </ItemButton>
         </div>
       }
     >
+      <SendToSheet open={sending} onClose={() => setSending(false)} target={{ kind: "task", id: task.id, file_id: item.fileId, title: task.title }} />
       <fieldset disabled={ro} className="flex flex-col gap-3">
         <TextInput
           value={title}

@@ -16,6 +16,7 @@ import {
   Images,
   LayoutGrid,
   Pencil,
+  Send,
   Share2,
   Star,
   Trash2,
@@ -43,6 +44,8 @@ import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { FilesTopNavSearch } from "@/components/files/FilesTopNavSearch";
 import { MoveItemModal } from "@/components/files/MoveItemModal";
 import { ShareGrantsModal } from "@/components/files/ShareGrantsModal";
+import { SendToSheet } from "@/components/share/SendToSheet";
+import type { ShareTarget } from "@/api/crossapp";
 import { NewMenu, useNewItems, type NewItemAction } from "@/components/files/NewMenu";
 import { askAboutFiles } from "@/components/files/askAbout";
 import { useDriveAi } from "@/components/files/DriveAiDialog";
@@ -1458,6 +1461,8 @@ function ContentGrid({
   const [menu, setMenu] = useState<{ entry: DriveEntry; x: number; y: number } | null>(null);
   const [renameDialog, setRenameDialog] = useState<{ entry: DriveEntry; value: string } | null>(null);
   const [trashAsk, setTrashAsk] = useState<DriveEntry | null>(null);
+  // "Send to…" a room or a person (a card in Rooms).
+  const [sendTo, setSendTo] = useState<{ target: ShareTarget; own: boolean } | null>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
 
   // The latest props for the controller's callbacks, so the controller
@@ -1562,6 +1567,18 @@ function ContentGrid({
         const common: ContextMenuItem[] = [
           starItem,
           { icon: <Share2 className="h-3.5 w-3.5" />, label: "Share", onClick: () => share(entry), disabled: !writable },
+          {
+            icon: <Send className="h-3.5 w-3.5" />,
+            label: "Send to…",
+            onClick: () =>
+              setSendTo({
+                own: L.scope === "mine",
+                target:
+                  entry.kind === "file"
+                    ? { kind: "file", id: entry.file.id, title: entry.file.filename }
+                    : { kind: "folder", id: entry.folder.id, title: entry.folder.name },
+              }),
+          },
           { icon: <Pencil className="h-3.5 w-3.5" />, label: "Rename", onClick: () => startRename(entry), disabled: !writable },
           move,
         ];
@@ -1727,6 +1744,8 @@ function ContentGrid({
         items={menuItems}
         onClose={() => setMenu(null)}
       />
+
+      <SendToSheet open={!!sendTo} target={sendTo?.target ?? null} canGrant={sendTo?.own ?? false} onClose={() => setSendTo(null)} />
 
       <InlinePromptModal
         open={!!renameDialog}

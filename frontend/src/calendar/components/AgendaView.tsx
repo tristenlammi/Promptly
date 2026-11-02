@@ -4,9 +4,10 @@ import { useEffect, useMemo, useRef } from "react";
 import { EmptyState, ItemButton } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
-import { addDays, dayDiff, fmt, sameDay, shortTime, startOfDay, ymd } from "../dates";
-import { birthdayLabel, lookStyle, onDay, sortEvents, type ViewEvent } from "../model";
+import { addDays, dayDiff, fmt, sameDay, shortDay, shortTime, startOfDay, ymd, zoneNote } from "../dates";
+import { birthdayLabel, extraLabel, lookStyle, onDay, sortEvents, type ViewEvent } from "../model";
 import { openFrom, type OpenEvent } from "./EventChip";
+import { extraEmoji } from "./ExtraDetail";
 import { BirthdayAvatar, TaskCheck } from "./ExtrasChips";
 
 /** Upcoming days with their events, from ``from`` for ``days`` days. */
@@ -101,6 +102,8 @@ function AgendaRow({ v, day, onOpen }: { v: ViewEvent; day: Date; onOpen: OpenEv
   else if (v.start < d0) when = `Until ${shortTime(v.end)}`;
   else if (v.end > addDays(d0, 1)) when = `From ${shortTime(v.start)}`;
   else when = `${shortTime(v.start)} – ${shortTime(v.end)}`;
+  // Its own time zone too, when that isn't mine ("9:00 AM Tokyo time · …").
+  const zone = zoneNote(v.start, v.ev.tz, v.allDay);
   const solid = v.look === "solid";
   return (
     <button
@@ -122,6 +125,7 @@ function AgendaRow({ v, day, onOpen }: { v: ViewEvent; day: Date; onOpen: OpenEv
           )}
           {v.look === "pending" && <span className="shrink-0 font-medium text-[var(--item-accent)]">Invited</span>}
         </span>
+        {zone && <span className="truncate text-[11px] text-[var(--text-muted)]">{zone}</span>}
       </span>
     </button>
   );
@@ -133,7 +137,7 @@ function ExtraRow({ v, onOpen }: { v: ViewEvent; onOpen: OpenEvent }) {
   if (x.kind === "task") {
     const t = x.task;
     return (
-      <div className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-1.5 hover:bg-[var(--hover)]">
+      <div className={cn("flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-1.5 hover:bg-[var(--hover)]", t.planned && "opacity-60")}>
         <span className="flex w-1 justify-center">
           <TaskCheck task={t} size={18} />
         </span>
@@ -145,9 +149,34 @@ function ExtraRow({ v, onOpen }: { v: ViewEvent; onOpen: OpenEvent }) {
               <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: t.color }} />
               <span className="truncate">{t.list}</span>
             </span>
+            {t.planned && <span className="shrink-0">· Planned {shortDay(new Date(t.planned.start))}, {shortTime(new Date(t.planned.start))}</span>}
           </span>
         </button>
       </div>
+    );
+  }
+  if (x.kind !== "birthday") {
+    let sub: string;
+    if (x.kind === "workout") sub = x.w.kind === "day" ? "Training day · from Workout" : x.w.time ? `${shortTime(v.start)} · Workout` : "Workout";
+    else if (x.kind === "meals") sub = "Meal plan";
+    else if (x.kind === "bill") sub = `${x.bill.kind === "bill" ? "Bill" : "Subscription"} due · from Budget`;
+    else if (x.kind === "trip") sub = `${fmt(v.start, { month: "short", day: "numeric" })} – ${fmt(addDays(v.end, -1), { month: "short", day: "numeric" })} · Trip`;
+    else sub = "Public holiday";
+    return (
+      <button
+        type="button"
+        onClick={(e) => openFrom(e, v, onOpen)}
+        className="flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-1.5 text-left transition hover:brightness-[0.97]"
+        style={{ background: `color-mix(in srgb, ${v.color} 9%, var(--surface))` }}
+      >
+        <span aria-hidden className="flex w-[26px] shrink-0 justify-center text-lg leading-none">
+          {extraEmoji(x)}
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-sm text-[var(--text)]">{extraLabel(x)}</span>
+          <span className="truncate text-xs text-[var(--text-muted)]">{sub}</span>
+        </span>
+      </button>
     );
   }
   return (

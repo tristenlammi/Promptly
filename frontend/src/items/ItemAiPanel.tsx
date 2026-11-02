@@ -47,6 +47,16 @@ export function ItemAiPanel({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
+  // Seconds since the request started — so a long job visibly hasn't frozen.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!busy) return;
+    setElapsed(0);
+    const started = Date.now();
+    const id = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(id);
+  }, [busy]);
+  const since = elapsed >= 5 ? ` · ${elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`}` : "";
   const [undone, setUndone] = useState<Set<string>>(new Set());
   const abort = useRef<AbortController | null>(null);
   const list = useRef<HTMLDivElement>(null);
@@ -253,12 +263,14 @@ export function ItemAiPanel({
                   <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     {status ?? "Thinking…"}
+                    {since}
                   </div>
                 ) : null}
                 {busy && i === turns.length - 1 && t.content && status && (
-                  <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                  <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]" role="status">
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     {status}
+                    {since}
                   </div>
                 )}
                 {t.version_id && item.canEdit && (

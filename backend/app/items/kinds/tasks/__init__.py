@@ -94,7 +94,7 @@ AI_BRIEF = """You are a sharp, calm personal organiser running the person's task
 How to work:
 - "Remind me to…", "add…", "I need to…" → add_tasks. Turn natural language into fields: "tomorrow at 3" → due tomorrow, time 15:00; "next Friday" → that date; "in March" → 1 March (all day) unless they say a day; "every month on the 1st" → repeat monthly, month_day 1; "every weekday" → weekly, weekdays [0,1,2,3,4]; "every 3 days after I do it" → daily, interval 3, from_completion. Today's date is in your context — compute dates from it, never guess.
 - Pick the list from context (groceries → Shopping, work things → Work, chores → Home), else the Inbox. Don't invent new lists unless asked.
-- Reminders: a timed task gets an at-the-time push by default. For things with lead time (a bill, a renewal, a birthday) add sensible early alerts, e.g. 1 day (1440) or 1 week (10080) before, and say so. All-day tasks show in the morning digest.
+- Reminders: a timed task gets an at-the-time push by default. For things with lead time (a bill, a renewal, a birthday) add sensible early alerts, e.g. 1 day (1440) or 1 week (10080) before, and say so. All-day tasks show in the morning summary push (Today).
 - Priority only when the person signals urgency or importance (3 = high). Don't mark everything high.
 - Multi-step jobs ("plan the party", "move house") → one task with steps, or a few tasks on sensible dates; ask one short question only if the deadline is unknown and matters.
 - Before changing or completing tasks, get ids from agenda / find_tasks. Use complete_tasks to tick off (repeats roll forward on their own); postpone_tasks to reschedule ("move everything overdue to tomorrow").
@@ -138,7 +138,7 @@ SPEC = ItemSpec(
         "Reminder pushes at the time, or a day or a week before",
         "Repeats: daily, weekdays, monthly on a date, yearly, or N days after done",
         "Today, Upcoming and per-list views; steps, notes, tags and priorities",
-        "A morning digest of what's due",
+        "One morning summary push of your day — tasks due, events and more",
         "Share a list with the household — everyone gets its reminders",
         "Ask the assistant to plan your day, reschedule, or review your week",
     ],

@@ -62,8 +62,12 @@ async def send_message(
     text_body: str,
     html_body: str | None = None,
     reply_to: str | None = None,
+    attachments: list[tuple[str, str, str | bytes]] | None = None,
 ) -> None:
     """Send a single email.
+
+    ``attachments``: ``(filename, content type, data)`` — e.g. a calendar
+    invite, ``("invite.ics", "text/calendar; method=REQUEST", ics_text)``.
 
     ``reply_to`` sets the Reply-To header — used by the feedback mailer so a
     reply lands with the person who submitted it, not the instance's SMTP
@@ -96,6 +100,14 @@ async def send_message(
     msg.set_content(text_body)
     if html_body:
         msg.add_alternative(html_body, subtype="html")
+    for filename, ctype, data in attachments or []:
+        main, _, rest = ctype.partition("/")
+        sub, *param_bits = [p.strip() for p in rest.split(";")]
+        params = dict(p.split("=", 1) for p in param_bits if "=" in p)
+        if isinstance(data, str):
+            msg.add_attachment(data, subtype=sub, filename=filename, params=params)
+        else:
+            msg.add_attachment(data, maintype=main, subtype=sub, filename=filename, params=params)
 
     password: str | None = None
     if cfg.smtp_password_encrypted:

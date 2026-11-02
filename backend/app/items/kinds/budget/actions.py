@@ -236,7 +236,7 @@ def delete_transactions(ctx: ItemContext, data: dict, p: Ids) -> ActionOutcome:
 
 
 class Categorise(BaseModel):
-    ids: list[str] = Field(min_length=1, max_length=1000)
+    ids: list[str] = Field(min_length=1, max_length=1000, description="Transaction ids — find them with find_transactions (e.g. uncategorised=true)")
     category_id: str = Field(description="The category id to set")
     always_for_payee: bool = Field(
         default=False, description="Also make a rule so every transaction from these payees gets this category (and apply it now)"

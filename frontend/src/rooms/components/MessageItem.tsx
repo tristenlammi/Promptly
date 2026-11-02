@@ -1,6 +1,7 @@
 import { AlertCircle, Copy, CornerUpLeft, Loader2, MoreHorizontal, Pencil, Pin, RotateCw, SmilePlus, Trash2 } from "lucide-react";
 import { memo, useRef, useState, type ReactNode } from "react";
 
+import type { ShareKind } from "@/api/crossapp";
 import type { Message, RoomUser } from "@/api/rooms";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
@@ -12,7 +13,16 @@ import type { PendingMessage } from "../store";
 import { AttachmentList } from "./Attachments";
 import { EventCard } from "./EventCard";
 import { MessageBody } from "./MessageBody";
+import { ShareCard } from "./ShareCard";
 import { EmojiGrid, Popover, PromptlyAvatar, UserAvatar } from "./ui";
+
+/** A "Send to…" card's ``meta.share`` (see ShareCard), if this message is one. */
+function shareOf(m: Message): { kind: string; label?: string; has_note?: boolean } | null {
+  const s = m.meta?.share as { kind?: unknown; label?: unknown; has_note?: unknown } | undefined;
+  return s && typeof s === "object" && typeof s.kind === "string"
+    ? { kind: s.kind, label: typeof s.label === "string" ? s.label : undefined, has_note: s.has_note === true }
+    : null;
+}
 
 export interface MessageCtx {
   meId: string;
@@ -141,6 +151,11 @@ export const MessageItem = memo(function MessageItem({
           <>
             {typeof m.meta?.event_id === "string" ? (
               <EventCard eventId={m.meta.event_id} fallback={m.body} meId={ctx.meId} users={ctx.users} />
+            ) : shareOf(m) ? (
+              <>
+                {shareOf(m)!.has_note && m.body && <MessageBody body={m.body} usernames={ctx.usernames} me={ctx.meName} />}
+                <ShareCard messageId={m.id} kind={shareOf(m)!.kind as ShareKind} label={shareOf(m)!.label} />
+              </>
             ) : (
               m.body && <MessageBody body={m.body} usernames={ctx.usernames} me={ctx.meName} />
             )}
@@ -174,7 +189,7 @@ export const MessageItem = memo(function MessageItem({
           <ToolButton label="Reply" onClick={() => ctx.onReply(m)}>
             <CornerUpLeft className="h-4 w-4" />
           </ToolButton>
-          {own && typeof m.meta?.event_id !== "string" && (
+          {own && typeof m.meta?.event_id !== "string" && (!shareOf(m) || shareOf(m)!.has_note) && (
             <ToolButton label="Edit" onClick={() => ctx.onEdit(m)}>
               <Pencil className="h-4 w-4" />
             </ToolButton>

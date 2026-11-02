@@ -8,6 +8,7 @@ import { Avatar, Card, Chip, EmptyState, Fab, Field, IconButton, ItemButton, Lis
 import { cn } from "@/utils/cn";
 
 import { onAddExpense, takeAddExpense } from "./bus";
+import { BudgetSpentCard } from "./CrossApp";
 import { budget, expenseSplit, lockedRate, meId, money, phaseOf, settleUp, toHome, toMajor, toMinor } from "./logic";
 import { assignChanged, claimMe } from "./ops";
 import { homeHint } from "./PlanItemSheet";
@@ -716,6 +717,7 @@ export function MoneyTab({ item, isPhone, ask }: ItemViewProps<Trip>) {
           {settleCard}
           {list}
           {budgetCard}
+          <BudgetSpentCard item={item} />
           {ratesCard}
         </>
       ) : (
@@ -724,6 +726,7 @@ export function MoneyTab({ item, isPhone, ask }: ItemViewProps<Trip>) {
           <div className="flex flex-col gap-5">
             {settleCard}
             {budgetCard}
+            <BudgetSpentCard item={item} />
             {ratesCard}
           </div>
         </div>
