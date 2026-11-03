@@ -48,15 +48,37 @@ cleanupOutdatedCaches();
 // routes (e.g. the workspace canvas). So every navigation fetches the live
 // index.html (which always reflects what's on disk), and we fall back to the
 // precached shell ONLY when the network is unreachable (offline support).
-async function navigationHandler(): Promise<Response> {
+async function navigationHandler({ url }: { url: URL }): Promise<Response> {
   try {
     const fresh = await fetch("/index.html", { cache: "no-store" });
-    if (fresh && fresh.ok) return fresh;
+    if (fresh && fresh.ok) return withManifest(fresh, url.pathname);
   } catch {
     // Network unreachable — fall through to the offline shell below.
   }
   const cached = await matchPrecache("/index.html");
-  return cached ?? Response.error();
+  return cached ? withManifest(cached, url.pathname) : Response.error();
+}
+
+/** Which app a page installs as — the same rule as the ``$pwa_manifest``
+ *  map in nginx.spa.conf. It has to be in the HTML itself: some browsers
+ *  only read the first manifest, so one the page swaps in later leaves
+ *  /rooms or /app/<file>/ looking like Promptly ("already installed"). */
+function manifestFor(path: string): string {
+  if (/^\/rooms(\/|$)/.test(path)) return "/rooms.webmanifest";
+  if (/^\/calendar(\/|$)/.test(path)) return "/calendar.webmanifest";
+  if (/^\/photos(\/|$)/.test(path)) return "/photos.webmanifest";
+  const app = /^\/app\/([0-9a-fA-F-]{36})/.exec(path);
+  if (app) return `/api/items/app-manifest/${app[1]}.webmanifest`;
+  return "/manifest.webmanifest";
+}
+
+const MAIN_MANIFEST_TAG = '<link rel="manifest" href="/manifest.webmanifest">';
+
+async function withManifest(res: Response, path: string): Promise<Response> {
+  const href = manifestFor(path);
+  if (href === "/manifest.webmanifest") return res;
+  const html = (await res.text()).replace(MAIN_MANIFEST_TAG, `<link rel="manifest" href="${href}">`);
+  return new Response(html, { status: res.status, statusText: res.statusText, headers: res.headers });
 }
 
 registerRoute(

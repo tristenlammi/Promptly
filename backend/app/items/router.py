@@ -254,6 +254,25 @@ async def app_manifest(
     if spec is None:
         raise _not_found()
     clean = re.sub(r"[\x00-\x1f<>]", "", name).strip()[:60] or spec.name
+    return JSONResponse(_manifest_for(spec, id, clean), media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
+
+
+@router.get("/app-manifest/{file_id}.webmanifest")
+async def app_manifest_by_file(file_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> JSONResponse:
+    """The same manifest, found from the file id alone — what the server
+    puts in ``/app/<file id>/``'s HTML before any script runs, so browsers
+    that only read the first manifest see a separate app, not Promptly.
+
+    Public like the one above; it reads only the file's kind (from its
+    suffix), never its name — the page swaps in the named one once it loads."""
+    row = await db.get(UserFile, file_id)
+    spec = get_spec(service.kind_from_row(row)) if row is not None else None
+    if spec is None:
+        raise _not_found()
+    return JSONResponse(_manifest_for(spec, file_id, spec.name), media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
+
+
+def _manifest_for(spec: ItemSpec, id: uuid.UUID, clean: str) -> dict:
     short = clean if len(clean) <= 12 else spec.name[:12]
     base = f"/app/{id}/"
     icon = spec.kind if spec.kind in _ICON_KINDS else "item"
@@ -274,7 +293,7 @@ async def app_manifest(
             {"src": f"/item-icons/{icon}-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
         ],
     }
-    return JSONResponse(manifest, media_type="application/manifest+json", headers={"Cache-Control": "no-cache"})
+    return manifest
 
 
 # Kinds with their own icon set in frontend/public/item-icons (made by

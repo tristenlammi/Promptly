@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-11-03
+
+### Fixed
+- Installing Rooms, Calendar, Photos or an app (/app/…) could install Promptly again, or say it was already installed, in browsers that only read the page's first manifest. The server, and the installed app's offline worker, now hand each of those pages its own manifest from the start.
+
 ## [0.18.1] - 2026-11-03
 
 ### Changed
