@@ -207,6 +207,19 @@ async def install(db: AsyncSession, user: User, kind: str) -> None:
     )
 
 
+# Apps every new account starts with (they can still remove them).
+DEFAULT_KINDS = ("tasks",)
+
+
+async def install_defaults(db: AsyncSession, user: User) -> None:
+    """Add the default apps for a new account; the caller commits."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    for kind in DEFAULT_KINDS:
+        if get_spec(kind) is not None:
+            await db.execute(pg_insert(ItemInstall).values(user_id=user.id, kind=kind).on_conflict_do_nothing())
+
+
 async def uninstall(db: AsyncSession, user: User, kind: str) -> None:
     """Removes it from New menus. The person's files stay where they are."""
     await db.execute(delete(ItemInstall).where(ItemInstall.user_id == user.id, ItemInstall.kind == kind))
@@ -311,6 +324,9 @@ async def create_item(
     db.add(doc)
     await db.flush()
     await refresh_reminders(db, row, doc, user)
+    from app.tags.items_sync import sync_file as _sync_tags
+
+    await _sync_tags(db, row.id, row.user_id, doc.kind, doc.data)
     return row, doc
 
 
@@ -380,9 +396,13 @@ async def save_data(
     source: str = "edit",
     keep_version: bool = False,
     version_label: str | None = None,
+    trash_removed: bool = True,
 ) -> FileVersion | None:
     """Validate and store ``data`` as the file's new content (flushed, not
     committed). Returns the version kept of the state it replaced, if any.
+
+    Tasks / contacts the change drops go to the trash (``trash_removed``;
+    off for archiving and version restores, which keep their own copy).
 
     ``base_revision`` is the revision the change was made against; None
     means "whatever is there" (server-side writers holding the row lock)."""
@@ -405,6 +425,10 @@ async def save_data(
     if user is not None and row.user_id == user.id:
         await _check_room(db, user, size, int(row.size_bytes or 0))
     version = await _maybe_version(db, row, doc, user, force=keep_version, source=source, label=version_label)
+    if trash_removed:
+        from app.trash.service import capture_item_removals
+
+        await capture_item_removals(db, row, doc.kind, doc.data, clean, user.id if user is not None else None)
     doc.data = clean
     doc.revision = (doc.revision or 0) + 1
     doc.updated_by = user.id if user is not None else doc.updated_by
@@ -413,9 +437,17 @@ async def save_data(
     row.content_text = text_for(spec, title_of(row), clean, user)
     row.modified_at = datetime.now(timezone.utc)
     await db.flush()
+    if doc.kind == "journal":
+        # Mentions in entries ("Mentioned in" on the things they name).
+        from app.links.service import sync_journal
+
+        await sync_journal(db, row.id, clean, user_id=user.id if user is not None else None)
     owner = user if (user is not None and user.id == row.user_id) else await db.get(User, row.user_id)
     if owner is not None:
         await refresh_reminders(db, row, doc, owner)
+    from app.tags.items_sync import sync_file as _sync_tags
+
+    await _sync_tags(db, row.id, row.user_id, doc.kind, doc.data)
     return version
 
 
@@ -726,7 +758,7 @@ async def restore(db: AsyncSession, user: User, row: UserFile, doc: ItemDocument
     stamp = version.created_at.strftime("%d %b %Y, %H:%M") if version.created_at else "earlier"
     await save_data(
         db, user, row, doc, data, base_revision=None, source="restore",
-        keep_version=True, version_label=f"Before restoring the version from {stamp}",
+        keep_version=True, version_label=f"Before restoring the version from {stamp}", trash_removed=False,
     )
     spec = get_spec(doc.kind)
     if spec is not None and spec.after_restore is not None:
@@ -761,7 +793,7 @@ async def archive(
     await set_state(db, new_row.id, ARCHIVE_KEY, {"of": str(row.id), "before": before_day})
     await save_data(
         db, user, row, doc, kept, base_revision=None, source="manual",
-        keep_version=True, version_label=f"Before archiving up to {before_day}",
+        keep_version=True, version_label=f"Before archiving up to {before_day}", trash_removed=False,
     )
     return new_row
 

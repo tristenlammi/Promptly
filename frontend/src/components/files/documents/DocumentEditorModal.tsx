@@ -38,6 +38,7 @@ import {
 
 import { buildExtensions } from "./extensions";
 import type { WikiTarget } from "./WikiLinkExtension";
+import { connectionsApi, linkPath } from "@/api/connections";
 import { DocumentToolbar } from "./DocumentToolbar";
 import { CommentBubbleMenu, EditorBubbleMenu } from "./EditorBubbleMenu";
 import { CommentsPanel, type CommentDraft } from "./CommentsPanel";
@@ -251,24 +252,44 @@ export function DocumentEditorModal({
   const wikiRef = useRef(wikiLink);
   wikiRef.current = wikiLink;
   const hasWiki = Boolean(wikiLink);
-  const stableWiki = useMemo(
-    () =>
-      hasWiki
-        ? {
-            items: (q: string) => wikiRef.current?.items(q) ?? Promise.resolve([]),
-            mentions: (q: string) =>
-              (wikiRef.current?.mentions ?? wikiRef.current?.items)?.(q) ?? Promise.resolve([]),
-            onMention: (userId: string) => {
-              wikiRef.current?.onMention?.(userId);
-              // Tell the person (best effort; the backend checks they can
-              // open this document and doesn't repeat itself).
-              void documentsApi.notifyMention(file.id, userId).catch(() => undefined);
-            },
-          }
-        : undefined,
+  // Every document can mention anything (``[[`` / ``@``): a task, an event,
+  // a file, a contact… on top of a workspace note's own items and people.
+  // The link it inserts (``/link/<kind>/<id>``) is recorded as a mention
+  // when the document saves.
+  const stableWiki = useMemo(() => {
+    const things = async (q: string): Promise<WikiTarget[]> => {
+      if (q.trim().length < 1) return [];
+      try {
+        const found = await connectionsApi.search(q.trim(), 4);
+        return found.map((t) => ({
+          id: t.id,
+          kind: t.label,
+          refId: null,
+          title: t.title,
+          workspaceId: "",
+          href: linkPath(t),
+        }));
+      } catch {
+        return [];
+      }
+    };
+    const merge = async (a: Promise<WikiTarget[]>, q: string) => {
+      const [mine, other] = await Promise.all([a.catch(() => []), things(q)]);
+      return [...mine, ...other];
+    };
+    return {
+      items: (q: string) => merge(wikiRef.current?.items(q) ?? Promise.resolve([]), q),
+      mentions: (q: string) =>
+        merge((wikiRef.current?.mentions ?? wikiRef.current?.items)?.(q) ?? Promise.resolve([]), q),
+      onMention: (userId: string) => {
+        wikiRef.current?.onMention?.(userId);
+        // Tell the person (best effort; the backend checks they can
+        // open this document and doesn't repeat itself).
+        void documentsApi.notifyMention(file.id, userId).catch(() => undefined);
+      },
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [hasWiki, file.id]
-  );
+  }, [hasWiki, file.id]);
   const extensions = useMemo(
     () =>
       buildExtensions({
@@ -412,6 +433,12 @@ export function DocumentEditorModal({
           const href = a.getAttribute("href") || "";
           if (/^(https?:|mailto:|tel:)/i.test(href) && !href.includes("item=")) {
             window.open(a.href, "_blank", "noopener,noreferrer");
+            return true;
+          }
+          // A mention of anything (``/link/<kind>/<id>``): open it beside
+          // the document rather than leaving it.
+          if (href.startsWith("/link/")) {
+            window.open(href, "_blank", "noopener,noreferrer");
             return true;
           }
           return false;

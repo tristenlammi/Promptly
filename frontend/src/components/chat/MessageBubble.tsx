@@ -1,5 +1,6 @@
 import {
   createContext,
+  Fragment,
   memo,
   useContext,
   useEffect,
@@ -9,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Link2 as ThingLinkIcon } from "lucide-react";
 import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -234,12 +236,55 @@ function rewriteMentionsForMarkdown(markdown: string): string {
   );
 }
 
+/** ``@[Title](/link/<kind>/<id>)`` — a mention of anything (a task, an
+ *  event, a file…), written by the composer's ``[[`` picker. */
+const THING_TOKEN_RE = /@\[([^\]\n]+?)\]\((\/link\/[a-z_]+\/[A-Za-z0-9:_-]+)\)/g;
+
+/** Chip for a ``/link/…`` mention: opens the thing (the server decides
+ *  where — or says it isn't available to you). */
+function ThingMentionChip({ title, href }: { title: string; href: string }) {
+  const clean = (title || "").replace(/[[\]]/g, "").trim() || "Link";
+  return (
+    <Link
+      to={href}
+      onClick={(e) => e.stopPropagation()}
+      className={cn(
+        "mx-[1px] inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0 align-baseline text-[12px] font-medium leading-5 no-underline transition",
+        "border-[var(--accent)]/40 bg-[var(--accent)]/10 text-[var(--accent-text)]",
+        "hover:bg-[var(--accent)]/20 hover:border-[var(--accent)]/60"
+      )}
+      title={clean}
+    >
+      <ThingLinkIcon className="h-3 w-3" />
+      <span className="max-w-[14rem] truncate">{clean}</span>
+    </Link>
+  );
+}
+
 /** Render a plain-text string (user messages) replacing any
  *  ``@[title](id)`` tokens with mention chips. Returns a list of
  *  React nodes in input order — plain text segments survive
  *  unchanged (``whitespace-pre-wrap`` styling on the parent
  *  preserves their newlines). */
 function renderMentionText(text: string): ReactNode {
+  if (!text) return null;
+  if (text.includes("](/link/")) {
+    const out: ReactNode[] = [];
+    let last = 0;
+    let m: RegExpExecArray | null;
+    THING_TOKEN_RE.lastIndex = 0;
+    while ((m = THING_TOKEN_RE.exec(text)) !== null) {
+      if (m.index > last) out.push(<Fragment key={`t-${last}`}>{renderChatMentionText(text.slice(last, m.index))}</Fragment>);
+      out.push(<ThingMentionChip key={`thing-${m.index}`} title={m[1]} href={m[2]} />);
+      last = THING_TOKEN_RE.lastIndex;
+    }
+    if (last < text.length) out.push(<Fragment key={`t-${last}`}>{renderChatMentionText(text.slice(last))}</Fragment>);
+    return out;
+  }
+  return renderChatMentionText(text);
+}
+
+function renderChatMentionText(text: string): ReactNode {
   if (!text) return null;
   const parts: ReactNode[] = [];
   let lastIndex = 0;
@@ -619,6 +664,13 @@ const markdownComponents: Components = {
       );
       const title = raw.replace(/^@\u200B?/, "");
       return <FileMentionChip title={title} />;
+    }
+    if (typeof href === "string" && href.startsWith("/link/")) {
+      const raw = String(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (children as any)?.[0] ?? children ?? ""
+      );
+      return <ThingMentionChip title={raw} href={href} />;
     }
     if (typeof href === "string" && href.startsWith("promptly-connector:")) {
       const raw = String(

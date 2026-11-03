@@ -388,7 +388,7 @@ Every server-side function subclasses **`Tool`** (`base.py`): `name`, `descripti
 
 **Dispatch** (`_dispatch_tools`) — two-phase: validate/account/launch native tools as concurrent tasks (own session, `asyncio.timeout`, `_TOOL_CONCURRENCY=4`), then drain **in model-call order**. Features: per-turn caps, cross-hop dedup cache (replays cached content instead of re-executing), MCP routing, `tool_started`/`tool_progress`/`tool_finished` SSE events, and a compact **Tool Activity Card** record persisted onto `messages.tool_calls`.
 
-**Category gating** (per turn): `tools_enabled` → `artefact` + `code` (+ `workspace` if in a workspace); `web_search_mode` ∈ {off, auto, always} → `search` (+ `agents` if tools also on). Voice turns skip all tools. `generate_image` is stripped for ungated users.
+**Category gating** (per turn): `tools_enabled` → `artefact` + `code` (+ `workspace` if in a workspace); `web_search_mode` ∈ {off, auto, always} → `search` (+ `agents` if tools also on). With the Tools toggle also `files`, `calendar`, `apps` (everyone), `items` (anyone with an Item Store app), `rooms` (anyone in a space/DM), `photos` (a library); the tool prompt names which app each tool reaches and asks for parallel calls on multi-app questions. Voice turns skip all tools. `generate_image` is stripped for ungated users.
 
 ### 8.2 The tools
 
@@ -405,6 +405,8 @@ Every server-side function subclasses **`Tool`** (`base.py`): `name`, `descripti
 | `propose_workspace_note` / `_board_cards` / `_board_updates` | workspace | File a write-back proposal for human approval |
 | `read_workspace_item` | workspace | Read full live content of a note/board/sheet/canvas by title |
 | `query_board_cards` | workspace | Real SQL filter/count over board cards |
+| `my_day` / `find_person` / `search_apps` | apps | Across the apps (`chat/tools/crossapp.py`): a 1–31-day agenda (events, tasks due/overdue, Budget bills, workouts, meals, shifts, birthdays, trips, today's habits + unread-room counts) with each app's file id for `use_item`; a person from Contacts + Photos people + accounts (`people/directory.py`); `/api/today/search` + trips + recipes |
+| `read_room` / `post_to_room` | rooms | Rooms list (unread counts); a room's messages only where `rooms/promptly.can_read_history` (room AI switch / every DM member's `ai_ok`) — `read_room` is in `UNTRUSTED_CONTENT_TOOLS`; posting goes through `rooms/router.send` and refuses on an untrusted turn |
 
 ### 8.3 Deep research engine (`research/`)
 
@@ -557,6 +559,7 @@ A full Drive experience (`backend/app/files/`) on **local disk** (no object stor
 - **Quotas** (`quota.py`) — per-user total-bytes cap: user override → instance default → unlimited.
 - **System folders** (`system_folders.py`) — protected per-user `My files/` → `Chat Uploads/` + `Generated Files/{Files,Media}/`, plus a `Workspaces/` root; find-or-create with race handling.
 - **Chat-upload hygiene** — a Chat-Uploads file is "referenced" while its id appears in any live `messages.attachments`; unreferenced ones are soft-deleted on conversation-delete and by a 6-hour backstop sweeper. Re-attaching an identical name+size file reuses the row.
+- **One trash** (`app/trash/`, migration 0236 `trash_entries`, page `/trash`) — `GET /api/trash` lists Drive files/folders (via Drive's own `list_trash`, so Item Store files and photos too), the caller's trashed workspaces, trashed workspace-item roots in workspaces they can edit (no one else's private drafts) and `trash_entries` snapshots (`user_id` = owner, or `deleted_by`). Snapshots are written where an app hard-deletes: `calendars/service.delete_event` (whole event/series + attendees), `albums_router.delete_album` (album + items/members/exclusions; links stay revoked) and `items/service.save_data`, which diffs `tasks` / `contacts` by id (archive and version restore opt out; a record that reappears — the app's Undo — drops its entry). Restore / purge reuse each app's endpoint code; snapshots re-create rows with their old ids (calendar gone → personal calendar, item file gone → the app's primary file, missing task list → Inbox). Nightly storage maintenance purges snapshots and workspace items after 30 days (`RETENTION_DAYS`).
 
 The frontend Files UI aims to feel like a real drive: full-width, sticky header, Kind column, folder-tree rail, and deep-linkable Recent/Starred/Shared/Trash/Search surfaces (with a separate "Promptly Files" PWA identity).
 

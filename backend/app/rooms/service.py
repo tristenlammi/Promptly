@@ -85,6 +85,10 @@ async def post_message(
     )
     db.add(msg)
     await db.flush()
+    if body:
+        from app.links.service import sync_text
+
+        await sync_text(db, "room_msg", msg.id, body, user_id=user.id)
     for a in atts:
         a.message_id = msg.id
     me = await core.my_state(db, room.id, user.id)

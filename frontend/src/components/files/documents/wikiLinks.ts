@@ -17,6 +17,9 @@ export interface WikiTarget {
   /** For ``kind === "date"`` — the literal text to drop in (e.g. the
    *  formatted date); ignored for items/people. */
   insertText?: string;
+  /** A thing from another app (a task, an event, a file…): the in-app
+   *  ``/link/<kind>/<id>`` href to insert instead of a workspace href. */
+  href?: string;
 }
 
 /** Build the in-app relative href the Link mark carries. Relative on

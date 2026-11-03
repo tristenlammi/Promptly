@@ -266,7 +266,7 @@ export const WikiLinkExtension = Extension.create<WikiLinkOptions>({
             .run();
           return;
         }
-        if (target.kind === "person") {
+        if (target.kind === "person" && !target.href) {
           editor
             .chain()
             .focus()
@@ -285,7 +285,7 @@ export const WikiLinkExtension = Extension.create<WikiLinkOptions>({
           extensionThis.options.onMention?.(target.id);
           return;
         }
-        const href = buildWikiHref(target);
+        const href = target.href ?? buildWikiHref(target);
         const label = target.title || "Untitled";
         editor
           .chain()
@@ -316,7 +316,7 @@ export const WikiLinkExtension = Extension.create<WikiLinkOptions>({
               (target) => currentCommand?.(target),
               char === "@"
                 ? "Mention a person, item, or date"
-                : "Link to a workspace item"
+                : "Link to anything"
             );
             popup.setItems(props.items);
             popup.position(props.clientRect?.() ?? null);

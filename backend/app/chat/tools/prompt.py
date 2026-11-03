@@ -148,6 +148,37 @@ def build_tools_system_prompt(
             "- `propose_file_changes` only files a proposal: say it's ready to "
             "review, never that it's done."
         )
+    if "apps" in categories:
+        # One assistant across the apps: name which tool reaches which app
+        # (only the ones offered this turn) and ask for fan-out.
+        present = {t.name for t in tools}
+        reach = [
+            (app, tool)
+            for app, tool in (
+                ("day/week overview", "my_day"),
+                ("calendar", "calendar_events"),
+                ("Tasks, Budget, Trips, Meal planner/recipes/groceries, Workouts, Habits, Journal, Contacts", "list_my_items → read_item/use_item"),
+                ("people", "find_person"),
+                ("Rooms", "read_room/post_to_room"),
+                ("photos", "search_photos"),
+                ("files", "search_my_files"),
+                ("anything by name", "search_apps"),
+            )
+            if tool.split(" ")[0].split("/")[0] in present
+        ]
+        guidelines.append(
+            "- You reach all of the user's Promptly apps: "
+            + "; ".join(f"{a} → `{t}`" for a, t in reach)
+            + ". A question that spans apps needs several tools — call them together in one step when they "
+            "don't depend on each other, then answer from all the results."
+            + (
+                " E.g. 'what's my week like and can we afford the trip?' → `my_day` for the week plus `use_item` "
+                "on the Trips file (`budget_status`) and the Budget file (`forecast_month_end` or "
+                "`accounts_overview`)."
+                if "use_item" in present and "my_day" in present
+                else ""
+            )
+        )
     if "agents" in categories:
         guidelines.append(
             "- Use `run_agents` only when a request splits into 2–4 "

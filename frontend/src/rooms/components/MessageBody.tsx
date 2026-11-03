@@ -1,5 +1,6 @@
 import { memo, useMemo } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
+import { Link } from "react-router-dom";
 import remarkGfm from "remark-gfm";
 
 const REMARK = [remarkGfm];
@@ -51,6 +52,14 @@ export const MessageBody = memo(function MessageBody({
             >
               {children}
             </span>
+          );
+        }
+        if (href?.startsWith("/") && !href.startsWith("//")) {
+          // A mention (``@[Title](/link/…)``) or another in-app path.
+          return (
+            <Link to={href} className="font-medium text-[var(--item-accent)] underline underline-offset-2 break-words">
+              {children}
+            </Link>
           );
         }
         return (

@@ -105,6 +105,22 @@ class CalReminderSent(Base):
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 
+class CalEventSnooze(Base):
+    """A reminder snoozed from its notification ("Snooze 10 min"): send it
+    again at ``until``. Saved so a restart doesn't lose it; the reminder
+    loop sends it and deletes the row."""
+
+    __tablename__ = "cal_event_snoozes"
+    __table_args__ = (UniqueConstraint("user_id", "event_id", "occurrence", name="uq_cal_event_snoozes"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    event_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("cal_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    occurrence: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class CalFeed(Base):
     """A person's private subscribe link (read-only, for a phone's calendar app)."""
 

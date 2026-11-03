@@ -1,6 +1,7 @@
 import { ArrowLeftRight, ChevronDown, Globe, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
+import { LinkedSection } from "@/components/links/LinkedSection";
 import { toast } from "@/store/toastStore";
 import { Field, ItemButton, Segmented, Select, Sheet, TextArea, TextInput, Toggle, fmtDay, todayISO, uid } from "@/items/ui";
 import { cn } from "@/utils/cn";
@@ -464,6 +465,7 @@ export function TxnSheet({ item, txn, open, onClose }: { item: H; txn: Txn | nul
               {txn.category_by === "rule" ? " · categorised by a rule" : ""}
             </p>
           )}
+          {txn && <LinkedSection thing={{ kind: "txn", id: `${item.fileId}:${txn.id}` }} readOnly={!item.canEdit} />}
         </div>
       </Sheet>
       <CategoryPicker

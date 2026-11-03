@@ -3,6 +3,7 @@ import { AtSign, CalendarPlus, CornerUpLeft, Loader2, Paperclip, Pencil, Plus, S
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { roomsApi, type Attachment, type Message, type RoomUser } from "@/api/rooms";
+import { useThingMentions } from "@/components/links/useThingMentions";
 import { Sheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -67,6 +68,8 @@ export const Composer = forwardRef<
   const plusBtn = useRef<HTMLButtonElement>(null);
   const [plusOpen, setPlusOpen] = useState(false);
   const [caret, setCaret] = useState(0);
+  // ``[[`` mentions a task, event, file, contact… (recorded when it's sent).
+  const thingMention = useThingMentions({ ref: ta, value: text, onChange: setText });
   const [mentionIdx, setMentionIdx] = useState(0);
   const [mentionDismissed, setMentionDismissed] = useState<string | null>(null);
   const lastTyping = useRef(0);
@@ -242,6 +245,7 @@ export const Composer = forwardRef<
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (thingMention.onKeyDown(e)) return;
     if (showMentions) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -455,13 +459,17 @@ export const Composer = forwardRef<
           value={text}
           onChange={onChange}
           onKeyDown={onKeyDown}
-          onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+          onSelect={(e) => {
+            setCaret(e.currentTarget.selectionStart ?? 0);
+            thingMention.onSelect();
+          }}
           onPaste={onPaste}
           placeholder={editing ? "Edit your message" : placeholder}
           aria-label={editing ? "Edit message" : placeholder}
           enterKeyHint={isPhone ? "enter" : "send"}
           className="max-h-[40vh] min-h-[44px] flex-1 resize-none bg-transparent px-1 py-[11px] text-base leading-[22px] text-[var(--text)] !outline-none placeholder:text-[var(--text-muted)] md:min-h-[40px] md:py-[9px] md:text-sm"
         />
+        {thingMention.popup}
         <button
           ref={emojiBtn}
           type="button"

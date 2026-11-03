@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/shared/Skeleton";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
+import { RecentStrip } from "@/components/today/RecentStrip";
 
 /**
  * Today — what your day holds across Promptly, on one page: events, tasks
@@ -97,6 +98,8 @@ function TodayBody({ data }: { data: TodayData }) {
           {summary ? ` · ${summary}` : ""}
         </p>
       </header>
+
+      <RecentStrip />
 
       <div className="grid items-start gap-3 md:grid-cols-2 md:gap-4">
         {s.events && <EventsCard events={s.events.events} url={s.events.url} />}

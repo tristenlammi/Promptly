@@ -31,12 +31,17 @@ async def run_storage_maintenance() -> dict[str, int]:
     from app.files.versions import prune_versions
     from app.files.link_roles import purge_dead_link_grants
     from app.workspaces.router import purge_trashed_workspaces
+    from app.trash.service import purge_expired_entries, purge_expired_workspace_items
 
     out = {
         "trash_purged": 0, "orphan_assets": 0, "docs_rerendered": 0,
         "blobs_unlinked": 0, "bytes_freed": 0,
     }
     for key, fn in (
+        # One trash, one rule: 30 days for everything (workspace items used
+        # to go only when someone opened that workspace's Trash panel).
+        ("workspace_items_purged", purge_expired_workspace_items),
+        ("trash_entries_purged", purge_expired_entries),
         ("trash_purged", purge_expired_trash),
         ("orphan_assets", purge_orphan_document_assets),
         # Pictures deleted from a document a week or more ago (R-228).

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Check,
@@ -20,8 +20,9 @@ import {
   type Grantee,
   type ShareLinkRole,
   type ShareableResourceType,
-  type UserSearchHit,
 } from "@/api/files";
+import type { RoomUser } from "@/api/rooms";
+import { PeoplePicker } from "@/components/people/PeoplePicker";
 import { Button } from "@/components/shared/Button";
 import { Modal } from "@/components/shared/Modal";
 import { cn } from "@/utils/cn";
@@ -102,10 +103,6 @@ export function ShareGrantsModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Picker state
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<UserSearchHit[]>([]);
-  const [searching, setSearching] = useState(false);
   /** The role applied to the *next* user added from the picker.
    *  Per-grantee changes happen on the row itself further down. */
   const [defaultRole, setDefaultRole] = useState<Role>("viewer");
@@ -127,8 +124,6 @@ export function ShareGrantsModal({
     if (!open || !resource) {
       setGrants([]);
       setError(null);
-      setQuery("");
-      setResults([]);
       setConfirmUnshare(false);
       setUnsharing(false);
       setDefaultRole("viewer");
@@ -155,40 +150,6 @@ export function ShareGrantsModal({
     };
   }, [open, resource]);
 
-  // Debounced user directory. Unlike a pure type-ahead, this always
-  // fetches once the modal is open — a blank query browses the first
-  // page of users so people can simply *see* who's on the app and
-  // pick them, while typing narrows the same list. Debounced 200ms so
-  // keystrokes don't flood the backend.
-  const searchTimer = useRef<number | null>(null);
-  useEffect(() => {
-    if (!open || !resource) return;
-    if (searchTimer.current) {
-      window.clearTimeout(searchTimer.current);
-      searchTimer.current = null;
-    }
-    setSearching(true);
-    searchTimer.current = window.setTimeout(async () => {
-      try {
-        const res = await filesApi.searchUsersForShare(query.trim(), {
-          type: resource.type,
-          id: resource.id,
-        });
-        setResults(res.results);
-      } catch (e) {
-        setError(extractError(e));
-      } finally {
-        setSearching(false);
-      }
-    }, query.trim() ? 200 : 0);
-    return () => {
-      if (searchTimer.current) {
-        window.clearTimeout(searchTimer.current);
-        searchTimer.current = null;
-      }
-    };
-  }, [query, open, resource]);
-
   const grantedIds = useMemo(
     () => new Set(grants.map((g) => g.user_id)),
     [grants]
@@ -197,7 +158,7 @@ export function ShareGrantsModal({
   // People who joined through a link don't count toward the list's limit.
   const atCap = grants.filter((g) => !g.via_link).length >= MAX_GRANTS_PER_RESOURCE;
 
-  const handleAdd = async (user: UserSearchHit) => {
+  const handleAdd = async (user: Pick<RoomUser, "id">) => {
     if (!resource || adding) return;
     if (atCap) {
       setError(
@@ -216,7 +177,6 @@ export function ShareGrantsModal({
         can_comment: flags.can_comment,
       });
       setGrants(res.grants);
-      setQuery("");
       onChanged?.();
     } catch (e) {
       setError(extractError(e));
@@ -350,22 +310,6 @@ export function ShareGrantsModal({
             <Search className="h-3.5 w-3.5" />
             <span>Add people on Promptly</span>
           </label>
-          <input
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder={
-              atCap ? "Cap reached — revoke before adding" : "Search by name or email…"
-            }
-            disabled={atCap || adding}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className={cn(
-              "w-full rounded-md border border-[var(--border)] bg-[var(--surface)] px-2 py-1.5 text-sm",
-              "outline-none focus:border-[var(--accent)]",
-              "disabled:cursor-not-allowed disabled:opacity-60"
-            )}
-          />
           <div className="mt-2 flex flex-wrap items-center gap-1">
             <span className="mr-1 text-[11px] font-medium uppercase tracking-wider text-[var(--text-muted)]">
               Default role
@@ -379,61 +323,23 @@ export function ShareGrantsModal({
               size="sm"
             />
           </div>
-          {!atCap && (
-            <div className="mt-2 max-h-56 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--surface)]">
-              {searching && results.length === 0 && (
-                <div className="flex items-center gap-2 px-3 py-2 text-xs text-[var(--text-muted)]">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>Loading people…</span>
-                </div>
-              )}
-              {!searching && results.length === 0 && (
-                <div className="px-3 py-2 text-xs text-[var(--text-muted)]">
-                  {query.trim().length === 1
-                    ? "Keep typing…"
-                    : query.trim()
-                      ? "No matches."
-                      : "Type a name or email to find someone."}
-                </div>
-              )}
-              {results.map((u) => {
-                  const already =
-                    u.already_granted || grantedIds.has(u.id);
-                  return (
-                    <button
-                      key={u.id}
-                      type="button"
-                      disabled={already || adding || atCap}
-                      onClick={() => handleAdd(u)}
-                      className={cn(
-                        "flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition",
-                        already
-                          ? "cursor-not-allowed opacity-60"
-                          : "hover:bg-[var(--bg)]"
-                      )}
-                    >
-                      <div className="min-w-0">
-                        <div className="truncate font-medium text-[var(--text)]">
-                          @{u.username}
-                        </div>
-                        {u.email && (
-                          <div className="truncate text-xs text-[var(--text-muted)]">
-                            {u.email}
-                          </div>
-                        )}
-                      </div>
-                      {already ? (
-                        <span className="shrink-0 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-600 dark:text-emerald-400">
-                          Already added
-                        </span>
-                      ) : (
-                        <span className="shrink-0 text-xs text-[var(--accent-text)]">
-                          + Add
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+          {atCap ? (
+            <p className="mt-2 text-xs text-[var(--text-muted)]">
+              Cap reached — revoke someone before adding more.
+            </p>
+          ) : (
+            <div className={cn("mt-2", adding && "pointer-events-none opacity-60")}>
+              {/* The one shared people picker (accounts, your Contacts and
+                  faces from Photos). Picking someone adds them straight away
+                  with the default role; people who already have access are
+                  left out of the list. */}
+              <PeoplePicker
+                selected={[]}
+                exclude={[...grantedIds]}
+                onChange={(next) => {
+                  if (next[0]) void handleAdd(next[0]);
+                }}
+              />
             </div>
           )}
         </div>

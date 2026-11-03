@@ -53,6 +53,7 @@ import {
   type ArtifactLanguage,
 } from "@/components/codeArtifacts/previewable";
 import { cn } from "@/utils/cn";
+import { useRecordOpen } from "@/hooks/useRecordOpen";
 
 import {
   classifyMime,
@@ -141,6 +142,7 @@ export function FilePreviewModal({
   // this file attached. Not offered inside a chat — it already is one.
   const navigate = useNavigate();
   const inFiles = useLocation().pathname.startsWith("/files");
+  useRecordOpen("file", open ? file?.id : null);
   const index = useMemo(() => {
     if (!file || !siblings?.length) return -1;
     return siblings.findIndex((s) => s.id === file.id);

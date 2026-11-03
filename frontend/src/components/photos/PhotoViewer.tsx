@@ -25,6 +25,7 @@ import { filesApi, type SignedUrls } from "@/api/files";
 import { mediaApi } from "@/api/files";
 import { photosApi, type PhotoItem } from "@/api/photos";
 import { MediaDetails } from "@/components/files/MediaDetails";
+import { LinkedSection } from "@/components/links/LinkedSection";
 import { PeopleInPhoto } from "@/components/photos/PeopleInPhoto";
 import { PhotoEditor } from "@/components/photos/PhotoEditor";
 import { SendToSheet } from "@/components/share/SendToSheet";
@@ -527,6 +528,7 @@ function InfoPanel({ photo, onClose }: { photo: PhotoItem; onClose: () => void }
       >
         <FolderOpen className="h-3.5 w-3.5" /> Show in Files
       </Link>
+      <LinkedSection thing={{ kind: "photo", id: photo.id }} className="mt-4" />
     </aside>
   );
 }

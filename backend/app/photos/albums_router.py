@@ -359,6 +359,11 @@ async def delete_album(album_id: uuid.UUID, db: AsyncSession = Depends(get_db), 
         .where(FileShareLink.resource_type == "album", FileShareLink.resource_id == album.id, FileShareLink.revoked_at.is_(None))
         .values(revoked_at=func.now())
     )
+    # A copy goes to the trash (30 days) — restoring brings back its photos
+    # and members (public links stay revoked).
+    from app.trash.service import trash_album
+
+    await trash_album(db, album, user)
     await db.delete(album)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

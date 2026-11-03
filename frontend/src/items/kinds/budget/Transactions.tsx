@@ -1,6 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowLeftRight, FileUp, Plus, Receipt, RefreshCw, Search, Tags, X } from "lucide-react";
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import { toast } from "@/store/toastStore";
 import type { ItemViewProps } from "@/items/types";
@@ -92,6 +93,17 @@ export function TransactionsView({ item, isPhone, ask }: ItemViewProps<BudgetDat
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<Txn | null>(null);
   const [adding, setAdding] = useState(false);
+  // ``?txn=<id>`` — a link or mention opening one transaction.
+  const [params, setParams] = useSearchParams();
+  const linkedTxn = params.get("txn");
+  useEffect(() => {
+    if (!linkedTxn) return;
+    const t = data.transactions.find((x) => x.id === linkedTxn);
+    if (t) setEditing(t);
+    const next = new URLSearchParams(params);
+    next.delete("txn");
+    setParams(next, { replace: true });
+  }, [linkedTxn, data.transactions, params, setParams]);
   const [recat, setRecat] = useState<Txn[] | null>(null);
   const [catFilter, setCatFilter] = useState(false);
   const [importing, setImporting] = useState(false);

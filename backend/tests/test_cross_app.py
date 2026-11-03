@@ -321,6 +321,8 @@ async def test_grocery_list_to_tasks_is_one_list_updated_in_place(client, db, us
     r = await client.post(f"/api/items/{plan}/actions/send_grocery_list_to_tasks", headers=_auth(user), json={})
     assert r.status_code == 200, r.text
     assert r.json()["result"]["list_id"] == out["list_id"] and r.json()["summary"].startswith("3 to buy in Tasks")
+    # "Open Tasks" lands on the list it just made.
+    assert r.json()["result"]["href"].endswith(f"?tab=lists&list={out['list_id']}")
     # A read-only action: the meal plan itself doesn't change.
     assert r.json()["revision"] == (await client.get(f"/api/items/{plan}", headers=_auth(user))).json()["revision"]
 

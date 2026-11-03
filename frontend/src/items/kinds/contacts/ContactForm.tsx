@@ -1,6 +1,7 @@
 import { Camera, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
+import { TagPicker } from "@/components/tags/TagPicker";
 import { Chip, Field, ItemButton, Select, Sheet, TextArea, TextInput, Toggle, uid } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
@@ -46,7 +47,7 @@ export function ContactForm({
   const existing = contactId ? item.data.contacts.find((c) => c.id === contactId) : undefined;
   const [c, setC] = useState<Contact>(() => existing ?? blankContact(initial));
   const [bday, setBday] = useState("");
-  const [tagText, setTagText] = useState("");
+  const [tagList, setTagList] = useState<string[]>([]);
   const [newGroup, setNewGroup] = useState("");
   const [more, setMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +63,7 @@ export function ContactForm({
     opened.current = existing ? structuredClone(existing) : null;
     setC(base);
     setBday(base.birthday ? fmtDate(base.birthday) : "");
-    setTagText(base.tags.join(", "));
+    setTagList(base.tags);
     setNewGroup("");
     setMore(!!(base.prefix || base.middle || base.suffix || base.phonetic_first || base.phonetic_last || base.pronouns));
     setError(null);
@@ -93,7 +94,7 @@ export function ContactForm({
   };
 
   const save = () => {
-    const tags = tagText.split(",").map((t) => t.trim()).filter(Boolean);
+    const tags = tagList;
     const next: Contact = {
       ...c,
       birthday: bdayParsed,
@@ -338,8 +339,8 @@ export function ContactForm({
             <Field label="New group">
               <TextInput value={newGroup} onChange={(e) => setNewGroup(e.target.value)} placeholder="Book club" />
             </Field>
-            <Field label="Tags" hint="Separate with commas">
-              <TextInput value={tagText} onChange={(e) => setTagText(e.target.value)} placeholder="climbing, neighbours" />
+            <Field label="Tags" hint="Shared with your other apps">
+              <TagPicker value={tagList} onChange={setTagList} max={50} placeholder="climbing, neighbours" />
             </Field>
           </div>
           <Field label="Notes">

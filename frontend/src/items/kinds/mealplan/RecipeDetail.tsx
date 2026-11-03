@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 
 import { cn } from "@/utils/cn";
 
+import { LinkedSection } from "@/components/links/LinkedSection";
 import { SendToSheet } from "@/components/share/SendToSheet";
 import type { ItemHandle } from "@/items/useItem";
 import { Card, Chip, ItemButton, Section, Segmented, Stepper, fmtDay, safeHref, todayISO, uid } from "@/items/ui";
@@ -343,6 +344,7 @@ export function RecipeDetail({
           </>
         )}
       </div>
+      <LinkedSection thing={{ kind: "recipe", id: `${item.fileId}:${recipe.id}` }} readOnly={!can} className="mt-4" />
     </div>
   );
 }

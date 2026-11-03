@@ -60,6 +60,7 @@ import {
   MentionAutocomplete,
   type MentionPickState,
 } from "./MentionAutocomplete";
+import { useThingMentions } from "@/components/links/useThingMentions";
 import {
   SlashCommandAutocomplete,
   type SlashPickState,
@@ -184,6 +185,8 @@ export function InputBar({
   // so the mention popover can detect when the user is mid-``@``.
   const [caret, setCaret] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // ``[[`` mentions a task, event, file, contact… (recorded when it's sent).
+  const thingMention = useThingMentions({ ref: textareaRef, value, onChange: setValue });
   // Registered by ``MentionAutocomplete`` so we can forward key
   // events to the popover before applying our own (Enter = send)
   // logic. Stored in a ref so re-registers don't cause re-renders.
@@ -803,6 +806,7 @@ export function InputBar({
     // Mid-IME composition (Chinese, Japanese, Korean…) Enter picks a
     // candidate — it must not send, or pick a mention / command (R-071).
     if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (thingMention.onKeyDown(e)) return;
     // Give the @-mention popover first crack at navigation keys.
     // If it consumes (Up/Down/Enter/Tab while open, Esc), we stop
     // here and don't fall through to Enter-to-send.
@@ -1070,6 +1074,7 @@ export function InputBar({
         workspaceId={workspaceId}
         onKeyRegister={registerMentionKeys}
       />
+      {thingMention.popup}
 
       <SlashCommandAutocomplete
         textareaRef={textareaRef}
@@ -1382,7 +1387,10 @@ export function InputBar({
               }}
               onKeyDown={handleKey}
               onKeyUp={syncCaret}
-              onSelect={syncCaret}
+              onSelect={() => {
+                syncCaret();
+                thingMention.onSelect();
+              }}
               onClick={syncCaret}
               onPaste={handlePaste}
               placeholder={placeholder}

@@ -6,10 +6,13 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { usePhotosPath } from "@/components/photos/photosPath";
 import { albumsApi, type Album, type AlbumPhoto } from "@/api/albums";
 import { filesApi } from "@/api/files";
+import { trashApi } from "@/api/trash";
 import { AlbumMembersDialog, Cover } from "@/components/photos/AlbumDialogs";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { SendToSheet } from "@/components/share/SendToSheet";
+import { EntityTags } from "@/components/tags/TagPicker";
+import { LinkedSection } from "@/components/links/LinkedSection";
 import { SmartAlbumDialog } from "@/components/photos/SmartAlbumDialog";
 import { Button } from "@/components/shared/Button";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -253,6 +256,8 @@ export function PhotoAlbumPage() {
                   </span>
                 )}
               </p>
+              <EntityTags kind="album" id={album.id} className="mt-1 max-w-md px-1" />
+              <LinkedSection thing={{ kind: "album", id: album.id }} className="mt-2 max-w-md px-1" />
             </div>
             {canAdd && (
               <>
@@ -310,6 +315,21 @@ export function PhotoAlbumPage() {
                       await albumsApi.remove(album.id);
                       void qc.invalidateQueries({ queryKey: ["albums"] });
                       navigate(photosPath("/albums"));
+                      // It went to the Trash — one tap brings it back.
+                      const albumId = album.id;
+                      toast.success("Album deleted", {
+                        action: {
+                          label: "Undo",
+                          onClick: () =>
+                            void trashApi
+                              .restore([{ type: "album", id: albumId }])
+                              .then((r) => {
+                                if (!r.done) toast.error(r.results[0]?.error || "Couldn't bring it back.");
+                                void qc.invalidateQueries({ queryKey: ["albums"] });
+                              })
+                              .catch((e) => toast.error(apiErrorMessage(e))),
+                        },
+                      });
                     }}>
                       Delete album
                     </button>

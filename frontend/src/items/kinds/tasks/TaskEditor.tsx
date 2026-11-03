@@ -2,6 +2,8 @@ import { Bell, CalendarDays, Clock, Flag, ListChecks, Plus, Repeat as RepeatIcon
 import { useEffect, useState, type ReactNode } from "react";
 
 import { SendToSheet } from "@/components/share/SendToSheet";
+import { TagPicker } from "@/components/tags/TagPicker";
+import { LinkedSection } from "@/components/links/LinkedSection";
 import type { ItemHandle } from "@/items/useItem";
 import { Chip, Field, ItemButton, Segmented, Select, Sheet, Stepper, TextArea, TextInput, Toggle, fmtDay, todayISO, uid } from "@/items/ui";
 import { toast } from "@/store/toastStore";
@@ -35,7 +37,6 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
   const [title, setTitle] = useState("");
   const [notes, setNotes] = useState("");
   const [step, setStep] = useState("");
-  const [tagText, setTagText] = useState("");
   const toggle = useToggle(item);
   const ro = !item.canEdit;
   const [sending, setSending] = useState(false);
@@ -43,7 +44,6 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
     if (task) {
       setTitle(task.title);
       setNotes(task.notes);
-      setTagText(task.tags.join(", "));
     }
     // Only when a different task opens — not on every save of this one.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -59,8 +59,6 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
     const tt = title.trim();
     if (tt && tt !== task.title) edit((t) => void (t.title = tt));
     if (notes !== task.notes) edit((t) => void (t.notes = notes));
-    const tags = Array.from(new Set(tagText.split(/[,\s]+/).map((x) => x.replace(/^[#@]/, "").trim()).filter(Boolean))).slice(0, 20);
-    if (tags.join() !== task.tags.join()) edit((t) => void (t.tags = tags));
   };
   const close = () => {
     commitText();
@@ -307,8 +305,8 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
               </option>
             ))}
           </Select>
-          <Field label="Tags" hint="Separate with commas">
-            <TextInput value={tagText} onChange={(e) => setTagText(e.target.value)} onBlur={commitText} placeholder="errands, calls" />
+          <Field label="Tags" hint="Shared with your other apps">
+            <TagPicker value={task.tags} onChange={(tags) => edit((t) => void (t.tags = tags))} max={20} disabled={ro} placeholder="errands, calls" />
           </Field>
         </Row>
 
@@ -364,6 +362,7 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
           </p>
         )}
       </fieldset>
+      <LinkedSection thing={{ kind: "task", id: `${item.fileId}:${task.id}` }} readOnly={ro} className="mt-4" />
     </Sheet>
   );
 }

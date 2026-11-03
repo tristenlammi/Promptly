@@ -21,6 +21,32 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-03
+
+### Added
+- Ctrl+K now does things as well as searching: type "new event lunch with Sam fri 1pm", "add task buy milk tomorrow", "remind me to call mum at 5", "log $40 fuel", "note …", "new doc/sheet/slides <title>", "message sam …" or "go to calendar" and press Enter on the "Do" row to make it in place (a toast offers Open). Plain Create… actions (New event, New task, New doc, New room message…) are there too, and Tab picks which Tasks or Budget file to use when you have several.
+- **Pick up where you left off** on Today: the docs, sheets, whiteboards, files, app files, chats, rooms and workspace items you opened last, newest first, one tap back to each (Clear empties it).
+- **Places** (sidebar → Places): one list and map of your trip stops, where your photos were taken, event locations and contact addresses, grouped by town, each linking back into its app. Matched offline — nothing is sent to a geocoding service; places written as text Promptly can't place stay in the list only.
+- **Shared tags**: one set of tags across Tasks, Contacts, Journal, Recipes, Budget, Files, Calendar events and photo albums — tag something in one app and the same tag autocompletes everywhere. Tags you already had in those apps join the set automatically.
+- **Tag pages** (`/tags`): everything with a tag across your apps (only what you can still open), plus rename, recolour, merge and delete — changes reach the apps' own tags too.
+- Ctrl+K search matches tags: "#home" shows the tag and the contacts, tasks and events carrying it.
+- Chat reaches every app at once: ask "what's my week look like and can we afford the trip?" and it checks your calendar, tasks, bills, workouts, meals, birthdays and trips together, looks people up across Contacts and Photos, searches events, contacts, tasks, trips and recipes by name, and reads or posts in Rooms (it only reads rooms where Promptly reading has been switched on, and only posts when you ask).
+- **Mention anything**: type `[[` in a doc, a room message, a chat message or a journal entry to mention a task, event, file, photo, album, contact, trip, recipe, budget transaction, person or workspace item. The mentioned thing then lists it under **Mentioned in**, with a link back (taking the mention out removes it).
+- **Linked**: link any two things — a receipt or photo to an event, a task to a contact, a file to a trip or a budget transaction. Links show on both sides in a "Linked" section on events, tasks, contacts, trips, recipes, transactions, journal entries, albums, photos, files, people and workspace items, with a search across apps to add one. Only what you can open yourself ever shows in either list.
+- **One Trash for every app** (account menu → Trash, `/trash`): deleted files, photos, workspaces and workspace pages, calendar events, photo albums, tasks and contacts in one list, grouped by app and searchable, with the same Restore, "Delete forever" and Empty trash everywhere. Everything is deleted for good after 30 days; restoring puts it back where it was, or at the top level when that's gone.
+- Deleting a calendar event, a photo album or a contact now shows an Undo toast (events and albums used to be gone for good straight away).
+- **Tasks & Reminders comes with every account**, beside Rooms and Calendar, so nobody has to add it from Get apps first (existing accounts get it too; you can still remove it).
+
+### Changed
+- Rooms reads like a messaging app: your messages sit on the right in tinted bubbles, everyone else's on the left with their name and picture.
+
+### Fixed
+- Workspace pages in a workspace's trash are now deleted after 30 days even if nobody opens that workspace's Trash panel.
+- Drive's Share dialog uses the same people picker as Calendar and Rooms (accounts, your Contacts and people from your Photos).
+- Meal Planner → "Open Tasks" after sending the grocery list now opens straight on the Groceries list.
+- "Snooze 10 min" on an event reminder is no longer lost if the server restarts.
+- Opening an emailed invitation's link no longer answers it by itself (link scanners could RSVP for you); the suggested answer is highlighted and you tap to send it.
+
 ## [0.16.0] - 2026-11-02
 
 ### Added

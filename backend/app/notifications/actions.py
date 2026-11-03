@@ -156,12 +156,14 @@ SNOOZE_CAL = timedelta(minutes=10)
 
 
 async def _cal_snooze(db: AsyncSession, user: User, target: str) -> str:
-    """Remind again in 10 minutes. Held in memory (one worker): a restart in
-    those 10 minutes loses it — the reminder was already shown once."""
+    """Remind again in 10 minutes. Saved in ``cal_event_snoozes`` (so a
+    restart doesn't lose it); the calendar reminder loop sends it when it's
+    due and deletes the row. Snoozing the same one again moves it."""
     from fastapi import HTTPException
+    from sqlalchemy.dialects.postgresql import insert
 
-    from app.background import spawn
     from app.calendars import core
+    from app.calendars.models import CalEventSnooze
 
     eid_s, _, occ_s = target.partition("|")
     eid = _uuid(eid_s)
@@ -170,25 +172,15 @@ async def _cal_snooze(db: AsyncSession, user: User, target: str) -> str:
         start = datetime.fromisoformat(occ_s.replace("Z", "+00:00")).astimezone(timezone.utc)
     except (HTTPException, ValueError) as exc:
         raise ActionRefused("gone") from exc
-    spawn(_remind_later(user.id, ev.id, start, SNOOZE_CAL.total_seconds()), name=f"cal-snooze-{ev.id}-{user.id}")
-    return f"I'll remind you about {ev.title} in 10 minutes"
-
-
-async def _remind_later(user_id: uuid.UUID, event_id: uuid.UUID, start: datetime, delay_s: float) -> None:
-    import asyncio
-
-    from app.calendars import notify
-    from app.calendars.models import CalEvent
-    from app.database import SessionLocal
-
-    await asyncio.sleep(delay_s)
-    async with SessionLocal() as db:
-        user = await db.get(User, user_id)
-        ev = await db.get(CalEvent, event_id)
-        if user is None or user.disabled or ev is None:
-            return
-        left = int((start - datetime.now(timezone.utc)).total_seconds() // 60)
-        await notify.reminder(user, ev, start, max(0, left))
+    until = datetime.now(timezone.utc) + SNOOZE_CAL
+    await db.execute(
+        insert(CalEventSnooze)
+        .values(user_id=user.id, event_id=ev.id, occurrence=start, until=until)
+        .on_conflict_do_update(constraint="uq_cal_event_snoozes", set_={"until": until})
+    )
+    title = ev.title
+    await db.commit()
+    return f"I'll remind you about {title} in 10 minutes"
 
 
 async def _task_done(db: AsyncSession, user: User, target: str) -> str:

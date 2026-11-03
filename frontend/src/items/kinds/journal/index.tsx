@@ -1,10 +1,12 @@
 import { BarChart3, BookOpen, CalendarDays, PenLine, Sun } from "lucide-react";
 import type { ComponentType } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import type { ItemModule, ItemViewProps } from "@/items/types";
 
 import { CalendarView } from "./CalendarView";
 import { EditorHost } from "./Editor";
+import { ReaderSheet } from "./EntryViews";
 import { InsightsView } from "./Insights";
 import { Onboarding } from "./Onboarding";
 import { editor } from "./store";
@@ -22,10 +24,19 @@ import type { JournalData } from "./types";
 
 function withEditor(View: ComponentType<ItemViewProps<JournalData>>) {
   return function JournalTab(props: ItemViewProps<JournalData>) {
+    // ``?entry=<id>`` — a mention or a link opening one entry.
+    const [params, setParams] = useSearchParams();
+    const linked = params.get("entry");
+    const closeLinked = () => {
+      const next = new URLSearchParams(params);
+      next.delete("entry");
+      setParams(next, { replace: true });
+    };
     return (
       <>
         <View {...props} />
         <EditorHost item={props.item} isPhone={props.isPhone} />
+        {linked && <ReaderSheet entryId={linked} onClose={closeLinked} item={props.item} ask={props.ask} />}
       </>
     );
   };

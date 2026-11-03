@@ -78,6 +78,7 @@ import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 import { apiErrorMessage } from "@/utils/apiError";
+import { useRecordOpen } from "@/hooks/useRecordOpen";
 
 // Defaults applied when the user has never touched the toggles.
 //   * Tools defaults ON so the AI can invoke artefact tools (PDF,
@@ -112,6 +113,7 @@ export function ChatPage({
   const pdfEditorOpen = useEditorStore((st) => st.open);
   const { id: routeId } = useParams<{ id?: string }>();
   const id = embeddedConversationId ?? routeId;
+  useRecordOpen("chat", id);
   const navigate = useNavigate();
   const location = useLocation();
   // Phase Z1 — temporary chat mode picked from the sidebar split button.

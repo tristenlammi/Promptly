@@ -2,6 +2,7 @@ import {
   Blocks,
   LayoutGrid,
   FolderOpen,
+  MapPin,
   ListTodo,
   MessagesSquare,
   Star,
@@ -32,7 +33,7 @@ export type NavSection = "chat" | "drive" | "admin";
 /** Stable identifiers for the *optional* nav surfaces a user can hide
  *  from their sidebar (Phase 2 — per-user feature visibility). Chat and
  *  Files are core and intentionally absent. */
-export type OptionalNavKey = "today" | "workspaces" | "tasks";
+export type OptionalNavKey = "today" | "places" | "workspaces" | "tasks";
 
 export const OPTIONAL_NAV_KEYS: {
   key: OptionalNavKey;
@@ -47,6 +48,11 @@ export const OPTIONAL_NAV_KEYS: {
     label: "Today",
     description:
       "Your day on one page — events, tasks due, habits, your workout and meals, unread rooms and your cards.",
+  },
+  {
+    key: "places",
+    label: "Places",
+    description: "One list and map of trip stops, photo places, event locations and contact addresses.",
   },
   {
     key: "workspaces",
@@ -90,6 +96,13 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Today",
     section: "chat",
     optionalKey: "today",
+  },
+  {
+    to: "/places",
+    icon: MapPin,
+    label: "Places",
+    section: "chat",
+    optionalKey: "places",
   },
   {
     to: "/chat",

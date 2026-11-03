@@ -61,6 +61,7 @@ from app.billing.usage import check_budget
 from app.database import get_db
 from app.files.quota import get_quota
 from app.files.system_folders import seed_system_folders
+from app.items.service import install_defaults as install_default_apps
 from app.models_config.models import ModelProvider
 
 router = APIRouter()
@@ -187,6 +188,7 @@ async def create_user(
     # of an empty one. Runs in its own commit so a folder-creation glitch
     # never blocks the user being created.
     await seed_system_folders(db, user)
+    await install_default_apps(db, user)
     await db.commit()
     if payload.group_ids:
         await _sync_user_groups(db, user.id, payload.group_ids)
@@ -384,6 +386,7 @@ async def _run_import(job_id: str, rows: list[dict], admin_id: uuid.UUID) -> Non
                 await db.refresh(user)
                 try:
                     await seed_system_folders(db, user)
+                    await install_default_apps(db, user)
                     await db.commit()
                 except Exception:  # noqa: BLE001 — folder glitch must not fail the import
                     await db.rollback()

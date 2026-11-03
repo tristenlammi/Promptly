@@ -128,7 +128,7 @@ async def sync_to_tasks(db: AsyncSession, user: User, mealplan_id: uuid.UUID, gr
     out = merge(data, mealplan_id, grocery, now)
     await items.save_data(db, user, trow, tdoc, data, base_revision=None)
     open_count = sum(1 for t in data["tasks"] if t.get("list_id") == out["list_id"] and not t.get("done"))
-    return {**out, "tasks_file_id": str(trow.id), "open": open_count, "href": f"/apps/tasks/{trow.id}?tab=lists"}
+    return {**out, "tasks_file_id": str(trow.id), "open": open_count, "href": f"/apps/tasks/{trow.id}?tab=lists&list={out['list_id']}"}
 
 
 def summary_of(out: dict) -> str:

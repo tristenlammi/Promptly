@@ -1558,6 +1558,13 @@ async def delete_conversation(
             status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found"
         )
     owner_id = conv.user_id
+    from app.links.service import purge_sources
+
+    await purge_sources(
+        db,
+        "chat_msg",
+        (await db.execute(select(Message.id).where(Message.conversation_id == conv.id))).scalars().all(),
+    )
     await db.delete(conv)
     await db.commit()
 
@@ -1762,6 +1769,9 @@ async def send_message(
     db.add(user_msg)
     await db.flush()
     conv.active_leaf_message_id = user_msg.id
+    from app.links.service import sync_text
+
+    await sync_text(db, "chat_msg", user_msg.id, payload.content, user_id=user.id)
 
     # Set a *provisional* title so the sidebar has something meaningful the
     # moment the POST returns. An AI-generated title will replace it at the
@@ -2039,6 +2049,9 @@ async def edit_and_resend_message(
     db.add(edited)
     await db.flush()
     conv.active_leaf_message_id = edited.id
+    from app.links.service import sync_text
+
+    await sync_text(db, "chat_msg", edited.id, payload.content, user_id=user.id)
 
     # Update conv defaults so the next plain ``send_message`` works
     # without re-specifying — same behavior as send_message.
@@ -2222,6 +2235,9 @@ async def delete_message(
     if conv.active_leaf_message_id == target.id:
         conv.active_leaf_message_id = target.parent_id
 
+    from app.links.service import purge_sources
+
+    await purge_sources(db, "chat_msg", [target.id])
     await db.delete(target)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -3530,6 +3546,8 @@ UNTRUSTED_CONTENT_TOOLS = frozenset(
         "read_workspace_item", "query_board_cards", "code_interpreter",
         # File text — including files other people shared (WP-5.2/5.3).
         "search_my_files", "read_file", "list_my_files",
+        # Other people's messages in Rooms.
+        "read_room",
     }
 )
 
@@ -5031,6 +5049,13 @@ async def _stream_generator(
                     enabled_categories.add("items")
                 # The calendar: everyone has one.
                 enabled_categories.add("calendar")
+                # Across the apps (my_day, find_person, search_apps): everyone.
+                enabled_categories.add("apps")
+                # Rooms: for anyone in a space or a conversation.
+                from app.chat.tools.crossapp import has_rooms
+
+                if await has_rooms(db, user.id):
+                    enabled_categories.add("rooms")
                 # Ask your photos (PH-4): for anyone with a photo library.
                 from app.chat.tools.photos import has_library
 

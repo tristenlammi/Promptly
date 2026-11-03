@@ -28,6 +28,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { cn } from "@/utils/cn";
+import { useRecordOpen } from "@/hooks/useRecordOpen";
 import {
   Archive,
   ArchiveRestore,
@@ -102,6 +103,7 @@ import { WorkspaceRosterPane } from "@/components/workspaces/WorkspaceRosterPane
 import { WorkspaceDiscussionPane } from "@/components/workspaces/WorkspaceDiscussionPane";
 import { ItemContextToggle } from "@/components/workspaces/ItemPaneHeader";
 import { ItemCommentsPanel } from "@/components/workspaces/ItemCommentsPanel";
+import { LinkedSection } from "@/components/links/LinkedSection";
 import { WorkspaceNavigatorTree } from "@/components/workspaces/WorkspaceNavigatorTree";
 import { TaskFormModal } from "@/components/tasks/TaskFormModal";
 import { MeetingNotesModal } from "@/components/workspaces/MeetingNotesModal";
@@ -179,6 +181,7 @@ export function WorkspaceDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [selected, setSelected] = useState<WorkspaceItemNode | null>(null);
+  useRecordOpen("workspace_item", selected?.id);
   const [secondary, setSecondary] = useState<WorkspaceItemNode | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [driveOpen, setDriveOpen] = useState(false);
@@ -1989,6 +1992,11 @@ function WorkspaceNotePane({
         itemId={node.id}
         onOpenItem={onOpenItem}
       />
+      <LinkedSection
+        thing={{ kind: "witem", id: node.id }}
+        readOnly={!canEdit}
+        className="max-h-60 shrink-0 overflow-y-auto border-t border-[var(--border)] bg-[var(--surface)] px-4 py-2"
+      />
       {/* Note comments live in the editor now, anchored in the text
           (WP-4.5, R-227) — the Comments button in its header. */}
     </div>
@@ -2847,6 +2855,11 @@ function WithComments({
             canModerate={canModerateIn(ws?.access_role)}
             defaultOpen
             emptyHint="No comments yet — start the conversation about this item."
+          />
+          <LinkedSection
+            thing={{ kind: "witem", id: itemId }}
+            readOnly={!canEdit}
+            className="border-t border-[var(--border)] px-3 py-3"
           />
         </aside>
       )}

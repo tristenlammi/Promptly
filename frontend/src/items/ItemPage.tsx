@@ -36,6 +36,7 @@ import type { ItemModule } from "./types";
 import { useItem, type ItemHandle } from "./useItem";
 import { setItemTimeZone } from "./ui/format";
 import { useAuthStore } from "@/store/authStore";
+import { useRecordOpen } from "@/hooks/useRecordOpen";
 import "./ui/items.css";
 
 const AI_OPEN_KEY = "promptly.items.aiOpen";
@@ -58,6 +59,8 @@ export function ItemPage({ standalone = false }: { standalone?: boolean } = {}) 
     staleTime: Infinity,
     gcTime: 0,
   });
+  // Today's "Recent" strip (filed as the app's file server-side).
+  useRecordOpen("file", doc ? fileId : null);
   const [module, setModule] = useState<ItemModule | null | undefined>(undefined);
 
   useEffect(() => {

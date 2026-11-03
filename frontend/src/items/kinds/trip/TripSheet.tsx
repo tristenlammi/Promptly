@@ -1,6 +1,7 @@
 import { Plus, Trash2, UserRound } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { LinkedSection } from "@/components/links/LinkedSection";
 import type { ItemHandle } from "@/items/useItem";
 import { Field, IconButton, ItemButton, Segmented, Select, Sheet, TextArea, TextInput, todayISO, uid } from "@/items/ui";
 import { cn } from "@/utils/cn";
@@ -319,6 +320,7 @@ export function TripSheet({ item, open, onClose, fallbackTitle }: { item: ItemHa
         <Field label="Notes">
           <TextArea value={d.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Anything worth remembering — the plan, who's booking what…" />
         </Field>
+        <LinkedSection thing={{ kind: "trip", id: `${item.fileId}:${t.id}` }} readOnly={!item.canEdit} />
       </div>
     </Sheet>
   );

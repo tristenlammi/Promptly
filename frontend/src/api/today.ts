@@ -98,6 +98,8 @@ export interface EverydaySearch {
   events: { id: string; event_id: string; title: string; start: string; all_day: boolean; location: string; url: string }[];
   contacts: { id: string; name: string; detail: string; favorite: boolean; url: string }[];
   tasks: { id: string; title: string; done: boolean; due: string | null; time: string | null; list: string; url: string }[];
+  /** Shared tags matching the query (#tags). */
+  tags?: { id: string; name: string; color: string | null; count?: number; url: string }[];
 }
 
 export interface JournalDay {

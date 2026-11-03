@@ -5,6 +5,10 @@ sees it gets each of their reminders once, when it comes due (a row in
 ``cal_reminders_sent`` claims it, so a restart or a second pass never sends
 it twice). One overdue by more than 10 minutes — the server was down — is
 skipped rather than sent late.
+
+Snoozed reminders ("Snooze 10 min" on the notification) are rows in
+``cal_event_snoozes``; each pass sends the due ones and deletes them, so a
+snooze survives a restart.
 """
 from __future__ import annotations
 
@@ -32,9 +36,11 @@ async def send_due(db, now: datetime | None = None) -> int:  # noqa: ANN001
     from .models import CalAttendee, CalCalendar, CalEvent, CalMember, CalReminderSent
 
     now = now or datetime.now(timezone.utc)
+    snoozed = await send_snoozed(db, now)
     events = list((await db.execute(select(CalEvent).where(core.in_range_filter(now - _GRACE, now + _AHEAD)))).scalars())
     if not events:
-        return 0
+        await db.commit()
+        return snoozed
     atts = await core.attendees_of(db, [e.id for e in events])
     # Who's reminded of a calendar's events by default: everyone on a shared
     # calendar ("Family"), but only the owner of someone's own calendar —
@@ -90,6 +96,38 @@ async def send_due(db, now: datetime | None = None) -> int:  # noqa: ANN001
                     await notify.reminder(user, ev, start, m)
                     sent += 1
     await db.commit()
+    return sent + snoozed
+
+
+async def send_snoozed(db, now: datetime | None = None) -> int:  # noqa: ANN001
+    """Send the snoozed reminders that are due, deleting their rows (the
+    delete claims them, so one never goes twice). One overdue by more than
+    the grace — the server was down — is dropped rather than sent late.
+    Flushed, not committed (``send_due`` commits)."""
+    from app.auth.models import User
+
+    from . import notify
+    from .models import CalEvent, CalEventSnooze
+
+    now = now or datetime.now(timezone.utc)
+    rows = (
+        await db.execute(
+            delete(CalEventSnooze)
+            .where(CalEventSnooze.until <= now)
+            .returning(CalEventSnooze.user_id, CalEventSnooze.event_id, CalEventSnooze.occurrence, CalEventSnooze.until)
+        )
+    ).all()
+    sent = 0
+    for uid, eid, occurrence, until in rows:
+        if until < now - _GRACE:
+            continue
+        user = await db.get(User, uid)
+        ev = await db.get(CalEvent, eid)
+        if user is None or user.disabled or ev is None:
+            continue
+        left = int((occurrence - now).total_seconds() // 60)
+        await notify.reminder(user, ev, occurrence, max(0, left))
+        sent += 1
     return sent
 
 
@@ -106,11 +144,12 @@ def _due(start: datetime, minutes: int, all_day: bool, tz_name: str, user) -> da
 
 
 async def _prune(db) -> None:  # noqa: ANN001
-    from .models import CalReminderSent
+    from .models import CalEventSnooze, CalReminderSent
 
     from .reach import prune_room_sent
 
     await db.execute(delete(CalReminderSent).where(CalReminderSent.sent_at < datetime.now(timezone.utc) - timedelta(days=30)))
+    await db.execute(delete(CalEventSnooze).where(CalEventSnooze.until < datetime.now(timezone.utc) - timedelta(days=1)))
     await prune_room_sent(db)
     await db.commit()
 

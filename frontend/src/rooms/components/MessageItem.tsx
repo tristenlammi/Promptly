@@ -108,6 +108,7 @@ export const MessageItem = memo(function MessageItem({
       }}
       className={cn(
         "group relative flex gap-3 px-3 transition-colors md:px-4",
+        own && "flex-row-reverse",
         grouped ? "py-0.5" : "pt-2 pb-0.5",
         isPromptly && "bg-[color-mix(in_srgb,var(--item-accent)_7%,transparent)]",
         highlight && "!bg-[color-mix(in_srgb,#C08B2C_22%,transparent)]",
@@ -115,7 +116,7 @@ export const MessageItem = memo(function MessageItem({
         ctx.isPhone && "select-none [-webkit-touch-callout:none]",
       )}
     >
-      <div className="w-9 shrink-0">
+      <div className={cn("w-9 shrink-0", own && "hidden")}>
         {!grouped ? (
           isPromptly ? (
             <PromptlyAvatar size={36} />
@@ -132,8 +133,13 @@ export const MessageItem = memo(function MessageItem({
           </time>
         )}
       </div>
-      <div className="min-w-0 flex-1">
-        {!grouped && (
+      <div className={cn("flex min-w-0 flex-1 flex-col", own ? "items-end pl-10 md:pl-24" : "items-start pr-10 md:pr-24")}>
+        {!grouped && own && (
+          <time dateTime={m.created_at} title={fullDate(m.created_at)} className="mb-0.5 text-[11px] text-[var(--text-muted)]">
+            {timeOf(m.created_at)}
+          </time>
+        )}
+        {!grouped && !own && (
           <div className="flex items-baseline gap-2">
             <span className={cn("truncate text-sm font-semibold", isPromptly ? "text-[var(--item-accent)]" : "text-[var(--text)]")}>{name}</span>
             {isPromptly && typeof m.meta?.asked_by === "string" && (
@@ -153,11 +159,19 @@ export const MessageItem = memo(function MessageItem({
               <EventCard eventId={m.meta.event_id} fallback={m.body} meId={ctx.meId} users={ctx.users} />
             ) : shareOf(m) ? (
               <>
-                {shareOf(m)!.has_note && m.body && <MessageBody body={m.body} usernames={ctx.usernames} me={ctx.meName} />}
+                {shareOf(m)!.has_note && m.body && (
+                  <Bubble own={own}>
+                    <MessageBody body={m.body} usernames={ctx.usernames} me={ctx.meName} />
+                  </Bubble>
+                )}
                 <ShareCard messageId={m.id} kind={shareOf(m)!.kind as ShareKind} label={shareOf(m)!.label} />
               </>
             ) : (
-              m.body && <MessageBody body={m.body} usernames={ctx.usernames} me={ctx.meName} />
+              m.body && (
+                <Bubble own={own}>
+                  <MessageBody body={m.body} usernames={ctx.usernames} me={ctx.meName} />
+                </Bubble>
+              )
             )}
             {m.edited_at && <span className="text-[10px] text-[var(--text-muted)]" title={fullDate(m.edited_at)}>(edited)</span>}
             {m.pinned && (
@@ -174,7 +188,8 @@ export const MessageItem = memo(function MessageItem({
       {!ctx.isPhone && !m.deleted && (
         <div
           className={cn(
-            "absolute -top-3 right-3 z-10 hidden items-center gap-0.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-0.5 shadow-[var(--shadow-sm)] group-hover:flex group-focus-within:flex",
+            "absolute -top-3 z-10 hidden items-center gap-0.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-0.5 shadow-[var(--shadow-sm)] group-hover:flex group-focus-within:flex",
+            own ? "left-3" : "right-3",
             hoverPicker && "!flex",
           )}
         >
@@ -228,6 +243,22 @@ export const MessageItem = memo(function MessageItem({
     </div>
   );
 });
+
+/** Text in a chat bubble: yours tinted on the right, everyone else's plain on the left. */
+function Bubble({ own, children }: { own: boolean; children: ReactNode }) {
+  return (
+    <div
+      className={cn(
+        "max-w-full rounded-2xl px-3 py-1.5",
+        own
+          ? "rounded-br-md bg-[color-mix(in_srgb,var(--item-accent)_22%,var(--surface))]"
+          : "rounded-bl-md bg-[var(--surface-2)]",
+      )}
+    >
+      {children}
+    </div>
+  );
+}
 
 function ToolButton({
   label,
@@ -331,16 +362,14 @@ export function PendingItem({
 }) {
   const failed = p.status === "failed";
   return (
-    <div className={cn("flex gap-3 px-3 md:px-4", grouped ? "py-0.5" : "pt-2 pb-0.5", !failed && "opacity-60")}>
-      <div className="w-9 shrink-0">{!grouped && <UserAvatar user={ctx.users[ctx.meId]} size={36} />}</div>
-      <div className="min-w-0 flex-1">
-        {!grouped && (
-          <div className="flex items-baseline gap-2">
-            <span className="text-sm font-semibold text-[var(--text)]">{ctx.meName}</span>
-            <span className="text-[11px] text-[var(--text-muted)]">{failed ? "Not sent" : "Sending…"}</span>
-          </div>
+    <div className={cn("flex flex-row-reverse gap-3 px-3 md:px-4", grouped ? "py-0.5" : "pt-2 pb-0.5", !failed && "opacity-60")}>
+      <div className="flex min-w-0 flex-1 flex-col items-end pl-10 md:pl-24">
+        {!grouped && <span className="mb-0.5 text-[11px] text-[var(--text-muted)]">{failed ? "Not sent" : "Sending…"}</span>}
+        {p.body && (
+          <Bubble own>
+            <MessageBody body={p.body} usernames={ctx.usernames} me={ctx.meName} />
+          </Bubble>
         )}
-        {p.body && <MessageBody body={p.body} usernames={ctx.usernames} me={ctx.meName} />}
         {p.attachments.length > 0 && <AttachmentList attachments={p.attachments} />}
         {failed ? (
           <div className="mt-1 flex items-center gap-2 text-xs text-[var(--danger)]">

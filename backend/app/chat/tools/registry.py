@@ -14,6 +14,7 @@ from typing import Any
 from app.chat.tools.base import Tool
 from app.chat.tools.calendar import CalendarAddEventTool, CalendarChangeEventTool, CalendarEventsTool, CalendarFreeTimesTool
 from app.chat.tools.code_interpreter import CodeInterpreterTool
+from app.chat.tools.crossapp import FindPersonTool, MyDayTool, PostToRoomTool, ReadRoomTool, SearchAppsTool
 from app.chat.tools.deep_research import DeepResearchTool
 from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
@@ -104,6 +105,14 @@ REGISTRY: list[Tool] = [
     CalendarAddEventTool(),
     CalendarChangeEventTool(),
     CalendarFreeTimesTool(),
+    # Across the apps (category "apps", with the Tools toggle for everyone):
+    # the day/week overview, people, and a search over the everyday apps.
+    MyDayTool(),
+    FindPersonTool(),
+    SearchAppsTool(),
+    # Rooms (category "rooms"): for people in a space or conversation.
+    ReadRoomTool(),
+    PostToRoomTool(),
 ]
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the

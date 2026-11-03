@@ -17,6 +17,8 @@ import {
 import type { FileItem, FolderItem } from "@/api/files";
 import { filesShellApi } from "@/api/filesShell";
 import { MediaDetails, isMediaFile } from "@/components/files/MediaDetails";
+import { EntityTags } from "@/components/tags/TagPicker";
+import { LinkedSection } from "@/components/links/LinkedSection";
 import { DriveItemIcon } from "./DriveItemIcon";
 import { DriveThumb } from "./DriveThumb";
 import { GranteesPill } from "./GranteesPill";
@@ -154,6 +156,18 @@ export function DriveDetailsPanel({
           )}
         </dl>
         {file && isMediaFile(file.mime_type) && <MediaDetails fileId={file.id} />}
+        {file && (
+          <div className="mt-4">
+            <div className="mb-1.5 text-xs text-[var(--text-muted)]">Tags</div>
+            <EntityTags kind="file" id={file.id} />
+          </div>
+        )}
+        {file && (
+          <LinkedSection
+            thing={{ kind: isMediaFile(file.mime_type) ? "photo" : "file", id: file.id }}
+            className="mt-4"
+          />
+        )}
 
         {/* Actions */}
         <div className="mt-5 space-y-1">

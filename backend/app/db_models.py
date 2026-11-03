@@ -76,11 +76,16 @@ from app.calendars.models import (  # noqa: F401
     CalCalendar,
     CalEvent,
     CalEventRoom,
+    CalEventSnooze,
     CalExternalGuest,
     CalFeed,
     CalMember,
     CalReminderSent,
     CalRoomReminderSent,
 )
+from app.tags.models import Tag, TagAssignment  # noqa: F401
 from app.tasks.models import Task, TaskConnector, TaskRun  # noqa: F401
+from app.trash.models import TrashEntry  # noqa: F401
+from app.links.models import EntityLink  # noqa: F401
+from app.today.models import RecentOpen  # noqa: F401
 from app.workspaces.meetings_models import MeetingJob  # noqa: F401

@@ -23,6 +23,7 @@ import { CreateRoomSheet, NewDmSheet } from "./components/RoomSheets";
 import { RoomView } from "./components/RoomView";
 import { CreateSpaceSheet, SpaceSettingsSheet } from "./components/SpaceSheets";
 import { CountBadge, SpaceIcon } from "./components/ui";
+import { useRecordOpen } from "@/hooks/useRecordOpen";
 
 export const ROOMS_ACCENT = "#5865F2";
 const LAST_ROOM_KEY = "rooms:last-room";
@@ -84,6 +85,7 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
   const isPhone = useIsMobile(767);
   const roomMatch = useMatch("/rooms/r/:roomId");
   const roomId = roomMatch?.params.roomId ?? null;
+  useRecordOpen("room", roomId);
   const onDmPath = location.pathname.startsWith("/rooms/dm");
   const { data: b, isLoading, isError, refetch } = useQuery({
     queryKey: BOOTSTRAP_KEY,

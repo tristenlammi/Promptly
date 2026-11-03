@@ -26,6 +26,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { peopleHubApi, type PersonPage, type PersonRef } from "@/api/peopleHub";
 import { roomsApi } from "@/api/rooms";
 import { PersonAvatar } from "@/components/people/PeoplePicker";
+import { LinkedSection } from "@/components/links/LinkedSection";
 import { Button } from "@/components/shared/Button";
 import { fmt, parseYmd, sameDay, addDays, timeLabel } from "@/calendar/dates";
 import { daysFrom, fmtDate, nextOccurrence } from "@/items/kinds/contacts/model";
@@ -345,6 +346,21 @@ function PersonBody({ p }: { p: PersonPage }) {
           </Section>
         </>
       )}
+
+      {/* Links and mentions — on your contact for them if you have one,
+          else their Photos person, else their account. */}
+      <LinkedSection
+        thing={
+          c
+            ? { kind: "contact", id: `${c.file_id}:${c.contact_id}` }
+            : p.photo_person_id
+              ? { kind: "person", id: p.photo_person_id }
+              : p.user
+                ? { kind: "user", id: p.user.id }
+                : null
+        }
+        className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3 sm:p-4"
+      />
     </div>
   );
 }

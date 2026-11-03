@@ -43,11 +43,17 @@ const components: Components = {
   blockquote: ({ children }) => (
     <blockquote className="my-4 border-l-[3px] border-[var(--item-accent)] pl-4 italic text-[var(--text-muted)]">{children}</blockquote>
   ),
-  a: ({ children, href }) => (
-    <a href={href} target="_blank" rel="noreferrer noopener" className="text-[var(--item-accent)] underline underline-offset-2">
-      {children}
-    </a>
-  ),
+  a: ({ children, href }) =>
+    // A mention (``@[Title](/link/…)``) or another in-app path opens here.
+    href?.startsWith("/") && !href.startsWith("//") ? (
+      <Link to={href} className="font-medium text-[var(--item-accent)] underline underline-offset-2">
+        {children}
+      </Link>
+    ) : (
+      <a href={href} target="_blank" rel="noreferrer noopener" className="text-[var(--item-accent)] underline underline-offset-2">
+        {children}
+      </a>
+    ),
   hr: () => <hr className="my-6 border-[var(--border)]" />,
   code: ({ children }) => <code className="rounded bg-[var(--surface-2)] px-1 py-0.5 font-mono text-[0.9em]">{children}</code>,
   pre: ({ children }) => <pre className="my-3 overflow-x-auto rounded-xl bg-[var(--surface-2)] p-3 text-sm">{children}</pre>,

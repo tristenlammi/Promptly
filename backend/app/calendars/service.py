@@ -339,6 +339,10 @@ async def delete_event(db: AsyncSession, user: User, event_id: uuid.UUID, *, sco
             return
     await notify.cancelled(db, ev, user, seeing)
     await reach.email_cancelled(db, ev, user)  # before its email guests go with it
+    # A copy goes to the trash (30 days), so a delete can be undone.
+    from app.trash.service import trash_event
+
+    await trash_event(db, ev, user)
     await db.delete(ev)
 
 

@@ -98,6 +98,7 @@ from app.auth.utils import (
 from app.config import get_settings
 from app.database import get_db
 from app.files.system_folders import seed_system_folders
+from app.items.service import install_defaults as install_default_apps
 from app.mfa import service as mfa_service
 from app.mfa import trusted as trusted_devices
 from app.mfa.email_otp import (
@@ -604,6 +605,7 @@ async def setup(
     # very first visit instead of waiting on a chat upload to lazily
     # create them.
     await seed_system_folders(db, user)
+    await install_default_apps(db, user)
     await db.commit()
     await db.refresh(user)
     return _issue_tokens_for(user, response)

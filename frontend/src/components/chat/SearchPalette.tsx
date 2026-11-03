@@ -16,13 +16,21 @@ import {
 import { chatApi } from "@/api/chat";
 import { workspacesApi } from "@/api/workspaces";
 import { todayApi, type EverydaySearch } from "@/api/today";
+import { TagSearchHits } from "@/components/tags/TagSearchHits";
 import type { ConversationSearchHit } from "@/api/types";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { SearchDateFilter, type DateRange } from "./SearchDateFilter";
+import { ActionRows, usePaletteActions, type PaletteAction } from "./usePaletteActions";
 
 /**
  * Global command palette for full-text conversation search.
+ *
+ * It also *acts*: a typed command ("new event lunch fri 1pm", "add task
+ * buy milk tomorrow", "log $40 fuel", "go to calendar") shows a "Do" row
+ * on top (``usePaletteActions`` / ``lib/paletteCommands``) that makes the
+ * thing in place on Enter, plus plain Create… actions. Search results stay
+ * below; the ↑↓ cursor runs over both.
  *
  * Opened via ``Ctrl+K`` / ``Cmd+K`` (or the sidebar search entry). The
  * modal covers the top-centre of the viewport, debounces queries by
@@ -70,6 +78,8 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cursor, setCursor] = useState(0);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const { actions, sureTop, cycleTarget } = usePaletteActions(open ? query : "", { navigate, setQuery });
 
   const inputRef = useRef<HTMLInputElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -158,7 +168,6 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
         if (seq !== fetchSeq.current) return; // superseded
         setHits(results);
         setError(null);
-        setCursor(0);
       } catch (e) {
         if (seq !== fetchSeq.current) return;
         setError(extractError(e));
@@ -184,7 +193,28 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   // without having to worry about section boundaries.
   const flat = useMemo(() => [...owned, ...shared], [owned, shared]);
   const everydayCount =
-    (everyday?.events.length ?? 0) + (everyday?.contacts.length ?? 0) + (everyday?.tasks.length ?? 0);
+    (everyday?.events.length ?? 0) + (everyday?.contacts.length ?? 0) + (everyday?.tasks.length ?? 0) + (everyday?.tags?.length ?? 0);
+
+  // The ↑↓ cursor runs over the Do / Create rows, then the chat hits. A
+  // command said outright starts selected; a guess is only offered (-1:
+  // nothing selected, so Enter does nothing until the person picks).
+  const nActions = actions.length;
+  const defaultCursor = sureTop ? 0 : flat.length ? nActions : -1;
+  useEffect(() => {
+    setCursor(defaultCursor);
+  }, [defaultCursor, query, hits]);
+
+  const runAction = async (a: PaletteAction) => {
+    if (busyKey) return;
+    setBusyKey(a.key);
+    try {
+      const close = await a.run();
+      if (close) onClose();
+      else inputRef.current?.focus();
+    } finally {
+      setBusyKey(null);
+    }
+  };
 
   // Handle global keyboard inside the modal. Keep arrow keys from
   // reaching the underlying page (e.g. scrolling the chat log).
@@ -201,12 +231,20 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
       }
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setCursor((c) => Math.min(flat.length - 1, c + 1));
+        setCursor((c) => Math.min(nActions + flat.length - 1, c + 1));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setCursor((c) => Math.max(0, c - 1));
+      } else if (e.key === "Tab" && cursor >= 0 && actions[cursor]?.target && cycleTarget(e.shiftKey ? -1 : 1)) {
+        // Tab on a task / expense row: write to the next file instead.
+        e.preventDefault();
       } else if (e.key === "Enter") {
-        const hit = flat[cursor];
+        if (cursor >= 0 && cursor < nActions) {
+          e.preventDefault();
+          void runAction(actions[cursor]);
+          return;
+        }
+        const hit = flat[cursor - nActions];
         if (hit) {
           e.preventDefault();
           openHit(hit);
@@ -215,7 +253,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [open, flat, cursor, onClose]);
+  }, [open, flat, cursor, onClose, actions, nActions, cycleTarget, busyKey]);
 
   // Keep the cursored row visible as the user arrows down past the
   // visible viewport of the scrollable list.
@@ -286,6 +324,16 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
         </div>
 
         <div ref={listRef} className="max-h-[50vh] overflow-y-auto">
+          {!dateRange && (
+            <ActionRows
+              actions={actions}
+              cursor={cursor}
+              busyKey={busyKey}
+              onRun={(a) => void runAction(a)}
+              onHover={setCursor}
+              onCycle={() => cycleTarget(1)}
+            />
+          )}
           {error && (
             <div className="px-3 py-4 text-xs text-[var(--danger)]">
               {error}
@@ -294,6 +342,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
           {!error &&
             !loading &&
             flat.length === 0 &&
+            nActions === 0 &&
             wsGroups.length === 0 &&
             everydayCount === 0 &&
             (query.trim() || dateRange) && (
@@ -311,7 +360,9 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
           {!error && !query.trim() && !dateRange && (
             <div className="px-3 py-6 text-center text-xs text-[var(--text-muted)]">
               Type to search your chats, workspaces, calendar, contacts and
-              tasks — or filter by date to browse your chats.
+              tasks — or filter by date to browse your chats. Commands work
+              too: “add task buy milk tomorrow”, “log $40 fuel”, “go to
+              calendar”.
             </div>
           )}
 
@@ -329,7 +380,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
               label="Your chats"
               icon={<UserIcon className="h-3 w-3" />}
               hits={owned}
-              baseIndex={0}
+              baseIndex={nActions}
               cursor={cursor}
               onSelect={openHit}
               onHover={setCursor}
@@ -340,7 +391,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
               label="Shared with you"
               icon={<Users className="h-3 w-3" />}
               hits={shared}
-              baseIndex={owned.length}
+              baseIndex={nActions + owned.length}
               cursor={cursor}
               onSelect={openHit}
               onHover={setCursor}
@@ -414,7 +465,12 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
         >
           <div className="flex items-center gap-2">
             <KeyHint label="↑↓" /> navigate
-            <KeyHint label="⏎" /> open
+            <KeyHint label="⏎" /> {cursor >= 0 && cursor < nActions ? "do" : "open"}
+            {(actions[cursor]?.target?.count ?? 0) > 1 && (
+              <>
+                <KeyHint label="Tab" /> change file
+              </>
+            )}
             <KeyHint label="Esc" /> close
           </div>
           <span>Keyword + meaning · ranked</span>
@@ -452,6 +508,7 @@ function EverydaySection({ data, onOpen }: { data: EverydaySearch; onOpen: (url:
   );
   return (
     <div className="border-t border-[var(--border)] pb-1">
+      <TagSearchHits tags={data.tags} onOpen={onOpen} />
       {data.events.length > 0 && (
         <>
           {label("Calendar", <CalendarDays className="h-3 w-3" />)}

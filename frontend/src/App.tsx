@@ -61,6 +61,18 @@ const TodayPage = lazyWithRetry(
   () => import("@/pages/TodayPage").then((m) => ({ default: m.TodayPage })),
   "TodayPage"
 );
+const TagsPage = lazyWithRetry(
+  () => import("@/pages/TagsPage").then((m) => ({ default: m.TagsPage })),
+  "TagsPage"
+);
+const TagPage = lazyWithRetry(
+  () => import("@/pages/TagsPage").then((m) => ({ default: m.TagPage })),
+  "TagPage"
+);
+const PlacesPage = lazyWithRetry(
+  () => import("@/pages/PlacesPage").then((m) => ({ default: m.PlacesPage })),
+  "PlacesPage"
+);
 const PersonHubPage = lazyWithRetry(
   () => import("@/pages/PersonHubPage").then((m) => ({ default: m.PersonHubPage })),
   "PersonHubPage"
@@ -149,6 +161,10 @@ const FileDeepLinkPage = lazyWithRetry(
   () => import("@/pages/FileDeepLinkPage").then((m) => ({ default: m.FileDeepLinkPage })),
   "FileDeepLinkPage"
 );
+const LinkRedirectPage = lazyWithRetry(
+  () => import("@/pages/LinkRedirectPage").then((m) => ({ default: m.LinkRedirectPage })),
+  "LinkRedirectPage"
+);
 const OfficeEditorPage = lazyWithRetry(
   () => import("@/pages/OfficeEditorPage").then((m) => ({ default: m.OfficeEditorPage })),
   "OfficeEditorPage"
@@ -201,6 +217,10 @@ const SharedLinksPage = lazyWithRetry(
 const TrashPage = lazyWithRetry(
   () => import("@/pages/TrashPage").then((m) => ({ default: m.TrashPage })),
   "TrashPage"
+);
+const UnifiedTrashPage = lazyWithRetry(
+  () => import("@/pages/UnifiedTrashPage").then((m) => ({ default: m.UnifiedTrashPage })),
+  "UnifiedTrashPage"
 );
 const WorkspaceDetailPage = lazyWithRetry(
   () => import("@/pages/WorkspaceDetailPage").then((m) => ({ default: m.WorkspaceDetailPage })),
@@ -642,6 +662,9 @@ export default function App() {
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route path="/work" element={<MyWorkPage />} />
         <Route path="/today" element={<TodayPage />} />
+        <Route path="/tags" element={<TagsPage />} />
+        <Route path="/tags/:tagId" element={<TagPage />} />
+        <Route path="/places" element={<PlacesPage />} />
         {/* One person, everywhere: /people/u/<user>, /people/c/<file>/<contact>, /people/p/<photos person>. */}
         <Route path="/people/:kind/:a" element={<PersonHubPage />} />
         <Route path="/people/:kind/:a/:b" element={<PersonHubPage />} />
@@ -684,6 +707,7 @@ export default function App() {
           <Route path="/files/workspaces/:wsId" element={<WorkspaceDrivePage />} />
         </Route>
         <Route path="/files/f/:fileId" element={<FileDeepLinkPage />} />
+        <Route path="/link/:kind/:id" element={<LinkRedirectPage />} />
         <Route path="/files/doc/:fileId" element={<OfficeEditorPage />} />
         <Route path="/files/sheet/:fileId" element={<OfficeEditorPage />} />
         <Route path="/files/whiteboard/:fileId" element={<OfficeEditorPage />} />
@@ -696,6 +720,7 @@ export default function App() {
         <Route path="/apps/:kind" element={<AppLaunch />} />
         <Route path="/apps/:kind/:fileId" element={<ItemPage />} />
         <Route path="/archive" element={<ArchivePage />} />
+        <Route path="/trash" element={<UnifiedTrashPage />} />
         {/* /account opens at the top (Profile); /account/<section> deep-
             links to one section — /account/security used to be the only
             address, whatever it showed (V25). */}

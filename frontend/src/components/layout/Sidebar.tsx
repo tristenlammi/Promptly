@@ -210,6 +210,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             icon={<Archive className="h-4 w-4" />}
             label="Archive"
           />
+          <SideIcon to="/trash" icon={<Trash2 className="h-4 w-4" />} label="Trash" />
           {isAdmin && (
             <SideIcon to="/admin" icon={<Settings className="h-4 w-4" />} label="Settings" />
           )}
@@ -1020,6 +1021,10 @@ function UserFooter() {
           <button role="menuitem" className={itemClass} onClick={() => go("/archive")}>
             <Archive className="h-4 w-4 text-[var(--text-muted)]" />
             Archived chats
+          </button>
+          <button role="menuitem" className={itemClass} onClick={() => go("/trash")}>
+            <Trash2 className="h-4 w-4 text-[var(--text-muted)]" />
+            Trash
           </button>
           {inviteCount > 0 && (
             <button

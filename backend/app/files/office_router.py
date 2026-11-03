@@ -140,6 +140,10 @@ async def office_info(
         ws = await db.get(Workspace, workspace_id)
         workspace_title = ws.title if ws is not None else None
     await record_activity(db, user_id=user.id, file_id=row.id, kind="opened")
+    # Today's "Recent" strip (access already checked above).
+    from app.today.recents import office_title, touch as touch_recent
+
+    await touch_recent(db, user.id, row.source_kind, row.id, office_title(row.filename))
     await db.commit()
     return {
         "kind": row.source_kind,

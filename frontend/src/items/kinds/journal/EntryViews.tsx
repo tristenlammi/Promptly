@@ -1,5 +1,6 @@
 import { CloudSun, Heart, MapPin, PenLine, Sparkles, Star, Zap } from "lucide-react";
 
+import { LinkedSection } from "@/components/links/LinkedSection";
 import { Sheet, todayISO } from "@/items/ui";
 import type { ItemHandle } from "@/items/useItem";
 import { cn } from "@/utils/cn";
@@ -259,6 +260,8 @@ export function EntryReader({
       )}
 
       {entry.body.trim() && <Markdown text={entry.body} />}
+
+      <LinkedSection thing={{ kind: "journal", id: `${item.fileId}:${entry.id}` }} readOnly={!item.canEdit} />
 
       <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-3">
         {entry.tags.map((t) => (

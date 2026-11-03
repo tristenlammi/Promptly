@@ -361,3 +361,76 @@ async def test_event_reminder_has_snooze(db, people, pushes):
     assert [a["action"] for a in pushes[-1]["extra"]["actions"]] == ["cal_snooze"]
     await notify.reminder(ann, ev, datetime.now(UTC) + timedelta(minutes=5), 5)
     assert pushes[-1]["extra"] is None
+
+
+async def test_answer_page_get_does_not_record_post_does(client, db, people, pushes, smtp):
+    """Email link scanners and prefetchers open links: GET (even with the
+    email's ``?a=going``) only shows the invite; the click's POST answers."""
+    from app.calendars.models import CalExternalGuest
+
+    ann, _, _ = people
+    ev = await add(client, ann, title="Picnic")
+    r = await client.post(f"/api/calendar/events/{ev['event_id']}/email-guests", headers=H(ann), json={"emails": ["pat@example.org"]})
+    assert r.status_code == 201, r.text
+    token = smtp[0]["text_body"].split("/calendar/answer/")[1].split("?")[0]
+    assert f"/calendar/answer/{token}?a=going" in smtp[0]["text_body"]  # old-style links still carry a suggestion
+
+    pushes.clear()
+    for _ in range(2):
+        r = await client.get(f"/api/calendar/answer/{token}", params={"a": "going"})
+        assert r.status_code == 200 and r.json()["status"] == "invited"
+    g = (await db.execute(select(CalExternalGuest).where(CalExternalGuest.token == token))).scalar_one()
+    await db.refresh(g)
+    assert g.status == "invited" and g.responded_at is None and pushes == []
+
+    r = await client.post(f"/api/calendar/answer/{token}", json={"status": "maybe"})
+    assert r.status_code == 200 and r.json()["status"] == "maybe"
+    await db.refresh(g)
+    assert g.status == "maybe" and g.responded_at is not None
+    assert [p["user_id"] for p in pushes] == [ann.id]
+    assert (await client.post(f"/api/calendar/answer/{token}", json={"status": "sure"})).status_code == 422
+
+
+async def test_event_snooze_is_saved_and_survives_a_restart(client, db, people, pushes, monkeypatch):
+    from app.calendars import loops, recur
+    from app.calendars.models import CalEventSnooze
+    from app.notifications import actions
+    import app.background as bg
+
+    # Nothing may be parked in memory: the snooze lives in the table only.
+    monkeypatch.setattr(bg, "spawn", lambda coro, name=None: (coro.close(), pytest.fail("snooze spawned a task")))
+    ann, _, _ = people
+    start = (datetime.now(UTC) + timedelta(hours=2)).replace(second=0, microsecond=0)
+    ev = await add(client, ann, title="Call", start=recur.stamp(start), end=recur.stamp(start + timedelta(hours=1)), reminders=[])
+    target = f"{ev['event_id']}|{recur.stamp(start)}"
+
+    before = datetime.now(UTC)
+    r = await client.post("/api/notifications/action", json={"token": actions.sign(ann, "cal_snooze", target)})
+    assert r.status_code == 200, r.text
+    assert r.json()["message"] == "I'll remind you about Call in 10 minutes"
+    # Snoozing again moves it rather than doubling it.
+    r = await client.post("/api/notifications/action", json={"token": actions.sign(ann, "cal_snooze", target)})
+    assert r.status_code == 200, r.text
+    rows = (await db.execute(select(CalEventSnooze))).scalars().all()
+    assert len(rows) == 1 and rows[0].user_id == ann.id and rows[0].occurrence == start
+    until = rows[0].until
+    assert before + timedelta(minutes=9) < until < datetime.now(UTC) + timedelta(minutes=11)
+
+    # "Restart": a fresh look at the database is all there is.
+    db.expire_all()
+    pushes.clear()
+    assert await loops.send_due(db, now=until - timedelta(minutes=1)) == 0
+    assert pushes == []
+    assert await loops.send_due(db, now=until + timedelta(seconds=5)) == 1
+    assert [p["title"] for p in pushes] == ["Call"]
+    assert pushes[0]["body"].startswith("In 1 h 4") or pushes[0]["body"].startswith("In 1 h 5")
+    # Sent once, and the row is gone.
+    assert (await db.execute(select(CalEventSnooze))).scalars().all() == []
+    assert await loops.send_due(db, now=until + timedelta(seconds=40)) == 0
+    assert len(pushes) == 1
+
+    # One that came due while the server was down too long is dropped, not sent late.
+    r = await client.post("/api/notifications/action", json={"token": actions.sign(ann, "cal_snooze", target)})
+    until = (await db.execute(select(CalEventSnooze.until))).scalar_one()
+    assert await loops.send_due(db, now=until + timedelta(minutes=30)) == 0
+    assert len(pushes) == 1 and (await db.execute(select(CalEventSnooze))).scalars().all() == []

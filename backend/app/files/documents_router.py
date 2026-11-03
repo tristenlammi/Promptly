@@ -798,6 +798,9 @@ async def write_snapshot(
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     html_text, plain_text = _write_rendered(row, body)
+    from app.links.service import sync_text
+
+    await sync_text(db, "file", row.id, html_text, wiki=True)
     await db.commit()
 
     # Capture a version (throttled + deduped inside). The collab POST is
@@ -941,6 +944,9 @@ async def manual_save_document(
     row.size_bytes = size
     row.content_text = plain_text or None
     row.updated_at = datetime.now(timezone.utc)
+    from app.links.service import sync_text
+
+    await sync_text(db, "file", row.id, html_text, user_id=user.id, wiki=True)
 
     await db.commit()
     await db.refresh(row)

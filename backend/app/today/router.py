@@ -59,7 +59,7 @@ def search_contacts(file_id, data: dict, q: str, limit: int) -> list[dict]:  # n
     out = []
     for c in data.get("contacts", []):
         name = display_name(c)
-        hay = [name, c.get("nickname", ""), c.get("company", ""), c.get("title", "")]
+        hay = [name, c.get("nickname", ""), c.get("company", ""), c.get("title", ""), *c.get("tags", [])]
         hay += [x.get("value", "") for x in c.get("emails", [])]
         phones = [x.get("value", "") for x in c.get("phones", [])]
         digits = re.sub(r"\D", "", q)
@@ -104,8 +104,13 @@ async def search(
     ][:limit]
     contacts: list[dict] = []
     for row, doc in await service.list_items(db, user, "contacts", limit=5, archives=False):
-        contacts += search_contacts(row.id, doc.data or {}, term, limit)
+        contacts += search_contacts(row.id, doc.data or {}, term.lstrip("#"), limit)
     tasks: list[dict] = []
     for row, doc in await service.list_items(db, user, "tasks", limit=5, archives=False):
-        tasks += search_tasks(row.id, doc.data or {}, term, limit)
-    return {"events": events, "contacts": contacts[:limit], "tasks": tasks[:limit]}
+        tasks += search_tasks(row.id, doc.data or {}, term.lstrip("#"), limit)
+    # Shared tags (#tags): matching tags, and events carrying one by name.
+    from app.tags import search_hook
+
+    tags, tagged_events = await search_hook.everyday(db, user, term, limit, {e["event_id"] for e in events})
+    events = (events + tagged_events)[:limit]
+    return {"events": events, "contacts": contacts[:limit], "tasks": tasks[:limit], "tags": tags}

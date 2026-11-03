@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldAlert, Trash2 } from "lucide-react";
 
@@ -150,6 +150,13 @@ export function TrashPage() {
       <div className="promptly-scroll flex-1 overflow-y-auto">
         <div className="w-full px-6 py-6">
           <RestoreDeviceBanner />
+          <p className="mb-4 text-xs text-[var(--text-muted)]">
+            This is Files' trash. Events, albums, tasks, contacts and workspace pages you delete are in{" "}
+            <Link to="/trash" className="text-[var(--accent-text)] hover:underline">
+              Trash for all apps
+            </Link>
+            .
+          </p>
           {isLoading && (
             <div className="text-sm text-[var(--text-muted)]">Loading…</div>
           )}

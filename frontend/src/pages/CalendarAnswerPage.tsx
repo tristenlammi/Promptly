@@ -21,7 +21,9 @@ const SAID: Record<Answer, string> = {
 
 /** The page an emailed invitation links to: someone without a Promptly
  *  account sees the event and answers Going / Maybe / Can't go. No sign-in
- *  — the link is the key. ``?a=going`` (the email's buttons) answers on open. */
+ *  — the link is the key. ``?a=going`` (the email's buttons) only
+ *  pre-selects that answer: opening the page never records anything (email
+ *  link scanners and prefetchers open links too) — the click does. */
 export function CalendarAnswerPage() {
   const { token = "" } = useParams();
   const [params, setParams] = useSearchParams();
@@ -30,12 +32,15 @@ export function CalendarAnswerPage() {
   const [busy, setBusy] = useState<Answer | null>(null);
   const [just, setJust] = useState<Answer | null>(null);
   const started = useRef(false);
+  const preParam = params.get("a");
+  const suggested = CHOICES.some((c) => c.value === preParam) ? (preParam as Answer) : null;
 
   const answer = async (a: Answer) => {
     setBusy(a);
     try {
       setInv(await inviteAnswerApi.answer(token, a));
       setJust(a);
+      if (params.has("a")) setParams({}, { replace: true });
     } catch {
       setError("Couldn't save your answer. Please try again.");
     } finally {
@@ -46,14 +51,9 @@ export function CalendarAnswerPage() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    const pre = params.get("a") as Answer | null;
     (async () => {
       try {
         setInv(await inviteAnswerApi.get(token));
-        if (pre && CHOICES.some((c) => c.value === pre)) {
-          await answer(pre);
-          setParams({}, { replace: true });
-        }
       } catch {
         setError("This invitation isn't available any more — the event may have been cancelled.");
       }
@@ -116,6 +116,8 @@ export function CalendarAnswerPage() {
                 <div className="grid grid-cols-3 gap-2">
                   {CHOICES.map((c) => {
                     const active = inv.status === c.value;
+                    // The email's link suggested this one — highlighted, not saved.
+                    const pending = !active && !just && suggested === c.value;
                     const Icon = c.icon;
                     return (
                       <button
@@ -127,7 +129,9 @@ export function CalendarAnswerPage() {
                         className={`flex h-12 items-center justify-center gap-1.5 rounded-xl border text-sm font-medium transition disabled:opacity-60 ${
                           active
                             ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_14%,transparent)] text-[var(--text)]"
-                            : "border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]"
+                            : pending
+                              ? "border-dashed border-[var(--accent)] text-[var(--text)] ring-2 ring-[color-mix(in_srgb,var(--accent)_35%,transparent)] hover:bg-[var(--hover)]"
+                              : "border-[var(--border)] text-[var(--text)] hover:bg-[var(--hover)]"
                         }`}
                       >
                         {busy === c.value ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-4 w-4" />}
@@ -137,7 +141,15 @@ export function CalendarAnswerPage() {
                   })}
                 </div>
                 <p className="mt-3 min-h-5 text-sm text-[var(--text-muted)]" aria-live="polite">
-                  {error ? error : just ? SAID[just] : inv.status !== "invited" ? "You can change your answer any time." : ""}
+                  {error
+                    ? error
+                    : just
+                      ? SAID[just]
+                      : suggested && inv.status !== suggested
+                        ? `Tap ${CHOICES.find((c) => c.value === suggested)?.label} to send your answer.`
+                        : inv.status !== "invited"
+                          ? "You can change your answer any time."
+                          : ""}
                 </p>
               </div>
             )}

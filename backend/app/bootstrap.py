@@ -29,6 +29,7 @@ from app.auth.utils import hash_password
 from app.config import get_settings
 from app.database import SessionLocal
 from app.files.system_folders import seed_system_folders
+from app.items.service import install_defaults as install_default_apps
 from app.models_config.models import ModelProvider
 from app.models_config.service import encrypt_api_key
 from app.search.models import SearchProvider
@@ -170,6 +171,7 @@ async def provision_singleton_user() -> None:
         # straight away so the singleton user's Files page is populated
         # before they ever upload anything.
         await seed_system_folders(db, user)
+        await install_default_apps(db, user)
         await db.commit()
         logger.info(
             "Provisioned singleton user: username=%s email=%s",

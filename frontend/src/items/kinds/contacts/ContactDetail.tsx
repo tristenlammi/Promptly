@@ -31,8 +31,11 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
+import { TagChips } from "@/components/tags/TagPicker";
+import { LinkedSection } from "@/components/links/LinkedSection";
 import { personPath } from "@/api/peopleHub";
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
+import { toast } from "@/store/toastStore";
 import { Chip, Field, ItemButton, Select, Sheet, TextArea, TextInput, todayISO, uid } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
@@ -240,11 +243,7 @@ export function ContactDetail({
                     {groupName(item.data.groups, g)}
                   </Chip>
                 ))}
-                {c.tags.map((t) => (
-                  <Chip key={t} className="h-7">
-                    #{t}
-                  </Chip>
-                ))}
+                <TagChips names={c.tags} />
               </div>
             )}
           </div>
@@ -329,6 +328,11 @@ export function ContactDetail({
           <NoteList item={item} c={c} field="gifts" title="Gift ideas" icon={Gift} placeholder="That climbing guidebook" checkable doneLabel="Given" />
           <FreeNotes item={item} c={c} />
           <Timeline item={item} c={c} first={first} onLog={() => setLogging(true)} />
+          <LinkedSection
+            thing={{ kind: "contact", id: `${item.fileId}:${c.id}` }}
+            readOnly={!item.canEdit}
+            className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4"
+          />
         </div>
       </div>
 
@@ -348,9 +352,17 @@ export function ContactDetail({
               variant="danger"
               block
               onClick={() => {
+                const copy = structuredClone(c);
                 item.update((d) => removeContacts(d, new Set([c.id])));
                 setConfirmDelete(false);
                 onDeleted?.();
+                // Putting it back also takes it out of the Trash.
+                toast.success(`Deleted ${name}`, {
+                  action: {
+                    label: "Undo",
+                    onClick: () => item.update((d) => void (d.contacts.some((x) => x.id === copy.id) || d.contacts.push(copy))),
+                  },
+                });
               }}
             >
               Delete
@@ -359,7 +371,7 @@ export function ContactDetail({
         }
       >
         <p className="text-sm text-[var(--text-muted)]">
-          Their details, notes and history go. People linked to them keep the name. You can undo from the ⋯ menu or version history.
+          Their details, notes and history go. People linked to them keep the name. They stay in the Trash for 30 days, so you can restore them.
         </p>
       </Sheet>
     </div>

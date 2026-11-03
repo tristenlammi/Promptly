@@ -32,6 +32,7 @@ import { createPortal } from "react-dom";
 
 import { Field, ItemButton, ProgressBar, Sheet, TextInput, nowISO, todayISO, uid } from "@/items/ui";
 import type { ItemHandle } from "@/items/useItem";
+import { useThingMentions } from "@/components/links/useThingMentions";
 import { cn } from "@/utils/cn";
 
 import { ENERGY, moodInfo } from "./constants";
@@ -546,6 +547,8 @@ function Editor({ req, item, isPhone }: { req: EditorRequest; item: ItemHandle<J
   // ------------------------------------------------------------ markdown ops
 
   const setBody = (body: string) => patch({ body });
+  // ``[[`` mentions a task, event, file, contact… (recorded when it saves).
+  const mention = useThingMentions({ ref: ta, value: draft.body, onChange: setBody });
 
   /** "Your day" → a line (an event) or a photo reference, at the end. */
   const addToBody = (text: string) => {
@@ -622,6 +625,7 @@ ${text}
   };
 
   const onKeyDown = (ev: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mention.onKeyDown(ev)) return;
     const mod = ev.metaKey || ev.ctrlKey;
     const k = ev.key.toLowerCase();
     const run = (fn: () => void) => {
@@ -1024,12 +1028,14 @@ ${text}
                 commit();
               }}
               onKeyDown={onKeyDown}
+              onSelect={mention.onSelect}
               placeholder={draft.prompt ? "Start anywhere…" : "What's on your mind?"}
               aria-label="Entry"
               spellCheck
               className="block w-full resize-none overflow-hidden bg-transparent text-[17px] leading-[1.75] text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus-visible:outline-none md:text-[18px]"
             />
           )}
+          {mention.popup}
         </div>
       </div>
 

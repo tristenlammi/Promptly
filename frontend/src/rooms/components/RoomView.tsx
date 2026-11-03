@@ -1,6 +1,6 @@
 import { ArrowLeft, CalendarDays, Hash, Pin, Search, Settings, Sparkles, Upload, Users } from "lucide-react";
-import { useCallback, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 
 import type { Bootstrap, Message } from "@/api/rooms";
 import { Sheet } from "@/items/ui";
@@ -77,6 +77,17 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
     },
     [roomId, navigate, isPhone],
   );
+
+  // ``?m=<seq>`` — a "Mentioned in" entry opening one message.
+  const [params, setParams] = useSearchParams();
+  const linkedSeq = Number(params.get("m")) || null;
+  useEffect(() => {
+    if (!linkedSeq || !room) return;
+    useRoomsStore.getState().requestJump(room.id, linkedSeq);
+    const next = new URLSearchParams(params);
+    next.delete("m");
+    setParams(next, { replace: true });
+  }, [linkedSeq, room, params, setParams]);
 
   if (!room) {
     return (

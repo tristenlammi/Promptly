@@ -636,10 +636,28 @@ app.include_router(rooms_router, prefix="/api/rooms", tags=["rooms"])
 from app.today.router import router as today_router  # noqa: E402
 
 app.include_router(today_router, prefix="/api/today", tags=["today"])
+# Tags: one shared set per person across every app (app/tags).
+from app.tags.router import router as tags_router  # noqa: E402
+
+app.include_router(tags_router, prefix="/api/tags", tags=["tags"])
+# Recently opened things across apps (Today's "Recent" strip) + Places.
+from app.places.router import router as places_router  # noqa: E402
+from app.today.recents import router as recents_router  # noqa: E402
+
+app.include_router(recents_router, prefix="/api/today/recents", tags=["today"])
+app.include_router(places_router, prefix="/api/places", tags=["places"])
 # Across apps: "Send to…" cards in Rooms, trip album / spending, groceries → Tasks.
 from app.crossapp.router import router as crossapp_router  # noqa: E402
 
 app.include_router(crossapp_router, prefix="/api/crossapp", tags=["crossapp"])
+# "Mentioned in" and "Linked": connections between things across apps (app/links).
+from app.links.router import router as entity_links_router  # noqa: E402
+
+app.include_router(entity_links_router, prefix="/api/connections", tags=["links"])
+# One trash across apps: Drive, workspaces, calendar, tasks, contacts, albums.
+from app.trash.router import router as trash_router  # noqa: E402
+
+app.include_router(trash_router, prefix="/api/trash", tags=["trash"])
 # Calendar: events shared per event or via group calendars (app/calendars).
 from app.calendars.router import public_router as calendar_feed_router  # noqa: E402
 from app.calendars.router import router as calendar_router  # noqa: E402

@@ -1,12 +1,15 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, CalendarDays, Clock, EyeOff, Hash, Mail, MapPin, Pencil, Repeat as RepeatIcon, Send, Text, Trash2, Users, X } from "lucide-react";
+import { Bell, BellOff, CalendarDays, Clock, EyeOff, Hash, Mail, MapPin, Pencil, Repeat as RepeatIcon, Send, Tag as TagIcon, Text, Trash2, Users, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { calendarApi, type CalendarBootstrap, type RsvpStatus } from "@/api/calendar";
 import { calendarReachApi, ROOM_REMIND_OPTIONS, type EventReachFields } from "@/api/calendarReach";
+import { trashApi } from "@/api/trash";
 import { extractError } from "@/components/files/helpers";
+import { LinkedSection } from "@/components/links/LinkedSection";
 import { confirm } from "@/components/shared/ConfirmDialog";
+import { EntityTags } from "@/components/tags/TagPicker";
 import { Chip } from "@/items/ui";
 import { UserAvatar } from "@/rooms/components/ui";
 import { toast } from "@/store/toastStore";
@@ -107,7 +110,24 @@ export function EventDetail({
         return;
       }
       await calendarApi.remove(ev.event_id, scope, ev.occurrence);
-      toast.success("Event deleted");
+      // A whole event goes to the Trash, so it can come straight back.
+      const eventId = ev.event_id;
+      toast.success("Event deleted", {
+        action:
+          scope === "all"
+            ? {
+                label: "Undo",
+                onClick: () =>
+                  void trashApi
+                    .restore([{ type: "calendar_event", id: eventId }])
+                    .then((r) => {
+                      if (!r.done) toast.error(r.results[0]?.error || "Couldn't bring it back.");
+                      refresh();
+                    })
+                    .catch((e) => toast.error(extractError(e))),
+              }
+            : undefined,
+      });
       refresh();
       onClose();
     });
@@ -178,6 +198,12 @@ export function EventDetail({
         <div>{cal ? cal.name : "Invited"}</div>
         {organiser && <div className="text-xs text-[var(--text-muted)]">Organised by {organiser.id === b.me.id ? "you" : organiser.username}</div>}
       </Row>
+
+      {!v.extra && !ev.busy_only && (
+        <Row icon={<TagIcon className="h-4 w-4" />}>
+          <EntityTags kind="event" id={ev.event_id} />
+        </Row>
+      )}
 
       {rooms.length > 0 && (
         <Row icon={<Hash className="h-4 w-4" />}>
@@ -284,6 +310,10 @@ export function EventDetail({
           <span className="text-xs font-medium text-[var(--text-muted)]">{isGuest && ev.my_status === "invited" ? "You're invited — going?" : "Going?"}</span>
           <RsvpButtons value={ev.my_status === "invited" ? null : ev.my_status} onAnswer={answer} busy={busy} />
         </div>
+      )}
+
+      {!v.extra && !ev.busy_only && (
+        <LinkedSection thing={{ kind: "event", id: ev.event_id }} className="border-t border-[var(--border)] pt-3" />
       )}
 
       {ev.can_edit && (

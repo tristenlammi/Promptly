@@ -2,7 +2,8 @@ import { DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter, 
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ArrowLeft, CheckCheck, Flag, GripVertical, Inbox, ListPlus, Pencil, Plus, Search, Trash2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 
 import type { ItemViewProps } from "@/items/types";
 import type { ItemHandle } from "@/items/useItem";
@@ -24,12 +25,29 @@ type Sel = string | "@high" | "@done";
 
 export function ListsView({ item, isPhone }: ItemViewProps<TasksData>) {
   const data = item.data;
-  const [sel, setSel] = useState<Sel | null>(isPhone ? null : INBOX);
+  const [params, setParams] = useSearchParams();
+  const wanted = params.get("list");
+  // A deep link can name a list (?list=<id>, e.g. Meal Planner's "Open
+  // Tasks" after sending the grocery list) — open it straight away.
+  const [sel, setSel] = useState<Sel | null>(() => (wanted && item.data.lists.some((l) => l.id === wanted) ? wanted : isPhone ? null : INBOX));
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [editList, setEditList] = useState<TaskList | "new" | null>(null);
   const toggle = useToggle(item);
+  // Select + scroll to the linked list once it's in the data, then drop the
+  // param so it doesn't pin the selection on later visits.
+  useEffect(() => {
+    if (!wanted || !data.lists.some((l) => l.id === wanted)) return;
+    setSel(wanted);
+    const p = new URLSearchParams(window.location.search);
+    p.delete("list");
+    setParams(p, { replace: true });
+    window.requestAnimationFrame(() => {
+      document.querySelector(`[data-list-id="${window.CSS.escape(wanted)}"]`)?.scrollIntoView({ block: "nearest" });
+      if (isPhone) window.scrollTo({ top: 0 });
+    });
+  }, [wanted, data.lists, setParams, isPhone]);
   useQuickAddRequest(() => (isPhone ? setAdding(true) : document.querySelector<HTMLInputElement>("[aria-label='New task']")?.focus()));
 
   const counts = useMemo(() => {
@@ -76,6 +94,7 @@ export function ListsView({ item, isPhone }: ItemViewProps<TasksData>) {
             count={counts[l.id] ?? 0}
             active={sel === l.id}
             onClick={() => setSel(l.id)}
+            listId={l.id}
           />
         ))}
       </div>
@@ -139,11 +158,12 @@ export function ListsView({ item, isPhone }: ItemViewProps<TasksData>) {
   );
 }
 
-function NavRow({ icon, name, count, active, onClick }: { icon: React.ReactNode; name: string; count?: number; active?: boolean; onClick: () => void }) {
+function NavRow({ icon, name, count, active, onClick, listId }: { icon: React.ReactNode; name: string; count?: number; active?: boolean; onClick: () => void; listId?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-list-id={listId}
       aria-current={active ? "page" : undefined}
       className={cn(
         "flex min-h-[44px] items-center gap-3 rounded-xl px-2 text-left text-sm transition md:min-h-[38px]",

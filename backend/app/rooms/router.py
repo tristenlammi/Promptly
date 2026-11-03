@@ -545,6 +545,9 @@ async def edit_message(message_id: uuid.UUID, body: MessagePatch, db: AsyncSessi
             msg.body = text
             msg.mentions = await core.parse_mentions(db, text, await core.member_ids(db, room))
             msg.edited_at = _now()
+            from app.links.service import sync_text
+
+            await sync_text(db, "room_msg", msg.id, text, user_id=user.id)
     if data.get("pinned") is not None:
         if msg.kind == "system":
             raise core.forbidden("That can't be pinned")
@@ -576,6 +579,9 @@ async def delete_message(message_id: uuid.UUID, db: AsyncSession = Depends(get_d
         service.remove_attachment_files(a)
         await db.delete(a)
     await db.execute(delete(RoomReaction).where(RoomReaction.message_id == msg.id))
+    from app.links.service import purge_sources
+
+    await purge_sources(db, "room_msg", [msg.id])
     await db.commit()
     await core.publish(await core.member_ids(db, room), {"type": "message_delete", "room_id": str(room.id), "id": str(msg.id)})
 
