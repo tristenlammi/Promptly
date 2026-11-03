@@ -148,6 +148,8 @@ export function UsersPanel() {
       can_generate_images: values.can_generate_images,
       can_execute_code: values.can_execute_code,
       can_reach_private_network: values.can_reach_private_network,
+      can_use_automations: values.can_use_automations,
+      model_locked: values.model_locked,
       must_change_password: values.must_change_password ?? true,
       group_ids: values.group_ids,
       storage_cap_bytes: values.storage_cap_bytes,
@@ -190,6 +192,12 @@ export function UsersPanel() {
           values.can_reach_private_network !== target.can_reach_private_network
             ? values.can_reach_private_network
             : undefined,
+        can_use_automations:
+          values.can_use_automations !== target.can_use_automations
+            ? values.can_use_automations
+            : undefined,
+        model_locked:
+          values.model_locked !== target.model_locked ? values.model_locked : undefined,
         group_ids: sameStringSet(values.group_ids, target.group_ids)
           ? undefined
           : values.group_ids,

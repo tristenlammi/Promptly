@@ -194,13 +194,12 @@ export interface Place {
 
 export const PLACES: Place[] = [
   { label: "Chat", to: "/chat", words: ["chat", "chats", "conversations"] },
-  { label: "Today", to: "/today", words: ["today", "my day", "home"] },
+  { label: "Today", to: "/today", words: ["today", "my day", "home", "my work", "cards", "shifts"] },
   { label: "Calendar", to: "/calendar", words: ["calendar", "cal", "events"] },
   { label: "Rooms", to: "/rooms", words: ["rooms", "room", "messages", "dms"] },
   { label: "Files", to: "/files", words: ["files", "drive", "my files", "documents", "docs"] },
   { label: "Photos", to: "/files/photos", words: ["photos", "pictures", "gallery"] },
   { label: "Workspaces", to: "/workspaces", words: ["workspaces", "workspace"] },
-  { label: "My work", to: "/work", words: ["my work", "work", "cards"] },
   { label: "Automations", to: "/tasks", words: ["automations", "automation"] },
   { label: "Apps", to: "/apps", words: ["apps", "launcher"] },
   { label: "Item Store", to: "/apps/store", words: ["store", "app store", "item store"] },

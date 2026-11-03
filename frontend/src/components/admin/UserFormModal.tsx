@@ -27,6 +27,10 @@ export interface UserFormValues {
   /** Whether the user can run code via the "Run" button on code artifacts. */
   can_execute_code: boolean;
   can_reach_private_network: boolean;
+  /** Whether the user may use Automations (off unless turned on). */
+  can_use_automations: boolean;
+  /** Locked to the one model in ``allowed_models`` (no picker). */
+  model_locked: boolean;
   /** Create only: ask them to choose their own password on first sign-in. */
   must_change_password?: boolean;
   /** Group memberships (role bundles — grant connectors + models). */
@@ -83,6 +87,8 @@ export function UserFormModal({
   const [canGenerateImages, setCanGenerateImages] = useState(true);
   const [canExecuteCode, setCanExecuteCode] = useState(true);
   const [canReachPrivate, setCanReachPrivate] = useState(false);
+  const [canUseAutomations, setCanUseAutomations] = useState(false);
+  const [locked, setLocked] = useState(false);
   const [mustChangePassword, setMustChangePassword] = useState(true);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [groupIds, setGroupIds] = useState<Set<string>>(new Set());
@@ -118,6 +124,8 @@ export function UserFormModal({
       setCanGenerateImages(user.can_generate_images ?? true);
       setCanExecuteCode(user.can_execute_code ?? true);
       setCanReachPrivate(user.can_reach_private_network ?? false);
+      setCanUseAutomations(user.can_use_automations ?? false);
+      setLocked(!!user.model_locked && user.allowed_models !== null);
       setPicked(new Set(user.allowed_models ?? []));
       setGroupIds(new Set(user.group_ids ?? []));
       setStorageCapGb(
@@ -144,6 +152,8 @@ export function UserFormModal({
       setCanGenerateImages(true);
       setCanExecuteCode(true);
       setCanReachPrivate(false);
+      setCanUseAutomations(false);
+      setLocked(false);
       setPicked(new Set());
       setGroupIds(new Set());
       setStorageCapGb("");
@@ -164,6 +174,11 @@ export function UserFormModal({
   }, [pool, search]);
 
   const toggle = (id: string) => {
+    // Locked = exactly one model, so a tick replaces the last one.
+    if (locked) {
+      setPicked(new Set([id]));
+      return;
+    }
     setPicked((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -187,7 +202,8 @@ export function UserFormModal({
   const canSubmit =
     email.trim().length > 0 &&
     username.trim().length >= 3 &&
-    (mode === "edit" || password.length >= 8);
+    (mode === "edit" || password.length >= 8) &&
+    !(role === "user" && locked && picked.size !== 1);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -218,6 +234,8 @@ export function UserFormModal({
         can_generate_images: canGenerateImages,
         can_execute_code: canExecuteCode,
         can_reach_private_network: canReachPrivate,
+        can_use_automations: canUseAutomations,
+        model_locked: role === "user" && !fullAccess && locked,
         must_change_password: mode === "create" ? mustChangePassword : undefined,
         group_ids: Array.from(groupIds),
         storage_cap_bytes: storageBytes,
@@ -422,6 +440,24 @@ export function UserFormModal({
               <input
                 type="checkbox"
                 className="mt-0.5"
+                checked={canUseAutomations}
+                onChange={(e) => setCanUseAutomations(e.target.checked)}
+              />
+              <span className="text-xs">
+                <span className="font-medium text-[var(--text)]">
+                  Automations
+                </span>
+                <span className="block text-[11px] text-[var(--text-muted)]">
+                  Let this user build scheduled, webhook and event
+                  automations. Off = Automations is hidden for them and any
+                  they already have stop running.
+                </span>
+              </span>
+            </label>
+            <label className="mt-2 flex cursor-pointer items-start gap-2 rounded-card border border-[var(--border)] px-3 py-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
                 checked={canReachPrivate}
                 onChange={(e) => setCanReachPrivate(e.target.checked)}
               />
@@ -456,18 +492,39 @@ export function UserFormModal({
             <div className="mb-2 flex gap-2">
               <AccessOption
                 active={fullAccess}
-                onClick={() => setFullAccess(true)}
+                onClick={() => {
+                  setFullAccess(true);
+                  setLocked(false);
+                }}
                 title="Full access"
                 body="Every model the admin has curated."
               />
               <AccessOption
-                active={!fullAccess}
-                onClick={() => setFullAccess(false)}
+                active={!fullAccess && !locked}
+                onClick={() => {
+                  setFullAccess(false);
+                  setLocked(false);
+                }}
                 title="Custom"
                 body="Pick specific models below."
               />
+              <AccessOption
+                active={!fullAccess && locked}
+                onClick={() => {
+                  setFullAccess(false);
+                  setLocked(true);
+                  setPicked((prev) => new Set([...prev].slice(0, 1)));
+                }}
+                title="Locked"
+                body="One model, no model picker."
+              />
             </div>
 
+            {!fullAccess && locked && (
+              <p className="mb-2 text-[11px] text-[var(--text-muted)]">
+                Pick the one model they get. They won't see a model picker, and groups can't add more.
+              </p>
+            )}
             {!fullAccess && (
               <div className="rounded-card border border-[var(--border)]">
                 <div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2">
@@ -478,13 +535,15 @@ export function UserFormModal({
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
-                  <button
-                    type="button"
-                    className="text-[11px] text-[var(--accent-text)] hover:underline"
-                    onClick={selectAll}
-                  >
-                    Select all
-                  </button>
+                  {!locked && (
+                    <button
+                      type="button"
+                      className="text-[11px] text-[var(--accent-text)] hover:underline"
+                      onClick={selectAll}
+                    >
+                      Select all
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="text-[11px] text-[var(--text-muted)] hover:underline"

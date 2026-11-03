@@ -6995,8 +6995,12 @@ async def _subscribe_session_to_response(
 async def stream_response(
     stream_id: uuid.UUID,
     request: Request,
+    db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
+    # Hand the auth lookup's DB connection back before the long-lived
+    # stream starts — the generation opens its own sessions.
+    await db.close()
     # First call: peek at the queued context so we can index the session
     # by conversation id (needed for ``find_active_for_conversation``).
     # Reconnects skip the peek — the in-memory session already has it.

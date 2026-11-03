@@ -361,17 +361,19 @@ async def rooms_unread(db: AsyncSession, user: User, limit: int = 8) -> dict | N
 
 
 async def work_section(db: AsyncSession, user: User, today: date, tz: ZoneInfo) -> dict | None:
-    """Your assigned workspace cards (due today or overdue first) and today's
-    shifts — the same data as My work."""
+    """Your open workspace cards (overdue, then due soonest, then undated),
+    today's shifts and the week's coming ones — what the My work page held."""
     from app.workspaces.router import _my_shifts, my_work
 
     try:
         cards = (await my_work(db=db, user=user)).cards
-        shifts = [s for s in await _my_shifts(db, user, days=2) if s.date == today.isoformat()]
+        week = await _my_shifts(db, user, days=8)
     except Exception:  # noqa: BLE001
         logger.exception("my work for today failed")
         return None
-    if not cards and not shifts:
+    shifts = [s for s in week if s.date == today.isoformat()]
+    upcoming = [s for s in week if s.date > today.isoformat()][:5]
+    if not cards and not shifts and not upcoming:
         return None
 
     def due_day(c) -> date | None:  # noqa: ANN001
@@ -381,10 +383,24 @@ async def work_section(db: AsyncSession, user: User, today: date, tz: ZoneInfo) 
         return d.astimezone(tz).date()
 
     due = [c for c in cards if (due_day(c) or date.max) <= today]
+    cards = sorted(cards, key=lambda c: due_day(c) or date.max)
+
+    def shift(s) -> dict:  # noqa: ANN001
+        return {
+            "date": s.date,
+            "workspace": s.workspace_title,
+            "roster": s.roster_title,
+            "start": s.start,
+            "end": s.end,
+            "hours": s.hours,
+            "note": s.note,
+            "url": f"/workspaces/{s.workspace_id}?item={s.roster_item_id}",
+        }
+
     return {
         "open_count": len(cards),
         "due_count": len(due),
-        "url": "/work",
+        "url": "/workspaces",
         "cards": [
             {
                 "id": str(c.id),
@@ -395,20 +411,10 @@ async def work_section(db: AsyncSession, user: User, today: date, tz: ZoneInfo) 
                 "overdue": (due_day(c) or date.max) < today,
                 "url": f"/workspaces/{c.workspace_id}?item={c.board_item_id}&card={c.id}" if c.board_item_id else f"/workspaces/{c.workspace_id}",
             }
-            for c in (due or cards)[:6]
+            for c in cards[:30]
         ],
-        "shifts": [
-            {
-                "workspace": s.workspace_title,
-                "roster": s.roster_title,
-                "start": s.start,
-                "end": s.end,
-                "hours": s.hours,
-                "note": s.note,
-                "url": f"/workspaces/{s.workspace_id}?item={s.roster_item_id}",
-            }
-            for s in shifts
-        ],
+        "shifts": [shift(s) for s in shifts],
+        "upcoming": [shift(s) for s in upcoming],
     }
 
 

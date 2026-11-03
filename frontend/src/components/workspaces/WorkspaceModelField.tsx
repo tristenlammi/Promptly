@@ -137,7 +137,7 @@ export function WorkspaceModelField({
             />
             {grouped.customs.length > 0 && (
               <>
-                <GroupHeader label="Custom models" />
+                <GroupHeader label="Internal" />
                 {grouped.customs.map((m) => (
                   <Option
                     key={m.model_id}

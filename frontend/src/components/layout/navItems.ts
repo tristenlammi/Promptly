@@ -3,7 +3,6 @@ import {
   LayoutGrid,
   FolderOpen,
   MapPin,
-  ListTodo,
   MessagesSquare,
   Star,
   Trash2,
@@ -119,16 +118,6 @@ export const NAV_ITEMS: NavItem[] = [
     // Editing is desktop-only, but phones get a read-only single-column
     // view (item list → notes/chats render; heavier editors show a "best on
     // desktop" notice), so the nav item is available on mobile too.
-    optionalKey: "workspaces",
-  },
-  {
-    to: "/work",
-    icon: ListTodo,
-    label: "My work",
-    section: "chat",
-    // Card deep-links land inside desktop-gated workspaces, so the page
-    // follows the same rule.
-    desktopOnly: true,
     optionalKey: "workspaces",
   },
   {

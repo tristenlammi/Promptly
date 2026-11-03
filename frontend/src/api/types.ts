@@ -60,9 +60,15 @@ export interface UserSettings {
   /** Apps pinned to the sidebar, in order: ``"rooms"`` or an Item Store
    *  kind. Absent / ``[]`` = none. */
   nav_apps?: string[];
+  /** Today cards the user hid, and the order the rest show in. */
+  today_hidden?: string[];
+  today_order?: string[];
   /** One-shot marker: the org admin has finished (or skipped) the
    *  post-signup onboarding wizard. Absent/false = still to onboard. */
   onboarding_completed?: boolean;
+  /** One-shot: this member has answered the first-sign-in "pick your
+   *  apps" prompt. */
+  features_chosen?: boolean;
   /** Legacy master switch for cross-chat memory (Phase 6). Superseded by
    *  ``memory_mode``; kept for back-compat reads. */
   memory_enabled?: boolean;
@@ -118,8 +124,13 @@ export interface UserPreferencesUpdate {
   enabled_nav?: string[];
   /** Replace the apps pinned to the sidebar. ``[]`` = none. */
   nav_apps?: string[];
+  /** Replace the hidden Today cards / their order. */
+  today_hidden?: string[];
+  today_order?: string[];
   /** Mark the post-signup onboarding wizard as finished/skipped. */
   onboarding_completed?: boolean;
+  /** Mark the first-sign-in "pick your apps" prompt as answered. */
+  features_chosen?: boolean;
   /** Toggle cross-chat memory capture + injection (legacy). */
   memory_enabled?: boolean;
   /** Memory behaviour: off / auto / manual. */
@@ -174,6 +185,10 @@ export interface User {
   /** May this user's automation HTTP steps reach the local network?
    *  Admins always may. */
   can_reach_private_network?: boolean;
+  /** May this user use Automations? Admins always may; off by default. */
+  can_use_automations?: boolean;
+  /** Locked to one model: the chat picker shows its name, no dropdown. */
+  model_locked?: boolean;
 }
 
 /** Expanded row used by the admin users table. */
@@ -192,6 +207,10 @@ export interface AdminUser {
   /** Whether the user's automation HTTP steps may reach the local network
    *  (LAN, Tailscale, the Docker host). Admins are never gated. */
   can_reach_private_network: boolean;
+  /** Whether the user may use Automations. Admins are never gated. */
+  can_use_automations: boolean;
+  /** Locked to their allowed model — groups can't add more, no picker. */
+  model_locked: boolean;
   /** Groups this user belongs to (role bundles — grant connectors + models). */
   group_ids: string[];
   created_at: string;

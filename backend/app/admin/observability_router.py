@@ -143,9 +143,12 @@ def _sse_raw(payload: str) -> bytes:
 @router.get("/logs/stream")
 async def stream_logs(
     level: str | None = Query(default=None, max_length=16),
+    db: AsyncSession = Depends(get_db),
     _: User = Depends(require_admin),
 ) -> StreamingResponse:
     """SSE feed of structured log lines for the admin Live Console."""
+    # Hand the DB connection back before the long-lived stream starts.
+    await db.close()
     return StreamingResponse(
         _log_event_stream(level),
         media_type="text/event-stream",

@@ -575,7 +575,11 @@ app.include_router(
     prefix="/api/admin/local-models",
     tags=["local-models"],
 )
-app.include_router(tasks_router, prefix="/api/tasks", tags=["tasks"])
+from app.tasks.policy import require_automations  # noqa: E402
+
+app.include_router(
+    tasks_router, prefix="/api/tasks", tags=["tasks"], dependencies=[Depends(require_automations)]
+)
 app.include_router(memory_router, prefix="/api/memory", tags=["memory"])
 app.include_router(
     commands_router, prefix="/api/commands", tags=["commands"]

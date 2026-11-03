@@ -59,6 +59,7 @@ import { FolderEditModal } from "./FolderEditModal";
 import { useChatFoldersQuery, useDeleteFolder } from "@/hooks/useChatFolders";
 import { useFolderUiStore } from "@/store/folderUiStore";
 import { useNavApps } from "@/items/navApps";
+import { useCanUseAutomations } from "@/hooks/useCanUseAutomations";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import type { ChatFolder } from "@/api/folders";
 
@@ -76,6 +77,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const hiddenNav = useAuthStore((s) => s.user?.settings?.hidden_nav);
   // Opt-in surfaces ship hidden and appear only once enabled here.
   const enabledNav = useAuthStore((s) => s.user?.settings?.enabled_nav);
+  const canAutomate = useCanUseAutomations();
   const isMobile = useIsMobile();
   // Apps the user pinned to their sidebar (from Apps → Edit).
   const { apps: navApps } = useNavApps();
@@ -160,6 +162,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const visibleNavItems: NavItemConfig[] = NAV_ITEMS.filter((it) => {
     if (it.desktopOnly && isMobile) return false;
     if (it.adminOnly && !isAdmin) return false;
+    if (it.optionalKey === "tasks" && !canAutomate) return false;
     if (it.optionalKey) {
       // Opt-in surfaces: shown only when explicitly enabled.
       // Opt-out surfaces: shown unless the user hid them.

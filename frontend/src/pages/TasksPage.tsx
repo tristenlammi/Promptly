@@ -46,6 +46,7 @@ import { Skeleton } from "@/components/shared/Skeleton";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { useCanUseAutomations } from "@/hooks/useCanUseAutomations";
 
 type Tab = "prompts" | "commands" | "scheduled" | "history";
 
@@ -85,19 +86,24 @@ const SOURCE_LABELS: Record<string, string> = {
   chat: "typed",
 };
 export function TasksPage() {
+  // Without Automations on the account, only the started-by-you tabs
+  // (Commands, Prompts, History) remain.
+  const canAutomate = useCanUseAutomations();
+  const tabs = canAutomate ? TABS : TABS.filter((t) => t.key !== "scheduled");
   // Opens on what the page is named for — automations (V13) — or the tab
   // in the link (?tab=prompts), or the one you used last.
-  const [tab, setTabState] = useState<Tab>(() => {
+  const [tabState, setTabState] = useState<Tab>(() => {
     const fromUrl = new URLSearchParams(window.location.search).get("tab");
-    if (fromUrl && TABS.some((t) => t.key === fromUrl)) return fromUrl as Tab;
+    if (fromUrl && tabs.some((t) => t.key === fromUrl)) return fromUrl as Tab;
     try {
       const last = localStorage.getItem("promptly.automations.tab");
-      if (last && TABS.some((t) => t.key === last)) return last as Tab;
+      if (last && tabs.some((t) => t.key === last)) return last as Tab;
     } catch {
       /* storage unavailable */
     }
-    return "scheduled";
+    return tabs[0].key;
   });
+  const tab: Tab = tabs.some((t) => t.key === tabState) ? tabState : tabs[0].key;
   const setTab = (t: Tab) => {
     setTabState(t);
     try {
@@ -212,8 +218,8 @@ export function TasksPage() {
   return (
     <>
       <TopNav
-        title="Automations"
-        subtitle={TABS.find((t) => t.key === tab)?.hint}
+        title={canAutomate ? "Automations" : "Prompts & commands"}
+        subtitle={tabs.find((t) => t.key === tab)?.hint}
         actions={
           <div className="flex items-center gap-2">
             {tab === "history" ? null : tab === "scheduled" ? (
@@ -253,7 +259,7 @@ export function TasksPage() {
             aria-label="Automations sections"
             className="mb-5 flex gap-1 self-start rounded-lg bg-[var(--surface-2)] p-1"
           >
-            {TABS.map((t) => (
+            {tabs.map((t) => (
               <button
                 key={t.key}
                 role="tab"

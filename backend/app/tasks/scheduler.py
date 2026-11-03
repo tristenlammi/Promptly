@@ -19,8 +19,9 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, or_, select
 
+from app.auth.models import User
 from app.chat.models import Workspace
 from app.database import SessionLocal
 from app.tasks.models import Task, TaskRun
@@ -52,6 +53,12 @@ async def _claim_due() -> list[uuid.UUID]:
                         ~exists().where(
                             Workspace.id == Task.workspace_id,
                             Workspace.trashed_at.is_not(None),
+                        ),
+                        # Only for owners who may use Automations: turning
+                        # it off quietly holds their schedules.
+                        exists().where(
+                            User.id == Task.user_id,
+                            or_(User.role == "admin", User.can_use_automations.is_(True)),
                         ),
                     )
                     .order_by(Task.next_run_at.asc())

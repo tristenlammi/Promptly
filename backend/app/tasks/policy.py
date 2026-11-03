@@ -11,13 +11,30 @@ from __future__ import annotations
 
 import uuid
 
+from fastapi import Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.tasks.flow_graph import FlowGraph, NodeType
 from app.tasks.models import Task
 
 WRITE_ROLES = ("owner", "admin", "editor")
+
+
+AUTOMATIONS_OFF = "Automations aren't turned on for your account. Ask an admin to turn them on."
+
+
+def may_use_automations(user) -> bool:
+    """Admins, or users an admin has turned Automations on for."""
+    return getattr(user, "role", None) == "admin" or bool(getattr(user, "can_use_automations", False))
+
+
+async def require_automations(user: User = Depends(get_current_user)) -> User:
+    """Router dependency: 403 for anyone without Automations."""
+    if not may_use_automations(user):
+        raise HTTPException(status_code=403, detail=AUTOMATIONS_OFF)
+    return user
 
 
 class FlowPolicyError(ValueError):

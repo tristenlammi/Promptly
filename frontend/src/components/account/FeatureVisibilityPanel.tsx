@@ -4,6 +4,7 @@ import { LayoutGrid, Loader2 } from "lucide-react";
 import { authApi } from "@/api/auth";
 import { Button } from "@/components/shared/Button";
 import { useAuthStore } from "@/store/authStore";
+import { useCanUseAutomations } from "@/hooks/useCanUseAutomations";
 import {
   OPTIONAL_NAV_KEYS,
   OPT_IN_NAV_KEYS,
@@ -22,6 +23,7 @@ import { cn } from "@/utils/cn";
  */
 export function FeatureVisibilityPanel() {
   const user = useAuthStore((s) => s.user);
+  const canAutomate = useCanUseAutomations();
   const patchSettings = useAuthStore((s) => s.patchSettings);
   const setUser = useAuthStore((s) => s.setUser);
 
@@ -80,7 +82,7 @@ export function FeatureVisibilityPanel() {
       </header>
 
       <div className="space-y-5 px-4 py-4">
-        {OPTIONAL_NAV_KEYS.map(({ key, label, description }, i) => (
+        {OPTIONAL_NAV_KEYS.filter((k) => k.key !== "tasks" || canAutomate).map(({ key, label, description }, i) => (
           <div key={key}>
             {i > 0 && <div className="mb-5 border-t border-[var(--border)]" />}
             <div className="flex items-start justify-between gap-4">

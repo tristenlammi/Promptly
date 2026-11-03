@@ -739,7 +739,11 @@ async def search(q: str = Query(..., min_length=1, max_length=200), room_id: uui
 
 
 @router.get("/events")
-async def events(request: Request, user: User = Depends(get_current_user)) -> StreamingResponse:
+async def events(request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> StreamingResponse:
+    # The stream lives for minutes (hours, for a backgrounded phone), and the
+    # request's session would hold a pooled DB connection the whole time —
+    # enough open clients drained the pool and took the server down.
+    await db.close()
     return StreamingResponse(
         _stream(user.id, request),
         media_type="text/event-stream",

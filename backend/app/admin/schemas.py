@@ -41,6 +41,10 @@ class AdminUserResponse(BaseModel):
     can_execute_code: bool = True
     # Whether the user's automation HTTP steps may reach the local network.
     can_reach_private_network: bool = False
+    # Whether the user may use Automations (off unless an admin turns it on).
+    can_use_automations: bool = False
+    # Locked to ``allowed_models`` (groups can't widen it; no picker).
+    model_locked: bool = False
     # Groups this user belongs to (role bundles — grant connectors + models).
     group_ids: list[uuid.UUID] = []
     created_at: datetime
@@ -382,6 +386,8 @@ class AdminUserCreate(BaseModel):
     can_generate_images: bool | None = None
     can_execute_code: bool | None = None
     can_reach_private_network: bool | None = None
+    can_use_automations: bool | None = None
+    model_locked: bool | None = None
     # Admin-chosen passwords are hand-delivered; make the person pick their
     # own on first sign-in (R-259). The dialog can untick it.
     must_change_password: bool = True
@@ -423,6 +429,10 @@ class AdminUserUpdate(BaseModel):
     # Omit to leave unchanged; send a bool to allow/deny local-network
     # access for the user's automation HTTP steps.
     can_reach_private_network: bool | None = None
+    # Omit to leave unchanged; send a bool to turn Automations on/off.
+    can_use_automations: bool | None = None
+    # Omit to leave unchanged; send a bool to lock/unlock their model.
+    model_locked: bool | None = None
     # Omit to leave membership unchanged; send a (possibly empty) list to
     # replace the user's group set.
     group_ids: list[uuid.UUID] | None = None

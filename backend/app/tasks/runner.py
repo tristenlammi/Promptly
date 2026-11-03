@@ -621,6 +621,10 @@ async def execute_run(run_id: uuid.UUID) -> None:
             bill_usage_to(task.user_id)
             if user is None:
                 raise TaskRunError("Task owner no longer exists.")
+            from app.tasks.policy import may_use_automations
+
+            if not may_use_automations(user):
+                raise TaskRunError("Automations are turned off for this account.")
             # Execute the task's flow graph — its stored Advanced graph, or the
             # canonical trigger→AI→output graph derived from the Simple columns.
             # A Simple task is a single-AI chain, so this runs identically to

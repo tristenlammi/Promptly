@@ -73,7 +73,9 @@ export interface TodaySections {
     due_count: number;
     url: string;
     cards: { id: string; title: string; workspace: string; board: string | null; due: string | null; overdue: boolean; url: string }[];
-    shifts: { workspace: string; roster: string; start: string | null; end: string | null; hours: number | null; note: string | null; url: string }[];
+    shifts: { date: string; workspace: string; roster: string; start: string | null; end: string | null; hours: number | null; note: string | null; url: string }[];
+    /** The coming week's shifts (after today), up to five. */
+    upcoming?: { date: string; workspace: string; roster: string; start: string | null; end: string | null; hours: number | null; note: string | null; url: string }[];
   };
 }
 

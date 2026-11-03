@@ -94,12 +94,15 @@ async def setup() -> dict:
             user.mfa_enrolled_method = None
             user.must_change_password = key == "carol"
             user.allowed_models = [m["id"] for m in MODELS]
+            user.can_use_automations = True  # off by default since 0240
             user.settings = {
                 **(user.settings or {}),
                 "memory_mode": "off",
                 "default_web_search_mode": "off",
                 "default_provider_id": str(provider.id),
                 "default_model_id": MODELS[0]["id"],
+                # Skip the first-sign-in "Pick your apps" prompt.
+                "features_chosen": True,
             }
             await db.flush()
             if created:

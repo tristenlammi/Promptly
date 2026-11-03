@@ -136,6 +136,11 @@ class UserResponse(BaseModel):
     # May the user's automation HTTP steps reach the local network? Admins
     # always may; the flow editor hides the option otherwise.
     can_reach_private_network: bool = False
+    # May the user use Automations? Admins always may; the sidebar entry and
+    # "New automation" buttons hide otherwise. Server re-checks.
+    can_use_automations: bool = False
+    # Locked to one model: the chat picker shows its name, no dropdown.
+    model_locked: bool = False
     settings: dict[str, Any]
     # Profile appearance: signed picture URL (None = initials chip; a
     # model property, so it serializes from anywhere) and the chosen
@@ -174,6 +179,14 @@ class DirectoryUser(BaseModel):
     # visible to every authenticated user anyway).
     avatar_url: str | None = None
     avatar_color: str | None = None
+
+
+# New members start with the bigger optional surfaces hidden; the first
+# sign-in prompt (and Account → Sidebar features) turns them on.
+NEW_MEMBER_HIDDEN_NAV = ("places", "workspaces", "tasks")
+
+# The cards the Today page can show, in their default order.
+TODAY_SECTIONS = ("recent", "events", "tasks", "habits", "workout", "meals", "work", "rooms", "photos", "morning")
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -246,10 +259,17 @@ class UserPreferencesUpdate(BaseModel):
     # Promptly without installing it. Apps they no longer have are skipped
     # when the sidebar draws. ``[]`` = none pinned.
     nav_apps: list[str] | None = None
+    # The Today page, curated: cards hidden from it, and the order the rest
+    # appear in (keys from ``TODAY_SECTIONS``; unknown ones are dropped).
+    today_hidden: list[str] | None = None
+    today_order: list[str] | None = None
     # One-shot flag: the org admin has finished (or skipped) the post-signup
     # onboarding wizard. Gates the wizard so it shows once and never nags again,
     # even if they later remove every provider. Purely a client-driven marker.
     onboarding_completed: bool | None = None
+    # One-shot flag: this member has been through the first-sign-in "pick
+    # your apps" prompt (Places / Workspaces / Automations start hidden).
+    features_chosen: bool | None = None
     # Master switch for cross-chat memory (Phase 6). When off, the
     # post-turn extraction pass is skipped and saved facts are not
     # injected into the system prompt. Absent = on (the default).
@@ -378,6 +398,18 @@ class UserPreferencesUpdate(BaseModel):
             if key == "projects":
                 key = "workspaces"
             if key in allowed and key not in seen:
+                seen.append(key)
+        return seen
+
+    @field_validator("today_hidden", "today_order")
+    @classmethod
+    def _clean_today(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        seen: list[str] = []
+        for item in v:
+            key = str(item).strip().lower()
+            if key in TODAY_SECTIONS and key not in seen:
                 seen.append(key)
         return seen
 

@@ -286,6 +286,8 @@ async def discussion_events(
     """
     await get_accessible_workspace(workspace_id, user, db)
     await _require_discussion_item(workspace_id, item_id, db, user)
+    # Hand the DB connection back before the long-lived stream starts.
+    await db.close()
 
     return StreamingResponse(
         _discussion_event_stream(item_id, request),

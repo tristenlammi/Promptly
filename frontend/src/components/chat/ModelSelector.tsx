@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Eye, Sparkles } from "lucide-react";
+import { Check, ChevronDown, Eye } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 import { useAvailableModels } from "@/hooks/useProviders";
@@ -26,6 +26,8 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
   const isAdmin = useAuthStore((s) => s.user?.role === "admin");
+  // An admin can lock a member to one model: no dropdown, just its name.
+  const locked = useAuthStore((s) => s.user?.role !== "admin" && !!s.user?.model_locked);
 
   // Open on demand when another surface requests it (e.g. the
   // "Pick another model" action on a stream-error card). Skips the
@@ -47,10 +49,10 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
     return () => window.removeEventListener("mousedown", onDoc);
   }, [open]);
 
-  // Group models for the dropdown. Custom Models render as a single
-  // top section (they share no real provider) so admins can pluck
-  // one out without hunting through OpenRouter's 100+ rows. Raw
-  // provider groups follow in their natural list order.
+  // Group models for the dropdown. Custom models render as a single
+  // top "Internal" section (they share no real provider) so they're easy
+  // to pluck out of OpenRouter's 100+ rows. Raw provider groups follow in
+  // their natural list order.
   const grouped = useMemo(() => {
     // Image-output models (e.g. gemini-*-image) aren't conversational —
     // they're plumbing for the `generate_image` tool, which the admin
@@ -79,7 +81,7 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
     if (customs.length > 0) {
       groups.push({
         key: "__custom__",
-        name: "Custom Models",
+        name: "Internal",
         models: customs,
         isCustom: true,
       });
@@ -147,9 +149,25 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
     );
   }
 
+  // A custom model goes by its own name — never the provider it runs on.
   const label = selected
-    ? `${selected.display_name} · ${selected.provider_name}`
+    ? selected.is_custom
+      ? selected.display_name
+      : `${selected.display_name} · ${selected.provider_name}`
     : "Select a model";
+
+  if (locked) {
+    if (compact) return null;
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-input border border-[var(--border)] bg-[var(--surface)] px-3 py-1.5 text-xs text-[var(--text)]"
+        title={label}
+      >
+        <span className="max-w-[220px] truncate">{label}</span>
+        {selected?.supports_vision && <VisionBadge compact />}
+      </span>
+    );
+  }
 
   return (
     <div ref={ref} className="relative">
@@ -219,7 +237,7 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
                   selected?.provider_id === m.provider_id &&
                   selected?.model_id === m.model_id;
                 const subtitle = m.is_custom
-                  ? `Based on ${m.base_display_name ?? m.provider_name}`
+                  ? `Internal model${m.context_window ? ` · ${(m.context_window / 1000).toFixed(0)}k ctx` : ""}`
                   : `${m.model_id}${m.context_window ? ` · ${(m.context_window / 1000).toFixed(0)}k ctx` : ""}`;
                 return (
                   <button
@@ -241,7 +259,6 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
                         <span className="truncate font-medium">
                           {m.display_name}
                         </span>
-                        {m.is_custom && <CustomBadge />}
                         {m.supports_vision && <VisionBadge />}
                       </div>
                       <div className="truncate text-[11px] text-[var(--text-muted)]">
@@ -259,21 +276,6 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
         </div>
       )}
     </div>
-  );
-}
-
-function CustomBadge() {
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide",
-        "bg-[var(--accent)]/15 text-[var(--accent-text)]"
-      )}
-      title="Custom assistant — admin-curated personality + knowledge library"
-    >
-      <Sparkles className="h-2.5 w-2.5" />
-      Custom
-    </span>
   );
 }
 

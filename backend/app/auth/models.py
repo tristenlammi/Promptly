@@ -61,6 +61,19 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    # May this user use Automations (scheduled / webhook / event flows)?
+    # FALSE by default — an admin turns it on per account. Admins are never
+    # gated. Off also stops their saved automations from running.
+    can_use_automations: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
+    # Locked to the model(s) in ``allowed_models`` — groups can't widen the
+    # set, and the chat picker shows the name with no dropdown (0241).
+    model_locked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
     # User settings: default_model, default_search_on, preferred_search_provider, theme, ...
     settings: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default="{}"

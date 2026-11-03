@@ -154,6 +154,7 @@ import {
   useDeleteWorkspace,
   useUnarchiveWorkspace,
 } from "@/hooks/useWorkspaces";
+import { useCanUseAutomations } from "@/hooks/useCanUseAutomations";
 
 /**
  * Workspace detail page (Phase 1c) — rail + main-pane navigator.
@@ -165,6 +166,7 @@ import {
  * moved into a slide-over drawer behind the gear button.
  */
 export function WorkspaceDetailPage() {
+  const canAutomate = useCanUseAutomations();
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const isMobile = useIsMobile();
@@ -797,7 +799,7 @@ export function WorkspaceDetailPage() {
                 }}
                 atDrive={driveOpen}
                 onNewTask={
-                  canEdit && !isArchived
+                  canEdit && !isArchived && canAutomate
                     ? () => setTaskChooserOpen(true)
                     : undefined
                 }

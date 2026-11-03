@@ -6,6 +6,7 @@ import {
   type Task,
   type TaskInput,
 } from "@/api/tasks";
+import { useCanUseAutomations } from "@/hooks/useCanUseAutomations";
 
 const TASKS_KEY = ["tasks"] as const;
 const taskKey = (id: string) => ["tasks", id] as const;
@@ -15,10 +16,12 @@ const runKey = (taskId: string, runId: string) =>
   ["tasks", taskId, "runs", runId] as const;
 
 export function useTasks(scope: "personal" | "all" = "personal") {
+  const allowed = useCanUseAutomations();
   return useQuery<Task[]>({
     queryKey: [...TASKS_KEY, scope],
     queryFn: () => tasksApi.list(scope),
     staleTime: 30_000,
+    enabled: allowed,
   });
 }
 

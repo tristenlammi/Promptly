@@ -56,6 +56,7 @@ from app.auth.audit import (
 from app.auth.deps import require_admin
 from app.auth.events import AuthEvent
 from app.auth.models import User
+from app.auth.schemas import NEW_MEMBER_HIDDEN_NAV
 from app.auth.utils import ahash_password
 from app.billing.usage import check_budget
 from app.database import get_db
@@ -160,7 +161,7 @@ async def create_user(
         password_hash=await ahash_password(payload.password),
         role=payload.role,
         allowed_models=_clean_allowed_models(payload.allowed_models),
-        settings={},
+        settings={"hidden_nav": list(NEW_MEMBER_HIDDEN_NAV)},
         must_change_password=payload.must_change_password,
         storage_cap_bytes=payload.storage_cap_bytes,
         daily_token_budget=payload.daily_token_budget,
@@ -172,6 +173,10 @@ async def create_user(
         user.can_execute_code = payload.can_execute_code
     if payload.can_reach_private_network is not None:
         user.can_reach_private_network = payload.can_reach_private_network
+    if payload.can_use_automations is not None:
+        user.can_use_automations = payload.can_use_automations
+    if payload.model_locked is not None:
+        user.model_locked = payload.model_locked
     db.add(user)
     try:
         await db.commit()
@@ -373,7 +378,7 @@ async def _run_import(job_id: str, rows: list[dict], admin_id: uuid.UUID) -> Non
                     username=checked.username,
                     password_hash=await ahash_password(temp_password),
                     role=checked.role,
-                    settings={},
+                    settings={"hidden_nav": list(NEW_MEMBER_HIDDEN_NAV)},
                     must_change_password=True,
                 )
                 db.add(user)
@@ -488,6 +493,10 @@ async def update_user(
         and payload.can_reach_private_network is not None
     ):
         target.can_reach_private_network = payload.can_reach_private_network
+    if "can_use_automations" in fields and payload.can_use_automations is not None:
+        target.can_use_automations = payload.can_use_automations
+    if "model_locked" in fields and payload.model_locked is not None:
+        target.model_locked = payload.model_locked
 
     if "group_ids" in fields and payload.group_ids is not None:
         await _sync_user_groups(db, target.id, payload.group_ids)

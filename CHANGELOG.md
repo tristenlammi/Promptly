@@ -21,6 +21,25 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-03
+
+### Added
+- Today is customisable: a Customise button picks which cards show (Calendar, Tasks, Habits, Workout, Meals, Workspaces, Unread rooms, On this day, Recently opened, Morning summary) and the order they come in, saved to your account.
+- Admins can lock a member to one model (Admin → Users → Model access → Locked): they see its name with no model picker, and groups can't add more.
+- First sign-in asks new members which extras they want in their sidebar (Places, Workspaces, and Automations if allowed); the same switches stay in Account → Sidebar features.
+
+### Changed
+- Automations are off by default and turned on per account by an admin (Admin → Users → Automations). Admins always have them, and anyone who already owns an automation keeps them on. With them off, the sidebar entry and "New automation" buttons are hidden, saved automations don't run, and the page keeps just Commands, Prompts and History.
+- Today's Workspaces card now holds everything My work did: today's shifts, the week's coming shifts, every open card assigned to you (overdue first, "Show all"), and the shifts calendar link.
+- New members start with Places, Workspaces and Automations hidden from their sidebar.
+- Custom models show under "Internal" by their own name only — no "Custom" badge, no "Based on…" line, and members are no longer sent which model one runs on.
+
+### Fixed
+- The server could stop answering after a while: every open Rooms live feed (and discussion, admin log and chat streams) held a database connection for as long as it stayed connected, so enough open tabs and backgrounded phones used up the pool. Streams now hand the connection back before they start.
+
+### Removed
+- The My work page and its sidebar entry; old /work links open Today.
+
 ## [0.17.0] - 2026-11-03
 
 ### Added

@@ -328,12 +328,9 @@ async def list_available_models_for(
     # with the models granted by every group they belong to (a group is a
     # role bundle). ``None`` = full access (admin, or a user with no custom
     # list) — groups can't *narrow* that, only widen a custom list.
-    from app.models_config.access import group_granted_models
+    from app.models_config.access import effective_allow_set
 
-    user_allow: set[str] | None = None
-    if user.role != "admin" and user.allowed_models is not None:
-        user_allow = set(user.allowed_models)
-        user_allow |= await group_granted_models(user.id, db)
+    user_allow = await effective_allow_set(user, db)
 
     flat: list[AvailableModel] = []
     for provider in result.scalars().all():
@@ -494,7 +491,9 @@ async def list_available_models_for(
                 or _detect_reasoning_by_id(base_provider.type, cm.base_model_id),
                 is_custom=True,
                 custom_model_id=cm.id,
-                base_display_name=base_label,
+                # Members see a custom model by its own name only — what it
+                # runs on is the admin's business.
+                base_display_name=base_label if user.role == "admin" else None,
             )
         )
 

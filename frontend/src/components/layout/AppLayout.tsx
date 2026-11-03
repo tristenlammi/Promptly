@@ -14,6 +14,7 @@ import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
 
 import { NetworkStatusToast } from "./NetworkStatusToast";
+import { WelcomeAppsDialog } from "./WelcomeAppsDialog";
 import { Sidebar } from "./Sidebar";
 
 export function AppLayout() {
@@ -208,6 +209,7 @@ export function AppLayout() {
       </main>
 
       <NetworkStatusToast />
+      <WelcomeAppsDialog />
       <SearchPalette open={searchPaletteOpen} onClose={closeSearchPalette} />
       {/* Drive upload panel only renders on ``/files*`` routes — it
           short-circuits when no uploads are in flight, so it's zero-cost

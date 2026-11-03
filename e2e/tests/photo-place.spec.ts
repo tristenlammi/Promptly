@@ -45,7 +45,7 @@ test("a photo's place is named", async ({ dana: page }) => {
   // Places (PH-5): Australia → Noosa Heads → the photo.
   await page.goto("/files/photos");
   await ready(page);
-  await page.getByRole("link", { name: "Places" }).click();
+  await page.getByRole("navigation", { name: "Photos" }).getByRole("link", { name: "Places" }).click();
   await page.getByRole("list", { name: "Countries" }).getByRole("link", { name: /Australia/ }).click();
   await page.getByRole("list", { name: "Towns" }).getByRole("link", { name: /Noosa Heads/ }).click();
   await expect(page.getByRole("heading", { name: "Noosa Heads" })).toBeVisible();

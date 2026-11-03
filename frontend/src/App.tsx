@@ -53,10 +53,6 @@ const SharedWithMePage = lazyWithRetry(
   () => import("@/pages/FilesPage").then((m) => ({ default: m.SharedWithMePage })),
   "SharedWithMePage"
 );
-const MyWorkPage = lazyWithRetry(
-  () => import("@/pages/MyWorkPage").then((m) => ({ default: m.MyWorkPage })),
-  "MyWorkPage"
-);
 const TodayPage = lazyWithRetry(
   () => import("@/pages/TodayPage").then((m) => ({ default: m.TodayPage })),
   "TodayPage"
@@ -660,7 +656,8 @@ export default function App() {
         <Route path="/workspaces/:id" element={<WorkspaceDetailPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
-        <Route path="/work" element={<MyWorkPage />} />
+        {/* My work folded into Today's Workspaces card. */}
+        <Route path="/work" element={<Navigate to="/today" replace />} />
         <Route path="/today" element={<TodayPage />} />
         <Route path="/tags" element={<TagsPage />} />
         <Route path="/tags/:tagId" element={<TagPage />} />

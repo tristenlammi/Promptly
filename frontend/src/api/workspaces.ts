@@ -386,7 +386,7 @@ export interface WorkspaceAskResponse {
   degraded?: "embedder_unavailable" | null;
 }
 
-/** One open card assigned to the caller (the "My work" page). */
+/** One open card assigned to the caller (Today's Workspaces card). */
 export interface MyWorkCard {
   id: string;
   title: string;

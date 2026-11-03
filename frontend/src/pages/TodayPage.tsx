@@ -1,29 +1,36 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
   CalendarDays,
   Check,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Dumbbell,
   Hash,
   Images,
   LayoutGrid,
+  Link2,
   ListChecks,
   MessageCircle,
   Repeat,
+  SlidersHorizontal,
   UtensilsCrossed,
 } from "lucide-react";
 
 import { todayApi, type TodayData, type TodayEvent, type TodayHabit, type TodayTask } from "@/api/today";
 import { itemsApi } from "@/items/api";
+import { workspacesApi } from "@/api/workspaces";
 import { TopNav } from "@/components/layout/TopNav";
 import { Skeleton } from "@/components/shared/Skeleton";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { RecentStrip } from "@/components/today/RecentStrip";
+import { authApi } from "@/api/auth";
+import { useAuthStore } from "@/store/authStore";
 
 /**
  * Today — what your day holds across Promptly, on one page: events, tasks
@@ -57,7 +64,7 @@ export function TodayPage() {
 
   return (
     <>
-      <TopNav title="Today" />
+      <TopNav title="Today" actions={<CustomiseToday />} />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl px-4 py-5 md:py-8">
           {isLoading ? (
@@ -85,27 +92,52 @@ export function TodayPage() {
   );
 }
 
+/** Every card Today can show, in the default order. ``recent`` sits at the
+ *  top and ``morning`` at the bottom; the rest are the grid, in your order. */
+const SECTIONS: { key: string; label: string; grid: boolean }[] = [
+  { key: "recent", label: "Recently opened", grid: false },
+  { key: "events", label: "Calendar", grid: true },
+  { key: "tasks", label: "Tasks", grid: true },
+  { key: "habits", label: "Habits", grid: true },
+  { key: "workout", label: "Workout", grid: true },
+  { key: "meals", label: "Meals", grid: true },
+  { key: "work", label: "Workspace cards and shifts", grid: true },
+  { key: "rooms", label: "Unread rooms", grid: true },
+  { key: "photos", label: "On this day", grid: true },
+  { key: "morning", label: "Morning summary", grid: false },
+];
+const GRID_KEYS = SECTIONS.filter((x) => x.grid).map((x) => x.key);
+
+/** Your Today layout — hidden cards and the grid order — from your settings. */
+function useTodayLayout() {
+  const settings = useAuthStore((st) => st.user?.settings);
+  const patchSettings = useAuthStore((st) => st.patchSettings);
+  const setUser = useAuthStore((st) => st.setUser);
+  const hidden = new Set(settings?.today_hidden ?? []);
+  const saved = settings?.today_order ?? [];
+  const order = [...saved.filter((k) => GRID_KEYS.includes(k)), ...GRID_KEYS.filter((k) => !saved.includes(k))];
+  const save = async (patch: { today_hidden?: string[]; today_order?: string[] }) => {
+    const before = { today_hidden: settings?.today_hidden, today_order: settings?.today_order };
+    patchSettings(patch);
+    try {
+      setUser(await authApi.updatePreferences(patch));
+    } catch (err) {
+      patchSettings(before);
+      toast.error(apiErrorMessage(err, "Couldn't save your layout."));
+    }
+  };
+  return { hidden, order, save };
+}
+
 function TodayBody({ data }: { data: TodayData }) {
   const s = data.sections;
   const summary = summaryLine(data);
-  const empty = !s.events?.events.length && !s.tasks && !s.habits && !s.workout && !s.meals && !s.photos && !s.rooms && !s.work;
-  return (
-    <>
-      <header className="mb-5 md:mb-7">
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] md:text-3xl">{data.greeting}</h1>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">
-          {longDate(data.date)}
-          {summary ? ` · ${summary}` : ""}
-        </p>
-      </header>
-
-      <RecentStrip />
-
-      <div className="grid items-start gap-3 md:grid-cols-2 md:gap-4">
-        {s.events && <EventsCard events={s.events.events} url={s.events.url} />}
-        {s.tasks && <TasksCard tasks={s.tasks} />}
-        {s.habits && <HabitsCard habits={s.habits} />}
-        {s.workout && (
+  const { hidden, order } = useTodayLayout();
+  const cards: Record<string, ReactNode> = {
+    events: s.events && <EventsCard events={s.events.events} url={s.events.url} />,
+    tasks: s.tasks && <TasksCard tasks={s.tasks} />,
+    habits: s.habits && <HabitsCard habits={s.habits} />,
+    workout: s.workout && (
           <Card icon={<Dumbbell className="h-4 w-4" />} title="Workout" to={s.workout.url} open="Open logger">
             <ul className="space-y-1">
               {s.workout.sessions.map((w) => (
@@ -123,8 +155,8 @@ function TodayBody({ data }: { data: TodayData }) {
               ))}
             </ul>
           </Card>
-        )}
-        {s.meals && (
+        ),
+    meals: s.meals && (
           <Card icon={<UtensilsCrossed className="h-4 w-4" />} title="Meals" to={s.meals.url} open="Meal plan">
             <ul className="space-y-0.5">
               {s.meals.meals.map((m) => (
@@ -138,9 +170,9 @@ function TodayBody({ data }: { data: TodayData }) {
               ))}
             </ul>
           </Card>
-        )}
-        {s.work && <WorkCard work={s.work} />}
-        {s.rooms && (
+        ),
+    work: s.work && <WorkCard work={s.work} />,
+    rooms: s.rooms && (
           <Card icon={<MessageCircle className="h-4 w-4" />} title={`Unread · ${s.rooms.total}`} to={s.rooms.url} open="Rooms">
             <ul className="space-y-0.5">
               {s.rooms.rooms.map((r) => (
@@ -157,8 +189,8 @@ function TodayBody({ data }: { data: TodayData }) {
               ))}
             </ul>
           </Card>
-        )}
-        {s.photos && (
+        ),
+    photos: s.photos && (
           <Card icon={<Images className="h-4 w-4" />} title="On this day" to={s.photos.url} open="Photos">
             <p className="mb-2 px-2 text-xs text-[var(--text-muted)]">
               {plural(s.photos.count, "photo")} from {s.photos.years.map((y) => new Date(data.date).getFullYear() - y).filter((n) => n > 0).map((n) => plural(n, "year")).join(", ")} ago
@@ -171,17 +203,108 @@ function TodayBody({ data }: { data: TodayData }) {
               ))}
             </div>
           </Card>
-        )}
+        ),
+  };
+  const shown = order.filter((k) => !hidden.has(k) && cards[k]);
+  const anyData = Object.values(cards).some(Boolean);
+  return (
+    <>
+      <header className="mb-5 md:mb-7">
+        <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] md:text-3xl">{data.greeting}</h1>
+        <p className="mt-1 text-sm text-[var(--text-muted)]">
+          {longDate(data.date)}
+          {summary ? ` · ${summary}` : ""}
+        </p>
+      </header>
+
+      {!hidden.has("recent") && <RecentStrip />}
+
+      <div className="grid items-start gap-3 md:grid-cols-2 md:gap-4">
+        {shown.map((k) => (
+          <Fragment key={k}>{cards[k]}</Fragment>
+        ))}
       </div>
 
-      {empty && (
+      {!anyData ? (
         <p className="mt-6 text-center text-sm text-[var(--text-muted)]">
           A clear day. Add events in Calendar, or apps like Tasks, Habits and Meal planner from Apps — they'll show up here.
         </p>
-      )}
+      ) : !shown.length ? (
+        <p className="mt-6 text-center text-sm text-[var(--text-muted)]">Every card is hidden — use Customise to bring some back.</p>
+      ) : null}
 
-      <MorningCard data={data} />
+      {!hidden.has("morning") && <MorningCard data={data} />}
     </>
+  );
+}
+
+/** Pick which cards Today shows and the order they come in. */
+function CustomiseToday() {
+  const { hidden, order, save } = useTodayLayout();
+  const [open, setOpen] = useState(false);
+  const rows = [SECTIONS[0], ...order.map((k) => SECTIONS.find((x) => x.key === k)!), SECTIONS[SECTIONS.length - 1]];
+  const toggle = (key: string) => {
+    const next = hidden.has(key) ? [...hidden].filter((k) => k !== key) : [...hidden, key];
+    void save({ today_hidden: next });
+  };
+  const move = (key: string, by: number) => {
+    const i = order.indexOf(key);
+    const j = i + by;
+    if (i < 0 || j < 0 || j >= order.length) return;
+    const next = [...order];
+    [next[i], next[j]] = [next[j], next[i]];
+    void save({ today_order: next });
+  };
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 py-1.5 text-sm text-[var(--text)] hover:bg-[var(--hover)]"
+      >
+        <SlidersHorizontal className="h-4 w-4" />
+        <span className="hidden sm:inline">Customise</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 z-50 mt-2 w-72 rounded-card border border-[var(--border)] bg-[var(--surface)] p-2 shadow-lg">
+            <p className="px-2 pb-2 pt-1 text-xs text-[var(--text-muted)]">Choose what Today shows. A card only appears when there's something in it.</p>
+            <ul>
+              {rows.map((r) => {
+                const i = order.indexOf(r.key);
+                return (
+                  <li key={r.key} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-[var(--hover)]">
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-sm text-[var(--text)]">
+                      <input type="checkbox" checked={!hidden.has(r.key)} onChange={() => toggle(r.key)} />
+                      <span className="truncate">{r.label}</span>
+                    </label>
+                    {r.grid && (
+                      <span className="flex shrink-0">
+                        <button type="button" aria-label={`Move ${r.label} up`} disabled={i <= 0} onClick={() => move(r.key, -1)} className="rounded p-1 text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-30">
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        </button>
+                        <button type="button" aria-label={`Move ${r.label} down`} disabled={i >= order.length - 1} onClick={() => move(r.key, 1)} className="rounded p-1 text-[var(--text-muted)] hover:text-[var(--text)] disabled:opacity-30">
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </button>
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            <button
+              type="button"
+              onClick={() => void save({ today_hidden: [], today_order: [] })}
+              className="mt-1 w-full rounded-lg px-2 py-1.5 text-left text-xs text-[var(--accent-text)] hover:bg-[var(--hover)]"
+            >
+              Reset to default
+            </button>
+          </div>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -353,18 +476,38 @@ function HabitsCard({ habits }: { habits: NonNullable<TodayData["sections"]["hab
   );
 }
 
+type WorkShift = NonNullable<TodayData["sections"]["work"]>["shifts"][number];
+
+function shiftTime(s: WorkShift): string {
+  return s.start && s.end ? `${s.start}–${s.end}` : s.hours ? `${s.hours}h` : "";
+}
+
+/** Your workspace cards and shifts — what the My work page used to hold:
+ *  today's shifts, the week's coming ones, then every open card assigned to
+ *  you (overdue first), six at a time. */
 function WorkCard({ work }: { work: NonNullable<TodayData["sections"]["work"]> }) {
+  const [all, setAll] = useState(false);
+  const upcoming = work.upcoming ?? [];
+  const cards = all ? work.cards : work.cards.slice(0, 6);
+  const copyFeed = async () => {
+    try {
+      const url = await workspacesApi.shiftsCalendarLink();
+      await navigator.clipboard.writeText(url);
+      toast.success("Calendar link copied — add it to your calendar app as a subscription.");
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't get the calendar link."));
+    }
+  };
+  const title = work.due_count ? `Workspaces · ${work.due_count} due` : work.open_count ? `Workspaces · ${work.open_count} open` : "Workspaces";
   return (
-    <Card icon={<LayoutGrid className="h-4 w-4" />} title={work.due_count ? `My work · ${work.due_count} due` : `My work · ${work.open_count} open`} to={work.url} open="My work">
+    <Card icon={<LayoutGrid className="h-4 w-4" />} title={title} to={work.url} open="Workspaces">
       <ul className="space-y-0.5">
         {work.shifts.map((s, i) => (
           <li key={`shift-${i}`}>
             <Link to={s.url} className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-[var(--hover)]">
               <CalendarDays className="h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">
-                  Shift {s.start && s.end ? `${s.start}–${s.end}` : s.hours ? `· ${s.hours}h` : "today"}
-                </span>
+                <span className="block truncate text-sm font-medium">Shift today{shiftTime(s) ? ` · ${shiftTime(s)}` : ""}</span>
                 <span className="block truncate text-xs text-[var(--text-muted)]">
                   {s.workspace} · {s.roster}
                   {s.note ? ` · ${s.note}` : ""}
@@ -373,22 +516,57 @@ function WorkCard({ work }: { work: NonNullable<TodayData["sections"]["work"]> }
             </Link>
           </li>
         ))}
-        {work.cards.map((c) => (
+        {upcoming.map((s, i) => (
+          <li key={`up-${i}`}>
+            <Link to={s.url} className="flex items-center gap-3 rounded-lg px-2 py-1 hover:bg-[var(--hover)]">
+              <CalendarDays className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+              <span className="min-w-0 flex-1 truncate text-xs text-[var(--text-muted)]">
+                <span className="text-[var(--text)]">
+                  {new Date(`${s.date}T00:00:00`).toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}
+                </span>
+                {shiftTime(s) ? ` · ${shiftTime(s)}` : ""} · {s.roster}
+              </span>
+            </Link>
+          </li>
+        ))}
+        {cards.map((c) => (
           <li key={c.id}>
             <Link to={c.url} className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-[var(--hover)]">
-              <span className={cn("h-2 w-2 shrink-0 rounded-full", c.overdue ? "bg-[var(--danger)]" : "bg-[var(--accent)]")} />
+              <span className={cn("h-2 w-2 shrink-0 rounded-full", c.overdue ? "bg-[var(--danger)]" : c.due ? "bg-[var(--accent)]" : "bg-[var(--border)]")} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm">{c.title}</span>
                 <span className={cn("block truncate text-xs", c.overdue ? "text-[var(--danger)]" : "text-[var(--text-muted)]")}>
-                  {[c.overdue ? "Overdue" : c.due ? "Due today" : "", c.workspace, c.board].filter(Boolean).join(" · ")}
+                  {[c.overdue ? "Overdue" : c.due ? `Due ${c.due === todayIso() ? "today" : new Date(`${c.due}T00:00:00`).toLocaleDateString([], { day: "numeric", month: "short" })}` : "", c.workspace, c.board].filter(Boolean).join(" · ")}
                 </span>
               </span>
             </Link>
           </li>
         ))}
       </ul>
+      {(work.cards.length > 6 || work.shifts.length + upcoming.length > 0) && (
+        <div className="mt-1 flex items-center justify-between px-2 text-xs">
+          {work.cards.length > 6 ? (
+            <button type="button" onClick={() => setAll((v) => !v)} className="font-medium text-[var(--accent-text)] hover:underline">
+              {all ? "Show fewer" : `Show all ${work.cards.length} cards`}
+            </button>
+          ) : (
+            <span />
+          )}
+          {work.shifts.length + upcoming.length > 0 && (
+            <button type="button" onClick={() => void copyFeed()} className="inline-flex items-center gap-1 font-medium text-[var(--accent-text)] hover:underline">
+              <Link2 className="h-3 w-3" />
+              Shifts calendar link
+            </button>
+          )}
+        </div>
+      )}
     </Card>
   );
+}
+
+function todayIso(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 /** The one morning push: on/off and when. Lives in Tasks' settings when

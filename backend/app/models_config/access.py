@@ -55,6 +55,9 @@ async def effective_allow_set(
     """
     if user.role == "admin" or user.allowed_models is None:
         return None
+    if user.model_locked:
+        # Locked to what the admin picked — groups can't widen it.
+        return set(user.allowed_models)
     return set(user.allowed_models) | await group_granted_models(user.id, db)
 
 
