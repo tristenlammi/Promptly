@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-11-03
+
+### Changed
+- Apps pinned to the sidebar now use simple line icons that match the rest of the menu. Apps → Edit has a "Sidebar icons: Simple / Colour" switch to bring back the colour app icons.
+
 ## [0.18.0] - 2026-11-03
 
 ### Added

@@ -58,7 +58,7 @@ import { NewChatButton } from "./NewChatButton";
 import { FolderEditModal } from "./FolderEditModal";
 import { useChatFoldersQuery, useDeleteFolder } from "@/hooks/useChatFolders";
 import { useFolderUiStore } from "@/store/folderUiStore";
-import { useNavApps } from "@/items/navApps";
+import { useNavApps, type NavApp } from "@/items/navApps";
 import { useCanUseAutomations } from "@/hooks/useCanUseAutomations";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import type { ChatFolder } from "@/api/folders";
@@ -80,7 +80,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const canAutomate = useCanUseAutomations();
   const isMobile = useIsMobile();
   // Apps the user pinned to their sidebar (from Apps → Edit).
-  const { apps: navApps } = useNavApps();
+  const { apps: navApps, iconStyle } = useNavApps();
   const { pathname } = useLocation();
   // While a pinned app is open, its own row lights up — not "Apps" too.
   const inNavApp = navApps.some((a) => pathname === a.to || pathname.startsWith(`${a.to}/`));
@@ -206,7 +206,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             );
           })}
           {navApps.map((app) => (
-            <SideIcon key={app.id} to={app.to} icon={<AppIcon src={app.icon} />} label={app.name} />
+            <SideIcon key={app.id} to={app.to} icon={<AppIcon app={app} style={iconStyle} />} label={app.name} />
           ))}
           <SideIcon
             to="/archive"
@@ -274,7 +274,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           );
         })}
         {navApps.map((app) => (
-          <NavItem key={app.id} to={app.to} icon={<AppIcon src={app.icon} />} label={app.name} />
+          <NavItem key={app.id} to={app.to} icon={<AppIcon app={app} style={iconStyle} />} label={app.name} />
         ))}
       </nav>
 
@@ -483,9 +483,12 @@ function TemporaryCountdownBadge({ expiresAt }: { expiresAt: string | null }) {
   );
 }
 
-/** A pinned app's own icon, shrunk to sit with the line icons. */
-function AppIcon({ src }: { src: string }) {
-  return <img src={src} alt="" className="h-4 w-4 rounded-[4px]" draggable={false} />;
+/** A pinned app's icon: a line icon like the rest of the sidebar, or —
+ *  if the person chose colour — the app's own icon, shrunk to fit. */
+function AppIcon({ app, style }: { app: NavApp; style: "line" | "color" }) {
+  if (style === "color") return <img src={app.icon} alt="" className="h-4 w-4 rounded-[4px]" draggable={false} />;
+  const Glyph = app.glyph;
+  return <Glyph className="h-4 w-4" />;
 }
 
 function NavItem({

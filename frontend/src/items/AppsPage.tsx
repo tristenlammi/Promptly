@@ -175,9 +175,31 @@ export function AppsPage() {
         </DndContext>
       )}
       {editing && (
-        <p className="text-center text-xs text-[var(--text-muted)]">
-          Drag to arrange · tap the pin to show an app in your sidebar · tap − to remove (its files stay in My files › Apps)
-        </p>
+        <>
+          <p className="text-center text-xs text-[var(--text-muted)]">
+            Drag to arrange · tap the pin to show an app in your sidebar · tap − to remove (its files stay in My files › Apps)
+          </p>
+          <div className="flex items-center justify-center gap-2 text-xs text-[var(--text-muted)]" onClick={(e) => e.stopPropagation()}>
+            <span>Sidebar icons</span>
+            <div role="radiogroup" aria-label="Sidebar icons" className="inline-flex rounded-lg border border-[var(--border)] p-0.5">
+              {(["line", "color"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  role="radio"
+                  aria-checked={nav.iconStyle === s}
+                  onClick={() => void nav.setIconStyle(s)}
+                  className={cn(
+                    "rounded-md px-2.5 py-1 font-medium transition",
+                    nav.iconStyle === s ? "bg-[var(--accent)] text-white" : "text-[var(--text)] hover:bg-[var(--hover)]",
+                  )}
+                >
+                  {s === "line" ? "Simple" : "Colour"}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
       )}
     </div>
       </div>

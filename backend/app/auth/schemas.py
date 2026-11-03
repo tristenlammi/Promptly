@@ -259,6 +259,9 @@ class UserPreferencesUpdate(BaseModel):
     # Promptly without installing it. Apps they no longer have are skipped
     # when the sidebar draws. ``[]`` = none pinned.
     nav_apps: list[str] | None = None
+    # How pinned apps look in the sidebar: simple line icons matching the
+    # rest of the nav, or the apps' own colour icons.
+    nav_app_icons: Literal["line", "color"] | None = None
     # The Today page, curated: cards hidden from it, and the order the rest
     # appear in (keys from ``TODAY_SECTIONS``; unknown ones are dropped).
     today_hidden: list[str] | None = None

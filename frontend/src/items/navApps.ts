@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { CalendarDays, MessageCircle, type LucideIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { authApi } from "@/api/auth";
@@ -7,19 +8,22 @@ import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 
 import { itemsApi } from "./api";
+import { itemIcon } from "./registry";
 
 /** An app that can sit in the sidebar: a built-in one or an added Item Store app. */
 export interface NavApp {
   id: string;
   name: string;
   icon: string;
+  /** The line icon used when the sidebar shows simple icons. */
+  glyph: LucideIcon;
   to: string;
 }
 
 /** Apps that are part of Promptly itself (not file-backed items). */
 export const BUILT_IN_APPS: NavApp[] = [
-  { id: "rooms", name: "Rooms", icon: "/item-icons/rooms-192.png", to: "/rooms" },
-  { id: "calendar", name: "Calendar", icon: "/item-icons/calendar-192.png", to: "/calendar" },
+  { id: "rooms", name: "Rooms", icon: "/item-icons/rooms-192.png", glyph: MessageCircle, to: "/rooms" },
+  { id: "calendar", name: "Calendar", icon: "/item-icons/calendar-192.png", glyph: CalendarDays, to: "/calendar" },
 ];
 
 /**
@@ -29,6 +33,9 @@ export const BUILT_IN_APPS: NavApp[] = [
  */
 export function useNavApps() {
   const pinnedIds = useAuthStore((s) => s.user?.settings?.nav_apps);
+  // Simple line icons (matching the rest of the sidebar) unless the person
+  // picked the apps' own colour icons.
+  const iconStyle = useAuthStore((s) => s.user?.settings?.nav_app_icons) ?? "line";
   const patchSettings = useAuthStore((s) => s.patchSettings);
   const setUser = useAuthStore((s) => s.setUser);
   const [saving, setSaving] = useState(false);
@@ -43,7 +50,7 @@ export function useNavApps() {
   const apps = useMemo(() => {
     const all = new Map<string, NavApp>(BUILT_IN_APPS.map((a) => [a.id, a]));
     for (const a of launcher ?? []) {
-      all.set(a.kind, { id: a.kind, name: a.name, icon: `/item-icons/${a.kind}-192.png`, to: `/apps/${a.kind}` });
+      all.set(a.kind, { id: a.kind, name: a.name, icon: `/item-icons/${a.kind}-192.png`, glyph: itemIcon(a.icon), to: `/apps/${a.kind}` });
     }
     return pinned.map((id) => all.get(id)).filter((a): a is NavApp => Boolean(a));
   }, [pinned, launcher]);
@@ -63,5 +70,16 @@ export function useNavApps() {
     }
   };
 
-  return { pinned, apps, toggle, saving };
+  const setIconStyle = async (style: "line" | "color") => {
+    const previous = iconStyle;
+    patchSettings({ nav_app_icons: style });
+    try {
+      setUser(await authApi.updatePreferences({ nav_app_icons: style }));
+    } catch (err) {
+      patchSettings({ nav_app_icons: previous });
+      toast.error(extractError(err));
+    }
+  };
+
+  return { pinned, apps, toggle, saving, iconStyle, setIconStyle };
 }

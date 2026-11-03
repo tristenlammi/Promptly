@@ -60,6 +60,8 @@ export interface UserSettings {
   /** Apps pinned to the sidebar, in order: ``"rooms"`` or an Item Store
    *  kind. Absent / ``[]`` = none. */
   nav_apps?: string[];
+  /** Pinned apps in the sidebar: simple line icons, or their colour icons. */
+  nav_app_icons?: "line" | "color";
   /** Today cards the user hid, and the order the rest show in. */
   today_hidden?: string[];
   today_order?: string[];
@@ -124,6 +126,8 @@ export interface UserPreferencesUpdate {
   enabled_nav?: string[];
   /** Replace the apps pinned to the sidebar. ``[]`` = none. */
   nav_apps?: string[];
+  /** Pinned apps in the sidebar: simple line icons, or their colour icons. */
+  nav_app_icons?: "line" | "color";
   /** Replace the hidden Today cards / their order. */
   today_hidden?: string[];
   today_order?: string[];
