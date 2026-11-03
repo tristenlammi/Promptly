@@ -33,9 +33,18 @@ test("a photo shows when it was taken, and the owner can correct the date and pl
     },
   });
   expect(up.ok()).toBeTruthy();
+  // Read by the media worker first: the details pane doesn't look again
+  // once it has shown "Reading the photo's details…".
+  const id = (await up.json()).id as string;
+  await expect
+    .poll(async () => (await (await page.request.get(`/api/files/${id}/media`, { headers: { Authorization: auth } })).json()).extracted, {
+      timeout: 30_000,
+    })
+    .toBeTruthy();
 
   await page.goto(`/files/folder/${folder.id}`);
-  await page.getByRole("button", { name, exact: true }).click();
+  // Selected (Ctrl-click; a plain click opens), so the details pane shows.
+  await page.getByRole("button", { name, exact: true }).click({ modifiers: ["ControlOrMeta"] });
   const details = page.getByLabel("Photo details");
   await expect(details).toContainText("from the file's date", { timeout: 20_000 });
   await expect(details).toContainText("2022");

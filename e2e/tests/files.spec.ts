@@ -65,7 +65,7 @@ test.describe("files", () => {
     await openDrive(alice);
 
     await alice.getByRole("button", { name: "New", exact: true }).click();
-    await alice.getByRole("menuitem", { name: "New folder" }).click();
+    await alice.getByRole("menuitem", { name: "Folder", exact: true }).click();
     await alice.getByLabel("Folder name").fill(folder);
     await alice.getByRole("button", { name: "Create", exact: true }).click();
     await expect(row(alice, folder)).toBeVisible();
@@ -73,8 +73,8 @@ test.describe("files", () => {
     await row(alice, folder).getByRole("button", { name: "More actions" }).click();
     await alice.getByRole("button", { name: "Share", exact: true }).click();
     const share = alice.getByRole("dialog").filter({ has: alice.getByRole("heading", { name: "Share folder" }) });
-    await share.getByPlaceholder("Search by name or email…").fill(run.users.bob.username);
-    await share.getByRole("button", { name: new RegExp(`@${run.users.bob.username}`) }).click();
+    await share.getByRole("combobox", { name: "Search people" }).fill(run.users.bob.username);
+    await share.getByRole("listbox", { name: "People" }).getByRole("button", { name: new RegExp(run.users.bob.username) }).click();
     await expect(share.getByRole("button", { name: "Revoke access" })).toBeVisible();
     await share.getByRole("button", { name: "Done" }).click();
 
@@ -93,7 +93,7 @@ test.describe("files", () => {
     const folder = `E2E trip ${stamp}`;
     await openDrive(page);
     await page.getByRole("button", { name: "New", exact: true }).click();
-    await page.getByRole("menuitem", { name: "New folder" }).click();
+    await page.getByRole("menuitem", { name: "Folder", exact: true }).click();
     await page.getByLabel("Folder name").fill(folder);
     await page.getByRole("button", { name: "Create", exact: true }).click();
     await expect(row(page, folder)).toBeVisible();
@@ -129,13 +129,17 @@ test.describe("files", () => {
     expect((await uploaded).ok()).toBeTruthy();
 
     // R-213: "budget" used to miss "Q3_budget-…" (one token to Postgres),
-    // and results only came on submit.
+    // and results only came on submit. In the instant-results dropdown (the
+    // folder list has the file too). Once the upload lands the list scrolls
+    // to the new file and focuses it, which can close a dropdown already
+    // open — so type again if it does.
     const box = page.getByPlaceholder("Search Drive…");
-    await box.click();
-    await box.fill(`budget ${stamp}`);
-    // In the instant-results dropdown (the folder list has the file too).
     const dropdown = box.locator("xpath=ancestor::form[1]");
-    await expect(dropdown.getByRole("button", { name: new RegExp(name) })).toBeVisible();
+    await expect(async () => {
+      await box.click();
+      await box.fill(`budget ${stamp}`);
+      await expect(dropdown.getByRole("button", { name: new RegExp(name) })).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 20_000 });
   });
 
   test("one search box: words as you type, kind chips, inside a folder, and where each result is", async ({
@@ -217,8 +221,8 @@ test.describe("files", () => {
     await expect(name).toHaveValue(title);
     await alice.getByRole("button", { name: "Share", exact: true }).click();
     const share = alice.getByRole("dialog").filter({ has: alice.getByRole("heading", { name: "Share file" }) });
-    await share.getByPlaceholder("Search by name or email…").fill(run.users.bob.username);
-    await share.getByRole("button", { name: new RegExp(`@${run.users.bob.username}`) }).click();
+    await share.getByRole("combobox", { name: "Search people" }).fill(run.users.bob.username);
+    await share.getByRole("listbox", { name: "People" }).getByRole("button", { name: new RegExp(run.users.bob.username) }).click();
     await expect(share.getByRole("button", { name: "Revoke access" })).toBeVisible();
     await share.getByRole("button", { name: "Done" }).click();
 
@@ -250,7 +254,7 @@ test.describe("files", () => {
     await expect(page.getByLabel("Name")).toHaveValue("Untitled whiteboard");
   });
 
-  test("a click selects and fills the details pane; Enter opens", async ({ alice: page }) => {
+  test("Ctrl-click selects and fills the details pane; Enter opens", async ({ alice: page }) => {
     const name = `e2e-details-${stamp}`;
     // Its own folder: the account's root is long and virtualised, so a new
     // row there can be out of view.
@@ -270,7 +274,8 @@ test.describe("files", () => {
     const open = page.getByRole("button", { name, exact: true });
     await expect(open).toBeVisible();
 
-    await open.click();
+    // A plain click opens (the Drive click model); Ctrl-click selects.
+    await open.click({ modifiers: ["ControlOrMeta"] });
     const details = page.locator("aside").filter({ hasText: "Details" });
     await expect(details.getByText("Owner")).toBeVisible();
     await expect(details.getByText("You", { exact: true })).toBeVisible();
@@ -839,7 +844,7 @@ test.describe("files", () => {
     await page.getByRole("menuitem", { name: "Upload files" }).click();
     await (await chooser).setFiles(pdf(`e2e-ai-${stamp}.pdf`, `Boiler service quote ${stamp}`));
     await page.getByRole("button", { name: "New", exact: true }).click();
-    await page.getByRole("menuitem", { name: "New folder" }).click();
+    await page.getByRole("menuitem", { name: "Folder", exact: true }).click();
     await page.getByRole("dialog").getByRole("textbox").fill(folder);
     await page.getByRole("dialog").getByRole("button", { name: /Create/ }).click();
     await expect(row(page, folder)).toBeVisible();
@@ -847,40 +852,63 @@ test.describe("files", () => {
     await page.getByRole("button", { name: /^AI search/ }).click();
     const dialog = page.getByRole("dialog", { name: "AI search of your files" });
     const toggle = dialog.getByRole("switch", { name: "Search inside my files" });
-    // Start from off (an interrupted earlier run may have left it on).
-    if ((await toggle.getAttribute("aria-checked")) === "true") await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-checked", "false");
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-checked", "true");
-    await expect(dialog.getByText(/Indexing…|searchable/)).toBeVisible();
+    // It can only be turned on once an admin has set up an embedding model;
+    // without one it says so (and leaving things out still works).
+    await expect(toggle).toBeVisible();
+    const canIndex = await toggle.isEnabled();
+    if (canIndex) {
+      // Start from off (an interrupted earlier run may have left it on).
+      if ((await toggle.getAttribute("aria-checked")) === "true") await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-checked", "false");
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-checked", "true");
+      await expect(dialog.getByText(/Indexing…|searchable/)).toBeVisible();
+    } else {
+      await expect(dialog.getByText(/An administrator needs to set up an embedding model/)).toBeVisible();
+    }
     await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
 
-    // A folder can be left out from its menu, and shows unticked in the
-    // dialog's folder list; ticking it puts it back.
-    const folderRow = row(page, folder);
-    await folderRow.hover();
-    await folderRow.getByRole("button", { name: "More actions" }).first().click();
-    await page.getByRole("button", { name: "Leave out of AI search" }).click();
-    await page.getByRole("button", { name: /^AI search/ }).click();
+    // A folder can be left out from its menu (offered while AI search is on)
+    // or the dialog, and shows unticked in the dialog's folder list; ticking
+    // it puts it back. (The boxes tick when the server has saved, so click
+    // and wait rather than check().)
     const folderBox = dialog.getByRole("checkbox", { name: folder });
+    if (canIndex) {
+      const folderRow = row(page, folder);
+      await folderRow.hover();
+      await folderRow.getByRole("button", { name: "More actions" }).first().click();
+      await page.getByRole("button", { name: "Leave out of AI search" }).click();
+      await page.getByRole("button", { name: /^AI search/ }).click();
+    } else {
+      // The folder list is as it was when the page loaded (turning AI
+      // search on refreshes it), so load it again with the new folder.
+      await page.reload();
+      await ready(page);
+      await page.getByRole("button", { name: /^AI search/ }).click();
+      await folderBox.click();
+    }
     await expect(folderBox).not.toBeChecked();
-    await folderBox.check();
+    await folderBox.click();
     await expect(folderBox).toBeChecked();
 
     // A whole kind of file can be left out, and back in.
     const pdfs = dialog.getByRole("checkbox", { name: "PDFs" });
     await expect(pdfs).toBeChecked();
-    await pdfs.uncheck();
+    await pdfs.click();
     await expect(pdfs).not.toBeChecked();
     await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
     await page.getByRole("button", { name: /^AI search/ }).click();
     await expect(pdfs).not.toBeChecked(); // saved
-    await pdfs.check();
+    await pdfs.click();
     await expect(pdfs).toBeChecked();
 
     // Off again: nothing of Bob's stays indexed.
-    await toggle.click();
-    await expect(toggle).toHaveAttribute("aria-checked", "false");
+    if (canIndex) {
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("aria-checked", "false");
+    }
   });
 
   test("a chat citation opens the PDF at its page, the sheet at its row, the document at the passage", async ({
@@ -943,6 +971,13 @@ test.describe("files", () => {
     await page.keyboard.press("Enter");
     await page.keyboard.type("The spare key is under the blue flowerpot by the shed.");
     await expect(page.getByText("Saved", { exact: true })).toBeVisible({ timeout: 20_000 });
+    // "Saved" is the live copy's; reopened straight away, the page reads the
+    // stored one — so wait until that has the passage too.
+    await expect
+      .poll(async () => (await page.request.get(`/api/documents/${docId}/download?format=html`, { headers: { Authorization: auth } })).text(), {
+        timeout: 30_000,
+      })
+      .toContain("blue flowerpot");
     await page.goto(`/files/f/${docId}?q=${encodeURIComponent("The spare key is under the blue flowerpot")}`);
     const find = page.getByRole("search", { name: "Find in document" });
     await expect(find.getByRole("textbox").first()).toHaveValue("The spare key is under the blue flowerpot", {

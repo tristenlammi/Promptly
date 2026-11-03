@@ -2,7 +2,7 @@ import fs from "node:fs";
 
 import type { Page } from "@playwright/test";
 
-import { expect, ready, run, stamp, test } from "../fixtures";
+import { expect, photosFolder, ready, run, stamp, test } from "../fixtures";
 import { png } from "../lib/files";
 
 /** Albums (WP-9.4): make one from a selection, share it, and the person it's
@@ -18,12 +18,15 @@ async function bearer(page: Page): Promise<string> {
 test("an album made from a selection, shared, and seen by someone else", async ({ alice, bob }) => {
   test.setTimeout(150_000);
   const auth = await bearer(alice);
+  // Into the Photos folder: only what's in it is the photo library. Each
+  // one's bytes differ (Photos skips a copy of a photo already there).
+  const library = await photosFolder(alice, auth);
   const ids: string[] = [];
   for (const n of ["one", "two"]) {
     const name = `e2e-album-${n}-${stamp}.png`;
     const r = await alice.request.post("/api/files/", {
       headers: { Authorization: auth },
-      multipart: { file: { name, mimeType: "image/png", buffer: fs.readFileSync(png(name)) }, scope: "mine" },
+      multipart: { file: { name, mimeType: "image/png", buffer: Buffer.concat([fs.readFileSync(png(name)), Buffer.from(name)]) }, scope: "mine", folder_id: library },
     });
     expect(r.status()).toBe(201);
     ids.push((await r.json()).id);

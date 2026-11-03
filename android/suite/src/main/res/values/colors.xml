@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bar">#1C1917</color>
+    <color name="bg_promptly">#D97757</color>
+    <color name="bg_photos">#D97757</color>
+    <color name="bg_rooms">#D97757</color>
+    <color name="bg_calendar">#D97757</color>
+    <color name="bg_contacts">#D97757</color>
+    <color name="bg_budget">#D97757</color>
+    <color name="bg_habits">#D97757</color>
+    <color name="bg_journal">#D97757</color>
+    <color name="bg_workout">#D97757</color>
+    <color name="bg_flashcards">#D97757</color>
+    <color name="bg_boardgames">#D97757</color>
+    <color name="bg_health">#D97757</color>
+    <color name="bg_mealplan">#D97757</color>
+    <color name="bg_meals">#D97757</color>
+    <color name="bg_trip">#D97757</color>
+    <color name="bg_tasks">#D97757</color>
+</resources>

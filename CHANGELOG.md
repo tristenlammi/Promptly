@@ -21,6 +21,19 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-03
+
+### Added
+- **Promptly for Android**: one app for Android phones. It puts Promptly on your home screen and lets you pick which other apps get their own icon (P Photos, P Rooms, P Calendar, P Contacts, P Budget, P Habits, P Journal, P Workout, P Cards, P Games, P Health, P Meal Plan, P Macros, P Trips, P Tasks), each opening full screen with notifications, all in terracotta. Get it from Apps → Install apps on an Android phone; "Set up the app" connects it to your server and pre-ticks the apps you already use. Long-press Promptly for Choose apps, Change server and Photo backup. The normal web-app installs still work.
+- Photo backup now lives inside Promptly for Android (long-press Promptly or P Photos → Photo backup); on the phone itself, Files → Devices → Add device offers "Set up backup here" instead of scanning.
+- Each app has a fixed address, `/app/open/<app>`, that opens your copy of it as its own app.
+
+### Fixed
+- Resuming a big upload after a name clash ("Choose file to continue") started again from the beginning instead of carrying on.
+
+### Removed
+- The separate PromptlySync app download — photo backup is part of Promptly for Android now. Uninstall PromptlySync and re-link backup in the new app.
+
 ## [0.18.2] - 2026-11-03
 
 ### Fixed

@@ -1,9 +1,13 @@
-# Build a signed PromptlySync APK and put it where the Promptly server serves it:
-#   frontend/public/downloads/PromptlySync.apk   (the download)
-#   frontend/public/downloads/PromptlySync.json  (what the app checks for updates)
+# Build the signed Promptly Android app (home-screen launchers + photo backup)
+# and put it where the Promptly server serves it:
+#   frontend/public/downloads/Promptly.apk   (the download)
+#   frontend/public/downloads/Promptly.json  (what the app checks for updates)
 #
 # Bump versionCode (+1) and versionName in app/build.gradle.kts first — phones
-# only offer the update when versionCode goes up.
+# only offer the update when versionCode goes up. Changed the app list or the
+# icons? Re-run gen_suite.py first (needs Pillow — e.g. in the backend image).
+# The key's SHA-256 is in frontend/public/.well-known/assetlinks.json; a new
+# key means updating that file.
 #
 # The signing key lives OUTSIDE the repo, in %USERPROFILE%\.promptly\. It is made
 # on the first run. BACK THAT FOLDER UP: Android only installs an update signed
@@ -55,11 +59,11 @@ $name = [regex]::Match($gradle, 'versionName\s*=\s*"([^"]+)"').Groups[1].Value
 
 $out = Join-Path $root "..\frontend\public\downloads"
 New-Item -ItemType Directory -Force $out | Out-Null
-Copy-Item $apk (Join-Path $out "PromptlySync.apk") -Force
-$file = Get-Item (Join-Path $out "PromptlySync.apk")
+Copy-Item $apk (Join-Path $out "Promptly.apk") -Force
+$file = Get-Item (Join-Path $out "Promptly.apk")
 $sha = (Get-FileHash $file -Algorithm SHA256).Hash.ToLower()
 $json = [ordered]@{ version = $name; version_code = $code; size_bytes = $file.Length; sha256 = $sha } | ConvertTo-Json
 # No byte-order mark (Windows PowerShell's utf8 adds one; the app's JSON parser chokes on it).
-[System.IO.File]::WriteAllText((Join-Path $out "PromptlySync.json"), $json, (New-Object System.Text.UTF8Encoding $false))
+[System.IO.File]::WriteAllText((Join-Path $out "Promptly.json"), $json, (New-Object System.Text.UTF8Encoding $false))
 
-Write-Host "PromptlySync $name ($code) -> frontend/public/downloads ($([math]::Round($file.Length / 1MB, 1)) MB)" -ForegroundColor Green
+Write-Host "Promptly for Android $name ($code) -> frontend/public/downloads ($([math]::Round($file.Length / 1MB, 1)) MB)" -ForegroundColor Green

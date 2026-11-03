@@ -66,7 +66,7 @@ object FreeUp {
         return out
     }
 
-    /** Android's "Allow PromptlySync to delete N items?" — one per [BATCH]. */
+    /** Android's "Allow Promptly to delete N items?" — one per [BATCH]. */
     @RequiresApi(30)
     fun requests(context: Context, items: List<Item>): List<IntentSenderRequest> =
         items.chunked(BATCH).map { batch ->

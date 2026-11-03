@@ -17,9 +17,19 @@ test.describe("backups", () => {
     await card.getByRole("combobox").first().selectOption("folder");
     // One folder for every run: restic de-duplicates, so repeat runs add
     // almost nothing (a fresh folder each time would pile up full copies).
-    await card.getByPlaceholder("promptly").fill("e2e");
-    await card.getByRole("button", { name: "Save and test" }).click();
-    await expect(card.getByText(/^Connected — /)).toBeVisible({ timeout: 60_000 });
+    // A copy made under an earlier install's keys can't be opened ("wrong
+    // password") — then the next fixed name, which later runs reuse.
+    const connected = card.getByText(/^Connected — /);
+    const refused = card.getByText(/^Couldn't use it: .*wrong password/);
+    for (const folder of ["e2e", "e2e-2", "e2e-3", "e2e-4"]) {
+      await card.getByPlaceholder("promptly").fill(folder);
+      const tested = page.waitForResponse((r) => r.url().includes("/backups/offsite/test"), { timeout: 60_000 });
+      await card.getByRole("button", { name: "Save and test" }).click();
+      await tested;
+      await expect(connected.or(refused)).toBeVisible();
+      if (await connected.isVisible()) break;
+    }
+    await expect(connected).toBeVisible();
 
     await on.check();
     await card.getByRole("button", { name: "Copy now" }).click();

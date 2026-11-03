@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press P Photos: photo backup (the app module's MainActivity). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="photos_backup" android:enabled="true" android:icon="@mipmap/ic_photos"
+        android:shortcutShortLabel="@string/backup_settings">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.sync.MainActivity" />
+    </shortcut>
+</shortcuts>

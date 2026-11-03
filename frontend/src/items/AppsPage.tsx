@@ -348,6 +348,40 @@ function Tile({
 }
 
 /** ``/apps/:kind`` — launching an app: open its most recent file (or a new one). */
+/** ``/app/open/<kind>``: an app's fixed address for a home-screen icon (the
+ *  Android app's launchers) — opens your copy of it as its own app, with no
+ *  Promptly chrome, at ``/app/<file>/``. */
+export function AppOpen() {
+  const navigate = useNavigate();
+  const kind = window.location.pathname.split("/")[3] ?? "";
+  const [failed, setFailed] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    itemsApi
+      .openApp(kind)
+      .then(({ file_id }) => live && navigate(`/app/${file_id}/`, { replace: true }))
+      .catch((err) => live && setFailed(extractError(err)));
+    return () => {
+      live = false;
+    };
+  }, [kind, navigate]);
+  if (failed) {
+    return (
+      <div className="flex h-[100dvh] flex-col items-center justify-center gap-3 bg-[var(--bg)] px-6 text-center">
+        <p className="text-sm text-[var(--text)]">{failed}</p>
+        <a href="/apps" className="text-sm font-medium text-[var(--accent-text)] hover:underline">
+          Open your apps in Promptly
+        </a>
+      </div>
+    );
+  }
+  return (
+    <div className="flex h-[100dvh] items-center justify-center bg-[var(--bg)] text-[var(--text-muted)]">
+      <Loader2 className="h-5 w-5 animate-spin" />
+    </div>
+  );
+}
+
 export function AppLaunch() {
   const navigate = useNavigate();
   const kind = window.location.pathname.split("/")[2] ?? "";

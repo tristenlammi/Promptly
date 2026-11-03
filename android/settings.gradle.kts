@@ -11,5 +11,6 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "PromptlySync"
+rootProject.name = "Promptly"
 include(":app")
+include(":suite")

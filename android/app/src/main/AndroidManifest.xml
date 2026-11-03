@@ -23,22 +23,24 @@
         android:name=".SyncApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
-        android:icon="@drawable/ic_launcher"
-        android:label="PromptlySync"
+        android:icon="@mipmap/ic_promptly"
+        android:roundIcon="@mipmap/ic_promptly"
+        android:label="Promptly"
+        android:manageSpaceActivity="org.promptly.app.ManageData"
         android:networkSecurityConfig="@xml/network_security_config"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
+        <!-- Photo backup (was the PromptlySync app). No icon of its own: long-press
+             P Photos → Backup settings, or "Set up on this phone" on the server. -->
         <activity
             android:name=".MainActivity"
+            android:label="Photo backup"
             android:exported="true"
             android:launchMode="singleTask"
+            android:taskAffinity="org.promptly.app.backup"
             android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <!-- "Already installed? Open PromptlySync" on the server's /sync page. -->
+            <!-- "Already installed? Open the app" on the server's /sync page. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />

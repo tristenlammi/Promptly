@@ -44,7 +44,7 @@ test("a family member's shared photos show in Family", async ({ alice, dana }) =
     await expect(dana.getByRole("button", { name: "Move to trash" })).toHaveCount(0);
     await dana.keyboard.press("Escape");
 
-    await dana.getByRole("button", { name: "Family…" }).click();
+    await dana.getByRole("button", { name: "Family settings" }).click();
     const dialog = dana.getByRole("dialog", { name: "E2E family" });
     await expect(dialog.getByRole("region", { name: "People in the family" })).toContainText("sharing everything");
     await expect(dialog.getByRole("radio", { name: "Nothing" })).toBeChecked();

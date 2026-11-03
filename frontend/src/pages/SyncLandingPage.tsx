@@ -5,9 +5,9 @@ import { useSearchParams } from "react-router-dom";
 /**
  * /sync?code=… — where a phone's camera lands after scanning the
  * "Add device" QR code. It needs no sign-in: the page only offers the
- * PromptlySync download (served by this server) and a way to hand the code
- * straight to the app if it's already installed. Pairing itself happens in
- * the app, which scans the same code.
+ * Promptly Android app download (served by this server; photo backup lives in
+ * it) and a way to hand the code straight to the app if it's already
+ * installed. Pairing itself happens in the app, which scans the same code.
  */
 
 interface ApkInfo {
@@ -15,7 +15,7 @@ interface ApkInfo {
   size_bytes?: number;
 }
 
-const APK = "/downloads/PromptlySync.apk";
+const APK = "/downloads/Promptly.apk";
 
 export function SyncLandingPage() {
   const [params] = useSearchParams();
@@ -24,7 +24,7 @@ export function SyncLandingPage() {
 
   useEffect(() => {
     let live = true;
-    fetch("/downloads/PromptlySync.json", { cache: "no-store" })
+    fetch("/downloads/Promptly.json", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
       .then((j: ApkInfo) => live && setInfo(j))
       .catch(() => live && setInfo("missing"));
@@ -42,7 +42,7 @@ export function SyncLandingPage() {
     <div className="flex min-h-[100dvh] items-center justify-center bg-[var(--bg)] px-4 py-10">
       <div className="w-full max-w-sm rounded-card border border-[var(--border)] bg-[var(--surface)] p-6 text-center shadow-sm">
         <Smartphone className="mx-auto mb-3 h-10 w-10 text-[var(--accent)]" />
-        <h1 className="text-lg font-semibold text-[var(--text)]">PromptlySync</h1>
+        <h1 className="text-lg font-semibold text-[var(--text)]">Promptly for Android</h1>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
           Backs up your phone's photos and videos to Promptly, in the background.
         </p>
@@ -55,7 +55,7 @@ export function SyncLandingPage() {
           <>
             <a
               href={APK}
-              download="PromptlySync.apk"
+              download="Promptly.apk"
               className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white hover:opacity-90"
             >
               <Download className="h-4 w-4" />
@@ -72,17 +72,17 @@ export function SyncLandingPage() {
 
         <ol className="mt-5 list-decimal space-y-1.5 pl-5 text-left text-sm text-[var(--text)]">
           <li>Download and open the file. If Android asks, allow installing from your browser.</li>
-          <li>Open PromptlySync and scan the QR code on your computer again.</li>
+          <li>Long-press the Promptly icon → Photo backup (or tap below), and scan the QR code on your computer again.</li>
           <li>Choose the folders to back up — syncing starts right away.</li>
         </ol>
 
         {openApp && isAndroid && (
           <a href={openApp} className="mt-4 block text-sm text-[var(--accent-text)] hover:underline">
-            Already installed? Open PromptlySync
+            Already installed? Set up backup
           </a>
         )}
         {!isAndroid && (
-          <p className="mt-4 text-xs text-[var(--text-muted)]">PromptlySync is for Android phones.</p>
+          <p className="mt-4 text-xs text-[var(--text-muted)]">Promptly for Android is for Android phones.</p>
         )}
       </div>
     </div>

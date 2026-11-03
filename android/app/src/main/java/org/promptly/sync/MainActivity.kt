@@ -78,7 +78,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
-    /** A pairing link the app was opened with ("Open PromptlySync" on the site). */
+    /** A pairing link the app was opened with ("Open the app" on the site). */
     private val incoming = mutableStateOf<PairLink?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -209,7 +209,7 @@ private fun PairScreen(incoming: PairLink?, consumed: () -> Unit, onPaired: (Sto
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Spacer(Modifier.height(24.dp))
-        Text("PromptlySync", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+        Text("Photo backup", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
         Text(
             "Back up this phone's photos and videos to Promptly.",
             style = MaterialTheme.typography.bodyLarge,
@@ -244,7 +244,7 @@ private fun PairScreen(incoming: PairLink?, consumed: () -> Unit, onPaired: (Sto
                     GmsBarcodeScanning.getClient(ctx, opts).startScan()
                         .addOnSuccessListener { code ->
                             val parsed = code.rawValue?.let { Api.parseLink(it) }
-                            if (parsed == null) error = "That isn't a PromptlySync code." else link = parsed
+                            if (parsed == null) error = "That isn't a Promptly backup code." else link = parsed
                         }
                         .addOnFailureListener { e -> error = e.message ?: "The scanner didn't start." }
                 },
@@ -280,7 +280,7 @@ private fun PermissionScreen(partial: Boolean, onResult: () -> Unit) {
         Spacer(Modifier.height(24.dp))
         Text("Allow photos and videos", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
-            "PromptlySync needs to read your photos and videos to back them up, and where they were taken so they show on your map.",
+            "Promptly needs to read your photos and videos to back them up, and where they were taken so they show on your map.",
             style = MaterialTheme.typography.bodyMedium,
         )
         if (partial) {
@@ -395,7 +395,7 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Spacer(Modifier.height(12.dp))
-        Text("PromptlySync", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Text("Photo backup", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text(
             "${account.device} → ${Uri.parse(account.server).host}",
             style = MaterialTheme.typography.bodyMedium,
@@ -513,7 +513,7 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
 
         TextButton(onClick = { confirmUnlink = true }) { Text("Unlink this phone", color = MaterialTheme.colorScheme.error) }
         Text(
-            "PromptlySync ${BuildConfig.VERSION_NAME}",
+            "Promptly ${BuildConfig.VERSION_NAME}",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -669,7 +669,7 @@ private fun BatteryCard(mode: Power.Mode) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Battery use is set to Restricted", style = MaterialTheme.typography.titleSmall)
                 Text(
-                    "Android stops PromptlySync in the background, so photos only back up while it's open. " +
+                    "Android stops Promptly in the background, so photos only back up while it's open. " +
                         "Set App battery usage to Optimized.",
                     style = MaterialTheme.typography.bodySmall,
                 )

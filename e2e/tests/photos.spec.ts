@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 
-import { expect, ready, showRow, stamp, test } from "../fixtures";
+import { expect, photosFolder, ready, showRow, stamp, test } from "../fixtures";
 
 /** Photos (WP-9.1–9.2): the library by date taken, selection, archive, and
  *  a folder left out of Photos. */
@@ -27,9 +27,8 @@ test("photos show by date taken, can be archived, and a folder can be left out",
   test.setTimeout(120_000);
   const auth = await bearer(page);
   const folderName = `E2E photos ${stamp}`;
-  const folder = await (
-    await page.request.post("/api/files/folders", { headers: { Authorization: auth }, data: { name: folderName, scope: "mine" } })
-  ).json();
+  // Inside the Photos folder: only what's in it is the photo library.
+  const folder = { id: await photosFolder(page, auth, folderName) };
   const names = [`e2e-photo-a-${stamp}.jpg`, `e2e-photo-b-${stamp}.jpg`];
   const ids: string[] = [];
   for (const name of names) {
@@ -46,7 +45,7 @@ test("photos show by date taken, can be archived, and a folder can be left out",
 
   await page.goto("/files/photos");
   await ready(page);
-  await expect(page.getByRole("navigation", { name: "Photo views" })).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Photos", exact: true })).toBeVisible();
   // To July 2021 on the scrubber, a month at a time from the newest (the
   // test account has older photos too, from other tests).
   await page.locator("[data-photo]").first().waitFor();
@@ -68,7 +67,7 @@ test("photos show by date taken, can be archived, and a folder can be left out",
   await expect(bar).toContainText("2 selected");
   await bar.getByRole("button", { name: "Archive" }).click();
   await expect.poll(async () => (await july2021(page, auth)).filter((n) => names.includes(n)).length).toBe(0);
-  await page.getByRole("navigation", { name: "Photo views" }).getByRole("button", { name: "Archive" }).click();
+  await page.getByRole("navigation", { name: "Photos", exact: true }).getByRole("link", { name: "Archive" }).click();
   await expect(tileA).toBeVisible();
   await tileA.hover();
   await tileA.getByRole("button", { name: "Select" }).click();
@@ -77,7 +76,7 @@ test("photos show by date taken, can be archived, and a folder can be left out",
   await expect.poll(async () => (await july2021(page, auth)).filter((n) => names.includes(n)).length).toBe(2);
 
   // Hide the folder from Photos — from its menu in Files.
-  await page.goto("/files");
+  await page.goto(`/files/folder/${await photosFolder(page, auth)}`);
   await ready(page);
   await showRow(page, folderName);
   const row = page.locator("li:not(nav li)").filter({ has: page.getByRole("button", { name: folderName, exact: true }) }).last();

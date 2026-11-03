@@ -88,7 +88,7 @@ registerRoute(
       // Signed media links (WP-7.5) — a file, never the app shell.
       /^\/m\//,
       /^\/uploads\//,
-      // The PromptlySync app download — a file, never the app shell.
+      // The Android app download — a file, never the app shell.
       /^\/downloads\//,
       /^\/openapi\.json$/,
       /^\/docs/,

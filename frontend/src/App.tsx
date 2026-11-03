@@ -181,6 +181,7 @@ const ItemAppPage = lazyWithRetry(
 );
 const AppsPage = lazyWithRetry(() => import("@/items/AppsPage").then((m) => ({ default: m.AppsPage })), "AppsPage");
 const AppLaunch = lazyWithRetry(() => import("@/items/AppsPage").then((m) => ({ default: m.AppLaunch })), "AppLaunch");
+const AppOpen = lazyWithRetry(() => import("@/items/AppsPage").then((m) => ({ default: m.AppOpen })), "AppOpen");
 const InstallAppsPage = lazyWithRetry(() => import("@/items/InstallAppsPage").then((m) => ({ default: m.InstallAppsPage })), "InstallAppsPage");
 const ItemStorePage = lazyWithRetry(
   () => import("@/items/StorePage").then((m) => ({ default: m.StorePage })),
@@ -593,6 +594,15 @@ export default function App() {
             </Suspense>
           }
         />
+      {/* An app's fixed address (Android launcher icons): opens your copy. */}
+      <Route
+        path="/app/open/:kind"
+        element={
+          <Suspense fallback={<FullScreenLoading />}>
+            <AppOpen />
+          </Suspense>
+        }
+      />
       {/* An item file installed as its own app: no Promptly chrome at all. */}
       <Route
         path="/app/:fileId/*"
@@ -635,7 +645,7 @@ export default function App() {
         <Route index element={<CalendarApp embedded />} />
         <Route path="*" element={<CalendarApp embedded />} />
       </Route>
-      {/* The PromptlySync download page (the "Add device" QR lands here). */}
+      {/* The Android app download page (the "Add device" QR lands here). */}
       <Route
         path="/sync"
         element={

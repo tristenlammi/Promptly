@@ -13,7 +13,7 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
 /**
- * Files → Devices: link a phone with PromptlySync. "Add device" shows a QR
+ * Files → Devices: link a phone's photo backup (in the Promptly Android app). "Add device" shows a QR
  * code — the phone's camera opens the download page, and the app scans
  * the same code to sign in. Each phone gets its own app password (upload
  * and read, never delete), so it can be cut off on its own.
@@ -49,7 +49,7 @@ export function FilesDevicesPage() {
         <div className="min-w-0 flex-1">
           <h1 className="text-lg font-semibold text-[var(--text)]">Devices</h1>
           <p className="text-sm text-[var(--text-muted)]">
-            Back up your phone's photos and videos to Photos with the PromptlySync app.
+            Back up your phone's photos and videos to Photos with the Promptly Android app.
           </p>
         </div>
         <Button variant="primary" size="sm" leftIcon={<Plus className="h-3.5 w-3.5" />} onClick={() => setAdding(true)}>
@@ -145,10 +145,18 @@ function AddDevice({ onClose }: { onClose: () => void }) {
       ) : (
         <div className="space-y-4">
           <ol className="list-decimal space-y-1 pl-5 text-sm text-[var(--text)]">
-            <li>Scan this code with your phone's camera and install PromptlySync.</li>
-            <li>Open PromptlySync and scan the same code to link it to your account.</li>
+            <li>Scan this code with your phone's camera and install the Promptly app.</li>
+            <li>Long-press the Promptly icon → Photo backup, and scan the same code.</li>
             <li>Pick the folders to back up.</li>
           </ol>
+          {pair && /android/i.test(navigator.userAgent) && (
+            <a
+              href={`promptlysync://pair?server=${encodeURIComponent(location.origin)}&code=${encodeURIComponent(pair.code)}`}
+              className="block rounded-md border border-[var(--border)] px-3 py-2 text-center text-sm font-medium text-[var(--accent-text)] hover:bg-[var(--hover)]"
+            >
+              On this phone? Set up backup here
+            </a>
+          )}
           <div className="flex justify-center">
             {pair && state === "waiting" ? (
               <img

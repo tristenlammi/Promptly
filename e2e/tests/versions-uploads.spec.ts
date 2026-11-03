@@ -40,8 +40,8 @@ test("replacing a file keeps the old one as a version you can get back", async (
   const row = page.getByRole("button", { name: "plan", exact: true });
   await expect(row).toHaveCount(1);
 
-  // Details → Version history.
-  await row.click();
+  // Details (Ctrl-click selects; a plain click opens) → Version history.
+  await row.click({ modifiers: ["ControlOrMeta"] });
   await page.getByRole("button", { name: "Version history" }).click();
   const panel = page.getByRole("complementary", { name: "Version history" });
   await panel.getByText("Replaced by an upload").click();

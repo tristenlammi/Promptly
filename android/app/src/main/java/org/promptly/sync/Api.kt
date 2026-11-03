@@ -194,14 +194,14 @@ object Api {
 
     data class Update(val version: String, val code: Int, val url: String)
 
-    /** A newer PromptlySync on the server, if there is one. */
+    /** A newer Promptly app on the server, if there is one. */
     fun update(server: String): Update? = runCatching {
-        val req = Request.Builder().url("$server/downloads/PromptlySync.json").header("Cache-Control", "no-cache").build()
+        val req = Request.Builder().url("$server/downloads/Promptly.json").header("Cache-Control", "no-cache").build()
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) return null
             val j = JSONObject(r.body.string())
             val code = j.optInt("version_code", 0)
-            if (code > BuildConfig.VERSION_CODE) Update(j.optString("version"), code, "$server/downloads/PromptlySync.apk")
+            if (code > BuildConfig.VERSION_CODE) Update(j.optString("version"), code, "$server/downloads/Promptly.apk")
             else null
         }
     }.getOrNull()

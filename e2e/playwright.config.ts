@@ -18,8 +18,11 @@ export default defineConfig({
   globalTeardown: "./global-teardown.ts",
   timeout: 60_000,
   expect: { timeout: 15_000 },
-  // One instance, one shared set of rate limits: keep the load polite.
-  workers: 2,
+  // One instance, one shared set of rate limits: keep the load polite. All
+  // the suite's traffic comes from one IP, and two workers loading the app
+  // back to back went over nginx's per-IP 30 r/s (429s: sign-outs, failed
+  // uploads).
+  workers: 1,
   fullyParallel: false,
   retries: 0,
   reporter: [["list"], ["html", { open: "never" }]],

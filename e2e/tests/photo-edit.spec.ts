@@ -39,7 +39,7 @@ test("a photo is edited without touching the original, then reverted", async ({ 
   await editor.getByRole("tab", { name: "Adjust" }).click();
   await editor.getByRole("slider", { name: "Brightness" }).fill("20");
   const saved = page.waitForResponse((r) => r.url().endsWith(`/photos/files/${id}/edit`) && r.request().method() === "PUT");
-  await editor.getByRole("button", { name: "Save" }).click();
+  await editor.getByRole("button", { name: "Save", exact: true }).click();
   const out = await (await saved).json();
   expect(out.ops.rotate).toBe(90);
   expect(out.ops.brightness).toBeCloseTo(0.2);

@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 import type { Page } from "@playwright/test";
 
-import { expect, ready, stamp, test } from "../fixtures";
+import { expect, photosFolder, ready, stamp, test } from "../fixtures";
 import { png, video } from "../lib/files";
 import { BACKEND } from "../lib/stack";
 
@@ -48,9 +48,8 @@ function pairLive(still: string, clip: string) {
 test("the viewer: keys, favourite, info, and a Live Photo", async ({ alice: page }) => {
   test.setTimeout(150_000);
   const auth = await bearer(page);
-  const folder = await (
-    await page.request.post("/api/files/folders", { headers: { Authorization: auth }, data: { name: `E2E viewer ${stamp}`, scope: "mine" } })
-  ).json();
+  // Inside the Photos folder: only what's in it is the photo library.
+  const folder = { id: await photosFolder(page, auth, `E2E viewer ${stamp}`) };
   const still = await upload(page, auth, png(`e2e-live-${stamp}.png`), `e2e-live-${stamp}.png`, "image/png", folder.id);
   const clip = await upload(page, auth, video(`e2e-live-${stamp}.mp4`, { seconds: 2 }), `e2e-live-${stamp}.mp4`, "video/mp4", folder.id);
   // Both read by the media worker (and the clip made playable) first.

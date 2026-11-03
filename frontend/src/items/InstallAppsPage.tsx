@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Download, Loader2, Share } from "lucide-react";
+import { ArrowUpRight, Download, Loader2, Share, Smartphone } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -63,6 +63,65 @@ const CORE: Installable[] = [
 
 function withInstall(href: string): string {
   return href + (href.includes("?") ? "&" : "?") + "install=1";
+}
+
+function isAndroid(): boolean {
+  return /android/i.test(navigator.userAgent);
+}
+
+/** "Promptly for Android": one app that puts every part of Promptly on the
+ *  phone as its own icon (P Rooms, P Workout…), full screen — no browser
+ *  install steps. Shown on Android when the server has the APK. */
+function AndroidAppCard({ kinds }: { kinds: string[] }) {
+  const { data: apk } = useQuery({
+    queryKey: ["android-apk"],
+    queryFn: async () => {
+      const r = await fetch("/downloads/Promptly.json", { cache: "no-store" });
+      return r.ok ? ((await r.json()) as { version: string; size_bytes: number }) : null;
+    },
+    staleTime: 60_000,
+  });
+  if (!apk) return null;
+  // The phone pre-ticks these in its app picker: the built-in apps plus every
+  // app you've added here.
+  const apps = ["photos", "rooms", "calendar", ...kinds].join(",");
+  const setup = `promptlyapp://setup?server=${encodeURIComponent(location.origin)}&apps=${encodeURIComponent(apps)}`;
+  return (
+    <section className="flex flex-col gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--surface)] p-4">
+      <div className="flex items-center gap-3">
+        <img src="/pwa-192.png" alt="" className="h-12 w-12 shrink-0 rounded-2xl" />
+        <div className="min-w-0 flex-1">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text)]">
+            <Smartphone className="h-4 w-4 text-[var(--accent-text)]" /> Promptly for Android
+          </h2>
+          <p className="text-xs text-[var(--text-muted)]">
+            Promptly on your phone, plus the apps you choose as their own icons — P Rooms, P Workout… — full screen,
+            with notifications and photo backup.
+          </p>
+        </div>
+      </div>
+      <ol className="flex flex-col gap-2 text-sm text-[var(--text)]">
+        <li className="flex flex-wrap items-center gap-2">
+          <span>1.</span>
+          <a
+            href="/downloads/Promptly.apk"
+            download
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-[var(--accent)] px-3.5 font-semibold text-white"
+          >
+            <Download className="h-4 w-4" /> Download ({(apk.size_bytes / 1048576).toFixed(1)} MB)
+          </a>
+        </li>
+        <li>2. Open the download to install it. If your phone asks, allow installs from your browser.</li>
+        <li className="flex flex-wrap items-center gap-2">
+          <span>3.</span>
+          <a href={setup} className="inline-flex h-9 items-center rounded-xl border border-[var(--border)] px-3.5 font-medium hover:bg-[var(--hover)]">
+            Set up the app
+          </a>
+          <span className="text-xs text-[var(--text-muted)]">connects it to this Promptly</span>
+        </li>
+      </ol>
+    </section>
+  );
 }
 
 function isIos(): boolean {
@@ -140,6 +199,7 @@ export function InstallAppsPage() {
             Put any part of Promptly on your home screen or desktop as its own app — its own icon and window, with no
             Promptly menus around it. Everything stays in your Promptly, so search and chats still see it.
           </p>
+          {isAndroid() && <AndroidAppCard kinds={(apps ?? []).map((a) => a.kind)} />}
           {isIos() && (
             <p className="flex items-start gap-2 rounded-2xl bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
               <Share className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />

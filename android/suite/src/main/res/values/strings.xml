@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="change_server">Change server</string>
+    <string name="choose_apps">Choose apps</string>
+    <string name="backup_settings">Backup settings</string>
+    <string name="photo_backup">Photo backup</string>
+</resources>

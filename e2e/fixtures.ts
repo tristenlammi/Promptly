@@ -7,11 +7,31 @@ import { readRun, type RunInfo, storageStateFile } from "./lib/stack";
 
 export const run: RunInfo = readRun();
 
+/** The backend allows 900 API requests a minute from one address
+ *  (RATE_LIMIT_DEFAULT), and the whole suite is one address: an app load
+ *  alone is ~25. When the signed-in pages' last minute is near that, the
+ *  next test waits — a 429 mid-test signs a page out or fails an upload.
+ *  (Calls through ``page.request`` aren't counted, hence the margin.) */
+const API_PER_MINUTE = 600;
+const apiCalls: number[] = [];
+
+async function pace(): Promise<void> {
+  for (;;) {
+    const now = Date.now();
+    while (apiCalls.length && apiCalls[0] < now - 60_000) apiCalls.shift();
+    if (apiCalls.length < API_PER_MINUTE) return;
+    await new Promise((r) => setTimeout(r, apiCalls[0] + 60_000 - now + 100));
+  }
+}
+
 async function signedIn(browser: Browser, user: keyof RunInfo["users"]): Promise<BrowserContext> {
   const context = await browser.newContext({ storageState: storageStateFile(user) });
   // A newer build than the one under test shows an "updated — Reload"
   // banner over the composer; the suite always tests what's deployed.
   await context.route("**/version.json*", (r) => r.abort());
+  context.on("request", (r) => {
+    if (new URL(r.url()).pathname.startsWith("/api/") && !r.url().includes("/api/m/")) apiCalls.push(Date.now());
+  });
   return context;
 }
 
@@ -23,6 +43,19 @@ export async function ready(page: Page): Promise<void> {
 
 /** A per-run suffix so names never collide with earlier runs' leftovers. */
 export const stamp = `${Date.now().toString(36)}`;
+
+/** The Photos folder — the photo library is only what's inside it (and its
+ *  subfolders). With ``name``, a new folder of that name inside it, so a
+ *  test's uploads stay together (uploads straight into Photos itself are
+ *  sorted into YYYY/MM by date taken). Returns the folder's id. */
+export async function photosFolder(page: Page, auth: string, name?: string): Promise<string> {
+  const headers = { Authorization: auth };
+  const root = (await (await page.request.get("/api/photos/settings", { headers })).json()).folder.id as string;
+  if (!name) return root;
+  const r = await page.request.post("/api/files/folders", { headers, data: { name, parent_id: root, scope: "mine" } });
+  expect(r.ok()).toBe(true);
+  return (await r.json()).id as string;
+}
 
 /** Drive lists are virtualised (WP-7.6): a row far down a long list isn't
  *  in the page until it's scrolled to. Scroll the list until the item
@@ -48,7 +81,15 @@ export async function showRow(page: Page, name: string | Locator): Promise<void>
   }
 }
 
-export const test = base.extend<{ alice: Page; bob: Page; dana: Page }>({
+export const test = base.extend<{ alice: Page; bob: Page; dana: Page; pace: void }>({
+  pace: [
+    async ({}, use) => {
+      await pace();
+      await use();
+    },
+    // Its own timeout: a wait here mustn't eat into the test's.
+    { auto: true, timeout: 90_000 },
+  ],
   alice: async ({ browser }, use) => {
     const context = await signedIn(browser, "alice");
     await use(await context.newPage());

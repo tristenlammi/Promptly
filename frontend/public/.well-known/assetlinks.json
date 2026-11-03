@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "org.promptly.app",
+      "sha256_cert_fingerprints": [
+        "FA:00:74:0E:34:C8:32:34:54:72:C7:84:23:30:5B:A1:C4:78:D9:4C:D8:9A:A0:DB:83:0B:32:B4:73:9A:E6:F5"
+      ]
+    }
+  }
+]

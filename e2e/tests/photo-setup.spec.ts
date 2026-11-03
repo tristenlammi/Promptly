@@ -27,11 +27,15 @@ test("set up Photos walks through to a first question", async ({ dana: page }) =
   await page.getByRole("button", { name: "Next" }).click();
   await expect(page.getByRole("heading", { name: "Let Promptly understand them" })).toBeVisible();
   const faces = page.getByRole("checkbox", { name: "Find faces" });
-  if (!(await faces.isChecked())) {
+  // Shown as saved once the settings load (unticked till then), so go by
+  // the saved value; the box ticks when the save comes back.
+  const facesOn = !!(await (await page.request.get("/api/photos/settings", { headers: auth })).json()).faces;
+  if (!facesOn) {
     const saved = page.waitForResponse((r) => r.url().endsWith("/photos/settings") && r.request().method() === "PUT");
-    await faces.check();
+    await faces.click();
     expect((await (await saved).json()).faces).toBe(true);
   }
+  await expect(faces).toBeChecked();
 
   await page.getByRole("button", { name: "Next" }).click();
   await expect(page.getByRole("heading", { name: "Who's who" })).toBeVisible();

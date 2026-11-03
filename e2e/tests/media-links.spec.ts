@@ -102,8 +102,8 @@ test("a download goes straight to the browser from a signed link", async ({ alic
   const name = `e2e-native-${stamp}.png`;
   const { folder } = await folderWith(page, auth, "E2E downloads", [{ name, mime: "image/png", path: png(name) }]);
   await page.goto(`/files/folder/${folder}`);
-  // Details pane → Download.
-  await page.getByRole("button", { name: name.replace(/\.png$/, ""), exact: true }).click();
+  // Details pane (Ctrl-click selects; a plain click opens) → Download.
+  await page.getByRole("button", { name: name.replace(/\.png$/, ""), exact: true }).click({ modifiers: ["ControlOrMeta"] });
   const download = page.waitForEvent("download");
   await page.locator("aside").filter({ hasText: "Details" }).getByRole("button", { name: "Download", exact: true }).click();
   const d = await download;

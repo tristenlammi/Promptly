@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press Promptly. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="apps" android:enabled="true" android:icon="@mipmap/ic_promptly"
+        android:shortcutShortLabel="@string/choose_apps">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.app.ChooseAppsActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="server" android:enabled="true" android:icon="@mipmap/ic_promptly"
+        android:shortcutShortLabel="@string/change_server">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.app.SetupActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="backup" android:enabled="true" android:icon="@mipmap/ic_photos"
+        android:shortcutShortLabel="@string/photo_backup">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.sync.MainActivity" />
+    </shortcut>
+</shortcuts>

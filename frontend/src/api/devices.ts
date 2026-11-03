@@ -1,6 +1,6 @@
 import { apiClient } from "./client";
 
-/** PromptlySync pairing: a one-time QR code that links a phone. */
+/** Phone photo-backup pairing (Promptly Android app): a one-time QR code that links a phone. */
 
 export interface PairStart {
   code: string;

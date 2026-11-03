@@ -20,8 +20,10 @@ test.describe("context", () => {
     const size = (JSON.stringify(body.messages).length + JSON.stringify(body.tools ?? []).length) / 4;
     // ~2.9k, plus ~0.5k for the photo tools (search_photos, refine) offered to
     // anyone with a photo library (PH-4), and ~0.2k for propose_photo_action
-    // (albums, sharing, relationships from a chat).
-    expect(size).toBeLessThan(3700);
+    // (albums, sharing, relationships from a chat), and ~1.4k for the
+    // Calendar and continuity tools (calendar_events/free_times/add/change,
+    // my_day, search_apps, find_person) — ~5.1k in all.
+    expect(size).toBeLessThan(5400);
 
     // The meter reads that request and breaks it down.
     const pill = page.getByRole("button", { name: /\d.*\/ 32k/ });
