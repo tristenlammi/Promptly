@@ -183,15 +183,17 @@ async def plan(
     alternates: int = 2,
     pins: bool = True,
     warnings: bool = True,
+    via: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Routes for this trip, best first: your preferred way if you have one and
     it's open, then the rest by how long they take right now. Roads reported
     closed are routed around, and anything else on the way is listed on each."""
     body = engine.route_body(stops, mode, tolls=tolls, highways=highways, ferries=ferries, alternates=alternates)
-    routes = engine.routes_out(await engine.valhalla("/route", body))
+    # Going via a road you chose is the one route: that's what you asked for.
+    routes = engine.routes_out(await engine.valhalla("/route", with_through(body, via) if via else body))
     preferred: dict[str, Any] | None = None
     row: MapPreferredRoute | None = None
-    if len(stops) == 2:
+    if len(stops) == 2 and not via:
         found = await find_preferred(db, user.id, stops[0], stops[1], mode)
         if found:
             row, through = found
@@ -232,6 +234,9 @@ async def plan(
         r["slower_seconds"] = max(0, round(traffic.travel_seconds(r) - fastest))
         r["via_name"] = _via_name(r)
         r["through"] = await checked_through(body, r) if pins and len(stops) == 2 else []
+        # A short trip has no pins of its own; the road you chose still says which way.
+        if via and pins and len(stops) == 2 and not r["through"]:
+            r["through"] = [{"lat": v["lat"], "lon": v["lon"]} for v in via]
     return {"routes": routes, "traffic": has_traffic}
 
 

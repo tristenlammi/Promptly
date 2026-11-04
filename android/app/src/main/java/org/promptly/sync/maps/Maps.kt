@@ -79,6 +79,38 @@ object Maps {
         Store(context).account = account
     }
 
+    /** What you said after "Hey Promptly", and what to do about it. */
+    suspend fun assistant(context: Context, clip: ByteArray, state: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+        val server = server(context) ?: throw IOException("Not signed in")
+        val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
+            .addFormDataPart("state", state.toString())
+            .addFormDataPart("audio", "voice.wav", clip.toRequestBody("audio/wav".toMediaType()))
+            .build()
+        client(context).newCall(Request.Builder().url("$server/api/maps/assistant").post(body).build()).execute().use { r ->
+            val text = r.body.string()
+            if (!r.isSuccessful) throw IOException("Server said ${r.code}: ${text.take(300)}")
+            JSONObject(text)
+        }
+    }
+
+    /** One stop you could make, and what it would cost. */
+    data class Nearby(val stop: Stop, val addsMinutes: Int?, val aheadKm: Double?)
+
+    /** Fuel, food and so on along the rest of this trip. */
+    suspend fun onTheWay(context: Context, category: String, shape: String, here: Stop, to: Stop): List<Nearby> = withContext(Dispatchers.IO) {
+        fun spot(s: Stop) = JSONObject().put("lat", s.lat).put("lon", s.lon).put("name", s.name)
+        val body = JSONObject().put("category", category).put("shapes", JSONArray().put(shape)).put("here", spot(here)).put("to", spot(to))
+        val rows = send(context, "POST", "/api/maps/nearby/along", body).getJSONArray("results")
+        List(rows.length()) { i ->
+            val r = rows.getJSONObject(i)
+            Nearby(
+                Stop(r.getDouble("lat"), r.getDouble("lon"), r.getString("name")),
+                if (r.has("adds_seconds")) Math.round(r.getDouble("adds_seconds") / 60).toInt() else null,
+                if (r.has("along_m")) r.getDouble("along_m") / 1000 else null,
+            )
+        }
+    }
+
     /** The map style with this server's addresses filled in, as a local file. */
     suspend fun styleFile(context: Context): String = withContext(Dispatchers.IO) {
         val server = server(context) ?: throw IOException("Not signed in")

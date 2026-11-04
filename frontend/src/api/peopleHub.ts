@@ -66,7 +66,7 @@ export interface PersonPage {
   /** What they are to you ("Wife") — from Photos. */
   label: string | null;
   /** How their account was found from the contact. */
-  match: "email" | "name" | "me" | null;
+  match: "linked" | "email" | "name" | "me" | null;
   user: RoomUser | null;
   /** A signed link to their face in your Photos. */
   face: string | null;

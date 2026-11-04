@@ -123,9 +123,15 @@ One command bundles all three into a single archive:
 .\scripts\backup.ps1                     # Windows
 ```
 
+It also picks up `nginx/ssl`, `nginx/local` and `docker-compose.override.yml`
+if you have them, and `--with-env` puts them back. The off-site copies below
+don't include those, so keep a full backup too if you rely on them.
+
 Copy that archive to another machine or drive — a backup on the same disk
 isn't a backup. Models, thumbnails, Redis and the search index are rebuilt
-automatically and don't need backing up.
+automatically and don't need backing up. After a restore, thumbnails come back
+over the next while as the media worker remakes them, and the map data is
+downloaded again.
 
 **Restore:**
 

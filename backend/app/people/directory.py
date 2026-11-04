@@ -57,28 +57,47 @@ def _names(c: dict) -> list[str]:
     return [n.strip().lower() for n in out if n and n.strip()]
 
 
+def _chosen(contact: dict) -> uuid.UUID | None:
+    """The account picked on this contact, if it's a real id."""
+    try:
+        return uuid.UUID(str(contact.get("promptly_user_id") or ""))
+    except ValueError:
+        return None
+
+
 async def match_accounts(
     db: AsyncSession, viewer: User, contacts: list[dict], *, include_self: bool = False
 ) -> dict[str, tuple[User, str]]:
-    """Contact id → (the Promptly account they are, "email" | "name").
+    """Contact id → (the Promptly account they are, "linked" | "email" | "name").
 
-    An email on the contact wins; else the contact's name, first name or
-    nickname equal to a username. Disabled accounts never match."""
+    The account you chose on the contact wins; else an email on the contact;
+    else the contact's name, first name or nickname equal to a username.
+    Disabled accounts never match."""
     emails = {e for c in contacts for e in _emails(c)}
     names = {n for c in contacts for n in _names(c)}
-    if not emails and not names:
+    chosen = {_chosen(c) for c in contacts} - {None}
+    if not emails and not names and not chosen:
         return {}
     q = select(User).where(
         User.disabled.is_(False),
-        or_(func.lower(User.email).in_(sorted(emails) or [""]), func.lower(User.username).in_(sorted(names) or [""])),
+        or_(
+            func.lower(User.email).in_(sorted(emails) or [""]),
+            func.lower(User.username).in_(sorted(names) or [""]),
+            User.id.in_(chosen),
+        ),
     )
     if not include_self:
         q = q.where(User.id != viewer.id)
     users = list((await db.execute(q)).scalars())
     by_email = {(u.email or "").lower(): u for u in users if u.email}
     by_name = {(u.username or "").lower(): u for u in users}
+    by_id = {u.id: u for u in users}
     out: dict[str, tuple[User, str]] = {}
     for c in contacts:
+        linked = by_id.get(_chosen(c))
+        if linked is not None:
+            out[c["id"]] = (linked, "linked")
+            continue
         u = next((by_email[e] for e in _emails(c) if e in by_email), None)
         if u is not None:
             out[c["id"]] = (u, "email")

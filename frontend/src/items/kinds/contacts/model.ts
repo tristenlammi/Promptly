@@ -633,6 +633,8 @@ export function blankContact(defaults: Partial<Contact> = {}): Contact {
   const now = new Date().toISOString();
   return {
     id: uid("c"),
+    promptly_user_id: "",
+    promptly_username: "",
     prefix: "",
     first: "",
     middle: "",

@@ -89,6 +89,10 @@ object Nav {
     private var hazards: List<Hazard> = emptyList()
     private val spokenHazards = mutableSetOf<String>()
     private var lastRemaining = 0.0
+
+    /** A stop added during the drive, which can be taken off again. */
+    private val _addedStop = MutableStateFlow<Stop?>(null)
+    val addedStop = _addedStop.asStateFlow()
     private var lastWarningCheck = 0L
     private val _faster = MutableStateFlow<FasterRoute?>(null)
     val faster = _faster.asStateFlow()
@@ -206,6 +210,7 @@ object Nav {
                 hazards = emptyList()
                 spokenHazards.clear()
                 lastRemaining = 0.0
+                _addedStop.value = null
                 lastWarningCheck = 0L
                 _hazard.value = null
                 _faster.value = null
@@ -220,6 +225,7 @@ object Nav {
                 cameras = runCatching { Maps.cameras(app, shape) }.getOrDefault(emptyList())
                 liveLoop(vm)
                 trafficLoop(vm)
+                withContext(Dispatchers.Main) { Voice.start(app) }
             } catch (e: Exception) {
                 Log.w(TAG, "Couldn't start the trip", e)
                 _error.value = when {
@@ -288,8 +294,17 @@ object Nav {
 
     private var speaker: TextToSpeech? = null
 
+    /** An answer you asked for, so it's spoken even with directions muted. */
+    fun say(text: String) {
+        talk(text)
+    }
+
     private fun speak(text: String) {
         if (tts?.isMuted == true) return
+        talk(text)
+    }
+
+    private fun talk(text: String) {
         val s = speaker
         if (s != null) {
             s.speak(text, TextToSpeech.QUEUE_ADD, null, "camera")
@@ -317,6 +332,92 @@ object Nav {
         // Its direction of travel, so it lands on the right side of the road.
         val properties = p.heading?.let { JSONObject().put("heading", it).put("heading_tolerance", 45).toString().toByteArray() }
         return Waypoint(coordinate = GeographicCoordinate(p.lat, p.lon), kind = WaypointKind.VIA, properties = properties)
+    }
+
+    /** Go somewhere on the way to where you're going. */
+    fun addStop(stop: Stop) {
+        val to = destination ?: return
+        reroute(listOf(stop, to), "Couldn't add that stop.") {
+            multiStop = true
+            _addedStop.value = stop
+        }
+    }
+
+    fun removeStop() {
+        val to = destination ?: return
+        if (_addedStop.value == null) return
+        reroute(listOf(to), "Couldn't take that stop off.") {
+            multiStop = false
+            _addedStop.value = null
+        }
+    }
+
+    private fun reroute(stops: List<Stop>, failed: String, then: () -> Unit) {
+        val c = core ?: return
+        val vm = model ?: return
+        vm.viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val here = vm.navigationUiState.value.location ?: return@launch
+                val route = c.getRoutes(here, stops.map { Waypoint(coordinate = GeographicCoordinate(it.lat, it.lon), kind = WaypointKind.BREAK) }).first()
+                withContext(Dispatchers.Main) { c.replaceRoute(route) }
+                then()
+                val shape = Maps.encodeShape(route.geometry.map { it.lat to it.lng })
+                cameras = runCatching { Maps.cameras(app, shape) }.getOrDefault(cameras)
+                hazards = emptyList()
+                lastWarningCheck = 0L
+                trafficLoop(vm)
+            }.onFailure {
+                Log.w(TAG, "Couldn't change the route", it)
+                _error.value = failed
+                say(failed)
+            }
+        }
+    }
+
+    /** The road left to drive, and where you are, for looking along it. */
+    fun ahead(): Triple<String, Stop, Stop>? {
+        val state = model?.navigationUiState?.value ?: return null
+        val to = destination ?: return null
+        val at = state.location ?: return null
+        val line = state.remainingSteps.orEmpty().flatMap { it.geometry }.map { it.lat to it.lng }
+        if (line.size < 2) return null
+        return Triple(Maps.encodeShape(line), Stop(at.coordinates.lat, at.coordinates.lng, "You"), to)
+    }
+
+    /** What your server needs to know to answer you. */
+    fun assistantState(): JSONObject {
+        val body = JSONObject()
+        val clock = java.time.format.DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)
+        val zone = java.time.ZoneId.systemDefault()
+        body.put("now", java.time.ZonedDateTime.now(zone).format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM yyyy, h:mm a", Locale.ENGLISH)))
+        val state = model?.navigationUiState?.value ?: return body
+        state.location?.let { at ->
+            body.put("lat", at.coordinates.lat).put("lon", at.coordinates.lng)
+            at.courseOverGround?.let { body.put("heading", it.degrees.toInt()) }
+        }
+        val progress = state.progress
+        if (!state.isNavigating() || progress == null) return body
+        val line = state.remainingSteps.orEmpty().flatMap { it.geometry }.map { it.lat to it.lng }
+        if (line.size >= 2) body.put("shapes", org.json.JSONArray().put(Maps.encodeShape(line)))
+        body.put("seconds", progress.durationRemaining).put("km", progress.distanceRemaining / 1000.0)
+        destination?.let { body.put("to", JSONObject().put("lat", it.lat).put("lon", it.lon).put("name", it.name)) }
+        val traffic = _traffic.value
+        val arrive = traffic?.arriveAt ?: Instant.now().plusSeconds(progress.durationRemaining.toLong())
+        body.put("arrive", arrive.atZone(zone).format(clock))
+        traffic?.let { body.put("adds_minutes", it.addsMinutes) }
+        _addedStop.value?.let { body.put("added_stop", it.name) }
+        return body
+    }
+
+    /** Carry out what the assistant decided. */
+    fun act(action: JSONObject) {
+        fun stop(): Stop? = action.optJSONObject("stop")?.let { Stop(it.getDouble("lat"), it.getDouble("lon"), it.optString("name", "Stop")) }
+        when (action.optString("type")) {
+            "add_stop" -> stop()?.let(::addStop)
+            "remove_stop" -> removeStop()
+            "go" -> stop()?.let { start(listOf(it), lastOptions ?: TripOptions()) }
+            "end_trip" -> this.stop()
+        }
     }
 
     /** Take the quicker way that was offered. */
@@ -444,6 +545,8 @@ object Nav {
     }
 
     fun stop() {
+        Voice.stop(app)
+        _addedStop.value = null
         liveJob?.cancel()
         trafficJob?.cancel()
         _traffic.value = null

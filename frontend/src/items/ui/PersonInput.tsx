@@ -50,6 +50,10 @@ type Props = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | 
   onEnter?: () => void;
   /** Only people on your Contacts (care team, emergency contact). */
   contactsOnly?: boolean;
+  /** Only people with an account on this Promptly. */
+  accountsOnly?: boolean;
+  /** Suggestions push what's below them down, for a panel that would clip a popup. */
+  inlineList?: boolean;
   /** Promptly accounts to leave out (already added). */
   excludeUserIds?: string[];
   /** Names to leave out (case-insensitive; already added). */
@@ -62,7 +66,7 @@ type Props = Omit<InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | 
  * while still taking any typed name. Picking fills the name and hands the
  * caller the contact / account so it can fill phone, email…
  */
-export function PersonInput({ value, onChange, onPick, onEnter, contactsOnly, excludeUserIds, excludeNames, className, onBlur, onFocus, ...rest }: Props) {
+export function PersonInput({ value, onChange, onPick, onEnter, contactsOnly, accountsOnly, inlineList, excludeUserIds, excludeNames, className, onBlur, onFocus, ...rest }: Props) {
   const [open, setOpen] = useState(false);
   const [debounced, setDebounced] = useState("");
   const [active, setActive] = useState(-1);
@@ -80,6 +84,7 @@ export function PersonInput({ value, onChange, onPick, onEnter, contactsOnly, ex
   const skipNames = new Set((excludeNames ?? []).map((n) => n.trim().toLowerCase()).filter(Boolean));
   const people = (data ?? [])
     .filter((p) => (contactsOnly ? !!p.contact : true))
+    .filter((p) => (accountsOnly ? !!p.user : true))
     .filter((p) => !(p.user && excludeUserIds?.includes(p.user.id)))
     .filter((p) => !skipNames.has(p.name.trim().toLowerCase()))
     .slice(0, 8);
@@ -150,7 +155,10 @@ export function PersonInput({ value, onChange, onPick, onEnter, contactsOnly, ex
           id={listId}
           role="listbox"
           aria-label="People you know"
-          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-72 overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-[var(--shadow-md)]"
+          className={cn(
+            "mt-1 overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-1",
+            inlineList ? "max-h-44" : "absolute left-0 right-0 top-full z-30 max-h-72 shadow-[var(--shadow-md)]",
+          )}
         >
           {people.map((p, i) => {
             const c = p.contact;

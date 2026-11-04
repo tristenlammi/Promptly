@@ -79,7 +79,13 @@ try {
     Say "4/4  Writing the archive"
     New-Item -ItemType Directory -Force $OutDir | Out-Null
     $archive = Join-Path $OutDir "promptly-backup-$ts.tar"
-    tar -C $work -cf $archive MANIFEST db.dump files.tar env
+    $config = @("nginx/ssl", "nginx/local", "docker-compose.override.yml") | Where-Object { Test-Path $_ }
+    $parts = @("MANIFEST", "db.dump", "files.tar", "env")
+    if ($config) {
+        tar -cf (Join-Path $work "config.tar") @config
+        $parts += "config.tar"
+    }
+    tar -C $work -cf $archive @parts
     if ($LASTEXITCODE -ne 0) { Fail "Couldn't write the archive." }
     # Readable by you only.
     icacls $archive /inheritance:r /grant:r "$($env:USERNAME):(R,W)" | Out-Null

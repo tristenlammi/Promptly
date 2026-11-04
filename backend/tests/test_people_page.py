@@ -83,6 +83,37 @@ async def test_three_addresses_one_person(client, people, book):
     assert me["is_me"] and me["dm_room_id"] is None and me["files"] == []
 
 
+async def test_the_account_you_chose_on_a_contact_wins(db, people):
+    from app.people.directory import match_accounts
+
+    ann, bob, cat = people
+    # Bob's email is on the card, but you said it's Cat.
+    contact = {"id": "x", "first": "Someone", "emails": [{"label": "", "value": bob.email}], "promptly_user_id": str(cat.id)}
+    got = await match_accounts(db, ann, [contact])
+    assert got["x"][0].id == cat.id and got["x"][1] == "linked"
+
+    # Not chosen, or a bad or disabled id: back to the email.
+    for value in ("", "not-an-id"):
+        got = await match_accounts(db, ann, [{**contact, "promptly_user_id": value}])
+        assert got["x"][0].id == bob.id and got["x"][1] == "email"
+    cat.disabled = True
+    await db.commit()
+    got = await match_accounts(db, ann, [contact])
+    assert got["x"][0].id == bob.id
+
+
+async def test_a_contact_keeps_its_chosen_account(db, client, people):
+    from app.items import service as items
+
+    ann, _bob, cat = people
+    row, _ = await items.create_item(db, ann, "contacts", installed_check=False, data={
+        "contacts": [{"id": "k", "first": "Tyler", "promptly_user_id": str(cat.id), "promptly_username": cat.username}],
+    })
+    await db.commit()
+    got = (await client.get(f"/api/people/c/{row.id}/k", headers=H(ann))).json()
+    assert got["match"] == "linked" and got["user"]["username"] == cat.username
+
+
 async def test_someone_elses_contacts_and_photos_are_404(client, people, book):
     ann, bob, cat = people
     fid, pid = book

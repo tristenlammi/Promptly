@@ -12,6 +12,8 @@
 #   files.tar    data/uploads + data/whiteboard (your files)
 #   env          a copy of .env — SECRET_KEY in it decrypts every stored
 #                API key and secret; without it a restore can't use them
+#   config.tar   nginx/ssl, nginx/local and docker-compose.override.yml, if
+#                you have them: your certificates and local settings
 #   MANIFEST     version, git commit and schema revision
 #
 # Copying ./data while Postgres is running is NOT a backup (the files can
@@ -75,10 +77,20 @@ REV="$(docker compose exec -T postgres psql -U promptly -d promptly -tAc 'select
   echo "schema_revision=${REV:-unknown}"
 } > "$WORK/MANIFEST"
 
+CONFIG=()
+for path in nginx/ssl nginx/local docker-compose.override.yml; do
+  [[ -e "$path" ]] && CONFIG+=("$path")
+done
+PARTS=(MANIFEST db.dump files.tar env)
+if ((${#CONFIG[@]})); then
+  tar -cf "$WORK/config.tar" "${CONFIG[@]}"
+  PARTS+=(config.tar)
+fi
+
 say "4/4  Writing the archive"
 mkdir -p "$OUT_DIR"
 ARCHIVE="$OUT_DIR/promptly-backup-$TS.tar"
-tar -C "$WORK" -cf "$ARCHIVE" MANIFEST db.dump files.tar env
+tar -C "$WORK" -cf "$ARCHIVE" "${PARTS[@]}"
 chmod 600 "$ARCHIVE"
 
 printf '\033[32m%s\033[0m\n' "Backup written: $ARCHIVE ($(du -h "$ARCHIVE" | cut -f1))"

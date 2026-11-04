@@ -2,7 +2,10 @@ package org.promptly.sync.maps
 
 import android.content.Intent
 import androidx.car.app.CarAppService
+import android.util.Log
 import androidx.car.app.CarToast
+import androidx.car.app.media.CarAudioRecord
+import androidx.car.app.versioning.CarAppApiLevels
 import androidx.car.app.CarContext
 import androidx.car.app.Screen
 import androidx.car.app.Session
@@ -109,6 +112,14 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         Nav.style.onEach { invalidate() }.launchIn(scope)
         Nav.traffic.onEach { invalidate() }.launchIn(scope)
         Nav.faster.onEach { invalidate() }.launchIn(scope)
+        // What the assistant said, on the screen as well.
+        Voice.reply.onEach { said ->
+            if (said != null) {
+                CarToast.makeText(carContext, said.take(120), CarToast.LENGTH_LONG).show()
+                Voice.clearReply()
+            }
+        }.launchIn(scope)
+        Voice.start(carContext)
         // A warning on the car's screen as you come up to it; the voice comes from the phone.
         var shown: String? = null
         Nav.hazard.onEach { alert ->
@@ -169,12 +180,19 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             )
             strip.addAction(Action.Builder().setTitle("No").setOnClickListener { Nav.declineFaster() }.build())
         }
+        strip.addAction(Action.Builder().setTitle("Add stop").setOnClickListener { screenManager.push(AddStopScreen(carContext)) }.build())
         strip.addAction(Action.Builder().setTitle("Stop").setOnClickListener { Nav.stop() }.build())
         val builder = NavigationTemplate.Builder().setActionStrip(strip.build())
         val icons = InterfaceCarIcons(carContext)
         builder.setMapActionStrip(
             ActionStrip.Builder()
                 .addAction(Action.Builder().setIcon(icons.mute(state.isMuted ?: false)).setOnClickListener { vm.toggleMute() }.build())
+                .addAction(
+                    Action.Builder()
+                        .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_map_mic)).build())
+                        .setOnClickListener { askFromCar() }
+                        .build(),
+                )
                 .build(),
         )
         state.tripState?.let { trip ->
@@ -195,6 +213,42 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         return builder.build()
     }
 
+    /** The car's own microphone, for when you press its button. */
+    private fun askFromCar() {
+        if (!Voice.allowed(carContext)) {
+            CarToast.makeText(carContext, "Allow the microphone on your phone first", CarToast.LENGTH_LONG).show()
+            return
+        }
+        if (carContext.carAppApiLevel < CarAppApiLevels.LEVEL_5) {
+            CarToast.makeText(carContext, "Say \"Hey Promptly\" instead", CarToast.LENGTH_LONG).show()
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            VoiceService.paused = true
+            val release = Voice.holdFocus(carContext)
+            val record = CarAudioRecord.create(carContext)
+            try {
+                record.startRecording()
+                val bytes = ByteArray(CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE)
+                val clip = Voice.capture(200.0) { frame ->
+                    val want = minOf(bytes.size, frame.size * 2)
+                    val got = record.read(bytes, 0, want)
+                    for (i in 0 until got / 2) {
+                        frame[i] = ((bytes[i * 2 + 1].toInt() shl 8) or (bytes[i * 2].toInt() and 0xFF)).toShort()
+                    }
+                    if (got <= 0) -1 else got / 2
+                }
+                runCatching { record.stopRecording() }
+                if (clip != null) Voice.ask(carContext, clip)
+            } catch (e: Exception) {
+                Log.w("PromptlyVoice", "Couldn't use the car's microphone", e)
+            } finally {
+                release()
+                VoiceService.paused = false
+            }
+        }
+    }
+
     override fun onGetTemplate(): Template {
         val state = uiState
         if (state?.isNavigating() == true) {
@@ -211,6 +265,63 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
 }
 
 /** Where to? Your saved places and recents, or a search. */
+private val STOP_KINDS = listOf("fuel" to "Fuel", "food" to "Food", "coffee" to "Coffee", "groceries" to "Groceries", "toilets" to "Toilets", "chemist" to "Chemist")
+
+/** Add a stop: what you're after. */
+private class AddStopScreen(context: CarContext) : Screen(context) {
+    override fun onGetTemplate(): Template {
+        val list = ItemList.Builder()
+        STOP_KINDS.forEach { (id, name) ->
+            list.addItem(
+                Row.Builder().setTitle(name).setBrowsable(true)
+                    .setOnClickListener { screenManager.push(OnTheWayScreen(carContext, id, name)) }
+                    .build(),
+            )
+        }
+        return ListTemplate.Builder().setTitle("Add a stop").setHeaderAction(Action.BACK).setSingleList(list.build()).build()
+    }
+}
+
+/** What's on the way, and how long each adds. */
+private class OnTheWayScreen(context: CarContext, category: String, private val title: String) : Screen(context) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var rows: List<Maps.Nearby>? = null
+
+    init {
+        scope.launch {
+            val ahead = Nav.ahead()
+            rows = if (ahead == null) emptyList() else runCatching {
+                Maps.onTheWay(carContext, category, ahead.first, ahead.second, ahead.third)
+            }.getOrDefault(emptyList())
+            invalidate()
+        }
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onDestroy(owner: LifecycleOwner) = scope.cancel()
+        })
+    }
+
+    override fun onGetTemplate(): Template {
+        val builder = ListTemplate.Builder().setTitle(title).setHeaderAction(Action.BACK)
+        val found = rows
+        if (found == null) return builder.setLoading(true).build()
+        val list = ItemList.Builder().setNoItemsMessage("Nothing close to your route.")
+        found.take(6).forEach { n ->
+            val row = Row.Builder().setTitle(CarText.create(n.stop.name)).setOnClickListener {
+                Nav.addStop(n.stop)
+                CarToast.makeText(carContext, "Adding ${n.stop.name}", CarToast.LENGTH_SHORT).show()
+                screenManager.popToRoot()
+            }
+            val detail = listOfNotNull(
+                n.addsMinutes?.let { if (it < 1) "No extra time" else "+$it min" },
+                n.aheadKm?.let { String.format(java.util.Locale.ENGLISH, "%.1f km ahead", it) },
+            ).joinToString(" · ")
+            if (detail.isNotEmpty()) row.addText(detail)
+            list.addItem(row.build())
+        }
+        return builder.setSingleList(list.build()).build()
+    }
+}
+
 private class PlacesScreen(context: CarContext) : Screen(context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var places: List<Stop>? = null

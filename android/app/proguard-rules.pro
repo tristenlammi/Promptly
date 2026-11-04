@@ -15,4 +15,5 @@
 -keep class androidx.car.app.** { *; }
 -keep class org.maplibre.android.** { *; }
 -dontwarn java.awt.**
-
+# The wake word library is called from native code.
+-keep class com.k2fsa.sherpa.onnx.** { *; }

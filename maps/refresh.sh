@@ -78,10 +78,12 @@ fi
 if [ -z "${MAPS_PBF_URL:-}" ] && step addresses; then
   url=$(curl -fsSL "https://data.gov.au/data/api/3/action/package_show?id=geocoded-national-address-file-g-naf" \
     | jq -r '[.result.resources[] | select(.name | test("GDA2020")) | .url] | first' || true)
-  if [ -n "$url" ] && [ "$url" != "null" ] && curl -fL --retry 5 -C - -o "$B/gnaf.zip.part" "$url"; then
+  if [ -n "$url" ] && [ "$url" != "null" ] && curl -fL --retry 20 --retry-all-errors --retry-delay 30 -C - -o "$B/gnaf.zip.part" "$url"; then
     mv "$B/gnaf.zip.part" "$B/gnaf.zip"
   else
     echo "maps: G-NAF download failed; carrying on without it" >&2
+    # Admins see this: search works, but without house numbers.
+    touch "$B/addresses.failed"
   fi
   done_step addresses
 fi

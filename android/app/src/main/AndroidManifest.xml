@@ -22,6 +22,9 @@
     <!-- Only if you turn the timeline on, and pick "Allow all the time". -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- "Hey Promptly" while driving. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- The car's screen. -->
     <uses-permission android:name="androidx.car.app.MAP_TEMPLATES" />
@@ -91,6 +94,10 @@
         <service
             android:name="com.stadiamaps.ferrostar.core.service.FerrostarForegroundService"
             android:foregroundServiceType="location" />
+        <service
+            android:name=".maps.VoiceService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
         <service
             android:name=".maps.TimelineService"
             android:foregroundServiceType="location" />

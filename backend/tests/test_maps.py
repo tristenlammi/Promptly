@@ -268,6 +268,38 @@ async def test_config_and_map_link(map_build, user, client):
     assert r.headers["X-Accel-Redirect"] == "/_maps/build-1/basemap.pmtiles"
 
 
+@pytest.mark.parametrize(("marker", "state"), [("addresses.source", "ok"), ("addresses.failed", "missing"), (None, "unknown")])
+async def test_admins_can_see_if_addresses_are_missing(map_build, marker, state):
+    from app.maps import data
+
+    if marker:
+        (data.root() / "build-1" / marker).write_text("")
+    assert data.addresses_state() == state
+
+
+@pytest.mark.parametrize(("age", "late"), [(10, 0), (30, 0), (37, 0), (40, 10)])
+def test_overdue_map_data(age, late):
+    from datetime import datetime, timedelta, timezone
+
+    from app.maps import data
+
+    built = (datetime.now(timezone.utc) - timedelta(days=age)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert data.overdue_days(built, 30) == late
+
+
+async def test_map_data_status_is_for_admins(map_build, db, user, client):
+    from app.auth.utils import create_access_token
+
+    assert (await client.get("/api/maps/data-status")).status_code == 401
+    if user.role != "admin":
+        assert (await client.get("/api/maps/data-status", headers=_hdr(user))).status_code == 403
+    user.role = "admin"
+    await db.commit()
+    headers = {"Authorization": f"Bearer {create_access_token(user.id, token_version=user.token_version)}"}
+    got = (await client.get("/api/maps/data-status", headers=headers)).json()
+    assert got["ready"] is True and got["addresses"] == "unknown"
+
+
 async def test_config_with_no_map_says_so(tmp_path, monkeypatch, user, client):
     from app.config import get_settings
 

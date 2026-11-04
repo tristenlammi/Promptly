@@ -201,6 +201,10 @@ class Contact(BaseModel):
     pronouns: str = Field(default="", max_length=40)
     phonetic_first: str = Field(default="", max_length=100)
     phonetic_last: str = Field(default="", max_length=100)
+    # Their account on this Promptly, chosen by you. The id decides who it is;
+    # the username is only what to show until it's looked up.
+    promptly_user_id: str = Field(default="", max_length=40)
+    promptly_username: str = Field(default="", max_length=120)
     # Work
     company: str = Field(default="", max_length=160)
     title: str = Field(default="", max_length=160)

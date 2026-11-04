@@ -100,6 +100,8 @@ try {
         if ($WithEnv -and (Test-Path (Join-Path $work "env"))) {
             if (Test-Path .env) { Copy-Item .env ".env.before-restore-$ts" }
             Copy-Item (Join-Path $work "env") .env -Force
+            # A new machine needs its certificates and local settings back too.
+            if (Test-Path (Join-Path $work "config.tar")) { tar -xf (Join-Path $work "config.tar") }
         }
     } else {
         Say "4/5  (database only - files left as they are)"

@@ -52,6 +52,44 @@ async def client(db, root, queued):
         rate_limit._settings.RATE_LIMIT_ENABLED = True
 
 
+async def test_thumbnails_lost_in_a_restore_are_remade_without_touching_corrections(db, user, client, root, queued):
+    from app.files import media_pipeline
+    from app.files.derivatives import derived_dir, rendition_path
+    from app.files.media_pipeline import ingest, repair_missing
+    from app.files.models import FileMedia
+
+    media_pipeline._repair_after = None
+    fid = await _upload(client, user, "lost.jpg", _jpeg(), "image/jpeg")
+    assert await ingest(fid) == "ready"
+    file_id = uuid.UUID(fid)
+    assert rendition_path(file_id, "thumb.webp").is_file()
+
+    # Nothing's wrong: nothing happens.
+    assert await repair_missing(db) == 0
+    media_pipeline._repair_after = None
+
+    corrected = datetime(2001, 2, 3, tzinfo=timezone.utc)
+    media = await db.get(FileMedia, file_id)
+    media.taken_at, media.lat, media.lon = corrected, -27.5, 153.0
+    await db.commit()
+
+    # What a restore looks like: the database says ready, the files aren't there.
+    import shutil
+
+    shutil.rmtree(derived_dir(file_id))
+    assert await repair_missing(db) == 1
+    await db.commit()
+    db.expire_all()
+    media = await db.get(FileMedia, file_id)
+    assert media.derivative_state == "pending"
+
+    assert await ingest(fid) == "ready"
+    assert rendition_path(file_id, "thumb.webp").is_file()
+    db.expire_all()
+    media = await db.get(FileMedia, file_id)
+    assert media.taken_at == corrected and media.lat == -27.5
+
+
 def _auth(user):
     from app.auth.utils import create_access_token
 

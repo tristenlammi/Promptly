@@ -1,7 +1,8 @@
-import { Camera, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { Camera, ChevronDown, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { TagPicker } from "@/components/tags/TagPicker";
+import { PersonInput } from "@/items/ui/PersonInput";
 import { Chip, Field, ItemButton, Select, Sheet, TextArea, TextInput, Toggle, uid } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
@@ -18,6 +19,7 @@ const EDITABLE = [
   "prefix", "first", "middle", "last", "suffix", "nickname", "pronouns", "phonetic_first", "phonetic_last",
   "company", "title", "department", "phones", "emails", "addresses", "websites", "birthday", "dates",
   "met_how", "met_where", "met_date", "tags", "notes", "favorite", "color", "photo",
+  "promptly_user_id", "promptly_username",
 ] as const;
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -49,6 +51,7 @@ export function ContactForm({
   const [bday, setBday] = useState("");
   const [tagList, setTagList] = useState<string[]>([]);
   const [newGroup, setNewGroup] = useState("");
+  const [account, setAccount] = useState("");
   const [more, setMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shrinking, setShrinking] = useState(false);
@@ -259,6 +262,29 @@ export function ContactForm({
           )}
           <Field label="Nickname">
             <TextInput value={c.nickname} onChange={(e) => set("nickname", e.target.value)} />
+          </Field>
+          <Field label="On Promptly">
+            {c.promptly_user_id ? (
+              <div className="flex h-10 items-center justify-between gap-2 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)]">
+                <span className="min-w-0 truncate">@{c.promptly_username}</span>
+                <button type="button" aria-label="Not this person" onClick={() => setC((p) => ({ ...p, promptly_user_id: "", promptly_username: "" }))} className="text-[var(--text-muted)] hover:text-[var(--text)]">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <PersonInput
+                value={account}
+                accountsOnly
+                inlineList
+                onChange={setAccount}
+                onPick={(p) => {
+                  setAccount("");
+                  setC((prev) => ({ ...prev, promptly_user_id: p.user_id, promptly_username: p.username }));
+                }}
+                placeholder="Search people on this server"
+                aria-label="Their Promptly account"
+              />
+            )}
           </Field>
           <div className="flex items-end">
             <button

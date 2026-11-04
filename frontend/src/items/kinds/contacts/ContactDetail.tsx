@@ -29,11 +29,12 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 
 import { TagChips } from "@/components/tags/TagPicker";
 import { LinkedSection } from "@/components/links/LinkedSection";
-import { personPath } from "@/api/peopleHub";
+import { peopleHubApi, personPath } from "@/api/peopleHub";
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import { toast } from "@/store/toastStore";
 import { Chip, Field, ItemButton, Select, Sheet, TextArea, TextInput, todayISO, uid } from "@/items/ui";
@@ -126,6 +127,13 @@ export function ContactDetail({
 
   const name = displayName(c, item.data.settings.name_order);
   const first = c.nickname || c.first || name;
+  // Picked on the contact, or matched from their email.
+  const { data: account } = useQuery({
+    queryKey: ["people-hub", "contact", item.fileId, c.id, c.promptly_user_id, c.emails.map((e) => e.value).join()],
+    queryFn: () => peopleHubApi.get({ kind: "c", fileId: item.fileId, contactId: c.id }),
+    staleTime: 60_000,
+    retry: false,
+  });
   const can = item.canEdit;
   const today = todayISO();
   const bdayNext = c.birthday ? nextOccurrence(c.birthday, today) : null;
@@ -229,6 +237,7 @@ export function ContactDetail({
             </h2>
             {c.nickname && c.nickname !== name && <p className="text-sm text-[var(--text-muted)]">“{c.nickname}”</p>}
             {sub && <p className="mt-0.5 text-sm text-[var(--text-muted)]">{sub}</p>}
+            {account?.user && <p className="mt-0.5 text-sm text-[var(--item-accent)]">@{account.user.username} on Promptly</p>}
             <Link
               to={personPath({ kind: "c", fileId: item.fileId, contactId: c.id })}
               className="mt-1 inline-flex h-8 items-center gap-1 rounded-lg text-sm font-medium text-[var(--item-accent)] hover:underline"

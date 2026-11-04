@@ -669,7 +669,7 @@ def _renumbered(existing: list[dict], extra: list[dict], prefix: str) -> list[di
 _SCALARS = (
     "prefix", "first", "middle", "last", "suffix", "nickname", "pronouns", "phonetic_first", "phonetic_last",
     "company", "title", "department", "birthday", "met_how", "met_where", "met_date", "color", "snoozed_until",
-    "photo", "uid",
+    "photo", "uid", "promptly_user_id", "promptly_username",
 )
 
 

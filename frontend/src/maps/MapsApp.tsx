@@ -3,7 +3,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, BatteryCharging, Bike, Bookmark, Briefcase, Car, ChevronDown, ChevronUp, Clock, Crosshair, Footprints, GripVertical,
+  ArrowLeft, BatteryCharging, Bike, Bookmark, Briefcase, Car, ChevronDown, ChevronUp, Clock, SlidersHorizontal, Crosshair, Footprints, GripVertical,
   Home, List, Loader2, MapPin, Navigation, ParkingCircle, Plus, Route as RouteIcon, Search, TrafficCone, Trash2, User, Users, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -15,7 +15,8 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { isAndroidDevice } from "@/lib/installPrompt";
 import { toast } from "@/store/toastStore";
 
-import { mapsApi, decodeShape, formatDuration, formatKm, routeSeconds, trafficLine, type Charger, type Mode, type PlaceMore, type PreferredRoute, type Route, type SavedPlace, type SearchResult, type Spot } from "./api";
+import { useKeyboardInset } from "@/components/files/documents/useKeyboardInset";
+import { NEARBY, mapsApi, decodeShape, formatDuration, formatKm, routeSeconds, trafficLine, type Charger, type Mode, type PlaceMore, type PreferredRoute, type Route, type SavedPlace, type SearchResult, type Spot } from "./api";
 import { MapView, placeLook, type MapViewHandle } from "./MapView";
 import { PeoplePanel, useShares } from "./People";
 import { PLACE_COLOURS, PLACE_ICON_SVG, PLACE_ICONS } from "./placeIcons";
@@ -51,6 +52,7 @@ const asStop = (s: Spot): StopRow => ({ lat: s.lat, lon: s.lon, name: s.name, ad
 export function MapsApp({ embedded = false }: { embedded?: boolean }) {
   const qc = useQueryClient();
   const isMobile = useIsMobile();
+  const keyboard = useKeyboardInset();
   const map = useRef<MapViewHandle>(null);
   const { data: config } = useQuery({
     queryKey: ["maps-config"],
@@ -150,6 +152,12 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
   const [addingStop, setAddingStop] = useState(false);
   const stopsRef = useRef(stops);
   stopsRef.current = stops;
+  // Roads you chose to go along, as points tapped on them.
+  const [via, setVia] = useState<{ lat: number; lon: number; name: string }[]>([]);
+  const viaRef = useRef(via);
+  viaRef.current = via;
+  const [pickingVia, setPickingVia] = useState(false);
+  const [nearMarks, setNearMarks] = useState<SearchResult[]>([]);
   const panelPadding = useCallback(() => {
     return !isMobile ? { top: 40, bottom: 40, left: 420, right: 40 } : { top: 90, bottom: Math.round(window.innerHeight * 0.5), left: 30, right: 30 };
   }, [isMobile]);
@@ -168,6 +176,7 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
         avoid_highways: avoid.highways,
         avoid_ferries: avoid.ferries,
         best_order: bestOrder,
+        via: viaRef.current.map((v) => ({ lat: v.lat, lon: v.lon })),
       });
       if (bestOrder) setStops(got.order.map((i) => rows[i]));
       setRoutes(got.routes);
@@ -202,7 +211,24 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
     changeStops(rows);
   };
 
+  const changeVia = (rows: { lat: number; lon: number; name: string }[]) => {
+    viaRef.current = rows;
+    setVia(rows);
+    void runRoute(stopsRef.current);
+  };
+
+  const addVia = async (lat: number, lon: number) => {
+    setPickingVia(false);
+    const named = await mapsApi.reverse(lat, lon).catch(() => null);
+    const road = named?.address?.split(",")[0] || named?.name || "That road";
+    changeVia([...viaRef.current, { lat, lon, name: road.replace(/^\d+\S*\s+/, "") }]);
+  };
+
   const leaveRoute = () => {
+    viaRef.current = [];
+    setVia([]);
+    setPickingVia(false);
+    setNearMarks([]);
     setStops([]);
     setRoutes([]);
     setRouteError(null);
@@ -231,6 +257,9 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
       await mapsApi.prefer(stops[0], stops[1], route.through, mode);
       refreshUsual();
       toast.success("This is now your usual way");
+      // It's saved, so it no longer needs the roads you picked to get there.
+      viaRef.current = [];
+      setVia([]);
       await runRoute(stops);
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't save that."));
@@ -414,6 +443,7 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
     <>
       {panel === "home" && (
         <HomePanel
+          nearby={<NearbyPanel centre={() => you ?? map.current?.center() ?? null} onShow={(r) => showPlace(r)} onMarks={setNearMarks} />}
           home={saved.home}
           work={saved.work}
           places={saved.rest}
@@ -520,6 +550,12 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
           onPrefer={() => void preferSelected()}
           onStopPreferring={(id) => void stopPreferring(id)}
           onStart={startDriving}
+          via={via}
+          pickingVia={pickingVia}
+          onPickVia={setPickingVia}
+          onRemoveVia={(i) => changeVia(via.filter((_, n) => n !== i))}
+          onMarks={setNearMarks}
+          onAddOnWay={(s) => changeStops([...stops.slice(0, -1), asStop(s), stops[stops.length - 1]])}
           onAddStop={(s) => {
             // With one stop so far, that's where you're going: this is where from.
             changeStops(stops.length === 1 ? [asStop(s), ...stops] : [...stops, asStop(s)]);
@@ -547,7 +583,8 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
           saved={savedOnMap}
           showTraffic={!!config?.traffic && trafficOn}
           onPickIncident={(i) => showPlace({ kind: "pin", name: i.label, address: i.text !== i.label ? i.text : null, lat: i.lat, lon: i.lon })}
-          marks={dayOnMap?.stays}
+          marks={dayOnMap?.stays ?? nearMarks}
+          onPickPoint={pickingVia ? (lat, lon) => void addVia(lat, lon) : undefined}
           trail={dayOnMap?.lines}
           onPickSaved={(p) => showPlace({ ...p })}
           friends={friends}
@@ -583,7 +620,7 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
                 )}
               </div>
               {showResults && (
-                <div className="mt-2 max-h-[60vh] overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg">
+                <div style={{ maxHeight: `min(60dvh, calc(100dvh - 7rem - ${keyboard}px))` }} className="mt-2 overflow-y-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] py-1 shadow-lg">
                   {searchError ? (
                     <p className="px-4 py-3 text-sm text-[var(--text-muted)]">{apiErrorMessage(searchError, "Search isn't available right now.")}</p>
                   ) : results && results.length === 0 && !searching ? (
@@ -604,16 +641,27 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
 
         {/* On a phone, the same panel rises from the bottom. */}
         {!showResults && isMobile && (
-          <div className="absolute inset-x-0 bottom-0 z-10 flex max-h-[62%] flex-col rounded-t-2xl border-t border-[var(--border)] bg-[var(--surface)] shadow-[0_-4px_20px_rgba(0,0,0,0.15)]">
+          <div
+            style={{ bottom: keyboard, maxHeight: keyboard || addingStop ? `calc(100% - ${keyboard}px - 3rem)` : "62%" }}
+            className="absolute inset-x-0 z-10 flex flex-col rounded-t-2xl border-t border-[var(--border)] bg-[var(--surface)] shadow-[0_-4px_20px_rgba(0,0,0,0.15)]"
+          >
             <button type="button" onClick={() => setOpen((v) => !v)} aria-label={open ? "Collapse the panel" : "Expand the panel"} className="flex shrink-0 justify-center py-2 text-[var(--text-muted)]">
               {open ? <ChevronDown className="h-5 w-5" /> : <ChevronUp className="h-5 w-5" />}
             </button>
-            {open && <div className="min-h-0 overflow-y-auto pb-[env(safe-area-inset-bottom)]">{body}</div>}
+            {open && (panel === "route" && pickingVia ? (
+              // The map's what you need to see: only this, until you've tapped.
+              <div className="flex items-center justify-between gap-3 px-4 pb-4 text-sm text-[var(--text)]">
+                <span>Tap the road you want to go along.</span>
+                <button type="button" onClick={() => setPickingVia(false)} className="shrink-0 text-[var(--accent-text)] underline">Cancel</button>
+              </div>
+            ) : (
+              <div className="min-h-0 overflow-y-auto pb-[env(safe-area-inset-bottom)]">{body}</div>
+            ))}
           </div>
         )}
 
         {/* Map buttons. */}
-        <div className="absolute right-3 top-[4.5rem] z-10 flex flex-col gap-2 md:top-3">
+        <div className={`absolute right-3 top-[4.5rem] z-10 flex-col gap-2 md:top-3 ${isMobile && (addingStop || keyboard > 0) ? "hidden" : "flex"}`}>
           <MapButton label="Go to your location" onClick={() => (you ? map.current?.flyTo(you.lat, you.lon, 15) : toast.info("Waiting for your location."))}>
             <Crosshair className="h-5 w-5" />
           </MapButton>
@@ -717,6 +765,7 @@ function Heading({ children, action }: { children: React.ReactNode; action?: Rea
 }
 
 function HomePanel(p: {
+  nearby: React.ReactNode;
   home?: SavedPlace;
   work?: SavedPlace;
   places: SavedPlace[];
@@ -762,6 +811,7 @@ function HomePanel(p: {
       ) : (
         <Row icon={ParkingCircle} title="Save where you parked" onClick={p.onPark} />
       )}
+      {p.nearby}
       <Row icon={Clock} title="Your timeline" detail="Where you've been, by day" onClick={p.onTimeline} />
       <Row icon={Users} title="Live location" detail={p.friends ? `${p.friends} sharing with you` : "Share where you are with family"} onClick={p.onPeople} />
       {p.usual.length > 0 && (
@@ -1067,7 +1117,7 @@ function ChargerPanel({ charger, onClose, onDirections, addTo }: { charger: Char
 function SortableStop({ stop, index, total, onRemove }: { stop: StopRow; index: number; total: number; onRemove?: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: stop.key });
   return (
-    <li ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className="flex items-center gap-2 bg-[var(--surface)] py-1">
+    <li ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className="flex items-center gap-2 bg-[var(--surface)] py-0.5">
       <button type="button" aria-label={`Move ${stop.name}`} className="cursor-grab touch-none text-[var(--text-muted)]" {...attributes} {...listeners}>
         <GripVertical className="h-4 w-4" />
       </button>
@@ -1078,7 +1128,103 @@ function SortableStop({ stop, index, total, onRemove }: { stop: StopRow; index: 
   );
 }
 
+/** What can be looked for, as a row of small buttons. */
+function NearbyChips({ on, onPick }: { on: string | null; onPick: (id: string | null) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {NEARBY.map((c) => (
+        <Chip key={c.id} on={on === c.id} onClick={() => onPick(on === c.id ? null : c.id)}>{c.label}</Chip>
+      ))}
+    </div>
+  );
+}
+
+/** Fuel, food and so on around you, closest first. */
+function NearbyPanel({ centre, onShow, onMarks }: { centre: () => { lat: number; lon: number } | null; onShow: (r: SearchResult) => void; onMarks: (rows: SearchResult[]) => void }) {
+  const [category, setCategory] = useState<string | null>(null);
+  const [at, setAt] = useState<{ lat: number; lon: number } | null>(null);
+  const { data, isFetching, isError } = useQuery({
+    queryKey: ["maps-nearby", category, at?.lat, at?.lon],
+    queryFn: () => mapsApi.nearby(category!, at!.lat, at!.lon),
+    enabled: !!category && !!at,
+    staleTime: 300_000,
+  });
+  useEffect(() => onMarks(category ? (data ?? []) : []), [category, data]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onMarks([]), []); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="px-3 pb-2">
+      <NearbyChips on={category} onPick={(id) => {
+        setAt(centre());
+        setCategory(id);
+      }} />
+      {category && (
+        <div className="-mx-3 mt-1">
+          {isFetching && <p className="px-4 py-2 text-xs text-[var(--text-muted)]">Looking nearby…</p>}
+          {isError && <p className="px-4 py-2 text-xs text-[var(--text-muted)]">Couldn't look that up.</p>}
+          {!isFetching && !isError && data?.length === 0 && <p className="px-4 py-2 text-xs text-[var(--text-muted)]">Nothing close to here.</p>}
+          {(data ?? []).slice(0, 8).map((r, i) => (
+            <button key={i} type="button" onClick={() => onShow(r)} className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left hover:bg-[var(--hover)]">
+              <span className="min-w-0">
+                <span className="block truncate text-sm text-[var(--text)]">{r.name}</span>
+                {r.address && <span className="block truncate text-xs text-[var(--text-muted)]">{r.address}</span>}
+              </span>
+              {r.distance_m != null && <span className="shrink-0 text-xs text-[var(--text-muted)]">{formatKm(r.distance_m / 1000)}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** What's on the way, with how long stopping there adds. */
+function OnTheWay({ route, stops, mode, onAdd, onMarks }: { route: Route; stops: StopRow[]; mode: Mode; onAdd: (r: SearchResult) => void; onMarks: (rows: SearchResult[]) => void }) {
+  const [category, setCategory] = useState<string | null>(null);
+  const shapes = route.legs.map((l) => l.shape);
+  const { data, isFetching, isError } = useQuery({
+    queryKey: ["maps-on-the-way", category, shapes.join("|").length, stops[0]?.lat, stops[stops.length - 1]?.lat],
+    queryFn: () => mapsApi.nearbyAlong(category!, shapes, stops[0], stops[stops.length - 1], mode),
+    enabled: !!category,
+    staleTime: 300_000,
+  });
+  useEffect(() => onMarks(category ? (data ?? []) : []), [category, data]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => onMarks([]), []); // eslint-disable-line react-hooks/exhaustive-deps
+  return (
+    <div className="px-4 pt-3">
+      <p className="mb-1.5 text-xs text-[var(--text-muted)]">Or stop on the way</p>
+      <NearbyChips on={category} onPick={setCategory} />
+      {category && (
+        <div className="-mx-4 mt-1">
+          {isFetching && <p className="px-4 py-2 text-xs text-[var(--text-muted)]">Looking along your route…</p>}
+          {isError && <p className="px-4 py-2 text-xs text-[var(--text-muted)]">Couldn't look that up.</p>}
+          {!isFetching && !isError && data?.length === 0 && <p className="px-4 py-2 text-xs text-[var(--text-muted)]">Nothing close to this route.</p>}
+          {(data ?? []).map((r, i) => (
+            <button key={i} type="button" onClick={() => {
+              setCategory(null);
+              onAdd(r);
+            }} className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left hover:bg-[var(--hover)]">
+              <span className="min-w-0">
+                <span className="block truncate text-sm text-[var(--text)]">{r.name}</span>
+                {r.address && <span className="block truncate text-xs text-[var(--text-muted)]">{r.address}</span>}
+              </span>
+              {r.adds_seconds != null && (
+                <span className="shrink-0 text-xs text-[var(--text-muted)]">{r.adds_seconds < 60 ? "No extra time" : `+${formatDuration(r.adds_seconds)}`}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RoutePanel(p: {
+  via: { lat: number; lon: number; name: string }[];
+  pickingVia: boolean;
+  onPickVia: (on: boolean) => void;
+  onRemoveVia: (index: number) => void;
+  onMarks: (rows: SearchResult[]) => void;
+  onAddOnWay: (r: SearchResult) => void;
   stops: StopRow[];
   mode: Mode;
   setMode: (m: Mode) => void;
@@ -1104,16 +1250,44 @@ function RoutePanel(p: {
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const [showSteps, setShowSteps] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
   const route = p.routes[p.selected];
+  const avoiding = Object.values(p.avoid).filter(Boolean).length;
   const drop = (e: DragEndEvent) => {
     if (!e.over || e.active.id === e.over.id) return;
     const from = p.stops.findIndex((s) => s.key === e.active.id);
     const to = p.stops.findIndex((s) => s.key === e.over!.id);
     p.onChange(arrayMove(p.stops, from, to));
   };
+  // Adding a stop is the whole panel: what you type, and what it found, above the keyboard.
+  if (p.adding) {
+    return (
+      <div className="pb-4">
+        <div className="sticky top-0 z-10 flex items-center gap-2 bg-[var(--surface)] px-3 pb-1 pt-2">
+          <SmallIcon label="Back to the route" onClick={() => {
+            p.setQuery("");
+            p.setAdding(false);
+          }}><ArrowLeft className="h-4 w-4" /></SmallIcon>
+          <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] px-2">
+            <Search className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+            <input autoFocus value={p.query} onChange={(e) => p.setQuery(e.target.value)} placeholder={p.stops.length === 1 ? "Start from where?" : "Add a stop"} aria-label="Add a stop" className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />
+          </div>
+        </div>
+        {p.query.trim().length > 1 ? (
+          (p.results ?? []).slice(0, 8).map((r, i) => <ResultRow key={i} result={r} onPick={() => p.onAddStop(r)} />)
+        ) : route && p.mode !== "walk" && (
+          <OnTheWay route={route} stops={p.stops} mode={p.mode} onMarks={p.onMarks} onAdd={(r) => {
+            p.onAddOnWay(r);
+            p.setAdding(false);
+          }} />
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="pb-4">
-      <div className="flex items-center gap-2 px-3 pt-3">
+    <div>
+      <div className="flex items-center gap-2 px-3 pt-1 md:pt-3">
         <SmallIcon label="Back" onClick={p.onClose}><ArrowLeft className="h-4 w-4" /></SmallIcon>
         <div role="radiogroup" aria-label="How you're travelling" className="flex flex-1 gap-1">
           {MODES.map((m) => (
@@ -1134,29 +1308,49 @@ function RoutePanel(p: {
             </ul>
           </SortableContext>
         </DndContext>
-        {p.adding ? (
-          <div className="mt-1">
-            <div className="flex h-9 items-center gap-2 rounded-lg border border-[var(--border)] px-2">
-              <Search className="h-4 w-4 text-[var(--text-muted)]" />
-              <input autoFocus value={p.query} onChange={(e) => p.setQuery(e.target.value)} placeholder={p.stops.length === 1 ? "Start from where?" : "Add a stop"} aria-label="Add a stop" className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none" />
-            </div>
-            {p.query.trim().length > 1 && (p.results ?? []).slice(0, 6).map((r, i) => <ResultRow key={i} result={r} onPick={() => p.onAddStop(r)} />)}
+        {p.via.map((v, i) => (
+          <div key={i} className="flex items-center justify-between gap-2 text-xs text-[var(--text)]">
+            <span className="min-w-0 truncate">Via {v.name}</span>
+            <SmallIcon label={`Stop going via ${v.name}`} onClick={() => p.onRemoveVia(i)}><X className="h-3.5 w-3.5" /></SmallIcon>
           </div>
-        ) : (
-          <div className="mt-1 flex flex-wrap gap-2">
-            {p.stops.length < 20 && <SaveButton icon={Plus} onClick={() => p.setAdding(true)}>Add stop</SaveButton>}
-            {p.stops.length > 3 && <SaveButton icon={Navigation} onClick={p.onBestOrder}>Best order</SaveButton>}
-          </div>
-        )}
+        ))}
+        <div className="mt-1 flex flex-wrap gap-2">
+          {p.stops.length < 20 && <SaveButton icon={Plus} onClick={() => p.setAdding(true)}>Add stop</SaveButton>}
+          {p.stops.length > 3 && <SaveButton icon={Navigation} onClick={p.onBestOrder}>Best order</SaveButton>}
+          {p.mode !== "walk" && (
+            <SaveButton icon={SlidersHorizontal} on={avoiding > 0} onClick={() => setShowOptions((v) => !v)}>
+              {avoiding > 0 ? `Options (${avoiding})` : "Options"}
+            </SaveButton>
+          )}
+        </div>
       </div>
 
-      {p.mode !== "walk" && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 px-4 pt-3 text-xs text-[var(--text)]">
-          {([["tolls", "Avoid tolls"], ...(p.mode === "drive" ? [["highways", "Avoid highways"]] : []), ["ferries", "Avoid ferries"]] as [keyof typeof p.avoid, string][]).map(([key, label]) => (
-            <label key={key} className="inline-flex items-center gap-1.5">
-              <input type="checkbox" checked={p.avoid[key]} onChange={(e) => p.setAvoid({ ...p.avoid, [key]: e.target.checked })} />{label}
-            </label>
-          ))}
+      {showOptions && p.mode !== "walk" && (
+        <div className="space-y-2 px-4 pt-2">
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-[var(--text)]">
+            {([["tolls", "Avoid tolls"], ...(p.mode === "drive" ? [["highways", "Avoid highways"]] : []), ["ferries", "Avoid ferries"]] as [keyof typeof p.avoid, string][]).map(([key, label]) => (
+              <label key={key} className="inline-flex items-center gap-1.5">
+                <input type="checkbox" checked={p.avoid[key]} onChange={(e) => p.setAvoid({ ...p.avoid, [key]: e.target.checked })} />{label}
+              </label>
+            ))}
+          </div>
+          {p.stops.length === 2 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {p.pickingVia ? (
+                <div className="flex items-center gap-2 text-xs text-[var(--accent-text)]">
+                  <span>Tap the road you want to go along.</span>
+                  <button type="button" onClick={() => p.onPickVia(false)} className="underline">Cancel</button>
+                </div>
+              ) : p.via.length < 5 && (
+                <SaveButton icon={MapPin} onClick={() => p.onPickVia(true)}>Go via a road</SaveButton>
+              )}
+              {route && !p.routing && (route.preferred ? (
+                <button type="button" onClick={() => p.onStopPreferring(route.preferred!.id)} className="text-xs text-[var(--text-muted)] hover:underline">Stop using this as your usual way</button>
+              ) : (
+                <SaveButton icon={RouteIcon} onClick={p.onPrefer}>Always go this way</SaveButton>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -1167,19 +1361,22 @@ function RoutePanel(p: {
         <ul className="pt-2">
           {p.routes.map((r, i) => (
             <li key={i}>
-              <button type="button" onClick={() => p.setSelected(i)} aria-pressed={i === p.selected} className={`flex w-full items-center justify-between gap-3 px-4 py-2 text-left ${i === p.selected ? "bg-[var(--hover)]" : "hover:bg-[var(--hover)]"}`}>
+              <button type="button" onClick={() => p.setSelected(i)} aria-pressed={i === p.selected} className={`flex w-full items-center justify-between gap-3 px-4 py-1.5 text-left ${i === p.selected ? "bg-[var(--hover)]" : "hover:bg-[var(--hover)]"}`}>
                 <span className="min-w-0">
                   <span className="text-[15px] font-semibold text-[var(--text)]">{formatDuration(routeSeconds(r))}</span>
                   <span className="ml-2 text-sm text-[var(--text-muted)]">{formatKm(r.km)}</span>
-                  {r.via_name && <span className="block truncate text-xs text-[var(--text-muted)]">via {r.via_name}</span>}
                   {r.avoids?.length ? <span className="block text-xs font-medium text-[#2F9E6E]">Goes around a closed road: {r.avoids.join(", ")}</span> : null}
                   {r.incidents?.some((i) => i.closed) && <span className="block text-xs font-medium text-[#C62828]">Road closed on this way</span>}
                   {r.preferred && <span className="block text-xs font-medium text-[#D97757]">Your usual way{(r.slower_seconds ?? 0) >= 60 ? `, ${formatDuration(r.slower_seconds ?? 0)} slower today` : ""}</span>}
-                  {trafficLine(r) && (
-                    <span className={`block text-xs ${(r.traffic?.adds_seconds ?? 0) >= 60 ? "text-[#D9730D] dark:text-[#F2B01E]" : "text-[var(--text-muted)]"}`}>{trafficLine(r)}</span>
-                  )}
+                  <span className="block truncate text-xs text-[var(--text-muted)]">
+                    {[r.via_name && `via ${r.via_name}`, r.toll && "Tolls", r.ferry && "Ferry"].filter(Boolean).join(" · ")}
+                    {trafficLine(r) && (
+                      <span className={(r.traffic?.adds_seconds ?? 0) >= 60 ? "text-[#D9730D] dark:text-[#F2B01E]" : undefined}>
+                        {r.via_name || r.toll || r.ferry ? " · " : ""}{trafficLine(r)}
+                      </span>
+                    )}
+                  </span>
                 </span>
-                <span className="text-xs text-[var(--text-muted)]">{[r.toll && "Tolls", r.ferry && "Ferry"].filter(Boolean).join(" · ")}</span>
               </button>
             </li>
           ))}
@@ -1187,35 +1384,19 @@ function RoutePanel(p: {
       )}
       {route && !p.routing && (
         <>
-          <p className="px-4 pt-1 text-[11px] text-[var(--text-muted)]">{route.traffic ? "Includes live traffic." : "Times come from road speeds, without live traffic."}</p>
+          {!route.traffic && <p className="px-4 pt-1 text-[11px] text-[var(--text-muted)]">Times come from road speeds, without live traffic.</p>}
           {(route.incidents?.length ?? 0) > 0 && (
-            <ul className="px-4 pt-2">
-              {route.incidents!.slice(0, 5).map((i) => (
-                <li key={i.id} className="flex gap-2 py-1 text-xs">
+            <ul className="px-4 pt-1">
+              {route.incidents!.slice(0, 3).map((i) => (
+                <li key={i.id} className="flex gap-2 py-0.5 text-xs">
                   <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full font-bold text-white ${i.closed || i.category === 1 ? "bg-[#C62828]" : "bg-[#EF8A1A]"}`}>!</span>
                   <span className="min-w-0 text-[var(--text)]">
                     {i.label}{i.from ? ` on ${i.from}` : ""}, {formatKm(i.along_km)} ahead{i.delay_seconds >= 60 ? `, adds ${formatDuration(i.delay_seconds)}` : ""}
-                    {i.text !== i.label && <span className="block text-[var(--text-muted)]">{i.text}</span>}
                   </span>
                 </li>
               ))}
             </ul>
           )}
-          {p.stops.length === 2 && p.mode !== "walk" && (
-            <div className="px-4 pt-2">
-              {route.preferred ? (
-                <button type="button" onClick={() => p.onStopPreferring(route.preferred!.id)} className="text-xs text-[var(--text-muted)] hover:underline">Stop using this as your usual way</button>
-              ) : (
-                <SaveButton icon={RouteIcon} onClick={p.onPrefer}>Always go this way</SaveButton>
-              )}
-            </div>
-          )}
-          <div className="flex gap-2 px-4 pt-3">
-            <PrimaryButton icon={Navigation} onClick={p.onStart}>Start</PrimaryButton>
-            <button type="button" onClick={() => setShowSteps((v) => !v)} aria-expanded={showSteps} className="inline-flex h-10 items-center gap-1 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]">
-              Steps{showSteps ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </button>
-          </div>
           {showSteps && (
             <ol className="px-4 pt-3 text-sm">
               {route.legs.flatMap((l, li) => l.steps.map((s, si) => (
@@ -1226,6 +1407,13 @@ function RoutePanel(p: {
               )))}
             </ol>
           )}
+          {/* Always there: everything above scrolls under it. */}
+          <div className="sticky bottom-0 flex gap-2 bg-[var(--surface)] px-4 pb-3 pt-2">
+            <PrimaryButton icon={Navigation} onClick={p.onStart}>Start</PrimaryButton>
+            <button type="button" onClick={() => setShowSteps((v) => !v)} aria-expanded={showSteps} className="inline-flex h-10 items-center gap-1 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]">
+              Steps{showSteps ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </button>
+          </div>
         </>
       )}
     </div>

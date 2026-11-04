@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   Gauge,
   Globe,
@@ -81,6 +82,7 @@ export function AppSettingsPanel() {
         onSubmit={(patch) => update.mutateAsync(patch)}
         busy={update.isPending}
       />
+      <MapDataWarning />
       <MapsTrafficCard
         settings={data}
         onSubmit={(patch) => update.mutateAsync(patch)}
@@ -1097,6 +1099,64 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
 // ``SettingsCard`` is imported from ``./SettingsCard``).
 // --------------------------------------------------------------------
 // --------------------------------------------------------------------
+interface MapDataStatus {
+  ready: boolean;
+  building: boolean;
+  step: string | null;
+  failed: boolean;
+  built_at: string | null;
+  addresses: "ok" | "missing" | "unknown";
+  overdue_days: number;
+}
+
+/** Warns when the map data is missing something. Quiet when maps aren't set up at all. */
+function MapDataWarning() {
+  const [status, setStatus] = useState<MapDataStatus | null>(null);
+  useEffect(() => {
+    let live = true;
+    apiClient.get<MapDataStatus>("/maps/data-status").then((r) => {
+      if (live) setStatus(r.data);
+    }).catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!status) return null;
+  const problems: { title: string; detail: string }[] = [];
+  if (status.addresses === "missing") {
+    problems.push({
+      title: "P Maps search has no house numbers",
+      detail: "The street address download failed during the last map build, so searching for an address like \"64 Example Street\" won't find it. Streets and places still work. It's tried again at the next monthly map refresh; the Promptly-Maps log has the details.",
+    });
+  }
+  if (status.failed) {
+    problems.push({
+      title: "The last P Maps data update failed",
+      detail: `It stopped at the ${status.step ?? "unknown"} step. ${status.ready ? "The current map stays in use." : "Maps won't work until it finishes."} It's tried again automatically; the Promptly-Maps log has the details.`,
+    });
+  }
+  if (status.overdue_days > 0) {
+    problems.push({
+      title: "P Maps data hasn't refreshed",
+      detail: `It's ${status.overdue_days} days past its monthly update, so new roads, places and addresses aren't showing. Maps still work. Check that the Promptly-Maps container is running and look at its log.`,
+    });
+  }
+  if (problems.length === 0) return null;
+  return (
+    <div role="alert" className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-3">
+      {problems.map((p) => (
+        <div key={p.title} className="flex gap-2 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <div>
+            <p className="font-medium text-[var(--text)]">{p.title}</p>
+            <p className="text-xs text-[var(--text-muted)]">{p.detail}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MapsTrafficCard({ settings, onSubmit, busy }: CardSubmit) {
   const [key, setKey] = useState("");
   const [clearKey, setClearKey] = useState(false);

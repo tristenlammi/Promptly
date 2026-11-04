@@ -97,6 +97,8 @@ if ! $DB_ONLY; then
   if $WITH_ENV && [[ -f "$WORK/env" ]]; then
     [[ -f .env ]] && cp .env ".env.before-restore-$TS"
     cp "$WORK/env" .env && chmod 600 .env
+    # A new machine needs its certificates and local settings back too.
+    [[ -f "$WORK/config.tar" ]] && tar -xf "$WORK/config.tar"
   fi
 else
   say "4/5  (database only — files left as they are)"

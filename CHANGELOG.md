@@ -21,6 +21,24 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-04
+
+### Added
+- **"Hey Promptly" while driving** in P Maps: say it (or just "Promptly") and ask for a stop, a change of destination, your arrival time or whether your way is clear. The wake word is heard on the phone and no sound leaves it until then; what you say next goes to your own server. Speech from the car uses a mic button on its screen. An on-screen button turns listening off.
+- **Nearby in P Maps**: fuel, food, coffee, groceries, chemists, toilets, parking, ATMs and places to stay around you. Searching for "fuel" or "the nearest servo" finds them too, including in chat and in the car. All from the map on your own server.
+- **Stop on the way**: on a route, on the driving screen and in the car, see what's along the road ahead and how long each adds, and add it as a stop, with a button to take it off again.
+- Admin → App settings warns if P Maps' last data update failed, if its data is overdue for its monthly refresh, or if its street address download failed and search has no house numbers.
+- "Hey Promptly" can use your other apps: your day, calendar, tasks, contacts, timeline and web search. Anything that would change something is read back and only happens after you say yes.
+- Contacts can say who someone is on your Promptly: pick their account when adding or editing a contact, and it shows their @username.
+- **Go via a road**: tap a road on the map to route along it, then "Always go this way" to make it your usual route.
+
+### Fixed
+- P Maps' route panel on a phone: Start is always on screen, routes take less room, avoid and usual-route settings moved under Options, and Add stop becomes a full panel above the keyboard so results aren't hidden.
+- After restoring a backup, photo and video thumbnails are now remade automatically instead of staying blank, and doing so keeps any dates and places you corrected.
+- The full backup now includes `nginx/ssl`, `nginx/local` and `docker-compose.override.yml`, and `--with-env` restores them.
+- P Maps' Live location now suggests people on your server as you type, and its Share button no longer gets cut off.
+- P Maps' map build keeps retrying and resuming the 1.9 GB address download, so a dropped connection is less likely to leave search without street addresses.
+
 ## [0.20.0] - 2026-11-04
 
 ### Changed

@@ -3,6 +3,7 @@ import { ArrowLeft, Clock, User, X } from "lucide-react";
 import { useState } from "react";
 
 import { apiClient } from "@/api/client";
+import { PersonInput } from "@/items/ui/PersonInput";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -37,13 +38,16 @@ export function PeoplePanel({ onClose, onShow }: { onClose: () => void; onShow: 
   const qc = useQueryClient();
   const { data } = useShares();
   const [name, setName] = useState("");
+  // Who was picked from the suggestions; typing again clears it.
+  const [picked, setPicked] = useState("");
   const [hours, setHours] = useState("1");
   const refresh = () => void qc.invalidateQueries({ queryKey: ["maps-shares"] });
 
   const share = async () => {
     try {
-      await apiClient.put("/maps/share", { username: name.trim(), hours: hours ? Number(hours) : null });
+      await apiClient.put("/maps/share", { username: picked || name.trim(), hours: hours ? Number(hours) : null });
       setName("");
+      setPicked("");
       refresh();
       toast.success("Sharing your location. Your phone sends it while P Maps is driving or the timeline is on.");
     } catch (e) {
@@ -98,8 +102,21 @@ export function PeoplePanel({ onClose, onShow }: { onClose: () => void; onShow: 
           if (name.trim()) void share();
         }}
       >
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Their username or email" aria-label="Who to share with" className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-transparent px-3 text-sm text-[var(--text)] outline-none" />
-        <select value={hours} onChange={(e) => setHours(e.target.value)} aria-label="For how long" className="h-9 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-sm text-[var(--text)]">
+        <div className="w-full">
+          <PersonInput
+            value={name}
+            accountsOnly
+            inlineList
+            onChange={(v) => {
+              setName(v);
+              setPicked("");
+            }}
+            onPick={(p) => setPicked(p.username)}
+            placeholder="Name, username or email"
+            aria-label="Who to share with"
+          />
+        </div>
+        <select value={hours} onChange={(e) => setHours(e.target.value)} aria-label="For how long" className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-sm text-[var(--text)]">
           <option value="1">1 hour</option>
           <option value="8">8 hours</option>
           <option value="24">1 day</option>

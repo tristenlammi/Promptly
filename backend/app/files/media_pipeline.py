@@ -21,6 +21,10 @@ logger = logging.getLogger("promptly.files.media_pipeline")
 STUCK_AFTER = timedelta(minutes=45)
 MAX_ATTEMPTS = 3
 SWEEP_BATCH = 500
+REPAIR_BATCH = 2000
+REPAIR_ROUNDS = 500
+# Where the look through the library for missing renditions has got to.
+_repair_after: uuid.UUID | None = None
 
 # One video at a time per worker process, whatever max_jobs allows — a
 # transcode takes every core it gets.
@@ -37,7 +41,12 @@ async def ingest(file_id: uuid.UUID | str, *, force: bool = False) -> str:
     from app.files.storage import absolute_path
 
     fid = uuid.UUID(str(file_id))
-    if not await extract_and_store(fid):
+    # Metadata is read once. Reading it again for renditions that went missing
+    # would put back the camera's date over one the owner corrected.
+    async with SessionLocal() as db:
+        known = await db.get(FileMedia, fid)
+        read_it = force or known is None or known.extracted_at is None or bool(known.error)
+    if read_it and not await extract_and_store(fid):
         return "skipped"
     async with SessionLocal() as db:
         row = await db.get(UserFile, fid)
@@ -97,6 +106,47 @@ async def ingest(file_id: uuid.UUID | str, *, force: bool = False) -> str:
     return state
 
 
+def _renditions_gone(file_id: uuid.UUID, renditions: dict[str, Any]) -> bool:
+    from app.files.derivatives import rendition_path
+
+    return any(name.endswith(".webp") and not rendition_path(file_id, name).is_file() for name in renditions)
+
+
+async def repair_missing(db) -> int:  # noqa: ANN001
+    """Back to the queue with any file whose thumbnails aren't on disk. Backups
+    leave them out because they can be remade, so after a restore every photo is
+    "ready" with nothing to show. Looks through the library a batch per sweep; if
+    most of a batch is missing, that's a restore, so it keeps going."""
+    from sqlalchemy import select, update
+
+    from app.files.models import FileMedia
+
+    global _repair_after
+    total = 0
+    for _ in range(REPAIR_ROUNDS):
+        query = select(FileMedia.file_id, FileMedia.renditions).where(
+            FileMedia.derivative_state == "ready", FileMedia.renditions.is_not(None),
+        )
+        if _repair_after is not None:
+            query = query.where(FileMedia.file_id > _repair_after)
+        rows = (await db.execute(query.order_by(FileMedia.file_id).limit(REPAIR_BATCH))).all()
+        if not rows:
+            _repair_after = None
+            break
+        _repair_after = rows[-1][0]
+        gone = await asyncio.to_thread(lambda: [fid for fid, names in rows if _renditions_gone(fid, names)])
+        if gone:
+            await db.execute(
+                update(FileMedia).where(FileMedia.file_id.in_(gone)).values(derivative_state="pending", attempts=0, error=None)
+            )
+            total += len(gone)
+        if len(gone) * 2 < len(rows):
+            break
+    if total:
+        logger.warning("Remaking thumbnails for %d file(s) whose renditions are missing", total)
+    return total
+
+
 async def sweep() -> dict[str, int]:
     """Re-queue what needs it (the media worker's cron)."""
     from sqlalchemy import or_, select, text, update
@@ -106,8 +156,9 @@ async def sweep() -> dict[str, int]:
     from app.tasks.queue import enqueue_media
 
     now = datetime.now(timezone.utc)
-    out = {"stuck": 0, "retried": 0, "new": 0}
+    out = {"stuck": 0, "retried": 0, "new": 0, "repaired": 0}
     async with SessionLocal() as db:
+        out["repaired"] = await repair_missing(db)
         stuck = (
             await db.execute(
                 update(FileMedia)

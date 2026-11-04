@@ -25,7 +25,25 @@ export interface SearchResult extends Spot {
   kind: "home" | "work" | "favourite" | "list" | "contact" | "recent" | "place" | "address" | "pin";
   id?: string;
   category?: string | null;
+  /** From you, for what's around you. */
+  distance_m?: number;
+  /** How long stopping here adds, for what's on the way. */
+  adds_seconds?: number;
+  along_m?: number;
 }
+
+/** What "nearby" can look for. */
+export const NEARBY = [
+  { id: "fuel", label: "Fuel" },
+  { id: "food", label: "Food" },
+  { id: "coffee", label: "Coffee" },
+  { id: "groceries", label: "Groceries" },
+  { id: "chemist", label: "Chemist" },
+  { id: "toilets", label: "Toilets" },
+  { id: "parking", label: "Parking" },
+  { id: "atm", label: "ATM" },
+  { id: "hotel", label: "Places to stay" },
+] as const;
 
 export interface SavedPlace extends Spot {
   id: string;
@@ -146,6 +164,7 @@ export interface RouteOptions {
   avoid_highways: boolean;
   avoid_ferries: boolean;
   best_order?: boolean;
+  via?: { lat: number; lon: number }[];
 }
 
 export interface Socket {
@@ -181,6 +200,14 @@ export const mapsApi = {
   async route(stops: Spot[], options: RouteOptions) {
     const body = { stops: stops.map((s) => ({ lat: s.lat, lon: s.lon, name: s.name })), ...options };
     return (await apiClient.post<{ routes: Route[]; order: number[]; traffic?: boolean }>("/maps/route", body)).data;
+  },
+  async nearby(category: string, lat: number, lon: number) {
+    return (await apiClient.get<{ results: SearchResult[] }>("/maps/nearby", { params: { category, lat, lon } })).data.results;
+  },
+  async nearbyAlong(category: string, shapes: string[], here: Spot, to: Spot, mode: Mode) {
+    const spot = (s: Spot) => ({ lat: s.lat, lon: s.lon, name: s.name });
+    const body = { category, shapes, here: spot(here), to: spot(to), mode };
+    return (await apiClient.post<{ results: SearchResult[] }>("/maps/nearby/along", body)).data.results;
   },
   async preferred() {
     return (await apiClient.get<{ routes: PreferredRoute[] }>("/maps/preferred")).data.routes;

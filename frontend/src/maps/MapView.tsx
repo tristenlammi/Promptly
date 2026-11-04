@@ -38,6 +38,8 @@ interface Props {
   showTraffic?: boolean;
   /** Frame these once the map's ready, and whenever they change. */
   fitTo?: [number, number][];
+  /** Choosing a point on the map: a tap goes here and nothing else happens. */
+  onPickPoint?: (lat: number, lon: number) => void;
   /** A long-press, or a right-click: what's here? */
   onHold: (lat: number, lon: number) => void;
   /** A name on the map tapped. */
@@ -184,6 +186,10 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
       map.on("movestart", cancel);
       map.on("click", (e) => {
         if (!map) return;
+        if (calls.current.onPickPoint) {
+          calls.current.onPickPoint(e.lngLat.lat, e.lngLat.lng);
+          return;
+        }
         const alt = map.queryRenderedFeatures(e.point, { layers: ["alts"] })[0];
         if (alt) {
           calls.current.onPickRoute(Number(alt.properties.index));

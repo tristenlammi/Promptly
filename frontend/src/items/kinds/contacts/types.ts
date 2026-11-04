@@ -87,6 +87,9 @@ export interface Contact {
   nickname: string;
   pronouns: string;
   phonetic_first: string;
+  /** Their account on this Promptly, chosen by you. */
+  promptly_user_id: string;
+  promptly_username: string;
   phonetic_last: string;
   company: string;
   title: string;

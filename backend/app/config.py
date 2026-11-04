@@ -264,6 +264,8 @@ class Settings(BaseSettings):
     # Live traffic: normally set in the admin panel. This is a fallback for
     # servers configured by file. The cap keeps a month inside the free 200,000.
     MAPS_TRAFFIC_KEY: str = ""
+    # How often the maps container rebuilds its data; the admin panel warns if it's overdue.
+    MAPS_REFRESH_DAYS: int = 30
     MAPS_TRAFFIC_DAILY_LIMIT: int = 6000
     # The traffic layer is what casual browsing spends, so it has its own smaller
     # share: looking around the map can't use up the traffic for your drive.

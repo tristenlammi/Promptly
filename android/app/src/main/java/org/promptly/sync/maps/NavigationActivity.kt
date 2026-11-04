@@ -13,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -179,6 +180,26 @@ class NavigationActivity : ComponentActivity() {
         val trafficNow by Nav.traffic.collectAsState()
         val faster by Nav.faster.collectAsState()
         val hazard by Nav.hazard.collectAsState()
+        val voice by Voice.state.collectAsState()
+        val said by Voice.reply.collectAsState()
+        val addedStop by Nav.addedStop.collectAsState()
+        var addingStop by remember { mutableStateOf(false) }
+        val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+            if (ok) Voice.start(applicationContext)
+        }
+        // Once, on your first drive. After that it's the button.
+        LaunchedEffect(Unit) {
+            if (!Voice.allowed(context) && !Voice.asked(context)) {
+                Voice.markAsked(context)
+                askMic.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
+        LaunchedEffect(said) {
+            if (said != null) {
+                kotlinx.coroutines.delay(8000)
+                Voice.clearReply()
+            }
+        }
         LaunchedEffect(state.location) {
             state.location?.let { Nav.onLocation(it.coordinates.lat, it.coordinates.lng) }
         }
@@ -219,6 +240,29 @@ class NavigationActivity : ComponentActivity() {
                 (camera as? CameraAlert.Ahead)?.let { c ->
                     Pill("Speed camera ${c.metres} m", Color(0xFFB3261E), Color.White)
                 }
+                Pill(
+                    "Add stop",
+                    MaterialTheme.colorScheme.primary,
+                    MaterialTheme.colorScheme.onPrimary,
+                    Modifier.clickable { addingStop = true },
+                )
+                addedStop?.let { stop ->
+                    Pill("Remove ${stop.name.take(18)}", MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface, Modifier.clickable { Nav.removeStop() })
+                }
+                Pill(
+                    when {
+                        voice == Voice.State.HEARD -> "Listening…"
+                        voice == Voice.State.THINKING -> "Thinking…"
+                        voice == Voice.State.LISTENING -> "\"Hey Promptly\" on"
+                        else -> "\"Hey Promptly\" off"
+                    },
+                    if (voice == Voice.State.HEARD || voice == Voice.State.THINKING) Color(0xFFD97757) else MaterialTheme.colorScheme.surface,
+                    if (voice == Voice.State.HEARD || voice == Voice.State.THINKING) Color.White else MaterialTheme.colorScheme.onSurface,
+                    Modifier.clickable {
+                        if (!Voice.allowed(context)) askMic.launch(Manifest.permission.RECORD_AUDIO)
+                        else Voice.setEnabled(context, voice == Voice.State.OFF)
+                    },
+                )
                 if (kmh != null) {
                     val over = limit != null && kmh > limit + 2
                     Pill("$kmh km/h", if (over) Color(0xFFB3261E) else MaterialTheme.colorScheme.surface, if (over) Color.White else MaterialTheme.colorScheme.onSurface)
@@ -226,6 +270,12 @@ class NavigationActivity : ComponentActivity() {
             }
             if (message != null) {
                 Pill(message, Color(0xFF3A3A3A), Color.White, Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 8.dp))
+            }
+            said?.let {
+                Pill(it, Color(0xFF3A3A3A), Color.White, Modifier.align(Alignment.Center).padding(horizontal = 24.dp))
+            }
+            if (addingStop) {
+                AddStopSheet { addingStop = false }
             }
             faster?.let { offer ->
                 LaunchedEffect(offer.savesMinutes) {
@@ -313,6 +363,55 @@ private fun Pill(text: String, background: Color, foreground: Color, modifier: M
         fontSize = 15.sp,
         modifier = modifier.clip(RoundedCornerShape(50)).background(background).padding(horizontal = 14.dp, vertical = 8.dp),
     )
+}
+
+/** Fuel, food and so on along the rest of the trip. */
+@Composable
+private fun AddStopSheet(onClose: () -> Unit) {
+    val context = LocalContext.current
+    var category by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var rows by remember { mutableStateOf<List<Maps.Nearby>?>(null) }
+    LaunchedEffect(category) {
+        val picked = category ?: return@LaunchedEffect
+        rows = null
+        val ahead = Nav.ahead()
+        rows = if (ahead == null) emptyList() else runCatching {
+            Maps.onTheWay(context, picked.first, ahead.first, ahead.second, ahead.third)
+        }.getOrDefault(emptyList())
+    }
+    Box(Modifier.fillMaxSize().background(Color(0x66000000)).clickable(onClick = onClose), contentAlignment = Alignment.BottomCenter) {
+        Surface(shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), modifier = Modifier.fillMaxWidth().clickable(enabled = false) {}) {
+            Column(Modifier.safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                val picked = category
+                Text(picked?.second ?: "Add a stop", fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+                if (picked == null) {
+                    listOf("fuel" to "Fuel", "food" to "Food", "coffee" to "Coffee", "groceries" to "Groceries", "toilets" to "Toilets", "chemist" to "Chemist").forEach { kind ->
+                        Text(kind.second, fontSize = 18.sp, modifier = Modifier.fillMaxWidth().clickable { category = kind }.padding(vertical = 10.dp))
+                    }
+                } else {
+                    val found = rows
+                    when {
+                        found == null -> CircularProgressIndicator()
+                        found.isEmpty() -> Text("Nothing close to your route.")
+                        else -> found.take(6).forEach { n ->
+                            Column(Modifier.fillMaxWidth().clickable {
+                                Nav.addStop(n.stop)
+                                onClose()
+                            }.padding(vertical = 8.dp)) {
+                                Text(n.stop.name, fontSize = 18.sp)
+                                val detail = listOfNotNull(
+                                    n.addsMinutes?.let { if (it < 1) "No extra time" else "+$it min" },
+                                    n.aheadKm?.let { String.format(java.util.Locale.ENGLISH, "%.1f km ahead", it) },
+                                ).joinToString(" · ")
+                                if (detail.isNotEmpty()) Text(detail, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+                OutlinedButton(onClick = { if (picked == null) onClose() else category = null }) { Text(if (picked == null) "Close" else "Back") }
+            }
+        }
+    }
 }
 
 @Composable

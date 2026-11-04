@@ -3,6 +3,7 @@ the build is in, and the cameras and chargers it extracted."""
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +61,30 @@ def manifest() -> dict[str, Any] | None:
         return json.loads((root() / build / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+def overdue_days(built_at: str | None, refresh_days: int, *, grace_days: int = 7) -> int:
+    """How far past its refresh date the live map is. A week's grace, because a
+    rebuild takes time and can wait out a failed download."""
+    if not built_at:
+        return 0
+    try:
+        built = datetime.fromisoformat(built_at.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    late = (datetime.now(timezone.utc) - built).days - refresh_days
+    return late if late > grace_days else 0
+
+
+def addresses_state() -> str:
+    """Did the live build get its street addresses? "unknown" is a build from
+    before this was recorded, or a region without an address file."""
+    build = current_build()
+    if not build:
+        return "unknown"
+    if (root() / build / "addresses.failed").exists():
+        return "missing"
+    return "ok" if (root() / build / "addresses.source").exists() else "unknown"
 
 
 def status() -> dict[str, Any]:

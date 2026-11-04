@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
@@ -23,7 +23,7 @@ from app.auth.models import User
 from app.config import get_settings
 from app.database import get_db
 
-from . import data, engine, incidents
+from . import data, engine, incidents, nearby
 from .models import MapParked, MapPlace, MapPreferredRoute, MapRecent
 
 router = APIRouter()
@@ -31,6 +31,10 @@ router = APIRouter()
 MAX_RECENTS = 40
 Lat = Field(ge=-90, le=90)
 Lon = Field(ge=-180, le=180)
+
+
+# About 30 seconds of 16 kHz speech.
+ASSISTANT_MAX_AUDIO = 1024 * 1024
 
 
 async def maps_user(
@@ -66,6 +70,23 @@ async def config(db: AsyncSession = Depends(get_db), user: User = Depends(maps_u
         "osm_data": (manifest or {}).get("osm_data"),
         "attribution": "© OpenStreetMap contributors · Protomaps · Addresses: G-NAF © Geoscape Australia",
         "traffic": has_traffic,
+    }
+
+
+@router.get("/data-status")
+async def data_status(admin: User = Depends(require_admin)) -> dict[str, Any]:
+    """For the admin panel: how the map data's doing."""
+    _ = admin
+    state = await asyncio.to_thread(data.status)
+    manifest = await asyncio.to_thread(data.manifest)
+    return {
+        "ready": manifest is not None,
+        "building": state.get("state") == "building",
+        "step": state.get("step") or None,
+        "failed": state.get("state") == "failed",
+        "built_at": (manifest or {}).get("built_at"),
+        "addresses": await asyncio.to_thread(data.addresses_state),
+        "overdue_days": 0 if state.get("state") == "building" else data.overdue_days((manifest or {}).get("built_at"), get_settings().MAPS_REFRESH_DAYS),
     }
 
 
@@ -142,6 +163,10 @@ async def find_places(db: AsyncSession, user: User, query: str, near: dict[str, 
         out += await _contacts(db, user, query)
     except Exception:  # noqa: BLE001 — a broken contacts file costs its results, not the search
         pass
+    # "Fuel", "the nearest servo": what's around you, not a place with that name.
+    category = nearby.category_for(query) if near else None
+    if category:
+        out += await nearby.around(category, near["lat"], near["lon"], limit=8)
     params: dict[str, Any] = {"q": query, "limit": 8, **(near or {})}
     seen = {(round(r["lat"], 4), round(r["lon"], 4)) for r in out if r.get("lat") is not None}
     for f in await engine.photon("/api", params):
@@ -184,6 +209,11 @@ class Stop(BaseModel):
     name: str | None = Field(default=None, max_length=200)
 
 
+class Via(BaseModel):
+    lat: float = Lat
+    lon: float = Lon
+
+
 class RouteBody(BaseModel):
     stops: list[Stop] = Field(min_length=2, max_length=20)
     mode: Literal["drive", "walk", "cycle"] = "drive"
@@ -192,6 +222,8 @@ class RouteBody(BaseModel):
     avoid_ferries: bool = False
     # Keep the first and last stops; put the ones between in the best order.
     best_order: bool = False
+    # Roads you want to go along, as points tapped on them.
+    via: list[Via] = Field(default_factory=list, max_length=5)
 
 
 @router.post("/route")
@@ -208,8 +240,76 @@ async def route(body: RouteBody, db: AsyncSession = Depends(get_db), user: User 
         stops = [stops[i] for i in order]
     from . import planning
 
-    planned = await planning.plan(db, user, stops, body.mode, **options)
+    planned = await planning.plan(db, user, stops, body.mode, **options, via=[v.model_dump() for v in body.via])
     return {**planned, "order": order}
+
+
+@router.get("/nearby")
+async def near_you(
+    category: str = Query(max_length=20),
+    lat: float = Query(ge=-90, le=90),
+    lon: float = Query(ge=-180, le=180),
+    user: User = Depends(maps_user),
+) -> dict[str, Any]:
+    """Fuel, food and so on around a point, closest first."""
+    _ = user
+    if category not in nearby.CATEGORIES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown category.")
+    return {"results": await nearby.around(category, lat, lon)}
+
+
+class NearbyAlong(BaseModel):
+    category: str = Field(max_length=20)
+    shapes: list[str] = Field(min_length=1, max_length=25)  # what's left of the trip
+    here: Stop
+    to: Stop
+    mode: Literal["drive", "walk", "cycle"] = "drive"
+
+
+@router.post("/nearby/along")
+async def near_the_way(body: NearbyAlong, user: User = Depends(maps_user)) -> dict[str, Any]:
+    """What's on the way, each with how long stopping there adds."""
+    _ = user
+    if body.category not in nearby.CATEGORIES:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown category.")
+    line = [p for s in body.shapes for p in data.decode_polyline(s)]
+    rows = await nearby.along(body.category, line)
+    if not rows:
+        rows = await nearby.along(body.category, line, within_m=3000.0)
+    results = await nearby.with_detours(rows, body.here.model_dump(), body.to.model_dump(), body.mode) if rows else []
+    return {"results": results}
+
+
+@router.post("/assistant")
+async def assistant(
+    request: Request,
+    audio: UploadFile | None = File(default=None),
+    text: str | None = Form(default=None, max_length=500),
+    state: str = Form(default="{}", max_length=200_000),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(maps_user),
+) -> dict[str, Any]:
+    """What you said after "Hey Promptly": what to say back, and what to do."""
+    from app.chat.router import _enforce_send_quotas
+    from app.voice.service import TranscriptionError, transcribe_audio
+
+    from . import assistant as talk
+
+    await _enforce_send_quotas(request, user, db)
+    try:
+        trip = talk.DriveState.model_validate_json(state)
+    except ValueError:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Bad trip details.") from None
+    heard = text or ""
+    if audio is not None:
+        clip = await audio.read(ASSISTANT_MAX_AUDIO + 1)
+        if len(clip) > ASSISTANT_MAX_AUDIO:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="That recording is too long.")
+        try:
+            heard = (await transcribe_audio(data=clip, filename="voice.wav", content_type="audio/wav", timeout_s=20)).text
+        except TranscriptionError:
+            return {"heard": "", "say": "Voice isn't available on this server right now."}
+    return await talk.reply(db, user, heard, trip)
 
 
 class TrafficNow(BaseModel):

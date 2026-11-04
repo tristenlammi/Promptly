@@ -621,6 +621,8 @@ export function vcardSelfCheck(): string[] {
   // Round trip through the writer, both versions.
   const contact: Contact = {
     id: "x1", prefix: "", first: "Zoë", middle: "", last: "O'Neil; Jr", suffix: "", nickname: "Zo", pronouns: "they/them",
+    promptly_user_id: "",
+    promptly_username: "",
     phonetic_first: "", phonetic_last: "", company: "Acme, Inc.", title: "CTO", department: "", birthday: "--02-29",
     phones: [{ label: "mobile", value: "+44 7700 900123" }, { label: "Boat", value: "123" }],
     emails: [{ label: "work", value: "zo@acme.test" }], addresses: [], websites: [{ label: "LinkedIn", value: "https://linkedin.com/in/zo" }],
