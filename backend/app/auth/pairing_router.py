@@ -33,7 +33,7 @@ from app.database import get_db
 router = APIRouter()
 
 PAIR_SECONDS = 600
-SCOPES = ["upload", "dav:read"]
+SCOPES = ["upload", "dav:read", "maps"]
 _KEY = "promptly:pair:{}"
 _DONE = "promptly:pair-done:{}"  # what the waiting page reads once it's claimed
 
@@ -77,7 +77,7 @@ async def pair_start(body: PairStart, request: Request, user: User = Depends(get
         "url": url,
         "qr": qr_data_uri(url),
         "expires_at": int(time.time()) + PAIR_SECONDS,
-        "apk_url": f"{origin}/downloads/PromptlySync.apk",
+        "apk_url": f"{origin}/downloads/Promptly.apk",
     }
 
 

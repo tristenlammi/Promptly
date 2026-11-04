@@ -7,7 +7,7 @@ import { beginPress, snap15 } from "../drag";
 import { addDays, fmt, hourLabel, localZone, sameDay, shortTime, startOfDay, timeRange, zoneCity, zoneNote, zoneShort } from "../dates";
 import { layoutDay, layoutSpans, lookStyle, onDay, withTimes, type ViewEvent } from "../model";
 import { EventChip, openFrom, type OpenEvent } from "./EventChip";
-import { TaskMarker } from "./ExtrasChips";
+import { AppointmentMarker, TaskMarker } from "./ExtrasChips";
 
 const HOUR = 48;
 const GUTTER = 52;
@@ -506,7 +506,11 @@ function DayColumn({
         );
       })}
       {taskMarks.map(({ v, top }) => (
-        <TaskMarker key={v.ev.id} v={v} onOpen={onOpen} top={top} narrow={narrow} />
+        v.extra?.kind === "task" ? (
+          <TaskMarker key={v.ev.id} v={v} onOpen={onOpen} top={top} narrow={narrow} />
+        ) : (
+          <AppointmentMarker key={v.ev.id} v={v} onOpen={onOpen} top={top} narrow={narrow} />
+        )
       ))}
       {drag && ghost && (
         <div

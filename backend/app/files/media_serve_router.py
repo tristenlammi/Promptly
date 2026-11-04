@@ -94,6 +94,8 @@ async def serve(token: str, request: Request, db: AsyncSession = Depends(get_db)
     user = await db.get(User, claim.user_id)
     if user is None or user.disabled or int(user.token_version) != claim.token_version:
         raise _not_found()
+    if claim.rendition == "basemap":
+        return await _serve_basemap(request)
     if claim.rendition == "zip":
         return await _serve_zip(claim, request)
     if claim.rendition == "version":
@@ -144,6 +146,27 @@ async def serve(token: str, request: Request, db: AsyncSession = Depends(get_db)
     # No nginx in front (tests, a bare backend): Starlette streams it, Range
     # and HEAD included.
     return FileResponse(path=str(path), media_type=media_type, headers=headers)
+
+
+async def _serve_basemap(request: Request) -> Response:
+    """The map, in byte ranges: nginx serves it from the live build's folder."""
+    import asyncio
+
+    from app.maps import data
+
+    path = await asyncio.to_thread(data.basemap_path)
+    if path is None:
+        raise _not_found()
+    headers = {
+        "Cache-Control": "private, max-age=86400",
+        "X-Content-Type-Options": "nosniff",
+        "Cross-Origin-Resource-Policy": "same-origin",
+    }
+    build = data.current_build()
+    if build and request.headers.get("x-promptly-accel") == "1" and path.parent.name == build:
+        headers["X-Accel-Redirect"] = urllib.parse.quote(f"/_maps/{build}/basemap.pmtiles", safe="/")
+        return Response(status_code=status.HTTP_200_OK, media_type="application/octet-stream", headers=headers)
+    return FileResponse(path=str(path), media_type="application/octet-stream", headers=headers)
 
 
 async def _serve_version(db: AsyncSession, claim: media_urls.MediaClaim, user: User, request: Request) -> Response:

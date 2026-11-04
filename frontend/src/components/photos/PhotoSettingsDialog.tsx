@@ -1,8 +1,9 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderOpen } from "lucide-react";
+import { FolderOpen, Loader2, Smartphone } from "lucide-react";
 import { Link } from "react-router-dom";
 
+import { devicesApi } from "@/api/devices";
 import { photosApi } from "@/api/photos";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { Modal } from "@/components/shared/Modal";
@@ -46,6 +47,7 @@ export function PhotoSettingsDialog({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal open onClose={onClose} title="Photos settings" widthClass="max-w-md">
+      <PhoneBackup />
       <PhotosFolder />
       <label className="mt-4 flex items-start gap-3 border-t border-[var(--border)] pt-4">
         <input
@@ -68,6 +70,68 @@ export function PhotoSettingsDialog({ onClose }: { onClose: () => void }) {
       </label>
       <Captions />
     </Modal>
+  );
+}
+
+/** Back up a phone's camera roll into Photos — the Promptly Android app's
+ *  photo backup. On the phone: link it in one tap (a pairing code handed
+ *  straight to the app), or open its backup settings. Elsewhere: Files →
+ *  Devices, which shows the QR code to scan. */
+function PhoneBackup() {
+  const [busy, setBusy] = useState(false);
+  const android = /android/i.test(navigator.userAgent);
+  const link = async () => {
+    setBusy(true);
+    try {
+      const { code } = await devicesApi.pair();
+      location.href = `promptlysync://pair?server=${encodeURIComponent(location.origin)}&code=${encodeURIComponent(code)}`;
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't start linking this phone."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="mb-4 border-b border-[var(--border)] pb-4">
+      <h3 className="flex items-center gap-1.5 text-sm font-medium text-[var(--text)]">
+        <Smartphone className="h-4 w-4 text-[var(--text-muted)]" /> Phone backup
+      </h3>
+      {android ? (
+        <>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Backs up this phone's photos and videos to Photos in the background, with the Promptly app.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void link()}
+              disabled={busy}
+              className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-[var(--accent)] px-3 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              Set up backup on this phone
+            </button>
+            <a
+              href="promptlysync://pair"
+              className="inline-flex h-8 items-center rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)]"
+            >
+              Open backup settings
+            </a>
+          </div>
+          <p className="mt-2 text-[11px] text-[var(--text-muted)]">
+            Needs the Promptly app — <Link to="/apps/install" className="text-[var(--accent-text)] hover:underline">get it from Install apps</Link>.
+          </p>
+        </>
+      ) : (
+        <p className="mt-1 text-xs text-[var(--text-muted)]">
+          Back up a phone's photos and videos here automatically:{" "}
+          <Link to="/files/devices" className="text-[var(--accent-text)] hover:underline">
+            Files → Devices → Add device
+          </Link>
+          .
+        </p>
+      )}
+    </section>
   );
 }
 

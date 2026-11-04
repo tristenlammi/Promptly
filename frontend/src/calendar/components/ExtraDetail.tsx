@@ -25,6 +25,8 @@ export function extraEmoji(x: Extra): string {
       return "💳";
     case "trip":
       return x.trip.emoji || "✈️";
+    case "appointment":
+      return "🩺";
     case "holiday":
       return "🎉";
     case "birthday":
@@ -41,6 +43,7 @@ const SOURCE: Record<Exclude<Extra["kind"], "holiday" | "birthday">, string> = {
   meals: "Meal plan",
   bill: "Budget",
   trip: "Trips",
+  appointment: "Health",
 };
 
 /** Where an item lives in its own app (``null``: nowhere to open, a holiday). */
@@ -56,6 +59,8 @@ export function extraPath(x: Extra): string | null {
       return `/apps/budget/${x.bill.file_id}?tab=subscriptions`;
     case "trip":
       return `/apps/trip/${x.trip.file_id}`;
+    case "appointment":
+      return `/apps/health/${x.a.file_id}?tab=records`;
     case "birthday":
       return `/apps/contacts/${x.b.file_id}?c=${encodeURIComponent(x.b.contact_id)}`;
     case "holiday":
@@ -281,6 +286,12 @@ export function ExtraDetail({ v, onClose, onOpenEvent }: { v: ViewEvent; onClose
     case "trip": {
       const last = addDays(v.end, -1);
       sub = sameDay(v.start, last) ? day : `${fmt(v.start, { month: "short", day: "numeric" })} – ${shortDay(last)}`;
+      break;
+    }
+    case "appointment": {
+      const a = x.a;
+      sub = `${day}, ${timeLabel(v.start)}${a.done ? " · Done" : ""}`;
+      if (a.location) body = <p className="text-[var(--text-muted)]">{a.location}</p>;
       break;
     }
     case "holiday":

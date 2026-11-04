@@ -71,6 +71,15 @@ from app.rooms.models import (  # noqa: F401
     RoomSpace,
     RoomSpaceMember,
 )
+from app.maps.models import (  # noqa: F401
+    MapLiveLocation,
+    MapParked,
+    MapPlace,
+    MapPreferredRoute,
+    MapRecent,
+    MapShare,
+    MapTrackPoint,
+)
 from app.calendars.models import (  # noqa: F401
     CalAttendee,
     CalCalendar,

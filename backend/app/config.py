@@ -256,10 +256,21 @@ class Settings(BaseSettings):
     # Understanding photos (PH-2): the photos-ml service (started by
     # compose by default). Empty turns it off.
     PHOTOS_ML_URL: str = "http://photos-ml:8000"
-    # The Photos map's streets and place names from OpenFreeMap (free, no
-    # key; the browser fetches the map tiles of the area on screen). Off =
-    # countries only, unless the server has an offline basemap.
-    PHOTOS_ONLINE_MAP: bool = True
+    # P Maps: the local map services (the ``maps`` compose profile) and the
+    # folder of data they build. Empty URLs turn routing or search off.
+    MAPS_DATA_DIR: str = "/maps"
+    MAPS_VALHALLA_URL: str = "http://maps:8002"
+    MAPS_PHOTON_URL: str = "http://maps:2322"
+    # Live traffic: normally set in the admin panel. This is a fallback for
+    # servers configured by file. The cap keeps a month inside the free 200,000.
+    MAPS_TRAFFIC_KEY: str = ""
+    MAPS_TRAFFIC_DAILY_LIMIT: int = 6000
+    # The traffic layer is what casual browsing spends, so it has its own smaller
+    # share: looking around the map can't use up the traffic for your drive.
+    MAPS_TRAFFIC_LAYER_DAILY_LIMIT: int = 1500
+    # TomTom's free 2,500 incident and search requests a month, per day.
+    MAPS_INCIDENTS_DAILY_LIMIT: int = 80
+    MAPS_PLACES_DAILY_LIMIT: int = 80
     # Model the cloud path asks for when ``STT_BACKEND=openai``. ``whisper-1``
     # is the broadly-available default; ``gpt-4o-transcribe`` is newer/better
     # where the account has access.

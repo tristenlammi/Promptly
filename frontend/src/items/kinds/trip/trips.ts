@@ -16,7 +16,7 @@ import { uid } from "@/items/ui";
 import type { ItemHandle } from "@/items/useItem";
 
 import { dayDiff } from "./tz";
-import type { Trip, TripFile, TripRecord, TripSettings } from "./types";
+import type { TravelDocument, Trip, TripFile, TripRecord, TripSettings } from "./types";
 
 export const DEFAULT_SETTINGS: TripSettings = { home_currency: "AUD", passport_months: 6, onboarded: false, clock: "auto", distance: "km" };
 const FILE_PREFS = ["passport_months", "onboarded", "clock", "distance"] as const;
@@ -166,6 +166,22 @@ export function blankTrip(id: string, title: string, home: string): TripRecord {
     destinations: [], travellers: [], currencies: [], budget: { total_minor: null, lines: [] }, bookings: [], days: [],
     ideas: [], packing: [], expenses: [], settlements: [], documents: [], me_by_user: {},
   };
+}
+
+/** Your passport country and passport document from your most recent trip
+ *  in the file (latest start first) — a new trip starts with them instead of
+ *  asking again. Mirrors the backend's ``_my_last_passport``. */
+export function myLastPassport(f: TripFile, userId: string | null | undefined): { country: string; doc: TravelDocument | null } {
+  if (!userId) return { country: "", doc: null };
+  const sorted = [...(f.trips ?? [])].sort((a, b) => (b.start ?? "").localeCompare(a.start ?? ""));
+  for (const t of sorted) {
+    const tid = t.me_by_user?.[userId] && t.travellers.some((x) => x.id === t.me_by_user[userId]) ? t.me_by_user[userId] : t.travellers.find((x) => x.user_id === userId)?.id;
+    if (!tid) continue;
+    const doc = t.documents.find((d) => d.type === "passport" && d.traveller_id === tid) ?? null;
+    const country = (t.travellers.find((x) => x.id === tid)?.passport_country ?? "").trim() || (doc?.country ?? "").trim();
+    if (country || doc) return { country, doc };
+  }
+  return { country: "", doc: null };
 }
 
 const addDays = (day: string, n: number) => new Date(Date.parse(`${day}T00:00:00Z`) + n * 86_400_000).toISOString().slice(0, 10);

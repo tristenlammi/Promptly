@@ -793,26 +793,11 @@ async def save_as_new(
     return {"file_id": str(new_id), "filename": out.filename}
 
 
-def _basemap_path():  # noqa: ANN202 — Path | None
-    """An admin-provided offline basemap (a PMTiles extract), if any:
-    ``MAP_PMTILES`` or ``uploads/.maps/basemap.pmtiles``."""
-    import os
-    from pathlib import Path
-
-    from app.files import storage
-
-    raw = (os.environ.get("MAP_PMTILES") or "").strip()
-    path = Path(raw) if raw else storage.UPLOAD_ROOT / ".maps" / "basemap.pmtiles"
-    return path if path.is_file() else None
-
-
 @router.get("/map")
 async def photo_map(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
     """Where every located photo of yours was taken (the Photos map,
     PH-5): parallel arrays, compact for a big library; plus whether this
-    server has a detailed offline basemap."""
-    import asyncio
-
+    server has its own detailed map."""
     lat = func.coalesce(FileMedia.lat_override, FileMedia.lat)
     lon = func.coalesce(FileMedia.lon_override, FileMedia.lon)
     rows = (
@@ -824,28 +809,14 @@ async def photo_map(db: AsyncSession = Depends(get_db), user: User = Depends(get
             .order_by(PhotoAsset.taken_local.desc())
         )
     ).all()
-    basemap = await asyncio.to_thread(_basemap_path)
+    from app.maps.links import basemap_link
+
     return {
         "ids": [str(r[0]) for r in rows],
         "lat": [round(float(r[1]), 5) for r in rows],
         "lon": [round(float(r[2]), 5) for r in rows],
-        "basemap": "/api/photos/basemap.pmtiles" if basemap else None,
-        # No offline basemap: the browser may use OpenFreeMap's.
-        "online": bool(get_app_config().PHOTOS_ONLINE_MAP),
+        "basemap": await basemap_link(user),
     }
-
-
-@router.get("/basemap.pmtiles")
-async def basemap(user: User = Depends(get_current_user)):  # noqa: ANN201 — a FileResponse
-    """The offline basemap, read in ranges by the map (signed-in only)."""
-    import asyncio
-
-    from fastapi.responses import FileResponse
-
-    path = await asyncio.to_thread(_basemap_path)
-    if path is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No offline map on this server.")
-    return FileResponse(str(path), media_type="application/octet-stream", headers={"Cache-Control": "private, max-age=86400"})
 
 
 class ArchiveRequest(BaseModel):

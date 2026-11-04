@@ -253,6 +253,25 @@ const CalendarApp = lazyWithRetry(
   "CalendarApp"
 );
 
+const MapsApp = lazyWithRetry(
+  () => import("@/maps/MapsApp").then((m) => ({ default: m.MapsApp })),
+  "MapsApp"
+);
+
+/** Maps fills the screen on a phone and as an installed app; on a desktop
+ *  browser it sits inside Promptly's layout. */
+function MapsGate() {
+  const isMobile = useIsMobile();
+  if (isMobile || launchedAppKey() === "maps") {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <MapsApp />
+      </Suspense>
+    );
+  }
+  return <AppLayout />;
+}
+
 /** Calendar sits inside Promptly's layout (desktop and phone browsers);
  *  only the installed Calendar app shows it on its own. */
 function CalendarGate() {
@@ -644,6 +663,10 @@ export default function App() {
       <Route path="/calendar" element={<CalendarGate />}>
         <Route index element={<CalendarApp embedded />} />
         <Route path="*" element={<CalendarApp embedded />} />
+      </Route>
+      <Route path="/maps" element={<MapsGate />}>
+        <Route index element={<MapsApp embedded />} />
+        <Route path="*" element={<MapsApp embedded />} />
       </Route>
       {/* The Android app download page (the "Add device" QR lands here). */}
       <Route

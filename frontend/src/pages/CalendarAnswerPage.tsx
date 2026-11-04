@@ -95,14 +95,7 @@ export function CalendarAnswerPage() {
               {inv.location && (
                 <p className="flex gap-2.5">
                   <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-                  <a
-                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(inv.location)}`}
-                    target="_blank"
-                    rel="noreferrer noopener"
-                    className="break-words text-[var(--accent)] hover:underline"
-                  >
-                    {inv.location}
-                  </a>
+                  <span className="break-words">{inv.location}</span>
                 </p>
               )}
               {inv.description && <p className="whitespace-pre-wrap break-words text-[var(--text-muted)]">{inv.description}</p>}

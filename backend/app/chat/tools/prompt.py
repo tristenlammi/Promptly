@@ -157,6 +157,8 @@ def build_tools_system_prompt(
             for app, tool in (
                 ("day/week overview", "my_day"),
                 ("calendar", "calendar_events"),
+                ("maps, directions and chargers", "maps_search/maps_directions/maps_chargers"),
+                ("where they've been (their timeline)", "timeline_day/timeline_visits"),
                 ("Tasks, Budget, Trips, Meal planner/recipes/groceries, Workouts, Habits, Journal, Contacts", "list_my_items → read_item/use_item"),
                 ("people", "find_person"),
                 ("Rooms", "read_room/post_to_room"),

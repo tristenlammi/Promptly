@@ -56,6 +56,13 @@ export function useDrivePwaManifest(): void {
       setAppleMobileTitle("Promptly Rooms");
       return;
     }
+    if (location.pathname === "/maps" || location.pathname.startsWith("/maps/")) {
+      // P Maps: its own app, scope ``/maps/``.
+      setManifestHref("/maps.webmanifest");
+      setAppleTouchIconHref("/item-icons/maps-apple-180.png");
+      setAppleMobileTitle("P Maps");
+      return;
+    }
     const onCalendar =
       location.pathname === "/calendar" || location.pathname.startsWith("/calendar/");
     if (onCalendar) {

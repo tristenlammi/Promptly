@@ -662,6 +662,13 @@ app.include_router(entity_links_router, prefix="/api/connections", tags=["links"
 from app.trash.router import router as trash_router  # noqa: E402
 
 app.include_router(trash_router, prefix="/api/trash", tags=["trash"])
+# P Maps: search, routes, saved places (app/maps).
+from app.maps.router import router as maps_router  # noqa: E402
+
+app.include_router(maps_router, prefix="/api/maps", tags=["maps"])
+from app.maps.timeline import router as maps_timeline_router  # noqa: E402
+
+app.include_router(maps_timeline_router, prefix="/api/maps", tags=["maps"])
 # Calendar: events shared per event or via group calendars (app/calendars).
 from app.calendars.router import public_router as calendar_feed_router  # noqa: E402
 from app.calendars.router import router as calendar_router  # noqa: E402

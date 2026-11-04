@@ -214,6 +214,8 @@ export interface AppSettingsPatch {
   oidc_issuer?: string | null;
   oidc_client_id?: string | null;
   oidc_client_secret?: string;
+  /** P Maps live traffic. "" clears it; omitted keeps it. */
+  maps_traffic_key?: string;
   oidc_button_label?: string | null;
   oidc_scopes?: string | null;
   oidc_trust_unverified_email?: boolean;

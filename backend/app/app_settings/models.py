@@ -49,6 +49,8 @@ class AppSettings(Base):
     smtp_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Fernet-encrypted at rest. NULL when no SMTP server is configured.
     smtp_password_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # P Maps' live traffic key (TomTom), Fernet-encrypted. NULL: no traffic.
+    maps_traffic_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     smtp_use_tls: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )

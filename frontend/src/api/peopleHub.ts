@@ -87,7 +87,9 @@ export interface PickerPerson {
   name: string;
   label: string | null;
   face: string | null;
-  contact: { file_id: string; contact_id: string } | null;
+  /** With ``details`` (item apps' person fields): the first phone / email /
+   *  address on your own contact card ("" when it has none). */
+  contact: { file_id: string; contact_id: string; phone?: string; email?: string; address?: string; company?: string } | null;
   photo_person_id: string | null;
 }
 
@@ -108,8 +110,8 @@ export const peopleHubApi = {
   async get(ref: PersonRef): Promise<PersonPage> {
     return (await apiClient.get<PersonPage>(`/people/${refPath(ref)}`)).data;
   },
-  async search(q: string): Promise<PickerPerson[]> {
-    const { data } = await apiClient.get<{ people: PickerPerson[] }>("/people/search", { params: { q } });
+  async search(q: string, opts: { details?: boolean } = {}): Promise<PickerPerson[]> {
+    const { data } = await apiClient.get<{ people: PickerPerson[] }>("/people/search", { params: { q, details: opts.details || undefined } });
     return data.people;
   },
 };

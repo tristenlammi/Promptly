@@ -79,6 +79,123 @@ export interface TodaySections {
   };
 }
 
+export interface TodayDose {
+  med_id: string;
+  name: string;
+  dose: string;
+  time: string;
+  state: "taken" | "late" | "skipped" | "due" | "upcoming";
+}
+
+/** One thing on the day's schedule, whichever app it lives in. */
+export interface TodayScheduleItem {
+  time: string;
+  end?: string | null;
+  kind: string;
+  title: string;
+  detail?: string;
+  url: string;
+  color?: string | null;
+  done: boolean;
+  due?: boolean;
+}
+
+/** Something that needs you now. */
+export interface TodayAttention {
+  kind: string;
+  level: "danger" | "warn" | "info";
+  title: string;
+  detail: string;
+  url: string;
+  /** A card on this page to scroll to, instead of leaving. */
+  anchor?: string;
+}
+
+export interface TodayComing {
+  date: string;
+  time: string | null;
+  kind: string;
+  title: string;
+  url: string;
+  color?: string | null;
+}
+
+export interface TodayHub {
+  health?: {
+    file_id: string;
+    url: string;
+    doses: TodayDose[];
+    doses_due: number;
+    doses_taken: number;
+    numbers: { metric: string; label: string; value: string | null; series?: (number | null)[] }[];
+    goals: { metric: string; label: string; today: string; target: string; pct: number; met: boolean; series: (number | null)[] }[];
+    /** Daily weights over the last 30 days, oldest first, and the change. */
+    weight_series: number[];
+    weight_change: string | null;
+    weight: string | null;
+    weight_day: string | null;
+    weight_unit: string;
+    appointments: { id: string; title: string; who: string; location: string; date: string; time: string }[];
+  };
+  nutrition?: {
+    file_id: string;
+    url: string;
+    kcal: number;
+    kcal_target: number | null;
+    /** The last 14 days, oldest first; null = nothing logged. */
+    kcal_series: (number | null)[];
+    protein_series: (number | null)[];
+    macros: { key: string; label: string; value: number; target: number | null }[];
+    water_ml: number;
+    water_target: number | null;
+    entries: number;
+    meals_left: string[];
+  };
+  budget?: {
+    file_id: string;
+    url: string;
+    label: string;
+    spent: string;
+    budgeted: string | null;
+    left: string | null;
+    over: boolean;
+    pct: number | null;
+    days_left: number;
+    projected_over: string | null;
+    bills: { name: string; date: string; amount: string }[];
+    overspent: { name: string; by: string }[];
+  };
+  maps?: {
+    next: { title: string; place: string; minutes: number; km: number; leave_by: string; leave_by_label: string; soon: boolean; url: string; traffic?: boolean; adds?: number; warning?: string | null } | null;
+    parked: { at: string; url: string } | null;
+  };
+  trip?: {
+    file_id: string;
+    url: string;
+    title: string;
+    emoji: string;
+    start: string | null;
+    end: string | null;
+    phase: "before" | "during";
+    days_to_go?: number;
+    day?: number;
+    of?: number;
+    next: { what: string; in: string }[];
+    packed: number;
+    packing_total: number;
+  };
+  study?: { file_id: string; url: string; due: number; new: number; review: number; done_today: number; streak: number; studied_today: boolean };
+  journal?: { file_id: string; url: string; wrote_today: boolean; words_today: number; mood: number | null; streak: number; total: number };
+  people?: {
+    file_id: string;
+    url: string;
+    dates: { name: string; kind: string; label: string; date: string; in_days: number; turns: number | null; url: string }[];
+    catchup: { name: string; days_since: number | null; overdue_days: number; url: string }[];
+    catchup_total: number;
+  };
+  automations?: { url: string; failed_24h: number; next: { id: string; title: string; at: string }[] };
+}
+
 export interface MorningSummary {
   on: boolean;
   time: string;
@@ -92,8 +209,13 @@ export interface TodayData {
   tz: string;
   now: string;
   greeting: string;
-  sections: TodaySections;
+  sections: TodaySections & TodayHub;
   morning: MorningSummary;
+  schedule: { items: TodayScheduleItem[]; all_day: { kind: string; title: string; url: string; color?: string | null; done?: boolean }[] };
+  attention: TodayAttention[];
+  coming: TodayComing[];
+  progress: { done: number; total: number; pct: number } | null;
+  discover: { kind: string; name: string; why: string }[];
 }
 
 export interface EverydaySearch {

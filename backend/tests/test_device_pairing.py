@@ -45,7 +45,7 @@ async def test_pair_start_gives_a_link_and_qr(client, user):
     p = await _start(client, user)
     assert p["url"] == f"{ORIGIN}/sync?code={p['code']}"
     assert p["qr"].startswith("data:image/")
-    assert p["apk_url"] == f"{ORIGIN}/downloads/PromptlySync.apk"
+    assert p["apk_url"] == f"{ORIGIN}/downloads/Promptly.apk"
     r = await client.get(f"/api/devices/pair/{p['code']}", headers=_auth(user))
     assert r.json() == {"state": "waiting"}
 
@@ -69,7 +69,7 @@ async def test_claim_makes_an_upload_password_once(client, db, user):
     got = r.json()
     assert got["username"] == user.username and got["device_name"] == "Pixel 9"
     row = await db.get(AppPassword, uuid.UUID(got["device_id"]))
-    assert set(row.scopes) == {"upload", "dav:read"}
+    assert set(row.scopes) == {"upload", "dav:read", "maps"}
     assert "dav:delete" not in row.scopes
 
     # The page sees it paired; the code doesn't work twice.

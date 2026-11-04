@@ -135,6 +135,7 @@ class Traveller(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     is_me: bool = False  # legacy: the file's creator ("me" is per viewer — see TripData.me_by_user)
     user_id: str = Field(default="", max_length=64)  # the Promptly account this traveller is, when known
+    contact_id: str = Field(default="", max_length=40)  # their card in the person's own Contacts, when picked from it
     age_group: AgeGroup = "adult"
     passport_country: str = Field(default="", max_length=60)
 

@@ -293,6 +293,14 @@ async def create_item(
         folder_id = (await app_folder(db, user, spec.name)).id
     ctx = make_context(db, user, None, spec)
     raw = data if data is not None else spec.template(ctx)
+    if data is None:
+        # A new Health / Macros / Workout starts with what the others know.
+        from app.items.body import prefill
+
+        raw = await prefill(db, user, kind, raw)
+        from app.items.shared import prefill as _shared_prefill
+
+        raw = await _shared_prefill(user, kind, raw)
     try:
         clean = spec.validate(raw)
     except ValidationError as e:
@@ -429,6 +437,7 @@ async def save_data(
         from app.trash.service import capture_item_removals
 
         await capture_item_removals(db, row, doc.kind, doc.data, clean, user.id if user is not None else None)
+    before = doc.data
     doc.data = clean
     doc.revision = (doc.revision or 0) + 1
     doc.updated_by = user.id if user is not None else doc.updated_by
@@ -448,6 +457,14 @@ async def save_data(
     from app.tags.items_sync import sync_file as _sync_tags
 
     await _sync_tags(db, row.id, row.user_id, doc.kind, doc.data)
+    # Health / Macros / Workout share the person's body details and weigh-ins.
+    from app.items.body import after_save as _body_after_save
+
+    await _body_after_save(db, user, row, doc.kind, before or {}, clean)
+    # …and food, currency and time format with the account and each other.
+    from app.items.shared import after_save as _shared_after_save
+
+    await _shared_after_save(db, user, row, doc.kind, before or {}, clean)
     return version
 
 

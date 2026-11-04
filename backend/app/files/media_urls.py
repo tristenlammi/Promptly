@@ -44,6 +44,7 @@ _VERSION = 1
 _INFO = b"promptly/media-url/v1"
 # A link lives 3–6 hours: issued for the current 3-hour window plus the next.
 WINDOW_SECONDS = 3 * 3600
+BASEMAP_WINDOW_SECONDS = 7 * 24 * 3600
 
 RENDITIONS = ("thumb", "preview", "poster", "video", "original")
 # A zip download (WP-7.6): the "file" is the zip job. A version of an
@@ -51,7 +52,7 @@ RENDITIONS = ("thumb", "preview", "poster", "video", "original")
 # export (WP-10.4): the "file" is the export, ``ver`` the part number. A face
 # or animal's crop (PH-3): the "file" is the face (or animal). An edited
 # photo's tile and preview (PH-7). New codes only ever go on the end.
-_CODE = {name: i + 1 for i, name in enumerate((*RENDITIONS, "zip", "version", "export", "face", "thumb_edit", "preview_edit"))}
+_CODE = {name: i + 1 for i, name in enumerate((*RENDITIONS, "zip", "version", "export", "face", "thumb_edit", "preview_edit", "basemap"))}
 _NAME = {v: k for k, v in _CODE.items()}
 # What each rendition is on disk under derived/<file_id>/.
 RENDITION_FILE = {
@@ -145,6 +146,17 @@ def sign(file_id: uuid.UUID, user_id: uuid.UUID, token_version: int, rendition: 
     return f"/m/{_b64(payload + mac)}"
 
 
+def sign_basemap(user_id: uuid.UUID, token_version: int, ver: int, *, now: float | None = None) -> str:
+    """A link to this server's map. A map stays open for days (and on the
+    phone's driving screen), so this one lives for a week. It names no file:
+    the map is the same for everyone signed in."""
+    now_s = time.time() if now is None else now
+    exp = (int(now_s) // BASEMAP_WINDOW_SECONDS + 2) * BASEMAP_WINDOW_SECONDS
+    payload = _PAYLOAD.pack(_VERSION, _CODE["basemap"], exp, uuid.UUID(int=0).bytes, user_id.bytes, int(token_version) & 0xFFFFFFFF, ver & 0xFFFFFFFF)
+    mac = hmac.new(_keys()[0], payload, hashlib.sha256).digest()[:16]
+    return f"/m/{_b64(payload + mac)}"
+
+
 def verify(token: str, *, now: float | None = None) -> MediaClaim | None:
     """The claim a token carries, or None if it's forged, mangled or
     expired. (Whether the user may still read the file is the caller's
@@ -167,6 +179,6 @@ def verify(token: str, *, now: float | None = None) -> MediaClaim | None:
 
 
 __all__ = [
-    "MediaClaim", "RENDITIONS", "RENDITION_FILE", "WINDOW_SECONDS", "expiry", "rendition_tag", "shown", "sign", "sign_shown", "verify",
+    "MediaClaim", "RENDITIONS", "RENDITION_FILE", "WINDOW_SECONDS", "expiry", "rendition_tag", "shown", "sign", "sign_basemap", "sign_shown", "verify",
     "version_tag",
 ]

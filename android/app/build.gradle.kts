@@ -20,10 +20,11 @@ android {
         // photo backup (this module, which grew out of PromptlySync — hence
         // the org.promptly.sync code namespace).
         applicationId = "org.promptly.app"
-        minSdk = 26
+        // 29: the car screen's navigation library needs it.
+        minSdk = 29
         targetSdk = 37
-        versionCode = 5
-        versionName = "1.0.0"
+        versionCode = 6
+        versionName = "1.1.0"
     }
 
     signingConfigs {
@@ -38,7 +39,14 @@ android {
     }
 
     buildTypes {
+        // The navigation engine is native code. Phones are arm64; x86_64 is only
+        // for the emulator, and would add a lot to the download.
+        debug {
+            ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+        }
         release {
+            // -PemulatorAbi: to try a release build on the emulator.
+            ndk { abiFilters += if (hasProperty("emulatorAbi")) listOf("arm64-v8a", "x86_64") else listOf("arm64-v8a") }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -49,6 +57,8 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // The navigation libraries use newer java.time on older phones.
+        isCoreLibraryDesugaringEnabled = true
     }
 
     buildFeatures {
@@ -70,4 +80,18 @@ dependencies {
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation(project(":suite"))
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+
+    // P Maps' driving screen and Android Auto (see the maps package). Android's
+    // own GPS: Ferrostar's google-play-services module is deliberately left out.
+    val ferrostar = "0.59.0"
+    implementation("com.stadiamaps.ferrostar:core:$ferrostar")
+    implementation("com.stadiamaps.ferrostar:ui-compose:$ferrostar")
+    implementation("com.stadiamaps.ferrostar:ui-formatters:$ferrostar")
+    implementation("com.stadiamaps.ferrostar:ui-maplibre:$ferrostar")
+    implementation("com.stadiamaps.ferrostar:car-app:$ferrostar")
+    implementation("com.stadiamaps.ferrostar:ui-maplibre-car-app:$ferrostar")
+    implementation("org.maplibre.compose:maplibre-compose-android:0.13.0")
+    implementation("androidx.car.app:app:1.7.0")
+    implementation("io.github.rallista:car-app-compose:0.0.2")
 }

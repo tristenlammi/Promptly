@@ -40,7 +40,6 @@ export interface PlacesData {
   gazetteer: boolean;
   attribution: string | null;
   basemap: string | null;
-  online: boolean;
 }
 
 export const placesApi = {

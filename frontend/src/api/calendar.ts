@@ -112,6 +112,8 @@ export interface CalendarPrefs {
   meals: boolean;
   bills: boolean;
   trips: boolean;
+  /** Appointments from my own Health app. */
+  appointments: boolean;
   holidays: boolean;
   /** ISO country code for public holidays ("" = not picked yet). */
   holiday_country: string;
@@ -189,6 +191,18 @@ export interface CalTrip {
   status: string;
 }
 
+/** An appointment from my own Health app (day / time in my time zone). */
+export interface CalAppointment {
+  file_id: string;
+  id: string;
+  day: string;
+  time: string;
+  title: string;
+  who: string;
+  location: string;
+  done: boolean;
+}
+
 export interface CalHoliday {
   day: string;
   name: string;
@@ -203,6 +217,7 @@ export interface CalExtras {
   meals: CalMeal[];
   bills: CalBill[];
   trips: CalTrip[];
+  appointments: CalAppointment[];
   holidays: CalHoliday[];
 }
 
@@ -234,7 +249,7 @@ export interface CalendarBootstrap {
   feed_token: string | null;
   prefs: CalendarPrefs;
   /** Which other apps this person has (so the Tasks / Birthdays toggles only show when useful). */
-  apps: { tasks: boolean; contacts: boolean; workout?: boolean; mealplan?: boolean; budget?: boolean; trip?: boolean };
+  apps: { tasks: boolean; contacts: boolean; workout?: boolean; mealplan?: boolean; budget?: boolean; trip?: boolean; health?: boolean };
 }
 
 export interface EventInput {

@@ -1,7 +1,7 @@
 {
   "name": "promptly-frontend",
   "private": true,
-  "version": "0.19.0",
+  "version": "0.20.0",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -109,6 +109,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
+    "@protomaps/basemaps": "5.7.2",
     "@types/dompurify": "^3.0.5",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^20.14.12",

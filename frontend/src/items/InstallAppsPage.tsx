@@ -84,7 +84,7 @@ function AndroidAppCard({ kinds }: { kinds: string[] }) {
   if (!apk) return null;
   // The phone pre-ticks these in its app picker: the built-in apps plus every
   // app you've added here.
-  const apps = ["photos", "rooms", "calendar", ...kinds].join(",");
+  const apps = ["photos", "rooms", "calendar", "maps", ...kinds].join(",");
   const setup = `promptlyapp://setup?server=${encodeURIComponent(location.origin)}&apps=${encodeURIComponent(apps)}`;
   return (
     <section className="flex flex-col gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--surface)] p-4">

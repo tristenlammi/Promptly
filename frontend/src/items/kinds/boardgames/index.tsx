@@ -3,6 +3,8 @@ import { useState } from "react";
 
 import type { ItemModule, ItemViewProps } from "@/items/types";
 import { Chip, ItemButton, Page, TextInput, todayISO, uid } from "@/items/ui";
+import { PersonInput } from "@/items/ui/PersonInput";
+import { useAuthStore } from "@/store/authStore";
 
 import { PlayerBadge } from "./bits";
 import { GamesTab } from "./GamesTab";
@@ -36,14 +38,15 @@ const STARTERS = [
 ] as const;
 
 function Onboarding({ item }: ItemViewProps<Data>) {
-  const [me, setMe] = useState("");
+  // Your account name to start with — change it if friends know you otherwise.
+  const [me, setMe] = useState(() => useAuthStore.getState().user?.username?.trim().slice(0, 60) ?? "");
   const [friend, setFriend] = useState("");
   const [friends, setFriends] = useState<string[]>([]);
   const [picked, setPicked] = useState<string[]>(["catan", "ticket-to-ride", "codenames"]);
   const [busy, setBusy] = useState(false);
 
-  const addFriend = () => {
-    const parts = friend.split(",").map((s) => s.trim()).filter(Boolean);
+  const addFriend = (typed = friend) => {
+    const parts = typed.split(",").map((s) => s.trim()).filter(Boolean);
     if (!parts.length) return;
     setFriends((f) => [...f, ...parts.filter((p) => !f.some((x) => x.toLowerCase() === p.toLowerCase()))].slice(0, 20));
     setFriend("");
@@ -87,8 +90,16 @@ function Onboarding({ item }: ItemViewProps<Data>) {
       <section className="flex flex-col gap-2">
         <h2 className="text-sm font-semibold text-[var(--text)]">Who do you play with?</h2>
         <div className="flex gap-2">
-          <TextInput value={friend} onChange={(e) => setFriend(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addFriend()} placeholder="Sam, Jo, Priya…" aria-label="Friend's name" />
-          <ItemButton onClick={addFriend} disabled={!friend.trim()} icon={<Plus className="h-4 w-4" />}>
+          <PersonInput
+            value={friend}
+            onChange={setFriend}
+            onPick={(p) => addFriend(p.name.slice(0, 60))}
+            onEnter={() => addFriend()}
+            excludeNames={[me, ...friends]}
+            placeholder="Sam, Jo, Priya…"
+            aria-label="Friend's name"
+          />
+          <ItemButton onClick={() => addFriend()} disabled={!friend.trim()} icon={<Plus className="h-4 w-4" />}>
             Add
           </ItemButton>
         </div>

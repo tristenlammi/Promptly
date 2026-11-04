@@ -14,6 +14,7 @@ APPS = [
     ("photos", "P Photos", "/photos", "pwa-photos-maskable-512.png"),
     ("rooms", "P Rooms", "/rooms/", "item-icons/rooms-maskable-512.png"),
     ("calendar", "P Calendar", "/calendar", "item-icons/calendar-maskable-512.png"),
+    ("maps", "P Maps", "/maps", "item-icons/maps-maskable-512.png"),
     ("contacts", "P Contacts", "/app/open/contacts", "item-icons/contacts-maskable-512.png"),
     ("budget", "P Budget", "/app/open/budget", "item-icons/budget-maskable-512.png"),
     ("habits", "P Habits", "/app/open/habits", "item-icons/habits-maskable-512.png"),

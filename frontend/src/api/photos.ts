@@ -224,7 +224,7 @@ export const photosApi = {
     return data.kept;
   },
   /** Every located photo of yours, for the map (PH-5) — parallel arrays. */
-  async map(): Promise<{ ids: string[]; lat: number[]; lon: number[]; basemap: string | null; online?: boolean }> {
+  async map(): Promise<{ ids: string[]; lat: number[]; lon: number[]; basemap: string | null }> {
     const { data } = await apiClient.get("/photos/map", { timeout: 60_000 });
     return data;
   },

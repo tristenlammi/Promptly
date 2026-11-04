@@ -4,6 +4,7 @@ import {
   Gauge,
   Globe,
   KeyRound,
+  TrafficCone,
   Loader2,
   Mail,
   ShieldAlert,
@@ -15,6 +16,7 @@ import { Button } from "@/components/shared/Button";
 import { useAppSettings, useUpdateAppSettings } from "@/hooks/useAdminUsers";
 import { cn } from "@/utils/cn";
 import type { AppSettings } from "@/api/types";
+import { apiClient } from "@/api/client";
 import { adminApi, type AppSettingsPatch } from "@/api/admin";
 import { apiErrorMessage } from "@/utils/apiError";
 
@@ -75,6 +77,11 @@ export function AppSettingsPanel() {
         busy={update.isPending}
       />
       <SmtpCard
+        settings={data}
+        onSubmit={(patch) => update.mutateAsync(patch)}
+        busy={update.isPending}
+      />
+      <MapsTrafficCard
         settings={data}
         onSubmit={(patch) => update.mutateAsync(patch)}
         busy={update.isPending}
@@ -1090,6 +1097,107 @@ function SmtpCard({ settings, onSubmit, busy }: CardSubmit) {
 // ``SettingsCard`` is imported from ``./SettingsCard``).
 // --------------------------------------------------------------------
 // --------------------------------------------------------------------
+function MapsTrafficCard({ settings, onSubmit, busy }: CardSubmit) {
+  const [key, setKey] = useState("");
+  const [clearKey, setClearKey] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ ok: boolean; message: string; used_today?: number; daily_limit?: number } | null>(null);
+  const [testing, setTesting] = useState(false);
+  const stored = !!settings.maps_traffic_key_set;
+  const dirty = clearKey || key.trim().length > 0;
+
+  const save = async () => {
+    setError(null);
+    setResult(null);
+    try {
+      await onSubmit({ maps_traffic_key: clearKey ? "" : key.trim() });
+      setKey("");
+      setClearKey(false);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Couldn't save the key."));
+    }
+  };
+
+  const test = async () => {
+    setTesting(true);
+    setError(null);
+    try {
+      setResult((await apiClient.post<{ ok: boolean; message: string; used_today?: number; daily_limit?: number }>("/maps/traffic/test")).data);
+    } catch (err) {
+      setError(apiErrorMessage(err, "Couldn't test the key."));
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <SettingsCard
+      title="Live traffic (P Maps)"
+      icon={<TrafficCone className="h-4 w-4" />}
+      footer={
+        <>
+          {error && <span className="mr-auto text-xs text-red-600 dark:text-red-400">{error}</span>}
+          {!error && result && (
+            <span className={`mr-auto text-xs ${result.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+              {result.message}
+              {result.used_today !== undefined && result.daily_limit ? ` ${result.used_today.toLocaleString()} of ${result.daily_limit.toLocaleString()} requests used today.` : ""}
+            </span>
+          )}
+          {!error && !result && stored && (
+            <span className="mr-auto inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-3.5 w-3.5" /> Configured
+            </span>
+          )}
+          <button type="button" onClick={() => void test()} disabled={busy || testing || dirty} className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50">
+            {testing ? "Testing…" : "Test key"}
+          </button>
+          <button type="button" onClick={() => void save()} disabled={busy || !dirty} className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white hover:opacity-90 disabled:opacity-50">
+            Save
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-xs text-[var(--text-muted)]">
+          Adds &quot;traffic adds 6 min&quot;, traffic-aware arrival times, warnings about crashes and closures, and routing around closed roads to P Maps, anywhere TomTom covers. This server asks TomTom by map area, so TomTom sees this server and the areas, not who is driving or where to. The one exception is a place&apos;s More details button, which names that place. Without a key, P Maps works without any of this.
+        </p>
+        <p className="text-xs text-[var(--text-muted)]">
+          TomTom&apos;s free tier is licensed for evaluation only, and its terms need written permission for turn-by-turn and in-car use. Get that from TomTom before relying on this day to day.
+        </p>
+        <div>
+          <Field
+            label="TomTom API key"
+            type="password"
+            value={key}
+            onChange={(v) => {
+              setKey(v);
+              if (v) setClearKey(false);
+            }}
+            placeholder={stored ? "•••••••• (stored — leave blank to keep)" : "Paste the key from your TomTom account"}
+            autoComplete="new-password"
+            disabled={busy || clearKey}
+          />
+          {stored && (
+            <label className="mt-1.5 flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
+              <input
+                type="checkbox"
+                checked={clearKey}
+                onChange={(e) => {
+                  setClearKey(e.target.checked);
+                  if (e.target.checked) setKey("");
+                }}
+                className="h-3.5 w-3.5 accent-[var(--accent)]"
+                disabled={busy}
+              />
+              Remove the stored key
+            </label>
+          )}
+        </div>
+      </div>
+    </SettingsCard>
+  );
+}
+
 // SSO (OIDC) card — optional single sign-on for invited accounts.
 // --------------------------------------------------------------------
 

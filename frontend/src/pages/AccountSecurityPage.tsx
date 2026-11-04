@@ -21,6 +21,8 @@ import { ImportExportPanel } from "@/components/account/ImportExportPanel";
 import { MemoryPanel } from "@/components/account/MemoryPanel";
 import { NotificationsPanel } from "@/components/account/NotificationsPanel";
 import { PersonalContextPanel } from "@/components/account/PersonalContextPanel";
+import { BodyProfilePanel } from "@/components/account/BodyProfilePanel";
+import { UnitsPanel } from "@/components/account/UnitsPanel";
 import { ProfilePanel } from "@/components/account/ProfilePanel";
 import { SavedPromptsPanel } from "@/components/account/SavedPromptsPanel";
 import { SignOutEverywherePanel } from "@/components/account/SignOutEverywherePanel";
@@ -61,7 +63,13 @@ export function AccountSecurityPage() {
 
   const sections: Section[] = [
     { id: "profile", label: "Profile", icon: UserRound, node: <ProfilePanel /> },
-    { id: "about", label: "About you", icon: UserRound, node: <PersonalContextPanel /> },
+    { id: "about", label: "About you", icon: UserRound, node: (
+        <>
+          <PersonalContextPanel />
+          <UnitsPanel />
+          <BodyProfilePanel />
+        </>
+      ) },
     { id: "chat", label: "Chat defaults", icon: SlidersHorizontal, node: <ChatPreferencesPanel /> },
     { id: "memory", label: "Memory", icon: Brain, node: <MemoryPanel /> },
     { id: "data", label: "Import & export", icon: FolderInput, node: <ImportExportPanel /> },

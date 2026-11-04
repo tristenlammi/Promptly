@@ -62,6 +62,8 @@ export interface UserSettings {
   nav_apps?: string[];
   /** Pinned apps in the sidebar: simple line icons, or their colour icons. */
   nav_app_icons?: "line" | "color";
+  /** The desktop sidebar stays as you left it, everywhere. */
+  sidebar_collapsed?: boolean;
   /** Today cards the user hid, and the order the rest show in. */
   today_hidden?: string[];
   today_order?: string[];
@@ -91,6 +93,9 @@ export interface UserSettings {
    *  the ambient personal-context block and overrides locale inference.
    *  Absent / ``""`` = infer from location. */
   currency?: string;
+  /** Units and time format every app follows (Account → About you). */
+  units?: "metric" | "imperial";
+  clock?: "auto" | "12h" | "24h";
   /** Note-editor spell-check: draw live misspelling underlines. Absent = on. */
   spellcheck_enabled?: boolean;
   /** Note-editor spell-check: auto-replace a misspelled word with the top
@@ -128,6 +133,8 @@ export interface UserPreferencesUpdate {
   nav_apps?: string[];
   /** Pinned apps in the sidebar: simple line icons, or their colour icons. */
   nav_app_icons?: "line" | "color";
+  /** The desktop sidebar stays as you left it, everywhere. */
+  sidebar_collapsed?: boolean;
   /** Replace the hidden Today cards / their order. */
   today_hidden?: string[];
   today_order?: string[];
@@ -148,6 +155,9 @@ export interface UserPreferencesUpdate {
   /** Preferred display currency (ISO 4217). Pass an empty string to clear
    *  (fall back to locale inference). */
   currency?: string;
+  /** Units and time format every app follows (Account → About you). */
+  units?: "metric" | "imperial";
+  clock?: "auto" | "12h" | "24h";
   /** Note-editor spell-check: draw live misspelling underlines. */
   spellcheck_enabled?: boolean;
   /** Note-editor spell-check: auto-replace misspelled words on a boundary. */
@@ -296,6 +306,7 @@ export interface AppSettings {
   smtp_from_name: string | null;
   smtp_password_set: boolean;
   smtp_configured: boolean;
+  maps_traffic_key_set?: boolean;
   /**
    * SSO (OIDC). Off by default; when enabled, an invited user can sign in
    * via the configured identity provider (matched by verified email — no

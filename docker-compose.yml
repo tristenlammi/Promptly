@@ -77,6 +77,7 @@ services:
       # backend has checked the link.
       - ./nginx/promptly:/etc/nginx/promptly:ro
       - ${PROMPTLY_UPLOADS_DIR:-./data/uploads}:/srv/promptly-uploads:ro
+      - ./data/maps:/srv/promptly-maps:ro
     depends_on:
       - frontend
       - backend
@@ -205,6 +206,7 @@ services:
       # PROMPTLY_UPLOADS_DIR (WP-7.1): keep uploads somewhere else — an
       # array or NAS share — while Postgres stays on fast disk.
       - ${PROMPTLY_UPLOADS_DIR:-./data/uploads}:/app/uploads
+      - ./data/maps:/maps:ro
       - ./data/whiteboard:/app/whiteboard
       # Database dumps: before every migration, and nightly (keep 14).
       - ./data/backups:/app/backups
@@ -298,6 +300,7 @@ services:
     mem_limit: ${ARQ_MEM_LIMIT:-2g}
     volumes:
       - ${PROMPTLY_UPLOADS_DIR:-./data/uploads}:/app/uploads
+      - ./data/maps:/maps:ro
       - ./data/whiteboard:/app/whiteboard
       - ./data/backups:/app/backups
       - ${OFFSITE_BACKUP_DIR:-./data/offsite}:/app/offsite
@@ -832,6 +835,36 @@ services:
       # Long start period: the model download + load on a cold install
       # can take a couple of minutes on a slow connection.
       start_period: 180s
+    networks:
+      - promptly
+
+  maps:
+    # P Maps: routing, search and the map itself, all on this server. Add
+    # "maps" to COMPOSE_PROFILES to turn it on. The first start downloads
+    # Australia's map data and builds it (about an hour and 15 GB of disk while
+    # building, about 7 GB after), then rebuilds every MAPS_REFRESH_DAYS. Only
+    # downloads leave the server: searches, routes and locations never do.
+    build:
+      context: ./maps
+      dockerfile: Dockerfile
+    profiles: ["maps"]
+    container_name: Promptly-Maps
+    logging: *default-logging
+    cpus: ${MAPS_CPUS:-4}
+    mem_limit: ${MAPS_MEM_LIMIT:-8g}
+    environment:
+      - MAPS_REFRESH_DAYS=${MAPS_REFRESH_DAYS:-30}
+      - MAPS_PBF_URL=${MAPS_PBF_URL:-}
+      - MAPS_PHOTON_URL=${MAPS_PHOTON_URL:-}
+      - MAPS_BBOX=${MAPS_BBOX:-}
+      - MAPS_SEARCH_HEAP=${MAPS_SEARCH_HEAP:-1g}
+      - MAPS_ROUTE_THREADS=${MAPS_ROUTE_THREADS:-2}
+    volumes:
+      - ./data/maps:/data
+    expose:
+      - "8002"
+      - "2322"
+    restart: unless-stopped
     networks:
       - promptly
 

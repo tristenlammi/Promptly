@@ -16,6 +16,17 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- P Maps: the driving screen and the timeline read the phone's GPS. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Only if you turn the timeline on, and pick "Allow all the time". -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- The car's screen. -->
+    <uses-permission android:name="androidx.car.app.MAP_TEMPLATES" />
+    <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
+    <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
     <!-- Only for "Back up right away instead" — asked, never assumed. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
@@ -49,10 +60,70 @@
             </intent-filter>
         </activity>
 
+        <!-- P Maps. The web app opens these for what a web page can't do. -->
+        <activity
+            android:name=".maps.NavigationActivity"
+            android:label="P Maps"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="org.promptly.app.maps"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:theme="@android:style/Theme.Material.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptlymaps" android:host="navigate" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".maps.TimelineActivity"
+            android:label="Your timeline"
+            android:exported="true"
+            android:taskAffinity="org.promptly.app.maps">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptlymaps" android:host="timeline" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name="com.stadiamaps.ferrostar.core.service.FerrostarForegroundService"
+            android:foregroundServiceType="location" />
+        <service
+            android:name=".maps.TimelineService"
+            android:foregroundServiceType="location" />
+        <receiver android:name=".maps.TimelineBootReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Android Auto. -->
+        <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="2" />
+        <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
+        <service
+            android:name=".maps.PromptlyCarService"
+            android:label="P Maps"
+            android:icon="@mipmap/ic_promptly"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.NAVIGATION" />
+            </intent-filter>
+        </service>
+
         <!-- WorkManager's foreground service, for long backups. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"
             tools:node="merge" />
     </application>
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
 </manifest>

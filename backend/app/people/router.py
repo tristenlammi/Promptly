@@ -281,14 +281,39 @@ async def person_by_photos(person_id: uuid.UUID, db: AsyncSession = Depends(get_
     return await _page(db, viewer, await _by_photo_person(db, viewer, person_id))
 
 
-def _row(p: Person, viewer: User) -> dict:
+def _first(xs: list[dict] | None) -> str:
+    return next(((x.get("value") or "").strip() for x in xs or [] if (x.get("value") or "").strip()), "")
+
+
+def _address_line(c: dict) -> str:
+    for a in c.get("addresses") or []:
+        line = ", ".join(x for x in (a.get(k, "").strip() for k in ("street", "city", "region", "postcode", "country")) if x)
+        if line:
+            return line
+    return ""
+
+
+def _contact_ref(p: Person, details: bool) -> dict | None:
+    if p.contact is None:
+        return None
+    out: dict[str, Any] = {"file_id": str(p.file_id), "contact_id": p.contact["id"]}
+    if details:
+        # The viewer's own contact card (``directory`` reads only their files)
+        # — for item apps that fill in a phone / email / address from it.
+        c = p.contact
+        out.update(phone=_first(c.get("phones")), email=_first(c.get("emails")), address=_address_line(c),
+                   company=(c.get("company") or "").strip())
+    return out
+
+
+def _row(p: Person, viewer: User, details: bool = False) -> dict:
     return {
         "key": str(p.user.id) if p.user else (f"c:{p.file_id}:{p.contact['id']}" if p.contact else f"p:{p.person_id}"),
         "user": _user_out(p.user) if p.user else None,
         "name": p.name,
         "label": p.label,
         "face": _crop(p.cover, viewer),
-        "contact": {"file_id": str(p.file_id), "contact_id": p.contact["id"]} if p.contact else None,
+        "contact": _contact_ref(p, details),
         "photo_person_id": str(p.person_id) if p.person_id else None,
     }
 
@@ -325,14 +350,19 @@ async def _known_ids(db: AsyncSession, viewer: User) -> set[uuid.UUID]:
 
 @router.get("/search")
 async def search(
-    q: str = Query(default="", max_length=80), db: AsyncSession = Depends(get_db), viewer: User = Depends(get_current_user)
+    q: str = Query(default="", max_length=80),
+    details: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+    viewer: User = Depends(get_current_user),
 ) -> dict:
     """The people picker. Blank: suggestions — your contacts on Promptly
     (labelled ones first), then people you already work with. Typed: your
     contacts and Photos people by name or label, and (2+ letters) anyone on
     this Promptly by username or email. Emails never come back; contacts and
     faces without an account come last, marked not on Promptly
-    (``user`` null)."""
+    (``user`` null). ``details``: each row's ``contact`` also carries the
+    first phone, email and address on the viewer's own contact card (never
+    an account's email) — the item apps' person fields fill in from it."""
     term = q.strip().lower()
     people = await directory(db, viewer)
     seen: set[uuid.UUID] = set()
@@ -344,9 +374,9 @@ async def search(
             if p.user.id in seen or p.user.id == viewer.id:
                 return
             seen.add(p.user.id)
-            on.append(_row(p, viewer))
+            on.append(_row(p, viewer, details))
         elif term:
-            off.append(_row(p, viewer))
+            off.append(_row(p, viewer, details))
 
     mine = [p for p in people if (not term or _hits(p, term))]
     mine.sort(key=lambda p: (p.user is None, p.label is None, p.name.lower()))

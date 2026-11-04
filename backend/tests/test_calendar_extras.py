@@ -61,9 +61,9 @@ async def test_prefs_defaults_and_validation(client, people):  # noqa: F811
     boot = (await client.get("/api/calendar/bootstrap", headers=H(ann))).json()
     assert boot["prefs"] == {
         "tasks": True, "birthdays": True, "workouts": False, "meals": False, "bills": False, "trips": False,
-        "holidays": False, "holiday_country": "", "second_tz": "",
+        "appointments": False, "holidays": False, "holiday_country": "", "second_tz": "",
     }
-    assert set(boot["apps"]) == {"tasks", "contacts", "workout", "mealplan", "budget", "trip"}
+    assert set(boot["apps"]) == {"tasks", "contacts", "workout", "mealplan", "budget", "trip", "health"}
     r = await client.patch("/api/calendar/prefs", headers=H(ann), json={"holidays": True, "holiday_country": "au", "second_tz": "Asia/Tokyo"})
     assert r.status_code == 200, r.text
     assert r.json()["holiday_country"] == "AU" and r.json()["second_tz"] == "Asia/Tokyo" and r.json()["tasks"] is True

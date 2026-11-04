@@ -107,6 +107,7 @@ def _to_response(row: AppSettings) -> AppSettingsResponse:
         smtp_from_name=row.smtp_from_name,
         smtp_password_set=bool(row.smtp_password_encrypted),
         smtp_configured=row.smtp_configured,
+        maps_traffic_key_set=bool(row.maps_traffic_key_encrypted),
         oidc_enabled=row.oidc_enabled,
         oidc_issuer=row.oidc_issuer,
         oidc_client_id=row.oidc_client_id,
@@ -241,6 +242,16 @@ async def update_app_settings(
         else:
             row.smtp_password_encrypted = encrypt_secret(payload.smtp_password)
             diff["smtp_password"] = "<set>"
+
+    if "maps_traffic_key" in fields:
+        new_key = (payload.maps_traffic_key or "").strip()
+        if new_key:
+            row.maps_traffic_key_encrypted = encrypt_secret(new_key)
+            diff["maps_traffic_key"] = "<set>"
+        else:
+            if row.maps_traffic_key_encrypted is not None:
+                diff["maps_traffic_key"] = "<cleared>"
+            row.maps_traffic_key_encrypted = None
 
     if "smtp_use_tls" in fields and payload.smtp_use_tls is not None:
         if row.smtp_use_tls != payload.smtp_use_tls:

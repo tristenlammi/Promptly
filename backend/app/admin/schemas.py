@@ -158,6 +158,9 @@ class AppSettingsResponse(BaseModel):
     smtp_password_set: bool
     smtp_configured: bool
 
+    # ----- P Maps live traffic: the key is never echoed -----
+    maps_traffic_key_set: bool = False
+
     # ----- SSO (OIDC single sign-on) -----
     # Client secret is never echoed; ``oidc_client_secret_set`` flags whether
     # one is stored. ``oidc_configured`` = enabled AND all three of
@@ -265,6 +268,8 @@ class AppSettingsUpdate(BaseModel):
     smtp_port: int | None = Field(default=None, ge=1, le=65535)
     smtp_username: str | None = Field(default=None, max_length=255)
     smtp_password: str | None = Field(default=None, max_length=512)
+    # P Maps live traffic: same idiom (omitted = unchanged, "" = clear).
+    maps_traffic_key: str | None = Field(default=None, max_length=256)
     smtp_use_tls: bool | None = None
     smtp_from_address: EmailAddress | None = None
     smtp_from_name: str | None = Field(default=None, max_length=128)

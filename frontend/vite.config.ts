@@ -252,11 +252,11 @@ export default defineConfig({
           "**/item-icons/**",
           "**/excalidraw-assets/**",
           "**/excalidraw-*.js",
-          // The Photos map (~1 MB) and its offline country outlines: only for
-          // whoever opens the map.
+          // The map library (~1 MB) and its fonts, icons and country outlines:
+          // only for whoever opens a map.
           "**/maplibre-gl-*.js",
           "**/maplibre-gl-*.css",
-          "**/maps/**",
+          "**/map-assets/**",
           // Spell-check dictionaries: large (up to ~5.5 MB for pt) and only
           // loaded when the user turns spell-check on for a language. Keep them
           // out of the precache so first install stays lean (same rationale as

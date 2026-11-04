@@ -1,10 +1,12 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Bell,
   CalendarDays,
   Check,
+  Clock,
+  Plus,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -20,7 +22,7 @@ import {
   UtensilsCrossed,
 } from "lucide-react";
 
-import { todayApi, type TodayData, type TodayEvent, type TodayHabit, type TodayTask } from "@/api/today";
+import { todayApi, type TodayData, type TodayHabit, type TodayTask } from "@/api/today";
 import { itemsApi } from "@/items/api";
 import { workspacesApi } from "@/api/workspaces";
 import { TopNav } from "@/components/layout/TopNav";
@@ -29,6 +31,27 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { RecentStrip } from "@/components/today/RecentStrip";
+import {
+  AttentionStrip,
+  AutomationsCard,
+  BudgetCard,
+  ComingCard,
+  DiscoverCard,
+  GlanceRow,
+  HealthCard,
+  JournalCard,
+  MedsCard,
+  NutritionCard,
+  PeopleCard,
+  Ring,
+  ScheduleCard,
+  StudyCard,
+  TripCard,
+  hhmm,
+  nextUp,
+  MapsCard,
+} from "@/components/today/HubCards";
+import { useUIStore } from "@/store/uiStore";
 import { authApi } from "@/api/auth";
 import { useAuthStore } from "@/store/authStore";
 
@@ -42,10 +65,6 @@ import { useAuthStore } from "@/store/authStore";
 
 const QUERY_KEY = ["today"];
 
-function clock(iso: string): string {
-  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-}
-
 function longDate(day: string): string {
   return new Date(`${day}T12:00:00`).toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
 }
@@ -58,7 +77,8 @@ export function TodayPage() {
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: QUERY_KEY,
     queryFn: todayApi.get,
-    refetchInterval: 5 * 60_000,
+    // Often enough that a dose coming due shows without a reload.
+    refetchInterval: 60_000,
     refetchOnWindowFocus: true,
   });
 
@@ -66,7 +86,7 @@ export function TodayPage() {
     <>
       <TopNav title="Today" actions={<CustomiseToday />} />
       <div className="flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-5xl px-4 py-5 md:py-8">
+        <div className="mx-auto w-full max-w-7xl px-4 py-5 md:py-8">
           {isLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-10 w-64" />
@@ -95,18 +115,33 @@ export function TodayPage() {
 /** Every card Today can show, in the default order. ``recent`` sits at the
  *  top and ``morning`` at the bottom; the rest are the grid, in your order. */
 const SECTIONS: { key: string; label: string; grid: boolean }[] = [
+  { key: "attention", label: "Needs you", grid: false },
+  { key: "glance", label: "At a glance", grid: false },
   { key: "recent", label: "Recently opened", grid: false },
-  { key: "events", label: "Calendar", grid: true },
+  { key: "events", label: "Schedule", grid: true },
+  { key: "meds", label: "Medication", grid: true },
   { key: "tasks", label: "Tasks", grid: true },
   { key: "habits", label: "Habits", grid: true },
+  { key: "nutrition", label: "Food and water", grid: true },
+  { key: "health", label: "Body & Health", grid: true },
   { key: "workout", label: "Workout", grid: true },
-  { key: "meals", label: "Meals", grid: true },
+  { key: "meals", label: "Meal plan", grid: true },
+  { key: "coming", label: "Coming up", grid: true },
+  { key: "budget", label: "Budget and bills", grid: true },
+  { key: "trip", label: "Next trip", grid: true },
+  { key: "maps", label: "Getting there", grid: true },
+  { key: "study", label: "Flashcards", grid: true },
+  { key: "journal", label: "Journal", grid: true },
+  { key: "people", label: "People", grid: true },
   { key: "work", label: "Workspace cards and shifts", grid: true },
   { key: "rooms", label: "Unread rooms", grid: true },
+  { key: "automations", label: "Automations", grid: true },
   { key: "photos", label: "On this day", grid: true },
+  { key: "discover", label: "Suggested apps", grid: true },
   { key: "morning", label: "Morning summary", grid: false },
 ];
 const GRID_KEYS = SECTIONS.filter((x) => x.grid).map((x) => x.key);
+const TOP_SECTIONS = SECTIONS.filter((x) => !x.grid && x.key !== "morning");
 
 /** Your Today layout — hidden cards and the grid order — from your settings. */
 function useTodayLayout() {
@@ -132,9 +167,22 @@ function useTodayLayout() {
 function TodayBody({ data }: { data: TodayData }) {
   const s = data.sections;
   const summary = summaryLine(data);
+  const next = nextUp(data);
   const { hidden, order } = useTodayLayout();
   const cards: Record<string, ReactNode> = {
-    events: s.events && <EventsCard events={s.events.events} url={s.events.url} />,
+    events: (s.events || data.schedule.items.length > 0 || data.schedule.all_day.length > 0) && <ScheduleCard data={data} />,
+    meds: s.health && s.health.doses.length > 0 && <MedsCard health={s.health} />,
+    health: s.health && <HealthCard health={s.health} today={data.date} hideWater={!!s.nutrition} />,
+    nutrition: s.nutrition && <NutritionCard n={s.nutrition} />,
+    coming: data.coming.length > 0 && <ComingCard coming={data.coming} today={data.date} />,
+    budget: s.budget && <BudgetCard b={s.budget} today={data.date} />,
+    trip: s.trip && <TripCard t={s.trip} />,
+    maps: s.maps && <MapsCard m={s.maps} />,
+    study: s.study && <StudyCard s={s.study} />,
+    journal: s.journal && <JournalCard j={s.journal} />,
+    people: s.people && <PeopleCard p={s.people} today={data.date} />,
+    automations: s.automations && <AutomationsCard a={s.automations} />,
+    discover: data.discover.length > 0 && <DiscoverCard apps={data.discover} />,
     tasks: s.tasks && <TasksCard tasks={s.tasks} />,
     habits: s.habits && <HabitsCard habits={s.habits} />,
     workout: s.workout && (
@@ -209,19 +257,38 @@ function TodayBody({ data }: { data: TodayData }) {
   const anyData = Object.values(cards).some(Boolean);
   return (
     <>
-      <header className="mb-5 md:mb-7">
-        <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] md:text-3xl">{data.greeting}</h1>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">
-          {longDate(data.date)}
-          {summary ? ` · ${summary}` : ""}
-        </p>
+      <header className="mb-4 flex flex-wrap items-center gap-x-5 gap-y-3 md:mb-5">
+        {data.progress && (
+          <Ring pct={data.progress.pct} size={64} stroke={6}>
+            <span className="text-sm font-semibold tabular-nums text-[var(--text)]">{data.progress.pct}%</span>
+          </Ring>
+        )}
+        <div className="min-w-0 flex-1 basis-64">
+          <h1 className="text-2xl font-semibold tracking-tight text-[var(--text)] md:text-3xl">{data.greeting}</h1>
+          <p className="mt-1 text-sm text-[var(--text-muted)]">
+            {longDate(data.date)}
+            {summary ? ` · ${summary}` : ""}
+          </p>
+          {next && (
+            <Link to={next.url} className="mt-1 inline-flex max-w-full items-center gap-1.5 text-sm font-medium text-[var(--accent-text)] hover:underline">
+              <Clock className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{next.due ? "Due now" : `Next at ${hhmm(next.time)}`}: {next.title}</span>
+            </Link>
+          )}
+        </div>
+        <QuickAdd />
       </header>
 
+      {!hidden.has("attention") && <AttentionStrip items={data.attention} />}
+      {!hidden.has("glance") && <GlanceRow data={data} />}
       {!hidden.has("recent") && <RecentStrip />}
 
-      <div className="grid items-start gap-3 md:grid-cols-2 md:gap-4">
+      {/* Masonry: cards keep your order, top to bottom, and leave no gaps. */}
+      <div className="columns-1 gap-3 md:columns-2 md:gap-4 xl:columns-3">
         {shown.map((k) => (
-          <Fragment key={k}>{cards[k]}</Fragment>
+          <div key={k} id={`today-${k}`} className="mb-3 scroll-mt-4 break-inside-avoid md:mb-4">
+            {cards[k]}
+          </div>
         ))}
       </div>
 
@@ -242,7 +309,7 @@ function TodayBody({ data }: { data: TodayData }) {
 function CustomiseToday() {
   const { hidden, order, save } = useTodayLayout();
   const [open, setOpen] = useState(false);
-  const rows = [SECTIONS[0], ...order.map((k) => SECTIONS.find((x) => x.key === k)!), SECTIONS[SECTIONS.length - 1]];
+  const rows = [...TOP_SECTIONS, ...order.map((k) => SECTIONS.find((x) => x.key === k)!), SECTIONS[SECTIONS.length - 1]];
   const toggle = (key: string) => {
     const next = hidden.has(key) ? [...hidden].filter((k) => k !== key) : [...hidden, key];
     void save({ today_hidden: next });
@@ -269,7 +336,7 @@ function CustomiseToday() {
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 z-50 mt-2 w-72 rounded-card border border-[var(--border)] bg-[var(--surface)] p-2 shadow-lg">
+          <div className="absolute right-0 z-50 mt-2 max-h-[75vh] w-72 overflow-y-auto rounded-card border border-[var(--border)] bg-[var(--surface)] p-2 shadow-lg">
             <p className="px-2 pb-2 pt-1 text-xs text-[var(--text-muted)]">Choose what Today shows. A card only appears when there's something in it.</p>
             <ul>
               {rows.map((r) => {
@@ -311,6 +378,8 @@ function CustomiseToday() {
 function summaryLine(data: TodayData): string {
   const s = data.sections;
   const bits: string[] = [];
+  const doses = s.health?.doses_due ?? 0;
+  if (doses) bits.push(`${plural(doses, "dose")} due`);
   const ev = s.events?.events.length ?? 0;
   if (ev) bits.push(plural(ev, "event"));
   const due = (s.tasks?.today_count ?? 0) + (s.tasks?.overdue_count ?? 0);
@@ -336,28 +405,21 @@ function Card({ icon, title, to, open, children }: { icon: ReactNode; title: str
   );
 }
 
-function EventsCard({ events, url }: { events: TodayEvent[]; url: string }) {
+/** Add anything from here: the Ctrl+K box understands "new event lunch fri
+ *  1pm", "add task buy milk tomorrow", "log $40 fuel", "note ...". */
+function QuickAdd() {
+  const open = useUIStore((st) => st.openSearchPalette);
   return (
-    <Card icon={<CalendarDays className="h-4 w-4" />} title="Calendar" to={url} open="Calendar">
-      {events.length === 0 ? (
-        <p className="px-2 py-1 text-sm text-[var(--text-muted)]">Nothing on your calendar today.</p>
-      ) : (
-        <ul className="space-y-0.5">
-          {events.map((e) => (
-            <li key={e.id}>
-              <Link to={e.url} className="flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-[var(--hover)]">
-                <span className="h-8 w-1 shrink-0 rounded-full" style={{ background: e.color || "var(--accent)" }} />
-                <span className="w-16 shrink-0 text-xs tabular-nums text-[var(--text-muted)]">{e.all_day ? "All day" : clock(e.start)}</span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-[var(--text)]">{e.title}</span>
-                  {e.location && <span className="block truncate text-xs text-[var(--text-muted)]">{e.location}</span>}
-                </span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
+    <button
+      type="button"
+      onClick={open}
+      title="Try: new event lunch fri 1pm, add task buy milk tomorrow, log $40 fuel"
+      className="inline-flex h-10 shrink-0 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 text-sm text-[var(--text)] transition hover:bg-[var(--hover)]"
+    >
+      <Plus className="h-4 w-4 shrink-0 text-[var(--accent-text)]" />
+      Add anything
+      <kbd className="hidden rounded border border-[var(--border)] px-1 text-[10px] text-[var(--text-muted)] md:inline">Ctrl K</kbd>
+    </button>
   );
 }
 

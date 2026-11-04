@@ -141,7 +141,6 @@ export function PlacesPage() {
               <ClusterMap
                 points={points}
                 basemap={data.basemap}
-                online={data.online}
                 focus={focus}
                 label="Map of your places"
                 onPick={(pick) => {

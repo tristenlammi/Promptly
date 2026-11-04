@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.chat.tools.base import Tool
+from app.chat.tools.maps import MapsChargersTool, MapsDirectionsTool, MapsSearchTool, TimelineDayTool, TimelineVisitsTool
 from app.chat.tools.calendar import CalendarAddEventTool, CalendarChangeEventTool, CalendarEventsTool, CalendarFreeTimesTool
 from app.chat.tools.code_interpreter import CodeInterpreterTool
 from app.chat.tools.crossapp import FindPersonTool, MyDayTool, PostToRoomTool, ReadRoomTool, SearchAppsTool
@@ -108,6 +109,11 @@ REGISTRY: list[Tool] = [
     # Across the apps (category "apps", with the Tools toggle for everyone):
     # the day/week overview, people, and a search over the everyday apps.
     MyDayTool(),
+    MapsSearchTool(),
+    MapsDirectionsTool(),
+    MapsChargersTool(),
+    TimelineDayTool(),
+    TimelineVisitsTool(),
     FindPersonTool(),
     SearchAppsTool(),
     # Rooms (category "rooms"): for people in a space or conversation.

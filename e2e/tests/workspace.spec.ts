@@ -274,8 +274,9 @@ test("the workspace drive is the Files browser, with the workspace's own details
   await page.getByRole("button", { name: "Leave out of context" }).click();
   await expect(row).toContainText("not in context");
 
-  // A folder, opened from the list; the breadcrumb leads back.
-  await page.getByRole("button", { name: "New folder" }).click();
+  // A folder, opened from the list; the breadcrumb leads back. (The last one:
+  // the sidebar has a New folder button of its own, for chats.)
+  await page.getByRole("button", { name: "New folder" }).last().click();
   await page.getByLabel("Folder name").fill("Receipts");
   await page.getByRole("button", { name: "Create", exact: true }).click();
   await page.getByRole("button", { name: "Receipts", exact: true }).dblclick();

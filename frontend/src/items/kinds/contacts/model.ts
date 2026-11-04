@@ -1,3 +1,4 @@
+import { mapsSearchLink } from "@/maps/links";
 /*
  * Contacts — pure logic shared by the views: names, sort letters, dates
  * (next occurrence, age), the keep-in-touch rhythm, search, duplicates and
@@ -773,7 +774,7 @@ export function smsHref(v: string): string {
 
 export function mapsHref(a: { street: string; city: string; region: string; postcode: string; country: string }): string {
   const q = [a.street, a.city, a.region, a.postcode, a.country].filter(Boolean).join(", ");
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(q)}`;
+  return mapsSearchLink(q);
 }
 
 const HANDLE_SITES: Record<string, string> = {

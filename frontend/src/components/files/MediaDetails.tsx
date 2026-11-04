@@ -1,3 +1,4 @@
+import { mapsPinLink } from "@/maps/links";
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
@@ -179,7 +180,7 @@ export function MediaDetails({ fileId }: { fileId: string }) {
               </span>
             )}
             <a
-              href={`https://www.openstreetmap.org/?mlat=${info.location.lat}&mlon=${info.location.lon}#map=15/${info.location.lat}/${info.location.lon}`}
+              href={mapsPinLink(info.location.lat, info.location.lon, info.place?.label ?? "Photo")}
               target="_blank"
               rel="noreferrer noopener"
               className={info.place ? "text-xs text-[var(--accent-text)] hover:underline" : "text-[var(--accent-text)] hover:underline"}

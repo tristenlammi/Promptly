@@ -1,3 +1,4 @@
+import { mapsSearchLink } from "@/maps/links";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bell, BellOff, CalendarDays, Clock, EyeOff, Hash, Mail, MapPin, Pencil, Repeat as RepeatIcon, Send, Tag as TagIcon, Text, Trash2, Users, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
@@ -178,7 +179,7 @@ export function EventDetail({
       {ev.location && (
         <Row icon={<MapPin className="h-4 w-4" />}>
           <a
-            href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.location)}`}
+            href={mapsSearchLink(ev.location)}
             target="_blank"
             rel="noreferrer noopener"
             className="break-words text-[var(--item-accent)] hover:underline"

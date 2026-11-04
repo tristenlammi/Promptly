@@ -142,7 +142,7 @@ export function ExtraChip({
   }
   if (x.kind !== "birthday") {
     const label = extraLabel(x);
-    const done = (x.kind === "workout" && x.w.done) || (x.kind === "meals" && x.meals.every((m) => m.cooked));
+    const done = (x.kind === "workout" && x.w.done) || (x.kind === "appointment" && x.a.done) || (x.kind === "meals" && x.meals.every((m) => m.cooked));
     const bar = x.kind === "trip";
     return (
       <button
@@ -160,6 +160,7 @@ export function ExtraChip({
         style={{ background: `color-mix(in srgb, ${v.color} ${bar ? 22 : 12}%, var(--surface))`, borderColor: v.color }}
       >
         {!compact || bar ? <span aria-hidden className="shrink-0">{extraEmoji(x)}</span> : null}
+        {x.kind === "appointment" && !compact && <span className="shrink-0 tabular-nums text-[var(--text-muted)]">{shortTime(v.start)}</span>}
         <span className="truncate">{label}</span>
       </button>
     );
@@ -200,6 +201,31 @@ export function TaskMarker({ v, onOpen, top, narrow }: { v: ViewEvent; onOpen: O
         {!narrow && <span className="text-[var(--text-muted)]"> · {shortTime(v.start)}</span>}
       </button>
     </div>
+  );
+}
+
+/** A Health appointment in the hour grid: a slim marker at its time. */
+export function AppointmentMarker({ v, onOpen, top, narrow }: { v: ViewEvent; onOpen: OpenEvent; top: number; narrow: boolean }) {
+  const x = v.extra!;
+  const label = extraLabel(x);
+  const done = x.kind === "appointment" && x.a.done;
+  return (
+    <button
+      type="button"
+      onClick={(e: MouseEvent<HTMLElement>) => openFrom(e, v, onOpen)}
+      title={label}
+      className={cn(
+        "absolute left-[1px] right-[3px] z-[5] flex h-[18px] items-center gap-1 rounded-md border-l-2 pl-1 pr-1 text-left text-[11px] leading-none text-[var(--text)] shadow-[0_0_0_1px_var(--bg)]",
+        done && "opacity-60",
+      )}
+      style={{ top, borderColor: v.color, background: `color-mix(in srgb, ${v.color} 14%, var(--surface))` }}
+    >
+      <span aria-hidden className="shrink-0">{extraEmoji(x)}</span>
+      <span className="min-w-0 truncate">
+        {label}
+        {!narrow && <span className="text-[var(--text-muted)]"> · {shortTime(v.start)}</span>}
+      </span>
+    </button>
   );
 }
 

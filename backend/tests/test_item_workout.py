@@ -554,12 +554,13 @@ def test_planned_list_makes_room_by_dropping_old_sessions():
 
 
 def test_to_text_has_the_facts_newest_first():
+    soon = (date.today() + timedelta(days=1)).isoformat()
     d = _history(_fresh(bodyweight_kg=80, injuries="left knee — no deep lunges"))
-    run(d, "plan_week", {"sessions": [{"date": "2026-11-03", "name": "Upper A", "exercises": [{"exercise": "bench", "sets": 3, "reps": 5}]}]})
+    run(d, "plan_week", {"sessions": [{"date": soon, "name": "Upper A", "exercises": [{"exercise": "bench", "sets": 3, "reps": 5}]}]})
     run(d, "start_session", {"empty": True, "name": "Arms"})
     t = to_text(d)
     assert "left knee" in t and "bodyweight 80 kg" in t
-    assert "IN PROGRESS: Arms" in t and "2026-11-03 Upper A: Bench Press (Barbell) 3×5" in t
+    assert "IN PROGRESS: Arms" in t and f"{soon} Upper A: Bench Press (Barbell) 3×5" in t
     assert "Bench Press (Barbell) 3×5 @" not in t  # plans carry no load
     assert t.index("2026-10-29") < t.index("2026-10-26")  # newest first
     assert "80×10" in t and "RIR" not in t and "Best estimated 1RMs" in t

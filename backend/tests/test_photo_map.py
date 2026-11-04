@@ -19,7 +19,11 @@ T = datetime(2024, 3, 1, tzinfo=timezone.utc)
 @pytest.mark.asyncio
 async def test_map_points_and_basemap(client, db, user, root, fake_ml, monkeypatch, tmp_path):
     from app.auth.models import User
+    from app.config import get_settings
 
+    # No map built on this server yet.
+    monkeypatch.setattr(get_settings(), "MAPS_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("MAP_PMTILES", raising=False)
     here = await _scene(db, user, who=[], lat=-26.39, lon=153.09, when=T)
     hidden = await _scene(db, user, who=[], lat=40.4, lon=-3.7, when=T)
     await db.execute(text("UPDATE file_media SET location_hidden = true WHERE file_id = :f"), {"f": hidden})
@@ -35,12 +39,16 @@ async def test_map_points_and_basemap(client, db, user, root, fake_ml, monkeypat
     pts = {i: (la, lo) for i, la, lo in zip(got["ids"], got["lat"], got["lon"])}
     assert pts == {str(here): (-26.39, 153.09), str(moved): (51.5, -0.12)}
     assert got["basemap"] is None
-    assert (await client.get("/api/photos/basemap.pmtiles", headers=_auth(user))).status_code == 404
 
     tiles = tmp_path / "basemap.pmtiles"
     tiles.write_bytes(b"PMTiles" + bytes(range(256)) * 10)
     monkeypatch.setenv("MAP_PMTILES", str(tiles))
-    assert (await client.get("/api/photos/map", headers=_auth(user))).json()["basemap"] == "/api/photos/basemap.pmtiles"
-    r = await client.get("/api/photos/basemap.pmtiles", headers={**_auth(user), "Range": "bytes=0-6"})
+    link = (await client.get("/api/photos/map", headers=_auth(user))).json()["basemap"]
+    assert link.startswith("/m/")
+    r = await client.get(f"/api{link}", headers={"Range": "bytes=0-6"})
     assert r.status_code == 206 and r.content == b"PMTiles"
-    assert (await client.get("/api/photos/basemap.pmtiles")).status_code == 401
+    # A forged link gets nothing, and signing out everywhere ends it.
+    assert (await client.get(f"/api{link[:-3]}abc")).status_code == 404
+    await db.execute(text("UPDATE users SET token_version = token_version + 1 WHERE id = :u"), {"u": user.id})
+    await db.commit()
+    assert (await client.get(f"/api{link}")).status_code == 404

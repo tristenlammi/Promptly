@@ -96,7 +96,8 @@ test.describe("comments", () => {
 
     // Deselect, then the thread brings the selection back.
     await page.keyboard.press("Escape");
-    await page.mouse.click(box.x + box.width * 0.2, box.y + box.height * 0.7);
+    // Empty canvas: below the shape, and right of the shape-style panel on the left.
+    await page.mouse.click(box.x + box.width * 0.4, box.y + box.height * 0.85);
     await expect(panel.getByRole("button", { name: "Comment on the whiteboard" })).toBeVisible();
     await thread.click();
     await expect(panel.getByRole("button", { name: "Comment on the selection" })).toBeVisible();

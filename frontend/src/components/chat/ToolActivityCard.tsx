@@ -22,6 +22,10 @@ import {
   Wrench,
   X,
   Zap,
+  BatteryCharging,
+  Clock,
+  MapPin,
+  Navigation,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -145,6 +149,36 @@ const TOOL_INFO: Record<
     once: true,
     noun: (n) => (n === 1 ? "proposal" : "proposals"),
     icon: FolderInput,
+  },
+  maps_search: {
+    verb: "Looking at the map",
+    past: "looked at the map",
+    noun: (n) => (n === 1 ? "search" : "searches"),
+    icon: MapPin,
+  },
+  maps_directions: {
+    verb: "Finding the way",
+    past: "found the way",
+    noun: (n) => (n === 1 ? "route" : "routes"),
+    icon: Navigation,
+  },
+  maps_chargers: {
+    verb: "Looking for chargers",
+    past: "looked for chargers",
+    noun: (n) => (n === 1 ? "search" : "searches"),
+    icon: BatteryCharging,
+  },
+  timeline_day: {
+    verb: "Reading your timeline",
+    past: "read your timeline",
+    noun: (n) => (n === 1 ? "look" : "looks"),
+    icon: Clock,
+  },
+  timeline_visits: {
+    verb: "Checking your timeline",
+    past: "checked your timeline",
+    noun: (n) => (n === 1 ? "look" : "looks"),
+    icon: Clock,
   },
   search_photos: {
     verb: "Searching your photos",

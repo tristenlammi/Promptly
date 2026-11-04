@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef } from "react";
 import { Loader2 } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
@@ -10,6 +10,8 @@ import { UploadProgressPanel } from "@/components/files/UploadProgressPanel";
 import { UploadQueueWatcher } from "@/components/files/UploadQueueWatcher";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useComposerStore } from "@/store/composerStore";
+import { authApi } from "@/api/auth";
+import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
 
@@ -19,36 +21,17 @@ import { Sidebar } from "./Sidebar";
 
 export function AppLayout() {
   const isMobile = useIsMobile();
-  // Desktop-only collapse state. Untouched on mobile so the desktop UX
-  // stays exactly as it was before the mobile work.
-  const [collapsed, setCollapsed] = useState(false);
+  // Desktop-only: the sidebar stays as you left it, on every page and device
+  // (saved to your account), until you change it.
+  const collapsed = useAuthStore((s) => !!s.user?.settings?.sidebar_collapsed);
+  const patchSettings = useAuthStore((s) => s.patchSettings);
+  const toggleCollapsed = () => {
+    const next = !collapsed;
+    patchSettings({ sidebar_collapsed: next });
+    void authApi.updatePreferences({ sidebar_collapsed: next }).catch(() => patchSettings({ sidebar_collapsed: !next }));
+  };
   const location = useLocation();
   const navigate = useNavigate();
-
-  // Inside a workspace the page has its own rail — three columns of
-  // chrome is too many, so the app sidebar auto-collapses on entry and
-  // restores the user's previous state on exit (Batch 10). Manual
-  // toggles while inside are respected: we only touch the state on the
-  // enter/leave transitions.
-  // Files has its own rail too (WP-3.5, Part C §2.2): the app sidebar
-  // becomes an icon strip there the same way.
-  const inWorkspace =
-    /^\/workspaces\/[0-9a-fA-F-]{36}/.test(location.pathname) ||
-    /^\/files(\/|$)/.test(location.pathname);
-  const wasInWorkspace = useRef(false);
-  const preWorkspaceCollapsed = useRef(false);
-  const collapsedRef = useRef(collapsed);
-  collapsedRef.current = collapsed;
-  useEffect(() => {
-    if (isMobile) return;
-    if (inWorkspace && !wasInWorkspace.current) {
-      preWorkspaceCollapsed.current = collapsedRef.current;
-      setCollapsed(true);
-    } else if (!inWorkspace && wasInWorkspace.current) {
-      setCollapsed(preWorkspaceCollapsed.current);
-    }
-    wasInWorkspace.current = inWorkspace;
-  }, [inWorkspace, isMobile]);
 
   const mobileNavOpen = useUIStore((s) => s.mobileNavOpen);
   const closeMobileNav = useUIStore((s) => s.closeMobileNav);
@@ -182,7 +165,7 @@ export function AppLayout() {
       >
         <Sidebar
           collapsed={isMobile ? false : collapsed}
-          onToggle={isMobile ? closeMobileNav : () => setCollapsed((v) => !v)}
+          onToggle={isMobile ? closeMobileNav : toggleCollapsed}
         />
       </div>
 

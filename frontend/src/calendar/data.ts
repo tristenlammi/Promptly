@@ -92,11 +92,12 @@ function shownExtras(prefs: CalendarPrefs | undefined) {
     meals: !!prefs?.meals,
     bills: !!prefs?.bills,
     trips: !!prefs?.trips,
+    appointments: !!prefs?.appointments,
     holidays: !!prefs?.holidays && !!prefs?.holiday_country,
   };
 }
 
-/** Tasks due, birthdays, workouts, meals, bills, trips and holidays in
+/** Tasks due, birthdays, workouts, meals, bills, trips, appointments and holidays in
  *  [from, to) (local days), as my "Also show" switches allow. */
 export function useExtras(from: Date, to: Date, prefs: CalendarPrefs | undefined, enabled = true) {
   const start = ymd(from);
@@ -126,6 +127,7 @@ export function useExtras(from: Date, to: Date, prefs: CalendarPrefs | undefined
       meals: pick(s.meals, d.meals),
       bills: pick(s.bills, d.bills),
       trips: pick(s.trips, d.trips),
+      appointments: pick(s.appointments, d.appointments),
       holidays: pick(s.holidays, d.holidays),
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps

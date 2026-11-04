@@ -1,13 +1,14 @@
-import { Sparkles } from "lucide-react";
+import { Sparkles, X } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import type { ItemHandle } from "@/items/useItem";
 import { Field, ItemButton, Sheet, TextInput, Toggle, uid } from "@/items/ui";
+import { PersonInput } from "@/items/ui/PersonInput";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 import { blankDestination, COVER_COLORS } from "./TripSheet";
-import { blankTrip, fileSettings, MAX_TRIPS, selectTrip } from "./trips";
+import { blankTrip, fileSettings, MAX_TRIPS, myLastPassport, selectTrip } from "./trips";
 import type { Trip, TripFile, TripRecord } from "./types";
 import { CurrencySelect, FieldRow, ZoneInput } from "./ui";
 import { allZones, fallbackZone, validZone } from "./tz";
@@ -21,13 +22,25 @@ interface Form {
   tz: string;
   start: string;
   end: string;
+  /** What's typed in the "who" box (commas split it into people). */
   who: string;
+  /** Companions added so far — picked from Contacts / Promptly, or typed. */
+  people: Companion[];
   mine: boolean;
   home: string;
   emoji: string;
 }
 
-const empty = (home: string): Form => ({ title: "", where: "", country: "", tz: "", start: "", end: "", who: "", mine: true, home, emoji: "✈️" });
+interface Companion {
+  name: string;
+  user_id: string;
+  contact_id: string;
+}
+
+const empty = (home: string): Form => ({ title: "", where: "", country: "", tz: "", start: "", end: "", who: "", people: [], mine: true, home, emoji: "✈️" });
+
+const typedPeople = (who: string): Companion[] =>
+  who.split(/[,\n]/).map((s) => s.trim()).filter(Boolean).map((name) => ({ name: name.slice(0, 60), user_id: "", contact_id: "" }));
 
 /** Build the new trip outside the mutator (ids are made once), then add it. */
 function buildTrip(f: Form, file: TripFile, user: { id: string; username: string } | null): TripRecord {
@@ -39,14 +52,18 @@ function buildTrip(f: Form, file: TripFile, user: { id: string; username: string
   t.end = f.end || f.start || null;
   if (t.start && t.end && t.end < t.start) [t.start, t.end] = [t.end, t.start];
   if (f.where.trim()) t.destinations.push({ ...blankDestination(), name: f.where.trim(), country: f.country.trim(), tz: validZone(f.tz) ? f.tz : "", start: t.start, end: t.end });
-  if (f.mine || !f.who.trim()) {
-    const me = { id: uid("t-"), name: user?.username?.trim().slice(0, 60) || "Me", is_me: true, user_id: user?.id ?? "", age_group: "adult" as const, passport_country: "" };
+  const others = [...f.people, ...typedPeople(f.who)];
+  if (f.mine || !others.length) {
+    // Your passport from your last trip, so it isn't typed in again.
+    const last = myLastPassport(file, user?.id);
+    const me = { id: uid("t-"), name: user?.username?.trim().slice(0, 60) || "Me", is_me: true, user_id: user?.id ?? "", contact_id: "", age_group: "adult" as const, passport_country: last.country.slice(0, 60) };
     t.travellers.push(me);
     if (user?.id) t.me_by_user[user.id] = me.id;
+    if (last.doc) t.documents.push({ ...structuredClone(last.doc), id: uid("doc-"), traveller_id: me.id, remind_on: null });
   }
-  for (const n of f.who.split(/[,\n]/).map((s) => s.trim()).filter(Boolean).slice(0, 19)) {
-    if (!t.travellers.some((x) => x.name.toLowerCase() === n.toLowerCase()))
-      t.travellers.push({ id: uid("t-"), name: n.slice(0, 60), is_me: false, user_id: "", age_group: "adult", passport_country: "" });
+  for (const c of others.slice(0, 19)) {
+    if (t.travellers.some((x) => x.name.toLowerCase() === c.name.toLowerCase() || (c.user_id && x.user_id === c.user_id))) continue;
+    t.travellers.push({ id: uid("t-"), name: c.name, is_me: false, user_id: c.user_id, contact_id: c.contact_id, age_group: "adult", passport_country: "" });
   }
   return t;
 }
@@ -71,6 +88,14 @@ function zoneForCity(city: string): string {
 
 function NewTripFields({ f, set }: { f: Form; set: <K extends keyof Form>(k: K, v: Form[K]) => void }) {
   const pseudo = { settings: { home_currency: f.home }, currencies: [] } as unknown as Trip;
+  const addPeople = (more: Companion[]) => {
+    const next = [...f.people];
+    for (const c of more) {
+      if (!next.some((x) => x.name.toLowerCase() === c.name.toLowerCase() || (c.user_id && x.user_id === c.user_id))) next.push(c);
+    }
+    set("people", next.slice(0, 19));
+    set("who", "");
+  };
   return (
     <div className="flex flex-col gap-4">
       <Field label="Where are you going?">
@@ -116,8 +141,39 @@ function NewTripFields({ f, set }: { f: Form; set: <K extends keyof Form>(k: K, 
       <Field label="Its time zone" hint={`So bookings show the right local times. You're in ${fallbackZone()}.`}>
         <ZoneInput value={f.tz} onChange={(v) => set("tz", v)} />
       </Field>
-      <Field label="Who else is coming?" hint="Names, separated by commas">
-        <TextInput placeholder="Sam, Kai" value={f.who} onChange={(e) => set("who", e.target.value)} />
+      <Field label="Who else is coming?" hint="Pick from your contacts, or type a name and press Enter">
+        <div className="flex flex-col gap-2">
+          {f.people.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {f.people.map((c, i) => (
+                <span key={`${c.name}-${i}`} className="inline-flex h-8 items-center gap-1 rounded-full border border-[var(--border)] pl-3 pr-1 text-xs font-medium text-[var(--text)]">
+                  {c.name}
+                  <button
+                    type="button"
+                    aria-label={`Remove ${c.name}`}
+                    onClick={() => set("people", f.people.filter((_, n) => n !== i))}
+                    className="flex h-6 w-6 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)]"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <PersonInput
+            placeholder={f.people.length ? "Anyone else?" : "Sam, Kai"}
+            aria-label="Who else is coming?"
+            value={f.who}
+            excludeUserIds={f.people.map((c) => c.user_id).filter(Boolean)}
+            excludeNames={f.people.map((c) => c.name)}
+            onChange={(v) => {
+              if (/[,\n]$/.test(v)) addPeople(typedPeople(v));
+              else set("who", v);
+            }}
+            onPick={(p) => addPeople([{ name: p.name.slice(0, 60), user_id: p.user_id, contact_id: p.contact_id }])}
+            onEnter={() => addPeople(typedPeople(f.who))}
+          />
+        </div>
       </Field>
       <div className="flex min-h-[44px] items-center justify-between gap-3">
         <span className="text-sm text-[var(--text)]">I'm going too</span>

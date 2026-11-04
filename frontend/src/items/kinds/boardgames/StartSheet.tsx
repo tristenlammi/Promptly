@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { ItemHandle } from "@/items/useItem";
 import { Chip, EmptyState, Field, ItemButton, Select, Sheet, TextInput, Toggle, todayISO, uid } from "@/items/ui";
+import { PersonInput } from "@/items/ui/PersonInput";
 import { cn } from "@/utils/cn";
 
 import { FavStar, GameTile, PlayerBadge, gameMeta, makePlay } from "./bits";
@@ -105,8 +106,8 @@ export function StartSheet({
       return n;
     });
 
-  const addNew = () => {
-    const name = newName.trim();
+  const addNew = (typed = newName) => {
+    const name = typed.trim();
     if (!name) return;
     const existing = data.players.find((p) => p.name.toLowerCase() === name.toLowerCase());
     if (existing) {
@@ -242,8 +243,8 @@ export function StartSheet({
         </div>
       </Field>
       <div className="flex gap-2">
-        <TextInput value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addNew()} placeholder="Add someone new" aria-label="New player name" />
-        <ItemButton onClick={addNew} disabled={!newName.trim()} icon={<Plus className="h-4 w-4" />}>
+        <PersonInput value={newName} onChange={setNewName} onPick={(p) => addNew(p.name)} onEnter={() => addNew()} placeholder="Add someone new" aria-label="New player name" />
+        <ItemButton onClick={() => addNew()} disabled={!newName.trim()} icon={<Plus className="h-4 w-4" />}>
           Add
         </ItemButton>
       </div>

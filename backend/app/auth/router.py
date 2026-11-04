@@ -1410,6 +1410,14 @@ async def update_preferences(
 
         await refile_zoneless(db, current_user.id, merged.get("timezone"), before_tz)
 
+    # Currency, units and time format are shared with the apps (Budget,
+    # Trip, Health, Macros, Meal Plan…): write the change into each.
+    shared_keys = {"currency", "units", "clock"} & {k for k, v in updates.items() if v not in (None, "")}
+    if shared_keys:
+        from app.items.shared import account_changed
+
+        await account_changed(db, current_user, shared_keys)
+
     await db.commit()
     await db.refresh(current_user)
     return UserResponse.model_validate(current_user)

@@ -160,6 +160,7 @@ function ExtraRow({ v, onOpen }: { v: ViewEvent; onOpen: OpenEvent }) {
     if (x.kind === "workout") sub = x.w.kind === "day" ? "Training day · from Workout" : x.w.time ? `${shortTime(v.start)} · Workout` : "Workout";
     else if (x.kind === "meals") sub = "Meal plan";
     else if (x.kind === "bill") sub = `${x.bill.kind === "bill" ? "Bill" : "Subscription"} due · from Budget`;
+    else if (x.kind === "appointment") sub = `${shortTime(v.start)} · Health appointment${x.a.location ? ` · ${x.a.location}` : ""}`;
     else if (x.kind === "trip") sub = `${fmt(v.start, { month: "short", day: "numeric" })} – ${fmt(addDays(v.end, -1), { month: "short", day: "numeric" })} · Trip`;
     else sub = "Public holiday";
     return (

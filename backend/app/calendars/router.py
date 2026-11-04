@@ -79,13 +79,13 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
         "feed_token": feed.token if feed else None,
         "prefs": _prefs(user),
         # Which other apps can show on the calendar ("Also show").
-        "apps": {k: k in kinds for k in ("tasks", "contacts", "workout", "mealplan", "budget", "trip")},
+        "apps": {k: k in kinds for k in ("tasks", "contacts", "workout", "mealplan", "budget", "trip", "health")},
     }
 
 
 # What shows on the calendar besides events ("Also show"). Holidays stay off
 # until a country is picked; ``second_tz`` adds a second time column.
-_PREF_DEFAULTS: dict[str, bool] = {"tasks": True, "birthdays": True, "workouts": False, "meals": False, "bills": False, "trips": False, "holidays": False}
+_PREF_DEFAULTS: dict[str, bool] = {"tasks": True, "birthdays": True, "workouts": False, "meals": False, "bills": False, "trips": False, "appointments": False, "holidays": False}
 
 
 def _prefs(user: User) -> dict[str, Any]:
@@ -103,6 +103,7 @@ class PrefsIn(BaseModel):
     meals: bool | None = None
     bills: bool | None = None
     trips: bool | None = None
+    appointments: bool | None = None
     holidays: bool | None = None
     holiday_country: str | None = Field(default=None, max_length=8)  # "" = none
     second_tz: str | None = Field(default=None, max_length=64)  # "" = off
@@ -111,7 +112,8 @@ class PrefsIn(BaseModel):
 @router.patch("/prefs")
 async def set_prefs(body: PrefsIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     """What else shows on the calendar (tasks, birthdays, workouts, meals,
-    bills, trips, holidays and their country), and a second time zone."""
+    bills, trips, Health appointments, holidays and their country), and a
+    second time zone."""
     patch = body.model_dump(exclude_none=True)
     if patch.get("holiday_country"):
         patch["holiday_country"] = patch["holiday_country"].upper()
@@ -594,7 +596,7 @@ async def extras_in(
     user: User = Depends(get_current_user),
 ) -> dict:
     """What else is on in a range of days (``YYYY-MM-DD``) — tasks due,
-    birthdays, workouts, meals, bills, trips and holidays — as your calendar
+    birthdays, workouts, meals, bills, trips, Health appointments and holidays — as your calendar
     settings allow (and only from apps you have)."""
     try:
         s, e = date.fromisoformat(start[:10]), date.fromisoformat(end[:10])
@@ -618,6 +620,7 @@ async def extras_in(
         "meals": await extras.meals_in(db, user, s, e) if on("meals", "mealplan") else [],
         "bills": await extras.bills_in(db, user, s, e) if on("bills", "budget") else [],
         "trips": await extras.trips_in(db, user, s, e) if on("trips", "trip") else [],
+        "appointments": await extras.appointments_in(db, user, s, e) if on("appointments", "health") else [],
         "holidays": extras.holidays_in(country, s, e) if on("holidays") and country else [],
     }
 

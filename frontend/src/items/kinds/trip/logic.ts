@@ -1,3 +1,5 @@
+import { mapsPinLink, mapsSearchLink } from "@/maps/links";
+
 /* Derived trip facts for the UI (mirrors backend logic.py where it matters:
  * money conversion, splits, settle-up, booking events, where you are each
  * day). Conflicts come from the server's ``conflicts`` action. */
@@ -482,7 +484,7 @@ export function packingProgress(t: Trip, travellerId?: string | null) {
 
 export function mapsUrl(q: { lat?: number | null; lng?: number | null; place?: string; address?: string; title?: string }): string | null {
   if (q.lat !== null && q.lat !== undefined && q.lng !== null && q.lng !== undefined)
-    return `https://www.google.com/maps/search/?api=1&query=${q.lat},${q.lng}`;
+    return mapsPinLink(q.lat, q.lng, q.place || q.title || "Pin");
   const text = [q.place || q.title, q.address].filter(Boolean).join(", ");
-  return text ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(text)}` : null;
+  return text ? mapsSearchLink(text) : null;
 }

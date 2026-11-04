@@ -20,6 +20,7 @@ import {
   Toggle,
   uid,
 } from "@/items/ui";
+import { PersonInput } from "@/items/ui/PersonInput";
 
 import { DeleteButton, ListInput, NumberInput, round } from "./common";
 import {
@@ -110,8 +111,16 @@ export function ProfileView({ item, ask }: ItemViewProps<HealthData>) {
           <Field label="Allergies" hint="Separate with commas">
             <ListInput value={p.allergies} onChange={(v) => !ro && setP({ allergies: v })} placeholder="Penicillin, peanuts" />
           </Field>
-          <Field label="Emergency contact" className="sm:col-span-2">
-            <TextInput disabled={ro} value={p.emergency_contact} maxLength={300} onChange={(e) => setP({ emergency_contact: e.target.value })} placeholder="Name · phone" />
+          <Field label="Emergency contact" className="sm:col-span-2" hint={ro ? undefined : "Type a name to pick from your Contacts"}>
+            <PersonInput
+              disabled={ro}
+              value={p.emergency_contact}
+              maxLength={300}
+              onChange={(v) => setP({ emergency_contact: v })}
+              // Kept as text ("Name · phone") — the contact just fills it in.
+              onPick={(c) => setP({ emergency_contact: [c.name, c.phone].filter(Boolean).join(" · ").slice(0, 300) })}
+              placeholder="Name · phone"
+            />
           </Field>
           <Field label="Emergency notes" className="sm:col-span-2" hint="What a paramedic should know. Not shared with chats.">
             <TextArea disabled={ro} value={p.emergency_notes} maxLength={2000} onChange={(e) => setP({ emergency_notes: e.target.value })} />
@@ -550,8 +559,26 @@ function ProviderSheet({ item, editing, onClose }: { item: H; editing: CareProvi
     >
       <div className="flex flex-col gap-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Name">
-            <TextInput autoFocus value={c.name} maxLength={120} onChange={(e) => set({ name: e.target.value })} placeholder="Dr Lee" />
+          <Field label="Name" hint="Type to pick from your Contacts">
+            <PersonInput
+              autoFocus
+              contactsOnly
+              value={c.name}
+              maxLength={120}
+              onChange={(v) => set({ name: v })}
+              // Fills the blanks from the contact card; what's stored stays plain text.
+              onPick={(x) =>
+                setC((cur) => ({
+                  ...cur,
+                  name: x.name.slice(0, 120),
+                  phone: cur.phone || x.phone.slice(0, 60),
+                  email: cur.email || x.email.slice(0, 160),
+                  clinic: cur.clinic || x.company.slice(0, 160),
+                  address: cur.address || x.address.slice(0, 300),
+                }))
+              }
+              placeholder="Dr Lee"
+            />
           </Field>
           <Field label="Role">
             <TextInput value={c.role} maxLength={80} onChange={(e) => set({ role: e.target.value })} placeholder="GP" />

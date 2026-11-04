@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-import type { CalBill, CalBirthday, CalEvent, CalExtras, CalHoliday, Calendar, CalMeal, CalTask, CalTrip, CalWorkout, Repeat, RsvpStatus } from "@/api/calendar";
+import type { CalAppointment, CalBill, CalBirthday, CalEvent, CalExtras, CalHoliday, Calendar, CalMeal, CalTask, CalTrip, CalWorkout, Repeat, RsvpStatus } from "@/api/calendar";
 
 import { addDays, DAY_MS, dayDiff, fmt, ordinal, parseYmd, sameDay, shortTime, startOfDay, timeLabel, WEEKDAYS_MON, weekdayIndexMon } from "./dates";
 
@@ -23,10 +23,11 @@ export type Extra =
   | { kind: "meals"; day: string; meals: CalMeal[] }
   | { kind: "bill"; bill: CalBill }
   | { kind: "trip"; trip: CalTrip }
+  | { kind: "appointment"; a: CalAppointment }
   | { kind: "holiday"; h: CalHoliday };
 
 /** The colours of the other apps on the calendar. */
-export const EXTRA_COLORS = { workout: "#E2725B", meals: "#4E9F5B", bill: "#D9902F", holiday: "#7C83A0" } as const;
+export const EXTRA_COLORS = { workout: "#E2725B", meals: "#4E9F5B", bill: "#D9902F", appointment: "#2F9E8F", holiday: "#7C83A0" } as const;
 
 /** An occurrence ready to draw: local Dates, ``end`` exclusive. */
 export interface ViewEvent {
@@ -120,9 +121,17 @@ export function extraLabel(x: Extra): string {
       return `${x.bill.name} · ${x.bill.amount}`;
     case "trip":
       return x.trip.title;
+    case "appointment":
+      return appointmentLabel(x.a);
     case "holiday":
       return x.h.name;
   }
+}
+
+/** "GP check-up · Dr Lee" / "Appointment". */
+export function appointmentLabel(a: CalAppointment): string {
+  const what = a.title || "Appointment";
+  return a.who ? `${what} · ${a.who}` : what;
 }
 
 export function slotLabel(slot: string): string {
@@ -132,7 +141,7 @@ export function slotLabel(slot: string): string {
 /** Every "Also show" item as drawable items: all-day ones in the all-day
  *  row, a timed task as a 30-minute marker, a trip as a bar over its days. */
 export function extrasToView(x: Partial<CalExtras>): ViewEvent[] {
-  const { tasks = [], birthdays = [], workouts = [], meals = [], bills = [], trips = [], holidays = [] } = x;
+  const { tasks = [], birthdays = [], workouts = [], meals = [], bills = [], trips = [], appointments = [], holidays = [] } = x;
   const out: ViewEvent[] = [];
   const allDay = (id: string, extra: Extra, day: string, color: string, last = day) => {
     const start = parseYmd(day);
@@ -149,6 +158,15 @@ export function extrasToView(x: Partial<CalExtras>): ViewEvent[] {
     const start = parseYmd(b.day);
     const id = `bday:${b.file_id}:${b.contact_id}:${b.kind}:${b.label}:${b.day}`;
     out.push({ ev: standIn(id, birthdayLabel(b), true, b.day, b.day), extra: { kind: "birthday", b }, start, end: addDays(start, 1), allDay: true, spanning: true, color: b.color || "#D9506A", look: "solid" });
+  }
+  // Appointments: a marker at their time (like a timed task), an hour long.
+  for (const a of appointments) {
+    const day = parseYmd(a.day);
+    const [h, m] = a.time.split(":").map(Number);
+    const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), h || 0, m || 0);
+    const end = new Date(start.getTime() + 60 * 60_000);
+    const extra: Extra = { kind: "appointment", a };
+    out.push({ ev: standIn(`appt:${a.file_id}:${a.id}`, extraLabel(extra), false, start.toISOString(), end.toISOString()), extra, start, end, allDay: false, spanning: false, color: EXTRA_COLORS.appointment, look: "solid" });
   }
   for (const t of tasks) {
     const day = parseYmd(t.due);
@@ -202,7 +220,7 @@ export function onDay(v: ViewEvent, day: Date): boolean {
 }
 
 // All-day order: holidays and trips, birthdays, events, the other apps, tasks.
-const EXTRA_RANK: Record<Extra["kind"], number> = { holiday: 0, trip: 1, birthday: 2, workout: 4, meals: 4, bill: 4, task: 5 };
+const EXTRA_RANK: Record<Extra["kind"], number> = { holiday: 0, trip: 1, birthday: 2, workout: 4, meals: 4, bill: 4, appointment: 4, task: 5 };
 const extraRank = (v: ViewEvent) => (v.extra ? EXTRA_RANK[v.extra.kind] : 3);
 
 export function sortEvents(a: ViewEvent, b: ViewEvent): number {

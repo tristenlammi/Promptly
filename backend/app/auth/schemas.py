@@ -186,7 +186,10 @@ class DirectoryUser(BaseModel):
 NEW_MEMBER_HIDDEN_NAV = ("places", "workspaces", "tasks")
 
 # The cards the Today page can show, in their default order.
-TODAY_SECTIONS = ("recent", "events", "tasks", "habits", "workout", "meals", "work", "rooms", "photos", "morning")
+TODAY_SECTIONS = (
+    "attention", "glance", "recent", "events", "meds", "tasks", "habits", "health", "nutrition", "workout", "meals", "coming",
+    "budget", "trip", "study", "journal", "people", "work", "rooms", "automations", "photos", "discover", "morning", "maps",
+)
 
 
 class UserPreferencesUpdate(BaseModel):
@@ -262,6 +265,8 @@ class UserPreferencesUpdate(BaseModel):
     # How pinned apps look in the sidebar: simple line icons matching the
     # rest of the nav, or the apps' own colour icons.
     nav_app_icons: Literal["line", "color"] | None = None
+    # The desktop sidebar stays as you left it, everywhere, until you change it.
+    sidebar_collapsed: bool | None = None
     # The Today page, curated: cards hidden from it, and the order the rest
     # appear in (keys from ``TODAY_SECTIONS``; unknown ones are dropped).
     today_hidden: list[str] | None = None
@@ -310,6 +315,10 @@ class UserPreferencesUpdate(BaseModel):
     # (or who simply wants a different currency) gets consistent pricing.
     # ``None`` = no change; ``""`` clears it (falls back to locale inference).
     currency: str | None = Field(default=None, max_length=8)
+    # Units and time format for every app (items/shared.py): new app files
+    # start with them and changing them here updates each app's own setting.
+    units: Literal["metric", "imperial"] | None = None
+    clock: Literal["auto", "12h", "24h"] | None = None
     # Note-editor spell-check preferences (user-scoped so they follow the
     # account across devices, not just one browser's localStorage).
     #   * ``spellcheck_enabled`` — draw the live misspelling underlines.

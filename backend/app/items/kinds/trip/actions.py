@@ -309,7 +309,7 @@ def _traveller_dict(t: TravellerIn, taken: set[str], keep: dict | None) -> dict:
     return {
         "id": keep["id"] if keep else _new_id("t", t.name, taken),
         "name": t.name.strip(), "is_me": bool(keep and keep.get("is_me")),
-        "user_id": (keep or {}).get("user_id", ""),
+        "user_id": (keep or {}).get("user_id", ""), "contact_id": (keep or {}).get("contact_id", ""),
         "age_group": t.age_group, "passport_country": t.passport_country or (keep or {}).get("passport_country", ""),
     }
 
@@ -1553,7 +1553,25 @@ def _blank_trip(tid: str, title: str, home: str) -> dict:
     return Trip.model_validate({"id": tid, "title": title, "home_currency": home}).model_dump(mode="json")
 
 
-def _me_traveller(ctx: ItemContext, trip: dict) -> None:
+def _my_last_passport(data: dict | None, uid: str) -> tuple[str, dict | None]:
+    """Your passport country and passport document from your most recent
+    other trip in the file (latest start first) — so a new trip doesn't ask
+    for them again. ``("", None)`` when no trip knows them."""
+    if not data or not uid:
+        return "", None
+    for t in sorted(data.get("trips", []), key=lambda t: t.get("start") or "", reverse=True):
+        me = logic.me_id(t, uid)
+        if not me:
+            continue
+        tr = next((x for x in t.get("travellers", []) if x["id"] == me), {})
+        doc = next((d for d in t.get("documents", []) if d.get("type") == "passport" and d.get("traveller_id") == me), None)
+        country = (tr.get("passport_country") or "").strip() or ((doc or {}).get("country") or "").strip()
+        if country or doc:
+            return country, doc
+    return "", None
+
+
+def _me_traveller(ctx: ItemContext, trip: dict, data: dict | None = None) -> None:
     uid = _ACTING.get() or ""
     name = (getattr(ctx.user, "username", "") or "").strip()[:60] or "Me"
     taken = {t["id"] for t in trip["travellers"]}
@@ -1562,9 +1580,15 @@ def _me_traveller(ctx: ItemContext, trip: dict) -> None:
     tid, n = f"t-{_slug(name)}", 2
     while tid in taken:
         tid, n = f"t-{_slug(name)}-{n}", n + 1
-    trip["travellers"].append({"id": tid, "name": name, "is_me": True, "user_id": uid, "age_group": "adult", "passport_country": ""})
+    country, passport = _my_last_passport(data, uid)
+    trip["travellers"].append({"id": tid, "name": name, "is_me": True, "user_id": uid, "age_group": "adult",
+                               "passport_country": country[:60], "contact_id": ""})
     if uid:
         trip["me_by_user"][uid] = tid
+    if passport is not None and not any(d.get("type") == "passport" and d.get("traveller_id") == tid for d in trip["documents"]):
+        doc = {**copy.deepcopy(passport), "traveller_id": tid, "remind_on": None}
+        doc["id"] = _new_id("doc", f"passport {tid}", {d["id"] for d in trip["documents"]})
+        trip["documents"].append(doc)
 
 
 class CreateTrip(BaseModel):
@@ -1596,7 +1620,7 @@ def create_trip(ctx: ItemContext, data: dict, p: CreateTrip) -> ActionOutcome:
         trip["travellers"] = copy.deepcopy(src["travellers"])
         trip["me_by_user"] = dict(src.get("me_by_user") or {})
     if p.include_me and not logic.me_id(trip, _ACTING.get()):
-        _me_traveller(ctx, trip)
+        _me_traveller(ctx, trip, data)
     v = trips.enter(data, trip)
     try:
         set_trip_details(ctx, v, SetTripDetails(

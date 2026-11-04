@@ -93,11 +93,38 @@ async def test_create_trip_adds_me():
     d = await _trip()
     assert T(d)["id"] == "trip-japan-2027" and T(d)["title"] == "Japan 2027"
     assert T(d)["travellers"][0] == {"id": "t-tess", "name": "Tess", "is_me": True, "user_id": str(TESS), "age_group": "adult",
-                                     "passport_country": ""}
+                                     "passport_country": "", "contact_id": ""}
     assert [t["name"] for t in T(d)["travellers"]] == ["Tess", "Sam"]
     assert T(d)["me_by_user"] == {str(TESS): "t-tess"}
     assert T(d)["home_currency"] == "AUD" and T(d)["status"] == "planning" and d["settings"]["onboarded"]
     assert "settings" not in T(d)  # the view's settings never land in the file
+
+
+async def test_new_trip_reuses_my_passport_from_my_last_trip():
+    d = await _trip()
+    await act(d, "add_documents", {"trip": "trip-japan-2027", "documents": [
+        {"type": "passport", "traveller": "Tess", "country": "Australia", "reference": "…123", "expires": "2030-01-01", "status": "done"},
+        {"type": "passport", "traveller": "Sam", "country": "New Zealand", "expires": "2029-01-01"},
+    ]})
+    await act(d, "create_trip", {"title": "Bali", "start": "2027-08-01", "end": "2027-08-08"})
+    bali = next(t for t in d["trips"] if t["title"] == "Bali")
+    me = bali["travellers"][0]
+    assert me["user_id"] == str(TESS) and me["passport_country"] == "Australia" and me["contact_id"] == ""
+    docs = bali["documents"]
+    assert len(docs) == 1 and docs[0]["traveller_id"] == me["id"] and docs[0]["expires"] == "2030-01-01"
+    assert docs[0]["reference"] == "…123" and docs[0]["status"] == "done" and docs[0]["remind_on"] is None
+    # Someone else creating a trip in the file doesn't get Tess's passport.
+    await act(d, "create_trip", {"title": "Fiji"}, user=KAI_USER)
+    fiji = next(t for t in d["trips"] if t["title"] == "Fiji")
+    assert fiji["documents"] == [] and fiji["travellers"][0]["passport_country"] == ""
+    # Older files (travellers without contact_id) still validate, and a picked contact sticks.
+    raw = copy.deepcopy(d)
+    for t in raw["trips"]:
+        for tr in t["travellers"]:
+            tr.pop("contact_id", None)
+    SPEC.validate(raw)
+    raw["trips"][0]["travellers"][1]["contact_id"] = "c-sam"
+    assert SPEC.validate(raw)["trips"][0]["travellers"][1]["contact_id"] == "c-sam"
 
 
 def test_model_refuses_bad_zones_dates_and_currencies():

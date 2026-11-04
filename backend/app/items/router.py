@@ -22,7 +22,7 @@ Kinds can add their own endpoints under ``/k/{kind}/``.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.encoders import jsonable_encoder
@@ -34,7 +34,7 @@ from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
 from app.files.models import FileVersion, UserFile
-from app.items import service
+from app.items import body, service, shared
 from app.items.models import ItemDocument
 from app.items.registry import all_specs, get_spec
 from app.items.spec import ActionError, ItemSpec
@@ -175,6 +175,33 @@ async def admin_store(
 # ------------------------------------------------------------------ launcher
 
 LAUNCHER_KEY = "apps_order"
+
+
+class BodyProfileIn(BaseModel):
+    """Account → About you. Omit a field to leave it; units only take kg/lb, cm/in."""
+
+    sex: Literal["female", "male", "intersex"] | None = None
+    birth_date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    birth_year: int | None = Field(default=None, ge=1900, le=2100)
+    height_cm: float | None = Field(default=None, ge=90, le=250)
+    weight_unit: Literal["kg", "lb"] | None = None
+    length_unit: Literal["cm", "in"] | None = None
+
+
+@router.get("/body")
+async def get_body(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """About you: the details Health, Macros and Workout share (private to you)."""
+    if not body.stored(user).get(body.SEED_FLAG):
+        await body.seed(db, user)
+        await db.commit()
+    return body.public(user)
+
+
+@router.put("/body")
+async def put_body(payload: BodyProfileIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    out = await body.update_profile(db, user, payload.model_dump(exclude_none=True))
+    await db.commit()
+    return out
 
 
 @router.get("/launcher")
@@ -369,6 +396,11 @@ async def get_item(file_id: uuid.UUID, db: AsyncSession = Depends(get_db), user:
         row, doc, access = await service.load(db, user, file_id)
     except service.ItemNotFound:
         raise _not_found()
+    if doc.kind in body.BODY_KINDS and row.user_id == user.id and not body.stored(user).get(body.SEED_FLAG):
+        # First open since the apps started sharing body details: merge them once.
+        await body.seed(db, user)
+    if doc.kind in shared.KINDS and row.user_id == user.id and not (user.settings or {}).get(shared.SEED_FLAG):
+        await shared.seed(db, user)
     await db.commit()  # an upgrade of an old file sticks
     return doc_out(row, doc, access, user)
 

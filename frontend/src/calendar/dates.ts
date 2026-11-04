@@ -1,5 +1,7 @@
 /** Small date helpers — everything in the browser's local zone. */
 
+import { useAuthStore } from "@/store/authStore";
+
 export const DAY_MS = 86_400_000;
 
 export function startOfDay(d: Date): Date {
@@ -96,6 +98,9 @@ export function weekdayIndexMon(d: Date): number {
 
 const fmtCache = new Map<string, Intl.DateTimeFormat>();
 export function fmt(d: Date, opts: Intl.DateTimeFormatOptions): string {
+  // Account → About you → Time format (Automatic = the browser's locale).
+  const clock = useAuthStore.getState().user?.settings?.clock;
+  if (opts.hour && (clock === "12h" || clock === "24h")) opts = { ...opts, hourCycle: clock === "12h" ? "h12" : "h23" };
   const key = JSON.stringify(opts);
   let f = fmtCache.get(key);
   if (!f) {

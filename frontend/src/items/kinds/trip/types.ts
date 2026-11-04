@@ -20,6 +20,8 @@ export interface Traveller {
   is_me: boolean;
   /** The Promptly account this traveller is, when known. */
   user_id: string;
+  /** Their card in your Contacts, when picked from it ("" / missing: typed). */
+  contact_id?: string;
   age_group: "adult" | "child" | "infant";
   passport_country: string;
 }

@@ -27,9 +27,10 @@ router = APIRouter()
 
 @router.get("")
 async def today(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
-    from . import core, push
+    from . import core, hub, push
 
     out = await core.build(db, user)
+    await hub.extend(db, user, out)
     out["morning"] = await push.prefs(db, user)
     return out
 

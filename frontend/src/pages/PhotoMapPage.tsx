@@ -10,11 +10,9 @@ import { PhotoViewer } from "@/components/photos/PhotoViewer";
 import { apiErrorMessage } from "@/utils/apiError";
 
 /** The Photos map (PH-5): where your photos were taken, clustered — click
- *  a cluster for its photos. Streets, towns and place names come from the
- *  server's own offline basemap (a Protomaps PMTiles extract) when the admin
- *  put one there; otherwise from OpenFreeMap (free, no key — the browser
- *  fetches the tiles of the area on screen; ``PHOTOS_ONLINE_MAP``). With
- *  neither, the bundled countries (Natural Earth, public domain). */
+ *  a cluster for its photos. Streets, towns and place names come from this
+ *  server's own map (P Maps). Without it, the bundled countries (Natural
+ *  Earth, public domain). */
 
 export function PhotoMapPage() {
   const photosPath = usePhotosPath();
@@ -50,7 +48,7 @@ export function PhotoMapPage() {
         {/* MapLibre makes its container position: relative — the size comes
             from this wrapper. */}
         <div className="absolute inset-0">
-          {data && <ClusterMap points={points} basemap={data.basemap} online={!!data.online} onPick={setPicked} label="Map of your photos" />}
+          {data && <ClusterMap points={points} basemap={data.basemap} onPick={setPicked} label="Map of your photos" />}
         </div>
         {data && !data.ids.length && (
           <p className="absolute left-1/2 top-4 -translate-x-1/2 rounded-full bg-[var(--surface)] px-3 py-1 text-xs text-[var(--text-muted)] shadow">

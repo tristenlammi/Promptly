@@ -13,6 +13,7 @@ import {
   MessageSquare,
   Search,
   Settings2,
+  Smartphone,
   Sparkles,
   UsersRound,
   X,
@@ -134,6 +135,18 @@ export function PhotosAppTabs({ onSettings }: { onSettings: () => void }) {
                   }}
                 >
                   <Settings2 className="h-4 w-4 text-[var(--text-muted)]" /> Photos settings
+                </button>
+              </li>
+              <li>
+                <button
+                  type="button"
+                  className={cn(row, "w-full text-left")}
+                  onClick={() => {
+                    setMoreOpen(false);
+                    onSettings();
+                  }}
+                >
+                  <Smartphone className="h-4 w-4 text-[var(--text-muted)]" /> Phone backup
                 </button>
               </li>
             </ul>

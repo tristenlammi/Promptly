@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest.json",
+  "name": "P Maps",
+  "short_name": "P Maps",
+  "description": "Maps and directions on your own Promptly. Nothing you search for or drive to leaves your server.",
+  "id": "/maps/",
+  "start_url": "/maps/?source=pwa",
+  "scope": "/maps/",
+  "display": "standalone",
+  "background_color": "#FAF9F7",
+  "theme_color": "#4F7FE0",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "productivity",
+    "lifestyle"
+  ],
+  "icons": [
+    {
+      "src": "/item-icons/maps-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/maps-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/maps-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

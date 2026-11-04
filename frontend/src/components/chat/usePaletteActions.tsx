@@ -5,6 +5,7 @@ import {
   CheckSquare,
   FileText,
   ListPlus,
+  MapPin,
   MessageSquarePlus,
   Presentation,
   StickyNote,
@@ -149,7 +150,27 @@ export function usePaletteActions(
     }));
   }, [cmd, query, navigate, setQuery]);
 
-  const actions = useMemo(() => (doRow ? [doRow, ...createRows] : createRows), [doRow, createRows]);
+  // Anything typed can be looked up on the map.
+  const mapRow = useMemo<PaletteAction | null>(() => {
+    const t = query.trim();
+    if (cmd || t.length < 3) return null;
+    return {
+      key: "maps",
+      icon: <MapPin className="h-4 w-4" />,
+      title: `Find “${t}” on the map`,
+      detail: "Open in Maps",
+      sure: false,
+      run: async () => {
+        navigate(`/maps?q=${encodeURIComponent(t)}`);
+        return true;
+      },
+    };
+  }, [cmd, query, navigate]);
+
+  const actions = useMemo(
+    () => [...(doRow ? [doRow] : []), ...createRows, ...(mapRow ? [mapRow] : [])],
+    [doRow, createRows, mapRow],
+  );
 
   /** Tab on the Do row: the next file to write to. */
   const cycleTarget = (dir: 1 | -1): boolean => {

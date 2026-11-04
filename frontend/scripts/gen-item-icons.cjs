@@ -31,6 +31,7 @@ const KINDS = [
   ["tasks", "ListTodo", "#DB4C3F"],
   ["rooms", "MessagesSquare", "#5865F2"],
   ["calendar", "CalendarDays", "#4F7FE0"],
+  ["maps", "Navigation", "#2F9E6E"],
   ["example", "ListChecks", "#4F8A8B"],
   ["item", "LayoutGrid", TERRACOTTA], // fallback for a kind without its own
 ];

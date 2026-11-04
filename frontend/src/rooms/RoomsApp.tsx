@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Bell, Download, Home, Loader2, MessageSquarePlus, MessagesSquare, Plus, Search, Settings, X } from "lucide-react";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useMatch, useNavigate } from "react-router-dom";
 
 import { roomsApi, type Bootstrap, type Space } from "@/api/rooms";
@@ -87,6 +87,11 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
   const roomId = roomMatch?.params.roomId ?? null;
   useRecordOpen("room", roomId);
   const onDmPath = location.pathname.startsWith("/rooms/dm");
+  // Rooms opens on Messages (your DMs); after that, Spaces is a tap away.
+  const launching = useRef(!roomId && !onDmPath);
+  useEffect(() => {
+    launching.current = false;
+  }, []);
   const { data: b, isLoading, isError, refetch } = useQuery({
     queryKey: BOOTSTRAP_KEY,
     queryFn: roomsApi.bootstrap,
@@ -196,9 +201,15 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
     [isPhone, navigate, setRailSel],
   );
 
-  // Desktop, nothing open: reopen where you were.
+  // Desktop, nothing open: Messages opens your latest conversation; a
+  // space reopens the room you were last in.
   useEffect(() => {
-    if (!b || isPhone || roomId || onDmPath) return;
+    if (!b || isPhone || roomId) return;
+    if (onDmPath) {
+      const latest = [...b.dms].sort((x, y) => (y.last_message_at ?? "").localeCompare(x.last_message_at ?? ""))[0];
+      if (latest) navigate(`/rooms/r/${latest.id}`, { replace: true });
+      return;
+    }
     const last = readLS<string | null>(LAST_ROOM_KEY, null);
     const target = (last && findRoom(b, last)?.room) || b.spaces[0]?.rooms[0];
     if (target) navigate(`/rooms/r/${target.id}`, { replace: true });
@@ -224,6 +235,9 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
     return () => window.removeEventListener("keydown", onKey);
   }, [isPhone, b, sel, roomId, navigate]);
 
+  if (launching.current && (location.pathname === "/rooms" || location.pathname === "/rooms/")) {
+    return <Navigate replace to={{ pathname: "/rooms/dm", search: location.search, hash: location.hash }} />;
+  }
   if (location.pathname === "/rooms") {
     return <Navigate replace to={{ pathname: "/rooms/", search: location.search, hash: location.hash }} />;
   }

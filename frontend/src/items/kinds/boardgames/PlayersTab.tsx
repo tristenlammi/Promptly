@@ -3,8 +3,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ItemViewProps } from "@/items/types";
 import type { ItemHandle } from "@/items/useItem";
-import { Card, Chip, EmptyState, Fab, Field, IconButton, ItemButton, List, ListRow, Page, Section, Select, Sheet, Stat, TextInput, Toggle, fmtDay, todayISO, uid } from "@/items/ui";
+import { Card, Chip, EmptyState, Fab, Field, IconButton, ItemButton, List, ListRow, Page, Section, Select, Sheet, Stat, Toggle, fmtDay, todayISO, uid } from "@/items/ui";
 import { TrendChart } from "@/items/ui/charts";
+import { PersonInput } from "@/items/ui/PersonInput";
+import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
 import { FavStar, GameTile, PlayerBadge, Tiles, fmtPct, fmtScore, ordinal, shortDay, useWidth } from "./bits";
@@ -307,10 +309,12 @@ export function PlayerEditor({ open, onClose, item, playerId, onSaved }: { open:
     if (!open) return;
     opened.current = existing ? { name: existing.name, color: existing.color, favorite: existing.favorite, archived: existing.archived } : null;
     const used = new Set(item.data.players.map((p) => p.color));
-    setName(existing?.name ?? "");
+    const firstIsMe = !existing && !item.data.settings.me_player_id && item.data.players.length === 0;
+    // The first player is you: start from your account name.
+    setName(existing?.name ?? (firstIsMe ? (useAuthStore.getState().user?.username?.trim().slice(0, 60) ?? "") : ""));
     setColor(existing?.color ?? PALETTE.find((c) => !used.has(c)) ?? PALETTE[0]);
     setFav(existing?.favorite ?? false);
-    setMe(existing?.me ?? (!item.data.settings.me_player_id && item.data.players.length === 0));
+    setMe(existing?.me ?? firstIsMe);
     setArchived(existing?.archived ?? false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, playerId]);
@@ -359,7 +363,13 @@ export function PlayerEditor({ open, onClose, item, playerId, onSaved }: { open:
         <div className="flex items-center gap-3">
           <PlayerBadge player={{ name: name || "?", color }} size={56} />
           <Field label="Name" className="flex-1">
-            <TextInput autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && name.trim() && !dupe && save()} />
+            <PersonInput
+              autoFocus
+              value={name}
+              onChange={setName}
+              onEnter={() => name.trim() && !dupe && save()}
+              excludeNames={item.data.players.filter((p) => p.id !== playerId).map((p) => p.name)}
+            />
           </Field>
         </div>
         {dupe && <p className="text-xs text-[var(--danger)]">There's already a player with that name.</p>}
@@ -385,7 +395,15 @@ export function PlayerEditor({ open, onClose, item, playerId, onSaved }: { open:
           <span className="flex items-center gap-2">
             <UserRound className="h-4 w-4 text-[var(--text-muted)]" /> This is me
           </span>
-          <Toggle checked={me} onChange={setMe} label="This is me" />
+          <Toggle
+            checked={me}
+            onChange={(v) => {
+              setMe(v);
+              // Turning "me" on for a nameless player: use your account name.
+              if (v && !name.trim()) setName(useAuthStore.getState().user?.username?.trim().slice(0, 60) ?? "");
+            }}
+            label="This is me"
+          />
         </label>
         <label className="flex items-center justify-between text-sm text-[var(--text)]">
           <span className="flex items-center gap-2">

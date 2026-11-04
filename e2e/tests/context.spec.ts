@@ -22,8 +22,9 @@ test.describe("context", () => {
     // anyone with a photo library (PH-4), and ~0.2k for propose_photo_action
     // (albums, sharing, relationships from a chat), and ~1.4k for the
     // Calendar and continuity tools (calendar_events/free_times/add/change,
-    // my_day, search_apps, find_person) — ~5.1k in all.
-    expect(size).toBeLessThan(5400);
+    // my_day, search_apps, find_person), and ~0.6k for maps and the timeline
+    // (maps_search/directions/chargers, timeline_day/visits) — ~5.7k in all.
+    expect(size).toBeLessThan(5900);
 
     // The meter reads that request and breaks it down.
     const pill = page.getByRole("button", { name: /\d.*\/ 32k/ });

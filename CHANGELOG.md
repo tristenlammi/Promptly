@@ -21,6 +21,41 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-04
+
+### Changed
+- P Maps' traffic layer is now off until you turn it on, turns itself off after 10 minutes, and only loads when zoomed in. Your route always shows its own traffic. The layer has its own daily limit, so browsing can't use up traffic for a drive.
+- The Photos and Places maps now use your server's own map, with street and place names, and no longer fetch anything from OpenFreeMap. Without the `maps` profile they show countries only.
+- Addresses in Calendar, Contacts and Trips, and a photo's location, now open in P Maps instead of Google Maps or OpenStreetMap. The Android app now needs Android 10 or newer.
+- **Today is now a full dashboard.** Medication due now, with Take and Skip right there. A **Schedule** with everything timed today in order (events, doses, appointments, timed tasks, shifts, workouts) and a "now" line. **Needs you**: due doses, overdue tasks, bills, today's appointments and birthdays, messages, failed automations. **At a glance** tiles and a progress ring for the day. New cards: Food and water (quick-add water), Body & Health (log weight and mood), Budget and bills, Next trip, Flashcards, Journal, People, Coming up (the next seven days across every app) and Automations. Everything is in Customise, and the layout fills wide screens.
+- Today shows trends: spike graphs for 14 days of calories and protein against your targets, sleep, steps and other daily goals, and a 30-day weight line with the change.
+- The desktop sidebar stays as you left it, saved to your account. Files and workspaces no longer collapse it for you.
+- Rooms opens on Messages (your DMs) — on a computer, at your latest conversation. Spaces are one tap away.
+
+### Added
+- **P Maps**, a new app for maps and directions where nothing goes to Google: search addresses, places and your contacts; Home, Work, favourites and lists; car, bike and walking routes with alternatives; multi-stop trips you can drag to reorder or put in the best order; avoid tolls, highways or ferries; where you parked; and charging stations by plug and power, on the map or along your route. All the map data lives on your server, in an optional `maps` Docker profile that downloads Australia's data and refreshes it monthly.
+- **P Maps driving screen** in the Promptly Android app: turn-by-turn with voice that keeps going with the screen off, automatic rerouting, your speed against the limit, and speed camera warnings. It reads the phone's GPS directly rather than Google's location service.
+- **P Maps on Android Auto**: the map and turn-by-turn on the car's screen, with your saved places and a search, and it notes where you parked when the car screen goes away. This needs Unknown sources turned on in Android Auto's developer settings.
+- **P Maps timeline**: an opt-in, private history of where you've been, by day, with stays, journeys and your photos from the day; pause it, delete any day or all of it, choose how long it's kept, and import your Google Timeline.
+- **P Maps live location**: choose someone on your Promptly to see where you are and when you'll arrive, for a set time or until you stop.
+- **Live traffic in P Maps**, using a TomTom key added under Admin → App settings: "traffic adds 6 min", arrival times in current traffic, the fastest route right now listed first, busy stretches on your route, a traffic layer for the map, and the same figures in chat, on Today and on the driving screen. Your server asks by map area, so TomTom never gets your trip. Without a key, P Maps works as before.
+- **Your usual routes in P Maps**: pick a route and choose "Always go this way", and it comes first between those two places even when another is a little quicker. It's followed on the map, in chat, on the driving screen and in the car, including after a wrong turn.
+- **Faster route alerts while driving**: the phone and car screen offer a quicker way when traffic makes it worthwhile, with a bigger saving needed to leave your usual route. Traffic delays and arrival times now show on Android Auto, and slow stretches of your route are coloured while you drive. Start now drives the route you picked.
+- **Warnings and closures in P Maps**, from TomTom: crashes, closed roads, flooding, roadworks and other hazards on your route, shown on the route, spoken and shown while driving, and in chat and on Today. Routes go around closed roads, including your usual way, and the driving screen offers a way around a closure ahead. A place's More details button adds its hours, phone and website; it names that place to TomTom, so it only happens when pressed.
+- Today shows when to leave for your next event, and where you parked.
+- **Maps in chat**: ask any chat for distances, directions, places or chargers, and the reply carries a map chip that opens the trip in a window. Ask about your timeline too: "when was I last at Bunnings?", "where did I go on Saturday?". Timeline answers are refused on a turn that read outside content.
+- Saved places in P Maps always show on the map. Save lets you choose a name, icon and colour; Home and Work have their own icons, and the Home and Work buttons show when a place is set and ask before replacing it.
+- Your timeline draws the day's journeys and stops on the map.
+- Body & Health, Macros and Workout share your body details: sex, date of birth (or birth year), height and units are set once and fill in all three — change them in any of those apps, or in Account → About you → Body, and the others follow. Private to you: files shared with you are never touched. What the three already held is merged the first time you open one of them.
+- One weight log across Body & Health, Macros and Workout: a weigh-in added, changed or removed in Health or Macros shows in the other, and Workout's body weight follows the newest one (changing it in Workout logs today's weigh-in).
+- Macros and Meal Plan share your diets, allergies and dislikes: set them in either and the other follows (anything one already had fills the other's gaps the first time).
+- Currency is one setting: change it in Account, Budget or Trip (the default for new trips — each trip keeps its own) and the others follow.
+- Account → About you → **Units & time**: Metric/Imperial and Automatic/12-hour/24-hour for every app. New app files start with them, changing them updates Trip, Body & Health, Macros, Meal Plan and Workout, and Calendar shows times in your chosen format. Trip's own 12/24-hour switch is the same setting.
+- Calendar can show your Health appointments (Also show → Health appointments), at their time in your time zone, with a link back to the Health app. Only your own Health file is read.
+- Person fields in Trip, Board Games and Health suggest your Contacts and Promptly people as you type. Trip travellers remember the contact and account they were picked from, and Health's emergency contact and care team fill in phone, email and address from the contact card.
+- New trips reuse your passport country and passport details from your last trip, and Board Games starts with your account name instead of asking for it.
+- Phone backup in Photos: Photos settings (and More → Phone backup on a phone) has "Set up backup on this phone", which links the Promptly Android app in one tap, and "Open backup settings". On a computer it points to Files → Devices.
+
 ## [0.19.0] - 2026-11-03
 
 ### Added
@@ -29,6 +64,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Each app has a fixed address, `/app/open/<app>`, that opens your copy of it as its own app.
 
 ### Fixed
+- P Maps' traffic button no longer overlaps the other map buttons.
 - Resuming a big upload after a name clash ("Choose file to continue") started again from the beginning instead of carrying on.
 
 ### Removed

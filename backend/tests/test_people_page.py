@@ -164,6 +164,23 @@ async def test_search_suggests_contacts_first_and_never_emails(client, db, peopl
     assert "@example.com" not in str(got)
 
 
+async def test_search_details_fill_from_own_contact_card(client, db, people, book):
+    """``details=true`` (item apps' person fields): the viewer's own contact
+    card's first phone / email / address — never anyone else's."""
+    ann, bob, cat = people
+    plain = (await client.get("/api/people/search", headers=H(ann), params={"q": "bea"})).json()["people"]
+    assert set(plain[0]["contact"]) == {"file_id", "contact_id"}  # unchanged without the flag
+    got = (await client.get("/api/people/search", headers=H(ann), params={"q": "bea", "details": "true"})).json()["people"]
+    c = got[0]["contact"]
+    assert got[0]["user"]["id"] == str(bob.id) and c["contact_id"] == "w"
+    assert c["phone"] == "+44 7700 900123" and c["email"] == bob.email.upper() and c["address"] == "" and c["company"] == ""
+    joan = (await client.get("/api/people/search", headers=H(ann), params={"q": "grandma", "details": "1"})).json()["people"]
+    assert joan[0]["user"] is None and joan[0]["contact"]["contact_id"] == "y" and joan[0]["contact"]["phone"] == ""
+    # cat has no contacts: an account row carries no contact, so no email.
+    theirs = (await client.get("/api/people/search", headers=H(cat), params={"q": bob.username, "details": "true"})).json()["people"]
+    assert theirs[0]["contact"] is None and "@example.com" not in str(theirs).lower()
+
+
 async def test_calendar_people_suggestions_still_work(client, people, book):
     ann, bob, _ = people
     r = await client.get("/api/calendar/people-suggestions", headers=H(ann))

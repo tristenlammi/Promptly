@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { LinkedSection } from "@/components/links/LinkedSection";
 import type { ItemHandle } from "@/items/useItem";
 import { Field, IconButton, ItemButton, Segmented, Select, Sheet, TextArea, TextInput, todayISO, uid } from "@/items/ui";
+import { PersonInput } from "@/items/ui/PersonInput";
 import { cn } from "@/utils/cn";
 
 import { meId, travellerRefs } from "./logic";
@@ -239,7 +240,22 @@ export function TripSheet({ item, open, onClose, fallbackTitle }: { item: ItemHa
             <div key={x.id} className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
                 <UserRound className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
-                <TextInput aria-label="Traveller name" placeholder="Name" value={x.name} onChange={(e) => setTrav(i, { name: e.target.value })} />
+                <PersonInput
+                  aria-label="Traveller name"
+                  placeholder="Name"
+                  value={x.name}
+                  onChange={(v) => setTrav(i, { name: v })}
+                  excludeUserIds={d.travellers.filter((o) => o.id !== x.id).map((o) => o.user_id).filter(Boolean)}
+                  excludeNames={d.travellers.filter((o) => o.id !== x.id).map((o) => o.name)}
+                  onPick={(p) =>
+                    setTrav(i, {
+                      name: p.name.slice(0, 60),
+                      contact_id: p.contact_id,
+                      // Link the account only when no one else on the trip is it.
+                      ...(p.user_id && !d.travellers.some((o) => o.id !== x.id && o.user_id === p.user_id) ? { user_id: p.user_id } : {}),
+                    })
+                  }
+                />
                 <Select aria-label="Age" value={x.age_group} onChange={(e) => setTrav(i, { age_group: e.target.value as Traveller["age_group"] })} className="w-24">
                   <option value="adult">Adult</option>
                   <option value="child">Child</option>

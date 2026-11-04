@@ -36,7 +36,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 PREFIX = "pmt_"
-SCOPES = ("dav:read", "dav:write", "dav:delete", "upload")
+SCOPES = ("dav:read", "dav:write", "dav:delete", "upload", "maps")
 MAX_PER_USER = 50
 _ALPHABET = string.digits + string.ascii_letters  # base62
 _BODY = 30

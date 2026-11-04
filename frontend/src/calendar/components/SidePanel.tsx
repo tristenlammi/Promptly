@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Cake, Check, CircleCheck, Dumbbell, Globe, Mail, MoreHorizontal, PartyPopper, Plane, Plus, Receipt, Rss, Share2, UtensilsCrossed } from "lucide-react";
+import { ArrowLeft, Cake, Check, CircleCheck, Dumbbell, Globe, Mail, MoreHorizontal, PartyPopper, Plane, Plus, Receipt, Rss, Share2, Stethoscope, UtensilsCrossed } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { calendarApi, type CalEvent, type Calendar, type CalendarBootstrap, type CalendarPrefs, type RsvpStatus } from "@/api/calendar";
@@ -223,7 +223,7 @@ function Invitations({ onOpen }: { onOpen: (ev: CalEvent) => void }) {
 }
 
 /** What else shows on the calendar, each with its own switch: tasks,
- *  birthdays, workouts, the meal plan, bills, trips (only for apps this
+ *  birthdays, workouts, the meal plan, bills, trips, Health appointments (only for apps this
  *  person has) and public holidays (with a country) — plus an optional
  *  second time zone for week / day view. */
 function AlsoShow({ b }: { b: CalendarBootstrap }) {
@@ -266,6 +266,7 @@ function AlsoShow({ b }: { b: CalendarBootstrap }) {
       {b.apps.mealplan && row(<UtensilsCrossed className="h-4 w-4" />, "Meal plan", p.meals, (v) => flip({ meals: v }))}
       {b.apps.budget && row(<Receipt className="h-4 w-4" />, "Bills", p.bills, (v) => flip({ bills: v }))}
       {b.apps.trip && row(<Plane className="h-4 w-4" />, "Trips", p.trips, (v) => flip({ trips: v }))}
+      {b.apps.health && row(<Stethoscope className="h-4 w-4" />, "Health appointments", p.appointments, (v) => flip({ appointments: v }))}
       {row(<PartyPopper className="h-4 w-4" />, "Holidays", p.holidays, (v) => void holidaysOn(v))}
       {p.holidays && (
         <div className="flex flex-col gap-1 px-2 pb-1 pl-[34px]">

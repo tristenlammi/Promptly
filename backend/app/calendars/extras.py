@@ -1,7 +1,7 @@
 """What else shows on your calendar: tasks with a due date (from your Tasks
 app), birthdays / anniversaries (from Contacts, with the person's face
 from Photos when they're linked), planned workouts, the meal plan, bills
-due (Budget), trips, and public holidays for a country you pick. Read-only here — ticking a task off goes
+due (Budget), trips, Health appointments, and public holidays for a country you pick. Read-only here — ticking a task off goes
 through the Tasks app's own action, so both stay one source of truth."""
 from __future__ import annotations
 
@@ -287,6 +287,44 @@ async def trips_in(db: AsyncSession, user: User, start: date, end: date) -> list
             })
     out.sort(key=lambda x: (x["start"], x["title"]))
     return out[:100]
+
+
+async def appointments_in(db: AsyncSession, user: User, start: date, end: date) -> list[dict]:
+    """Appointments from the person's own Health file in [start, end) — read
+    in their time zone, so the day and time match what Health shows. Health
+    info is private: only ``list_items`` (this person's own files) is read,
+    never a file someone shared. A visit marked done comes through ``done``."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from app.items import service
+
+    from .core import user_tz
+
+    try:
+        tz = ZoneInfo(user_tz(user))
+    except Exception:  # noqa: BLE001 — a bad saved zone: UTC
+        tz = ZoneInfo("UTC")
+    out: list[dict] = []
+    for row, doc in await service.list_items(db, user, "health", archives=False):
+        for a in (doc.data or {}).get("appointments", []):
+            try:
+                at = datetime.fromisoformat(str(a.get("at") or ""))
+            except ValueError:
+                continue
+            local = (at.replace(tzinfo=tz) if at.tzinfo is None else at).astimezone(tz)
+            day = local.date()
+            if not (start <= day < end):
+                continue
+            out.append({
+                "file_id": str(row.id), "id": a.get("id"), "day": day.isoformat(), "time": local.strftime("%H:%M"),
+                "title": a.get("title") or "", "who": a.get("who") or "", "location": a.get("location") or "",
+                "done": bool(a.get("done")),
+            })
+            if len(out) >= MAX_EXTRA:
+                break
+    out.sort(key=lambda x: (x["day"], x["time"]))
+    return out[:MAX_EXTRA]
 
 
 # ------------------------------------------------------------------ holidays
