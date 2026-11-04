@@ -21,6 +21,23 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-04
+
+### Added
+- **Promptly as your phone's assistant**: choose Promptly under Android's Default apps → Digital assistant app, and the assistant gesture opens a small sheet that listens, thinks and answers out loud, with or without a trip running.
+- The assistant can set timers straight away and alarms after a spoken or tapped yes, open your Promptly apps, start directions, open the dialler for a contact or number, and start a text message. You always press call or send yourself.
+- Optional **"Hey Promptly" anywhere**, off by default, for phones with Promptly as their assistant.
+- `POST /api/assistant`, with its own app password scope `assistant`. Phones already linked keep working.
+
+### Changed
+- The older `POST /api/maps/assistant` now needs the `assistant` scope too, so a maps-only app password can no longer reach your calendar and files through it.
+
+### Fixed
+- P Maps no longer drives a chosen route twice when a trip starts from a named place like Home: it added about 150 km to an 82 km trip.
+- Muting P Maps' voice now stays muted, between trips too, until you turn it back on.
+- P Maps on the car screen opens on your location instead of the whole world, and follows the car's light or dark setting.
+- The Promptly phone app no longer offers server updates when it was installed from Google Play, which keeps it working in Android Auto.
+
 ## [0.21.0] - 2026-11-04
 
 ### Added

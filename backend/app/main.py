@@ -669,6 +669,10 @@ app.include_router(maps_router, prefix="/api/maps", tags=["maps"])
 from app.maps.timeline import router as maps_timeline_router  # noqa: E402
 
 app.include_router(maps_timeline_router, prefix="/api/maps", tags=["maps"])
+# The phone's assistant (app/assistant).
+from app.assistant.router import router as assistant_router  # noqa: E402
+
+app.include_router(assistant_router, prefix="/api/assistant", tags=["assistant"])
 # Calendar: events shared per event or via group calendars (app/calendars).
 from app.calendars.router import public_router as calendar_feed_router  # noqa: E402
 from app.calendars.router import router as calendar_router  # noqa: E402

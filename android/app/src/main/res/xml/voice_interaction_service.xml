@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What makes Promptly a choice under Default apps → Digital assistant app.
+     Android 12+ ignores recognitionService but still requires it to be named. -->
+<voice-interaction-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:sessionService="org.promptly.sync.assistant.PromptlySessionService"
+    android:recognitionService="org.promptly.sync.assistant.PromptlyRecognitionService"
+    android:settingsActivity="org.promptly.sync.assistant.AssistantSettingsActivity"
+    android:supportsAssist="true"
+    android:supportsLaunchVoiceAssistFromKeyguard="false" />

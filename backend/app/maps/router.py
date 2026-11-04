@@ -33,10 +33,6 @@ Lat = Field(ge=-90, le=90)
 Lon = Field(ge=-180, le=180)
 
 
-# About 30 seconds of 16 kHz speech.
-ASSISTANT_MAX_AUDIO = 1024 * 1024
-
-
 async def maps_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -46,6 +42,18 @@ async def maps_user(
     header = request.headers.get("authorization") or ""
     if header.lower().startswith("basic "):
         return await user_from_basic(db, header, scope="maps", ip=client_ip(request))
+    return await get_current_user(request, credentials, db)
+
+
+async def assistant_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    """The same for the assistant, which reaches far more than the map does."""
+    header = request.headers.get("authorization") or ""
+    if header.lower().startswith("basic "):
+        return await user_from_basic(db, header, scope="assistant", ip=client_ip(request))
     return await get_current_user(request, credentials, db)
 
 
@@ -287,29 +295,12 @@ async def assistant(
     text: str | None = Form(default=None, max_length=500),
     state: str = Form(default="{}", max_length=200_000),
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(maps_user),
+    user: User = Depends(assistant_user),
 ) -> dict[str, Any]:
-    """What you said after "Hey Promptly": what to say back, and what to do."""
-    from app.chat.router import _enforce_send_quotas
-    from app.voice.service import TranscriptionError, transcribe_audio
+    """What you said after "Hey Promptly", for apps installed before /api/assistant."""
+    from .assistant import answer_request
 
-    from . import assistant as talk
-
-    await _enforce_send_quotas(request, user, db)
-    try:
-        trip = talk.DriveState.model_validate_json(state)
-    except ValueError:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Bad trip details.") from None
-    heard = text or ""
-    if audio is not None:
-        clip = await audio.read(ASSISTANT_MAX_AUDIO + 1)
-        if len(clip) > ASSISTANT_MAX_AUDIO:
-            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="That recording is too long.")
-        try:
-            heard = (await transcribe_audio(data=clip, filename="voice.wav", content_type="audio/wav", timeout_s=20)).text
-        except TranscriptionError:
-            return {"heard": "", "say": "Voice isn't available on this server right now."}
-    return await talk.reply(db, user, heard, trip)
+    return await answer_request(request, audio, text, state, db, user)
 
 
 class TrafficNow(BaseModel):

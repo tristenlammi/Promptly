@@ -22,10 +22,12 @@
     <!-- Only if you turn the timeline on, and pick "Allow all the time". -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <!-- "Hey Promptly" while driving. -->
+    <!-- "Hey Promptly" and the phone's assistant. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- "Set a timer": no prompt, and only through the phone's clock app. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!-- The car's screen. -->
     <uses-permission android:name="androidx.car.app.MAP_TEMPLATES" />
     <uses-permission android:name="androidx.car.app.ACCESS_SURFACE" />
@@ -106,6 +108,50 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- The phone's assistant: Default apps → Digital assistant app. Android
+             lists this because of the service and its xml; the gesture goes to the
+             session, which opens the sheet. -->
+        <service
+            android:name=".assistant.PromptlyAssistantService"
+            android:exported="true"
+            android:label="Promptly"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+            <meta-data android:name="android.voice_interaction" android:resource="@xml/voice_interaction_service" />
+        </service>
+        <service
+            android:name=".assistant.PromptlySessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+        <service
+            android:name=".assistant.PromptlyRecognitionService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+        </service>
+        <activity
+            android:name=".assistant.AssistantActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:label="Promptly"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:taskAffinity="org.promptly.app.assistant"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".assistant.AssistantSettingsActivity"
+            android:exported="true"
+            android:label="Phone assistant"
+            android:taskAffinity="org.promptly.app.assistant.settings" />
 
         <!-- Android Auto. -->
         <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="2" />

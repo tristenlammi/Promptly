@@ -231,7 +231,7 @@ def _script(monkeypatch, *answers):
     rows = list(answers)
     seen = []
 
-    async def decide(db, user, messages):
+    async def decide(db, user, messages, system=None):
         seen.append(messages)
         return rows.pop(0)
 
@@ -384,3 +384,253 @@ async def test_search_understands_a_category(db, user, monkeypatch):
     nearby.around.reset_mock()
     await find_places(db, user, "nearest servo", None)
     nearby.around.assert_not_called()
+
+
+# ---- the phone's assistant
+
+
+ALONE = talk.DriveState()
+
+
+async def _phone(wants, state=ALONE):
+    return await talk.carry_out(None, SimpleNamespace(id="u"), wants, state, phone=True)
+
+
+@pytest.mark.parametrize("wants", [
+    {"do": "set_timer", "seconds": 600}, {"do": "set_alarm", "hour": 7}, {"do": "open_app", "app": "tasks"},
+    {"do": "call", "number": "000"}, {"do": "message", "number": "000", "text": "hi"},
+])
+async def test_older_apps_never_get_phone_actions(wants):
+    # The maps route: an app from before this couldn't carry them out.
+    assert await talk.carry_out(None, SimpleNamespace(id="u"), wants, ALONE) == {"say": talk.FAILED}
+
+
+@pytest.mark.parametrize("wants", [
+    {"do": "intent", "action": "android.intent.action.VIEW", "uri": "https://evil.example"},
+    {"do": "open_app", "app": "com.android.settings"},
+    {"do": "open_app", "app": "https://evil.example"},
+    {"do": "open_app"},
+    {"do": "set_timer"},
+    {"do": "set_timer", "seconds": 0},
+    {"do": "set_timer", "seconds": 86401},
+    {"do": "set_timer", "seconds": 2.5},
+    {"do": "set_timer", "seconds": True},
+    {"do": "set_timer", "seconds": "600"},
+    {"do": "set_alarm", "hour": 24, "minute": 0},
+    {"do": "set_alarm", "hour": 7, "minute": 60},
+    {"do": "set_alarm", "minute": 5},
+    {"do": "call"},
+    {"do": "call", "number": "*#06#"},
+    {"do": "call", "number": "tel:0412345678"},
+    {"do": "call", "number": "0412345678;ext=9"},
+    {"do": "message", "number": "smsto:1234"},
+])
+async def test_the_model_cant_ask_the_phone_for_anything_off_the_list(wants):
+    got = await _phone(wants)
+    assert "action" not in got and "pending" not in got
+
+
+@pytest.mark.parametrize(("wants", "action", "said"), [
+    ({"do": "set_timer", "seconds": 600}, {"type": "set_timer", "seconds": 600}, "Done, a timer for 10 minutes."),
+    ({"do": "set_timer", "seconds": 3690, "label": "  pasta\nwater "}, {"type": "set_timer", "seconds": 3690, "label": "pasta water"}, "Done, a timer for 1 hour and 1 minute and 30 seconds called pasta water."),
+])
+async def test_a_timer_just_gets_set(wants, action, said):
+    assert await _phone(wants) == {"say": said, "action": action}
+
+
+@pytest.mark.parametrize(("wants", "action", "question"), [
+    ({"do": "set_alarm", "hour": 7, "minute": 30}, {"type": "set_alarm", "hour": 7, "minute": 30}, "Set an alarm for 7:30 AM?"),
+    ({"do": "set_alarm", "hour": 0, "label": "x"}, {"type": "set_alarm", "hour": 0, "minute": 0, "label": "x"}, "Set an alarm for 12 AM called x?"),
+])
+async def test_an_alarm_waits_for_a_yes(wants, action, question):
+    got = await _phone(wants)
+    assert got == {"say": question, "pending": {"tool": talk.ON_THE_PHONE, "args": action, "question": question}}
+
+
+async def test_yes_sets_the_timer_that_was_read_back(monkeypatch):
+    pending = (await _phone({"do": "set_alarm", "hour": 7}))["pending"]
+    _script(monkeypatch, {"do": "confirm"})
+    got = await talk.reply(None, SimpleNamespace(id="u"), "yes", talk.DriveState(pending=pending), phone=True)
+    assert got["action"] == {"type": "set_alarm", "hour": 7, "minute": 0}
+    assert got["say"] == "Done, an alarm for 7 AM."
+    assert "pending" not in got
+
+
+@pytest.mark.parametrize(("said", "done"), [("Yes.", True), ("yes please", True), ("OK", True), ("go ahead", True), ("No.", False), ("no thanks", False)])
+async def test_a_plain_answer_needs_no_model(monkeypatch, said, done):
+    pending = (await _phone({"do": "set_alarm", "hour": 7}))["pending"]
+    decide = AsyncMock()
+    monkeypatch.setattr(talk, "decide", decide)
+    got = await talk.reply(None, SimpleNamespace(id="u"), said, talk.DriveState(pending=pending), phone=True)
+    decide.assert_not_called()
+    assert ("action" in got) is done
+
+
+async def test_yes_with_nothing_waiting_still_goes_to_the_model(monkeypatch):
+    seen = _script(monkeypatch, {"do": "answer", "say": "Yes to what?"})
+    got = await talk.reply(None, SimpleNamespace(id="u"), "yes", ALONE, phone=True)
+    assert got["say"] == "Yes to what?" and seen
+
+
+async def test_asking_for_the_same_timer_again_is_a_yes(monkeypatch):
+    pending = (await _phone({"do": "set_alarm", "hour": 7}))["pending"]
+    _script(monkeypatch, {"do": "set_alarm", "hour": 7})
+    got = await talk.reply(None, SimpleNamespace(id="u"), "yes, set it", talk.DriveState(pending=pending), phone=True)
+    assert got["action"] == {"type": "set_alarm", "hour": 7, "minute": 0}
+
+
+async def test_a_different_timer_is_asked_about_again(monkeypatch):
+    pending = (await _phone({"do": "set_alarm", "hour": 7}))["pending"]
+    _script(monkeypatch, {"do": "set_alarm", "hour": 8})
+    got = await talk.reply(None, SimpleNamespace(id="u"), "make it ten minutes", talk.DriveState(pending=pending), phone=True)
+    assert "action" not in got and got["pending"]["args"]["hour"] == 8
+
+
+async def test_no_means_no_timer(monkeypatch):
+    pending = (await _phone({"do": "set_alarm", "hour": 7}))["pending"]
+    _script(monkeypatch, {"do": "cancel"})
+    got = await talk.reply(None, SimpleNamespace(id="u"), "no", talk.DriveState(pending=pending), phone=True)
+    assert got == {"heard": "no", "say": "Okay, I'll leave it."}
+
+
+@pytest.mark.parametrize("args", [
+    {"type": "set_timer", "seconds": -1},
+    {"type": "dial", "number": "*#06#"},
+    {"type": "open_app", "app": "calendar"},
+    {"type": "intent", "uri": "tel:000"},
+])
+async def test_a_pending_action_is_checked_again_when_it_comes_back(monkeypatch, args):
+    _script(monkeypatch, {"do": "confirm"})
+    state = talk.DriveState(pending={"tool": talk.ON_THE_PHONE, "args": args})
+    got = await talk.reply(None, SimpleNamespace(id="u"), "yes", state, phone=True)
+    assert "nothing waiting" in got["say"] and "action" not in got
+
+
+async def test_a_pending_phone_action_means_nothing_on_the_maps_route(monkeypatch):
+    _script(monkeypatch, {"do": "confirm"})
+    state = talk.DriveState(pending={"tool": talk.ON_THE_PHONE, "args": {"type": "set_timer", "seconds": 60}})
+    got = await talk.reply(None, SimpleNamespace(id="u"), "yes", state)
+    assert "nothing waiting" in got["say"] and "action" not in got
+
+
+async def test_opening_an_app():
+    assert await _phone({"do": "open_app", "app": "calendar"}) == {"say": "Opening Calendar.", "action": {"type": "open_app", "app": "calendar"}}
+
+
+@pytest.mark.parametrize("wants", [
+    {"do": "open_app", "app": "calendar"}, {"do": "call", "number": "0412345678"}, {"do": "message", "person": "Sam", "text": "hi"},
+])
+async def test_nothing_that_needs_the_screen_while_driving(wants):
+    assert await _phone(wants, trip()) == {"say": talk.WHILE_DRIVING}
+
+
+async def test_a_timer_is_fine_while_driving():
+    assert "pending" in await _phone({"do": "set_alarm", "hour": 7}, trip())
+
+
+async def test_a_spoken_number_opens_the_dialler():
+    got = await _phone({"do": "call", "number": "+61 412 345-678"})
+    assert got["action"] == {"type": "dial", "number": "+61 412 345-678"}
+    assert "Press call" in got["say"]
+
+
+async def test_a_number_given_as_a_person_is_still_a_number():
+    got = await _phone({"do": "call", "person": "0412 345 678"})
+    assert got["action"] == {"type": "dial", "number": "0412 345 678"}
+
+
+async def test_calling_a_contact_finds_their_mobile(monkeypatch):
+    from app.people import directory, router
+
+    person = SimpleNamespace(name="Sam Smith", label=None, contact={"phones": [{"label": "work", "value": "07 3000 0000"}, {"label": "Mobile", "value": "0412 345 678"}]})
+    monkeypatch.setattr(directory, "directory", AsyncMock(return_value=[person]))
+    monkeypatch.setattr(directory, "complete", AsyncMock(return_value=person))
+    monkeypatch.setattr(router, "_hits", lambda p, needle: needle in p.name.lower())
+    got = await _phone({"do": "message", "person": "Sam", "text": "Running late"})
+    assert got["action"] == {"type": "message", "text": "Running late", "name": "Sam Smith", "number": "0412 345 678"}
+    assert "Press send" in got["say"]
+
+
+async def test_two_people_called_that_are_asked_about(monkeypatch):
+    from app.people import directory, router
+
+    people = [
+        SimpleNamespace(name="Sam Smith", label=None, contact={"phones": [{"value": "0412 000 001"}]}),
+        SimpleNamespace(name="Sam Jones", label=None, contact={"phones": [{"value": "0412 000 002"}]}),
+    ]
+    monkeypatch.setattr(directory, "directory", AsyncMock(return_value=people))
+    monkeypatch.setattr(directory, "complete", AsyncMock(side_effect=lambda db, user, p: p))
+    monkeypatch.setattr(router, "_hits", lambda p, needle: needle in p.name.lower())
+    got = await _phone({"do": "call", "person": "Sam"})
+    assert got == {"say": "Which one: Sam Smith or Sam Jones?"}
+
+
+async def test_no_number_here_lets_you_pick_on_the_phone(monkeypatch):
+    from app.people import directory
+
+    monkeypatch.setattr(directory, "directory", AsyncMock(return_value=[]))
+    got = await _phone({"do": "call", "person": "Mum"})
+    assert got["action"] == {"type": "dial", "name": "Mum"}
+    assert "Pick them" in got["say"]
+
+
+def test_the_prompt_fits_what_youre_doing():
+    alone = talk._system(ALONE, True)
+    assert "voice assistant on someone's phone" in alone and '"do":"add_stop"' not in alone and "calendar, " in alone
+    assert "DRIVING" not in alone and "APPS" not in alone
+    driving = talk._system(trip(), True)
+    assert '"do":"add_stop"' in driving and "They are driving" in driving
+    # The maps route is untouched: only what an older app can carry out.
+    older = talk._system(ALONE, False)
+    assert "set_timer" not in older and "open_app" not in older
+
+
+def test_your_position_doesnt_reach_the_model_off_a_trip_either():
+    note = talk._note(talk.DriveState(lat=-27.5, lon=153.0, now="Wed 4 Nov 2026, 4:45 PM"))
+    assert "27.5" not in note and "153" not in note and "4:45 PM" in note
+
+
+async def test_a_longer_spoken_answer_is_allowed_off_the_road():
+    got = await _phone({"do": "answer", "say": "x" * 2000})
+    assert len(got["say"]) == 800
+
+
+async def test_directions_and_nearby_work_without_a_trip(monkeypatch):
+    monkeypatch.setattr(nearby, "around", AsyncMock(return_value=[{"name": "BP", "address": None, "lat": -27.48, "lon": 153.0, "distance_m": 900}]))
+    got = await _phone({"do": "find", "category": "fuel"}, talk.DriveState(lat=-27.5, lon=153.0))
+    assert got["say"].endswith("Want directions?") and "action" not in got
+    assert "not navigating" in (await _phone({"do": "end_trip"}))["say"]
+
+
+async def test_the_general_route_and_scopes(db, user, monkeypatch):
+    from app import rate_limit
+    from app.auth.app_passwords import SCOPES, AppPassword, hint, new_token, token_hash
+    from app.auth.pairing_router import SCOPES as PAIRED
+    from app.auth.utils import create_access_token
+    from app.main import app
+
+    assert "assistant" in SCOPES and "assistant" in PAIRED
+
+    def device(scopes):
+        token = new_token()
+        db.add(AppPassword(user_id=user.id, name="phone", token_hash=token_hash(token), hint=hint(token), scopes=scopes))
+        return (user.username, token)
+
+    only_maps, both = device(["maps"]), device(["maps", "assistant"])
+    await db.commit()
+    monkeypatch.setattr(talk, "decide", AsyncMock(return_value={"do": "open_app", "app": "tasks"}))
+    rate_limit._settings.RATE_LIMIT_ENABLED = False
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+            assert (await c.post("/api/assistant", data={"text": "hi"})).status_code == 401
+            for path in ("/api/assistant", "/api/maps/assistant"):
+                assert (await c.post(path, data={"text": "hi"}, auth=only_maps)).status_code == 403
+            r = await c.post("/api/assistant", data={"text": "open tasks"}, auth=both)
+            assert r.status_code == 200 and r.json()["action"] == {"type": "open_app", "app": "tasks"}
+            # An older app on the same sign-in gets words, not an action it can't do.
+            r = await c.post("/api/maps/assistant", data={"text": "open tasks"}, auth=both)
+            assert r.status_code == 200 and "action" not in r.json()
+            headers = {"Authorization": f"Bearer {create_access_token(user.id, token_version=user.token_version)}"}
+            assert (await c.post("/api/assistant", data={"text": "open tasks"}, headers=headers)).status_code == 200
+    finally:
+        rate_limit._settings.RATE_LIMIT_ENABLED = True

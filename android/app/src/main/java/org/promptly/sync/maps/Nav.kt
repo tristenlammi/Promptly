@@ -58,6 +58,7 @@ sealed interface CameraAlert {
  *  this server for routes. */
 object Nav {
     private const val TAG = "PromptlyNav"
+    private const val SAME_PLACE_METRES = 500f
 
     @SuppressLint("StaticFieldLeak") // the application context
     private lateinit var app: Context
@@ -130,6 +131,18 @@ object Nav {
         }
     }
 
+    /** The car's map: light or dark by the car's own setting, not the phone's. */
+    private val _carStyle = MutableStateFlow<String?>(null)
+    val carStyle = _carStyle.asStateFlow()
+
+    fun loadCarStyle(scope: kotlinx.coroutines.CoroutineScope, dark: Boolean) {
+        scope.launch {
+            runCatching { Maps.styleFile(app, dark) }
+                .onSuccess { _carStyle.value = it }
+                .onFailure { _error.value = it.message ?: "Couldn't load the map." }
+        }
+    }
+
     /** The view model the screens draw from. */
     fun viewModel(options: TripOptions = lastOptions ?: TripOptions()): TripModel {
         model?.takeIf { lastOptions == options }?.let { return it }
@@ -180,10 +193,20 @@ object Nav {
             t.start()
             tts = t
         }
+        observer.setMuted(savedMuted())
         built.spokenInstructionObserver = observer
         core = built
         lastOptions = options
         return TripModel(built).also { model = it }
+    }
+
+    private fun startsHere(stops: List<Stop>, here: Location): Boolean {
+        val first = stops.firstOrNull() ?: return false
+        if (first.name == "Your location") return true
+        if (stops.size < 2) return false
+        val metres = FloatArray(1)
+        Location.distanceBetween(here.latitude, here.longitude, first.lat, first.lon, metres)
+        return metres[0] <= SAME_PLACE_METRES
     }
 
     /** Ask for the route from where you are, and go. */
@@ -203,8 +226,9 @@ object Nav {
                 } ?: withTimeoutOrNull(20_000) { locationProvider.locationUpdates(1000L).first() }
                     ?: throw IllegalStateException("Waiting for GPS. Try again outside.")
                 val c = core ?: return@launch
-                // "Your location" is where the trip starts; the phone knows better.
-                val rest = if (stops.firstOrNull()?.name == "Your location") stops.drop(1) else stops
+                // "Your location", or a start you're already standing at ("Home"), is
+                // where the trip begins, not somewhere to drive to first.
+                val rest = if (startsHere(stops, here)) stops.drop(1) else stops
                 destination = rest.lastOrNull()
                 multiStop = rest.size > 1
                 hazards = emptyList()
@@ -215,7 +239,10 @@ object Nav {
                 _hazard.value = null
                 _faster.value = null
                 declinedAt = 0L
-                val waypoints = through.map(::viaPoint) + rest.map { Waypoint(coordinate = GeographicCoordinate(it.lat, it.lon), kind = WaypointKind.BREAK) }
+                fun stopAt(s: Stop) = Waypoint(coordinate = GeographicCoordinate(s.lat, s.lon), kind = WaypointKind.BREAK)
+                // The way you picked is the way into the last stop. Going through it
+                // first would drive the whole route, come back, and drive it again.
+                val waypoints = rest.dropLast(1).map(::stopAt) + through.map(::viaPoint) + rest.takeLast(1).map(::stopAt)
                 val route = c.getRoutes(here.toUserLocation(), waypoints).first()
                 vm.setDestination(rest.lastOrNull()?.name)
                 withContext(Dispatchers.Main) {
@@ -267,8 +294,19 @@ object Nav {
         }
     }
 
+    private fun savedMuted(): Boolean =
+        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).getBoolean("muted", false)
+
+    /** You turned the voice off, so it stays off, this trip and the next, until you turn it on. */
+    fun setMuted(muted: Boolean) {
+        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit().putBoolean("muted", muted).apply()
+        tts?.setMuted(muted)
+    }
+
     /** Warn once for each camera ahead. */
     fun onLocation(lat: Double, lon: Double) {
+        // Anything else that switched it back on doesn't get to decide.
+        tts?.let { if (it.isMuted != savedMuted()) it.setMuted(savedMuted()) }
         checkHazards()
         val point = FloatArray(1)
         var nearest: Pair<Camera, Float>? = null
@@ -294,28 +332,55 @@ object Nav {
 
     private var speaker: TextToSpeech? = null
 
+    // Called when the sentence with this id has finished, or couldn't be said.
+    private val afterSpeech = java.util.concurrent.ConcurrentHashMap<String, () -> Unit>()
+    private val utterances = java.util.concurrent.atomic.AtomicInteger()
+
     /** An answer you asked for, so it's spoken even with directions muted. */
-    fun say(text: String) {
-        talk(text)
+    fun say(text: String, done: (() -> Unit)? = null) {
+        talk(text, done)
     }
+
+    /** You've moved on: stop saying it. */
+    fun hush() {
+        speaker?.stop()
+    }
+
+    /** Are you being given directions right now? */
+    fun onTrip(): Boolean = model?.navigationUiState?.value?.isNavigating() == true
 
     private fun speak(text: String) {
         if (tts?.isMuted == true) return
         talk(text)
     }
 
-    private fun talk(text: String) {
+    private fun talk(text: String, done: (() -> Unit)? = null) {
+        val id = "promptly-${utterances.incrementAndGet()}"
+        if (done != null) afterSpeech[id] = done
         val s = speaker
         if (s != null) {
-            s.speak(text, TextToSpeech.QUEUE_ADD, null, "camera")
+            if (s.speak(text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) spoke(id)
         } else {
             speaker = TextToSpeech(app) { status ->
                 if (status == TextToSpeech.SUCCESS) {
                     speaker?.language = Locale.forLanguageTag("en-AU")
-                    speaker?.speak(text, TextToSpeech.QUEUE_ADD, null, "camera")
+                    speaker?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) = Unit
+                        override fun onDone(utteranceId: String?) = spoke(utteranceId)
+                        @Deprecated("Deprecated in Java")
+                        override fun onError(utteranceId: String?) = spoke(utteranceId)
+                        override fun onStop(utteranceId: String?, interrupted: Boolean) = spoke(utteranceId)
+                    })
+                    speaker?.speak(text, TextToSpeech.QUEUE_ADD, null, id)
+                } else {
+                    spoke(id)
                 }
             }
         }
+    }
+
+    private fun spoke(id: String?) {
+        id?.let { afterSpeech.remove(it)?.invoke() }
     }
 
     fun arrivedNow() {
@@ -545,7 +610,7 @@ object Nav {
     }
 
     fun stop() {
-        Voice.stop(app)
+        if (!Voice.listensAnywhere(app)) Voice.stop(app)
         _addedStop.value = null
         liveJob?.cancel()
         trafficJob?.cancel()
@@ -565,7 +630,7 @@ class TripModel(core: FerrostarCore) : DefaultNavigationViewModel(core, valhalla
 
     override fun toggleMute() {
         val observer = ferrostar.spokenInstructionObserver ?: return
-        observer.setMuted(!observer.isMuted)
+        Nav.setMuted(!observer.isMuted)
     }
 
     override fun stopNavigation() {

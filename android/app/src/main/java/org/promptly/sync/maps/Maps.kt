@@ -79,14 +79,17 @@ object Maps {
         Store(context).account = account
     }
 
-    /** What you said after "Hey Promptly", and what to do about it. */
-    suspend fun assistant(context: Context, clip: ByteArray, state: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+    /** What you said, as sound or tapped words, and what to do about it. */
+    suspend fun assistant(context: Context, clip: ByteArray?, text: String?, state: JSONObject): JSONObject = withContext(Dispatchers.IO) {
         val server = server(context) ?: throw IOException("Not signed in")
         val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
             .addFormDataPart("state", state.toString())
-            .addFormDataPart("audio", "voice.wav", clip.toRequestBody("audio/wav".toMediaType()))
+            .apply {
+                text?.let { addFormDataPart("text", it) }
+                clip?.let { addFormDataPart("audio", "voice.wav", it.toRequestBody("audio/wav".toMediaType())) }
+            }
             .build()
-        client(context).newCall(Request.Builder().url("$server/api/maps/assistant").post(body).build()).execute().use { r ->
+        client(context).newCall(Request.Builder().url("$server/api/assistant").post(body).build()).execute().use { r ->
             val text = r.body.string()
             if (!r.isSuccessful) throw IOException("Server said ${r.code}: ${text.take(300)}")
             JSONObject(text)
@@ -112,12 +115,12 @@ object Maps {
     }
 
     /** The map style with this server's addresses filled in, as a local file. */
-    suspend fun styleFile(context: Context): String = withContext(Dispatchers.IO) {
+    suspend fun styleFile(context: Context, forceDark: Boolean? = null): String = withContext(Dispatchers.IO) {
         val server = server(context) ?: throw IOException("Not signed in")
         val config = get(context, "/api/maps/config")
         val basemap = config.optString("basemap").takeIf { it.isNotEmpty() && it != "null" }
             ?: throw IOException("Maps aren't set up on this server yet.")
-        val dark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+        val dark = forceDark ?: (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
         val flavor = if (dark) "dark" else "light"
         val (code, text) = call(context) { url("$server/map-assets/style-$flavor.json") }
         if (code != 200) throw IOException("Server said $code")

@@ -69,7 +69,7 @@ async def test_claim_makes_an_upload_password_once(client, db, user):
     got = r.json()
     assert got["username"] == user.username and got["device_name"] == "Pixel 9"
     row = await db.get(AppPassword, uuid.UUID(got["device_id"]))
-    assert set(row.scopes) == {"upload", "dav:read", "maps"}
+    assert set(row.scopes) == {"upload", "dav:read", "maps", "assistant"}
     assert "dav:delete" not in row.scopes
 
     # The page sees it paired; the code doesn't work twice.

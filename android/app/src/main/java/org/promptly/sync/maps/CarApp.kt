@@ -4,6 +4,11 @@ import android.content.Intent
 import androidx.car.app.CarAppService
 import android.util.Log
 import androidx.car.app.CarToast
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import org.maplibre.compose.camera.CameraPosition
+import org.maplibre.spatialk.geojson.Position
 import androidx.car.app.media.CarAudioRecord
 import androidx.car.app.versioning.CarAppApiLevels
 import androidx.car.app.CarContext
@@ -69,6 +74,13 @@ class PromptlyCarService : CarAppService() {
 }
 
 class PromptlyCarSession : Session() {
+    private val styleScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+    override fun onCarConfigurationChanged(newConfiguration: android.content.res.Configuration) {
+        // The car's headlights came on, or went off.
+        Nav.loadCarStyle(styleScope, carContext.isDarkMode)
+    }
+
     override fun onCreateScreen(intent: Intent): Screen {
         Nav.init(carContext)
         if (Maps.server(carContext) == null) {
@@ -101,7 +113,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
     private val surfaceArea = SurfaceAreaTracker { surfaceGestureCallback = it }
 
     init {
-        Nav.loadStyle(scope)
+        Nav.loadCarStyle(scope, carContext.isDarkMode)
         bridge.start(scope)
         vm.navigationUiState.onEach {
             val wasNavigating = uiState?.isNavigating() == true
@@ -109,7 +121,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             it.location?.let { at -> Nav.onLocation(at.coordinates.lat, at.coordinates.lng) }
             if (wasNavigating != it.isNavigating() || it.isNavigating()) invalidate()
         }.launchIn(scope)
-        Nav.style.onEach { invalidate() }.launchIn(scope)
+        Nav.carStyle.onEach { invalidate() }.launchIn(scope)
         Nav.traffic.onEach { invalidate() }.launchIn(scope)
         Nav.faster.onEach { invalidate() }.launchIn(scope)
         // What the assistant said, on the screen as well.
@@ -119,6 +131,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 Voice.clearReply()
             }
         }.launchIn(scope)
+        Voice.inCar = true
         Voice.start(carContext)
         // A warning on the car's screen as you come up to it; the voice comes from the phone.
         var shown: String? = null
@@ -130,6 +143,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         }.launchIn(scope)
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) {
+                Voice.inCar = false
                 // The car's screen going away is where you parked.
                 val at = uiState?.location
                 if (at != null) {
@@ -145,13 +159,23 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
 
     @Composable
     override fun content() {
-        val style by Nav.style.collectAsState()
+        val style by Nav.carStyle.collectAsState()
         val styleUri = style ?: return
         val area by screenSurfaceState(surfaceArea)
         val padding = surfaceStableFractionalPadding(area?.compositeArea)
         val tracking = surfaceStableFractionalPadding(area?.compositeArea, top = 0.5f)
         val options = navigationCameraOptions().copy(browsingPadding = padding, navigationPadding = tracking)
         val mapState = rememberNavigationMapState(navigationCameraOptions = options)
+        // With no trip yet, nothing moves the camera, and it would stay on the whole
+        // world, most of which this server has no map for. Start where you are.
+        LaunchedEffect(Unit) {
+            val here = runCatching {
+                withTimeoutOrNull(20_000) { Nav.locationProvider.locationUpdates(1000L).first() }
+            }.getOrNull() ?: return@LaunchedEffect
+            if (uiState?.isNavigating() != true) {
+                mapState.cameraState.position = CameraPosition(target = Position(here.longitude, here.latitude), zoom = 14.0)
+            }
+        }
         CarAppNavigationView(
             modifier = Modifier.fillMaxSize(),
             styleUrl = styleUri,

@@ -391,7 +391,7 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
         battery = Power.read(ctx) // back from the battery settings
         onPauseOrDispose { }
     }
-    LaunchedEffect(Unit) { update = withContext(Dispatchers.IO) { Api.update(account.server) } }
+    LaunchedEffect(Unit) { if (!installedFromPlay(ctx)) update = withContext(Dispatchers.IO) { Api.update(account.server) } }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Spacer(Modifier.height(12.dp))
@@ -510,6 +510,11 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
             onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("${account.server}/files/photos"))) },
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Open Promptly Photos") }
+
+        OutlinedButton(
+            onClick = { ctx.startActivity(Intent(ctx, org.promptly.sync.assistant.AssistantSettingsActivity::class.java)) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Phone assistant") }
 
         TextButton(onClick = { confirmUnlink = true }) { Text("Unlink this phone", color = MaterialTheme.colorScheme.error) }
         Text(
@@ -720,3 +725,14 @@ private fun Setting(title: String, hint: String?, checked: Boolean, onChange: (B
         Switch(checked = checked, onCheckedChange = onChange, modifier = Modifier.size(width = 52.dp, height = 32.dp))
     }
 }
+
+/** Play keeps this copy up to date; installing over it from the server would stop
+ *  Android Auto trusting it. */
+private fun installedFromPlay(context: android.content.Context): Boolean = runCatching {
+    val installer = if (android.os.Build.VERSION.SDK_INT >= 30) {
+        context.packageManager.getInstallSourceInfo(context.packageName).installingPackageName
+    } else {
+        @Suppress("DEPRECATION") context.packageManager.getInstallerPackageName(context.packageName)
+    }
+    installer == "com.android.vending"
+}.getOrDefault(false)

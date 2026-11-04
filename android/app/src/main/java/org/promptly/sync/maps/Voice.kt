@@ -2,6 +2,7 @@ package org.promptly.sync.maps
 
 import android.Manifest
 import android.app.NotificationChannel
+import android.app.role.RoleManager
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
@@ -36,6 +37,8 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.promptly.sync.R
+import org.promptly.sync.assistant.PhoneActions
+import org.promptly.sync.assistant.PromptlyAssistantService
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -47,6 +50,7 @@ import kotlin.math.sqrt
 object Voice {
     private const val TAG = "PromptlyVoice"
     private const val PREFS = "maps_voice"
+    private const val UNHEARD = "Sorry, I didn't catch that."
     const val SAMPLE_RATE = 16000
 
     enum class State { OFF, LISTENING, HEARD, THINKING }
@@ -57,6 +61,21 @@ object Voice {
     /** The last thing said back, for the screens to show. */
     private val _reply = MutableStateFlow<String?>(null)
     val reply = _reply.asStateFlow()
+
+    /** What it heard you say, for the sheet. */
+    private val _heard = MutableStateFlow<String?>(null)
+    val heard = _heard.asStateFlow()
+
+    /** The question it read back, while it's waiting for a yes or no. */
+    private val _question = MutableStateFlow<String?>(null)
+    val question = _question.asStateFlow()
+
+    /** Goes up each time an answer has finished being said. */
+    private val _spoken = MutableStateFlow(0)
+    val spoken = _spoken.asStateFlow()
+
+    /** The car's screen is connected: the phone is probably locked, and in a pocket. */
+    @Volatile var inCar = false
 
     private val history = ArrayDeque<Pair<String, String>>()
     // A change that was read back, waiting for you to say yes.
@@ -77,12 +96,38 @@ object Voice {
 
     fun setEnabled(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean("on", on).apply()
-        if (on) start(context) else stop(context)
+        if (on) {
+            start(context)
+        } else {
+            // Off means off, wherever it was asked for.
+            prefs(context).edit().putBoolean("anywhere", false).apply()
+            stop(context)
+        }
+    }
+
+    /** "Hey Promptly" away from the car: your choice, and off until you make it. */
+    fun anywhere(context: Context): Boolean = prefs(context).getBoolean("anywhere", false)
+
+    fun setAnywhere(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("anywhere", on).apply()
+        if (on) start(context) else if (!Nav.onTrip() && !inCar) stop(context)
+    }
+
+    /** Android only lets the microphone open from the background for the phone's assistant. */
+    fun holdsRole(context: Context): Boolean =
+        context.getSystemService(RoleManager::class.java)?.isRoleHeld(RoleManager.ROLE_ASSISTANT) == true
+
+    fun listensAnywhere(context: Context): Boolean = anywhere(context) && holdsRole(context)
+
+    /** The notification's Turn off: only for now if that's what's keeping it on. */
+    internal fun turnOff(context: Context) {
+        if (Nav.onTrip() || inCar) setEnabled(context, false) else setAnywhere(context, false)
     }
 
     /** Start listening, if you've allowed it. Android can refuse from the background. */
     fun start(context: Context) {
-        if (!enabled(context) || !allowed(context) || _state.value != State.OFF) return
+        if (!(enabled(context) || listensAnywhere(context)) || !allowed(context) || _state.value != State.OFF) return
+        Nav.init(context)
         runCatching {
             ContextCompat.startForegroundService(context, Intent(context, VoiceService::class.java))
         }.onFailure { Log.w(TAG, "Couldn't start listening", it) }
@@ -163,31 +208,99 @@ object Voice {
         }
     }
 
+    /** A fresh start on the sheet: nothing carried over from last time. */
+    fun newConversation() {
+        history.clear()
+        pending = null
+        _question.value = null
+        _heard.value = null
+        _reply.value = null
+    }
+
+    /** Listen once on the sheet, then answer. Blocks until done. */
+    internal fun listenOnce(context: Context, wanted: () -> Boolean) {
+        val size = max(AudioRecord.getMinBufferSize(SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT), SAMPLE_RATE)
+        val record = try {
+            AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, size)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "No microphone permission", e)
+            return
+        }
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            _reply.value = "The microphone is busy."
+            return
+        }
+        val was = _state.value
+        val release = holdFocus(context)
+        try {
+            setState(State.HEARD)
+            chime()
+            record.startRecording()
+            // A moment of the room first, to tell when you've stopped speaking.
+            val room = ShortArray(SAMPLE_RATE / 5)
+            val got = max(0, record.read(room, 0, room.size))
+            val before = ByteBuffer.allocate(got * 2).order(ByteOrder.LITTLE_ENDIAN)
+            for (i in 0 until got) before.putShort(room[i])
+            val floor = minOf(level(room, got), 400.0) // you may already be talking
+            val clip = capture(floor, before.array()) { buffer -> if (wanted()) record.read(buffer, 0, buffer.size) else -1 }
+            if (!wanted()) return
+            when {
+                clip != null -> ask(context, clip)
+                // Still asking: the question and its buttons stay. Don't keep on at you.
+                pending == null -> {
+                    _reply.value = UNHEARD
+                    Nav.init(context)
+                    Nav.say(UNHEARD)
+                }
+            }
+        } finally {
+            runCatching { record.stop() }
+            record.release()
+            release()
+            setState(was)
+        }
+    }
+
+    private fun answered(context: Context, words: String) {
+        Nav.init(context)
+        _reply.value = words
+        Nav.say(words) { _spoken.value += 1 }
+    }
+
     /** Send what you said, say the answer, do what it says. Blocks until done. */
-    internal fun ask(context: Context, clip: ByteArray) {
+    internal fun ask(context: Context, clip: ByteArray?, words: String? = null) {
+        Nav.init(context)
+        val was = _state.value
         setState(State.THINKING)
         try {
             val state = Nav.assistantState()
+            if (!state.has("lat")) {
+                PhoneActions.lastPosition(context)?.let { state.put("lat", it.latitude).put("lon", it.longitude) }
+            }
             state.put("history", JSONArray().also { rows ->
                 history.forEach { (heard, said) -> rows.put(JSONObject().put("heard", heard.take(500)).put("said", said.take(500))) }
             })
             pending?.let { state.put("pending", it) }
-            val answer = runBlocking { Maps.assistant(context, clip, state) }
+            val answer = runBlocking { Maps.assistant(context, clip, words, state) }
             pending = answer.optJSONObject("pending")
-            val say = answer.optString("say")
+            _question.value = pending?.optString("question")
             val heard = answer.optString("heard")
+            _heard.value = heard
+            // If the phone can't do it, say that instead of "done".
+            val problem = answer.optJSONObject("action")?.let { PhoneActions.carry(context, it) }
+            val say = problem ?: answer.optString("say")
             if (heard.isNotEmpty() && say.isNotEmpty()) {
                 history.addLast(heard to say)
                 while (history.size > 3) history.removeFirst()
             }
-            answer.optJSONObject("action")?.let(Nav::act)
-            if (say.isNotEmpty()) {
-                _reply.value = say
-                Nav.say(say)
-            }
+            if (say.isNotEmpty()) answered(context, say)
         } catch (e: Exception) {
             Log.w(TAG, "Couldn't reach the server", e)
-            Nav.say("Sorry, I can't reach your server.")
+            val refused = e.message.orEmpty().let { "said 401" in it || "said 403" in it || "Not signed in" in it }
+            answered(context, if (refused) "This phone needs linking to your Promptly again." else "Sorry, I can't reach your server.")
+        } finally {
+            setState(was)
         }
     }
 
@@ -235,7 +348,7 @@ class VoiceService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_OFF) Voice.setEnabled(this, false)
+        if (intent?.action == ACTION_OFF) Voice.turnOff(this)
         return START_NOT_STICKY
     }
 
@@ -341,6 +454,17 @@ class VoiceService : Service() {
 
 
     private fun answer(record: AudioRecord, floor: Double, before: ByteArray) {
+        // Away from a drive nothing personal is said on a locked phone. Driving, you
+        // set off with it on purpose, and the car's screen often leaves it locked.
+        val driving = Nav.onTrip() || Voice.inCar
+        if (!driving && PhoneActions.locked(this)) {
+            Nav.say("Unlock your phone first.")
+            return
+        }
+        if (!driving) {
+            Voice.newConversation()
+            PromptlyAssistantService.showSheet()
+        }
         Voice.setState(Voice.State.HEARD)
         val release = Voice.holdFocus(this)
         try {
