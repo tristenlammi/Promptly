@@ -8,6 +8,7 @@ A failure is shown on the account and retried, and never stops other accounts.
 from __future__ import annotations
 
 import asyncio
+import imaplib
 import logging
 import os
 import secrets
@@ -113,15 +114,21 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
             exists = await db.scalar(select(MailMessage.id).where(MailMessage.folder_id == folder_id, MailMessage.uid == uid))
             if exists:
                 continue
-            message = MailMessage(
-                account_id=account_id, folder_id=folder_id, uid=uid, thread_key=await _thread_for(db, account_id, found),
-                message_id=found.message_id, in_reply_to=found.in_reply_to, references=found.references, subject=found.subject,
-                from_name=found.from_name, from_addr=found.from_addr, to_addrs=found.to, cc_addrs=found.cc, sent_at=found.sent_at,
-                snippet=found.snippet, body_text=found.text.replace("\x00", ""), body_html=found.html.replace("\x00", ""),
-                attachments=found.attachments, unsubscribe=found.unsubscribe, reply_to=found.reply_to, invite=found.invite, **state,
-            )
-            db.add(message)
-            await db.flush()
+            # One email the database won't take can't cost you the rest of the folder.
+            try:
+                async with db.begin_nested():
+                    message = MailMessage(
+                        account_id=account_id, folder_id=folder_id, uid=uid, thread_key=await _thread_for(db, account_id, found),
+                        message_id=found.message_id, in_reply_to=found.in_reply_to, references=found.references, subject=found.subject,
+                        from_name=found.from_name, from_addr=found.from_addr, to_addrs=found.to, cc_addrs=found.cc, sent_at=found.sent_at,
+                        snippet=found.snippet.replace("\x00", ""), body_text=found.text.replace("\x00", ""), body_html=found.html.replace("\x00", ""),
+                        attachments=found.attachments, unsubscribe=found.unsubscribe, reply_to=found.reply_to, invite=found.invite, **state,
+                    )
+                    db.add(message)
+                    await db.flush()
+            except Exception as e:  # noqa: BLE001 — logged without its contents
+                logger.warning("Skipped an email that couldn't be saved: %s", type(e).__name__)
+                continue
             arrived.append(message)
         folder = await db.get(MailFolder, folder_id)
         quiet = await rules.apply_to_new(db, account_id, folder, arrived)
@@ -132,6 +139,19 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
     # What a rule filed doesn't interrupt you. A reply in a labelled conversation does.
     if announce and folder.role == "inbox":
         await _announce(account_id, [m for m in arrived if m.id not in quiet])
+
+
+async def _copy(client, account_id: uuid.UUID, folder_id: uuid.UUID, uids: list[int], announce: bool = False) -> None:
+    """A batch at a time, saved as it goes, so a big folder needs little memory and
+    picks up where it left off if it's interrupted."""
+    async with SessionLocal() as db:
+        held = set((await db.execute(select(MailMessage.uid).where(MailMessage.folder_id == folder_id, MailMessage.uid.in_(uids)))).scalars())
+    wanted = [u for u in uids if u not in held]
+    if not wanted:
+        return
+    for batch in await asyncio.to_thread(imap.batches, client, wanted):
+        items = await asyncio.to_thread(imap.fetch_messages, client, batch)
+        await _store(account_id, folder_id, items, announce=announce)
 
 
 async def _sync_folder(client, account_id: uuid.UUID, folder: MailFolder) -> None:
@@ -150,9 +170,7 @@ async def _sync_folder(client, account_id: uuid.UUID, folder: MailFolder) -> Non
         last_uid = 0
     uids = await asyncio.to_thread(imap.new_uids, client, last_uid, INITIAL_PER_FOLDER if last_uid == 0 else PER_SYNC)
     if uids:
-        items = await asyncio.to_thread(imap.fetch_messages, client, uids)
-        await _store(account_id, folder.id, items, announce=known)
-    if uids:
+        await _copy(client, account_id, folder.id, uids, announce=known)
         last_uid = max(last_uid, max(uids))
     async with SessionLocal() as db:
         values: dict = {"uidvalidity": validity, "last_uid": last_uid}
@@ -186,6 +204,34 @@ async def _sync_folder(client, account_id: uuid.UUID, folder: MailFolder) -> Non
         await db.commit()
 
 
+def _connection_lost(e: Exception) -> bool:
+    """Nothing more can be done on this connection, as opposed to one folder being a problem."""
+    return isinstance(e, (OSError, imaplib.IMAP4.abort))
+
+
+def _never_copied(folder: MailFolder) -> bool:
+    return folder.last_uid == 0 and folder.oldest_uid == 0
+
+
+async def _sync_folders(client, account_id: uuid.UUID, every: bool) -> None:
+    """Inbox first, then your own folders and labels, then the rest. A folder that
+    hasn't been copied yet doesn't wait for its turn, and one that fails doesn't stop
+    those after it: it's tried again next time."""
+    async with SessionLocal() as db:
+        folders = (await db.execute(select(MailFolder).where(MailFolder.account_id == account_id))).scalars().all()
+    for folder in sorted(folders, key=lambda f: (f.role != "inbox", f.role != "other")):
+        if folder.role in imap.SKIP_ROLES or not (every or folder.role == "inbox" or _never_copied(folder)):
+            continue
+        try:
+            await _sync_folder(client, account_id, folder)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — the path alone: it can name people
+            if _connection_lost(e):
+                raise
+            logger.warning("Couldn't copy one mail folder: %s", type(e).__name__, exc_info=True)
+
+
 async def _backfill(client, account_id: uuid.UUID) -> None:
     """A little more of your older mail, so search reaches back. One folder at a time."""
     async with SessionLocal() as db:
@@ -198,12 +244,19 @@ async def _backfill(client, account_id: uuid.UUID) -> None:
             lowest = await db.scalar(select(func.min(MailMessage.uid)).where(MailMessage.folder_id == folder.id))
         below = folder.oldest_uid or lowest or folder.last_uid
         older: list[int] = []
-        if held < HISTORY_PER_FOLDER:
-            await asyncio.to_thread(imap.select, client, folder.path)
-            older = await asyncio.to_thread(imap.older_uids, client, below, BACKFILL_BATCH)
-        if older:
-            items = await asyncio.to_thread(imap.fetch_messages, client, older)
-            await _store(account_id, folder.id, items)
+        try:
+            if held < HISTORY_PER_FOLDER:
+                await asyncio.to_thread(imap.select, client, folder.path)
+                older = await asyncio.to_thread(imap.older_uids, client, below, BACKFILL_BATCH)
+            if older:
+                await _copy(client, account_id, folder.id, older)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — the next folder still gets its turn
+            if _connection_lost(e):
+                raise
+            logger.warning("Couldn't copy older mail from one folder: %s", type(e).__name__)
+            continue
         async with SessionLocal() as db:
             await db.execute(update(MailFolder).where(MailFolder.id == folder.id).values(oldest_uid=min(older) if older else 1))
             await db.commit()
@@ -341,12 +394,7 @@ async def run_account(account_id: uuid.UUID) -> None:
                     every = now - last_all >= FOLDERS_EVERY_S
                     if every:
                         await _refresh_folders(client, account_id)
-                    async with SessionLocal() as db:
-                        folders = (await db.execute(select(MailFolder).where(MailFolder.account_id == account_id))).scalars().all()
-                    # Inbox first: it's what you're waiting for on a first sync.
-                    for folder in sorted(folders, key=lambda f: f.role != "inbox"):
-                        if folder.role not in imap.SKIP_ROLES and (every or folder.role == "inbox"):
-                            await _sync_folder(client, account_id, folder)
+                    await _sync_folders(client, account_id, every)
                     await _backfill(client, account_id)
                     await _set_status(account_id, "ok", synced=True)
                     last_inbox = now

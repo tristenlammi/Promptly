@@ -5,7 +5,13 @@ import androidx.car.app.CarAppService
 import android.util.Log
 import androidx.car.app.CarToast
 import androidx.compose.runtime.LaunchedEffect
+import androidx.activity.OnBackPressedCallback
+import androidx.car.app.constraints.ConstraintManager
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.first
+import org.maplibre.spatialk.geojson.BoundingBox
 import kotlinx.coroutines.withTimeoutOrNull
 import org.maplibre.compose.camera.CameraPosition
 import org.maplibre.spatialk.geojson.Position
@@ -111,6 +117,10 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
     )
     private var uiState: NavigationUiState? = null
     private val surfaceArea = SurfaceAreaTracker { surfaceGestureCallback = it }
+    private var shortcuts: List<Stop> = emptyList()
+    private val backFromPreview = object : OnBackPressedCallback(false) {
+        override fun handleOnBackPressed() = CarPreview.clear()
+    }
 
     init {
         Nav.loadCarStyle(scope, carContext.isDarkMode)
@@ -123,6 +133,18 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         }.launchIn(scope)
         Nav.carStyle.onEach { invalidate() }.launchIn(scope)
         Nav.traffic.onEach { invalidate() }.launchIn(scope)
+        CarPreview.plan.onEach {
+            backFromPreview.isEnabled = it != null
+            invalidate()
+        }.launchIn(scope)
+        // Why nothing happened, rather than nothing happening. Not one from before now.
+        CarPreview.problem.onEach { CarToast.makeText(carContext, it, CarToast.LENGTH_LONG).show() }.launchIn(scope)
+        Nav.error.drop(1).onEach { said -> if (said != null) CarToast.makeText(carContext, said, CarToast.LENGTH_LONG).show() }.launchIn(scope)
+        carContext.onBackPressedDispatcher.addCallback(this, backFromPreview)
+        scope.launch {
+            shortcuts = runCatching { Maps.myPlaces(carContext) }.getOrDefault(emptyList())
+            invalidate()
+        }
         Nav.faster.onEach { invalidate() }.launchIn(scope)
         // What the assistant said, on the screen as well.
         Voice.reply.onEach { said ->
@@ -175,6 +197,19 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 mapState.cameraState.position = CameraPosition(target = Position(here.longitude, here.latitude), zoom = 14.0)
             }
         }
+        // The whole route in view, beside the card that describes it.
+        val plan by CarPreview.plan.collectAsState()
+        LaunchedEffect(plan?.route) {
+            val line = plan?.route?.line.orEmpty()
+            if (line.size > 1) {
+                runCatching {
+                    mapState.cameraState.animateTo(
+                        boundingBox = BoundingBox(line.minOf { it.first }, line.minOf { it.second }, line.maxOf { it.first }, line.maxOf { it.second }),
+                        padding = padding,
+                    )
+                }
+            }
+        }
         CarAppNavigationView(
             modifier = Modifier.fillMaxSize(),
             styleUrl = styleUri,
@@ -183,7 +218,10 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             viewModel = vm,
             config = VisualNavigationViewConfig.Default().withSpeedLimitStyle(SignageStyle.ViennaConvention),
             surfaceAreaTracker = surfaceArea,
-            mapContent = { TrafficOnRoute() },
+            mapContent = {
+                TrafficOnRoute()
+                PreviewRoutesOnMap()
+            },
         )
     }
 
@@ -204,7 +242,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             strip.addAction(Action.Builder().setTitle("No").setOnClickListener { Nav.declineFaster() }.build())
         }
         strip.addAction(Action.Builder().setTitle("Add stop").setOnClickListener { screenManager.push(AddStopScreen(carContext)) }.build())
-        strip.addAction(Action.Builder().setTitle("Stop").setOnClickListener { Nav.stop() }.build())
+        strip.addAction(Action.Builder().setTitle("End").setOnClickListener { screenManager.push(ConfirmStopScreen(carContext)) }.build())
         val builder = NavigationTemplate.Builder().setActionStrip(strip.build())
         val icons = InterfaceCarIcons(carContext)
         builder.setMapActionStrip(
@@ -280,24 +318,43 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         if (state?.isNavigating() == true) {
             return drivingTemplate(state)
         }
-        val go = Action.Builder()
-            .setTitle("Go")
-            .setOnClickListener { screenManager.push(PlacesScreen(carContext)) }
-            .build()
-        return NavigationTemplate.Builder()
-            .setActionStrip(ActionStrip.Builder().addAction(go).build())
-            .setMapActionStrip(
-                ActionStrip.Builder()
-                    .addAction(
-                        Action.Builder()
-                            .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_map_mic)).build())
-                            .setOnClickListener { askFromCar() }
-                            .build(),
-                    )
-                    .build(),
-            )
-            .build()
+        CarPreview.plan.value?.let { plan ->
+            return CarTemplates.preview(plan, carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_ROUTE_LIST), onSelect = CarPreview::select, onGo = {
+                CarToast.makeText(carContext, "Starting your trip", CarToast.LENGTH_SHORT).show()
+                CarPreview.go()
+            })
+        }
+        return CarTemplates.landing(
+            carContext,
+            home = shortcuts.firstOrNull { it.kind == "home" },
+            work = shortcuts.firstOrNull { it.kind == "work" },
+            onWhereTo = { screenManager.push(PlacesScreen(carContext)) },
+            onPlace = { CarPreview.show(carContext, it) },
+            onMic = { askFromCar() },
+        )
     }
+}
+
+/** How many rows this car allows, which depends on the car and whether it's moving. */
+private fun carLimit(context: CarContext, type: Int): Int =
+    runCatching { context.getCarService(ConstraintManager::class.java).getContentLimit(type) }.getOrDefault(6)
+
+/** Straight-line, from the last place the phone knew. Enough to tell near from far. */
+private fun distanceTo(stop: Stop, here: android.location.Location?): Float? {
+    if (here == null) return null
+    val metres = FloatArray(1)
+    android.location.Location.distanceBetween(here.latitude, here.longitude, stop.lat, stop.lon, metres)
+    return metres[0]
+}
+
+private class ConfirmStopScreen(context: CarContext) : Screen(context) {
+    override fun onGetTemplate(): Template = CarTemplates.confirmStop(
+        onEnd = {
+            Nav.stop()
+            screenManager.popToRoot()
+        },
+        onKeep = { screenManager.pop() },
+    )
 }
 
 /** Where to? Your saved places and recents, or a search. */
@@ -362,9 +419,11 @@ private class PlacesScreen(context: CarContext) : Screen(context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var places: List<Stop>? = null
     private var failed = false
+    private var here: android.location.Location? = null
 
     init {
         scope.launch {
+            here = runCatching { Nav.locationProvider.lastLocation() }.getOrNull()
             runCatching { Maps.myPlaces(carContext) }
                 .onSuccess { places = it }
                 .onFailure { failed = true }
@@ -388,13 +447,13 @@ private class PlacesScreen(context: CarContext) : Screen(context) {
         when {
             failed -> builder.setSingleList(ItemList.Builder().setNoItemsMessage("Couldn't reach your server.").build())
             rows == null -> builder.setLoading(true)
-            else -> builder.setSingleList(stopList(carContext, rows, "Nothing saved yet. Search, or save places in P Maps.") { go(it) })
+            else -> builder.setSingleList(CarTemplates.places(carContext, rows, carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_PLACE_LIST), "Nothing saved yet. Search, or save places in P Maps.", { distanceTo(it, here) }) { go(it) })
         }
         return builder.build()
     }
 
     private fun go(stop: Stop) {
-        Nav.start(listOf(stop), TripOptions())
+        CarPreview.show(carContext, stop)
         screenManager.popToRoot()
     }
 }
@@ -402,6 +461,11 @@ private class PlacesScreen(context: CarContext) : Screen(context) {
 private class SearchScreen(context: CarContext) : Screen(context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var results: List<Stop> = emptyList()
+    private var query = ""
+    private var searching = false
+    private var failed = false
+    private var waiting: kotlinx.coroutines.Job? = null
+    private var here: android.location.Location? = null
 
     init {
         lifecycle.addObserver(object : DefaultLifecycleObserver {
@@ -409,34 +473,52 @@ private class SearchScreen(context: CarContext) : Screen(context) {
         })
     }
 
-    override fun onGetTemplate(): Template = SearchTemplate.Builder(object : SearchTemplate.SearchCallback {
-        override fun onSearchSubmitted(searchText: String) {
-            scope.launch {
-                results = runCatching { Maps.search(carContext, searchText, null) }.getOrDefault(emptyList())
-                invalidate()
-            }
+    private fun search(words: String, pause: Long) {
+        query = words
+        waiting?.cancel()
+        if (words.trim().length < 2) {
+            results = emptyList()
+            searching = false
+            failed = false
+            invalidate()
+            return
         }
-    })
-        .setHeaderAction(Action.BACK)
-        .setSearchHint("Search for a place")
-        .setItemList(stopList(carContext, results, "Search for a place") {
-            Nav.start(listOf(it), TripOptions())
-            screenManager.popToRoot()
-        })
-        .build()
-}
-
-private fun stopList(context: CarContext, stops: List<Stop>, empty: String, onPick: (Stop) -> Unit): ItemList {
-    val list = ItemList.Builder().setNoItemsMessage(empty)
-    val limit = 6
-    stops.take(limit).forEach { stop ->
-        list.addItem(
-            Row.Builder()
-                .setTitle(CarText.create(stop.name))
-                .setBrowsable(false)
-                .setOnClickListener { onPick(stop) }
-                .build(),
-        )
+        waiting = scope.launch {
+            delay(pause)
+            searching = true
+            failed = false
+            invalidate()
+            // Nearest first, as you'd expect from a map.
+            here = runCatching { Nav.locationProvider.lastLocation() }.getOrNull()
+            val near = here?.let { it.latitude to it.longitude }
+            val found = runCatching { Maps.search(carContext, words.trim(), near) }
+            results = found.getOrDefault(emptyList())
+            failed = found.isFailure
+            searching = false
+            invalidate()
+        }
     }
-    return list.build()
+
+    override fun onGetTemplate(): Template {
+        val builder = SearchTemplate.Builder(object : SearchTemplate.SearchCallback {
+            override fun onSearchTextChanged(searchText: String) = search(searchText, 400)
+
+            override fun onSearchSubmitted(searchText: String) = search(searchText, 0)
+        })
+            .setHeaderAction(Action.BACK)
+            .setSearchHint("Search for a place")
+            .setInitialSearchText(query)
+        if (searching) return builder.setLoading(true).build()
+        val empty = when {
+            failed -> "Couldn't reach your server."
+            query.trim().length < 2 -> "Search for a place or address"
+            else -> "Nothing found for that."
+        }
+        return builder.setItemList(
+            CarTemplates.places(carContext, results, carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_LIST), empty, { distanceTo(it, here) }) {
+                CarPreview.show(carContext, it)
+                screenManager.popToRoot()
+            },
+        ).build()
+    }
 }

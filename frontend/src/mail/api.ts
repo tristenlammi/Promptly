@@ -37,6 +37,8 @@ export interface MailLabel {
   name: string;
   color: string;
   unread: number;
+  /** Its mailbox folder hasn't been copied here yet. */
+  fetching?: boolean;
 }
 
 export type RuleKind = "from" | "domain" | "subject";

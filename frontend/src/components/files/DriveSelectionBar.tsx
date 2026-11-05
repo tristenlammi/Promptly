@@ -27,6 +27,7 @@ export function DriveSelectionBar({
   onUnstar,
   onDownload,
   onTrash,
+  onSelectAll,
   onRestore,
   onDeleteForever,
   onAsk,
@@ -43,6 +44,8 @@ export function DriveSelectionBar({
   onDeleteForever?: () => void;
   /** "Ask about these" — a chat with the selected files (WP-3.5). */
   onAsk?: () => void;
+  /** Offered until everything in the folder is selected. */
+  onSelectAll?: () => void;
 }) {
   if (count === 0) return null;
   return (
@@ -59,6 +62,16 @@ export function DriveSelectionBar({
         <X className="h-4 w-4" />
       </button>
       <span className="mr-1 text-sm font-medium">{count} selected</span>
+      {onSelectAll && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onSelectAll}
+          className="rounded-md px-2 py-1 text-xs font-medium text-[var(--accent-text)] transition hover:bg-[var(--hover)] disabled:opacity-50"
+        >
+          Select all
+        </button>
+      )}
 
       <div className="ml-auto flex items-center gap-1">
         {onAsk && (

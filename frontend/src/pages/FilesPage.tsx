@@ -428,6 +428,25 @@ export function FilesPage({
     setSelFiles(new Set());
     setSelFolders(new Set());
   }, []);
+  // Everything in the folder, however much of it has scrolled in so far. System
+  // folders are left out: they can't be moved or trashed.
+  const selectAll = useCallback(async () => {
+    let files = data?.files ?? [];
+    let more = !!hasNextPage;
+    while (more) {
+      const next = await fetchNextPage();
+      if (next.isError || !next.data) break;
+      files = next.data.pages.flatMap((p) => p.files);
+      more = !!next.hasNextPage;
+    }
+    setSelFiles(new Set(files.map((f) => f.id)));
+    setSelFolders(new Set((data?.folders ?? []).filter((f) => !f.system_kind).map((f) => f.id)));
+  }, [data, hasNextPage, fetchNextPage]);
+  const selectableFolders = (data?.folders ?? []).filter((f) => !f.system_kind).length;
+  const selectableCount = (data?.files.length ?? 0) + selectableFolders;
+  const selectedNow = selFiles.size + selFolders.size;
+  const selectAllState: "none" | "some" | "all" =
+    selectedNow === 0 ? "none" : !hasNextPage && selectedNow >= selectableCount ? "all" : "some";
 
   // Drive click model (WP-3.5): a plain click selects just this item and
   // fills the details pane; ⌘/Ctrl-click adds, Shift-click extends.
@@ -500,10 +519,14 @@ export function FilesPage({
       const ids = bulkIds();
       const res = await bulkTrash.mutateAsync(ids);
       const moved = res.files + res.folders;
-      undoToast(`Moved ${moved} item${moved === 1 ? "" : "s"} to trash`, async () => {
-        await filesApi.bulkRestore(ids);
-        refreshAll();
-      });
+      if (moved > 0) {
+        undoToast(`Moved ${moved} item${moved === 1 ? "" : "s"} to trash`, async () => {
+          await filesApi.bulkRestore(ids);
+          refreshAll();
+        });
+      } else if (!res.skipped) {
+        toast.info("System folders stay where they are. Open one to select and trash what's inside.");
+      }
       if (res.skipped) toast.info(workspaceSkipNote(res.skipped));
       clearSelection();
     } catch (e) {
@@ -640,12 +663,9 @@ export function FilesPage({
         return;
       }
       if (mod && (e.key === "a" || e.key === "A")) {
-        const allFiles = (data?.files ?? []).map((f) => f.id);
-        const allFolders = (data?.folders ?? []).map((f) => f.id);
-        if (allFiles.length + allFolders.length === 0) return;
+        if (selectableCount === 0) return;
         e.preventDefault();
-        setSelFiles(new Set(allFiles));
-        setSelFolders(new Set(allFolders));
+        void selectAll();
         return;
       }
       if (e.key === "Escape" && selFiles.size + selFolders.size > 0) {
@@ -662,7 +682,7 @@ export function FilesPage({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [data, selFiles, selFolders, clearSelection, handleBulkTrash, selectOnly, viewMode, writable]);
+  }, [data, selFiles, selFolders, clearSelection, handleBulkTrash, selectOnly, viewMode, writable, selectAll, selectableCount]);
 
   const navigateToFolder = useCallback(
     (id: string | null) => {
@@ -983,6 +1003,7 @@ export function FilesPage({
               onMove={writable ? () => setBulkMoveOpen(true) : undefined}
               onTrash={writable ? () => void handleBulkTrash() : undefined}
               onAsk={() => void handleAsk()}
+              onSelectAll={selectAllState === "all" ? undefined : () => void selectAll()}
             />
             </div>
           )}
@@ -998,6 +1019,7 @@ export function FilesPage({
               gridTile={gridTile}
               selFiles={selFiles}
               selFolders={selFolders}
+              selectAll={writable && selectableCount > 0 ? { state: selectAllState, onToggle: () => void (selectAllState === "all" ? clearSelection() : selectAll()) } : undefined}
               onToggleFile={toggleFile}
               onToggleFolder={toggleFolder}
               onOpenFolder={navigateToFolder}
@@ -1392,6 +1414,7 @@ function ContentGrid({
   gridTile,
   selFiles,
   selFolders,
+  selectAll,
   onToggleFile,
   onToggleFolder,
   onOpenFolder,
@@ -1417,6 +1440,7 @@ function ContentGrid({
   gridTile: number;
   selFiles: Set<string>;
   selFolders: Set<string>;
+  selectAll?: { state: "none" | "some" | "all"; onToggle: () => void };
   onToggleFile: (id: string, shift: boolean) => void;
   onToggleFolder: (id: string, shift: boolean) => void;
   onOpenFolder: (id: string | null) => void;
@@ -1727,7 +1751,7 @@ function ContentGrid({
         loadingMore={loadingMore}
         onLoadMore={onLoadMore}
         header={
-          <DriveListHeader>
+          <DriveListHeader selectAll={selectAll}>
             <SortHeader className="flex-1" label="Name" col="name" sort={sort} onSort={onSort} />
             {/* Kind isn't a sort key, so it's a static label. */}
             <span className="hidden w-24 shrink-0 lg:block">Kind</span>

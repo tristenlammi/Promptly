@@ -162,6 +162,9 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
   const [routing, setRouting] = useState(false);
   const [routeError, setRouteError] = useState<string | null>(null);
   const [addingStop, setAddingStop] = useState(false);
+  // Directions asked for before the phone has a fix: the trip starts from you as
+  // soon as it does.
+  const [findingYou, setFindingYou] = useState(false);
   const stopsRef = useRef(stops);
   stopsRef.current = stops;
   // Roads you chose to go along, as points tapped on them.
@@ -219,9 +222,23 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
     const rows = [...from, asStop(s)];
     setPanel("route");
     setOpen(true);
-    setAddingStop(!you);
+    // Only ask where from when your location can't be had at all.
+    const canFind = !!navigator.geolocation && !locationBlocked;
+    setFindingYou(!you && canFind);
+    setAddingStop(!you && !canFind);
     changeStops(rows);
   };
+
+  useEffect(() => {
+    if (!findingYou) return;
+    if (locationBlocked) {
+      setFindingYou(false);
+      setAddingStop(true);
+    } else if (you) {
+      setFindingYou(false);
+      changeStops([asStop({ lat: you.lat, lon: you.lon, name: "Your location" }), ...stopsRef.current]);
+    }
+  }, [findingYou, you, locationBlocked]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const changeVia = (rows: { lat: number; lon: number; name: string }[]) => {
     viaRef.current = rows;
@@ -245,6 +262,7 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
     setRoutes([]);
     setRouteError(null);
     setAddingStop(false);
+    setFindingYou(false);
     setPanel("home");
   };
 
@@ -553,6 +571,11 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
           error={routeError}
           adding={addingStop}
           setAdding={setAddingStop}
+          findingYou={findingYou}
+          onChooseStart={() => {
+            setFindingYou(false);
+            setAddingStop(true);
+          }}
           results={results}
           query={query}
           setQuery={setQuery}
@@ -1249,6 +1272,8 @@ function RoutePanel(p: {
   error: string | null;
   adding: boolean;
   setAdding: (v: boolean) => void;
+  findingYou: boolean;
+  onChooseStart: () => void;
   results?: SearchResult[];
   query: string;
   setQuery: (q: string) => void;
@@ -1311,6 +1336,12 @@ function RoutePanel(p: {
       </div>
 
       <div className="px-4 pt-2">
+        {p.findingYou && (
+          <div role="status" className="flex items-center gap-2 py-1 text-sm text-[var(--text-muted)]">
+            <span className="flex-1">Finding your location…</span>
+            <button type="button" onClick={p.onChooseStart} className="text-xs font-medium text-[var(--accent-text)]">Start somewhere else</button>
+          </div>
+        )}
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={drop}>
           <SortableContext items={p.stops.map((s) => s.key)} strategy={verticalListSortingStrategy}>
             <ul>

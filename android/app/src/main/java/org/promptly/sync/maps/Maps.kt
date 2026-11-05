@@ -20,7 +20,7 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /** One stop on a trip. */
-data class Stop(val lat: Double, val lon: Double, val name: String)
+data class Stop(val lat: Double, val lon: Double, val name: String, val kind: String? = null, val address: String? = null)
 
 /** Talking to the P Maps part of your Promptly server, and nothing else. The
  *  phone signs in with the same kind of app password as photo backup. */
@@ -164,17 +164,17 @@ object Maps {
         val rows = List(places.length()) { places.getJSONObject(it) }
         for (kind in listOf("home", "work", "favourite", "list")) {
             rows.filter { it.getString("kind") == kind }.forEach {
-                out += Stop(it.getDouble("lat"), it.getDouble("lon"), it.getString("name"))
+                out += Stop(it.getDouble("lat"), it.getDouble("lon"), it.getString("name"), kind, textOf(it, "address"))
             }
         }
         if (!mine.isNull("parked")) {
             val p = mine.getJSONObject("parked")
-            out += Stop(p.getDouble("lat"), p.getDouble("lon"), "Your car")
+            out += Stop(p.getDouble("lat"), p.getDouble("lon"), "Your car", "parked")
         }
         val recents = mine.getJSONArray("recents")
         for (i in 0 until recents.length()) {
             val r = recents.getJSONObject(i)
-            out += Stop(r.getDouble("lat"), r.getDouble("lon"), r.getString("name"))
+            out += Stop(r.getDouble("lat"), r.getDouble("lon"), r.getString("name"), "recent", textOf(r, "address"))
         }
         out.distinctBy { "%.4f,%.4f".format(it.lat, it.lon) }
     }
@@ -185,9 +185,12 @@ object Maps {
         val rows = get(context, "/api/maps/search?q=$q$at").getJSONArray("results")
         List(rows.length()) { i ->
             val r = rows.getJSONObject(i)
-            Stop(r.getDouble("lat"), r.getDouble("lon"), r.getString("name"))
+            Stop(r.getDouble("lat"), r.getDouble("lon"), r.getString("name"), r.optString("kind").ifEmpty { null }, textOf(r, "address"))
         }
     }
+
+    private fun textOf(row: JSONObject, key: String): String? =
+        if (row.isNull(key)) null else row.optString(key).takeIf { it.isNotBlank() }
 
     fun encodeShape(points: List<Pair<Double, Double>>): String {
         val out = StringBuilder()

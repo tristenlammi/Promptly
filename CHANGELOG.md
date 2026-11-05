@@ -21,6 +21,21 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-06
+
+### Added
+- Android Auto: tapping a place now shows the route on the map with time, distance and other ways there, and a big Go button, instead of setting off straight away. Home and Work are one tap from the map.
+- Mail: quick actions on each email as you point at it: archive, delete, mark read or unread, snooze.
+- Files: a Select all checkbox on the list and in the selection bar, so a folder like Chat Uploads or Generated Files can be cleared in one go. It covers the whole folder, including what hasn't scrolled in yet.
+
+### Fixed
+- Android Auto: a route that can't be found or a missing GPS fix now says so on the car's screen instead of doing nothing.
+- Android Auto: places have icons, distances and addresses, lists use as many rows as your car allows, search works as you type and looks near you, and ending a trip asks first.
+- Mail: a deleted or archived email no longer flashes back when the undo time runs out.
+- Mail: a mailbox's labels and folders now get their mail even if one folder is too big or has a problem: mail is copied in small batches that pick up where they left off, a failure in one folder doesn't stop the others, and a label still being fetched says so.
+- Trashing only system folders no longer says "Moved 0 items"; it explains what to do instead, and Ctrl+A leaves system folders out.
+- P Maps no longer asks where you're starting from when you tap Directions before your phone has a location: it waits for the location and shows the route. It only asks if location is turned off.
+
 ## [0.25.0] - 2026-11-05
 
 ### Changed

@@ -1,5 +1,5 @@
 import { createContext, memo, useContext, useRef, useState, type ReactNode } from "react";
-import { Check, Download, Eye, MoreVertical, Star } from "lucide-react";
+import { Check, Download, Eye, Minus, MoreVertical, Star } from "lucide-react";
 
 import type { FileItem, FolderItem, SystemFolderKind } from "@/api/files";
 import type { ContextMenuItem } from "./ContextMenu";
@@ -672,10 +672,38 @@ export const DriveItemRow = memo(function DriveItemRow({
 
 /** Column header for list views. ``children`` replaces the plain labels
  *  (the browse page's sortable headers). */
-export function DriveListHeader({ children, selectable = true }: { children?: ReactNode; selectable?: boolean }) {
+export function DriveListHeader({
+  children,
+  selectable = true,
+  selectAll,
+}: {
+  children?: ReactNode;
+  selectable?: boolean;
+  /** Tick everything in this folder, not only the part of it that's loaded. */
+  selectAll?: { state: "none" | "some" | "all"; onToggle: () => void };
+}) {
   return (
     <div className="sticky top-0 z-10 flex items-center gap-3 rounded-t-card border-b border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">
-      {selectable && <span className="w-5 shrink-0" aria-hidden />}
+      {selectAll ? (
+        <button
+          type="button"
+          role="checkbox"
+          aria-checked={selectAll.state === "all" ? true : selectAll.state === "some" ? "mixed" : false}
+          aria-label="Select all"
+          title="Select all"
+          onClick={selectAll.onToggle}
+          className={cn(
+            "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded border transition",
+            selectAll.state === "none"
+              ? "border-[var(--border)] bg-[var(--surface)] text-transparent hover:border-[var(--accent)]/60"
+              : "border-[var(--accent)] bg-[var(--accent)] text-white",
+          )}
+        >
+          {selectAll.state === "some" ? <Minus className="h-3.5 w-3.5" /> : <Check className="h-3.5 w-3.5" />}
+        </button>
+      ) : (
+        selectable && <span className="w-5 shrink-0" aria-hidden />
+      )}
       {children ?? (
         <>
           <span className="flex-1">Name</span>

@@ -12,6 +12,9 @@ val signingProps: Properties? = (findProperty("signing") as String?)?.let { path
 }
 
 android {
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
     namespace = "org.promptly.sync"
     compileSdk = 37
 
@@ -23,8 +26,8 @@ android {
         // 29: the car screen's navigation library needs it.
         minSdk = 29
         targetSdk = 37
-        versionCode = 15
-        versionName = "1.4.2"
+        versionCode = 16
+        versionName = "1.4.3"
     }
 
     signingConfigs {
@@ -101,4 +104,10 @@ dependencies {
     implementation("org.maplibre.compose:maplibre-compose-android:0.13.0")
     implementation("androidx.car.app:app:1.7.0")
     implementation("io.github.rallista:car-app-compose:0.0.2")
+
+    // The car's rules are checked when a template is built, so build them in a test.
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("androidx.test:core:1.7.0")
+    testImplementation("org.robolectric:robolectric:4.16")
+    testImplementation("androidx.car.app:app-testing:1.7.0")
 }

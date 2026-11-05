@@ -656,7 +656,13 @@ async def _labels_out(db: AsyncSession, user: User, accounts: list[uuid.UUID]) -
             "WHERE NOT m.seen AND f.role <> ALL(:hidden) GROUP BY placed.label_id"
         ), {"ids": accounts, "hidden": list(rules.HIDDEN_FROM_LABELS)})
         unread = {r[0]: int(r[1]) for r in rows}
-    return [{"id": str(x.id), "name": x.name, "color": x.color, "unread": unread.get(x.id, 0)} for x in labels]
+    # Its folder hasn't been copied yet, so an empty label isn't really empty.
+    fetching = set()
+    if labels and accounts:
+        fetching = set((await db.execute(
+            select(MailFolder.label_id).where(MailFolder.account_id.in_(accounts), MailFolder.label_id.is_not(None), MailFolder.last_uid == 0, MailFolder.oldest_uid == 0)
+        )).scalars())
+    return [{"id": str(x.id), "name": x.name, "color": x.color, "unread": unread.get(x.id, 0), "fetching": x.id in fetching} for x in labels]
 
 
 async def _name_is_free(db: AsyncSession, user: User, name: str, other_than: uuid.UUID | None = None) -> None:

@@ -177,8 +177,20 @@ export function MailApp() {
     leave(id);
     setOpen((o) => (o && o.key === row.key ? null : o));
     const timer = window.setTimeout(() => {
-      void act(row, action).finally(() => stay(id));
       setUndo(null);
+      void (async () => {
+        try {
+          await mailApi.act(row.account_id, row.key, action);
+          // Kept off the list until the new list is here, or it flashes back.
+          await qc.invalidateQueries({ queryKey: ["mail-threads"] });
+          void qc.invalidateQueries({ queryKey: ["mail-overview"] });
+          void qc.invalidateQueries({ queryKey: ["mail-conversation"] });
+        } catch (e) {
+          toast.error(apiErrorMessage(e, "Couldn't do that."));
+        } finally {
+          stay(id);
+        }
+      })();
     }, UNDO_MS);
     setUndo({
       label,
@@ -189,7 +201,7 @@ export function MailApp() {
         setUndo(null);
       },
     });
-  }, [act, leave, stay]);
+  }, [qc, leave, stay]);
 
   /** Into a label, or back to the Inbox, straight away: undo puts it back where it was. */
   const moveNow = useCallback(async (row: Open & { labels: string[] }, labelId: string | null, words: string, cameFrom: "inbox" | "archive" | "trash", fromLabel?: string) => {
@@ -350,6 +362,24 @@ export function MailApp() {
     ];
   };
 
+  /** On a row as you point at it, on a computer. A phone has swipes and press and hold. */
+  const quickActions = (row: ThreadRow): QuickAction[] => {
+    const at = { account_id: row.account_id, key: row.key };
+    const backToInbox = !view.label && (view.role === "archive" || view.role === "trash");
+    return [
+      backToInbox
+        ? { label: "Move to Inbox", icon: Inbox, onClick: () => void act(at, "inbox") }
+        : { label: "Archive", icon: Archive, onClick: () => moveAway(at, "archive", "Archived") },
+      ...(view.role === "trash" && !view.label ? [] : [{ label: "Move to Trash", icon: Trash2, onClick: () => moveAway(at, "trash", "Moved to Trash") }]),
+      row.unread > 0
+        ? { label: "Mark as read", icon: MailOpen, onClick: () => void act(at, "read") }
+        : { label: "Mark as unread", icon: Mail, onClick: () => void act(at, "unread") },
+      view.role === "snoozed" && !view.label
+        ? { label: "Back to Inbox now", icon: Inbox, onClick: () => void mailApi.unsnooze(at.account_id, at.key).then(refresh) }
+        : { label: "Snooze", icon: AlarmClock, onClick: () => setSnoozing(at) },
+    ];
+  };
+
   const unreadInbox = (overview?.folders ?? []).filter((f) => f.role === "inbox" && (!view.account || f.account_id === view.account)).reduce((n, f) => n + f.unread, 0);
   const problem = accounts.find((a) => a.status === "error");
 
@@ -433,7 +463,7 @@ export function MailApp() {
         {list.isLoading && <p className="p-6 text-center text-sm text-[var(--text-muted)]">Getting your mail…</p>}
         {!list.isLoading && rows.length === 0 && (
           <p className="p-8 text-center text-sm text-[var(--text-muted)]">
-            {search ? "Nothing found." : view.needsReply ? "Nothing's waiting on you." : view.role === "snoozed" ? "Nothing snoozed. Snooze an email to bring it back when you can deal with it." : view.label ? `Nothing here yet. ${isMobile ? "Press and hold an email and choose Move to label" : "Drag an email onto this label"}, or make a rule.` : accounts.some((a) => !a.last_sync_at) ? "Fetching your mail for the first time. This can take a few minutes." : "Nothing here. Enjoy the quiet."}
+            {search ? "Nothing found." : view.needsReply ? "Nothing's waiting on you." : view.role === "snoozed" ? "Nothing snoozed. Snooze an email to bring it back when you can deal with it." : shownLabel?.fetching ? "Fetching this label's mail from your mailbox. It'll appear here as it arrives." : view.label ? `Nothing here yet. ${isMobile ? "Press and hold an email and choose Move to label" : "Drag an email onto this label"}, or make a rule.` : accounts.some((a) => !a.last_sync_at) ? "Fetching your mail for the first time. This can take a few minutes." : "Nothing here. Enjoy the quiet."}
           </p>
         )}
         {rows.map((row, i) => (
@@ -441,7 +471,7 @@ export function MailApp() {
           {row.related && !rows[i - 1]?.related && <p className="px-4 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Related</p>}
           <div style={{ gridTemplateRows: leaving.has(`${row.account_id}/${row.key}`) ? "0fr" : "1fr", transitionDuration: `${LEAVE_MS}ms` }} className={`grid transition-[grid-template-rows,opacity] ease-out ${leaving.has(`${row.account_id}/${row.key}`) ? "opacity-0" : "opacity-100"}`}>
           <div className={`min-h-0 overflow-hidden transition-opacity duration-150 ${dragging?.key === row.key && dragging.account_id === row.account_id ? "opacity-40" : ""}`}>
-          <ThreadItem key={`${row.account_id}/${row.key}`} onDragStart={isMobile ? undefined : startDrag} row={row} selected={open?.key === row.key} colour={accounts.length > 1 ? accounts.find((a) => a.id === row.account_id)?.color : undefined} people={people} labels={row.labels.filter((id) => id !== view.label).flatMap((id) => labels.filter((l) => l.id === id))} onOpen={() => setOpen({ account_id: row.account_id, key: row.key })} onMenu={(x, y) => setMenu({ row, x, y })} onSwipe={isMobile ? (a) => (a === "archive" ? moveAway(row, "archive", "Archived") : moveAway(row, "trash", "Moved to Trash")) : undefined} />
+          <ThreadItem key={`${row.account_id}/${row.key}`} quick={isMobile || row.related ? undefined : quickActions(row)} onDragStart={isMobile ? undefined : startDrag} row={row} selected={open?.key === row.key} colour={accounts.length > 1 ? accounts.find((a) => a.id === row.account_id)?.color : undefined} people={people} labels={row.labels.filter((id) => id !== view.label).flatMap((id) => labels.filter((l) => l.id === id))} onOpen={() => setOpen({ account_id: row.account_id, key: row.key })} onMenu={(x, y) => setMenu({ row, x, y })} onSwipe={isMobile ? (a) => (a === "archive" ? moveAway(row, "archive", "Archived") : moveAway(row, "trash", "Moved to Trash")) : undefined} />
           </div>
           </div>
           </div>
@@ -534,7 +564,13 @@ export function MailApp() {
   );
 }
 
-function ThreadItem({ row, selected, colour, people, labels, onOpen, onMenu, onSwipe, onDragStart }: { onDragStart?: (e: ReactPointerEvent<HTMLElement>, row: ThreadRow) => void; row: ThreadRow; selected: boolean; colour?: string; people: People; labels: MailLabel[]; onOpen: () => void; onMenu: (x: number, y: number) => void; onSwipe?: (action: "archive" | "trash") => void }) {
+interface QuickAction {
+  label: string;
+  icon: typeof Archive;
+  onClick: () => void;
+}
+
+function ThreadItem({ row, selected, colour, people, labels, onOpen, onMenu, onSwipe, onDragStart, quick }: { quick?: QuickAction[]; onDragStart?: (e: ReactPointerEvent<HTMLElement>, row: ThreadRow) => void; row: ThreadRow; selected: boolean; colour?: string; people: People; labels: MailLabel[]; onOpen: () => void; onMenu: (x: number, y: number) => void; onSwipe?: (action: "archive" | "trash") => void }) {
   const unread = row.unread > 0;
   // Press and hold on a phone is the right-click of a computer.
   const press = useRef<{ timer: number; x: number; y: number } | null>(null);
@@ -549,7 +585,7 @@ function ThreadItem({ row, selected, colour, people, labels, onOpen, onMenu, onS
     press.current = null;
   };
   return (
-    <div ref={shell} className="relative overflow-hidden">
+    <div ref={shell} className="group/row relative overflow-hidden">
     {slide !== 0 && (
       <div aria-hidden className={`absolute inset-0 flex items-center px-5 text-white ${slide > 0 ? "justify-start bg-[#D97757]" : "justify-end bg-[#C62828]"}`}>
         {slide > 0 ? <Archive className="h-5 w-5" /> : <Trash2 className="h-5 w-5" />}
@@ -608,6 +644,15 @@ function ThreadItem({ row, selected, colour, people, labels, onOpen, onMenu, onS
         </span>
       </span>
     </button>
+    {quick && (
+      <div role="group" aria-label="Quick actions" className={`absolute bottom-2 right-2 flex items-center gap-0.5 rounded-lg border border-[var(--border)] p-0.5 opacity-0 shadow-sm transition-opacity duration-100 focus-within:opacity-100 group-hover/row:opacity-100 ${selected ? "bg-[var(--surface)]" : "bg-[var(--bg,var(--surface))]"}`}>
+        {quick.map((q) => (
+          <button key={q.label} type="button" aria-label={q.label} title={q.label} onClick={q.onClick} className="flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]">
+            <q.icon className="h-4 w-4" />
+          </button>
+        ))}
+      </div>
+    )}
     </div>
   );
 }

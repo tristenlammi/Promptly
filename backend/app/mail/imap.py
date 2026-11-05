@@ -23,6 +23,9 @@ TIMEOUT_S = 30
 BATCH = 25
 # Bigger than this and we keep the headers, and fetch the rest when it's opened.
 MAX_BODY_BYTES = 25 * 1024 * 1024
+# How much is held in memory at once while copying mail. A label full of big
+# attachments shouldn't be able to run the worker out of memory.
+BATCH_BYTES = 48 * 1024 * 1024
 
 PRESETS: dict[str, dict[str, Any]] = {
     "gmail": {
@@ -217,6 +220,28 @@ def older_uids(client: IMAPClient, below: int, count: int) -> list[int]:
         return []
     uids = [u for u in client.search(["UID", f"1:{below - 1}"]) if u < below]
     return sorted(uids, reverse=True)[:count]
+
+
+def batches(client: IMAPClient, uids: list[int]) -> list[list[int]]:
+    """These messages, in groups small enough to fetch and save one at a time."""
+    out: list[list[int]] = []
+    current: list[int] = []
+    held = 0
+    for start in range(0, len(uids), 500):
+        chunk = uids[start : start + 500]
+        sizes = client.fetch(chunk, ["RFC822.SIZE"])
+        for uid in chunk:
+            # Too big to keep whole only costs its headers.
+            size = sizes.get(uid, {}).get(b"RFC822.SIZE", 0)
+            size = size if size <= MAX_BODY_BYTES else 0
+            if current and (len(current) >= BATCH or held + size > BATCH_BYTES):
+                out.append(current)
+                current, held = [], 0
+            current.append(uid)
+            held += size
+    if current:
+        out.append(current)
+    return out
 
 
 def fetch_messages(client: IMAPClient, uids: list[int]) -> list[tuple[int, list[bytes], bytes]]:
