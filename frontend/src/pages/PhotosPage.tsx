@@ -12,6 +12,7 @@ import { AddToAlbumDialog } from "@/components/photos/AlbumDialogs";
 import { MemoriesStrip } from "@/components/photos/MemoriesStrip";
 import { PhotoTile } from "@/components/photos/PhotoTile";
 import { PhotoViewer } from "@/components/photos/PhotoViewer";
+import { TimelineScrubber, type TimelinePosition } from "@/components/photos/TimelineScrubber";
 import { FamilyDialog } from "@/components/photos/FamilyDialog";
 import { justify, rowsHeight, type JustifiedRow } from "@/lib/justify";
 import { toast } from "@/store/toastStore";
@@ -140,19 +141,38 @@ export function PhotosPage() {
   });
   // A jump made just before months finished laying out would land in the
   // wrong place as their real heights replace the estimates: re-apply it.
-  const lastJump = useRef<{ index: number; at: number } | null>(null);
-  const jump = useCallback(
-    (index: number) => {
-      lastJump.current = { index, at: Date.now() };
-      virtualizer.scrollToIndex(index, { align: "start" });
+  const lastJump = useRef<(TimelinePosition & { at: number }) | null>(null);
+  const scrollTo = useCallback(
+    ({ index, within }: TimelinePosition) => {
+      // The very top includes the memories above the first month.
+      if (index === 0 && within === 0) return virtualizer.scrollToOffset(0);
+      const [start] = virtualizer.getOffsetForIndex(index, "start") ?? [0];
+      virtualizer.scrollToOffset(start + within * (virtualizer.measurementsCache[index]?.size ?? 0));
     },
     [virtualizer],
+  );
+  const seek = useCallback(
+    (to: TimelinePosition) => {
+      lastJump.current = { ...to, at: Date.now() };
+      scrollTo(to);
+    },
+    [scrollTo],
   );
   useEffect(() => {
     virtualizer.measure();
     const j = lastJump.current;
-    if (j && Date.now() - j.at < 2000) virtualizer.scrollToIndex(j.index, { align: "start" });
-  }, [measured, gridWidth, virtualizer]);
+    if (j && Date.now() - j.at < 2000) scrollTo(j);
+  }, [measured, gridWidth, virtualizer, scrollTo]);
+  // Where the page is now, for the scrubber's marker.
+  const position = useCallback((): TimelinePosition => {
+    const el = scrollRef.current;
+    if (!el || !months.length) return { index: 0, within: 0 };
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 1) return { index: months.length - 1, within: 1 };
+    const item = virtualizer.getVirtualItemForOffset(el.scrollTop);
+    if (!item) return { index: 0, within: 0 };
+    return { index: item.index, within: Math.min(Math.max((el.scrollTop - item.start) / (item.size || 1), 0), 1) };
+  }, [virtualizer, months.length]);
+  const hasScrubber = !phone && months.length > 1;
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
@@ -286,8 +306,18 @@ export function PhotosPage() {
           </button>
         </div>
       )}
-      <div className="relative min-h-0 flex-1">
-        <div ref={scrollRef} className="h-full overflow-y-auto overscroll-contain" data-photos-scroller>
+      <div
+        className="relative min-h-0 flex-1"
+        // A hand on the wheel: don't pull the page back to the last jump.
+        onWheel={() => {
+          lastJump.current = null;
+        }}
+      >
+        <div
+          ref={scrollRef}
+          className={`h-full overflow-y-auto overscroll-contain ${hasScrubber ? "[scrollbar-width:none] [&::-webkit-scrollbar]:hidden" : ""}`}
+          data-photos-scroller
+        >
           {isLoading ? (
             <p className="p-6 text-sm text-[var(--text-muted)]">Loading…</p>
           ) : months.length === 0 ? (
@@ -324,9 +354,7 @@ export function PhotosPage() {
             </>
           )}
         </div>
-        {!phone && months.length > 1 && (
-          <Scrubber months={months} onJump={jump} />
-        )}
+        {hasScrubber && <TimelineScrubber months={months} scroller={scrollRef} label={monthLabel} position={position} onSeek={seek} />}
       </div>
 
       {familyOpen && <FamilyDialog onClose={() => setFamilyOpen(false)} />}
@@ -472,87 +500,6 @@ function SelectionBar({
         <Trash2 className="h-3.5 w-3.5" /> Move to trash
       </button>
       </>
-      )}
-    </div>
-  );
-}
-
-/** Years and months down the right edge; drag or click to jump. */
-function Scrubber({ months, onJump }: { months: PhotoBucket[]; onJump: (index: number) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [hover, setHover] = useState<number | null>(null);
-  const total = months.reduce((a, b) => a + b.count, 0) || 1;
-  // Each month gets room in proportion to its photos (and a little regardless).
-  const weights = months.map((b) => b.count / total + 0.15 / months.length);
-  const sum = weights.reduce((a, b) => a + b, 0);
-  const tops: number[] = [];
-  let acc = 0;
-  for (const w of weights) {
-    tops.push(acc / sum);
-    acc += w;
-  }
-  const indexAt = (clientY: number) => {
-    const rect = ref.current!.getBoundingClientRect();
-    const f = Math.min(Math.max((clientY - rect.top) / rect.height, 0), 0.9999);
-    let i = 0;
-    while (i + 1 < tops.length && tops[i + 1] <= f) i++;
-    return i;
-  };
-  const years: { year: string; top: number }[] = [];
-  months.forEach((b, i) => {
-    const y = b.month.slice(0, 4);
-    if (!years.length || years[years.length - 1].year !== y) years.push({ year: y, top: tops[i] });
-  });
-  return (
-    <div
-      ref={ref}
-      role="slider"
-      tabIndex={0}
-      aria-label="Jump to a date"
-      aria-valuemin={0}
-      aria-valuemax={months.length - 1}
-      aria-valuenow={hover ?? 0}
-      aria-valuetext={hover !== null ? monthLabel(months[hover].month) : undefined}
-      className="absolute bottom-2 right-0 top-2 w-9 cursor-ns-resize select-none"
-      onPointerDown={(e) => {
-        (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-        onJump(indexAt(e.clientY));
-      }}
-      onPointerMove={(e) => {
-        const i = indexAt(e.clientY);
-        setHover(i);
-        if (e.buttons) onJump(i);
-      }}
-      onPointerLeave={() => setHover(null)}
-      onKeyDown={(e) => {
-        const cur = hover ?? 0;
-        if (e.key === "ArrowDown") {
-          const i = Math.min(cur + 1, months.length - 1);
-          setHover(i);
-          onJump(i);
-        } else if (e.key === "ArrowUp") {
-          const i = Math.max(cur - 1, 0);
-          setHover(i);
-          onJump(i);
-        }
-      }}
-    >
-      {years.map((y) => (
-        <span
-          key={y.year}
-          className="absolute right-1 text-[10px] font-medium text-[var(--text-muted)]"
-          style={{ top: `${y.top * 100}%` }}
-        >
-          {y.year}
-        </span>
-      ))}
-      {hover !== null && (
-        <span
-          className="pointer-events-none absolute right-10 -translate-y-1/2 whitespace-nowrap rounded-md bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)] shadow"
-          style={{ top: `${tops[hover] * 100}%` }}
-        >
-          {monthLabel(months[hover].month)}
-        </span>
       )}
     </div>
   );

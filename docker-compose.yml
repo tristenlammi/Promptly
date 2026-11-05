@@ -867,8 +867,8 @@ services:
       - promptly
 
   maps:
-    # P Maps: routing, search and the map itself, all on this server. Add
-    # "maps" to COMPOSE_PROFILES to turn it on. The first start downloads
+    # P Maps: routing, search and the map itself, all on this server. On for
+    # new installs through COMPOSE_PROFILES in .env. The first start downloads
     # Australia's map data and builds it (about an hour and 15 GB of disk while
     # building, about 7 GB after), then rebuilds every MAPS_REFRESH_DAYS. Only
     # downloads leave the server: searches, routes and locations never do.

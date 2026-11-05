@@ -18,7 +18,7 @@ all on hardware you control.
 
 ## Install
 
-One command. Any machine that runs Docker (Compose v2 ≥ 2.20).
+One command. Any machine that runs Docker (Compose v2 ≥ 2.24).
 
 ```bash
 git clone https://github.com/tristenlammi/Promptly.git && cd Promptly && ./install.sh
@@ -39,8 +39,12 @@ installer detects it and wires the stack to it automatically.
 | :-- | :-- |
 | `--with-ollama` | Bundle a local-model container. GPU auto-detected: NVIDIA (CUDA), AMD (ROCm), else CPU |
 | `--no-search` | Skip the bundled SearXNG web search — add Brave/Tavily keys later in Admin |
+| `--no-maps` | Skip P Maps, which is on by default and builds its map data in the background (about an hour and 15 GB of disk, 7 GB after) |
 
-PowerShell spelling: `-WithOllama`, `-NoSearch`.
+PowerShell spelling: `-WithOllama`, `-NoSearch`, `-NoMaps`.
+
+**P Maps** covers Australia out of the box. For another country, set the
+`MAPS_*` values in `.env` (see "P Maps" there).
 
 **Want local models?** A **native** Ollama ([ollama.com](https://ollama.com))
 is the best option on every platform — better GPU support than the container,

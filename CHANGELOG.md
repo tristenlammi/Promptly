@@ -21,6 +21,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-11-05
+
+### Changed
+- New installs have P Maps on by default, building its map data in the background (`--no-maps` / `-NoMaps` to skip it). Existing installs keep their settings.
+- The Photos date scrubber is rebuilt: a marker shows where you are, every year gets readable room, dragging follows smoothly, the wheel works over it, and the browser's scrollbar no longer sits underneath.
+
+### Fixed
+- `install.sh` no longer stops with an error before printing the setup code when it can't work out the machine's network address. The README now gives the right minimum Docker Compose version (2.24).
+
 ## [0.24.0] - 2026-11-05
 
 ### Added

@@ -16,6 +16,9 @@
 #   .\install.ps1 -NoSearch     # skip the bundled SearXNG container - web
 #                               # search stays off until you add Brave/Tavily
 #                               # keys in the admin panel.
+#   .\install.ps1 -NoMaps       # skip P Maps. It's on by default, and builds
+#                               # its map data in the background: about an hour
+#                               # and 15 GB of disk (7 GB after).
 #
 # The choice persists in COMPOSE_PROFILES in .env, so a plain
 # `docker compose up -d` keeps honouring it. Re-run with a flag to change it.
@@ -32,13 +35,14 @@
 param(
     [switch]$WithOllama,
     [switch]$NoSearch,
+    [switch]$NoMaps,
     # Back-compat: -NoOllama is now the default, -Minimal == -NoSearch.
     [switch]$NoOllama,
     [switch]$Minimal
 )
 
 if ($Minimal) { $NoSearch = $true }
-$ProfileFlagsGiven = $WithOllama -or $NoSearch -or $NoOllama -or $Minimal
+$ProfileFlagsGiven = $WithOllama -or $NoSearch -or $NoMaps -or $NoOllama -or $Minimal
 
 $ErrorActionPreference = "Stop"
 
@@ -110,7 +114,7 @@ Set-IfPlaceholder ([ref]$envText) "TUS_HOOK_SECRET"   (New-HexSecret 32)
 # ---------- 3. optional services (compose profiles) ----------
 # COMPOSE_PROFILES in .env is the persistent source of truth: docker
 # compose reads it on every invocation, so a plain `docker compose up -d`
-# keeps honouring the install-time choice. Managed tokens: ollama, search.
+# keeps honouring the install-time choice. Managed tokens: ollama, search, maps.
 # An operator-added "gpu" token is always preserved.
 function Set-EnvLine([ref]$Text, [string]$Key, [string]$Value) {
     $pattern = "(?m)^$Key=.*$"
@@ -169,6 +173,7 @@ if ($WithOllama) {
 $profiles = @()
 if ($OllamaMode -eq "bundled") { $profiles += $OllamaProfile }
 if (-not $NoSearch) { $profiles += "search" }
+if (-not $NoMaps) { $profiles += "maps" }
 $profilesCsv = $profiles -join ","
 
 if ($ProfileFlagsGiven -or $FreshEnv -or ($envText -notmatch "(?m)^COMPOSE_PROFILES=")) {
@@ -270,6 +275,10 @@ Write-Host "  provider, the public URL, embeddings, email and two-step verificat
 if ($OllamaMode -eq "cloud") {
     Write-Host ""
     Write-Skip "No local-model runtime. Connect a cloud provider (OpenAI, Anthropic, OpenRouter, ...) in the wizard. For local models, install Ollama natively and re-run, or use -WithOllama."
+}
+if ((Get-Content .env -Raw) -match "(?m)^COMPOSE_PROFILES=.*maps") {
+    Write-Host ""
+    Write-Skip "P Maps is building Australia's map data in the background: about an hour and 15 GB of disk (7 GB after). Everything else works meanwhile. For another country, or to turn it off, see 'P Maps' in .env."
 }
 if ($NoSearch) {
     Write-Host ""

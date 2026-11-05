@@ -18,6 +18,9 @@
 #   ./install.sh --no-search    # skip the bundled SearXNG container - web
 #                               # search stays off until you add Brave/Tavily
 #                               # keys in the admin panel.
+#   ./install.sh --no-maps      # skip P Maps. It's on by default, and builds
+#                               # its map data in the background: about an hour
+#                               # and 15 GB of disk (7 GB after).
 #
 # The choice persists in COMPOSE_PROFILES in .env, so a plain
 # `docker compose up -d` keeps honouring it. Re-run with a flag to change it.
@@ -38,15 +41,17 @@ red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 # ---------- argument parsing ----------
 WITH_OLLAMA=false
 NO_SEARCH=false
+NO_MAPS=false
 PROFILE_FLAGS_GIVEN=false
 for arg in "$@"; do
   case "$arg" in
     --with-ollama) WITH_OLLAMA=true; PROFILE_FLAGS_GIVEN=true ;;
     --no-search)   NO_SEARCH=true;   PROFILE_FLAGS_GIVEN=true ;;
+    --no-maps)     NO_MAPS=true;     PROFILE_FLAGS_GIVEN=true ;;
     # Back-compat: --no-ollama is now the default; accept it silently.
     --no-ollama)   PROFILE_FLAGS_GIVEN=true ;;
     -h|--help)
-      sed -n '2,25p' "$0" | sed 's/^# //; s/^#//'
+      sed -n '2,28p' "$0" | sed 's/^# //; s/^#//'
       exit 0
       ;;
     *)
@@ -120,7 +125,7 @@ seed_secret TUS_HOOK_SECRET   "$(openssl rand -hex 32)"
 # COMPOSE_PROFILES in .env is the persistent source of truth: docker
 # compose reads it on every invocation, so a plain `docker compose up -d`
 # keeps honouring the install-time choice. Managed tokens: ollama/gpu/rocm
-# (only with --with-ollama) and search.
+# (only with --with-ollama), search and maps.
 set_env_line() {
   local key="$1" value="$2"
   if grep -qE "^${key}=" .env; then
@@ -179,6 +184,7 @@ fi
 profiles=()
 [[ "$OLLAMA_MODE" == "bundled" ]] && profiles+=("$OLLAMA_PROFILE")
 $NO_SEARCH || profiles+=("search")
+$NO_MAPS || profiles+=("maps")
 profiles_csv=$(IFS=,; printf '%s' "${profiles[*]-}")
 
 if $PROFILE_FLAGS_GIVEN || $FRESH_ENV || ! grep -qE '^COMPOSE_PROFILES=' .env; then
@@ -260,7 +266,7 @@ echo "  Open in your browser:"
 suffix=""
 [[ "$http_port" != "80" ]] && suffix=":${http_port}"
 echo "    http://localhost${suffix}"
-lan_ip=$( (hostname -I 2>/dev/null || ipconfig getifaddr en0 2>/dev/null) | awk '{print $1}')
+lan_ip=$( (hostname -I 2>/dev/null || ipconfig getifaddr en0 2>/dev/null) | awk '{print $1}' || true)
 [[ -n "$lan_ip" ]] && echo "    http://${lan_ip}${suffix}   (from other devices on your network)"
 echo
 setup_code=$(grep -E '^SETUP_TOKEN=' .env | cut -d= -f2- || true)
@@ -275,6 +281,12 @@ if [[ "$OLLAMA_MODE" == "cloud" ]]; then
   yellow "  Note: no local-model runtime. Connect a cloud provider (OpenAI,"
   yellow "  Anthropic, OpenRouter, ...) in the wizard. For local models, run"
   yellow "  Ollama natively and re-run, or install with --with-ollama."
+fi
+if grep -qE '^COMPOSE_PROFILES=.*maps' .env; then
+  echo
+  yellow "  Note: P Maps is building Australia's map data in the background: about"
+  yellow "  an hour and 15 GB of disk (7 GB after). Everything else works meanwhile."
+  yellow "  For another country, or to turn it off, see \"P Maps\" in .env."
 fi
 if $NO_SEARCH; then
   echo
