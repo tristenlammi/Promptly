@@ -14,9 +14,11 @@ interface ModelSelectorProps {
    *  dropdown opens at the same right-anchored position and is identical
    *  to the desktop list, so power users still get full control. */
   compact?: boolean;
+  /** Sitting at the bottom of the screen: open above the button, not off the edge. */
+  upward?: boolean;
 }
 
-export function ModelSelector({ compact = false }: ModelSelectorProps) {
+export function ModelSelector({ compact = false, upward = false }: ModelSelectorProps) {
   const { isLoading } = useAvailableModels();
   const available = useModelStore((s) => s.available);
   const selected = useSelectedModel();
@@ -220,7 +222,8 @@ export function ModelSelector({ compact = false }: ModelSelectorProps) {
         <div
           role="listbox"
           className={cn(
-            "promptly-scroll absolute right-0 z-20 mt-1 max-h-96 overflow-y-auto rounded-card border shadow-lg",
+            "promptly-scroll absolute right-0 z-20 max-h-96 overflow-y-auto rounded-card border shadow-lg",
+            upward ? "bottom-full mb-1" : "mt-1",
             "border-[var(--border)] bg-[var(--surface)]",
             // Wider on desktop, but cap to viewport width on mobile so
             // the dropdown never scrolls horizontally off-screen.

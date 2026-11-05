@@ -21,6 +21,27 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-05
+
+### Added
+- Mail: connect any IMAP/SMTP mailbox (several if you like) and read, search, file and send from one calm terracotta app, with undo send and an AI to ask. Switch mailboxes from the menu at the top left, gather mail under labels, and right-click (or press and hold) an email to make a rule that files it and future ones like it. Labels work like folders: drag an email onto one and it moves out of your Inbox. Your mailbox's own folders and Gmail's labels show as labels too, and moves stay in step. Open any attachment in a viewer, and choose which mailbox Ask looks at.
+- Mail: reply all, forward, attachments, Cc and Bcc, formatting, drafts that wait for you, address suggestions, and undo send that brings back what you wrote.
+- Mail: AI search, on or off for all of Promptly from Admin → Models → Defaults (automatic: on with a local indexing model, off with a cloud one).
+- Mail: optional AI sorting with "Needs a reply" and one-line summaries using a model you choose, plus AI drafts you review before sending.
+- Mail with the rest of Promptly: answer invites with Yes, Maybe or No, add any email to your calendar, ask about your email in Chat and on the phone assistant, save attachments to an Email Attachments folder and attach from Files, turn email into tasks, a Mail card on Today, contact names and pictures on your mail, and mail in Ctrl+K.
+- Mail: snooze, phone swipes, notifications, mailbox settings, older mail coming in gradually, and Proton Mail Bridge support.
+
+### Changed
+- Search now finds chats by their name, and matches the word you're still typing ("budg" finds "budget"), in chats and in mail.
+- The sidebar has one search box just under New chat, the same search as Ctrl+K. The separate message search and the Chat link are gone, since New chat does the same job.
+
+### Fixed
+- P Maps: directions now follow the GPS once a second. They were asking for battery-saving location, so the position barely moved while driving.
+- P Maps: your location starts again when you come back to the map, and it says so if location permission is off instead of waiting forever.
+- Quick add: a time you type now beats a part of the day, so "tomorrow morning at 8am" means 8:00 rather than 9:00 with "at 8am" left in the title, and "this evening at 8" means 8 pm. This applies to Tasks, Calendar and Ctrl+K.
+- The phone assistant now slides up as a panel over what you're doing, instead of flashing a full-screen window first.
+- The phone assistant now answers in the voice chosen in your account, and only uses the phone's own voice if your server can't be reached.
+
 ## [0.22.0] - 2026-11-04
 
 ### Added

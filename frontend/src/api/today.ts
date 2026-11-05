@@ -121,6 +121,12 @@ export interface TodayComing {
 }
 
 export interface TodayHub {
+  mail?: {
+    url: string;
+    unread: number;
+    needs_reply: number;
+    items: { from: string; subject: string; summary: string; url: string }[];
+  };
   health?: {
     file_id: string;
     url: string;
@@ -219,6 +225,7 @@ export interface TodayData {
 }
 
 export interface EverydaySearch {
+  mail?: { id: string; subject: string; from: string; at: string; url: string }[];
   events: { id: string; event_id: string; title: string; start: string; all_day: boolean; location: string; url: string }[];
   contacts: { id: string; name: string; detail: string; favorite: boolean; url: string }[];
   tasks: { id: string; title: string; done: boolean; due: string | null; time: string | null; list: string; url: string }[];

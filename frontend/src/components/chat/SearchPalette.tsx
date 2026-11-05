@@ -11,6 +11,7 @@ import {
   User as UserIcon,
   Loader2,
   X,
+  Mail,
 } from "lucide-react";
 
 import { chatApi } from "@/api/chat";
@@ -193,7 +194,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
   // without having to worry about section boundaries.
   const flat = useMemo(() => [...owned, ...shared], [owned, shared]);
   const everydayCount =
-    (everyday?.events.length ?? 0) + (everyday?.contacts.length ?? 0) + (everyday?.tasks.length ?? 0) + (everyday?.tags?.length ?? 0);
+    (everyday?.mail?.length ?? 0) + (everyday?.events.length ?? 0) + (everyday?.contacts.length ?? 0) + (everyday?.tasks.length ?? 0) + (everyday?.tags?.length ?? 0);
 
   // The ↑↓ cursor runs over the Do / Create rows, then the chat hits. A
   // command said outright starts selected; a guess is only offered (-1:
@@ -521,6 +522,14 @@ function EverydaySection({ data, onOpen }: { data: EverydaySearch; onOpen: (url:
         <>
           {label("Contacts", <ContactIcon className="h-3 w-3" />)}
           {data.contacts.map((c) => row(`c-${c.id}`, <UserIcon className="h-3.5 w-3.5" />, c.name, c.detail, c.url))}
+        </>
+      )}
+      {(data.mail?.length ?? 0) > 0 && (
+        <>
+          {label("Mail", <Mail className="h-3 w-3" />)}
+          {data.mail!.map((m) =>
+            row(`m-${m.id}`, <Mail className="h-3.5 w-3.5" />, m.subject, [m.from, new Date(m.at).toLocaleDateString([], { day: "numeric", month: "short" })].join(" · "), m.url),
+          )}
         </>
       )}
       {data.tasks.length > 0 && (

@@ -669,6 +669,11 @@ app.include_router(maps_router, prefix="/api/maps", tags=["maps"])
 from app.maps.timeline import router as maps_timeline_router  # noqa: E402
 
 app.include_router(maps_timeline_router, prefix="/api/maps", tags=["maps"])
+# Mail: the mailboxes people connect (app/mail).
+from app.mail.router import router as mail_router  # noqa: E402
+
+app.include_router(mail_router, prefix="/api/mail", tags=["mail"])
+
 # The phone's assistant (app/assistant).
 from app.assistant.router import router as assistant_router  # noqa: E402
 

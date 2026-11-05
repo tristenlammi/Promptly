@@ -542,6 +542,34 @@ services:
       - promptly
 
   # ------------------------------------------------------------
+  # Mail: keeps a copy of each connected mailbox up to date, and does
+  # the sending and filing the app has queued. One process, one
+  # connection per mailbox, so it's kept apart from the API.
+  # ------------------------------------------------------------
+  mail-worker:
+    image: promptly-backend:local
+    pull_policy: never
+    container_name: Promptly-MailWorker
+    logging: *default-logging
+    entrypoint: ["python", "-m", "app.mail.worker"]
+    env_file:
+      - path: .env
+        required: false
+    environment: *backend-env
+    cpus: ${MAIL_WORKER_CPUS:-1}
+    mem_limit: ${MAIL_WORKER_MEM_LIMIT:-512m}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - promptly
+
+  # ------------------------------------------------------------
   # Resumable uploads (WP-8.2): tusd takes big files (a 4 GB phone video)
   # in ~50 MB chunks it can resume after a dropped connection or a refresh,
   # writing into uploads/.tus. Before the first byte and after the last it

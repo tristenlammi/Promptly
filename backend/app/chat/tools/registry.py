@@ -19,6 +19,7 @@ from app.chat.tools.crossapp import FindPersonTool, MyDayTool, PostToRoomTool, R
 from app.chat.tools.deep_research import DeepResearchTool
 from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
+from app.chat.tools.mail import MailDraftReplyTool, MailReadTool, MailReplyTool, MailSearchTool
 from app.chat.tools.files import ListMyFilesTool, ProposeFileChangesTool, ReadFileTool
 from app.chat.tools.generate_image import GenerateImageTool
 from app.chat.tools.generate_pdf import GeneratePdfTool
@@ -100,6 +101,12 @@ REGISTRY: list[Tool] = [
     ListMyItemsTool(),
     ReadItemTool(),
     UseItemTool(),
+    # Mail (category "mail"): search and read, and a draft for the person to send.
+    # mail_reply is the phone's: it waits for a spoken yes, and Chat never gets it.
+    MailSearchTool(),
+    MailReadTool(),
+    MailDraftReplyTool(),
+    MailReplyTool(),
     # The calendar (category "calendar"): read events the user can see, add
     # and change them — with the Tools toggle, for everyone.
     CalendarEventsTool(),

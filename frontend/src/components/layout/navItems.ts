@@ -3,7 +3,6 @@ import {
   LayoutGrid,
   FolderOpen,
   MapPin,
-  MessagesSquare,
   Star,
   Trash2,
   Link2,
@@ -102,13 +101,6 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Places",
     section: "chat",
     optionalKey: "places",
-  },
-  {
-    to: "/chat",
-    icon: MessagesSquare,
-    label: "Chat",
-    section: "chat",
-    exact: true,
   },
   {
     to: "/workspaces",

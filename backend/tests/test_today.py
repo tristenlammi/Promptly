@@ -209,7 +209,7 @@ async def test_search_events_contacts_tasks_not_rooms(client, db, pushes):  # no
     r = await client.get("/api/today/search", headers=H(ann), params={"q": "dentist"})
     assert r.status_code == 200, r.text
     got = r.json()
-    assert set(got) == {"events", "contacts", "tasks", "tags"}
+    assert set(got) == {"events", "contacts", "tasks", "tags", "mail"} and got["mail"] == []
     assert [e["title"] for e in got["events"]] == ["Dentist check-up"]
     assert got["events"][0]["url"].startswith("/calendar?event=")
     assert [c["name"] for c in got["contacts"]] == ["Dana Dentista"]

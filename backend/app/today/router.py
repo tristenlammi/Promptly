@@ -11,6 +11,7 @@ searched here — they're private to each room.
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -21,6 +22,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
+
+logger = logging.getLogger("promptly.today")
 
 router = APIRouter()
 
@@ -96,7 +99,7 @@ async def search(
 
     term = q.strip().lower()
     if len(term) < 2:
-        return {"events": [], "contacts": [], "tasks": []}
+        return {"events": [], "contacts": [], "tasks": [], "mail": []}
     events = [
         {"id": e["id"], "event_id": e["event_id"], "title": e["title"], "start": e["start"], "all_day": e["all_day"],
          "location": e.get("location") or "", "url": f"/calendar?event={e['event_id']}"}
@@ -114,4 +117,11 @@ async def search(
 
     tags, tagged_events = await search_hook.everyday(db, user, term, limit, {e["event_id"] for e in events})
     events = (events + tagged_events)[:limit]
-    return {"events": events, "contacts": contacts[:limit], "tasks": tasks[:limit], "tags": tags}
+    mail: list[dict] = []
+    try:
+        from app.mail.apps import quick_search
+
+        mail = await quick_search(db, user, q.strip(), limit)
+    except Exception:  # noqa: BLE001 — the other results still matter
+        logger.exception("mail search failed")
+    return {"events": events, "contacts": contacts[:limit], "tasks": tasks[:limit], "tags": tags, "mail": mail}

@@ -378,6 +378,19 @@ A unified `ModelRouter` (`models_config/provider.py`) drives **every** provider 
 
 ---
 
+## Mail
+
+Any IMAP/SMTP mailbox, several per person (`app/mail`, `frontend/src/mail`, migrations 0247–0250). The mailbox stays the real one: Postgres holds a copy for speed and search, kept in step by the `mail-worker` container (`python -m app.mail.worker`, same image as the backend, so rebuild it with backend changes). It polls every 20 seconds, with no IDLE yet.
+
+- **Changes** land locally at once and reach the mailbox through `mail_ops`. Sending goes through `mail_outbox` with a 10-second undo; a send interrupted mid-way is marked as maybe sent, never retried blind.
+- **Older mail:** the first sync takes the newest 500 per folder, then older mail comes in gradually up to `MAIL_HISTORY_PER_FOLDER` (default 20000). Postgres holds the text of all of it, so large mailboxes use real disk space.
+- **Labels and rules** (`rules.py`) live in Promptly, on the conversation, not in the mailbox. Labels are places: a conversation has one, and leaves the Inbox when it gets it. A mailbox's own folders (Gmail's labels, say) show as labels through `mail_folders.label_id`, and moving into one moves it in the mailbox too. A rule only files mail and can never send anything. Only mail newer than the rule moves; replies follow the conversation.
+- **AI search** (`search.py`) is one admin choice for all of Promptly (Admin → Models → Defaults). Unset means on with a local embedder, off with a cloud one; agreeing to a cloud provider covers that provider only. One vector per email in `mail_vectors`, with an exact scan on purpose, because each search covers one person's mailboxes. Turning it off deletes the vectors.
+- **AI sorting** (`triage.py`) is per person, off until they choose a model. Newsletters and no-reply senders never reach the model. Email text is untrusted: the model only sets that email's flag and summary, and has no tools.
+- **Security:** every query goes through the signed-in person's accounts. Mail HTML renders in a sandboxed iframe with remote pictures held back and fetched through `safe_fetch`. Mail hosts are checked with `assert_url_is_safe`; private ones need an admin or `can_reach_private_network`. A certificate can only be pinned (`cert_pin`) for a server on a private network, for Proton Mail Bridge and the like.
+- **With the rest of Promptly** (`apps.py`, `invites.py`, `chat/tools/mail.py`): invites answered from the email, Add to calendar, Email Attachments system folder and attach from Files, tasks, a Today card, contact names and pictures, Ctrl+K. Chat can search, read and draft but never send; the phone can reply only after a spoken yes, to the address on the email.
+- **Not supported:** Outlook.com and Hotmail need OAuth, which isn't built.
+
 ## P Maps
 
 Maps and directions with nothing sent to Google (decided 2026-11-04): all map data on this server, Android only (the existing APK), timeline unencrypted.

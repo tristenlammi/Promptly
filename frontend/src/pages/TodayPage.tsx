@@ -39,7 +39,7 @@ import {
   DiscoverCard,
   GlanceRow,
   HealthCard,
-  JournalCard,
+  JournalCard, MailCard,
   MedsCard,
   NutritionCard,
   PeopleCard,
@@ -119,6 +119,7 @@ const SECTIONS: { key: string; label: string; grid: boolean }[] = [
   { key: "glance", label: "At a glance", grid: false },
   { key: "recent", label: "Recently opened", grid: false },
   { key: "events", label: "Schedule", grid: true },
+  { key: "mail", label: "Mail", grid: true },
   { key: "meds", label: "Medication", grid: true },
   { key: "tasks", label: "Tasks", grid: true },
   { key: "habits", label: "Habits", grid: true },
@@ -171,6 +172,7 @@ function TodayBody({ data }: { data: TodayData }) {
   const { hidden, order } = useTodayLayout();
   const cards: Record<string, ReactNode> = {
     events: (s.events || data.schedule.items.length > 0 || data.schedule.all_day.length > 0) && <ScheduleCard data={data} />,
+    mail: s.mail && <MailCard m={s.mail} />,
     meds: s.health && s.health.doses.length > 0 && <MedsCard health={s.health} />,
     health: s.health && <HealthCard health={s.health} today={data.date} hideWater={!!s.nutrition} />,
     nutrition: s.nutrition && <NutritionCard n={s.nutrition} />,

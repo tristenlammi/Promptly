@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest.json",
+  "name": "Mail",
+  "short_name": "Mail",
+  "description": "All your mailboxes in one calm place, on your own Promptly.",
+  "id": "/mail/",
+  "start_url": "/mail/?source=pwa",
+  "scope": "/mail/",
+  "display": "standalone",
+  "background_color": "#FAF9F7",
+  "theme_color": "#D97757",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "productivity",
+    "lifestyle"
+  ],
+  "icons": [
+    {
+      "src": "/item-icons/mail-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/mail-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/mail-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

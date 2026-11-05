@@ -28,6 +28,7 @@ object PhoneActions {
         "photos" to ("PhotosLauncher" to "/photos"),
         "rooms" to ("RoomsLauncher" to "/rooms/"),
         "calendar" to ("CalendarLauncher" to "/calendar"),
+        "mail" to ("MailLauncher" to "/mail"),
         "maps" to ("MapsLauncher" to "/maps"),
         "contacts" to ("ContactsLauncher" to "/app/open/contacts"),
         "budget" to ("BudgetLauncher" to "/app/open/budget"),

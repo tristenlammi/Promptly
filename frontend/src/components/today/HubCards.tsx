@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   BookOpen,
+  Mail,
   Cake,
   CalendarClock,
   CalendarDays,
@@ -765,6 +766,21 @@ export function StudyCard({ s }: { s: NonNullable<Sections["study"]> }) {
           </Link>
         )}
       </div>
+    </HubCard>
+  );
+}
+
+export function MailCard({ m }: { m: NonNullable<Sections["mail"]> }) {
+  const said = [m.needs_reply ? `${m.needs_reply} waiting on a reply` : "", m.unread ? `${m.unread} unread` : ""].filter(Boolean).join(" · ");
+  return (
+    <HubCard icon={Mail} title="Mail" to={m.url} open="Open">
+      <p className="px-1 pb-1 text-sm font-medium text-[var(--text)]">{said}</p>
+      {m.items.map((item) => (
+        <Link key={item.url} to={item.url} className="block rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+          <span className="block truncate text-sm text-[var(--text)]">{item.from}: {item.subject}</span>
+          {item.summary && <span className="block truncate text-xs text-[var(--text-muted)]">{item.summary}</span>}
+        </Link>
+      ))}
     </HubCard>
   );
 }

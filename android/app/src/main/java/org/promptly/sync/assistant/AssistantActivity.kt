@@ -4,12 +4,21 @@ import android.Manifest
 import android.app.Activity
 import android.app.KeyguardManager
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.provider.ContactsContract
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -99,7 +108,12 @@ class AssistantActivity : ComponentActivity() {
         }
     }
 
+    // Whether the panel is up. It slides in once it's drawn, and out before it closes.
+    private val raised = MutableTransitionState(false).apply { targetState = true }
+    private var closed = false
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        noWindowAnimation()
         super.onCreate(savedInstanceState)
         Nav.init(this)
         current = this
@@ -212,6 +226,38 @@ class AssistantActivity : ComponentActivity() {
         }
     }
 
+    private fun noWindowAnimation() {
+        if (Build.VERSION.SDK_INT >= 34) {
+            overrideActivityTransition(OVERRIDE_TRANSITION_OPEN, 0, 0)
+            overrideActivityTransition(OVERRIDE_TRANSITION_CLOSE, 0, 0)
+        } else {
+            @Suppress("DEPRECATION") overridePendingTransition(0, 0)
+        }
+    }
+
+    /** On screen: let the panel slide away first. Off screen: nothing to watch. */
+    override fun finish() {
+        if (closed) return
+        if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            closeNow()
+            return
+        }
+        closed = true
+        raised.targetState = false
+        window.decorView.postDelayed({
+            closed = false
+            closeNow()
+        }, LOWER_MS.toLong())
+    }
+
+    private fun closeNow() {
+        closed = true
+        super.finish()
+        if (Build.VERSION.SDK_INT < 34) {
+            @Suppress("DEPRECATION") overridePendingTransition(0, 0)
+        }
+    }
+
     private fun dismiss() {
         alive = false
         Nav.hush()
@@ -245,10 +291,18 @@ class AssistantActivity : ComponentActivity() {
             Box(
                 Modifier
                     .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.25f))
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { dismiss() },
                 contentAlignment = Alignment.BottomCenter,
             ) {
+                // The gentlest dim, faded in: what you were doing stays what you're looking at.
+                AnimatedVisibility(raised, enter = fadeIn(tween(RAISE_MS)), exit = fadeOut(tween(LOWER_MS))) {
+                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.14f)))
+                }
+                AnimatedVisibility(
+                    raised,
+                    enter = slideInVertically(tween(RAISE_MS, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(RAISE_MS / 2)),
+                    exit = slideOutVertically(tween(LOWER_MS, easing = FastOutLinearInEasing)) { it },
+                ) {
                 Surface(
                     Modifier
                         .fillMaxWidth()
@@ -278,6 +332,7 @@ class AssistantActivity : ComponentActivity() {
                             Gate.OPEN -> Talking()
                         }
                     }
+                }
                 }
             }
         }
@@ -344,6 +399,8 @@ class AssistantActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val RAISE_MS = 240
+        private const val LOWER_MS = 160
         const val EXTRA_PASSIVE = "org.promptly.sync.assistant.PASSIVE"
 
         /** The sheet that's open right now, if any. */

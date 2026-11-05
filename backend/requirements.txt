@@ -135,6 +135,10 @@ qrcode[pil]==7.4.2
 # transactional mail.
 aiosmtplib==3.0.2
 
+# ---- Mail (app/mail) ----
+# Reads and files mail in the mailboxes people connect (any IMAP server).
+imapclient==3.0.1
+
 # ---- Web Push (PWA notifications) ----
 # Signs/encrypts VAPID pushes to the browser's push service. Pure-
 # Python and depends only on ``cryptography`` which is already pinned

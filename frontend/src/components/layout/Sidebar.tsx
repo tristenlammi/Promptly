@@ -10,6 +10,7 @@ import {
   FolderPlus,
   LogOut,
   MessageSquare,
+  Search,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -21,6 +22,8 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
+
+import { useUIStore } from "@/store/uiStore";
 
 import {
   NAV_ITEMS,
@@ -51,7 +54,6 @@ import { logout } from "@/lib/session";
 import type { ConversationSummary } from "@/api/types";
 import { Bell, Inbox } from "lucide-react";
 
-import { ConversationSearchBox } from "./ConversationSearchBox";
 import { ConversationRowContextMenu } from "./ConversationRowContextMenu";
 import { InstallAppButton } from "./InstallAppButton";
 import { NewChatButton } from "./NewChatButton";
@@ -90,7 +92,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     fetchNextPage: loadMoreChats,
     isFetchingNextPage: loadingMoreChats,
   } = useConversationsQuery(); // drives store
-  const [searchActive, setSearchActive] = useState(false);
+  const openSearch = useUIStore((s) => s.openSearchPalette);
   // Folder create/edit modal. ``folderModal`` = null (closed), "new", or the
   // folder being edited.
   const [folderModal, setFolderModal] = useState<"new" | ChatFolder | null>(
@@ -252,6 +254,17 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           (ephemeral / 1-hour). See NewChatButton for the popover UI. */}
       <div className="px-3">
         <NewChatButton />
+        {/* The one search: chats, messages, mail, events, tasks and more (Ctrl+K). */}
+        <button
+          type="button"
+          onClick={openSearch}
+          aria-keyshortcuts="Control+K Meta+K"
+          className="mt-2 flex h-8 w-full items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--hover)] px-2.5 text-left text-xs text-[var(--text-muted)] transition hover:text-[var(--text)]"
+        >
+          <Search className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">Search</span>
+          <kbd className="hidden shrink-0 font-sans text-[10px] opacity-70 md:inline">Ctrl K</kbd>
+        </button>
       </div>
 
       {/* Nav — Models management lives inside Settings now (admin-only
@@ -278,21 +291,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         ))}
       </nav>
 
-      {/* Search across all conversations. Activates a panel that
-          replaces the conversation list while a query is in play; an
-          empty box collapses straight back to the normal sidebar. */}
-      <div className="mt-3">
-        <ConversationSearchBox onActive={setSearchActive} />
-      </div>
-
-      {/* Conversation list — hidden while a search is active so the
-          results panel above can take the full vertical space. */}
-      <div
-        className={cn(
-          "promptly-scroll mt-1 flex-1 overflow-y-auto px-2 pb-2",
-          searchActive && "hidden"
-        )}
-      >
+      {/* Conversation list */}
+      <div className="promptly-scroll mt-3 flex-1 overflow-y-auto px-2 pb-2">
         {/* Folders (0148) — always at the very top, above Pinned. Each is
             collapsed by default; the header row toggles it. The + on the row
             starts a new chat inside the folder. */}

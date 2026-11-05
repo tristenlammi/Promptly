@@ -272,6 +272,24 @@ function MapsGate() {
   return <AppLayout />;
 }
 
+const MailApp = lazyWithRetry(
+  () => import("@/mail/MailApp").then((m) => ({ default: m.MailApp })),
+  "MailApp"
+);
+
+/** Mail sits inside Promptly's layout; only the installed Mail app shows
+ *  it on its own. */
+function MailGate() {
+  if (launchedAppKey() === "mail") {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <div className="h-[100dvh]"><MailApp /></div>
+      </Suspense>
+    );
+  }
+  return <AppLayout />;
+}
+
 /** Calendar sits inside Promptly's layout (desktop and phone browsers);
  *  only the installed Calendar app shows it on its own. */
 function CalendarGate() {
@@ -663,6 +681,10 @@ export default function App() {
       <Route path="/calendar" element={<CalendarGate />}>
         <Route index element={<CalendarApp embedded />} />
         <Route path="*" element={<CalendarApp embedded />} />
+      </Route>
+      <Route path="/mail" element={<MailGate />}>
+        <Route index element={<MailApp />} />
+        <Route path="*" element={<MailApp />} />
       </Route>
       <Route path="/maps" element={<MapsGate />}>
         <Route index element={<MapsApp embedded />} />

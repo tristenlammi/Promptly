@@ -56,6 +56,13 @@ export function useDrivePwaManifest(): void {
       setAppleMobileTitle("Promptly Rooms");
       return;
     }
+    if (location.pathname === "/mail" || location.pathname.startsWith("/mail/")) {
+      // Mail: its own app, scope ``/mail/``.
+      setManifestHref("/mail.webmanifest");
+      setAppleTouchIconHref("/item-icons/mail-apple-180.png");
+      setAppleMobileTitle("Mail");
+      return;
+    }
     if (location.pathname === "/maps" || location.pathname.startsWith("/maps/")) {
       // P Maps: its own app, scope ``/maps/``.
       setManifestHref("/maps.webmanifest");

@@ -89,7 +89,7 @@ PHONE_DRIVING = """They are driving right now and can't look at a screen, so ans
 """
 # Promptly's apps, which the phone knows how to open. Nothing else can be opened.
 APPS = {
-    "promptly": "Promptly", "photos": "Photos", "rooms": "Rooms", "calendar": "Calendar", "maps": "Maps",
+    "promptly": "Promptly", "photos": "Photos", "rooms": "Rooms", "calendar": "Calendar", "mail": "Mail", "maps": "Maps",
     "contacts": "Contacts", "budget": "Budget", "habits": "Habits", "journal": "Journal", "workout": "Workout",
     "flashcards": "Cards", "boardgames": "Games", "health": "Health", "mealplan": "Meal Plan", "meals": "Macros",
     "trip": "Trips", "tasks": "Tasks",
@@ -97,10 +97,10 @@ APPS = {
 # Looking things up happens straight away.
 READ_TOOLS = (
     "my_day", "calendar_events", "calendar_free_times", "search_apps", "find_person",
-    "list_my_items", "read_item", "timeline_day", "timeline_visits", "web_search",
+    "list_my_items", "read_item", "timeline_day", "timeline_visits", "web_search", "mail_search", "mail_read",
 )
 # Changing anything waits for a spoken yes.
-WRITE_TOOLS = ("calendar_add_event", "calendar_change_event", "use_item")
+WRITE_TOOLS = ("calendar_add_event", "calendar_change_event", "use_item", "mail_reply")
 KNOWN = {"answer", "find", "add_stop", "remove_stop", "go", "check_route", "end_trip", "use", "confirm", "cancel"}
 # Only the phone's own route has these: older apps couldn't carry them out.
 PHONE_KNOWN = {"set_timer", "set_alarm", "open_app", "call", "message"}
@@ -598,6 +598,20 @@ def _words(value: Any) -> list[str]:
     return [str(value)[:80]]
 
 
+async def _reply_to_whom(db: AsyncSession, user: User, args: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    from app.chat.tools.mail import reply_address
+    from app.mail.models import MailAccount, MailMessage
+
+    try:
+        row = await db.get(MailMessage, uuid.UUID(str(args.get("message_id"))))
+    except ValueError:
+        row = None
+    account = await db.get(MailAccount, row.account_id) if row is not None else None
+    if row is None or account is None or account.user_id != user.id:
+        return args, "that email wasn't found"
+    return {"message_id": str(row.id), "text": str(args.get("text") or "")[:4000], "to": row.from_name or reply_address(row)}, None
+
+
 def _question(name: str, args: dict[str, Any]) -> str:
     """Read back from what would actually be done, not from what the model says it is."""
     def text(value: Any) -> str:
@@ -610,6 +624,8 @@ def _question(name: str, args: dict[str, Any]) -> str:
     if name == "calendar_change_event":
         changes = [f"{k} {text(v)}" for k, v in args.items() if k not in ("event_id", "occurrence")]
         return f"Change that event: {', '.join(changes)[:160]}?"
+    if name == "mail_reply":
+        return f"Reply to {text(args.get('to'))}, saying: {str(args.get('text'))[:300]}. Send it?"
     values = args.get("args") if isinstance(args.get("args"), dict) else {}
     action = text(args.get("action") or "do that").replace("_", " ")
     return f"Should I {action}: {', '.join(_words(values))[:160]}?"
@@ -661,6 +677,9 @@ async def _conversation(db: AsyncSession, user: User, heard: str, state: DriveSt
             label = str(name)
             if name in WRITE_TOOLS:
                 problem = await _cant_use(db, user, args) if name == "use_item" else None
+                if name == "mail_reply":
+                    # Read back who it really goes to, from the email itself.
+                    args, problem = await _reply_to_whom(db, user, args)
                 if problem is None:
                     question = _question(name, args)
                     return {"say": question, "pending": {"tool": name, "args": args, "question": question}}

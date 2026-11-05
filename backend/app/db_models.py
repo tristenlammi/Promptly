@@ -71,6 +71,18 @@ from app.rooms.models import (  # noqa: F401
     RoomSpace,
     RoomSpaceMember,
 )
+from app.mail.models import (  # noqa: F401
+    MailAccount,
+    MailFolder,
+    MailInvite,
+    MailLabel,
+    MailMessage,
+    MailOp,
+    MailOutbox,
+    MailRule,
+    MailSnooze,
+    MailThreadLabel,
+)
 from app.maps.models import (  # noqa: F401
     MapLiveLocation,
     MapParked,

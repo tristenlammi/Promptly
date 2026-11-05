@@ -50,6 +50,7 @@ class PreferencesSchema(BaseModel):
     item_reminder: bool = True
     room_message: bool = True
     calendar: bool = True
+    mail: bool = True
 
 
 class PreferencesUpdate(BaseModel):
@@ -68,6 +69,7 @@ class PreferencesUpdate(BaseModel):
     item_reminder: bool | None = None
     room_message: bool | None = None
     calendar: bool | None = None
+    mail: bool | None = None
 
 
 class NotificationActor(BaseModel):

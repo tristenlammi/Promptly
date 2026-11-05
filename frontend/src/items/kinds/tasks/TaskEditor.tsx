@@ -7,6 +7,8 @@ import { LinkedSection } from "@/components/links/LinkedSection";
 import type { ItemHandle } from "@/items/useItem";
 import { Chip, Field, ItemButton, Segmented, Select, Sheet, Stepper, TextArea, TextInput, Toggle, fmtDay, todayISO, uid } from "@/items/ui";
 import { toast } from "@/store/toastStore";
+import { Link } from "react-router-dom";
+
 import { cn } from "@/utils/cn";
 
 import { ALERTS, PRIORITY, alertLabel } from "./logic";
@@ -149,6 +151,7 @@ export function TaskEditor({ item, taskId, onClose }: { item: ItemHandle<TasksDa
           aria-label="Title"
           className="!h-auto border-transparent !px-1 py-1 text-lg font-semibold md:text-base"
         />
+        {/\/mail\?open=[\w/-]+/.exec(notes) && <Link to={/\/mail\?open=[\w/-]+/.exec(notes)![0]} className="px-1 text-xs font-medium text-[var(--item-accent)]">Open the email</Link>}
         <TextArea value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={commitText} placeholder="Notes" aria-label="Notes" className="min-h-[64px]" />
 
         <Row icon={CalendarDays} label="Due">

@@ -9,6 +9,8 @@ import type { AppSettings, AvailableModel } from "@/api/types";
 import type { AppSettingsPatch } from "@/api/admin";
 import { useModelStore } from "@/store/modelStore";
 
+import { MailSearchCard } from "@/mail/AdminSearchCard";
+
 import { EmbeddingConfigCard } from "./CustomModelsPanel";
 import { SettingsCard } from "./SettingsCard";
 
@@ -105,6 +107,7 @@ export function DefaultsTab() {
         busy={update.isPending}
       />
       <EmbeddingConfigCard />
+      <MailSearchCard />
     </div>
   );
 }

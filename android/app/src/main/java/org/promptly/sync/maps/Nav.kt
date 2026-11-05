@@ -13,7 +13,6 @@ import com.stadiamaps.ferrostar.core.DefaultNavigationViewModel
 import com.stadiamaps.ferrostar.core.FerrostarCore
 import com.stadiamaps.ferrostar.core.annotation.valhalla.valhallaExtendedOSRMAnnotationPublisher
 import com.stadiamaps.ferrostar.core.http.OkHttpClientProvider.Companion.toOkHttpClientProvider
-import com.stadiamaps.ferrostar.core.location.AndroidLocationProvider
 import com.stadiamaps.ferrostar.core.location.NavigationLocationProvider
 import com.stadiamaps.ferrostar.core.location.SimulatedLocationProvider
 import com.stadiamaps.ferrostar.core.location.toUserLocation
@@ -114,7 +113,7 @@ object Nav {
 
     val locationProvider: NavigationLocationProvider by lazy {
         NavigationLocationProvider(
-            liveProviding = AndroidLocationProvider(app),
+            liveProviding = LiveLocation(app),
             simulatedProvider = SimulatedLocationProvider(warpFactor = 2u, initialLocation = Location("sim")),
         )
     }
@@ -343,6 +342,7 @@ object Nav {
 
     /** You've moved on: stop saying it. */
     fun hush() {
+        SpokenAnswer.stop()
         speaker?.stop()
     }
 

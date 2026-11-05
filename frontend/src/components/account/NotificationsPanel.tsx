@@ -319,6 +319,14 @@ export function NotificationsPanel() {
                 onChange={(v) => toggle("calendar", v)}
                 dimmed={!prefs.enabled}
               />
+              <CategoryRow
+                title="Mail"
+                subtitle="New email in your Inbox, and snoozed email coming back (each mailbox's own setting still applies)."
+                checked={prefs.mail ?? true}
+                busy={prefsBusy === "mail"}
+                onChange={(v) => toggle("mail", v)}
+                dimmed={!prefs.enabled}
+              />
             </div>
           )}
           {prefsError && (

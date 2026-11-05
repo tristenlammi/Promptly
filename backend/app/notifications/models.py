@@ -126,6 +126,9 @@ class PushPreferences(Base):
     room_message: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    mail: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     # Calendar invites, changes and reminders (0231).
     calendar: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"

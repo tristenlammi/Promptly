@@ -140,6 +140,10 @@ class AppSettings(Base):
     )
     embedding_model_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     embedding_dim: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # AI search for mail. Unset: on with a local indexer, off with a cloud one
+    # (see app/mail/search.py). The provider is the cloud one the admin agreed to.
+    mail_ai_search: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    mail_ai_search_provider: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
 
     # ----- Public origins (replaces the old static .env ALLOWED_ORIGINS) -----
     # JSON array of fully-qualified origins (scheme + host [+ :port]) the

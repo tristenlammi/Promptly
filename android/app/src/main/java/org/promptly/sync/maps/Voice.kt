@@ -251,7 +251,7 @@ object Voice {
                 pending == null -> {
                     _reply.value = UNHEARD
                     Nav.init(context)
-                    Nav.say(UNHEARD)
+                    SpokenAnswer.say(context, UNHEARD)
                 }
             }
         } finally {
@@ -262,10 +262,10 @@ object Voice {
         }
     }
 
-    private fun answered(context: Context, words: String) {
+    private fun answered(context: Context, words: String, offline: Boolean = false) {
         Nav.init(context)
         _reply.value = words
-        Nav.say(words) { _spoken.value += 1 }
+        if (offline) Nav.say(words) { _spoken.value += 1 } else SpokenAnswer.say(context, words) { _spoken.value += 1 }
     }
 
     /** Send what you said, say the answer, do what it says. Blocks until done. */
@@ -298,7 +298,7 @@ object Voice {
         } catch (e: Exception) {
             Log.w(TAG, "Couldn't reach the server", e)
             val refused = e.message.orEmpty().let { "said 401" in it || "said 403" in it || "Not signed in" in it }
-            answered(context, if (refused) "This phone needs linking to your Promptly again." else "Sorry, I can't reach your server.")
+            answered(context, if (refused) "This phone needs linking to your Promptly again." else "Sorry, I can't reach your server.", offline = true)
         } finally {
             setState(was)
         }

@@ -67,6 +67,9 @@ class SystemKind(str, Enum):
     # files live here (ordinary files: shareable, searchable, indexed for
     # AI like any other folder).
     APPS = "apps"
+    # Attachments you saved from Mail. Not the old EMAIL_ATTACHMENTS kind, which
+    # migration 0106 deleted.
+    MAIL_ATTACHMENTS = "mail_attachments"
     # NOTE: a Phase-12 ``EMAIL_ATTACHMENTS`` kind used to live here, lazily
     # seeded on first email-account connect. Email/calendar integration was
     # removed, and migration ``0106_remove_email_attachments_folder`` deletes
@@ -82,6 +85,7 @@ DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
     SystemKind.TEMPLATES: "Templates",
     SystemKind.CAMERA_UPLOADS: "Photos",
     SystemKind.APPS: "Apps",
+    SystemKind.MAIL_ATTACHMENTS: "Email Attachments",
 }
 
 # The per-type subfolders auto-created inside each workspace's Drive
@@ -120,6 +124,11 @@ async def _fetch(
             )
         )
     ).scalar_one_or_none()
+
+
+async def ensure_mail_attachments(db: AsyncSession, user) -> FileFolder:  # noqa: ANN001
+    """Made the first time you save something from Mail."""
+    return await _ensure(db, user.id, SystemKind.MAIL_ATTACHMENTS)
 
 
 async def _ensure(

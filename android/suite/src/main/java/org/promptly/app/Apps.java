@@ -9,6 +9,7 @@ final class Apps {
         {"photos", "P Photos", "org.promptly.app.PhotosLauncher"},
         {"rooms", "P Rooms", "org.promptly.app.RoomsLauncher"},
         {"calendar", "P Calendar", "org.promptly.app.CalendarLauncher"},
+        {"mail", "P Mail", "org.promptly.app.MailLauncher"},
         {"maps", "P Maps", "org.promptly.app.MapsLauncher"},
         {"contacts", "P Contacts", "org.promptly.app.ContactsLauncher"},
         {"budget", "P Budget", "org.promptly.app.BudgetLauncher"},

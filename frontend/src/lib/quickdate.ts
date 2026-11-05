@@ -154,13 +154,15 @@ export function parseWhen(input: string, today: string, weekStart = 0): When & {
     });
 
   // ---- part-of-day phrases ("tomorrow morning" sets both)
-  const PARTS: Record<string, string> = { morning: "09:00", afternoon: "15:00", evening: "18:00", night: "20:00" };
+  const PARTS: Record<string, string> = { morning: "09:00", afternoon: "15:00", evening: "18:00", night: "20:00", tonight: "19:00" };
+  // Only a fallback: a time you actually gave beats what a part of the day implies.
+  let part: string | null = null;
   take(/\s(today|tomorrow|tmrw?|tmr)\s+(morning|afternoon|evening|night)\b/i, (m) => {
     out.due = /^tod/i.test(m[1]) ? today : plusDays(today, 1);
-    out.time = PARTS[m[2].toLowerCase()];
+    part = m[2].toLowerCase();
   });
   take(/\s(?:this|in\s+the)\s+(morning|afternoon|evening)\b/i, (m) => {
-    out.time = PARTS[m[1].toLowerCase()];
+    part = m[1].toLowerCase();
     out.due ??= today;
   });
 
@@ -176,7 +178,7 @@ export function parseWhen(input: string, today: string, weekStart = 0): When & {
       }],
       [/\s(?:(?:due|by|for)\s+)?(today|tod)\b/i, () => today],
       [/\s(tonight)\b/i, () => {
-        out.time ??= "19:00";
+        part = "tonight";
         return today;
       }],
       [/\s(?:(?:due|by|for)\s+)?(tomorrow|tmrw|tmr|tmw)\b/i, () => plusDays(today, 1)],
@@ -216,6 +218,8 @@ export function parseWhen(input: string, today: string, weekStart = 0): When & {
   }
 
   // ---- times
+  // "this evening at 8" is 8 pm, and "tonight at 7:30" is 7:30 pm.
+  const later = (h: number) => (part && part !== "morning" && h >= 1 && h < 12 ? h + 12 : h);
   if (!out.time) {
     take(/\s(?:at\s+|@\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)(?=\s|[,.]|$)/i, (m) => {
       let h = Number(m[1]);
@@ -227,7 +231,7 @@ export function parseWhen(input: string, today: string, weekStart = 0): When & {
       out.time = clock(h, mm);
     }) ||
       take(/\s(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)\b/i, (m) => {
-        out.time = clock(Number(m[1]), Number(m[2]));
+        out.time = clock(later(Number(m[1])), Number(m[2]));
       }) ||
       take(/\s(?:at\s+)(noon|midday|midnight)\b|\s(noon|midday)\b/i, (m) => {
         out.time = /night/i.test(m[1] ?? m[2]) ? "00:00" : "12:00";
@@ -235,10 +239,13 @@ export function parseWhen(input: string, today: string, weekStart = 0): When & {
       take(/\sat\s+(\d{1,2})(?=\s|$)/i, (m) => {
         let h = Number(m[1]);
         if (h > 23) return false;
-        if (h >= 1 && h <= 7) h += 12; // "at 5" means 5 pm
+        if (part === "morning") h %= 24;
+        else if (part) h = later(h);
+        else if (h >= 1 && h <= 7) h += 12; // "at 5" means 5 pm
         out.time = clock(h, 0);
       });
   }
+  if (!out.time && part) out.time = PARTS[part];
 
   if (out.repeat && !out.due) out.due = firstDue(out.repeat, today);
   if (out.time && !out.due) out.due = today;
@@ -250,6 +257,7 @@ export function parseWhen(input: string, today: string, weekStart = 0): When & {
 export function cleanTitle(s: string): string {
   return s
     .replace(/\s+/g, " ")
+    .replace(/\s+[.!,;]+\s*$/, "")
     .replace(/\s+(?:on|at|by|due|for|every)\s*$/i, "")
     .replace(/^\s*(?:remind\s+me\s+to|remember\s+to)\s+/i, "")
     .trim()

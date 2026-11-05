@@ -75,6 +75,8 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
   // Where you are, while the map is open.
   const [you, setYou] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
   const centredOnYou = useRef(false);
+  const [locationBlocked, setLocationBlocked] = useState(false);
+  const [watching, setWatching] = useState(0);
   useEffect(() => {
     if (!navigator.geolocation) return;
     const id = navigator.geolocation.watchPosition(
@@ -86,11 +88,21 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
           map.current?.flyTo(here.lat, here.lon, 13);
         }
       },
-      () => undefined,
-      { enableHighAccuracy: true, maximumAge: 10_000 },
+      (e) => setLocationBlocked(e.code === e.PERMISSION_DENIED),
+      { enableHighAccuracy: true, maximumAge: 2000 },
     );
     return () => navigator.geolocation.clearWatch(id);
+  }, [watching]);
+  // Phones can quietly end a watch while the app's in the background, such as during
+  // a drive in the navigation screen. Coming back starts a fresh one.
+  useEffect(() => {
+    const back = () => {
+      if (document.visibilityState === "visible") setWatching((n) => n + 1);
+    };
+    document.addEventListener("visibilitychange", back);
+    return () => document.removeEventListener("visibilitychange", back);
   }, []);
+  const noLocationYet = () => (locationBlocked ? "Promptly isn't allowed to use your location. Turn it on in your phone's settings." : "Waiting for your location.");
 
   // The day you're looking at on your timeline.
   const [dayOnMap, setDayOnMap] = useState<{ lines: [number, number][][]; stays: { lat: number; lon: number; name: string }[] } | null>(null);
@@ -402,7 +414,7 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
 
   const parkHere = async () => {
     if (!you) {
-      toast.error("Waiting for your location.");
+      toast.error(noLocationYet());
       return;
     }
     await mapsApi.park(you.lat, you.lon);
@@ -662,7 +674,7 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
 
         {/* Map buttons. */}
         <div className={`absolute right-3 top-[4.5rem] z-10 flex-col gap-2 md:top-3 ${isMobile && (addingStop || keyboard > 0) ? "hidden" : "flex"}`}>
-          <MapButton label="Go to your location" onClick={() => (you ? map.current?.flyTo(you.lat, you.lon, 15) : toast.info("Waiting for your location."))}>
+          <MapButton label="Go to your location" onClick={() => (you ? map.current?.flyTo(you.lat, you.lon, 15) : toast.info(noLocationYet()))}>
             <Crosshair className="h-5 w-5" />
           </MapButton>
           <MapButton label={chargersOn ? "Hide charging stations" : "Show charging stations"} active={chargersOn} onClick={() => setChargersOn((v) => !v)}>

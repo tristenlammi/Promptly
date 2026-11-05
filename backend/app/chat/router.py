@@ -203,6 +203,41 @@ async def _get_owned_conversation(
 # --------------------------------------------------------------------
 # Full-text search across the user's conversations
 # --------------------------------------------------------------------
+def partial_word_query(raw: str) -> str | None:
+    """A ``to_tsquery`` that also matches the word still being typed: "budg" finds
+    "budget". Only plain words go in, so nothing typed can break the query. None when
+    there's nothing to match, or when quotes or a minus mean an exact search."""
+    if any(c in raw for c in '"-'):
+        return None
+    words = re.findall(r"\w+", raw, flags=re.UNICODE)[:12]
+    return " & ".join([*words[:-1], f"{words[-1]}:*"]) if words else None
+
+
+def _like(term: str) -> str:
+    return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+async def _title_hits(db: AsyncSession, *, term: str, conv_ids: list, user_id, date_sql: str, date_params: dict, limit: int) -> list[ConversationSearchHit]:
+    """Chats whose name has this in it, opening at their latest message."""
+    like = _like(term)
+    rows = (await db.execute(text(f"""
+        SELECT DISTINCT ON (m.conversation_id)
+            m.conversation_id, m.id AS message_id, c.title AS conversation_title, m.role, m.content, m.created_at,
+            CASE WHEN c.user_id = :user_id THEN 'owner' ELSE 'collaborator' END AS access
+        FROM messages m JOIN conversations c ON c.id = m.conversation_id
+        WHERE m.conversation_id = ANY(:conv_ids) AND c.archived_at IS NULL AND c.title ILIKE :like ESCAPE '\\' {date_sql}
+        ORDER BY m.conversation_id, m.created_at DESC
+    """), {"conv_ids": conv_ids, "user_id": user_id, "like": like, **date_params})).mappings().all()
+    rows = sorted(rows, key=lambda r: r["created_at"], reverse=True)[:limit]
+    return [
+        ConversationSearchHit(
+            conversation_id=r["conversation_id"], message_id=r["message_id"], conversation_title=r["conversation_title"], role=r["role"],
+            snippet=_synth_snippet(r["content"] or ""), rank=1.0, created_at=r["created_at"], access=r["access"], match="keyword",
+        )
+        for r in rows
+    ]
+
+
 def _to_websearch_query(raw: str) -> str:
     """Sanitise the user-typed query for ``websearch_to_tsquery``.
 
@@ -305,6 +340,17 @@ async def search_conversations(
     # the fusion below has material to re-rank before we trim to ``limit``.
     fetch = min(50, max(limit * 2, 30))
 
+    # The whole words, or the last one still being typed.
+    partial = partial_word_query(cleaned)
+    query_sql = "(websearch_to_tsquery('english', :q) || to_tsquery('simple', :partial))" if partial else "websearch_to_tsquery('english', :q)"
+    partial_params = {"partial": partial} if partial else {}
+    # The index holds word stems ("quarterly" is "quarter"), so part of a longer word
+    # can miss it. Looking at the text itself only covers this person's own chats.
+    typed_sql = ""
+    if partial and len(cleaned) >= 3:
+        typed_sql = " OR m.content ILIKE :typed ESCAPE '\\'"
+        partial_params["typed"] = _like(cleaned)
+
     fts_sql = text(
         f"""
         SELECT
@@ -315,11 +361,11 @@ async def search_conversations(
             ts_headline(
                 'english',
                 m.content,
-                websearch_to_tsquery('english', :q),
+                {query_sql},
                 'StartSel=[[HL]], StopSel=[[/HL]], MaxWords=18, MinWords=6,'
                 ' ShortWord=3, MaxFragments=2, FragmentDelimiter=" … "'
             )                            AS snippet,
-            ts_rank(m.content_tsv, websearch_to_tsquery('english', :q)) AS rank,
+            ts_rank(m.content_tsv, {query_sql}) AS rank,
             m.created_at                 AS created_at,
             CASE
                 WHEN c.user_id = :user_id THEN 'owner'
@@ -329,7 +375,7 @@ async def search_conversations(
         JOIN conversations c ON c.id = m.conversation_id
         WHERE m.conversation_id = ANY(:conv_ids)
           AND c.archived_at IS NULL
-          AND m.content_tsv @@ websearch_to_tsquery('english', :q)
+          AND (m.content_tsv @@ {query_sql}{typed_sql})
           {date_sql}
         ORDER BY rank DESC, m.created_at DESC
         LIMIT :limit
@@ -344,6 +390,7 @@ async def search_conversations(
                 "limit": fetch,
                 "user_id": user.id,
                 **date_params,
+                **partial_params,
             },
         )
     ).mappings().all()
@@ -367,7 +414,11 @@ async def search_conversations(
                 end=end,
             )
 
-    return _fuse_search_hits(fts_rows, sem_rows, limit=limit)
+    # A chat's own name is the strongest match of all, so those come first.
+    named = await _title_hits(db, term=cleaned, conv_ids=accessible_ids, user_id=user.id, date_sql=date_sql, date_params=date_params, limit=limit)
+    found = _fuse_search_hits(fts_rows, sem_rows, limit=limit)
+    chats = {h.conversation_id for h in named}
+    return (named + [h for h in found if h.conversation_id not in chats or h.match != "semantic"])[:limit]
 
 
 # ---------------------------------------------------------------------
@@ -5051,6 +5102,11 @@ async def _stream_generator(
                 enabled_categories.add("calendar")
                 # Across the apps (my_day, find_person, search_apps): everyone.
                 enabled_categories.add("apps")
+                # Mail: for anyone who's connected a mailbox.
+                from app.chat.tools.mail import has_mail
+
+                if await has_mail(db, user.id):
+                    enabled_categories.add("mail")
                 # Rooms: for anyone in a space or a conversation.
                 from app.chat.tools.crossapp import has_rooms
 

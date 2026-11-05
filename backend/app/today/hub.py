@@ -566,6 +566,14 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
     await add("journal", "journal", lambda fid, d, _f: journal_section(fid, d, today))
     await add("people", "contacts", lambda fid, d, _f: people_section(fid, d, today))
     try:
+        from app.mail.apps import today_section
+
+        mail = await today_section(db, user)
+        if mail:
+            sec["mail"] = mail
+    except Exception:  # noqa: BLE001
+        logger.exception("today mail section failed")
+    try:
         a = await automations_section(db, user, now)
         if a:
             sec["automations"] = a

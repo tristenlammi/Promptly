@@ -141,7 +141,7 @@
             android:launchMode="singleTask"
             android:showWhenLocked="true"
             android:taskAffinity="org.promptly.app.assistant"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            android:theme="@style/Theme.Promptly.AssistantSheet">
             <intent-filter>
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.DEFAULT" />

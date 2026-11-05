@@ -96,6 +96,18 @@ object Maps {
         }
     }
 
+    /** An answer in your chosen voice. Quick or not at all: there's a fallback, and
+     *  you're waiting. Call this off the main thread. */
+    fun speech(context: Context, words: String): ByteArray {
+        val server = server(context) ?: throw IOException("Not signed in")
+        val body = JSONObject().put("text", words).toString().toRequestBody(JSON)
+        val quick = client(context).newBuilder().connectTimeout(4, TimeUnit.SECONDS).callTimeout(12, TimeUnit.SECONDS).build()
+        quick.newCall(Request.Builder().url("$server/api/assistant/speak").post(body).build()).execute().use { r ->
+            if (!r.isSuccessful) throw IOException("Server said ${r.code}")
+            return r.body.bytes()
+        }
+    }
+
     /** One stop you could make, and what it would cost. */
     data class Nearby(val stop: Stop, val addsMinutes: Int?, val aheadKm: Double?)
 

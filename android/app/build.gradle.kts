@@ -23,8 +23,8 @@ android {
         // 29: the car screen's navigation library needs it.
         minSdk = 29
         targetSdk = 37
-        versionCode = 10
-        versionName = "1.3.1"
+        versionCode = 13
+        versionName = "1.4.0"
     }
 
     signingConfigs {
