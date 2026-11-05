@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-06
+
+### Added
+- Apps: Edit now lists the apps in your sidebar so you can drag them into the order you want, instead of unpinning and pinning them again.
+
 ## [0.26.1] - 2026-11-06
 
 ### Fixed

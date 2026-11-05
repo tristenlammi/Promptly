@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { CalendarDays, Mail, MessageCircle, Navigation, type LucideIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { authApi } from "@/api/auth";
 import { extractError } from "@/components/files/helpers";
@@ -41,6 +41,7 @@ export function useNavApps() {
   const patchSettings = useAuthStore((s) => s.patchSettings);
   const setUser = useAuthStore((s) => s.setUser);
   const [saving, setSaving] = useState(false);
+  const latestOrder = useRef(0);
   const pinned = useMemo(() => pinnedIds ?? [], [pinnedIds]);
   const { data: launcher } = useQuery({
     queryKey: ["apps-launcher"],
@@ -72,6 +73,23 @@ export function useNavApps() {
     }
   };
 
+  /** Put the sidebar's apps in this order. Pins that can't be shown right now
+   *  (an app that's gone) keep their place at the end. */
+  const reorder = async (ids: string[]) => {
+    const previous = pinned;
+    const next = [...ids, ...previous.filter((k) => !ids.includes(k))];
+    const turn = ++latestOrder.current;
+    patchSettings({ nav_apps: next });
+    try {
+      const user = await authApi.updatePreferences({ nav_apps: next });
+      // A quicker second move mustn't be undone by the first one's reply.
+      if (turn === latestOrder.current) setUser(user);
+    } catch (err) {
+      if (turn === latestOrder.current) patchSettings({ nav_apps: previous });
+      toast.error(extractError(err));
+    }
+  };
+
   const setIconStyle = async (style: "line" | "color") => {
     const previous = iconStyle;
     patchSettings({ nav_app_icons: style });
@@ -83,5 +101,5 @@ export function useNavApps() {
     }
   };
 
-  return { pinned, apps, toggle, saving, iconStyle, setIconStyle };
+  return { pinned, apps, toggle, reorder, saving, iconStyle, setIconStyle };
 }

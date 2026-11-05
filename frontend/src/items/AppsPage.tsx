@@ -8,10 +8,17 @@ import {
   useSensors,
   type DragEndEvent,
 } from "@dnd-kit/core";
-import { SortableContext, arrayMove, rectSortingStrategy, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Download, Loader2, Minus, Pencil, Pin, Plus, Sparkles } from "lucide-react";
+import { Check, Download, GripVertical, Loader2, Minus, Pencil, Pin, Plus, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -21,7 +28,7 @@ import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 import { itemsApi, type LauncherApp } from "./api";
-import { BUILT_IN_APPS, useNavApps } from "./navApps";
+import { BUILT_IN_APPS, useNavApps, type NavApp } from "./navApps";
 import "./ui/items.css";
 
 /**
@@ -29,7 +36,8 @@ import "./ui/items.css";
  * arrange (drag in Edit, or long-press a tile on a phone). Tap a tile to
  * open the app; the last tile gets more apps. Each app's data lives in
  * ``My files/Apps/<App>``. In Edit, the pin on a tile puts that app in the
- * sidebar — so it can be used from Promptly without installing it.
+ * sidebar — so it can be used from Promptly without installing it — and the
+ * list under the tiles sets their order there.
  */
 export function AppsPage() {
   const navigate = useNavigate();
@@ -60,6 +68,12 @@ export function AppsPage() {
       .saveLauncher(next.map((a) => a.kind))
       .then(() => qc.invalidateQueries({ queryKey: ["apps-launcher"] }))
       .catch((err) => toast.error(extractError(err)));
+  };
+
+  const onSidebarDragEnd = (e: DragEndEvent) => {
+    if (!e.over || e.active.id === e.over.id) return;
+    const ids = nav.apps.map((a) => a.id);
+    void nav.reorder(arrayMove(ids, ids.indexOf(String(e.active.id)), ids.indexOf(String(e.over.id))));
   };
 
   const remove = async (app: LauncherApp) => {
@@ -179,6 +193,20 @@ export function AppsPage() {
           <p className="text-center text-xs text-[var(--text-muted)]">
             Drag to arrange · tap the pin to show an app in your sidebar · tap − to remove (its files stay in My files › Apps)
           </p>
+          {nav.apps.length > 0 && (
+            <section className="mx-auto w-full max-w-sm" aria-label="Sidebar order" onClick={(e) => e.stopPropagation()}>
+              <h2 className="mb-2 text-xs font-semibold text-[var(--text-muted)]">In your sidebar</h2>
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onSidebarDragEnd}>
+                <SortableContext items={nav.apps.map((a) => a.id)} strategy={verticalListSortingStrategy}>
+                  <ul className="flex flex-col gap-1">
+                    {nav.apps.map((app) => (
+                      <SidebarRow key={app.id} app={app} onRemove={() => void nav.toggle(app.id)} />
+                    ))}
+                  </ul>
+                </SortableContext>
+              </DndContext>
+            </section>
+          )}
           <div className="flex items-center justify-center gap-2 text-xs text-[var(--text-muted)]" onClick={(e) => e.stopPropagation()}>
             <span>Sidebar icons</span>
             <div role="radiogroup" aria-label="Sidebar icons" className="inline-flex rounded-lg border border-[var(--border)] p-0.5">
@@ -211,6 +239,43 @@ interface PinProps {
   editing: boolean;
   pinned: boolean;
   onTogglePin: () => void;
+}
+
+/** In Edit: one pinned app, dragged up or down to set its place in the sidebar. */
+function SidebarRow({ app, onRemove }: { app: NavApp; onRemove: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: app.id });
+  const Glyph = app.glyph;
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn(
+        "flex items-center rounded-xl border border-[var(--border)] bg-[var(--surface)]",
+        isDragging && "relative z-10 shadow-[var(--shadow-md)]",
+      )}
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        aria-label={`Move ${app.name}`}
+        className="flex min-h-11 min-w-0 flex-1 cursor-grab touch-manipulation items-center gap-2.5 rounded-xl px-3 text-left text-sm font-medium text-[var(--text)] active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+      >
+        <GripVertical className="h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
+        <Glyph className="h-4 w-4 shrink-0" aria-hidden />
+        <span className="truncate">{app.name}</span>
+      </button>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`Take ${app.name} off the sidebar`}
+        title="Remove from sidebar"
+        className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
+      >
+        <X className="h-4 w-4" />
+      </button>
+    </li>
+  );
 }
 
 /** In Edit: the corner button that adds an app to (or takes it off) the sidebar. */
