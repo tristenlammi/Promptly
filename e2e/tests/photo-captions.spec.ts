@@ -25,6 +25,7 @@ test("a photo is described and found by its description", async ({ dana: page })
     data: { photos_vision_provider_id: readRun().provider_id, photos_vision_model_id: "e2e-mock-vision" },
   });
   expect(set.ok(), await set.text()).toBeTruthy();
+  let uploaded: string | undefined;
   try {
     await page.goto("/files/photos");
     await ready(page);
@@ -42,6 +43,7 @@ test("a photo is described and found by its description", async ({ dana: page })
       multipart: { scope: "mine", route: "camera", file: { name, mimeType: "image/jpeg", buffer: fs.readFileSync(wordPhoto(name, "~")) } },
     });
     const id = (await up.json()).id as string;
+    uploaded = id;
     await expect
       .poll(async () => (await (await page.request.get(`/api/files/${id}/media`, { headers: auth })).json()).caption?.text, {
         timeout: 180_000,
@@ -51,6 +53,8 @@ test("a photo is described and found by its description", async ({ dana: page })
     const found = await (await page.request.get("/api/photos/search?q=lighthouses", { headers: auth })).json();
     expect(found.items.find((i: { id: string }) => i.id === id)?.matched).toBe("description");
   } finally {
+    // Search folds near-identical photos together: a copy left behind would hide the next run's.
+    if (uploaded) await page.request.delete(`/api/files/${uploaded}`, { headers: auth });
     await page.request.put("/api/photos/settings", { headers: auth, data: { captions: false } });
     await page.request.patch("/api/admin/app-settings", {
       headers: auth,

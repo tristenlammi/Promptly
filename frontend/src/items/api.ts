@@ -180,7 +180,7 @@ export const itemsApi = {
   /** One AI-panel turn, streamed. Yields events until ``done`` / ``error``. */
   async *ask(
     fileId: string,
-    body: { message: string; provider_id: string | null; model_id: string | null },
+    body: { message: string; provider_id: string | null; model_id: string | null; attachment_ids?: string[] },
     signal?: AbortSignal,
   ): AsyncGenerator<AiEvent> {
     // A cheap authed call first, so an expired access token is refreshed

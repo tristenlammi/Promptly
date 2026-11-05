@@ -185,14 +185,7 @@ class NavigationActivity : ComponentActivity() {
         val addedStop by Nav.addedStop.collectAsState()
         var addingStop by remember { mutableStateOf(false) }
         val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-            if (ok) Voice.start(applicationContext)
-        }
-        // Once, on your first drive. After that it's the button.
-        LaunchedEffect(Unit) {
-            if (!Voice.allowed(context) && !Voice.asked(context)) {
-                Voice.markAsked(context)
-                askMic.launch(Manifest.permission.RECORD_AUDIO)
-            }
+            if (ok) Voice.press(applicationContext)
         }
         LaunchedEffect(said) {
             if (said != null) {
@@ -253,14 +246,13 @@ class NavigationActivity : ComponentActivity() {
                     when {
                         voice == Voice.State.HEARD -> "Listening…"
                         voice == Voice.State.THINKING -> "Thinking…"
-                        voice == Voice.State.LISTENING -> "\"Hey Promptly\" on"
-                        else -> "\"Hey Promptly\" off"
+                        else -> "Ask Promptly"
                     },
                     if (voice == Voice.State.HEARD || voice == Voice.State.THINKING) Color(0xFFD97757) else MaterialTheme.colorScheme.surface,
                     if (voice == Voice.State.HEARD || voice == Voice.State.THINKING) Color.White else MaterialTheme.colorScheme.onSurface,
                     Modifier.clickable {
                         if (!Voice.allowed(context)) askMic.launch(Manifest.permission.RECORD_AUDIO)
-                        else Voice.setEnabled(context, voice == Voice.State.OFF)
+                        else Voice.press(context)
                     },
                 )
                 if (kmh != null) {

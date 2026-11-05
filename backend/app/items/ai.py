@@ -392,10 +392,44 @@ class AskItem(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     provider_id: uuid.UUID | None = None
     model_id: str | None = Field(default=None, max_length=300)
+    attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=5)
 
 
 def _sse(event: dict) -> str:
     return f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
+
+
+async def _with_attachments(
+    db: AsyncSession, user: User, ids: list[uuid.UUID], message: str, provider: Any, model_id: str
+) -> tuple[list[Any], Any]:
+    """The person's message with what they attached: as text where it has text, as
+    pictures if this model can see them, read by the Vision relay if it can't."""
+    from fastapi.concurrency import run_in_threadpool
+
+    from app.chat.router import _model_supports_vision
+    from app.files.prompt import build_attachment_preamble, build_image_parts, looks_image
+    from app.files.router import resolve_attachments
+    from app.files.vision_extract import extract_text_via_vision, read_scanned_pdfs
+    from app.models_config.provider import ChatMessage, TextPart
+
+    files = await resolve_attachments(db, ids, user)
+    vision = _model_supports_vision(provider, model_id)
+    images = [f for f in files if looks_image(f)]
+    relayed = ""
+    if images and not vision:
+        for f in images:
+            read = await extract_text_via_vision(db, f)
+            relayed += f"{read}\n" if read else f'[The image "{f.filename}" could not be read. Say so plainly and don\'t guess what it says.]\n'
+    preamble = await run_in_threadpool(build_attachment_preamble, files, vision_handles_images=vision or bool(relayed))
+    scan_words, parts = await read_scanned_pdfs(db, files, vision)
+    if images and vision:
+        pictures, _warnings = await run_in_threadpool(build_image_parts, images)
+        parts = [*pictures, *parts]
+    ids_line = "[File ids: " + ", ".join(f"{f.filename} = {f.id}" for f in files) + "]\n"
+    text = relayed + preamble + scan_words + ids_line + message
+    if not parts:
+        return files, text
+    return files, ChatMessage(role="user", content=[TextPart(text=text), *parts]).to_openai()["content"]
 
 
 @router.post("/{file_id}/ai")
@@ -408,6 +442,7 @@ async def ask(
 ) -> StreamingResponse:
     from app.files.editor_ai import resolve_model
     from app.chat.router import _enforce_send_quotas
+    from app.files.router import resolve_attachments
 
     try:
         row, doc, access = await service.load(db, user, file_id)
@@ -418,6 +453,8 @@ async def ask(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     provider, model_id = await resolve_model(db, user, payload.provider_id, payload.model_id)
     await _enforce_send_quotas(request, user, db)
+    # Unknown or someone else's files fail here, before anything starts.
+    attachment_ids = [f.id for f in await resolve_attachments(db, payload.attachment_ids, user)]
     user_id = user.id
     await db.commit()
 
@@ -426,7 +463,7 @@ async def ask(
             u = await s.get(User, user_id)
             try:
                 async with asyncio.timeout(TURN_TIMEOUT_S):
-                    async for ev in run_turn(s, u, file_id, payload.message, provider, model_id, can_edit=access == "edit"):
+                    async for ev in run_turn(s, u, file_id, payload.message, provider, model_id, can_edit=access == "edit", attachment_ids=attachment_ids):
                         yield _sse(ev)
             except TimeoutError:
                 yield _sse({"type": "error", "message": "That took too long — try a smaller ask."})
@@ -448,6 +485,7 @@ async def run_turn(
     model_id: str,
     *,
     can_edit: bool,
+    attachment_ids: list[uuid.UUID] | None = None,
 ) -> AsyncIterator[dict]:
     """One AI-panel turn (also used by tests with a fake provider)."""
     from app.chat.router import _build_tool_calls_payload
@@ -469,7 +507,15 @@ async def run_turn(
     for t in thread[-HISTORY_TURNS:]:
         if t.get("role") in ("user", "assistant") and t.get("content"):
             history.append({"role": t["role"], "content": str(t["content"])[:6000]})
-    history.append({"role": "user", "content": message})
+    said = message
+    if attachment_ids:
+        yield {"type": "status", "text": "Reading what you attached…"}
+        files, content = await _with_attachments(db, user, attachment_ids, message, provider, model_id)
+        history.append({"role": "user", "content": content})
+        # Later turns remember what was attached, and can read it again by id.
+        said = message + "\n\n[Attached: " + ", ".join(f"{f.filename} (file id {f.id})" for f in files) + "]"
+    else:
+        history.append({"role": "user", "content": message})
 
     text_parts: list[str] = []
     sep_pending = False
@@ -531,7 +577,7 @@ async def run_turn(
                     result, ok, summary = "Error: the arguments weren't valid JSON.", False, None
                 else:
                     yield {"type": "status", "text": _doing(name)}
-                    result, ok, summary, working = await _run_tool(ctx, spec, working, name, args, writes, can_edit)
+                    result, ok, summary, working = await _run_tool(ctx, spec, working, name, args, writes, can_edit, attached=bool(attachment_ids))
                 if summary or not ok:
                     entry = {"name": name, "summary": summary or result[:200], "ok": ok}
                     actions_log.append(entry)
@@ -566,7 +612,7 @@ async def run_turn(
     answer = "\n\n".join(p.strip() for p in text_parts if p.strip())
     now = datetime.now(timezone.utc).isoformat()
     thread = await load_thread(db, file_id, user)
-    thread.append({"role": "user", "content": message, "at": now})
+    thread.append({"role": "user", "content": said, "at": now})
     thread.append(
         {"role": "assistant", "content": answer, "actions": actions_log, "version_id": version_id, "at": now}
     )
@@ -576,9 +622,15 @@ async def run_turn(
 
 
 async def _run_tool(
-    ctx: Any, spec: ItemSpec, working: dict, name: str, args: dict, writes: list, can_edit: bool
+    ctx: Any, spec: ItemSpec, working: dict, name: str, args: dict, writes: list, can_edit: bool, attached: bool = False
 ) -> tuple[str, bool, str | None, dict]:
     """(result for the model, ok, summary for the person, new working copy)."""
+    # An app that says what a document may do (Health) keeps it to that: words in
+    # an attached file can add results, never delete or rewrite what's there.
+    if attached and any(a.from_documents for a in spec.actions):
+        act = spec.action(name)
+        if name == "update_data" or (act is not None and act.writes and not act.from_documents):
+            return "Error: not on a turn with an attached document. Ask them to say so in a new message.", False, None, working
     if name == "read_data":
         try:
             val = pointer_get(working, str(args.get("path", "")))

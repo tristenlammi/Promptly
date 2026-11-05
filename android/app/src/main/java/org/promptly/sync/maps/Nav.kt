@@ -251,7 +251,6 @@ object Nav {
                 cameras = runCatching { Maps.cameras(app, shape) }.getOrDefault(emptyList())
                 liveLoop(vm)
                 trafficLoop(vm)
-                withContext(Dispatchers.Main) { Voice.start(app) }
             } catch (e: Exception) {
                 Log.w(TAG, "Couldn't start the trip", e)
                 _error.value = when {
@@ -536,12 +535,15 @@ object Nav {
         if (isNew) speak(if (reason != null) "$reason. There's a way around it." else "A faster route is available. It saves $saves minutes.")
     }
 
+    // A check going wrong costs that check, never the drive.
+    private val keepDriving = kotlinx.coroutines.CoroutineExceptionHandler { _, e -> Log.w(TAG, "Background check stopped", e) }
+
     /** Ask your server about traffic on the road ahead every few minutes. Only
      *  your server is told where you're going. */
     private fun trafficLoop(vm: TripModel) {
         trafficJob?.cancel()
         _traffic.value = null
-        trafficJob = vm.viewModelScope.launch(Dispatchers.IO) {
+        trafficJob = vm.viewModelScope.launch(Dispatchers.IO + keepDriving) {
             var asked = false
             while (isActive) {
                 val state = vm.navigationUiState.value
@@ -565,7 +567,8 @@ object Nav {
                     // Incident checks are scarce: every 10 minutes, not every traffic check.
                     val checkWarnings = System.currentTimeMillis() - lastWarningCheck >= 600_000
                     if (checkWarnings) body.put("warnings", true)
-                    runCatching { Maps.send(app, "POST", "/api/maps/traffic/route", body) }.onSuccess { answer ->
+                    runCatching {
+                        val answer = Maps.send(app, "POST", "/api/maps/traffic/route", body)
                         val found = answer.optJSONObject("traffic")
                         _traffic.value = found?.let {
                             val rows = it.optJSONArray("jams")
@@ -592,7 +595,7 @@ object Nav {
     /** Tell the people you're sharing with, while there are any. */
     private fun liveLoop(vm: TripModel) {
         liveJob?.cancel()
-        liveJob = vm.viewModelScope.launch(Dispatchers.IO) {
+        liveJob = vm.viewModelScope.launch(Dispatchers.IO + keepDriving) {
             while (isActive) {
                 val state = vm.navigationUiState.value
                 val at = state.location
@@ -610,7 +613,6 @@ object Nav {
     }
 
     fun stop() {
-        if (!Voice.listensAnywhere(app)) Voice.stop(app)
         _addedStop.value = null
         liveJob?.cancel()
         trafficJob?.cancel()

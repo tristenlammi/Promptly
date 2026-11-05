@@ -758,9 +758,11 @@ class LabIn(BaseModel):
     flag: Literal["", "normal", "low", "high", "critical", "abnormal"] = Field(
         default="", description="As the lab flagged it; default worked out from the range"
     )
-    day: str | None = Field(default=None, description="Collection date YYYY-MM-DD; default today")
+    day: str | None = Field(default=None, description="The date it was COLLECTED, YYYY-MM-DD, not the date it was reported or printed; default today")
+    time: str = Field(default="", pattern=r"^(|([01]\d|2[0-3]):[0-5]\d)$", description="The time it was collected, 24-hour HH:MM, if the report gives one")
     panel: str = Field(default="", max_length=80)
     note: str = Field(default="", max_length=500)
+    source: str = Field(default="", max_length=200, description="The file name of the report it came from")
 
 
 class AddLabResults(BaseModel):
@@ -785,6 +787,12 @@ def _auto_flag(r: dict) -> str:
 def add_lab_result(ctx: ItemContext, data: dict, p: AddLabResults) -> ActionOutcome:
     existing = _ids(data["labs"])
     out = []
+    # The same report sent twice isn't two blood tests.
+    def same(r: dict) -> tuple:
+        return (r["day"], r["test"].strip().casefold(), r["value"], r["value_text"].strip().casefold(), r["unit"].strip().casefold())
+
+    logged = {same(r) for r in data["labs"]}
+    repeats = 0
     for i, r in enumerate(p.results):
         if r.value is None and not r.value_text.strip():
             raise ActionError(f"{r.test}: give a value or value_text.")
@@ -793,8 +801,12 @@ def add_lab_result(ctx: ItemContext, data: dict, p: AddLabResults) -> ActionOutc
         row = {
             "day": _day(ctx, r.day), "test": r.test.strip(), "value": r.value, "value_text": r.value_text.strip(),
             "unit": r.unit.strip(), "ref_low": r.ref_low, "ref_high": r.ref_high, "flag": r.flag,
-            "panel": r.panel.strip(), "note": r.note.strip(),
+            "panel": r.panel.strip(), "note": r.note.strip(), "time": r.time, "source": r.source.strip(),
         }
+        if same(row) in logged:
+            repeats += 1
+            continue
+        logged.add(same(row))
         row["flag"] = _auto_flag(row)
         row = {"id": _new_id("l", existing, "lab", row, i), **row}
         data["labs"].append(row)
@@ -802,8 +814,10 @@ def add_lab_result(ctx: ItemContext, data: dict, p: AddLabResults) -> ActionOutc
     data["labs"].sort(key=lambda x: x["day"])
     flagged = [f"{r['test']} {r['flag']}" for r in out if r["flag"] in ("low", "high", "critical", "abnormal")]
     return ActionOutcome(
-        summary=f"Added {len(out)} lab result{'s' if len(out) != 1 else ''}" + (f" · flagged: {', '.join(flagged)}" if flagged else ""),
-        result={"ids": [r["id"] for r in out], "flagged": flagged},
+        summary=f"Added {len(out)} lab result{'s' if len(out) != 1 else ''}"
+        + (f" · {repeats} already logged" if repeats else "")
+        + (f" · flagged: {', '.join(flagged)}" if flagged else ""),
+        result={"ids": [r["id"] for r in out], "flagged": flagged, "already_logged": repeats},
     )
 
 
@@ -1448,8 +1462,8 @@ ACTIONS = [
     ItemAction("log_dose", "Mark doses taken / late / skipped (one, many, or med='all' for everything due so far today). Updates pills left.", LogDose, log_dose),
     ItemAction("add_appointment", "Add an upcoming (or past) appointment with who, why, where and questions to ask.", AddAppointment, add_appointment),
     ItemAction("update_appointment", "Edit an appointment: move it, add questions, record notes/outcome, mark done.", UpdateAppointment, update_appointment),
-    ItemAction("add_lab_result", "Add lab results (one or a whole panel) with value, unit and the lab's reference range; flags low/high automatically.", AddLabResults, add_lab_result),
-    ItemAction("add_vaccination", "Record a vaccination (and when the next dose/booster is due).", AddVaccination, add_vaccination),
+    ItemAction("add_lab_result", "Add lab results (one or a whole panel) with value, unit and the lab's reference range; flags low/high automatically. From a report: log every result exactly as printed, on the date and time it was collected (not reported or printed), with source set to the file name. If the report shows no collection date, ask; never guess one. Sending the same result twice doesn't log it twice.", AddLabResults, add_lab_result, from_documents=True),
+    ItemAction("add_vaccination", "Record a vaccination (and when the next dose/booster is due).", AddVaccination, add_vaccination, from_documents=True),
     ItemAction("set_profile", "Set profile facts (height, date of birth, sex, blood type, conditions, allergies, emergency info) "
                "and preferences (units, cycle tracking, reminders, Today tiles).", SetProfile, set_profile),
     ItemAction("save_care_provider", "Add or edit a doctor/clinic in the care team.", SaveCareProvider, save_care_provider),

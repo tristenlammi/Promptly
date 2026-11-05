@@ -621,6 +621,9 @@ from app.auth.pairing_router import router as pairing_router  # noqa: E402
 
 # PromptlySync: pairing a phone by QR, and its "already have these?" check.
 app.include_router(pairing_router, prefix="/api/devices", tags=["devices"])
+from app.observability.phone import router as phone_crash_router  # noqa: E402
+
+app.include_router(phone_crash_router, prefix="/api/devices", tags=["devices"])
 # WebDAV for sync clients and mounts (WP-8.4) — at /dav/, outside /api/.
 from app.files.dav import router as dav_router  # noqa: E402
 

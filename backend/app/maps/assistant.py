@@ -1,7 +1,7 @@
 """Talking to your phone: what you said, what to do about it.
 
-The phone hears "Hey Promptly" by itself, or you hold the assistant button, and
-only then sends what you say next. That's transcribed by this server's speech
+You press the button on the phone or the car, or use the assistant gesture, and
+only then does the phone send what you say next. That's transcribed by this server's speech
 service, and the words plus a short note about the trip, if there is one, go to
 your model. The reply is one small JSON instruction, carried out here, so the
 model can't do anything but what's listed below: never an intent or a link of its
@@ -530,7 +530,7 @@ async def _check(db: AsyncSession, user: User, state: DriveState) -> str:
 
 
 def _without_wake_word(heard: str) -> str:
-    """The phone sends a moment from before it recognised the wake word."""
+    """People still start with "Hey Promptly", and older apps send it."""
     return re.sub(r"^\W*(?:(?:hey|hi|a|okay|ok)\W+)?promptly\b\W*", "", heard.strip(), flags=re.IGNORECASE).strip()
 
 

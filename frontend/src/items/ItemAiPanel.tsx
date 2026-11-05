@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUp, Check, Globe, Loader2, RotateCcw, Sparkles, SquarePen, Square, TriangleAlert, Undo2, X } from "lucide-react";
+import { ArrowUp, Check, FileText, Globe, Loader2, Paperclip, RotateCcw, Sparkles, SquarePen, Square, TriangleAlert, Undo2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { filesApi } from "@/api/files";
 import { useAvailableModels } from "@/hooks/useProviders";
 import { NO_MODEL_MESSAGE, useEditorModel } from "@/lib/editorModel";
 import { toast } from "@/store/toastStore";
@@ -11,6 +12,9 @@ import { cn } from "@/utils/cn";
 
 import { itemsApi, type AiTurn, type ItemSpecInfo } from "./api";
 import type { ItemHandle } from "./useItem";
+
+const MAX_ATTACHED = 5;
+const ATTACHED_ONLY = "Here's a file for this.";
 
 /**
  * The assistant inside an item: ask it to do things *in* the app ("plan my
@@ -61,6 +65,24 @@ export function ItemAiPanel({
   const abort = useRef<AbortController | null>(null);
   const list = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+  const [attached, setAttached] = useState<{ id: string; name: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  const attach = useCallback(async (chosen: FileList | null) => {
+    if (!chosen?.length) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(chosen).slice(0, MAX_ATTACHED)) {
+        const saved = await filesApi.upload("mine", file, null, "chat");
+        setAttached((rows) => (rows.length >= MAX_ATTACHED ? rows : [...rows, { id: saved.id, name: saved.filename }]));
+      }
+    } catch {
+      toast.error("That file couldn't be uploaded.");
+    } finally {
+      setUploading(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (saved) {
@@ -87,7 +109,10 @@ export function ItemAiPanel({
       const ctrl = new AbortController();
       abort.current = ctrl;
       const reply: AiTurn = { role: "assistant", content: "", actions: [] };
-      setTurns((t) => [...t, { role: "user", content: message }, reply]);
+      const sending = attached;
+      setAttached([]);
+      const shown = sending.length ? `${message}\n\n[Attached: ${sending.map((a) => a.name).join(", ")}]` : message;
+      setTurns((t) => [...t, { role: "user", content: shown }, reply]);
       const patch = (fn: (r: AiTurn) => void) =>
         setTurns((t) => {
           const copy = t.slice();
@@ -97,7 +122,11 @@ export function ItemAiPanel({
           return copy;
         });
       try {
-        for await (const ev of itemsApi.ask(item.fileId, { message, provider_id: providerId, model_id: modelId }, ctrl.signal)) {
+        for await (const ev of itemsApi.ask(
+          item.fileId,
+          { message, provider_id: providerId, model_id: modelId, attachment_ids: sending.map((a) => a.id) },
+          ctrl.signal,
+        )) {
           if (ev.type === "text") {
             setStatus(null);
             patch((r) => (r.content += ev.text));
@@ -123,7 +152,7 @@ export function ItemAiPanel({
         abort.current = null;
       }
     },
-    [busy, item, modelId, models.isLoading, providerId],
+    [attached, busy, item, modelId, models.isLoading, providerId],
   );
 
   // A prompt from elsewhere in the item ("Ask AI to plan this week").
@@ -300,10 +329,62 @@ export function ItemAiPanel({
         className={cn("shrink-0 border-t border-[var(--border)] p-2", variant === "tab" && "pb-2")}
         onSubmit={(e) => {
           e.preventDefault();
-          void send(draft);
+          void send(draft || (attached.length ? ATTACHED_ONLY : ""));
         }}
       >
+        {(attached.length > 0 || uploading) && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {attached.map((a) => (
+              <span
+                key={a.id}
+                className="inline-flex max-w-full items-center gap-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 py-1 text-xs text-[var(--text)]"
+              >
+                <FileText className="h-3.5 w-3.5 shrink-0 text-[var(--text-muted)]" />
+                <span className="truncate">{a.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${a.name}`}
+                  onClick={() => setAttached((rows) => rows.filter((r) => r.id !== a.id))}
+                  className="shrink-0 text-[var(--text-muted)] hover:text-[var(--text)]"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </span>
+            ))}
+            {uploading && (
+              <span className="inline-flex items-center gap-1 px-1 py-1 text-xs text-[var(--text-muted)]" role="status">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Uploading…
+              </span>
+            )}
+          </div>
+        )}
         <div className="flex items-end gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-1.5 focus-within:border-[var(--item-accent)]">
+          {item.canEdit && (
+            <>
+              <input
+                ref={picker}
+                type="file"
+                multiple
+                accept=".pdf,.txt,.csv,.docx,image/*"
+                aria-label="Attach a file"
+                className="hidden"
+                onChange={(e) => {
+                  void attach(e.currentTarget.files);
+                  e.currentTarget.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => picker.current?.click()}
+                disabled={busy || uploading || attached.length >= MAX_ATTACHED}
+                aria-label="Attach a file"
+                title="Attach a file"
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] transition hover:bg-[var(--surface-2)] hover:text-[var(--text)] disabled:opacity-50"
+              >
+                <Paperclip className="h-4 w-4" />
+              </button>
+            </>
+          )}
           <textarea
             ref={input}
             value={draft}
@@ -316,7 +397,7 @@ export function ItemAiPanel({
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
                 e.preventDefault();
-                void send(draft);
+                void send(draft || (attached.length ? ATTACHED_ONLY : ""));
               }
             }}
             placeholder={item.canEdit ? `Ask ${spec.name} to do something…` : "Ask about this file…"}
@@ -335,7 +416,7 @@ export function ItemAiPanel({
           ) : (
             <button
               type="submit"
-              disabled={!draft.trim()}
+              disabled={(!draft.trim() && !attached.length) || uploading}
               aria-label="Send"
               className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--item-accent)] text-white transition disabled:opacity-40"
             >

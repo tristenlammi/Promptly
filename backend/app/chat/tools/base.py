@@ -31,6 +31,17 @@ class ToolError(Exception):
     """
 
 
+class TurnState(dict):
+    """What one chat turn has seen. Starts ``own_attachments_only`` when the only
+    outside content is files you attached yourself; anything else marking the turn
+    untrusted ends that, wherever it happens."""
+
+    def __setitem__(self, key: str, value: Any) -> None:
+        if key == "untrusted":
+            dict.__setitem__(self, "own_attachments_only", False)
+        dict.__setitem__(self, key, value)
+
+
 @dataclass
 class ToolContext:
     """Per-invocation context passed to :meth:`Tool.run`.

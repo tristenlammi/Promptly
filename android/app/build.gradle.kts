@@ -23,8 +23,8 @@ android {
         // 29: the car screen's navigation library needs it.
         minSdk = 29
         targetSdk = 37
-        versionCode = 13
-        versionName = "1.4.0"
+        versionCode = 15
+        versionName = "1.4.2"
     }
 
     signingConfigs {
@@ -58,8 +58,6 @@ android {
         jniLibs {
             // Compressed, for a smaller download from your server.
             useLegacyPackaging = true
-            // The wake word only uses the JNI library and ONNX Runtime.
-            excludes += listOf("**/libsherpa-onnx-c-api.so", "**/libsherpa-onnx-cxx-api.so")
         }
     }
 
@@ -102,7 +100,5 @@ dependencies {
     implementation("com.stadiamaps.ferrostar:ui-maplibre-car-app:$ferrostar")
     implementation("org.maplibre.compose:maplibre-compose-android:0.13.0")
     implementation("androidx.car.app:app:1.7.0")
-    // sherpa-onnx (Apache-2.0): the on-device "Hey Promptly" wake word.
-    implementation("com.github.k2-fsa.sherpa-onnx:sherpa-onnx:v2.0.1")
     implementation("io.github.rallista:car-app-compose:0.0.2")
 }

@@ -321,6 +321,7 @@ function Labs({ item, ask }: ItemViewProps<HealthData>) {
               <div key={day} className="flex flex-col gap-1.5">
                 <p className="px-1 text-xs font-semibold text-[var(--text-muted)]">
                   {fmtDay(day)}
+                  {rows.find((r) => r.time)?.time ? ` · ${rows.find((r) => r.time)!.time}` : ""}
                   {rows[0].panel ? ` · ${[...new Set(rows.map((r) => r.panel).filter(Boolean))].join(", ")}` : ""}
                 </p>
                 <List>
@@ -331,7 +332,7 @@ function Labs({ item, ask }: ItemViewProps<HealthData>) {
                         key={l.id}
                         onClick={item.canEdit ? () => setEditing(l) : undefined}
                         title={l.test}
-                        subtitle={range(l) || l.note || undefined}
+                        subtitle={[range(l) || l.note, l.source].filter(Boolean).join(" · ") || undefined}
                         trailing={
                           <span className="flex items-center gap-2">
                             {h.length > 1 && <Sparkline values={h} width={48} height={20} />}
@@ -353,7 +354,7 @@ function Labs({ item, ask }: ItemViewProps<HealthData>) {
             icon={FlaskConical}
             title="No lab results yet"
             text="Add results with the lab's reference range — out-of-range values are flagged and each test gets its own history."
-            action={<ItemButton onClick={() => ask("Add the results from my latest blood test — I'll find the file: ")}>Import from a file</ItemButton>}
+            action={<ItemButton onClick={() => ask("Log my blood results. I'm attaching the report.")}>Import from a file</ItemButton>}
           />
         )}
       </Section>

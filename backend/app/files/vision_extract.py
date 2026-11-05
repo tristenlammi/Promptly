@@ -32,9 +32,10 @@ from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 from app.app_settings.defaults import load_effective_defaults, org_id_of
 from app.chat.vision_relay import caption_image, caption_index_image_part
 from app.files.models import UserFile
-from app.files.prompt import _looks_pdf, build_image_part_from_bytes, looks_image
+from app.files.prompt import _extract_pdf_text, _looks_pdf, build_image_part_from_bytes, looks_image
 from app.files.storage import absolute_path
 from app.models_config.models import ModelProvider
+from app.models_config.provider import ImagePart
 
 logger = logging.getLogger("promptly.files.vision_extract")
 
@@ -113,6 +114,45 @@ async def extract_text_via_vision(
         return await _ocr_pdf(db, file, provider, model_id)
 
     return None
+
+
+async def read_scanned_pdfs(
+    db: AsyncSession, files: list[UserFile], vision: bool
+) -> tuple[str, list[ImagePart]]:
+    """What a model needs to read scanned PDFs attached to a message, which have no
+    text of their own: the pages as pictures if it can see, else text from the Vision
+    relay. Returns ``(words for the message, pictures)``. If neither works, the words
+    say so, so the model tells the person rather than guessing."""
+    words: list[str] = []
+    parts: list[ImagePart] = []
+    for file in files:
+        if not _looks_pdf(file):
+            continue
+        try:
+            text, _ = await run_in_threadpool(_extract_pdf_text, file.storage_path, 2000)
+        except Exception:  # noqa: BLE001 - pypdf can raise broadly
+            text = ""
+        if text.strip():
+            continue
+        if vision:
+            try:
+                pages, total = await run_in_threadpool(_rasterize_pdf, str(absolute_path(file.storage_path)), _MAX_OCR_PAGES)
+            except Exception:  # noqa: BLE001 - a broken PDF is a readable failure
+                logger.info("couldn't render scanned PDF %s", file.id, exc_info=True)
+                pages, total = [], 0
+            rendered = [part for part in (build_image_part_from_bytes(page) for page in pages) if part is not None]
+            if rendered:
+                parts.extend(rendered)
+                more = f" Only the first {len(rendered)} of {total} pages are included." if total > len(rendered) else ""
+                words.append(f'[The pages of the scanned PDF "{file.filename}" follow as images.{more}]\n')
+                continue
+        else:
+            read = await extract_text_via_vision(db, file)
+            if read:
+                words.append(f'[Text read from the scanned PDF "{file.filename}", which may contain reading errors:]\n{read}\n')
+                continue
+        words.append(f'[The scanned PDF "{file.filename}" could not be read. Say so plainly and don\'t guess what it says.]\n')
+    return "".join(words), parts
 
 
 def _rasterize_pdf(path: str, max_pages: int) -> tuple[list[bytes], int]:
@@ -199,5 +239,6 @@ async def _ocr_pdf(
 
 __all__ = [
     "extract_text_via_vision",
+    "read_scanned_pdfs",
     "supports_vision_extraction",
 ]

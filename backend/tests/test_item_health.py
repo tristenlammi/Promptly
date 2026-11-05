@@ -925,3 +925,140 @@ async def test_ai_turn_logs_from_natural_language(client, db, user, monkeypatch)
     assert done["type"] == "done" and done["changed"]
     assert {r["metric"] for r in done["data"]["readings"]} == {"bp", "sleep"}
     assert "AHA" in fake.calls[0]["system"]
+
+
+async def test_a_report_logs_on_the_collection_day_and_only_once():
+    d = fresh()
+    results = [
+        {"test": "Ferritin", "value": 18, "unit": "ug/L", "ref_low": 30, "ref_high": 500, "day": "2026-10-28", "time": "08:15", "panel": "Iron studies", "source": "bloods.pdf"},
+        {"test": "HbA1c", "value": 5.4, "unit": "%", "ref_high": 5.6, "day": "2026-10-28", "time": "08:15", "source": "bloods.pdf"},
+    ]
+    out = await run(d, "add_lab_result", {"results": results})
+    assert out.result["already_logged"] == 0 and out.result["flagged"] == ["Ferritin low"]
+    row = d["labs"][0]
+    assert (row["day"], row["time"], row["source"]) == ("2026-10-28", "08:15", "bloods.pdf")
+    assert SPEC.validate(d)["labs"][0]["time"] == "08:15"
+    # The same report again, and a new result the next time.
+    again = await run(d, "add_lab_result", {"results": [*results, {"test": "Ferritin", "value": 42, "unit": "ug/L", "day": "2026-11-20"}]})
+    assert again.result["already_logged"] == 2 and "2 already logged" in again.summary and len(d["labs"]) == 3
+
+
+@pytest.mark.parametrize("name, body, mime", [("bloods.txt", b"Ferritin 18 ug/L collected 28 Oct 2026 08:15", "text/plain")])
+async def test_an_attached_report_reaches_the_model_in_the_ask_panel(client, db, user, monkeypatch, name, body, mime):
+    import uuid
+
+    from app.items import ai
+    from app.models_config import provider as prov
+    from app.models_config.provider import FinishEvent, TextDelta, ToolCallDelta
+
+    h = _auth(user)
+    await client.post("/api/items/store/health", headers=h)
+    fid = (await client.post("/api/items", headers=h, json={"kind": "health"})).json()["file_id"]
+    up = await client.post("/api/files/", headers=h, files={"file": (name, body, mime)}, data={"scope": "mine", "route": "chat"})
+    assert up.status_code < 300, up.text
+    attached = uuid.UUID(up.json()["id"])
+
+    class Fake:
+        def __init__(self):
+            self.calls = []
+
+        async def stream_chat_events(self, **kw):
+            self.calls.append([dict(m) for m in kw["messages"]])
+            if len(self.calls) == 1:
+                args = {"results": [{"test": "Ferritin", "value": 18, "unit": "ug/L", "day": "2026-10-28", "time": "08:15", "source": name}]}
+                yield ToolCallDelta(index=0, id="c1", name="add_lab_result", arguments=json.dumps(args))
+                yield FinishEvent(reason="tool_calls")
+            else:
+                yield TextDelta(text="Logged 1 result for 28 Oct.")
+                yield FinishEvent(reason="stop")
+
+    fake = Fake()
+    monkeypatch.setattr(prov, "model_router", fake)
+    from types import SimpleNamespace
+
+    model = SimpleNamespace(models=[{"id": "m", "supports_vision": False}])
+    events = [ev async for ev in ai.run_turn(db, user, uuid.UUID(fid), "Here you go", model, "m", can_edit=True, attachment_ids=[attached])]
+    assert "Ferritin 18 ug/L" in fake.calls[0][-1]["content"] and str(attached) in fake.calls[0][-1]["content"]
+    done = events[-1]
+    assert done["changed"] and done["data"]["labs"][0]["time"] == "08:15"
+    # A later turn can still tell what was attached, without carrying the whole file.
+    thread = await ai.load_thread(db, uuid.UUID(fid), user)
+    assert name in thread[0]["content"] and "Ferritin 18" not in thread[0]["content"]
+
+
+async def test_someone_elses_file_cant_be_attached(client, user):
+    import uuid
+
+    h = _auth(user)
+    await client.post("/api/items/store/health", headers=h)
+    fid = (await client.post("/api/items", headers=h, json={"kind": "health"})).json()["file_id"]
+    r = await client.post(f"/api/items/{fid}/ai", headers=h, json={"message": "hi", "attachment_ids": [str(uuid.uuid4())]})
+    assert r.status_code in (400, 404)
+
+
+async def test_a_scanned_pdf_goes_as_pictures_or_says_it_couldnt_be_read(db, tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    from app.files import vision_extract as ve
+
+    scan = tmp_path / "scan.pdf"
+    Image.new("RGB", (800, 1100), "white").save(scan, "PDF")
+    file = SimpleNamespace(id="x", filename="scan.pdf", mime_type="application/pdf", storage_path="scan.pdf", user_id=None)
+    monkeypatch.setattr(ve, "absolute_path", lambda _p: scan)
+    monkeypatch.setattr(ve, "_extract_pdf_text", lambda *_a: ("", False))
+    words, parts = await ve.read_scanned_pdfs(db, [file], True)
+    assert len(parts) == 1 and parts[0].url.startswith("data:image/") and "follow as images" in words
+
+    async def nothing(*_a):
+        return None
+
+    monkeypatch.setattr(ve, "extract_text_via_vision", nothing)
+    words, parts = await ve.read_scanned_pdfs(db, [file], False)
+    assert not parts and "could not be read" in words
+
+    # A PDF with its own text needs none of this.
+    monkeypatch.setattr(ve, "_extract_pdf_text", lambda *_a: ("Ferritin 18", False))
+    assert await ve.read_scanned_pdfs(db, [file], True) == ("", [])
+
+
+async def test_an_attached_file_can_log_results_but_not_change_anything_else(client, db, user):
+    import uuid
+
+    from app.chat.tools import ToolContext
+    from app.chat.tools.base import ToolError, TurnState
+    from app.chat.tools.items import UseItemTool
+
+    h = _auth(user)
+    await client.post("/api/items/store/health", headers=h)
+    fid = (await client.post("/api/items", headers=h, json={"kind": "health"})).json()["file_id"]
+    lab = {"results": [{"test": "Ferritin", "value": 18, "unit": "ug/L", "day": "2026-10-28"}]}
+
+    def turn(state):
+        return ToolContext(db=db, user=user, conversation_id=uuid.uuid4(), user_message_id=uuid.uuid4(), turn=state)
+
+    attached = TurnState(untrusted=True, own_attachments_only=True)
+    out = await UseItemTool().run(turn(attached), {"file_id": fid, "action": "add_lab_result", "args": lab})
+    assert "Added 1" in out.content
+    # Only that: a document can't get anything else done.
+    with pytest.raises(ToolError, match="Not changing"):
+        await UseItemTool().run(turn(attached), {"file_id": fid, "action": "set_profile", "args": {"height_cm": 100}})
+    # Anything else from outside this turn ends it, however it came in.
+    attached["untrusted"] = True
+    assert attached["own_attachments_only"] is False
+    with pytest.raises(ToolError, match="Not changing"):
+        await UseItemTool().run(turn(attached), {"file_id": fid, "action": "add_lab_result", "args": lab})
+    with pytest.raises(ToolError, match="Not changing"):
+        await UseItemTool().run(turn(TurnState(untrusted=True)), {"file_id": fid, "action": "add_lab_result", "args": lab})
+
+
+async def test_the_ask_panel_keeps_an_attached_document_to_adding_results():
+    from app.items import ai
+
+    d = fresh()
+    d["labs"] = [{"id": "l1", "day": "2026-10-01", "test": "X", "value": 1, "value_text": "", "unit": "", "ref_low": None, "ref_high": None, "flag": "", "panel": "", "note": "", "time": "", "source": ""}]
+    delete = {"entries": [{"type": "lab", "id": "l1"}]}
+    for name, args in (("delete_entry", delete), ("update_data", {"ops": [{"op": "remove", "path": "/labs/0"}]})):
+        result, ok, _s, working = await ai._run_tool(ctx(), SPEC, d, name, args, [], True, attached=True)
+        assert not ok and "attached document" in result and working is d and len(d["labs"]) == 1

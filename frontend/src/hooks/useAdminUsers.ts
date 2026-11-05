@@ -265,6 +265,7 @@ export function useErrorGroups(params: {
   status?: "open" | "resolved" | "all";
   q?: string;
   user_id?: string;
+  source?: "android";
   limit?: number;
   offset?: number;
 } = {}) {

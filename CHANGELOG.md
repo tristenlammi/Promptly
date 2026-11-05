@@ -21,6 +21,23 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-05
+
+### Added
+- Health: attach a blood test or other health document in the Health app's AI chat or a normal chat, and every result is logged on the date and time it was collected, with the report's own units and ranges. Scanned reports and photos work too, and sending the same report twice doesn't log it twice.
+- Any app's AI chat can now take attached files.
+- Android app crashes now reach your server: see them in Admin → Console → Errors, grouped, with the app version and device, including crashes in native libraries and times the app stopped responding. The app's assistant settings list them too. Admins get a notification when a crash is new, or back after being resolved.
+
+### Changed
+- The assistant only listens when you ask: press the button in P Maps or on the car's screen, or use your phone's assistant gesture. The button is on the car's screen when you're not on a trip too.
+
+### Removed
+- The always-on "Hey Promptly" wake word, its background microphone service and its setting. It could turn your music down on a false alarm during a drive.
+
+### Fixed
+- The phone assistant's sheet no longer brings a background sliding up the screen with it.
+- A background traffic or location-sharing check that goes wrong can no longer take a drive down with it.
+
 ## [0.23.0] - 2026-11-05
 
 ### Added

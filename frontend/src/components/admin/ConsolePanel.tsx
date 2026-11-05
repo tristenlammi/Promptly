@@ -42,7 +42,10 @@ export function ConsolePanel() {
   // Health first: "is the app OK right now" is the question an admin
   // opens this panel with; the log tail is what you read once you know
   // something is wrong.
-  const [tab, setTab] = useState<Tab>("health");
+  // A crash notification links straight to the errors.
+  const [tab, setTab] = useState<Tab>(() =>
+    new URLSearchParams(window.location.search).get("view") === "errors" ? "errors" : "health"
+  );
 
   return (
     <div className="space-y-4">
@@ -479,7 +482,10 @@ function ErrorsView() {
   const [status, setStatus] = useState<"open" | "resolved" | "all">("open");
   const [q, setQ] = useState("");
   const [openGroup, setOpenGroup] = useState<ErrorGroupRow | null>(null);
-  const groups = useErrorGroups({ status, q: q || undefined });
+  const [source, setSource] = useState<"" | "android">(() =>
+    new URLSearchParams(window.location.search).get("source") === "android" ? "android" : ""
+  );
+  const groups = useErrorGroups({ status, q: q || undefined, source: source || undefined });
   const resolve = useResolveErrorGroup();
   const reopen = useReopenErrorGroup();
 
@@ -494,6 +500,10 @@ function ErrorsView() {
           <option value="open">Open issues</option>
           <option value="resolved">Resolved</option>
           <option value="all">All</option>
+        </Select>
+        <Select ariaLabel="Where it happened" value={source} onChange={(v) => setSource(v as "" | "android")}>
+          <option value="">Everywhere</option>
+          <option value="android">Android app</option>
         </Select>
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-muted)]" />

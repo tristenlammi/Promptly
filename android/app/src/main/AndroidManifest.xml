@@ -22,9 +22,8 @@
     <!-- Only if you turn the timeline on, and pick "Allow all the time". -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <!-- "Hey Promptly" and the phone's assistant. -->
+    <!-- The assistant, when you ask for it. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- "Set a timer": no prompt, and only through the phone's clock app. -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
@@ -96,10 +95,6 @@
         <service
             android:name="com.stadiamaps.ferrostar.core.service.FerrostarForegroundService"
             android:foregroundServiceType="location" />
-        <service
-            android:name=".maps.VoiceService"
-            android:exported="false"
-            android:foregroundServiceType="microphone" />
         <service
             android:name=".maps.TimelineService"
             android:foregroundServiceType="location" />

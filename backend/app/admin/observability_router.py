@@ -189,6 +189,7 @@ async def list_error_groups(
     status: str = Query(default="open", pattern="^(open|resolved|all)$"),
     q: str | None = Query(default=None, max_length=200),
     user_id: uuid.UUID | None = Query(default=None),
+    source: str | None = Query(default=None, pattern="^(android)$"),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
@@ -228,6 +229,8 @@ async def list_error_groups(
     )
     if user_id is not None:
         stmt = stmt.where(ErrorEvent.user_id == user_id)
+    if source:
+        stmt = stmt.where(ErrorEvent.logger == source)
     if q:
         stmt = stmt.where(ErrorEvent.message.ilike(f"%{q}%"))
 

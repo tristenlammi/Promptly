@@ -132,7 +132,6 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             }
         }.launchIn(scope)
         Voice.inCar = true
-        Voice.start(carContext)
         // A warning on the car's screen as you come up to it; the voice comes from the phone.
         var shown: String? = null
         Nav.hazard.onEach { alert ->
@@ -237,18 +236,21 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         return builder.build()
     }
 
-    /** The car's own microphone, for when you press its button. */
+    private val listening = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** The car's own microphone, only when you press its button. */
     private fun askFromCar() {
         if (!Voice.allowed(carContext)) {
             CarToast.makeText(carContext, "Allow the microphone on your phone first", CarToast.LENGTH_LONG).show()
             return
         }
         if (carContext.carAppApiLevel < CarAppApiLevels.LEVEL_5) {
-            CarToast.makeText(carContext, "Say \"Hey Promptly\" instead", CarToast.LENGTH_LONG).show()
+            CarToast.makeText(carContext, "This car can't use its microphone for this", CarToast.LENGTH_LONG).show()
             return
         }
+        if (!listening.compareAndSet(false, true)) return
+        CarToast.makeText(carContext, "Listening…", CarToast.LENGTH_SHORT).show()
         scope.launch(Dispatchers.IO) {
-            VoiceService.paused = true
             val release = Voice.holdFocus(carContext)
             val record = CarAudioRecord.create(carContext)
             try {
@@ -268,7 +270,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 Log.w("PromptlyVoice", "Couldn't use the car's microphone", e)
             } finally {
                 release()
-                VoiceService.paused = false
+                listening.set(false)
             }
         }
     }
@@ -284,6 +286,16 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             .build()
         return NavigationTemplate.Builder()
             .setActionStrip(ActionStrip.Builder().addAction(go).build())
+            .setMapActionStrip(
+                ActionStrip.Builder()
+                    .addAction(
+                        Action.Builder()
+                            .setIcon(CarIcon.Builder(IconCompat.createWithResource(carContext, R.drawable.ic_map_mic)).build())
+                            .setOnClickListener { askFromCar() }
+                            .build(),
+                    )
+                    .build(),
+            )
             .build()
     }
 }

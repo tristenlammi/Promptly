@@ -192,6 +192,10 @@ export interface LabResult {
   flag: "" | "normal" | "low" | "high" | "critical" | "abnormal";
   panel: string;
   note: string;
+  /** When it was collected, HH:MM, if known. */
+  time?: string;
+  /** The report it came from. */
+  source?: string;
 }
 
 export interface Vaccination {

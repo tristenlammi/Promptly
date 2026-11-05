@@ -262,6 +262,8 @@ class LabResult(BaseModel):
     flag: Literal["", "normal", "low", "high", "critical", "abnormal"] = ""
     panel: str = Field(default="", max_length=80)  # "Lipids", "Full blood count"
     note: str = Field(default="", max_length=500)
+    time: str = Field(default="", pattern=r"^(|([01]\d|2[0-3]):[0-5]\d)$")  # when it was collected, if known
+    source: str = Field(default="", max_length=200)  # the report it came from
 
 
 class Vaccination(BaseModel):

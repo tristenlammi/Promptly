@@ -128,6 +128,9 @@ class ItemAction:
     # Offered to normal chats (list/read/use_item). False keeps it to the
     # item's own panel and UI — e.g. reading a journal entry's full text.
     chat: bool = True
+    # Only adds what a document says (a blood test), and can be undone: allowed on a
+    # turn whose only outside content is a file the person attached themselves.
+    from_documents: bool = False
 
 
 @dataclass

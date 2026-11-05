@@ -68,7 +68,6 @@ import org.promptly.sync.MainActivity
 import org.promptly.sync.maps.Maps
 import org.promptly.sync.maps.Nav
 import org.promptly.sync.maps.Voice
-import org.promptly.sync.maps.VoiceService
 import kotlin.concurrent.thread
 
 /** The sheet the assistant gesture opens: listening, thinking, the answer. It can
@@ -89,7 +88,7 @@ class AssistantActivity : ComponentActivity() {
 
     private val askMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         askingMic = false
-        if (ok) begin(false) else gate.value = Gate.NO_MIC
+        if (ok) begin() else gate.value = Gate.NO_MIC
     }
 
     private val contactPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -117,8 +116,6 @@ class AssistantActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Nav.init(this)
         current = this
-        // What's said on this sheet, including the answer, isn't a wake word.
-        VoiceService.paused = true
         enableEdgeToEdge()
         setContent { Sheet() }
         arrive(intent)
@@ -133,10 +130,9 @@ class AssistantActivity : ComponentActivity() {
     }
 
     private fun arrive(intent: Intent?) {
-        val passive = intent?.getBooleanExtra(EXTRA_PASSIVE, false) == true
         val keyguard = getSystemService(KeyguardManager::class.java)
         if (keyguard == null || !keyguard.isKeyguardLocked) {
-            begin(passive)
+            begin()
             return
         }
         gate.value = Gate.UNLOCK
@@ -144,7 +140,7 @@ class AssistantActivity : ComponentActivity() {
         keyguard.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
             override fun onDismissSucceeded() {
                 unlocking = false
-                begin(passive)
+                begin()
             }
 
             override fun onDismissCancelled() {
@@ -159,15 +155,11 @@ class AssistantActivity : ComponentActivity() {
         })
     }
 
-    private fun begin(passive: Boolean) {
+    private fun begin() {
         // From here on it's your answers: lock the phone and they're gone.
         setShowWhenLocked(false)
         if (Maps.server(this) == null) {
             gate.value = Gate.NOT_LINKED
-            return
-        }
-        if (passive) {
-            gate.value = Gate.OPEN
             return
         }
         if (!Voice.allowed(this)) {
@@ -276,7 +268,6 @@ class AssistantActivity : ComponentActivity() {
     override fun onDestroy() {
         alive = false
         if (current === this) current = null
-        VoiceService.paused = false
         super.onDestroy()
     }
 
@@ -294,10 +285,6 @@ class AssistantActivity : ComponentActivity() {
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { dismiss() },
                 contentAlignment = Alignment.BottomCenter,
             ) {
-                // The gentlest dim, faded in: what you were doing stays what you're looking at.
-                AnimatedVisibility(raised, enter = fadeIn(tween(RAISE_MS)), exit = fadeOut(tween(LOWER_MS))) {
-                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.14f)))
-                }
                 AnimatedVisibility(
                     raised,
                     enter = slideInVertically(tween(RAISE_MS, easing = FastOutSlowInEasing)) { it } + fadeIn(tween(RAISE_MS / 2)),
@@ -401,7 +388,6 @@ class AssistantActivity : ComponentActivity() {
     companion object {
         private const val RAISE_MS = 240
         private const val LOWER_MS = 160
-        const val EXTRA_PASSIVE = "org.promptly.sync.assistant.PASSIVE"
 
         /** The sheet that's open right now, if any. */
         @Volatile var current: AssistantActivity? = null

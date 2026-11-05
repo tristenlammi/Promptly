@@ -142,6 +142,7 @@ from app.chat.tools import (
     get_tool,
     list_openai_tools,
 )
+from app.chat.tools.base import TurnState
 from app.chat.tools.validation import ToolArgsInvalid, validate_tool_args
 from app.background import spawn as spawn_background
 from app.database import SessionLocal, get_db
@@ -4690,7 +4691,14 @@ async def _stream_generator(
         triggering_files = per_message_attachments.get(triggering_user_msg_id, [])
         # Shared by every tool call this turn (see ToolContext.turn).
         # Attached files are outside content too.
-        turn_state: dict[str, Any] = {"untrusted": bool(triggering_files)}
+        turn_state = TurnState(
+            untrusted=bool(triggering_files),
+            # Your own files, attached here, and not a shared workspace's: enough to
+            # log what they say (see ItemAction.from_documents), and nothing more.
+            own_attachments_only=bool(triggering_files)
+            and conv.workspace_id is None
+            and all(f.user_id == user.id for f in triggering_files),
+        )
         # On a DeepSeek model, web_search / fetch_url use DeepSeek's own
         # Search and Fetch (app.search.deepseek).
         from app.search.deepseek import mark_turn
@@ -4964,6 +4972,18 @@ async def _stream_generator(
             if is_triggering and caption_preamble:
                 preamble = caption_preamble + preamble
 
+            # A scan attached to this message has no text of its own. Only what was
+            # attached here: not a workspace's pinned files, which come every turn.
+            scan_parts: list[ImagePart] = []
+            if is_triggering and m.role == "user" and attachments:
+                sent = {str(a.get("id")) for a in (m.attachments or []) if isinstance(a, dict)}
+                from app.files.vision_extract import read_scanned_pdfs
+
+                scan_words, scan_parts = await read_scanned_pdfs(
+                    db, [f for f in attachments if str(f.id) in sent], model_supports_vision
+                )
+                preamble += scan_words
+
             full_text = preamble + base_text
             if m.role == "assistant" and attachments:
                 # What this reply produced (generated images, charts,
@@ -4991,6 +5011,7 @@ async def _stream_generator(
                 if is_triggering:
                     triggering_warnings.extend(_img_warnings)
                 image_parts = images
+            image_parts = image_parts + scan_parts
 
             # Hydrate DeepSeek thinking-mode chain-of-thought on
             # assistant rows. NULL on non-DeepSeek providers and on

@@ -42,7 +42,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import org.promptly.sync.maps.Voice
 
-/** Making Promptly the phone's assistant, and "Hey Promptly" away from the car. */
+/** Making Promptly the phone's assistant, and what went wrong lately. */
 class AssistantSettingsActivity : ComponentActivity() {
     // Android's own settings can change while you're away from this screen.
     private var tick by mutableIntStateOf(0)
@@ -82,19 +82,6 @@ class AssistantSettingsActivity : ComponentActivity() {
     private fun Screen() {
         val context = this@AssistantSettingsActivity
         val isAssistant = remember(tick) { Voice.holdsRole(context) }
-        val listening = remember(tick) { Voice.anywhere(context) }
-        val turnOn = {
-            Voice.setAnywhere(context, true)
-            tick++
-        }
-        val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { _ -> turnOn() }
-        val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-            when {
-                !ok -> tick++
-                Build.VERSION.SDK_INT >= 33 -> askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
-                else -> turnOn()
-            }
-        }
         Column(
             Modifier.fillMaxSize().systemBarsPadding().verticalScroll(rememberScrollState()).padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -113,29 +100,19 @@ class AssistantSettingsActivity : ComponentActivity() {
                     }
                 }
             }
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("\"Hey Promptly\" anywhere", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
-                        Switch(
-                            checked = isAssistant && listening,
-                            enabled = isAssistant,
-                            onCheckedChange = { on ->
-                                when {
-                                    !on -> {
-                                        Voice.setAnywhere(context, false)
-                                        tick++
-                                    }
-                                    !Voice.allowed(context) -> askMic.launch(Manifest.permission.RECORD_AUDIO)
-                                    Build.VERSION.SDK_INT >= 33 -> askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
-                                    else -> turnOn()
-                                }
-                            },
-                        )
+            Text("Nothing listens in the background. The microphone only opens when you use that gesture, or press the button in P Maps or on your car's screen.")
+            val problems = remember(tick) { Crashes.recent(context) }
+            if (problems.isNotEmpty()) {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Recent problems", style = MaterialTheme.typography.titleMedium)
+                        Text("Promptly stopped unexpectedly. Reports like these go to your Promptly server for its admin to see, and hold what the app was doing, not your data.")
+                        OutlinedButton(onClick = {
+                            context.getSystemService(android.content.ClipboardManager::class.java)
+                                ?.setPrimaryClip(android.content.ClipData.newPlainText("Promptly problems", problems.joinToString("\n\n")))
+                        }) { Text("Copy") }
+                        problems.take(5).forEach { Text(it.lineSequence().take(4).joinToString("\n").take(400), style = MaterialTheme.typography.bodySmall) }
                     }
-                    Text("Off by default. You don't need it for the assistant gesture, and P Maps listens during a drive either way.")
-                    Text("With it on, the microphone stays open whenever your phone is on. That uses battery all day, and Android shows a notification and its microphone indicator for as long as it's listening. The wake word is heard on this phone and no sound leaves it until you say it.")
-                    Text("It only works while Promptly is your assistant. It won't answer while your phone is locked, and it may miss you in a noisy room or if Android stops it to save battery.")
                 }
             }
         }
