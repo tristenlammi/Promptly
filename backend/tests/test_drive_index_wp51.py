@@ -184,10 +184,10 @@ async def test_the_drive_is_indexed_incrementally_and_shared_files_are_found(cli
     secret = await _upload(client, user, "diagnosis.txt", b"Confidential diagnosis paperwork.", folder_id=private.id)
     del word
 
-    assert await index_pass(db) >= 3
+    assert await index_pass(db) >= 2
     states = {s.file_id: s.status for s in (await db.execute(select(DriveIndexState))).scalars().all()}
     assert states[uuid.UUID(doc_id)] == "ready" and states[uuid.UUID(notes["id"])] == "ready"
-    assert states[uuid.UUID(img["id"])] == "skipped"
+    assert uuid.UUID(img["id"]) not in states  # nothing to read in a picture
     assert uuid.UUID(secret["id"]) not in states  # excluded folder
     chunks = (await db.execute(text("SELECT count(*) FROM knowledge_chunks WHERE drive_user_id = :u"),
                                {"u": str(user.id)})).scalar()

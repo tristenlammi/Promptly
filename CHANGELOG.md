@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-11-06
+
+### Fixed
+- AI search no longer counts photos, videos and other files it can't read under "Text & other files", which could add thousands to its total and slow indexing down.
+
 ## [0.26.0] - 2026-11-06
 
 ### Added

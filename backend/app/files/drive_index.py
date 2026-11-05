@@ -165,6 +165,22 @@ def _kind_sql(alias: str = "f") -> str:
         ELSE 'text' END)"""
 
 
+def _readable_sql(alias: str = "f") -> str:
+    """An upload the index could get text from, by the rules ``_file_text``
+    reads with. Photos, videos and other binaries aren't, so they don't count
+    towards the Drive's total or take a turn in the indexing queue."""
+    from app.custom_models.embedding import _PDF_MIMES, _TEXT_EXTS, _TEXT_MIMES
+    from app.files.office_formats import LEGACY_OFFICE_ALLOWLIST, OFFICE_ALLOWLIST
+
+    mimes = ", ".join(f"'{m}'" for m in sorted({*_TEXT_MIMES, *_PDF_MIMES}))
+    exts = "|".join(
+        sorted(e.lstrip(".") for e in {*_TEXT_EXTS, ".pdf", *OFFICE_ALLOWLIST, *LEGACY_OFFICE_ALLOWLIST})
+    )
+    return f"""(lower({alias}.mime_type) LIKE 'text/%'
+        OR lower({alias}.mime_type) IN ({mimes})
+        OR lower({alias}.filename) ~ '[.]({exts})$')"""
+
+
 def _eligible_where(alias: str = "f") -> str:
     """Files of ``:u``, not trashed, of a kind that has text, outside the
     excluded folder trees (``tree`` CTE) and the left-out kinds (``:xk``)."""
@@ -172,7 +188,7 @@ def _eligible_where(alias: str = "f") -> str:
     return f"""
         {alias}.user_id = :u
         AND {alias}.trashed_at IS NULL
-        AND ({alias}.source_kind IS NULL OR {alias}.source_kind IN ({kinds}))
+        AND ({alias}.source_kind IN ({kinds}) OR ({alias}.source_kind IS NULL AND {_readable_sql(alias)}))
         AND ({alias}.folder_id IS NULL OR {alias}.folder_id NOT IN (SELECT id FROM tree))
         AND NOT ({_kind_sql(alias)} = ANY(CAST(:xk AS text[])))"""
 

@@ -69,3 +69,45 @@ async def test_generated_files_and_kinds_of_file_can_be_left_out(client, db, use
     r = await client.put("/api/files/ai-index", json={"enabled": True, "excluded_folder_ids": []}, headers=_auth(user))
     assert r.json()["excluded_kinds"] == ["text"]
     assert r.json()["eligible"] == 1  # the Doc; both text files stay out
+
+
+@pytest.mark.asyncio
+async def test_files_it_cant_read_dont_count(client, db, user, embedder):
+    from app.files.drive_index import index_pass, prune
+    from app.files.models import DriveIndexState, UserFile
+
+    await client.put("/api/files/ai-index", json={"enabled": True, "excluded_folder_ids": []}, headers=_auth(user))
+
+    async def upload_as(name: str, mime: str) -> uuid.UUID:
+        made = await _upload(client, user, "x.txt", b"Plumber quoted 340 for the boiler service.")
+        row = await db.get(UserFile, uuid.UUID(made["id"]))
+        row.filename, row.mime_type = name, mime
+        await db.commit()
+        return row.id
+
+    photo = await upload_as("IMG_0001.jpg", "image/jpeg")
+    clip = await upload_as("clip.mov", "video/quicktime")
+    unknown = await upload_as("archive.bin", "application/octet-stream")
+    note = await upload_as("notes.txt", "text/plain")
+    csv = await upload_as("data.csv", "application/octet-stream")
+    report = await upload_as("Report.PDF", "application/octet-stream")
+    slides = await upload_as("deck.pptx", "application/octet-stream")
+
+    readable = {note, csv, report, slides}
+    body = (await client.get("/api/files/ai-index", headers=_auth(user))).json()
+    assert body["eligible"] == len(readable)
+
+    # A photo an older version looked at and skipped doesn't linger either.
+    db.add(DriveIndexState(file_id=photo, user_id=user.id, status="skipped"))
+    await db.commit()
+    await prune(db, user)
+    await index_pass(db)
+    states = {s.file_id for s in (await db.execute(select(DriveIndexState))).scalars().all()}
+    assert states.isdisjoint({photo, clip, unknown})
+    assert note in states and csv in states
+
+    # Leaving the catch-all out is still what takes real text files out.
+    r = await client.put(
+        "/api/files/ai-index", json={"enabled": True, "excluded_folder_ids": [], "excluded_kinds": ["text"]}, headers=_auth(user)
+    )
+    assert r.json()["eligible"] == 2  # the PDF and the PowerPoint
