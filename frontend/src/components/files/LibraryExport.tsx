@@ -39,10 +39,20 @@ export function LibraryExport() {
       <h2 className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
         <PackageOpen className="h-4 w-4" /> Export my library
       </h2>
-      <p className="mt-1 text-xs text-[var(--text-muted)]">
-        Your passwords aren't part of this: the server can't read them. Save an encrypted copy from{" "}
-        <a className="underline" href="/passwords#/transfer">Passwords, Import and export</a>.
-      </p>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--border)] p-2" data-testid="library-vault-step">
+        <p className="min-w-0 flex-1 text-xs text-[var(--text-muted)]">
+          <span className="font-medium text-[var(--text)]">Your passwords are a separate step.</span> The server can't read them, so
+          this export can't include them. Your device makes an encrypted copy, and it's protected by a password you choose.
+        </p>
+        <a
+          className="rounded-md border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text)]"
+          href="/passwords#/transfer"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Export my vault
+        </a>
+      </div>
       <p className="mt-1 text-xs text-[var(--text-muted)]">
         Everything you own as an ordinary folder tree: your files in their folders with their names and dates, documents
         as Word files, spreadsheets as Excel, and beside each photo its date, place, description and albums (as .json and

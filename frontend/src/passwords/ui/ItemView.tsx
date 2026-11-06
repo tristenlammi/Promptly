@@ -4,13 +4,16 @@ import { ChangePassword, ClockWarning, ExpiryReminder, FromFiles } from "./Conne
 import { ArchiveRestore, Archive, Download, ExternalLink, History, Pencil, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import { downloadAttachment, uploadAttachment } from "../core/attachments";
+import { downloadAttachment, streamAttachment, uploadAttachment } from "../core/attachments";
 import type { AttachmentRef, Item, ItemBody } from "../core/model";
 import { downloadBlob } from "./Onboarding";
 import { periodOf, secondsLeft, toOtpauth, totpCode } from "../core/totp";
 import { ItemEditor, KIND_LABEL } from "./ItemEditor";
 import { Button, Callout, CopyButton, errorText, IconButton, inputClass, Label, Modal, PlainRow, safeHref, SecretRow, useVault } from "./kit";
 import { QrImage } from "./qr";
+
+/** Above this an attachment goes straight to disk where the browser can do that. */
+const STREAM_FROM = 32 * 1024 * 1024;
 
 
 export function TotpRow({ cfg, label = "2FA code" }: { cfg: NonNullable<ItemBody["totp"]>; label?: string }) {
@@ -197,6 +200,26 @@ function Attachments({ item, canEdit }: { item: Item; canEdit: boolean }) {
     setError("");
     setBusy(`Downloading ${ref.name}…`);
     try {
+      // Chromium can write straight to a file the person picks, so a big attachment needn't fit
+      // in memory. Other browsers have to hold it all first. A damaged file is removed, not kept.
+      const picker = (window as unknown as { showSaveFilePicker?: (o: { suggestedName: string }) => Promise<{ createWritable(): Promise<{ write(d: Uint8Array): Promise<void>; close(): Promise<void>; abort(): Promise<void> }> }> }).showSaveFilePicker;
+      if (picker && ref.size > STREAM_FROM) {
+        let handle;
+        try {
+          handle = await picker.call(window, { suggestedName: ref.name });
+        } catch {
+          return; // They cancelled.
+        }
+        const out = await handle.createWritable();
+        try {
+          await streamAttachment(platform.api, item.vaultId, item.id, ref, (part) => out.write(part));
+          await out.close();
+        } catch (e) {
+          await out.abort().catch(() => undefined);
+          throw e;
+        }
+        return;
+      }
       const data = await downloadAttachment(platform.api, item.vaultId, item.id, ref);
       downloadBlob(data, ref.name, "application/octet-stream");
     } catch (e) {

@@ -46,6 +46,9 @@ export type PageRequest =
   | { t: "connected"; serverUrl: string; token: string; deviceId: string; userId: string }
   | { t: "activity" }
   | { t: "generate"; host?: string | null }
+  | { t: "mailForTab"; tabId: number }
+  | { t: "mailCodeFill"; tabId: number; id: string }
+  | { t: "mailLinkOpen"; tabId: number; id: string; confirmed?: boolean }
   | { t: "plusBase" }
   | { t: "plusAddress"; email: string; host?: string | null }
   | { t: "clipWatch"; text: string }

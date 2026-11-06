@@ -272,6 +272,23 @@ export class Shell {
       });
       if (r.outcome === "mismatch") return invoke("quick_feedback", { close: false, message: null, mismatch: { window: r.window, item: r.item } });
       if (r.outcome === "failed") return this.feedback(r.message);
+      // The next thing a sign-in asks for. Never for someone who can fill but not see.
+      if (b.totp && this.vault.canReveal(item.vaultId)) await native.copy(await totpCode(b.totp), true, await clipboardSeconds(this.store));
+      return;
+    }
+    if (a.action === "type-code") {
+      if (!this.vault.canReveal(item.vaultId)) return this.feedback("You can fill from this shared vault, but its 2FA code stays hidden.");
+      if (!b.totp) return this.feedback("This item has no 2FA code.");
+      const titles = [b.title, ...(b.fields ?? []).filter((f) => f.name.trim().toLowerCase() === "window title").map((f) => f.value)];
+      const r = await invoke<{ outcome: "typed"; keys: number } | { outcome: "mismatch"; window: string; item: string } | { outcome: "failed"; message: string }>("autotype_perform", {
+        token: a.token,
+        titles,
+        username: "",
+        password: await totpCode(b.totp),
+        confirmed: a.confirmed,
+      });
+      if (r.outcome === "mismatch") return invoke("quick_feedback", { close: false, message: null, mismatch: { window: r.window, item: r.item } });
+      if (r.outcome === "failed") return this.feedback(r.message);
     }
   }
 }

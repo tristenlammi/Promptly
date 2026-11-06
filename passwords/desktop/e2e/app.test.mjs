@@ -524,6 +524,9 @@ test("fill-only vault: quick search won't copy the password or 2FA code, and can
   await overlaySays("not copy");
   await q.sendKeys(await altEnter());
   await overlaySays("not copy");
+  // Nor type the code, which would put it on screen.
+  await q.sendKeys((await import("selenium-webdriver")).Key.chord("\uE009", "\uE00A", "\uE007"));
+  await overlaySays("stays hidden");
   // Auto-type gets past the role check, and stops at having no target window.
   await q.sendKeys(await ctrlEnter());
   await overlaySays("no window");

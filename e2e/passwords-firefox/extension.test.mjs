@@ -2,6 +2,7 @@
 // by WebDriver Actions. Shares fixtures and expectations with the Chromium suite.
 //   cd e2e && node --test passwords-firefox/extension.test.mjs
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
 import { createRequire } from "node:module";
@@ -24,6 +25,7 @@ const SITE = path.resolve(here, "../../passwords/test-sites/ext");
 const PORT = 8111;
 
 let driver;
+let ffUserId;
 let server;
 let xpi;
 let extTab;
@@ -117,6 +119,7 @@ before(async () => {
   await driver.installAddon(xpi, true);
 
   const [u] = makeUsers(["ffext"]);
+  ffUserId = u.id;
   await signIn(driver, u);
   const secret = await onboard(driver);
 
@@ -623,6 +626,45 @@ test("Firefox: a card in frames fills each frame's own box, after naming the oth
   };
   assert.equal(await valueIn("number"), "4111111111111111");
   assert.equal(await valueIn("cvc"), "123");
+  await closeTabs();
+});
+
+test("Firefox: a mail code from the toolbar fills the sender's own site as text", async () => {
+  execFileSync("docker", ["exec", "-i", "PromptlyPw-Backend", "python"], {
+    encoding: "utf8",
+    input: `
+import asyncio, uuid
+from datetime import datetime, timezone
+from sqlalchemy import select
+import app.db_models
+from app.database import SessionLocal
+from app.mail.models import MailAccount, MailFolder, MailMessage
+async def main():
+    async with SessionLocal() as db:
+        uid = uuid.UUID("${ffUserId}")
+        acc = await db.scalar(select(MailAccount).where(MailAccount.user_id == uid))
+        if acc is None:
+            acc = MailAccount(user_id=uid, email=f"{uuid.uuid4().hex[:8]}@example.com", imap_host="localhost", imap_port=993, imap_security="ssl", smtp_host="localhost", smtp_port=465, smtp_security="ssl", username="x", secret_encrypted="x")
+            db.add(acc)
+            await db.flush()
+            db.add(MailFolder(account_id=acc.id, path="INBOX", name="Inbox", role="inbox"))
+            await db.flush()
+        folder = await db.scalar(select(MailFolder).where(MailFolder.account_id == acc.id, MailFolder.role == "inbox"))
+        db.add(MailMessage(account_id=acc.id, folder_id=folder.id, uid=int(datetime.now().timestamp()*1000) % 2000000000, thread_key=uuid.uuid4().hex, subject="Your verification code", from_name="Fox", from_addr="no-reply@foxcodes.localhost", sent_at=datetime.now(timezone.utc), body_text="Your code is 615204"))
+        await db.commit()
+asyncio.run(main())
+`,
+  });
+  await extEval("() => browser.runtime.sendMessage({ t: 'setMailCodes', on: true })");
+  const url = "http://foxcodes.localhost:8111/otp.html";
+  const pg = await newTab(url);
+  await driver.sleep(800);
+  await popup(url);
+  await click(driver, button("Fill code from foxcodes.localhost"));
+  await driver.sleep(800);
+  await driver.switchTo().window(pg);
+  assert.deepEqual(await driver.executeScript("return window.__state()"), { code: "615204" });
+  await extEval("() => browser.runtime.sendMessage({ t: 'setMailCodes', on: false })");
   await closeTabs();
 });
 

@@ -102,6 +102,61 @@ test("mail codes stay off until turned on, then fill from the menu as text", asy
   await page.close();
 });
 
+test("the toolbar offers a mail code, and fills only the sender's own site", async () => {
+  seedMail("Your verification code", "no-reply@toolbarcodes.localhost", "Your code is 615204");
+  const page = await rig.ctx.newPage();
+  await page.goto("http://toolbarcodes.localhost:8111/otp.html");
+  const phish = await rig.ctx.newPage();
+  await phish.goto("http://elsewhere.localhost:8111/otp.html");
+  const helper = await rig.ctx.newPage();
+  await helper.goto(`chrome-extension://${rig.extId}/test.html`);
+  await helper.evaluate(() => chrome.runtime.sendMessage({ t: "setMailCodes", on: true }));
+  const tabOf = (host: string) => helper.evaluate(async (h) => (await chrome.tabs.query({ url: `http://${h}:8111/*` }))[0].id as number, host);
+  const tabId = await tabOf("toolbarcodes.localhost");
+  const phishTab = await tabOf("elsewhere.localhost");
+
+  // Another site's page gets no row, and the background refuses a request for it anyway.
+  const send = (m: object) => helper.evaluate(async (x) => (await chrome.runtime.sendMessage(x)).r, m);
+  expect((await send({ t: "mailForTab", tabId: phishTab })).mail).toEqual([]);
+  const here = (await send({ t: "mailForTab", tabId })).mail[0];
+  expect(here.code).toBe("615204");
+  expect((await send({ t: "mailCodeFill", tabId: phishTab, id: here.id })).ok).toBe(false);
+  expect(await phish.evaluate(() => (window as any).__state())).toEqual({ code: "" });
+  await phish.close();
+
+  const pop = await rig.ctx.newPage();
+  await pop.goto(`chrome-extension://${rig.extId}/popup.html?tab=${tabId}`);
+  await expect(pop.getByTestId("mail-rows").getByText(/Code from email: 615204/)).toBeVisible();
+  await pop.getByRole("button", { name: /Fill code from toolbarcodes.localhost/ }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).__state())).toEqual({ code: "615204" });
+  await helper.close();
+  await page.close();
+});
+
+test("the toolbar asks before a sign-in link, and Don't open it comes first", async () => {
+  seedMail("Sign in to your account", "no-reply@toolbarlink.localhost", "Sign in here: https://toolbarlink.localhost/magic?code=abc");
+  const page = await rig.ctx.newPage();
+  await page.goto("http://toolbarlink.localhost:8111/login.html");
+  const helper = await rig.ctx.newPage();
+  await helper.goto(`chrome-extension://${rig.extId}/test.html`);
+  await helper.evaluate(() => chrome.runtime.sendMessage({ t: "setMailCodes", on: true }));
+  const tabId = await helper.evaluate(async () => (await chrome.tabs.query({ url: "http://toolbarlink.localhost:8111/*" }))[0].id as number);
+  const id = (await helper.evaluate(async (t) => (await chrome.runtime.sendMessage({ t: "mailForTab", tabId: t })).r, tabId)).mail[0].id;
+  // Without a yes it doesn't go anywhere.
+  expect((await helper.evaluate(async ([t, i]) => (await chrome.runtime.sendMessage({ t: "mailLinkOpen", tabId: t, id: i })).r, [tabId, id] as const)).ok).toBe(false);
+  const where = () => helper.evaluate(async (t) => { const x = await chrome.tabs.get(t); return x.pendingUrl ?? x.url; }, tabId);
+  expect(await where()).not.toContain("/magic");
+  const pop = await rig.ctx.newPage();
+  await pop.goto(`chrome-extension://${rig.extId}/popup.html?tab=${tabId}`);
+  await pop.getByRole("button", { name: /Sign-in link from toolbarlink.localhost/ }).click();
+  const ask = pop.getByTestId("mail-link-ask");
+  await expect(ask.getByRole("button").first()).toHaveText("Don't open it");
+  await ask.getByRole("button", { name: "Open toolbarlink.localhost" }).click();
+  await expect.poll(where).toContain("toolbarlink.localhost/magic");
+  await helper.close();
+  await page.close();
+});
+
 test("the page never gets mail codes, and they're not in the page's DOM", async () => {
   const page = await rig.ctx.newPage();
   await page.goto("http://codes.localhost:8111/otp.html");

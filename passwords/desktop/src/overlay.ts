@@ -87,7 +87,8 @@ document.addEventListener("keydown", (e) => {
       act(pending.action, true);
       return;
     }
-    if (e.ctrlKey) act("type");
+    if (e.ctrlKey && e.altKey) act("type-code");
+    else if (e.ctrlKey) act("type");
     else if (e.shiftKey) act("copy-user");
     else if (e.altKey) act("totp");
     else act("copy");

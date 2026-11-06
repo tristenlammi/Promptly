@@ -895,6 +895,12 @@ async function handlePage(m: PageRequest): Promise<unknown> {
     }
     case "fill":
       return fill(m.tabId, m.itemId, m);
+    case "mailForTab":
+      return c.unlocked ? mailRowsForTab(m.tabId) : { mail: [], otherMail: [] };
+    case "mailCodeFill":
+      return c.unlocked ? mailCodeFromPopup(m.tabId, m.id) : { ok: false };
+    case "mailLinkOpen":
+      return c.unlocked ? mailLinkFromPopup(m.tabId, m.id, m.confirmed === true) : { ok: false };
     case "addLogin": {
       const it = await c.saveNew(await c.personalVaultId(), newBody("login", m.title, { username: m.username, password: m.password, urls: m.url ? [{ url: m.url }] : [] }));
       await safeSync();
@@ -1177,6 +1183,56 @@ function mailBelongsHere(found: MailCode, url: string): boolean {
 }
 
 const linkHostOf = (link: string | null) => hostOf(link ?? "");
+
+/** The frames of a tab that have fields, with what each reports. */
+async function reportedFrames(tabId: number) {
+  await ensureContent(tabId);
+  const list = await frames(tabId);
+  const asked = await Promise.all(list.map(async (f) => ({ f, report: await inTime(send<PageReport>(tabId, f.frameId, { t: "report", fresh: true }, f.documentId), REPORT_MS) })));
+  return asked
+    .filter(({ f, report }) => report && report.fieldCount > 0 && report.origin !== "null" && report.origin === originOf(report.url || f.url))
+    .map(({ f, report }) => ({ f, report: report!, url: report!.url || f.url }));
+}
+
+/** The toolbar's rows. A page can't cover the toolbar, so this is the way in on Firefox, whose
+ *  menu on the page doesn't fill, and in on-click mode. Each frame is judged by its own address. */
+async function mailRowsForTab(tabId: number): Promise<{ mail: unknown[]; otherMail: string[] }> {
+  const rows = new Map<string, { id: string; code: string | null }>();
+  const others = new Set<string>();
+  for (const { report, url } of await reportedFrames(tabId)) {
+    const { mail, otherMail } = await mailRows(report.kinds ?? [], url);
+    for (const row of mail as { id: string; code: string | null }[]) {
+      const had = rows.get(row.id);
+      if (!had || (!had.code && row.code)) rows.set(row.id, row);
+    }
+    for (const d of otherMail) others.add(d);
+  }
+  return { mail: [...rows.values()], otherMail: [...others] };
+}
+
+/** The code goes only to a frame the sender belongs to, and that has a box for it. */
+async function mailCodeFromPopup(tabId: number, id: string): Promise<{ ok: boolean; reason?: string }> {
+  if (!(await extSettings()).mailCodes) return { ok: false };
+  const found = (await fetchMailCodes()).find((x) => x.id === id);
+  if (!found?.code) return { ok: false, reason: "gone" };
+  for (const { f, report, url } of await reportedFrames(tabId)) {
+    if (!report.roles.includes("otp") || !mailBelongsHere(found, url)) continue;
+    const out = await inTime(send<{ filled: string[] }>(tabId, f.frameId, { t: "doFill", values: { otp: found.code }, origin: report.origin }, f.documentId), 5000);
+    return { ok: !!out?.filled.length };
+  }
+  return { ok: false, reason: "no-box" };
+}
+
+/** A link goes somewhere at once, so it needs the person's yes and a sender that fits the top page. */
+async function mailLinkFromPopup(tabId: number, id: string, confirmed: boolean): Promise<{ ok: boolean; reason?: string }> {
+  if (!confirmed || !(await extSettings()).mailCodes) return { ok: false, reason: "not-confirmed" };
+  const found = (await fetchMailCodes()).find((x) => x.id === id);
+  if (!found) return { ok: false, reason: "gone" };
+  const tab = await ext.tabs.get(tabId);
+  if (!mailBelongsHere(found, tab.url ?? "") || !linkIsSafe(found)) return { ok: false, reason: "other-sender" };
+  await ext.tabs.update(tabId, { url: found.link! });
+  return { ok: true };
+}
 
 /** Opt-in. The server's told nothing about this page: the matching happens here. Only the
  *  domain is shown, because the sender's name is whatever the email says. The domain is

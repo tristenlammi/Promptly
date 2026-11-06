@@ -159,7 +159,7 @@ function ExtensionSettings() {
         />
         Offer codes and sign-in links from Promptly Mail on sign-in pages
       </label>
-      <p className="text-xs text-[var(--text-muted)]">The extension asks your server for recent codes from your mail, and works out here which belong to the page you're on. The page's address isn't sent.</p>
+      <p className="text-xs text-[var(--text-muted)]">The extension asks your server for recent codes from your mail, and works out here which belong to the page you're on. The page's address isn't sent. They're in the toolbar button, and on Chromium browsers also in the menu on the page.</p>
       <label className="flex items-center gap-2">
         <input
           type="checkbox"

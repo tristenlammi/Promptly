@@ -50,6 +50,9 @@ Use throwaway logins titled to match the target, for example an item titled `Not
 
 Auto-type (Ctrl+Enter) into real apps:
 
+- [ ] After typing a login that has a 2FA code, the code is on the clipboard, and clears after the set time.
+- [ ] Ctrl+Alt+Enter on that login types only the code into the window that was in front, with no Enter.
+
 - [ ] Notepad with an item titled `Notepad`: types username, Tab, password. No Enter. Keys come out right, including `@ # é 🔑`, on your keyboard layout.
 - [ ] Still holding Ctrl when it starts: it waits for release, and doesn't fire shortcuts.
 - [ ] An item whose title doesn't match: nothing's typed, and both titles are shown. Enter types anyway. Esc stops.

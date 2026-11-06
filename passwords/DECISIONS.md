@@ -14,6 +14,12 @@ Decisions made during the build, and what the plan's **[verify]** items turned o
 | M5 Autofill and corpus | done. 161 fixtures: Chromium 100%, WebKit 100%, Firefox 99.4%, after tuning on them. Hold-out set: see REPORT |
 | M6 Extension | done. Chrome (real, D12) and Firefox (real) |
 | M7 Passkeys | done. Verified by @simplewebauthn/server on both engines |
+| M8 Android | done, with gaps listed in REPORT. JVM and instrumented tests on AVD `PromptlyTest`; Chrome on the emulator not tested (terms) |
+| M9 Windows | done. Rust and driver tests pass, unsigned installer builds; tray, Hello, auto-type and others compiled but never run |
+| M10 Sharing, Send, emergency access | done |
+| M11 Promptly-exclusive | done |
+| M12 Hardening | done. Four reviews fixed. Whole-suite results and caveats are in REPORT |
+| M13 Report | `REPORT.md`, `OWNER_STEPS.md`. Not pushed, not merged |
 
 ## [verify] results that changed the design
 
@@ -88,4 +94,11 @@ Decisions made during the build, and what the plan's **[verify]** items turned o
 | D52 | Rotation is two steps: `DELETE member` cuts access at once and flags the vault; re-encrypting follows and can be retried. The flag shows as a Change the key prompt. | One atomic request meant a hostile member could stop themselves being removed. |
 | D53 | Signed member lists weren't built. Grants are checked against people this person chose to trust, not against a list signed by the vault's managers, so a trusted member working with a hostile server can still hand out a vault key they know for a vault they're in. Keyset rotation wasn't built either. | Both are big changes to every client. Stated in SECURITY.md rather than hidden. |
 | D54 | The local keyset check runs on every online unlock, and `wrapped_keyset` is returned by prelogin, to any signed-in session. | It needs the master password and the Secret Key together to be useful. It's what stops a forged device payload making `auth_key` a password oracle. |
+| D55 | The isolated stack bind-mounts `backend/app` but doesn't reload it, so a backend fix isn't live until `docker restart PromptlyPw-Backend PromptlyPw-ArqWorker PromptlyPw-MailWorker PromptlyPw-MediaWorker`. It hadn't been restarted for a while late in M12, and everything run on the stack after that restart is what REPORT quotes. | Found as timeouts on a picker that needed a server fix already in the code. |
+| D56 | `passwords/stack/docker-compose.full.yml` adds what the main e2e suite needs: media worker, tusd, photos-ml (read-only public model files from the main checkout's data folder) and a Maps stub. The stub only says a map exists, so the screen opens; there's no real map data and those tests mock the rest. The dev stack wasn't used. | The first main e2e run had 31 failures, all from services the isolated stack didn't have. A real map build takes about an hour and 15 GB. |
+| D57 | A code audit against the plan, near the end of M12, found Must and Should features missing or partial, mostly on Android. Those were built after it, so anything quoted from before that point in REPORT is marked as such. | Done means every Must and Should, and earlier milestones had been called done without a row-by-row check. |
+| D58 | Email codes and links also appear in the extension's toolbar popup. That's the only way in on Firefox and in on-click mode. Rows are worked out per frame from that frame's own address, a code goes only to a frame the sender belongs to, and a link needs a second click with "Don't open it" first. | D49 took the inline menu's filling away on Firefox, which left the setting on that browser doing nothing. A page can't cover the toolbar, so no visibility check is needed there. |
+| D59 | Windows: typing a login copies its 2FA code afterwards, and Ctrl+Alt+Enter types the code alone. Neither for a fill-only member. | Plan 2FA row: copy the code after autofill, and fill it on the 2FA page. Auto-type is Windows' only autofill path. |
+| D60 | Attachments over 32 MiB go straight to a file on Chromium through `showSaveFilePicker`. Firefox and WebKit still hold the whole file in memory, since they have no such API. | The plan says streaming. A page can't do better on those two without a service worker download trick. |
+| D61 | "Export my library" gets its own step for the vault: a button to the vault's export screen, where the device makes the encrypted copy. It can't be inside the library job. | The main app holds no keys, and the job runs on the server. The plan's "no server plaintext" rules out anything closer. |
 | D9 | `@noble/hashes` stays on `^2.4.0` as main has it; all new dependencies are pinned exact. | Don't move what `main` already uses. The lockfile pins the resolved version. |

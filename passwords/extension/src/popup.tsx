@@ -279,6 +279,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
       {lookalike && <p className="err">This site looks like {lookalike}, but it isn't. Be careful.</p>}
       {message && <p role="status" className="text-xs font-medium">{message}</p>}
       {tab?.id !== undefined && <SaveOffer tabId={tab.id} />}
+      {tab?.id !== undefined && <MailRows tabId={tab.id} setMessage={setMessage} />}
       <PageTools tab={tab} matches={matches} setMessage={setMessage} />
       {confirm && <ConfirmBox outcome={confirm.outcome} onYes={answer} onNo={() => setConfirm(null)} />}
       {reprompt && (
@@ -310,6 +311,59 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
         <button className="link" onClick={OPEN_VAULT}>Open vault</button>
         <button className="link" onClick={async () => { await call({ t: "lock" }); onLock(); }}>Lock</button>
       </div>
+    </div>
+  );
+}
+
+type MailRow = { id: string; domain: string; ago: string; code: string | null; linkHost: string | null };
+
+/** Codes and sign-in links from Promptly Mail. What's in an email is untrusted, so it's text here
+ *  and nothing's filled or opened until it's clicked. Only mail from this page's own site gets a
+ *  row. The setting is off by default, and then the background returns nothing. */
+function MailRows({ tabId, setMessage }: { tabId: number; setMessage: (m: string) => void }) {
+  const [rows, setRows] = useState<MailRow[]>([]);
+  const [others, setOthers] = useState<string[]>([]);
+  const [asking, setAsking] = useState<MailRow | null>(null);
+  useEffect(() => {
+    call<{ mail: MailRow[]; otherMail: string[] }>({ t: "mailForTab", tabId })
+      .then((r) => {
+        setRows(r.mail);
+        setOthers(r.otherMail);
+      })
+      .catch(() => undefined);
+  }, [tabId]);
+  if (asking) {
+    return (
+      <div className="flex flex-col gap-1 text-xs" data-testid="mail-link-ask">
+        <p>An email says it's from {asking.domain}, and has a sign-in link to {asking.linkHost}. Email senders can be forged. Only open it if you just asked for it.</p>
+        <button className="btn-primary" onClick={() => setAsking(null)}>Don't open it</button>
+        <button className="btn" onClick={async () => {
+          const r = await call<{ ok: boolean }>({ t: "mailLinkOpen", tabId, id: asking.id, confirmed: true });
+          setAsking(null);
+          if (r.ok) window.close();
+          else setMessage("To be safe, open that link from the email yourself.");
+        }}>Open {asking.linkHost}</button>
+      </div>
+    );
+  }
+  if (!rows.length && !others.length) return null;
+  return (
+    <div className="flex flex-col gap-1 text-xs" data-testid="mail-rows">
+      {rows.map((m) => (
+        <div key={m.id} className="flex flex-col gap-1">
+          {m.code && (
+            <button className="btn" aria-label={`Fill code from ${m.domain}`} onClick={async () => {
+              const r = await call<{ ok: boolean }>({ t: "mailCodeFill", tabId, id: m.id });
+              if (r.ok) window.close();
+              else setMessage("To be safe, type this one in yourself.");
+            }}>Code from email: {m.code} (from {m.domain}, {m.ago})</button>
+          )}
+          {m.linkHost && (
+            <button className="btn" aria-label={`Sign-in link from ${m.domain}`} onClick={() => setAsking(m)}>Sign-in link from {m.domain}? {m.ago}</button>
+          )}
+        </div>
+      ))}
+      {others.map((d) => <p key={d} className="muted">An email from {d} has a code. It isn't from this site, so it's not offered here.</p>)}
     </div>
   );
 }

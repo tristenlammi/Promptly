@@ -39,19 +39,29 @@ export async function uploadAttachment(
   return { id, name: file.name, size: file.size, key: b64u(raw), chunks, mime: file.type || undefined };
 }
 
-export async function downloadAttachment(api: VaultApi, vaultId: string, itemId: string, ref: AttachmentRef, onProgress?: (done: number, total: number) => void): Promise<Uint8Array> {
+/** Decrypts one chunk at a time, handing each on before the next is fetched. So a big file
+ *  needn't fit in memory if `write` puts it on disk. A damaged chunk throws before it's written. */
+export async function streamAttachment(api: VaultApi, vaultId: string, itemId: string, ref: AttachmentRef, write: (part: Uint8Array) => Promise<void> | void, onProgress?: (done: number, total: number) => void): Promise<void> {
   const key = await aesKey(fromB64u(ref.key));
-  const out = new Uint8Array(ref.size);
   let at = 0;
   for (let i = 0; i < ref.chunks; i++) {
     const blob = await api.attachmentGet(vaultId, ref.id, i);
     const plain = await open(key, new Uint8Array(blob), chunkAad(vaultId, itemId, ref.id, i, ref.chunks));
     const n = new DataView(plain.buffer, plain.byteOffset).getUint32(0);
-    if (n > plain.length - 4 || at + n > out.length) throw new Error("That attachment is damaged");
-    out.set(plain.subarray(4, 4 + n), at);
+    if (n > plain.length - 4 || at + n > ref.size) throw new Error("That attachment is damaged");
+    await write(plain.subarray(4, 4 + n));
     at += n;
     onProgress?.(i + 1, ref.chunks);
   }
   if (at !== ref.size) throw new Error("That attachment is damaged");
+}
+
+export async function downloadAttachment(api: VaultApi, vaultId: string, itemId: string, ref: AttachmentRef, onProgress?: (done: number, total: number) => void): Promise<Uint8Array> {
+  const out = new Uint8Array(ref.size);
+  let at = 0;
+  await streamAttachment(api, vaultId, itemId, ref, (part) => {
+    out.set(part, at);
+    at += part.length;
+  }, onProgress);
   return out;
 }
