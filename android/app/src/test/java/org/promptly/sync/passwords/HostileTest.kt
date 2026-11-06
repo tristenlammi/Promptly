@@ -64,9 +64,7 @@ private class FI(val id: String, val vaultId: String, var revision: Int, var blo
 
 private class FM(val userId: String, val username: String, var x: String?, var e: String?, var grant: JsonObject? = null, var role: String = "edit")
 
-private class Persona(val username: String) {
-    val x = randomBytes(32)
-    val e = randomBytes(32)
+private class Persona(val username: String, val x: ByteArray = randomBytes(32), val e: ByteArray = randomBytes(32)) {
     val xPub = b64u(Primitives.x25519Public(x))
     val ePub = b64u(Primitives.ed25519Public(e))
 }
@@ -518,6 +516,7 @@ class HostileTest {
     @Test fun sealsToAChosenContactAndStopsIfTheirKeysChange() {
         val w = fresh()
         w.s.userKeys[carolId] = Persona("carol")
+        w.c.markVerified(carolId)
         w.c.emergencyInvite(carolId, 3)
         w.c.sync()
         assertEquals(1, w.s.wrapped.size)
@@ -530,6 +529,95 @@ class HostileTest {
         v.generation += 1
         v.memberGeneration = 1
         w.c.sync()
+        assertEquals(emptyList<JsonObject>(), w.s.wrapped)
+    }
+
+    /** A contact not pinned yet: the server answers with a key of its own, marks the row accepted,
+     *  and every look at the screen tries to seal. Naming someone isn't enough. */
+    @Test fun nothingIsSealedToAContactUntilTheirWordsAreCompared() {
+        val w = fresh()
+        w.c.saveNew(w.c.personalVaultId(), newBody("login", "Bank").withText("password", "hunter2-secret"))
+        w.c.sync()
+        val servers = Persona("carol")
+        w.s.userKeys[carolId] = servers
+        w.c.emergencyInvite(carolId, 3)
+        assertEquals("Named, and pinned on what the server said", false, w.c.trustEntries()[carolId]?.verified)
+        repeat(3) { w.c.refreshEmergency() }
+        w.c.sync()
+        assertEquals("Sealed on the server's word", emptyList<JsonObject>(), w.s.wrapped)
+
+        // The person compares the words with the real Carol's: the server's are what's on screen, and
+        // she'd read out others. Here they did match, and only now does anything go.
+        w.c.markVerified(carolId, w.c.identityWordsFor(carolId))
+        assertEquals(true, w.c.trustEntries()[carolId]?.verified)
+        w.c.refreshEmergency()
+        assertEquals(1, w.s.wrapped.size)
+    }
+
+    @Test fun aKeySwappedAfterComparingSealsNothingAndHasToBeComparedAgain() {
+        val w = fresh()
+        w.s.userKeys[carolId] = Persona("carol")
+        w.c.markVerified(carolId, w.c.identityWordsFor(carolId))
+        w.c.emergencyInvite(carolId, 3)
+        w.c.refreshEmergency()
+        assertEquals(1, w.s.wrapped.size)
+        w.s.wrapped.clear()
+
+        val swapped = Persona("carol")
+        w.s.userKeys[carolId] = swapped
+        val v = w.s.vaults.getValue(w.c.personalVaultId())
+        v.generation += 1
+        v.memberGeneration = 1
+        w.c.sync()
+        w.c.refreshEmergency()
+        assertEquals(emptyList<JsonObject>(), w.s.wrapped)
+
+        // Accepting the new key isn't comparing its words.
+        w.c.acceptChangedKey(carolId)
+        assertEquals(swapped.ePub, w.c.trustEntries()[carolId]?.ed25519)
+        assertEquals(false, w.c.trustEntries()[carolId]?.verified)
+        w.c.sync()
+        w.c.refreshEmergency()
+        assertEquals(emptyList<JsonObject>(), w.s.wrapped)
+        w.c.markVerified(carolId, w.c.identityWordsFor(carolId))
+        w.c.refreshEmergency()
+        assertEquals(1, w.s.wrapped.size)
+    }
+
+    /** One person's words on screen, and another's keys when "They match" reads them again. */
+    @Test fun wordsShownForOneKeyDontVouchForAnother() {
+        val w = fresh()
+        w.s.userKeys[carolId] = Persona("carol")
+        val shown = w.c.identityWordsFor(carolId)
+        w.s.userKeys[carolId] = Persona("carol")
+        assertThrows(KeyChangedError::class.java) { w.c.markVerified(carolId, shown) }
+        assertNull("Nothing remembered", w.c.trustEntries()[carolId])
+    }
+
+    /** The server tells this phone the right signing key and its own encryption key. Words compared
+     *  on another device, on the real keys, reach this phone through the trust book. They don't
+     *  vouch for what's pinned here. */
+    @Test fun wordsComparedOnAnotherDeviceOnlyVouchForTheKeysItSaw() {
+        val w = fresh()
+        val carol = Persona("carol")
+        val half = Persona("carol", randomBytes(32), carol.e)
+        val other = VaultClient(w.s.api, MemoryStore(), MemoryKeeper())
+        other.unlock(MASTER, w.secretKey)
+
+        // Each device on its own, before either has the other's book.
+        w.s.userKeys[carolId] = carol
+        w.c.markVerified(carolId, w.c.identityWordsFor(carolId))
+        w.s.userKeys[carolId] = half
+        other.emergencyInvite(carolId, 3)
+        w.c.sync()
+        assertEquals(true, w.c.trustEntries()[carolId]?.verified)
+        assertEquals(carol.xPub, w.c.trustEntries()[carolId]?.x25519)
+
+        other.sync()
+        other.sync()
+        assertEquals(half.xPub, other.trustEntries()[carolId]?.x25519)
+        assertEquals(false, other.trustEntries()[carolId]?.verified)
+        other.refreshEmergency()
         assertEquals(emptyList<JsonObject>(), w.s.wrapped)
     }
 
@@ -998,6 +1086,7 @@ class HostileTest {
         invite(w, dana, danaId, theirs, "Theirs")
         w.c.acceptVault(theirs)
         w.s.userKeys[carolId] = Persona("carol")
+        w.c.markVerified(carolId)
         w.c.emergencyInvite(carolId, 3)
         w.c.sync()
         val sealed = w.s.wrapped.last()["grants"]!!.jsonArray.map { it.jsonObject["vault_id"]!!.jsonPrimitive.content }.toSet()

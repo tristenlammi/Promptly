@@ -492,7 +492,7 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
             val o = item.body["trustBook"] as JsonObject
             for ((id, e) in TrustBook.peopleOf(o["people"])) {
                 val had = remotePeople[id]
-                remotePeople[id] = if (had == null) e else had.copy(verified = had.verified || (e.verified && e.ed25519 == had.ed25519))
+                remotePeople[id] = if (had == null) e else had.copy(verified = had.verified || (e.verified && sameKeys(e, had)))
             }
             accepted += TrustBook.strings(o["accepted"])
             contacts += TrustBook.strings(o["contacts"])
@@ -501,7 +501,9 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         }
         for ((id, e) in remotePeople) {
             val mine = local[id]
-            merged.people[id] = if (mine == null) e else if (e.verified && mine.ed25519 == e.ed25519) mine.copy(verified = true) else mine
+            // Words compared on another device vouch for the keys it saw, both of them. A server can show
+            // this device the right signing key and an encryption key of its own.
+            merged.people[id] = if (mine == null) e else if (e.verified && sameKeys(e, mine)) mine.copy(verified = true) else mine
         }
         for ((id, e) in local) merged.people.putIfAbsent(id, e)
         accepted += TrustBook.strings(store.getMeta("trust_accepted"))
@@ -518,6 +520,8 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         book = merged
         store.setMeta("trust", JsonObject(merged.people.mapValues { it.value.toJson() }))
     }
+
+    private fun sameKeys(a: TrustEntry, b: TrustEntry) = a.ed25519 == b.ed25519 && a.x25519 == b.x25519
 
     /** Saved locally now, and to your own vault so other devices know too. */
     private fun saveTrustBook() {
@@ -538,8 +542,7 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
     /** Remember this person's keys, because the person just chose to deal with them. A name
      *  already known under other keys is refused until they've looked, since a server picks
      *  the ids as well as the names. */
-    private fun pin(userId: String): TrustEntry {
-        val live = api.userKeys(userId)
+    private fun pin(userId: String, live: PublicKeys = api.userKeys(userId)): TrustEntry {
         val trust = trustMap()
         val known = trust[userId]
         if (known != null) {
@@ -576,6 +579,22 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
     @Synchronized
     fun markVerified(userId: String) {
         if (trustMap()[userId] == null) pin(userId)
+        val entry = trustMap()[userId] ?: return
+        book.people[userId] = entry.copy(verified = true)
+        saveTrustBook()
+    }
+
+    /** "They match", about the words that were on screen. The keys get read again to be pinned, so a
+     *  server could show one person's words and answer with another's keys: those words have to be
+     *  what these keys make, or nothing's remembered. */
+    @Synchronized
+    fun markVerified(userId: String, shown: List<String>) {
+        val known = trustMap()[userId]
+        val live = if (known == null) api.userKeys(userId) else null
+        val x = known?.x25519 ?: live!!.x25519Pub
+        val e = known?.ed25519 ?: live!!.ed25519Pub
+        if (identityWords(userId, fromB64u(x), fromB64u(e)) != shown) throw KeyChangedError(userId, known?.username ?: live?.username ?: "")
+        if (live != null) pin(userId, live)
         val entry = trustMap()[userId] ?: return
         book.people[userId] = entry.copy(verified = true)
         saveTrustBook()
@@ -1318,7 +1337,8 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
 
     /** Seal our vault keys to each accepted contact, signed, and again whenever a vault has
      *  been added or re-keyed since. A row in that list is only the server's word: keys go to
-     *  someone this person named, on the keys they saw then, and to nobody else, ever. */
+     *  someone this person named, whose safety words they've compared, on the keys they compared
+     *  them for, and to nobody else, ever. */
     fun refreshEmergency() {
         val s = need()
         val rows = api.emergencyList()
@@ -1332,6 +1352,9 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
             val keys = api.userKeys(row.granteeId)
             val known = trustMap()[row.granteeId] ?: continue
             if (known.ed25519 != keys.ed25519Pub || known.x25519 != keys.x25519Pub) continue
+            // Every key this person has, on keys only the server has vouched for so far, would be
+            // the whole game for a hostile server. The same rule as vault.ts.
+            if (!known.verified) continue
             val grants = buildJsonArray {
                 for (v in mine) {
                     val raw = rawVaultKey(v)

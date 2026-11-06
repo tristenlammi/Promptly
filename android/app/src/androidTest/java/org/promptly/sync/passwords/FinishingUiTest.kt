@@ -527,6 +527,46 @@ class FinishingUiTest {
         assertTrue(s.calls.any { it == "POST /api/passwords/account/kit" })
     }
 
+    /** A row whose contact isn't compared, as a server that's swapped in its own key would want it:
+     *  accepted, and the screen looking every five seconds. It only asks for the words. */
+    @Test fun aContactWhoseWordsArentComparedGetsNothingSealedUntilTheyAre() {
+        val (client, s) = seedWithServer()
+        s.json("/survival", survival(true))
+        s.json("/device-requests", "[]")
+        s.json("/people", "[]")
+        val id = java.util.UUID.randomUUID().toString()
+        val keys = org.promptly.sync.passwords.core.Keyset.random()
+        val row = """{"id":"e1","grantor_id":"${client.userId}","grantor":"me","grantee_id":"$id","grantee":"contact","wait_days":3,"state":"accepted","wrapped":{},"opened_vaults":[]}"""
+        s.json("/users/$id/keys", """{"user_id":"$id","username":"contact","x25519_pub":"${org.promptly.sync.passwords.core.b64u(keys.x25519Pub)}","ed25519_pub":"${org.promptly.sync.passwords.core.b64u(keys.ed25519Pub)}"}""")
+        s.answersFor("POST /api/passwords/emergency", "application/json", row.toByteArray())
+        s.answersFor("PUT /api/passwords/emergency/e1/wrap", "application/json", "{}".toByteArray())
+        s.json("/emergency", "[$row]")
+        client.emergencyInvite(id, 3)
+        open()
+        tap("tab-more", 30_000)
+        tap("open-emergency")
+        waitFor(By.res("emergency-compare"), 20_000)
+        assertEquals(org.promptly.sync.passwords.core.EmergencyText.COMPARE, waitFor(By.res("emergency-state")).text)
+        val looks = s.calls.count { it == "GET /api/passwords/emergency" }
+        waitUntil("The screen should keep looking") { s.calls.count { it == "GET /api/passwords/emergency" } >= looks + 2 }
+        assertFalse("Sealed on the server's word", s.calls.any { it.endsWith("/wrap") })
+
+        tap("emergency-compare")
+        assertEquals(client.identityWordsFor(id).joinToString(" "), waitFor(By.res("emergency-words"), 15_000).text)
+        tap("emergency-not-now")
+        assertTrue(Harness.gone(By.res("emergency-words"), 10_000))
+        assertEquals(false, client.trustEntries()[id]?.verified)
+        assertFalse(s.calls.any { it.endsWith("/wrap") })
+
+        tap("emergency-compare")
+        waitFor(By.res("emergency-words"), 15_000)
+        tap("emergency-match")
+        waitUntil("Sealed once they match") { s.calls.any { it == "PUT /api/passwords/emergency/e1/wrap" } }
+        assertEquals(true, client.trustEntries()[id]?.verified)
+        waitFor(By.text("Finishing on this device."), 20_000)
+        assertFalse(has(By.res("emergency-compare"), 300))
+    }
+
     @Test fun rubbishFromTheServerDoesntPopUpTheKit() {
         val (_, s) = seedWithServer()
         s.json("/survival", """{"kit_confirmed":"no","offsite_configured":"maybe"}""")
@@ -830,10 +870,23 @@ class FinishingUiTest {
         Harness.scrollToTag("emergency-add")
         assertFalse("Past 90 days isn't allowed", waitFor(By.res("emergency-add")).isEnabled)
         fill("emergency-days", "1")
+        // Add asks first: their safety words, the ones their device shows.
         Harness.scrollTap("emergency-add")
+        assertEquals(other.myIdentityWords().joinToString(" "), waitFor(By.res("emergency-words"), 20_000).text)
+        // "Not now" is nothing at all: no row, nobody pinned, and the choice is still there to go on with.
+        tap("emergency-not-now")
+        assertTrue(Harness.gone(By.res("emergency-words"), 10_000))
+        Thread.sleep(800)
+        assertFalse(has(By.res("emergency-$otherName"), 300))
+        assertTrue(client.api.emergencyList().isEmpty())
+        assertFalse(otherId in client.trustEntries())
+        Harness.scrollTap("emergency-add")
+        waitFor(By.res("emergency-words"), 20_000)
+        tap("emergency-match")
         waitFor(By.res("emergency-$otherName"), 20_000)
         assertEquals("Waiting for them to accept.", waitFor(By.res("emergency-state")).text)
         assertTrue("Named here, so in the trust book", otherId in client.trustEntries())
+        assertEquals("And the words compared", true, client.trustEntries()[otherId]?.verified)
 
         // They accept: this screen seals the keys to them, since they're the one named, on the keys
         // pinned then. That's its five-second look, with nothing else asking it to.
@@ -857,6 +910,7 @@ class FinishingUiTest {
         device.pressBack()
 
         // Now the other way round: someone's named this phone. Accept, then ask, from here.
+        other.markVerified(client.userId!!)
         other.emergencyInvite(client.userId!!, 1)
         tap("open-emergency", 15_000)
         waitFor(By.res("emergency-accept"), 20_000).click()

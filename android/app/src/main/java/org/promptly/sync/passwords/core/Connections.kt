@@ -251,6 +251,11 @@ data class SiteDirectory(val twofa: Map<String, String?>, val passkeys: Set<Stri
 object EmergencyText {
     const val WARNING = "If you don't refuse before the wait runs out, it opens. They can then read everything in your vaults. Pick someone you'd trust with all of it, and a wait long enough that you'd notice. The wait is kept by this server, so whoever runs the server, working with your contact, could skip it."
 
+    /** Nothing's sealed to them until the words have been compared, whatever the row's state says. */
+    const val COMPARE = "Compare safety words to finish setting this up."
+
+    fun needsWords(r: EmergencyOut, verified: Boolean) = !verified && r.state != "ended"
+
     fun state(r: EmergencyOut, mine: Boolean): String = when (r.state) {
         "invited" -> if (mine) "Waiting for them to accept." else "They've asked you."
         "accepted" -> if (mine) "Finishing on this device." else "Waiting for them to finish setting it up."

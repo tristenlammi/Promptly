@@ -1187,7 +1187,12 @@ class StackTests {
         val row = b.api.emergencyList().first { it.grantorId == aUser.id }
         assertEquals("invited", row.state)
         b.api.emergencyAct(row.id, "accept")
-        a.sync() // Seals A's keys to the contact, as the web client does.
+        a.sync()
+        assertTrue("Sealed before the words were compared", a.api.emergencyList().first { it.id == row.id }.wrapped.isEmpty())
+        // Their words are the same on both sides, and only now does it seal, as the web client does.
+        assertEquals(b.myIdentityWords(), a.identityWordsFor(bUser.id))
+        a.markVerified(bUser.id, a.identityWordsFor(bUser.id))
+        a.sync()
         val ready = a.api.emergencyList().first { it.id == row.id }
         assertTrue("wrapped: ${ready.wrapped}", ready.wrapped.isNotEmpty())
         assertEquals(a.personalVaultId(), ready.wrapped.keys.first())

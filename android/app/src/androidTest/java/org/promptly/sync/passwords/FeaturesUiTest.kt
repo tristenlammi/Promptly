@@ -441,6 +441,7 @@ class FeaturesUiTest {
         device.pressBack()
 
         // Emergency: they ask for this vault; a phone is where you'd be when it comes.
+        client.markVerified(otherId)
         client.emergencyInvite(otherId, 1)
         val row = other.api.emergencyList().first { it.grantorId == client.userId }
         other.api.emergencyAct(row.id, "accept")

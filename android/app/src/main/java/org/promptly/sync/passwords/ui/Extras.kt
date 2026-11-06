@@ -998,6 +998,35 @@ private fun PostSendDialog(client: VaultClient, p: Posting, onClose: () -> Unit)
 
 // ---- Emergency access ---------------------------------------------------------------------
 
+/** `inviteDays` is set when this comes from Add, and they get invited once the words match. */
+private data class CompareWords(val userId: String, val username: String, val inviteDays: Int?)
+
+/** Your vault keys go to these keys, and the server's the one saying they're this person's. These
+ *  words are how you find out. Nothing's sealed until you've said they match. */
+@Composable
+private fun EmergencyWordsDialog(client: VaultClient, c: CompareWords, onCancel: () -> Unit, onMatch: (List<String>) -> Unit) {
+    var words by remember(c.userId) { mutableStateOf<List<String>?>(null) }
+    var problem by remember(c.userId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(c.userId) {
+        withContext(Dispatchers.IO) { runCatching { client.identityWordsFor(c.userId) } }.onSuccess { words = it }.onFailure { problem = errorText(it) }
+    }
+    AlertDialog(
+        onDismissRequest = onCancel,
+        modifier = Modifier.exposeTags(),
+        title = { Text("Is this really ${c.username}?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("An emergency contact can end up with every key to your vaults, so make sure of who this is. Ask ${c.username} to read out the safety words on their Shared vaults screen, in person or by phone.")
+                problem?.let { ErrorCard(it) }
+                words?.let { Text(it.joinToString(" "), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("emergency-words")) }
+                Text("If they don't match, don't go on: someone may be pretending to be them, possibly whoever runs the server.", style = MaterialTheme.typography.bodySmall)
+            }
+        },
+        confirmButton = { TextButton(onClick = { words?.let(onMatch) }, enabled = words != null, modifier = Modifier.testTag("emergency-match")) { Text("They match") } },
+        dismissButton = { TextButton(onClick = onCancel, Modifier.testTag("emergency-not-now")) { Text("Not now") } },
+    )
+}
+
 @Composable
 fun EmergencyScreen(client: VaultClient, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -1009,14 +1038,18 @@ fun EmergencyScreen(client: VaultClient, onBack: () -> Unit) {
     var pick by remember { mutableStateOf(false) }
     var days by remember { mutableStateOf("7") }
     var asking by remember { mutableStateOf<EmergencyOut?>(null) }
+    var comparing by remember { mutableStateOf<CompareWords?>(null) }
+    var verified by remember { mutableStateOf<Set<String>>(emptySet()) }
     LaunchedEffect(refresh) {
         while (true) {
             withContext(Dispatchers.IO) {
-                // A row's only the server's word: this seals keys only to someone you named, on the keys you saw.
+                // A row's only the server's word: this seals keys only to someone you named, whose
+                // safety words you compared, on the keys you compared them for.
                 runCatching { client.refreshEmergency() }
-                runCatching { client.api.emergencyList() }
-            }.onSuccess {
-                rows = it
+                runCatching { client.api.emergencyList() to client.trustEntries().filterValues { it.verified }.keys }
+            }.onSuccess { (list, ok) ->
+                rows = list
+                verified = ok
                 error = null
             }.onFailure { error = errorText(it) }
             delay(5000)
@@ -1049,7 +1082,9 @@ fun EmergencyScreen(client: VaultClient, onBack: () -> Unit) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("${r.grantee} can ask for your vault", fontWeight = FontWeight.SemiBold)
                     Text("A ${r.waitDays} day wait.", style = MaterialTheme.typography.bodySmall)
-                    Text(EmergencyText.state(r, true), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("emergency-state"))
+                    val needsWords = EmergencyText.needsWords(r, r.granteeId in verified)
+                    Text(if (needsWords) EmergencyText.COMPARE else EmergencyText.state(r, true), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("emergency-state"))
+                    if (needsWords) OutlinedButton(onClick = { comparing = CompareWords(r.granteeId, r.grantee, null) }, Modifier.testTag("emergency-compare")) { Text("Compare safety words") }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         if (r.state == "requested") Button(onClick = { act { client.api.emergencyAct(r.id, "refuse") } }, Modifier.testTag("emergency-refuse")) { Text("Refuse") }
                         OutlinedButton(onClick = { act { client.emergencyEnd(r) } }, Modifier.testTag("emergency-end")) { Text(if (r.state == "opened" || r.state == "ended") "End and change the keys" else "End") }
@@ -1091,9 +1126,19 @@ fun EmergencyScreen(client: VaultClient, onBack: () -> Unit) {
         Button(onClick = {
             val p = who ?: return@Button
             val d = wait ?: return@Button
-            who = null
-            act { client.emergencyInvite(p.id, d) }
+            error = null
+            comparing = CompareWords(p.id, p.username, d)
         }, enabled = who != null && wait != null, modifier = Modifier.testTag("emergency-add")) { Text("Add") }
+    }
+    comparing?.let { c ->
+        EmergencyWordsDialog(client, c, { comparing = null }) { shown ->
+            comparing = null
+            if (c.inviteDays != null) who = null
+            act {
+                client.markVerified(c.userId, shown)
+                c.inviteDays?.let { client.emergencyInvite(c.userId, it) }
+            }
+        }
     }
     asking?.let { r ->
         AlertDialog(
