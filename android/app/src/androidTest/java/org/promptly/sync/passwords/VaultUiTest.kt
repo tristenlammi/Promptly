@@ -205,7 +205,14 @@ class VaultUiTest {
         tap("open-settings")
         assertTrue(waitFor(By.res("autofill-state")).text.contains("is your autofill"))
         Harness.setAutofill(false)
-        assertTrue(has(By.res("biometric-unavailable"), 1500) || has(By.res("biometric"), 500))
+        // Further down the screen now that Email codes is above it.
+        var seen = false
+        for (i in 1..8) {
+            seen = has(By.res("biometric-unavailable"), 700) || has(By.res("biometric"), 300)
+            if (seen) break
+            device.swipe(device.displayWidth / 2, device.displayHeight * 60 / 100, device.displayWidth / 2, device.displayHeight * 30 / 100, 30)
+        }
+        assertTrue(seen)
     }
 
     @Test fun shareTargetAddsAUrl() {

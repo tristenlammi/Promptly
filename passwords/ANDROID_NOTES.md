@@ -91,6 +91,13 @@ Written during the build. Decisions, what was checked and how, and the limits. C
 - **What a suggestion can do:** it can't fill anything itself. Every dataset is gated by `AutofillAuthActivity`, which needs an unlocked vault and re-checks the match against the decrypted item. So a stale or tampered index can show a wrong name, and can't fill a wrong site.
 - **What it gives away:** someone with the phone unlocked and the vault locked can see which sites have logins, and with the setting on, the usernames. So can code running as this app. Neither gets a password. The server sees nothing. Forensic access to a locked phone doesn't get it as far as the Keystore's unlocked-device binding holds on that hardware. That hasn't been tested against a real extraction.
 
+### Email codes on a phone
+
+- **What goes where:** the page's address doesn't leave the phone. Picking the row asks the server for this user's likely codes from the last ten minutes, and it can read that mail anyway. The sender's compared with the site here.
+- **What the row can't do:** it holds no code. A code only shows on our own sheet, as text, and only fills from a tap.
+- **What a forged From does:** the server takes the domain from the From line, with no DKIM or SPF check of its own. Mail claiming to be from the site that gets through to the inbox gets a row. The person still has to tap it, on a page they went to, and it's a code they'd have to be expecting.
+- **What it costs a phone:** the device token holds `mail_codes`, but that scope is no use without a vault session, so a stolen token reads no mail.
+
 ### A revoked device
 
 - **Online:** a 401 on the device token shows "Connect this phone again", keeping the Secret Key and the encrypted copy. Nothing is wiped by a server's answer, since a wipe on 401 would let a server, or a brief outage in auth, destroy unsynced edits.
@@ -182,6 +189,43 @@ These weren't touched, as asked:
 - `passwords/SECURITY.md`: the section above.
 - `CHANGELOG.md`: an `[Unreleased]` line for M8.
 - `passwords/DECISIONS.md`: M8 row and a pointer here.
+
+## What was run, connections, 2026-11-07
+
+Final code for the features that connect the vault to the rest of Promptly on a phone: email codes, security emails, the change helper, plus-addresses, documents from Files, your Promptly login, Today and Activity. AVD `PromptlyTest` (API 36, Google Play image, x86_64), the `:8092` stack. None of the eight was already there: each gap in the audit was still a gap when checked against the code.
+
+- **JVM:** `gradlew :app:cleanTestDebugUnitTest :app:testDebugUnitTest "-Dpw.stack=http://localhost:8092"`: 281 tests, 0 failed, 0 skipped. CarTemplatesTest 8, ConnectionsTest 24 (new), CoreTest 54, FinishingTest 33, HostileTest 34, ImportersTest 54, ReviewFixesTest 17, StackTests 39 (10 new), VectorsTest 18.
+- **Cross-check:** `connections-vectors.json` runs through the real `connections.ts` and `generator.ts` under vitest (`rankMailCodes`, `linkIsSafe`, `securityAlerts`, `changePageUrl`, `plusAddress`), and through Kotlin. Both have to give what the file says. Two link cases are marked `androidOnly`, where Android refuses what the web reads (A53). The real TypeScript client also reads a login at each step of a password change.
+- **Real server, on the JVM:** messages put in a throwaway user's Mail, read by the real extraction. That includes mail that says it's this site's code from another sender. A vault-only token gets 403 on mail, keeps syncing, and a new connection gets both scopes. Plus rules (the rule read back from the database), a real file through Files and back out of the vault on a second client, the original in Files' Trash, the reminder's words read back from the database, and the Today card's section.
+- **Instrumented:** `android/run-passwords-tests.ps1`: main pass 122 run, with 1 failure on the full run (below). 119 exercised: AutofillE2ETest 24, ConnectionsUiTest 24 (new), CredentialManagerE2ETest 6, DeviceCryptoTest 11, FeaturesUiTest 12, FinishingUiTest 22, ImportDeviceTest 9, VaultUiTest 11. 3 skipped by that script, as before: BiometricE2ETest 2, SmsConsentTest 1. Then the script seeds mail and runs MailRealStackTest (new): `OK (3 tests)`. That's 125 run, 122 exercised.
+- **The one failure on the full run:** `VaultUiTest.settingsShowTheSetupGuide`, caused by this work: the new Email codes section pushed the biometric row off the first screen, and the test looked without scrolling. The test now scrolls. Only that class was run again after the fix: `OK (11 tests)`. Autofill's suggestion lookup needed its own retry once, as it does.
+- **What the script does differently:** it makes three more users, and runs MailRealStackTest last with its mail seeded right before it, as mail only counts for ten minutes.
+- `lintVitalRelease`: passes.
+- **Failures on the way, all in the tests:** a test reading a row that a keyed recomposition had just replaced (stale object); a test leaving the app on Settings and expecting the home tabs when it came back; a Back meant for the keyboard landing after the keyboard had gone, which left the item (one run of the documents test, on the race this file already notes); a tap on a switch while the screen was still scrolling. A `runCatching` around a call in the first draft of `plusRule` hid 403s and was caught by the stack test.
+
+### Compiled only, or not exercised this way
+
+- **A real browser opening anything.** Chrome stays unopened, so the change page, the sign-in link and the connect page go to a test hook that records the address. The `ACTION_VIEW` itself isn't run. The browser leg of adding the scope is approved with the same API call the page makes, not by the page.
+- **A code in real Chrome.** The fills are the real autofill service on the test browser's WebView with local HTML, with a sender's domain seeded to match.
+- **Real mail delivery.** Messages are written straight to the Mail tables. IMAP and the From line a real provider would pass along aren't part of this.
+- **Filling split boxes from mail:** `forBoxes` is tested on the JVM, and the branch in `fillCode` is compiled.
+- **The frame rule:** `MailOffer.row` is tested, and no test page has a real frame from another site.
+- **A confirm box on the change form:** it's filled through the same list as the new box, and the test only reads the first.
+- **Android's own save sheet for a typed new password:** the sheet's screen is opened directly with what the service would have given it.
+- **The helper's copy buttons:** shown, not tapped. `Clip.copySecret` is tested elsewhere. "Reprompt before changing" and hiding the change buttons in a vault you can't edit are compiled.
+- **Adding the scope from a security email or a plus label:** the offer shows from the Security check. The add itself is only run from Settings, and it's the same panel. "Open login" on an alert isn't tapped.
+- **A 100 MiB document on a phone:** the stack test moves about 1.5 MiB, and the screen test about 72 KiB. Streaming is why it should hold, and that isn't shown at size.
+- **The Today card on screen:** its section in `/api/today` is checked, and the web page showing it isn't looked at.
+- **R8:** no release build, and nothing on arm64. `lintVitalRelease` compiles the release Kotlin and no more.
+
+### Added to the owner's real-phone checklist
+
+- Turn on Email codes, on a phone connected before this, and check it comes back with the vault open and one device on the list.
+- A real emailed code on a real site in Chrome: the row, the sheet, the tap. Then the same with mail from another sender, and check no code shows.
+- A real magic link: the confirm, then the browser.
+- Change a throwaway account's password from the Security check, with Chrome set up: open the change page, and see whether the row fills both boxes. Say no once and yes once. A site with no `/.well-known/change-password` gets whatever it answers there.
+- A plus-address at your real mail provider, and that the label picks up what arrives.
+- A large scan from Files, to see how long it takes and that the phone stays responsive. The Calendar entry shows on the day.
 
 ## What was run, importers, 2026-11-07
 
