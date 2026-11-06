@@ -95,13 +95,14 @@ async function buildEngine(engine) {
       vault: path.join(here, "src/vault.tsx"),
       menu: path.join(here, "src/menu.ts"),
       save: path.join(here, "src/save.ts"),
+      passkey: path.join(here, "src/passkey.ts"),
     },
     splitting: false,
   });
   // Content scripts and the MAIN-world wrapper can't be ES modules.
   await esbuild.build({ ...common, format: "iife", outdir: dist, entryPoints: { content: path.join(here, "src/content.ts"), "passkey-main": path.join(here, "src/passkey-main.ts") } });
 
-  for (const f of ["popup.html", "vault.html", "menu.html", "save.html"]) fs.copyFileSync(path.join(here, "src", f), path.join(dist, f));
+  for (const f of ["popup.html", "vault.html", "menu.html", "save.html", "passkey.html"]) fs.copyFileSync(path.join(here, "src", f), path.join(dist, f));
   css(path.join(dist, "ui.css"));
   for (const size of [16, 32, 48, 128]) fs.copyFileSync(path.join(here, "icons", `${size}.png`), path.join(dist, "icons", `${size}.png`));
   fs.writeFileSync(path.join(dist, "manifest.json"), JSON.stringify(manifest(engine), null, 1));

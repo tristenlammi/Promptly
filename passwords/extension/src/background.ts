@@ -149,8 +149,12 @@ async function applySiteAccess() {
   }
 }
 
+declare const __TEST_BUILD__: boolean;
+
 ext.runtime.onInstalled.addListener(() => {
   applySiteAccess().catch(() => undefined);
+  // WebDriver can't navigate Firefox to an extension page, so a test build opens one.
+  if (__TEST_BUILD__ && __ENGINE__ === "firefox") ext.tabs.create({ url: ext.runtime.getURL("vault.html") });
   ext.contextMenus.removeAll(() => {
     ext.contextMenus.create({ id: "fill", title: "Fill from Promptly Passwords", contexts: ["editable"] });
     ext.contextMenus.create({ id: "generate", title: "Generate a password here", contexts: ["editable"] });

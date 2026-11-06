@@ -1,0 +1,70 @@
+<!doctype html>
+<html>
+  <head><title>WebAuthn test site</title></head>
+  <body>
+    <h1>WebAuthn test relying party</h1>
+    <p>The test harness verifies what this page gets with an independent server library.</p>
+    <script>
+      const b64u = (b) => btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+
+      window.__register = async (o) => {
+        try {
+          const c = await navigator.credentials.create({
+            publicKey: {
+              rp: { name: "Test RP", id: o.rpId },
+              user: { id: unb64u(o.userId), name: o.userName, displayName: o.userName },
+              challenge: unb64u(o.challenge),
+              pubKeyCredParams: [{ type: "public-key", alg: -7 }],
+              excludeCredentials: (o.exclude ?? []).map((id) => ({ type: "public-key", id: unb64u(id) })),
+              authenticatorSelection: { residentKey: "required", userVerification: "preferred" },
+              attestation: "none",
+            },
+          });
+          return {
+            isReal: c instanceof PublicKeyCredential,
+            id: c.id,
+            rawId: b64u(c.rawId),
+            type: c.type,
+            authenticatorAttachment: c.authenticatorAttachment,
+            clientExtensionResults: c.getClientExtensionResults(),
+            response: {
+              clientDataJSON: b64u(c.response.clientDataJSON),
+              attestationObject: b64u(c.response.attestationObject),
+              transports: c.response.getTransports(),
+            },
+          };
+        } catch (e) {
+          return { error: e.name };
+        }
+      };
+
+      window.__auth = async (o) => {
+        try {
+          const c = await navigator.credentials.get({
+            publicKey: {
+              rpId: o.rpId,
+              challenge: unb64u(o.challenge),
+              allowCredentials: (o.allow ?? []).map((id) => ({ type: "public-key", id: unb64u(id) })),
+              userVerification: "preferred",
+            },
+          });
+          return {
+            id: c.id,
+            rawId: b64u(c.rawId),
+            type: c.type,
+            clientExtensionResults: c.getClientExtensionResults(),
+            response: {
+              clientDataJSON: b64u(c.response.clientDataJSON),
+              authenticatorData: b64u(c.response.authenticatorData),
+              signature: b64u(c.response.signature),
+              userHandle: c.response.userHandle ? b64u(c.response.userHandle) : undefined,
+            },
+          };
+        } catch (e) {
+          return { error: e.name };
+        }
+      };
+    </script>
+  </body>
+</html>

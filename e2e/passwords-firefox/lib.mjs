@@ -52,7 +52,9 @@ export async function newFirefox({ headless = true, prefs = {} } = {}) {
   options.setPreference("dom.serviceWorkers.testing.enabled", true);
   options.setPreference("browser.aboutConfig.showWarning", false);
   for (const [k, v] of Object.entries(prefs)) options.setPreference(k, v);
-  return new Builder().forBrowser("firefox").setFirefoxOptions(options).build();
+  // Needed for WebDriver to drive our own moz-extension:// pages.
+  const service = new firefox.ServiceBuilder().addArguments("--allow-system-access");
+  return new Builder().forBrowser("firefox").setFirefoxOptions(options).setFirefoxService(service).build();
 }
 
 /** A local pass-through to the stack that can be switched off, for real offline tests. */

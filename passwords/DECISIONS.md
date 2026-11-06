@@ -8,6 +8,12 @@ Decisions made during the build, and what the plan's **[verify]** items turned o
 |---|---|
 | M0 Setup | done |
 | M1 Crypto core | done |
+| M2 Backend | done |
+| M3 Web vault | done. Chromium, WebKit (offline skipped) by Playwright; Firefox by Selenium, see D11 |
+| M4 Import/export etc. | done |
+| M5 Autofill and corpus | done. 161 fixtures: Chromium 100%, WebKit 100%, Firefox 99.4%, after tuning on them. Hold-out set: see REPORT |
+| M6 Extension | done. Chrome (real, D12) and Firefox (real) |
+| M7 Passkeys | done. Verified by @simplewebauthn/server on both engines |
 
 ## [verify] results that changed the design
 
@@ -37,4 +43,13 @@ Decisions made during the build, and what the plan's **[verify]** items turned o
 | D6 | KDF ceiling as well as a floor (added beyond the plan). | A hostile server could otherwise hang clients with absurd parameters. |
 | D7 | Argon2id floor 64 MiB, t=3, p=1. | Well above OWASP minimums. Same as RFC 9106's second option except p, because WASM is single-threaded. |
 | D8 | `auth_key` verifier is HMAC-SHA256 with a random salt. No slow hash on the server. | `auth_key` is a 256-bit HKDF output, so a slow hash adds nothing. |
+| D10 | No `pw_changes` table: delta sync reads `pw_items.revision` and keeps tombstones in `pw_items`. Added `pw_sessions`, `pw_connects`, `pw_settings`. | One less table to keep in step; the plan's table list was a guide. |
+| D11 | Playwright's Firefox and full Chromium builds don't start on this machine (Windows "side-by-side configuration is incorrect"; only its headless shell and WebKit run). Installing runtimes is a hard stop, so: the web vault's Firefox tests run on the real installed Firefox (159) through Selenium and geckodriver, which is a stronger test anyway. | Listed in OWNER_STEPS. |
+| D12 | Extension E2E runs on the real installed Chrome (156) through the DevTools `Extensions.loadUnpacked` call with `--enable-unsafe-extension-debugging`, because that build of Chrome ignores `--load-extension` (confirmed by the [verify] check) and Playwright's Chromium won't start here. Throwaway profile each run. | Tests the real browser. |
+| D13 | A small manifest generator on esbuild instead of WXT, though WXT is maintained. | WXT is still 0.x with a large dependency tree; a password manager should ship as few moving parts as it can, and the two manifests are about 40 lines. |
+| D14 | Extension pages and the background share one IndexedDB copy, so they tell each other when it changes (`sync` and `vaultChanged`) and re-read it. | Each holds its own decrypted index, and a pull in one wouldn't otherwise reach the other. |
+| D15 | A test build differs from a release build in exactly: `host_permissions` granted up front (Chromium has no way to click its prompt), the popup can be aimed at another tab with `?tab=`, and Firefox's opens its own page on install (WebDriver can't navigate to one). | Listed so nobody assumes more. Firefox walks the real permission path, by Firefox's `extensions.webextOptionalPermissionPrompts` test pref. |
+| D16 | Passkeys: conditional (autofill-style) `get` requests pass straight to the browser's own UI, and aren't offered in our inline menu. A modal `get` or a `create` shows our window, with the browser's own passkeys one click away. | Keeps a page from silently learning anything, and the wrapper small. A known limit: see REPORT. |
+| D17 | User verification is reported true for passkeys when the vault's unlocked and the person confirmed in our window; items marked reprompt ask for the master password first. | Same model as other managers. Android asks for a biometric as the plan says. |
+| D18 | The classifier gets its accuracy from the corpus it was tuned on, so that number flatters it. A second, separately written hold-out set gives the honest number, recorded before any fix is made from it. | See REPORT. |
 | D9 | `@noble/hashes` stays on `^2.4.0` as main has it; all new dependencies are pinned exact. | Don't move what `main` already uses. The lockfile pins the resolved version. |

@@ -301,6 +301,56 @@ function main() {
     }
   }
 
+  // ---- Passkeys: the bridge from the page's world. Every decision is made on this side. --
+
+  const pkWaiting = new Map<number, boolean>();
+
+  /** The frame's real Permissions-Policy, from this world. A browser with no way to ask
+   *  gets the conservative answer: top-level or same-origin frames only. */
+  function policyAllows(op: "get" | "create"): boolean {
+    const feature = op === "get" ? "publickey-credentials-get" : "publickey-credentials-create";
+    const policy = (document as unknown as { featurePolicy?: { allowsFeature: (f: string) => boolean } }).featurePolicy;
+    if (policy) return policy.allowsFeature(feature);
+    if (window === window.top) return true;
+    try {
+      return window.top!.location.origin === location.origin;
+    } catch {
+      return false;
+    }
+  }
+
+  window.addEventListener("message", async (e) => {
+    if (e.source !== window || e.origin !== location.origin) return;
+    const d = e.data as { __pk?: string; id?: number; op?: "get" | "create"; options?: unknown };
+    if (d?.__pk === "cancel" && typeof d.id === "number") {
+      pkWaiting.delete(d.id);
+      return;
+    }
+    if (d?.__pk !== "req" || typeof d.id !== "number" || (d.op !== "get" && d.op !== "create") || typeof d.options !== "object") return;
+    const reply = (r: Record<string, unknown>) => window.postMessage({ __pk: "res", id: d.id, ...r }, location.origin);
+    if (!policyAllows(d.op)) {
+      // Fails closed here, before anything reaches the background.
+      reply({ ok: false, name: "NotAllowedError", message: "The Permissions-Policy of this page doesn't allow it." });
+      return;
+    }
+    pkWaiting.set(d.id, true);
+    let crossOrigin = false;
+    let topOrigin: string | undefined;
+    if (window !== window.top) {
+      crossOrigin = true;
+      try {
+        topOrigin = window.top!.location.origin;
+        crossOrigin = topOrigin !== location.origin;
+      } catch {
+        topOrigin = location.ancestorOrigins?.[location.ancestorOrigins.length - 1];
+      }
+    }
+    const r = (await send({ t: "pkRequest", op: d.op, options: d.options, crossOrigin, topOrigin })) as { ok: boolean; r?: Record<string, unknown> } | null;
+    if (!pkWaiting.get(d.id)) return;
+    pkWaiting.delete(d.id);
+    reply(r?.r ?? { ok: false, native: true });
+  });
+
   // ---- Teach it once --------------------------------------------------------------------
 
   function teach() {

@@ -24,6 +24,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Added
 - Passwords (preview): the end-to-end encrypted core. Your vault is locked by your master password plus a Secret Key only your devices hold, so a stolen database or backup can't be guessed open.
 - Passwords (preview): the web vault at /passwords, on its own page with a stricter security policy: onboarding with a printable recovery kit, logins, cards, identities, notes, keys and documents, 2FA codes, generator, search, folders, tags, history, Trash, offline use, and new devices approved with safety words.
+- Passwords (preview): import from Chrome, Edge, Firefox, Google, Bitwarden, 1Password, LastPass, Dashlane, Proton Pass, Apple Passwords, KeePass, Credential Exchange, Aegis, 2FAS and Google Authenticator, all read on your device. Encrypted export, a Security check with breach lookups through your server, and encrypted attachments.
+- Passwords (preview): a browser extension for the Chrome family and Firefox: popup, inline menu with anti-clickjacking checks, multi-step sign-ins, save and update prompts, teach-it-once site rules, 2FA codes, side panel, and passkeys that sync.
 - Notifications: a Passwords switch for new-device requests and shared-vault invites. They never carry anything from the vault.
 
 ## [0.28.0] - 2026-11-06
