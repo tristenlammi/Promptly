@@ -1,0 +1,82 @@
+# The extra services the main e2e suite needs (Photos, big uploads, the Maps screen), on top of
+# the isolated stack. Throwaway data in the isolated stack's own volumes. The only thing shared
+# with the dev stack is photos-ml's public model files, mounted read-only.
+#   docker compose -p promptly-pw -f docker-compose.yml -f docker-compose.full.yml up -d
+#
+# Maps is a stub: a manifest that says a map exists, so the screen opens. There's no real map
+# data (a real build takes about an hour and 15 GB), and the e2e tests mock what they need.
+x-full-env: &full-env
+  - TUS_ENABLED=true
+  - TUS_HOOK_SECRET=pw-test-hook
+
+x-full-vols: &full-vols
+  - ./maps-stub:/maps:ro
+
+services:
+  backend:
+    environment: *full-env
+    volumes: *full-vols
+  arq-worker:
+    environment: *full-env
+    volumes: *full-vols
+  mail-worker:
+    environment: *full-env
+
+  media-worker:
+    image: promptly-pw-backend:local
+    pull_policy: never
+    container_name: PromptlyPw-MediaWorker
+    entrypoint: ["arq", "app.tasks.media_worker.MediaWorkerSettings"]
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://promptly:${POSTGRES_PASSWORD}@postgres:5432/promptly
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=${SECRET_KEY}
+      - TUS_ENABLED=true
+      - TUS_HOOK_SECRET=pw-test-hook
+      - COOKIE_SECURE=false
+    volumes:
+      - ../../backend/app:/app/app
+      - ../../backend/alembic:/app/alembic
+      - pw_uploads:/app/uploads
+    depends_on:
+      backend: {condition: service_healthy}
+    restart: unless-stopped
+    networks: [pw]
+
+  photos-ml:
+    image: promptly-photos-ml:latest
+    pull_policy: never
+    container_name: PromptlyPw-PhotosML
+    mem_limit: 4g
+    volumes:
+      - ../../../../data/models:/models:ro
+    restart: unless-stopped
+    networks: [pw]
+
+  tusd:
+    image: tusproject/tusd:v2.10.1
+    container_name: PromptlyPw-Tusd
+    user: "0:0"
+    command:
+      - -host=0.0.0.0
+      - -port=8080
+      - -base-path=/api/files/tus/
+      - -upload-dir=/srv/uploads/.tus
+      - -behind-proxy
+      - -hooks-http=http://backend:8000/api/internal/tus-hook?key=pw-test-hook
+      - -hooks-enabled-events=pre-create,pre-finish,post-finish,post-terminate
+      - -hooks-http-timeout=600s
+      - -hooks-http-retry=1
+      - -hooks-http-size-limit=65536
+      - -disable-download
+      - -disable-concatenation
+      - -disable-cors
+      - -max-size=107374182400
+      - -expose-metrics=false
+      - -show-greeting=false
+    volumes:
+      - pw_uploads:/srv/uploads
+    depends_on:
+      backend: {condition: service_healthy}
+    restart: unless-stopped
+    networks: [pw]
