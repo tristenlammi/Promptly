@@ -120,6 +120,11 @@ def move(db: AsyncSession, folders: dict[uuid.UUID, MailFolder], messages: Itera
         uids = [m.uid for m in rows if m.uid is not None]
         if uids:
             db.add(MailOp(account_id=target.account_id, kind="move", folder_path=source.path, uids=uids, target_path=target.path))
+        # Moved here a moment ago, so it has no number here yet. Changes go out in
+        # order, so by the time this one runs it'll be here to find.
+        unnumbered = [m.message_id for m in rows if m.uid is None and m.message_id]
+        if unnumbered:
+            db.add(MailOp(account_id=target.account_id, kind="move_found", folder_path=source.path, uids=unnumbered, target_path=target.path))
         for m in rows:
             m.folder_id, m.uid = target.id, None
 

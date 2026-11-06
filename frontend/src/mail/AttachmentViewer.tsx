@@ -17,7 +17,7 @@ type Shown =
   | { kind: "image" | "video" | "audio"; url: string }
   | { kind: "pdf"; data: ArrayBuffer }
   | { kind: "text"; text: string; cut: boolean }
-  | { kind: "none"; why: string };
+  | { kind: "none"; why: string; retry?: boolean };
 
 function sizeOf(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -77,6 +77,7 @@ export function AttachmentViewer({ messageId, attachments, start, saved, saving,
 }) {
   const [index, setIndex] = useState(start);
   const [shown, setShown] = useState<Shown>({ kind: "loading" });
+  const [attempt, setAttempt] = useState(0);
   const file = attachments[index];
   const many = attachments.length > 1;
   const step = useCallback((by: number) => setIndex((i) => (i + by + attachments.length) % attachments.length), [attachments.length]);
@@ -105,14 +106,16 @@ export function AttachmentViewer({ messageId, attachments, start, saved, saving,
         }
         show({ kind: "none", why: "This type of file can't be previewed here. You can download it or save it to Files." });
       } catch (e) {
-        show({ kind: "none", why: apiErrorMessage(e, "Couldn't get that attachment from your mailbox.") });
+        // Not found there doesn't mean deleted: it may be moving between folders.
+        const missing = (e as { response?: { status?: number } }).response?.status === 404;
+        show({ kind: "none", retry: true, why: missing ? "Couldn't find this in your mailbox just now. If you've just moved the email, give it a moment." : apiErrorMessage(e, "Couldn't get that attachment from your mailbox.") });
       }
     })();
     return () => {
       live = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [file, messageId]);
+  }, [file, messageId, attempt]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -155,6 +158,7 @@ export function AttachmentViewer({ messageId, attachments, start, saved, saving,
             <FileIcon className="mx-auto h-9 w-9 text-[var(--text-muted)]" />
             <p className="mt-3 break-words text-sm font-medium text-[var(--text)]">{file.name}</p>
             <p className="mt-1 text-sm text-[var(--text-muted)]">{shown.why}</p>
+            {shown.retry && <button type="button" onClick={() => setAttempt((n) => n + 1)} className="mt-3 h-9 rounded-lg bg-[#D97757] px-4 text-sm font-medium text-white hover:opacity-90">Try again</button>}
           </div>
         )}
         {many && (

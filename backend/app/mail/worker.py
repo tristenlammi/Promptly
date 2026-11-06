@@ -288,7 +288,18 @@ async def _apply_ops(client, account_id: uuid.UUID) -> None:
         ops = (await db.execute(select(MailOp).where(MailOp.account_id == account_id).order_by(MailOp.created_at).limit(50))).scalars().all()
         for op in ops:
             try:
-                await asyncio.to_thread(imap.apply_op, client, op.kind, op.folder_path, list(op.uids), op.target_path)
+                if op.kind == "move_found":
+                    missing = await asyncio.to_thread(imap.move_found, client, op.folder_path, list(op.uids), op.target_path)
+                    if missing:
+                        # The move before this one hasn't landed yet: look again next time.
+                        op.uids = missing
+                        op.attempts += 1
+                        if op.attempts >= MAX_OP_ATTEMPTS:
+                            await db.delete(op)
+                        await db.commit()
+                        continue
+                else:
+                    await asyncio.to_thread(imap.apply_op, client, op.kind, op.folder_path, list(op.uids), op.target_path)
                 await db.delete(op)
             except Exception as e:  # noqa: BLE001 — a bad change shouldn't hold up the rest
                 op.attempts += 1

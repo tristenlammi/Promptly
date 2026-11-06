@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlarmClock, Archive, ArrowLeft, CalendarPlus, Check, CheckSquare, ChevronUp, Download, Forward, Inbox, ListFilter, Loader2, Mail, MailOpen, Paperclip, Pen, Plus, Reply, ReplyAll, Search, Send, Settings, Sparkles, Star, Tag, Trash2, UserPlus, X, type LucideIcon,
+  AlarmClock, Archive, ArrowLeft, CalendarPlus, Check, CheckSquare, ChevronDown, ChevronUp, Download, Forward, Inbox, ListFilter, Loader2, Mail, MailOpen, Paperclip, Pen, Plus, Reply, ReplyAll, Search, Send, Settings, Sparkles, Star, Tag, Trash2, UserPlus, X, type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { Link as RouterLink, useLocation } from "react-router-dom";
@@ -19,6 +19,7 @@ import { asParagraphs, Composer, type Draft } from "./Composer";
 import { AttachmentViewer, SaveToFiles, useSavedAttachments } from "./AttachmentViewer";
 import { useThreadDrag } from "./DragMove";
 import { LabelPicker, LabelPill, LabelsSheet, NewLabelSheet, RuleSheet, type LabelTarget } from "./Labels";
+import { labelRows, readFolded, saveFolded, unfolded } from "./labelTree";
 import { MessageBody } from "./MessageBody";
 import { EditMailboxSheet, EventSheet, MailSettingsSheet, SnoozeSheet } from "./Sheets";
 
@@ -71,6 +72,7 @@ export function MailApp() {
   const [adding, setAdding] = useState(false);
   const [managing, setManaging] = useState(false);
   const [labelsOpen, setLabelsOpen] = useState(false);
+  const [folded, setFolded] = useState(readFolded);
   const [menu, setMenu] = useState<{ row: ThreadRow; x: number; y: number } | null>(null);
   const [labelling, setLabelling] = useState<LabelTarget | null>(null);
   const [ruleFor, setRuleFor] = useState<LabelTarget | null>(null);
@@ -409,12 +411,47 @@ export function MailApp() {
         <p className="text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Labels</p>
         <button type="button" onClick={() => setLabelsOpen(true)} aria-label="Manage labels and rules" title="Manage labels and rules" className="flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--hover)]"><Settings className="h-3.5 w-3.5" /></button>
       </div>
-      {labels.map((l) => (
-        <button key={l.id} type="button" onClick={() => showLabel(l.id)} onContextMenu={(e) => { e.preventDefault(); setLabelsOpen(true); }} aria-current={view.label === l.id ? "page" : undefined} title={l.name} {...dropTarget(`label:${l.id}`, `Move to ${l.name}`, l.color)} style={dropStyle(`label:${l.id}`, l.color)} className={`flex h-8 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-[background-color,box-shadow,transform] duration-150 ease-out ${view.label === l.id ? "bg-[#D97757]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
-          <span style={{ backgroundColor: l.color }} className="h-2 w-2 shrink-0 rounded-full" /><span className="min-w-0 flex-1 truncate text-left">{l.name}</span>
-          {l.unread > 0 && <span className="text-xs font-medium text-[#D97757]">{l.unread}</span>}
-        </button>
-      ))}
+      {/* Dragging an email opens everything, so any label can take it. */}
+      {unfolded(labelRows(labels), dragging ? new Set() : folded).map((r) => {
+        const l = r.label;
+        const key = r.path.toLowerCase();
+        const isFolded = folded.has(key) && !dragging;
+        const count = isFolded ? r.unreadInside : (l?.unread ?? 0);
+        const padding = { paddingLeft: `${0.625 + r.depth * 0.875}rem` };
+        return (
+          <div key={r.path} className="relative shrink-0">
+            {l ? (
+              <button type="button" onClick={() => showLabel(l.id)} onContextMenu={(e) => { e.preventDefault(); setLabelsOpen(true); }} aria-current={view.label === l.id ? "page" : undefined} aria-label={l.name} title={l.name} {...dropTarget(`label:${l.id}`, `Move to ${l.name}`, l.color)} style={{ ...padding, ...dropStyle(`label:${l.id}`, l.color) }} className={`flex h-8 w-full items-center gap-2.5 rounded-lg text-sm transition-[background-color,box-shadow,transform] duration-150 ease-out ${r.hasChildren ? "pr-8" : "pr-2.5"} ${view.label === l.id ? "bg-[#D97757]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
+                <span style={{ backgroundColor: l.color }} className="h-2 w-2 shrink-0 rounded-full" /><span className="min-w-0 flex-1 truncate text-left">{r.name}</span>
+                {count > 0 && <span className="text-xs font-medium text-[#D97757]">{count}</span>}
+              </button>
+            ) : (
+              // Only a heading: there's a label inside it, but none called this.
+              <div style={padding} title={r.path} className="flex h-8 w-full items-center gap-2.5 pr-8 text-sm text-[var(--text-muted)]">
+                <span className="min-w-0 flex-1 truncate">{r.name}</span>
+                {count > 0 && <span className="text-xs font-medium text-[#D97757]">{count}</span>}
+              </div>
+            )}
+            {r.hasChildren && (
+              <button
+                type="button"
+                aria-expanded={!isFolded}
+                aria-label={`${isFolded ? "Show" : "Hide"} labels inside ${r.path}`}
+                onClick={() => {
+                  const next = new Set(folded);
+                  if (next.has(key)) next.delete(key);
+                  else next.add(key);
+                  setFolded(next);
+                  saveFolded(next);
+                }}
+                className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded text-[var(--text-muted)] hover:bg-[var(--hover)]"
+              >
+                <ChevronDown className={`h-3.5 w-3.5 transition-transform duration-150 ${isFolded ? "-rotate-90" : ""}`} />
+              </button>
+            )}
+          </div>
+        );
+      })}
       {labels.length === 0 && !dragging && <p className="px-2.5 py-1 text-xs text-[var(--text-muted)]">Drag an email here to start a label, or right-click one to make a rule.</p>}
       <div className={`grid shrink-0 transition-[grid-template-rows,opacity] duration-150 ease-out ${dragging ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}>
         <div className="min-h-0 overflow-hidden">

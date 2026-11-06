@@ -21,6 +21,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-06
+
+### Fixed
+- Mail: moving an email again before the first move has synced, or undoing a move straight away, now reaches your mailbox too. It used to stay at the first place in Gmail while Promptly showed the second.
+- Mail: an attachment no longer says it's been deleted while its email is moving between folders, or after it was moved from another device: Promptly now looks for it where it's coming from, and offers Try again.
+
+### Added
+- Mail: labels nest. A label inside another (Homes/Lot 7534, as Gmail keeps them) sits under its parent and folds away with it, and Manage labels can put one inside another, taking what's inside it along.
+
 ## [0.27.1] - 2026-11-06
 
 ### Fixed

@@ -6,6 +6,7 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
 import { mailApi, type MailLabel, type MailRule, type Person, type RuleKind } from "./api";
+import { joinLabel, labelRows, parentOf, placesFor, shortName } from "./labelTree";
 
 export const LABEL_COLOURS = ["#D97757", "#C9A227", "#6B9E78", "#4F9DA6", "#5B7FBF", "#8E6FB5", "#C2668A", "#8A7F73"];
 
@@ -29,8 +30,8 @@ export function nextColour(labels: MailLabel[]): string {
 
 export function LabelPill({ label }: { label: MailLabel }) {
   return (
-    <span style={{ color: label.color, backgroundColor: `${label.color}22` }} className="inline-flex max-w-[7rem] shrink-0 items-center rounded-full px-1.5 py-px text-[10px] font-medium">
-      <span className="truncate">{label.name}</span>
+    <span title={label.name} style={{ color: label.color, backgroundColor: `${label.color}22` }} className="inline-flex max-w-[7rem] shrink-0 items-center rounded-full px-1.5 py-px text-[10px] font-medium">
+      <span className="truncate">{shortName(label.name)}</span>
     </span>
   );
 }
@@ -59,6 +60,22 @@ function useMailRefresh() {
   };
 }
 
+/** How far in a label sits, in a list of them. */
+const indent = (depth: number) => ({ paddingLeft: `${0.5 + depth * 1.25}rem` });
+
+/** Which label this one goes inside. */
+function InsidePicker({ value, places, onChange }: { value: string; places: string[]; onChange: (v: string) => void }) {
+  return (
+    <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+      <span className="shrink-0">Inside</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="h-9 min-w-0 flex-1 rounded-lg border border-[var(--border)] bg-[var(--surface)] px-2 text-sm text-[var(--text)] outline-none focus:border-[#D97757]">
+        <option value="">Nothing (top level)</option>
+        {places.map((p) => <option key={p} value={p}>{p}</option>)}
+      </select>
+    </label>
+  );
+}
+
 const INPUT = "h-10 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[#D97757]";
 
 /** Where this conversation should live. A label is a place, so it goes to just one. */
@@ -80,13 +97,17 @@ export function LabelPicker({ target, labels, onMove, onToInbox, onMakeRule, onC
 
   return (
     <Sheet title="Move to" onClose={onClose}>
-      {labels.map((l) => (
-        <button key={l.id} type="button" aria-current={target.labels.includes(l.id) ? "true" : undefined} onClick={() => onMove(l.id)} className={row}>
-          <span style={{ backgroundColor: l.color }} className="h-2.5 w-2.5 shrink-0 rounded-full" />
-          <span className="min-w-0 flex-1 truncate">{l.name}</span>
-          {target.labels.includes(l.id) && <Check className="h-4 w-4 shrink-0 text-[#D97757]" />}
-        </button>
-      ))}
+      {labelRows(labels).map((r) => {
+        const l = r.label;
+        if (!l) return <p key={r.path} style={indent(r.depth)} className="flex min-h-9 items-center truncate text-xs font-medium text-[var(--text-muted)]">{r.name}</p>;
+        return (
+          <button key={l.id} type="button" aria-label={l.name} aria-current={target.labels.includes(l.id) ? "true" : undefined} onClick={() => onMove(l.id)} style={indent(r.depth)} className={row}>
+            <span style={{ backgroundColor: l.color }} className="h-2.5 w-2.5 shrink-0 rounded-full" />
+            <span className="min-w-0 flex-1 truncate">{r.name}</span>
+            {target.labels.includes(l.id) && <Check className="h-4 w-4 shrink-0 text-[#D97757]" />}
+          </button>
+        );
+      })}
       {target.labels.length > 0 && <button type="button" onClick={onToInbox} className={row}><span className="h-2.5 w-2.5 shrink-0" />Back to Inbox</button>}
       <form className="mt-2 flex gap-2" onSubmit={(e) => { e.preventDefault(); void create(); }}>
         <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="New label" aria-label="New label" className={INPUT} />
@@ -221,8 +242,11 @@ export function LabelsSheet({ labels, current, top, onPick, onClose, onRemoved }
   const rules = data ?? [];
   const [editing, setEditing] = useState<string | null>(null);
   const [name, setName] = useState("");
+  const [inside, setInside] = useState("");
   const [fresh, setFresh] = useState("");
+  const [freshInside, setFreshInside] = useState("");
   const [removing, setRemoving] = useState<string | null>(null);
+  const rows = labelRows(labels);
 
   const attempt = async (job: () => Promise<unknown>, fallback: string) => {
     try {
@@ -236,7 +260,8 @@ export function LabelsSheet({ labels, current, top, onPick, onClose, onRemoved }
   };
 
   const save = async (l: MailLabel) => {
-    if (name.trim() && name.trim() !== l.name && !(await attempt(() => mailApi.editLabel(l.id, { name }), "Couldn't rename that."))) return;
+    const whole = joinLabel(inside, name);
+    if (name.trim() && whole !== l.name && !(await attempt(() => mailApi.editLabel(l.id, { name: whole }), "Couldn't rename that."))) return;
     setEditing(null);
   };
 
@@ -244,11 +269,15 @@ export function LabelsSheet({ labels, current, top, onPick, onClose, onRemoved }
     <Sheet title="Labels" onClose={onClose}>
       {top}
       {labels.length === 0 && <p className="px-1 pb-2 text-sm text-[var(--text-muted)]">Labels are places to keep email, separate from your Inbox. Add one here, then drag email onto it on a computer, or press and hold an email on a phone.</p>}
-      {labels.map((l) => (
+      {rows.map((r) => {
+        const l = r.label;
+        if (!l) return <p key={r.path} style={indent(r.depth)} className="flex min-h-9 items-center truncate text-xs font-medium text-[var(--text-muted)]">{r.name}</p>;
+        return (
         <div key={l.id}>
           {editing === l.id ? (
             <form className="rounded-lg bg-[var(--hover)] p-2" onSubmit={(e) => { e.preventDefault(); void save(l); }}>
               <input autoFocus value={name} onChange={(e) => setName(e.target.value)} maxLength={60} aria-label="Label name" className={INPUT} />
+              <div className="mt-2"><InsidePicker value={inside} places={placesFor(rows, l.name)} onChange={setInside} /></div>
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {LABEL_COLOURS.map((c) => (
                   <button key={c} type="button" aria-label={`Colour ${c}`} aria-pressed={l.color === c} onClick={() => void attempt(() => mailApi.editLabel(l.id, { color: c }), "Couldn't change the colour.")} style={{ backgroundColor: c }} className={`h-7 w-7 rounded-full ${l.color === c ? "ring-2 ring-[var(--text)] ring-offset-2 ring-offset-[var(--surface)]" : ""}`} />
@@ -256,7 +285,7 @@ export function LabelsSheet({ labels, current, top, onPick, onClose, onRemoved }
               </div>
               {removing === l.id ? (
                 <div className="mt-2 text-xs text-[var(--text)]">
-                  <p>This removes the label and its rules from Promptly. No email is deleted, and a folder in your mailbox stays there.</p>
+                  <p>This removes the label and its rules from Promptly. No email is deleted, and a folder in your mailbox stays there.{r.hasChildren && " Labels inside it stay too."}</p>
                   <div className="mt-2 flex justify-end gap-2">
                     <button type="button" onClick={() => setRemoving(null)} className="h-8 rounded-lg px-3 text-[var(--text-muted)]">Keep it</button>
                     <button type="button" onClick={() => void attempt(() => mailApi.removeLabel(l.id), "Couldn't remove that.").then((ok) => { if (ok) { setEditing(null); setRemoving(null); onRemoved(l.id); } })} className="h-8 rounded-lg bg-[#C62828] px-3 font-medium text-white">Remove</button>
@@ -271,13 +300,13 @@ export function LabelsSheet({ labels, current, top, onPick, onClose, onRemoved }
             </form>
           ) : (
             <div className="flex items-center gap-1">
-              <button type="button" onClick={() => onPick(l.id)} aria-current={current === l.id ? "true" : undefined} className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg px-2 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]">
+              <button type="button" onClick={() => onPick(l.id)} aria-label={l.name} aria-current={current === l.id ? "true" : undefined} style={indent(r.depth)} className="flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg pr-2 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]">
                 <span style={{ backgroundColor: l.color }} className="h-2.5 w-2.5 shrink-0 rounded-full" />
-                <span className="min-w-0 flex-1 truncate">{l.name}</span>
+                <span className="min-w-0 flex-1 truncate">{r.name}</span>
                 {l.unread > 0 && <span className="text-xs font-medium text-[#D97757]">{l.unread}</span>}
                 {current === l.id && <Check className="h-4 w-4 shrink-0 text-[#D97757]" />}
               </button>
-              <button type="button" onClick={() => { setEditing(l.id); setName(l.name); setRemoving(null); }} aria-label={`Edit ${l.name}`} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)]"><Pencil className="h-4 w-4" /></button>
+              <button type="button" onClick={() => { setEditing(l.id); setName(shortName(l.name)); setInside(parentOf(l.name)); setRemoving(null); }} aria-label={`Edit ${l.name}`} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--hover)]"><Pencil className="h-4 w-4" /></button>
             </div>
           )}
           {rules.filter((r) => r.label_id === l.id).map((r) => (
@@ -287,14 +316,16 @@ export function LabelsSheet({ labels, current, top, onPick, onClose, onRemoved }
             </div>
           ))}
         </div>
-      ))}
-      <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (fresh.trim()) void attempt(() => mailApi.addLabel(fresh, nextColour(labels)), "Couldn't make that label.").then((ok) => { if (ok) setFresh(""); }); }}>
+        );
+      })}
+      <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); if (fresh.trim()) void attempt(() => mailApi.addLabel(joinLabel(freshInside, fresh), nextColour(labels)), "Couldn't make that label.").then((ok) => { if (ok) setFresh(""); }); }}>
         <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-lg border border-[var(--border)] px-3 focus-within:border-[#D97757]">
           <Tag className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
           <input value={fresh} onChange={(e) => setFresh(e.target.value)} maxLength={60} placeholder="New label" aria-label="New label" className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />
         </div>
         <button type="submit" disabled={!fresh.trim()} aria-label="Add label" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#D97757] text-white disabled:opacity-40"><Plus className="h-4 w-4" /></button>
       </form>
+      {rows.length > 0 && <div className="mt-2"><InsidePicker value={freshInside} places={placesFor(rows)} onChange={setFreshInside} /></div>}
     </Sheet>
   );
 }

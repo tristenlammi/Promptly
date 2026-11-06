@@ -1,15 +1,17 @@
 """Mail labels and rules: only ever yours, and rules really file mail on a real server."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
 
 from app.mail.models import MailFolder, MailLabel, MailMessage, MailOp, MailRule
+from app.mail import worker
 from app.mail.rules import normalise
 
-from .test_mail import H, _deliver, _live_account, _mailbox, _rows, _sync, client, live, mk_account, mk_message, mk_user, server  # noqa: F401
+from .test_mail import H, _connect, _deliver, _live_account, _mailbox, _rows, _sync, client, live, mk_account, mk_message, mk_user, server  # noqa: F401
 
 
 async def _label(client, u, name="Family") -> str:  # noqa: F811
@@ -374,3 +376,163 @@ async def test_a_label_of_your_own_with_the_same_name_is_the_same_label(client, 
     labels = (await client.get("/api/mail/overview", headers=H(u))).json()["labels"]
     assert [x["id"] for x in labels] == [mine]
     assert len((await client.get(f"/api/mail/threads?label={mine}", headers=H(u))).json()["threads"]) == 1
+
+
+async def test_labels_nest_by_name_and_their_children_move_with_them(client, db):  # noqa: F811
+    owner = await mk_user(db, "nester")
+    homes = await _label(client, owner, " Homes ")
+    lot = await _label(client, owner, "Homes / Lot  7534")
+    plans = await _label(client, owner, "Homes/Lot 7534/Plans")
+    other = await _label(client, owner, "Homes Two")
+
+    async def names() -> dict[str, str]:
+        rows = (await client.get("/api/mail/overview", headers=H(owner))).json()["labels"]
+        return {r["id"]: r["name"] for r in rows}
+
+    assert (await names())[lot] == "Homes/Lot 7534"
+
+    # What's inside goes along; a label that only starts the same doesn't.
+    r = await client.patch(f"/api/mail/labels/{homes}", json={"name": "Houses"}, headers=H(owner))
+    assert r.status_code == 200, r.text
+    assert await names() == {homes: "Houses", lot: "Houses/Lot 7534", plans: "Houses/Lot 7534/Plans", other: "Homes Two"}
+
+    # Moved under another label.
+    r = await client.patch(f"/api/mail/labels/{lot}", json={"name": "Homes Two/Lot 7534"}, headers=H(owner))
+    assert r.status_code == 200, r.text
+    assert (await names())[plans] == "Homes Two/Lot 7534/Plans"
+
+    # Not inside itself.
+    r = await client.patch(f"/api/mail/labels/{other}", json={"name": "Homes Two/Lot 7534/Mine"}, headers=H(owner))
+    assert r.status_code == 409
+
+    # A child that would land on a label you've got stops the whole move.
+    await _label(client, owner, "Elsewhere/Plans")
+    r = await client.patch(f"/api/mail/labels/{lot}", json={"name": "Elsewhere"}, headers=H(owner))
+    assert r.status_code == 409
+    assert "Elsewhere/Plans" in r.json()["detail"]
+    assert (await names())[lot] == "Homes Two/Lot 7534"
+
+    # Nor one that would make a child's name too long.
+    r = await client.patch(f"/api/mail/labels/{lot}", json={"name": "x" * 58}, headers=H(owner))
+    assert r.status_code == 422
+    assert (await names())[plans] == "Homes Two/Lot 7534/Plans"
+
+    r = await client.post("/api/mail/labels", json={"name": "/ / "}, headers=H(owner))
+    assert r.status_code == 422
+    r = await client.post("/api/mail/labels", json={"name": "a" * 40 + "/" + "b" * 40}, headers=H(owner))
+    assert r.status_code == 422
+
+
+async def test_removing_a_parent_leaves_whats_inside(client, db):  # noqa: F811
+    owner = await mk_user(db, "parent-remover")
+    homes = await _label(client, owner, "Homes")
+    lot = await _label(client, owner, "Homes/Lot 1")
+    assert (await client.delete(f"/api/mail/labels/{homes}", headers=H(owner))).status_code == 204
+    rows = (await client.get("/api/mail/overview", headers=H(owner))).json()["labels"]
+    assert [(r["id"], r["name"]) for r in rows] == [(lot, "Homes/Lot 1")]
+
+
+@live
+async def test_an_attachment_opens_while_its_email_is_still_moving(client, db, server):  # noqa: F811
+    u = await mk_user(db, "mover", role="admin")
+    account = await _live_account(db, u)
+    _deliver("alice@mailtest.example", subject="Payslip", attachment="%PDF-1.4 the payslip")
+    await _sync(account)
+    m = (await _rows(db, account))[0]
+    label = await _label(client, u)
+    url = f"/api/mail/messages/{m.id}/attachments/{m.attachments[0]['part']}"
+
+    # Promptly has filed it, but the mailbox hasn't caught up.
+    r = await client.put(f"/api/mail/threads/{account.id}/{m.thread_key}/labels/{label}", headers=H(u))
+    assert r.status_code == 204, r.text
+    pending = (await db.execute(select(MailOp).where(MailOp.account_id == account.id, MailOp.kind == "move"))).scalars().all()
+    assert pending, "expected the move to still be waiting"
+    r = await client.get(url, headers=H(u))
+    assert r.status_code == 200, r.text
+    assert r.content.startswith(b"%PDF")
+
+    # And once it has.
+    await _sync(account)
+    r = await client.get(url, headers=H(u))
+    assert r.status_code == 200, r.text
+    assert r.content.startswith(b"%PDF")
+
+
+@live
+async def test_an_attachment_is_found_after_the_mailbox_moved_it_elsewhere(client, db, server):  # noqa: F811
+    u = await mk_user(db, "mover2", role="admin")
+    account = await _live_account(db, u)
+    _deliver("alice@mailtest.example", subject="Payslip", attachment="%PDF-1.4 the payslip")
+    await _sync(account)
+    m = (await _rows(db, account))[0]
+    # Moved from another device, and not noticed here yet.
+    c = _mailbox()
+    c.select_folder("INBOX")
+    c.move(c.search(["ALL"]), "Archive")
+    c.logout()
+    r = await client.get(f"/api/mail/messages/{m.id}/attachments/{m.attachments[0]['part']}", headers=H(u))
+    assert r.status_code == 200, r.text
+    assert r.content.startswith(b"%PDF")
+
+
+def _count_in(folder: str) -> int:
+    c = _mailbox()
+    c.select_folder(folder, readonly=True)
+    n = len(c.search(["ALL"]))
+    c.logout()
+    return n
+
+
+async def _moved_twice_setup(client, db, name):  # noqa: F811
+    u = await mk_user(db, name, role="admin")
+    account = await _live_account(db, u)
+    _deliver("alice@mailtest.example", subject="Twice")
+    await _sync(account)
+    m = (await _rows(db, account))[0]
+    url = f"/api/mail/threads/{account.id}/{m.thread_key}/action"
+    return u, account, url
+
+
+async def _one_row_in(db, account, folder_path: str) -> None:
+    rows = await _rows(db, account)
+    assert len(rows) == 1, [r.subject for r in rows]
+    folder = await db.get(MailFolder, rows[0].folder_id)
+    assert folder.path == folder_path
+    assert rows[0].uid is not None
+
+
+@live
+async def test_moved_twice_before_the_mailbox_caught_up_ends_up_at_the_second(client, db, server):  # noqa: F811
+    u, account, url = await _moved_twice_setup(client, db, "twice1")
+    assert (await client.post(url, json={"action": "archive"}, headers=H(u))).status_code == 204
+    assert (await client.post(url, json={"action": "trash"}, headers=H(u))).status_code == 204
+    await _sync(account)
+    await _sync(account)
+    assert (_count_in("INBOX"), _count_in("Archive"), _count_in("Trash")) == (0, 0, 1)
+    await _one_row_in(db, account, "Trash")
+
+
+@live
+async def test_moved_again_after_the_first_move_landed_but_before_a_sync(client, db, server):  # noqa: F811
+    u, account, url = await _moved_twice_setup(client, db, "twice2")
+    assert (await client.post(url, json={"action": "archive"}, headers=H(u))).status_code == 204
+    c = await asyncio.to_thread(_connect, account)
+    await worker._apply_ops(c, account.id)
+    c.logout()
+    assert (_count_in("INBOX"), _count_in("Archive")) == (0, 1)
+    assert (await client.post(url, json={"action": "trash"}, headers=H(u))).status_code == 204
+    await _sync(account)
+    await _sync(account)
+    assert (_count_in("Archive"), _count_in("Trash")) == (0, 1)
+    await _one_row_in(db, account, "Trash")
+
+
+@live
+async def test_undoing_a_move_straight_away_puts_it_back(client, db, server):  # noqa: F811
+    u, account, url = await _moved_twice_setup(client, db, "twice3")
+    assert (await client.post(url, json={"action": "archive"}, headers=H(u))).status_code == 204
+    assert (await client.post(url, json={"action": "inbox"}, headers=H(u))).status_code == 204
+    await _sync(account)
+    await _sync(account)
+    assert (_count_in("INBOX"), _count_in("Archive")) == (1, 0)
+    await _one_row_in(db, account, "INBOX")

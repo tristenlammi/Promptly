@@ -23,6 +23,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import delete, func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import get_current_user, require_admin
@@ -634,6 +635,8 @@ async def known_people(body: PeopleBody, db: AsyncSession = Depends(get_db), use
 
 # ---- labels and rules
 
+MAX_LABEL_NAME = 60  # the column's size
+
 
 async def _my_label(db: AsyncSession, user: User, label_id: uuid.UUID) -> MailLabel:
     label = await db.get(MailLabel, label_id)
@@ -674,20 +677,45 @@ async def _name_is_free(db: AsyncSession, user: User, name: str, other_than: uui
 
 
 class LabelBody(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
+    name: str = Field(min_length=1, max_length=300)
     color: str = Field(default="#D97757", pattern=r"^#[0-9A-Fa-f]{6}$")
 
 
 class LabelPatch(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=60)
+    name: str | None = Field(default=None, min_length=1, max_length=300)
     color: str | None = Field(default=None, pattern=r"^#[0-9A-Fa-f]{6}$")
 
 
 def _label_name(raw: str) -> str:
-    name = " ".join(raw.split())
+    """A "/" puts a label inside another, as in Gmail: "Homes/Lot 7534"."""
+    name = "/".join(part for part in (" ".join(p.split()) for p in raw.split("/")) if part)
     if not name:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Give the label a name.")
+    if len(name) > MAX_LABEL_NAME:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"That's too long: a label and what it's inside can be up to {MAX_LABEL_NAME} characters.")
     return name
+
+
+async def _rename_with_children(db: AsyncSession, user: User, label: MailLabel, name: str) -> None:
+    """What's inside a label goes with it. Folders in the mailbox aren't touched."""
+    old = label.name
+    if name == old:
+        return
+    if name.lower().startswith(f"{old.lower()}/"):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="A label can't go inside itself.")
+    mine = (await db.execute(select(MailLabel).where(MailLabel.user_id == user.id))).scalars().all()
+    inside = [x for x in mine if x.name.lower().startswith(f"{old.lower()}/")]
+    moving = {x.id for x in inside} | {label.id}
+    renamed = {x.id: f"{name}{x.name[len(old):]}" for x in inside}
+    taken = {x.name.lower() for x in mine if x.id not in moving}
+    for new in [name, *renamed.values()]:
+        if new.lower() in taken:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail=f'You\'ve already got a label called "{new}".')
+        if len(new) > MAX_LABEL_NAME:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f'"{new}" would be too long: a label and what it\'s inside can be up to {MAX_LABEL_NAME} characters.')
+    label.name = name
+    for x in inside:
+        x.name = renamed[x.id]
 
 
 @router.post("/labels", status_code=status.HTTP_201_CREATED)
@@ -706,12 +734,14 @@ async def add_label(body: LabelBody, db: AsyncSession = Depends(get_db), user: U
 async def edit_label(label_id: uuid.UUID, body: LabelPatch, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
     label = await _my_label(db, user, label_id)
     if body.name is not None:
-        name = _label_name(body.name)
-        await _name_is_free(db, user, name, other_than=label.id)
-        label.name = name
+        await _rename_with_children(db, user, label, _label_name(body.name))
     if body.color is not None:
         label.color = body.color
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="You've already got a label called that.") from None
     return {"id": str(label.id), "name": label.name, "color": label.color}
 
 
@@ -919,14 +949,13 @@ async def _forwarded_files(db: AsyncSession, account: MailAccount, user: User, o
     """A forward carries its attachments, which are still only in the mailbox."""
     if not original.attachments:
         return []
-    folder = await db.get(MailFolder, original.folder_id)
+    places = await _where_it_could_be(db, original)
     server = _server_for(account, user)
 
     def fetch() -> list[compose.File]:
         client = imap.connect(server)
         try:
-            uid = original.uid or imap.find_uid(client, folder.path, original.message_id)
-            raw = imap.fetch_raw(client, folder.path, uid) if uid else None
+            raw = imap.read_message(client, places, original.uid, original.message_id)
         finally:
             client.logout()
         found = [parse.attachment_bytes(raw, a["part"]) for a in original.attachments] if raw else []
@@ -1064,19 +1093,35 @@ async def draft(body: DraftBody, request: Request, db: AsyncSession = Depends(ge
 # ---- attachments and images
 
 
+async def _where_it_could_be(db: AsyncSession, message: MailMessage) -> list[str]:
+    """The folder Promptly has it in, then where a move into there is still coming
+    from, then the places a move from another device most likely took it."""
+    folder = await db.get(MailFolder, message.folder_id)
+    moves = (await db.execute(
+        select(MailOp.folder_path, MailOp.target_path).where(MailOp.account_id == message.account_id, MailOp.kind.in_(("move", "move_found"))).order_by(MailOp.created_at.desc())
+    )).all()
+    # Back along the moves still waiting, since it may have been moved more than once.
+    coming_from = [folder.path]
+    for path in coming_from:
+        coming_from += [m.folder_path for m in moves if m.target_path == path and m.folder_path not in coming_from]
+    usual = (await db.execute(
+        select(MailFolder.path).where(MailFolder.account_id == message.account_id, MailFolder.role.in_(("inbox", "archive", "all")))
+    )).scalars().all()
+    return list(dict.fromkeys([*coming_from, *usual]))
+
+
 async def _attachment_bytes(db: AsyncSession, user: User, message_id: uuid.UUID, part: int) -> tuple[str, str, bytes]:
     message = await db.get(MailMessage, message_id)
     if message is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Attachment not found.")
     account = await _mine(db, user, message.account_id)
-    folder = await db.get(MailFolder, message.folder_id)
+    places = await _where_it_could_be(db, message)
     server = _server_for(account, user)
 
     def fetch() -> tuple[str, str, bytes] | None:
         client = imap.connect(server)
         try:
-            uid = message.uid or imap.find_uid(client, folder.path, message.message_id)
-            raw = imap.fetch_raw(client, folder.path, uid) if uid else None
+            raw = imap.read_message(client, places, message.uid, message.message_id)
         finally:
             client.logout()
         return parse.attachment_bytes(raw, part) if raw else None

@@ -166,9 +166,11 @@ class MailOp(UUIDPKMixin, CreatedAtMixin, Base):
     __tablename__ = "mail_ops"
 
     account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("mail_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
-    kind: Mapped[str] = mapped_column(String(12), nullable=False)  # seen | unseen | flag | unflag | move | delete
+    kind: Mapped[str] = mapped_column(String(12), nullable=False)  # seen | unseen | flag | unflag | move | move_found | delete
     folder_path: Mapped[str] = mapped_column(String(500), nullable=False)
-    uids: Mapped[list[int]] = mapped_column(JSONB, nullable=False, default=list)
+    # The server's numbers, or Message-IDs for move_found: an email moved again before
+    # its first move has been synced has no number yet in the folder it's leaving.
+    uids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     target_path: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 

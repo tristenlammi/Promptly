@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from imapclient import IMAPClient
+from imapclient.exceptions import IMAPClientError
 
 from app.net.safe_fetch import assert_url_is_safe
 
@@ -287,6 +288,25 @@ def find_uid(client: IMAPClient, path: str, message_id: str) -> int | None:
     return max(found) if found else None
 
 
+def read_message(client: IMAPClient, places: list[str], uid: int | None, message_id: str) -> bytes | None:
+    """One whole email, from wherever it is right now. ``places`` starts with the folder
+    we think it's in, but it may still be on its way there, or have been moved from
+    another device since we last looked."""
+    if uid:
+        raw = fetch_raw(client, places[0], uid)
+        if raw:
+            return raw
+    for path in places:
+        try:
+            found = find_uid(client, path, message_id)
+            raw = fetch_raw(client, path, found) if found else None
+        except IMAPClientError:
+            continue  # That folder's gone. The email may still be in another.
+        if raw:
+            return raw
+    return None
+
+
 def apply_op(client: IMAPClient, kind: str, path: str, uids: list[int], target: str) -> None:
     if not uids:
         return
@@ -300,12 +320,29 @@ def apply_op(client: IMAPClient, kind: str, path: str, uids: list[int], target: 
     elif kind == "unflag":
         client.remove_flags(uids, [b"\\Flagged"])
     elif kind == "move":
-        if client.has_capability("MOVE"):
-            client.move(uids, target)
-        else:
-            client.copy(uids, target)
-            client.delete_messages(uids)
-            client.expunge()
+        _move(client, uids, target)
+
+
+def _move(client: IMAPClient, uids: list[int], target: str) -> None:
+    if client.has_capability("MOVE"):
+        client.move(uids, target)
+    else:
+        client.copy(uids, target)
+        client.delete_messages(uids)
+        client.expunge()
+
+
+def move_found(client: IMAPClient, path: str, message_ids: list[str], target: str) -> list[str]:
+    """Moves these emails by their Message-IDs, and says which weren't there (yet)."""
+    found: dict[str, int] = {}
+    for message_id in message_ids:
+        uid = find_uid(client, path, message_id)
+        if uid:
+            found[message_id] = uid
+    if found:
+        select(client, path, readonly=False)
+        _move(client, list(found.values()), target)
+    return [m for m in message_ids if m not in found]
 
 
 def append_sent(client: IMAPClient, path: str, raw: bytes) -> None:
