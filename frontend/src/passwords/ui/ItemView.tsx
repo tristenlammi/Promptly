@@ -1,8 +1,10 @@
 // One item, read-only, with copy buttons. Secrets stay as dots until asked for.
-import { ArchiveRestore, Archive, ExternalLink, History, Pencil, Star, Trash2 } from "lucide-react";
+import { ArchiveRestore, Archive, Download, ExternalLink, History, Pencil, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
-import type { Item, ItemBody } from "../core/model";
+import { downloadAttachment, uploadAttachment } from "../core/attachments";
+import type { AttachmentRef, Item, ItemBody } from "../core/model";
+import { downloadBlob } from "./Onboarding";
 import { periodOf, secondsLeft, toOtpauth, totpCode } from "../core/totp";
 import { ItemEditor, KIND_LABEL } from "./ItemEditor";
 import { Button, Callout, CopyButton, errorText, IconButton, inputClass, Label, Modal, PlainRow, safeHref, SecretRow, useVault } from "./kit";
@@ -151,6 +153,78 @@ function ConflictPicker({ item }: { item: Item }) {
         );
       })}
     </Callout>
+  );
+}
+
+function Attachments({ item, canEdit }: { item: Item; canEdit: boolean }) {
+  const { vault, platform, bump, toast } = useVault();
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const list = item.body.attachments ?? [];
+
+  const add = async (file: File | undefined) => {
+    if (!file) return;
+    setError("");
+    setBusy(`Encrypting ${file.name}…`);
+    try {
+      await vault.sync();
+      const ref = await uploadAttachment(platform.api, item.vaultId, item.id, file, (d, t) => setBusy(`Uploading ${file.name}: ${d} of ${t} MB`));
+      const fresh = vault.get(item.id)!;
+      await vault.update(item.id, { ...fresh.body, attachments: [...(fresh.body.attachments ?? []), ref] });
+      await vault.sync();
+      bump();
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const get = async (ref: AttachmentRef) => {
+    setError("");
+    setBusy(`Downloading ${ref.name}…`);
+    try {
+      const data = await downloadAttachment(platform.api, item.vaultId, item.id, ref);
+      downloadBlob(data, ref.name, "application/octet-stream");
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const remove = async (ref: AttachmentRef) => {
+    try {
+      await platform.api.attachmentDelete(item.vaultId, ref.id);
+    } catch {
+      /* the file row goes either way; a sweep catches a stray */
+    }
+    await vault.update(item.id, { ...item.body, attachments: list.filter((a) => a.id !== ref.id) });
+    vault.sync().catch(() => undefined);
+    bump();
+    toast("Attachment removed");
+  };
+
+  return (
+    <section className="flex flex-col gap-1">
+      <h3 className="text-xs font-medium text-[var(--text-muted)]">Attachments</h3>
+      {list.map((a) => (
+        <div key={a.id} className="flex items-center gap-2 rounded-lg border border-[var(--border)] p-2 text-sm text-[var(--text)]">
+          <span className="min-w-0 flex-1 truncate">{a.name}</span>
+          <span className="text-xs text-[var(--text-muted)]">{(a.size / 1048576).toFixed(1)} MB</span>
+          <IconButton label={`Download ${a.name}`} onClick={() => get(a)}><Download className="h-4 w-4" /></IconButton>
+          {canEdit && <IconButton label={`Remove ${a.name}`} onClick={() => remove(a)}><Trash2 className="h-4 w-4" /></IconButton>}
+        </div>
+      ))}
+      {canEdit && (
+        <label className="w-fit cursor-pointer rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text)] hover:bg-[var(--surface-1)]">
+          Attach a file
+          <input type="file" aria-label="Attach a file" className="hidden" onChange={(e) => add(e.target.files?.[0])} />
+        </label>
+      )}
+      {busy && <p className="text-xs text-[var(--text-muted)]">{busy}</p>}
+      {error && <Callout kind="danger">{error}</Callout>}
+    </section>
   );
 }
 
@@ -314,6 +388,8 @@ export function ItemView({ item, onClosed }: { item: Item; onClosed: () => void 
           ))}
         </section>
       ) : null}
+
+      {b.kind !== "folder" && <Attachments item={item} canEdit={canEdit} />}
 
       <footer className="text-xs text-[var(--text-muted)]">Changed {new Date(b.updatedAt).toLocaleString()}</footer>
       {history && (

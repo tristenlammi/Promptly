@@ -683,8 +683,11 @@ from app.mail.router import router as mail_router  # noqa: E402
 app.include_router(mail_router, prefix="/api/mail", tags=["mail"])
 
 # Passwords: end-to-end encrypted vaults (app/passwords). All opaque here.
+from app.passwords.extras import router as passwords_extras_router  # noqa: E402
 from app.passwords.router import admin_router as passwords_admin_router  # noqa: E402
 from app.passwords.router import router as passwords_router  # noqa: E402
+
+app.include_router(passwords_extras_router, prefix="/api/passwords", tags=["passwords"])
 
 app.include_router(passwords_admin_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_router, prefix="/api/passwords", tags=["passwords"])

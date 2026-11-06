@@ -114,3 +114,5 @@ frontend/public/excalidraw-assets/
 # (untracked). Claude Code still loads it from disk regardless of git.
 # Recovery kit (secrets) — never commit.
 promptly-recovery-kit.txt
+e2e/playwright-report-passwords/
+e2e/test-results-passwords/

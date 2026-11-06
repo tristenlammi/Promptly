@@ -196,6 +196,21 @@ export class VaultApi {
   deviceRequestPoll = (id: string, poll_secret: string) =>
     this.request<{ status: string; approver_pub: string | null; payload: string | null }>("POST", `/device-requests/${id}/poll`, { poll_secret });
 
+  attachmentStart = (vaultId: string, body: { id: string; item_id: string; chunk_count: number }) =>
+    this.request<{ id: string; item_id: string; chunk_count: number; size_bytes: number; complete: boolean; received: number[] }>("POST", `/vaults/${vaultId}/attachments`, body);
+  attachmentPut = (vaultId: string, id: string, index: number, blob: Uint8Array) =>
+    this.request<void>("PUT", `/vaults/${vaultId}/attachments/${id}/chunks/${index}`, undefined, { raw: blob as Uint8Array<ArrayBuffer>, headers: { "Content-Type": "application/octet-stream" } });
+  attachmentFinish = (vaultId: string, id: string) => this.request<unknown>("POST", `/vaults/${vaultId}/attachments/${id}/finish`);
+  attachmentGet = (vaultId: string, id: string, index: number) => this.request<ArrayBuffer>("GET", `/vaults/${vaultId}/attachments/${id}/chunks/${index}`);
+  attachmentDelete = (vaultId: string, id: string) => this.request<void>("DELETE", `/vaults/${vaultId}/attachments/${id}`);
+
+  breachRange = async (prefix: string): Promise<string> => {
+    const raw = await this.request<ArrayBuffer>("POST", "/breach/range", { prefix });
+    return new TextDecoder().decode(raw);
+  };
+  directory = () => this.request<{ twofa: Record<string, { documentation?: string }>; passkeys: Record<string, unknown> }>("GET", "/directory");
+  icon = (domain: string) => this.request<ArrayBuffer>("POST", "/icon", { domain });
+
   activity = (limit = 100) => this.request<ActivityOut[]>("GET", `/activity?limit=${limit}`);
   noteExport = () => this.request<void>("POST", "/activity/export");
   putHealth = (counts: { weak: number; reused: number; breached: number; old: number }) => this.request<void>("PUT", "/health", counts);

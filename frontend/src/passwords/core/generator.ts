@@ -130,11 +130,29 @@ function classOf(token: string): string {
   return custom ? custom[1] : "";
 }
 
+/** Split on a separator, except inside a [character class]. */
+function splitOutsideBrackets(text: string, sep: string): string[] {
+  const out: string[] = [];
+  let at = "";
+  let depth = 0;
+  for (const c of text) {
+    if (c === "[") depth = 1;
+    else if (c === "]") depth = 0;
+    if (c === sep && depth === 0) {
+      out.push(at);
+      at = "";
+    } else at += c;
+  }
+  out.push(at);
+  return out;
+}
+
 /** Reads a rule string such as ``minlength: 8; required: lower; allowed: [-_];``. */
 export function parseRules(text: string): SiteRules {
   const out: SiteRules = { required: [], allowed: "" };
   const allowed = new Set<string>();
-  for (const part of text.split(";")) {
+  const clean = text.replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+  for (const part of splitOutsideBrackets(clean, ";")) {
     const colon = part.indexOf(":");
     if (colon < 0) continue;
     const name = part.slice(0, colon).trim().toLowerCase();
@@ -143,8 +161,8 @@ export function parseRules(text: string): SiteRules {
     else if (name === "maxlength") out.maxLength = Number(value);
     else if (name === "max-consecutive") out.maxConsecutive = Number(value);
     else if (name === "required" || name === "allowed") {
-      const classes = value.split(",").map(classOf).filter(Boolean);
-      const union = classes.join("");
+      const union = splitOutsideBrackets(value, ",").map(classOf).join("");
+      if (!union) continue;
       if (name === "required") out.required.push(union);
       for (const c of union) allowed.add(c);
     }
