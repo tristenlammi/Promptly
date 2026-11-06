@@ -23,12 +23,14 @@ try {
     }
 
     # Throwaway users on the stack: the one whose app password connects the phone, and
-    # others for the sharing and rotation stories. Fresh on each run.
+    # others for the sharing and rotation stories. Fresh on each run. Their tokens have to outlast
+    # the whole run, which is longer than an ordinary access token's life.
     $seed = @'
 import asyncio, secrets, uuid
+from datetime import timedelta
 import app.db_models
 from app.auth.models import User
-from app.auth.utils import create_access_token, hash_password
+from app.auth.utils import _create_token, hash_password
 from app.auth.app_passwords import AppPassword, new_token, token_hash, hint
 from app.database import SessionLocal
 from sqlalchemy import func, update
@@ -43,7 +45,7 @@ async def main():
             await db.flush()
             app = new_token()
             db.add(AppPassword(user_id=u.id, name="phone", token_hash=token_hash(app), hint=hint(app), scopes=["upload", "dav:read", "maps", "assistant"]))
-            print("PW_TOKEN " + tag + " " + create_access_token(u.id, token_version=u.token_version) + " " + u.username + " " + app)
+            print("PW_TOKEN " + tag + " " + _create_token(subject=str(u.id), token_type="access", expires_delta=timedelta(hours=3), token_version=u.token_version) + " " + u.username + " " + app)
         await db.commit()
 asyncio.run(main())
 '@

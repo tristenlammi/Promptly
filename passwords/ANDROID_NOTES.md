@@ -172,6 +172,31 @@ These weren't touched, as asked:
 - `CHANGELOG.md`: an `[Unreleased]` line for M8.
 - `passwords/DECISIONS.md`: M8 row and a pointer here.
 
+## What was run, importers, 2026-11-07
+
+Final code for the importers. AVD `PromptlyTest` (API 36, Google Play image, x86_64), the `:8092` stack.
+
+- **JVM:** `gradlew :app:cleanTestDebugUnitTest :app:testDebugUnitTest "-Dpw.stack=http://localhost:8092"`: 245 tests, 0 failed, 0 skipped. CarTemplatesTest 8, CoreTest 54, FinishingTest 33, HostileTest 34, ImportersTest 52 (new), ReviewFixesTest 17, StackTests 29 (1 new), VectorsTest 18.
+- **Cross-check:** `StackTests.importersReadTheSameFilesIntoTheSameItemsAsTheTypeScript` runs the real `importFile` from `importers.ts` under vitest, and compares format, warnings, folder and every body with Kotlin's, leaving out only the times an item was read at. It needs more than 60 items equal to pass. Every format, zips from both sides' writers, KDBX files from pykeepass and from the test's own writer, and files both have to refuse, including six kinds of malformed JSON. The four named differences came out as: `large.kdbx` 194 items, `lastpass-name-only.csv` 2, `doctype-only.xml` 1, `android-url.csv` 1.
+- **Instrumented:** `android/run-passwords-tests.ps1`: `OK (98 tests)`. 95 exercised: AutofillE2ETest 24, CredentialManagerE2ETest 6, DeviceCryptoTest 11, FeaturesUiTest 12, FinishingUiTest 22, ImportDeviceTest 9 (new), VaultUiTest 11. 3 skipped by that script, as before: BiometricE2ETest 2, SmsConsentTest 1. Autofill's suggestion lookup needed its own retry once. No class had to be rerun for that final result.
+- `lintVitalRelease` passes.
+- **What the KDF ceilings cost, measured on this emulator and scaled up, not run at the ceiling:** Argon2d, native, 256 MiB, 4 passes, 2 lanes took 428 ms, so the 32 GiB ceiling is about 13 s. 2 million AES rounds took 1,763 ms, so the 60 million ceiling is about 52 s. An emulator on a desktop CPU isn't a phone: expect a phone to take several times as long on Argon2. `ImportDeviceTest.whatTheCeilingsCost` prints these.
+- **Failures on the way.** Real, in the port: `parseToJsonElement` accepts malformed JSON, so `{"services":[{"secret":AAAA}]}` imported here and was refused on the web (A48). Kotlin's `IGNORE_CASE` is Unicode-aware where JavaScript's `/i` isn't here, so `http\u017F://` passed as a website. A second tap on "Open it" started a second KDF (A49). In the tests, on the first full instrumented run, 96 of 98: `VaultUiTest.againstTheRealStack` with "Signature has expired", since the run had grown past the life of an access token, so the script now gives its throwaway users longer ones. `FinishingUiTest.mainNoticesLeadToWhatNeedsALook` failed that run and 1 of 3 reruns alone, and was a race in the test, older than this work: the card it waited on is behind the dialog, in another window, so it looked gone at once. It now waits for the dialog.
+
+### Compiled only, or not exercised this way
+
+- **Real exports:** the files for 1Password, Proton Pass, Dashlane, LastPass, CXF, Aegis and 2FAS are written by hand from the web's tests and public documentation, not exported from those apps. The KDBX files come from pykeepass, an independent writer, not KeePass itself. So this shows Android and the web agree, not that either reads every real export.
+- **Through the real picker and screen:** a KDBX with its prompt, a `.1pux`, and a hostile XML. Every other format goes through `importFile` on the device, without the picker.
+- **On the device only by way of what's under them:** the AES KDF path through `Kdbx.read`, oversized KDF settings, and a gzip bomb inside a KDBX are JVM tests. That code's pure JVM, but the JVM's providers aren't Android's. On the device, KDBX files use Argon2, and AES rounds are only timed.
+- **The busy lock on the import buttons (A49):** compiled. No test taps twice.
+- **The free-memory limit:** `read()` sets it on every open, and a device test shows a low limit refuses a file, but nothing checks the value worked out from `availMem` is sensible on a phone short of memory.
+- **R8:** no release build was run this round, and nothing on arm64. `lintVitalRelease` compiles the release Kotlin and no more.
+
+### Added to the owner's real-phone checklist
+
+- A KeePass file you really use, on a real phone, with its real KDF settings: how long it takes, and whether the ceilings refuse it.
+- A real export from each manager you've got an account with, compared with the same file imported on the web. The web has the `kdbx.ts` bug above until it's fixed, so check passwords on large KeePass files against KeePass.
+
 ## What was run, 2026-11-07
 
 Final code, for the features that finished the client. AVD `PromptlyTest` (API 36, Google Play image, x86_64), the `:8092` stack.

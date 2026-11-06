@@ -552,6 +552,8 @@ class FinishingUiTest {
         waitFor(By.textContains("isn't right"), 20_000)
         fill("recovery-password", Harness.MASTER)
         tap("recovery-confirm")
+        // The dialog first: the card behind it is in another window, so it looks gone already.
+        assertTrue(Harness.gone(By.res("recovery-confirm"), 20_000))
         assertTrue(Harness.gone(By.res("survival-recovery"), 20_000))
         assertNotNull(client.recoveryChecked())
     }
