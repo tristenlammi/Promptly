@@ -20,6 +20,13 @@ The in-app version tag (bottom of the sidebar) reads the injected
 `frontend/package.json` version, so it always reflects the built release.
 
 ## [Unreleased]
+
+### Added
+- Passwords (preview): the end-to-end encrypted core. Your vault is locked by your master password plus a Secret Key only your devices hold, so a stolen database or backup can't be guessed open.
+- Passwords (preview): the web vault at /passwords, on its own page with a stricter security policy: onboarding with a printable recovery kit, logins, cards, identities, notes, keys and documents, 2FA codes, generator, search, folders, tags, history, Trash, offline use, and new devices approved with safety words.
+- Passwords (preview): import from Chrome, Edge, Firefox, Google, Bitwarden, 1Password, LastPass, Dashlane, Proton Pass, Apple Passwords, KeePass, Credential Exchange, Aegis, 2FAS and Google Authenticator, all read on your device. Encrypted export, a Security check with breach lookups through your server, and encrypted attachments.
+- Passwords (preview): a browser extension for the Chrome family and Firefox: popup, inline menu with anti-clickjacking checks, multi-step sign-ins, save and update prompts, teach-it-once site rules, 2FA codes, side panel, and passkeys that sync.
+- Notifications: a Passwords switch for new-device requests and shared-vault invites. They never carry anything from the vault.
 - Passwords: a Windows app with quick search, auto-type, Windows Hello, scheduled encrypted backups and an optional SSH agent.
 - Passwords: codes and sign-in links from Promptly Mail in the fill menu, if you turn them on. The server isn't told which page you're on.
 - Passwords: Security check now raises security emails against your logins, warns about what could lose your vault, merges duplicates, and walks you through changing passwords one at a time.
@@ -28,13 +35,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: shared vaults with safety words, roles, and a new key when someone's removed, plus a list of the passwords they could read.
 - Passwords: Secure Send, a link with an expiry and a view limit for someone with no account. It can be posted in Rooms or sent by Mail.
 - Passwords: emergency access, where a trusted contact can ask for your vault and it opens after a wait unless you refuse.
-
-### Added
-- Passwords (preview): the end-to-end encrypted core. Your vault is locked by your master password plus a Secret Key only your devices hold, so a stolen database or backup can't be guessed open.
-- Passwords (preview): the web vault at /passwords, on its own page with a stricter security policy: onboarding with a printable recovery kit, logins, cards, identities, notes, keys and documents, 2FA codes, generator, search, folders, tags, history, Trash, offline use, and new devices approved with safety words.
-- Passwords (preview): import from Chrome, Edge, Firefox, Google, Bitwarden, 1Password, LastPass, Dashlane, Proton Pass, Apple Passwords, KeePass, Credential Exchange, Aegis, 2FAS and Google Authenticator, all read on your device. Encrypted export, a Security check with breach lookups through your server, and encrypted attachments.
-- Passwords (preview): a browser extension for the Chrome family and Firefox: popup, inline menu with anti-clickjacking checks, multi-step sign-ins, save and update prompts, teach-it-once site rules, 2FA codes, side panel, and passkeys that sync.
-- Notifications: a Passwords switch for new-device requests and shared-vault invites. They never carry anything from the vault.
+- Passwords (preview): Promptly for Android gets the vault too: autofill in apps and browsers that support it, passkeys through Credential Manager, fingerprint unlock, sharing, Security check, attachments, import and export, and adding a device by QR code.
+- Passwords (preview): a fresh review of the crypto, the extension, Android and the server's access rules. Trust in other people's keys now lives in your own encrypted vault, removing someone from a shared vault can't be blocked by them, and imports can't plant internal items. `passwords/SECURITY.md` says what it still doesn't defend against.
 
 ## [0.28.0] - 2026-11-06
 

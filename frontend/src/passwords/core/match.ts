@@ -58,6 +58,8 @@ const SAFE_REGEX_LEN = 200;
 function regexMatches(pattern: string, page: URL): boolean {
   if (pattern.length > SAFE_REGEX_LEN) return false;
   if (/(\([^)]*[+*][^)]*\))[+*{]/.test(pattern)) return false;
+  // A repeated choice can blow up too: (a|aa)+. Android refuses the same.
+  if (/\([^)]*\|[^)]*\)[+*{]/.test(pattern)) return false;
   try {
     const m = new RegExp(pattern).exec(page.href);
     return !!m && m.index === 0 && m[0].length >= page.origin.length;

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 // Site matching and lookalike checks, including the origin-confusion cases in 13.5.
 import { describe, expect, it } from "vitest";
 
@@ -165,5 +166,26 @@ describe("an app's id isn't a website", () => {
     expect(matchUrl({ url: "android://HASH==@com.acme.app/" }, "https://acme.app/")).toBeNull();
     expect(hostOf("https://acme.app/x")).toBe("acme.app");
     expect(hostOf("acme.app")).toBe("acme.app");
+  });
+});
+
+describe("the list both clients share", () => {
+  it("gives the answers in android/app/src/test/cross/match-vectors.json", () => {
+    const file = new URL("../../../../android/app/src/test/cross/match-vectors.json", import.meta.url);
+    const v = JSON.parse(readFileSync(file, "utf8")) as { match: { url: string; mode?: string; page: string; want: string | null }[]; host: { url: string; want: string | null }[] };
+    const wrong: string[] = [];
+    for (const c of v.match) {
+      const got = matchUrl({ url: c.url, match: c.mode as never }, c.page);
+      if (got !== c.want) wrong.push(`${c.url} (${c.mode ?? "base"}) on ${c.page}: ${got}, wanted ${c.want}`);
+    }
+    for (const c of v.host) {
+      const got = hostOf(c.url);
+      if (got !== c.want) wrong.push(`hostOf ${c.url}: ${got}, wanted ${c.want}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+
+  it("refuses a repeated choice, as Android does", () => {
+    expect(matchUrl({ url: "https://(a|aa)+", match: "regex" }, "https://aaaa/")).toBeNull();
   });
 });
