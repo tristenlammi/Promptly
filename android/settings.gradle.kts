@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 rootProject.name = "Promptly"
 include(":app")
 include(":suite")
+include(":pwtestapp")

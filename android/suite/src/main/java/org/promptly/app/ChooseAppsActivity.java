@@ -88,8 +88,17 @@ public class ChooseAppsActivity extends Activity {
     }
 
     private boolean isOn(PackageManager pm, String cls) {
-        int state = pm.getComponentEnabledSetting(new ComponentName(this, cls));
-        return state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+        ComponentName name = new ComponentName(this, cls);
+        int state = pm.getComponentEnabledSetting(name);
+        if (state != PackageManager.COMPONENT_ENABLED_STATE_DEFAULT) {
+            return state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED;
+        }
+        // Never changed: what the manifest says (Passwords starts on, the web apps off).
+        try {
+            return pm.getActivityInfo(name, PackageManager.MATCH_DISABLED_COMPONENTS).enabled;
+        } catch (PackageManager.NameNotFoundException e) {
+            return false;
+        }
     }
 
     private void save() {

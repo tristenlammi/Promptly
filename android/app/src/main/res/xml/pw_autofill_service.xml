@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Compat mode for old Chrome only, capped at the version in VERIFY_NOTES item 14:
+     Chrome 137 and later use native third-party autofill, so the cap never applies there. -->
+<autofill-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="org.promptly.sync.passwords.ui.PasswordsActivity"
+    android:supportsInlineSuggestions="true">
+    <compatibility-package android:name="com.android.chrome" android:maxLongVersionCode="711900039" />
+    <compatibility-package android:name="com.chrome.beta" android:maxLongVersionCode="711900039" />
+    <compatibility-package android:name="com.chrome.dev" android:maxLongVersionCode="711900039" />
+    <compatibility-package android:name="com.chrome.canary" android:maxLongVersionCode="711900039" />
+</autofill-service>

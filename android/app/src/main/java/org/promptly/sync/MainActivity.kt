@@ -366,6 +366,9 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
     var refused by remember { mutableIntStateOf(0) }
     var deleted by remember { mutableIntStateOf(0) }
     var update by remember { mutableStateOf<Api.Update?>(null) }
+    var updating by remember { mutableStateOf(false) }
+    var updateNote by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
     var wifiOnly by remember { mutableStateOf(store.wifiOnly) }
     var chargingOnly by remember { mutableStateOf(store.chargingOnly) }
     var confirmUnlink by remember { mutableStateOf(false) }
@@ -405,8 +408,19 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
         update?.let { u ->
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Version ${u.version} is available.", Modifier.weight(1f))
-                    TextButton(onClick = { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u.url))) }) { Text("Update") }
+                    Text(updateNote ?: "Version ${u.version} is available.", Modifier.weight(1f))
+                    TextButton(
+                        enabled = !updating,
+                        onClick = {
+                            updating = true
+                            updateNote = "Downloading…"
+                            scope.launch {
+                                val r = withContext(Dispatchers.IO) { runCatching { Updater.downloadAndInstall(ctx, u) } }
+                                updating = false
+                                updateNote = r.exceptionOrNull()?.message
+                            }
+                        },
+                    ) { Text("Update") }
                 }
             }
         }

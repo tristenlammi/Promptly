@@ -2,11 +2,13 @@
 <!-- Nothing leaves the phone in a backup: the sign-in is tied to this device. -->
 <data-extraction-rules>
     <cloud-backup>
+        <exclude domain="file" />
         <exclude domain="root" />
         <exclude domain="sharedpref" />
         <exclude domain="database" />
     </cloud-backup>
     <device-transfer>
+        <exclude domain="file" />
         <exclude domain="root" />
         <exclude domain="sharedpref" />
         <exclude domain="database" />

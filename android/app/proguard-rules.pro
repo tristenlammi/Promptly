@@ -15,3 +15,9 @@
 -keep class androidx.car.app.** { *; }
 -keep class org.maplibre.android.** { *; }
 -dontwarn java.awt.**
+
+# Passwords. argon2kt's JNI finds its result class and fields by name. BouncyCastle
+# lists optional JCA and LDAP classes this app never uses (only its lightweight API).
+-keep class com.lambdapioneer.argon2kt.** { *; }
+-dontwarn org.bouncycastle.**
+-dontwarn javax.naming.**

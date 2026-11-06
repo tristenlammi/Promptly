@@ -192,16 +192,18 @@ object Api {
 
     // -------------------------------------------------------------- updates
 
-    data class Update(val version: String, val code: Int, val url: String)
+    data class Update(val version: String, val code: Int, val url: String, val sha256: String)
 
-    /** A newer Promptly app on the server, if there is one. */
+    /** A newer Promptly app on the server, if there is one. No valid hash, no update:
+     *  [Updater] checks the download against it before anything installs. */
     fun update(server: String): Update? = runCatching {
         val req = Request.Builder().url("$server/downloads/Promptly.json").header("Cache-Control", "no-cache").build()
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) return null
             val j = JSONObject(r.body.string())
             val code = j.optInt("version_code", 0)
-            if (code > BuildConfig.VERSION_CODE) Update(j.optString("version"), code, "$server/downloads/Promptly.apk")
+            val sha = UpdateVerifier.validHash(j.optString("sha256")) ?: return null
+            if (code > BuildConfig.VERSION_CODE) Update(j.optString("version"), code, "$server/downloads/Promptly.apk", sha)
             else null
         }
     }.getOrNull()

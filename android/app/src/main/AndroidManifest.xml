@@ -33,6 +33,10 @@
     <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
     <!-- Only for "Back up right away instead" — asked, never assumed. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Installing an update the app has downloaded and checked against its hash. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Only what Chrome's documented autofill-state provider asks of a caller. -->
+    <uses-permission android:name="android.permission.READ_USER_DICTIONARY" />
 
     <application
         android:name=".SyncApp"
@@ -162,6 +166,105 @@
             </intent-filter>
         </service>
 
+        <!-- Passwords: the native vault. Its launcher is an alias so the Choose apps
+             picker can hide the icon without turning off autofill's own screens. -->
+        <activity
+            android:name=".passwords.ui.PasswordsActivity"
+            android:label="P Passwords"
+            android:icon="@mipmap/ic_passwords"
+            android:roundIcon="@mipmap/ic_passwords"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="org.promptly.app.passwords"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter android:label="Add to Passwords">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+        <activity-alias
+            android:name="org.promptly.app.PasswordsLauncher"
+            android:targetActivity=".passwords.ui.PasswordsActivity"
+            android:label="P Passwords"
+            android:icon="@mipmap/ic_passwords"
+            android:roundIcon="@mipmap/ic_passwords"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <service
+            android:name=".passwords.autofill.PromptlyAutofillService"
+            android:exported="true"
+            android:label="Promptly Passwords"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data android:name="android.autofill" android:resource="@xml/pw_autofill_service" />
+        </service>
+        <activity
+            android:name=".passwords.autofill.AutofillAuthActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:label="Passwords"
+            android:taskAffinity="org.promptly.app.passwords.fill"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".passwords.autofill.AutofillSaveActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:label="Passwords"
+            android:taskAffinity="org.promptly.app.passwords.fill"
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".passwords.credentials.PromptlyCredentialProviderService"
+            android:enabled="@bool/pw_credential_provider"
+            tools:targetApi="34"
+            android:exported="true"
+            android:label="Promptly Passwords"
+            android:icon="@mipmap/ic_passwords"
+            android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.credentials.CredentialProviderService" />
+            </intent-filter>
+            <meta-data android:name="android.credentials.provider" android:resource="@xml/pw_credential_provider" />
+        </service>
+        <activity
+            android:name=".passwords.credentials.CredentialActivity"
+            android:enabled="@bool/pw_credential_provider"
+            tools:targetApi="34"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:label="Passwords"
+            android:taskAffinity="org.promptly.app.passwords.fill"
+            android:windowSoftInputMode="adjustResize" />
+
+        <service
+            android:name=".passwords.PasswordsTileService"
+            android:exported="true"
+            android:icon="@drawable/pw_key"
+            android:label="Passwords"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <!-- A checked update, given to Android's package installer. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
+
         <!-- WorkManager's foreground service, for long backups. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
@@ -173,5 +276,21 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <!-- Passwords: seeing an app's signing certificate is how it's told apart from an
+             impostor with the same package name. Launchable apps and browsers, not "all
+             packages". Chrome's channels for its documented settings provider. -->
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" />
+        </intent>
+        <package android:name="com.android.chrome" />
+        <package android:name="com.chrome.beta" />
+        <package android:name="com.chrome.dev" />
+        <package android:name="com.chrome.canary" />
     </queries>
 </manifest>

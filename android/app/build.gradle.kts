@@ -14,6 +14,11 @@ val signingProps: Properties? = (findProperty("signing") as String?)?.let { path
 android {
     testOptions {
         unitTests.isIncludeAndroidResources = true
+        unitTests.all {
+            it.systemProperty("pw.stack", System.getProperty("pw.stack") ?: "")
+            it.systemProperty("pw.frontend", rootDir.resolve("../frontend").absolutePath)
+            it.maxHeapSize = "1g"
+        }
     }
     namespace = "org.promptly.sync"
     compileSdk = 37
@@ -26,8 +31,9 @@ android {
         // 29: the car screen's navigation library needs it.
         minSdk = 29
         targetSdk = 37
-        versionCode = 17
-        versionName = "1.4.4"
+        versionCode = 18
+        versionName = "1.5.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     signingConfigs {
@@ -77,6 +83,46 @@ android {
     }
 }
 
+// The vault's data files are shared with the web client, not forked: copied from
+// frontend/src/passwords/core into the APK's assets at build time.
+abstract class CopyPasswordAssets : DefaultTask() {
+    @get:InputFiles abstract val sources: ConfigurableFileCollection
+    @get:OutputDirectory abstract val output: DirectoryProperty
+
+    @TaskAction
+    fun copy() {
+        val dir = output.get().asFile.resolve("passwords")
+        dir.mkdirs()
+        sources.files.forEach { it.copyTo(dir.resolve(it.name), overwrite = true) }
+    }
+}
+
+val passwordCore = rootDir.resolve("../frontend/src/passwords/core")
+val copyPasswordAssets = tasks.register<CopyPasswordAssets>("copyPasswordAssets") {
+    sources.from(
+        passwordCore.resolve("eff_large_wordlist.json"),
+        passwordCore.resolve("data/password-rules.json"),
+        passwordCore.resolve("data/shared-credentials.json"),
+    )
+    output.set(layout.buildDirectory.dir("generated/passwordAssets"))
+}
+val copyPasswordVectors = tasks.register<CopyPasswordAssets>("copyPasswordVectors") {
+    sources.from(passwordCore.resolve("vectors.json"))
+    output.set(layout.buildDirectory.dir("generated/passwordVectors"))
+}
+androidComponents {
+    onVariants { variant ->
+        variant.sources.assets?.addGeneratedSourceDirectory(copyPasswordAssets, CopyPasswordAssets::output)
+        // The same shared vectors, read on the device itself by the instrumented tests.
+        variant.androidTest?.sources?.assets?.addGeneratedSourceDirectory(copyPasswordVectors, CopyPasswordAssets::output)
+    }
+}
+
+// The instrumented tests drive this app too: `gradlew :app:connectedDebugAndroidTest`.
+tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+    dependsOn(":pwtestapp:installPlainDebug", ":pwtestapp:installBrowserDebug")
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.09.00")
     implementation(composeBom)
@@ -91,6 +137,17 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation(project(":suite"))
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+
+    // Passwords: see passwords/ANDROID_NOTES.md. BouncyCastle for X25519, Ed25519,
+    // HKDF and the Argon2 fallback; argon2kt (JNI) for the unlock's Argon2id.
+    implementation("org.bouncycastle:bcprov-jdk18on:1.86")
+    implementation("com.lambdapioneer.argon2kt:argon2kt:1.6.0")
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.9")
+    implementation("androidx.credentials:credentials:1.6.0")
+    implementation("androidx.autofill:autofill:1.3.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation("com.google.android.gms:play-services-auth-api-phone:18.3.1")
 
     // P Maps' driving screen and Android Auto (see the maps package). Android's
     // own GPS: Ferrostar's google-play-services module is deliberately left out.
@@ -110,4 +167,11 @@ dependencies {
     testImplementation("androidx.test:core:1.7.0")
     testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("androidx.car.app:app-testing:1.7.0")
+
+    // Instrumented tests on the emulator, driving the real system services.
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test:rules:1.7.0")
+    androidTestImplementation("androidx.test:core:1.7.0")
+    androidTestImplementation("androidx.test.ext:junit:1.3.0")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
 }

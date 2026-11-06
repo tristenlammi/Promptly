@@ -19,4 +19,5 @@
     <color name="bg_meals">#D97757</color>
     <color name="bg_trip">#D97757</color>
     <color name="bg_tasks">#D97757</color>
+    <color name="bg_passwords">#D97757</color>
 </resources>
