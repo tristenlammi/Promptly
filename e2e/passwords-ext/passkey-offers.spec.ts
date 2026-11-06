@@ -196,6 +196,71 @@ test("a page calling it off, or going away, takes the offer with it", async () =
   await again.close();
 });
 
+test("a window left open when the page navigates closes, and nothing's signed for the new page", async () => {
+  const wanted = challenge();
+  const page = await rig.ctx.newPage();
+  await page.goto(`${siteA("webauthn.html")}?auto=${wanted}&rp=${RP}&m=conditional&allow=${SITE_ID}`);
+  await page.waitForTimeout(500);
+  const pop = await popupFor(rig, page);
+  const opened = promptWindow();
+  await pop.getByRole("button", { name: `Sign in with a passkey as ${USER}` }).click();
+  const prompt = await opened;
+  await expect(prompt.getByText("Sign in with a passkey?")).toBeVisible();
+  const closed = prompt.waitForEvent("close", { timeout: 15_000 });
+  // The new page lines up the same ids, hoping for the answer.
+  await page.goto(`${siteA("webauthn.html")}?stolen=1`);
+  await page.evaluate(() => {
+    (window as any).__got = [];
+    window.addEventListener("message", (e) => { if ((e.data as { __pk?: string })?.__pk === "res") (window as any).__got.push(e.data); });
+    for (let id = 1; id < 40; id++) window.postMessage({ __pk: "offer", id, options: { rpId: "localhost", challenge: "AAAA", allow: [] } }, location.origin);
+  });
+  await closed;
+  await page.waitForTimeout(800);
+  expect(await page.evaluate(() => (window as any).__got)).toEqual([]);
+  await pop.close();
+  await page.close();
+});
+
+test("an answer sent with the wrong document's value is dropped by the content script", async () => {
+  const page = await rig.ctx.newPage();
+  await page.goto(`${siteA("webauthn.html")}?auto=${challenge()}&rp=${RP}&m=conditional`);
+  await page.evaluate(() => {
+    (window as any).__got = [];
+    window.addEventListener("message", (e) => { if ((e.data as { __pk?: string })?.__pk === "res") (window as any).__got.push(e.data); });
+  });
+  const tabId = await tabIdOf(rig, page);
+  const other = await rig.ctx.newPage();
+  await other.goto(`chrome-extension://${rig.extId}/test.html`);
+  await other.evaluate(async (t) => {
+    for (let id = 1; id < 6; id++) await chrome.tabs.sendMessage(t, { t: "pkOfferResult", id, document: "not-this-one", origin: "http://localhost:8111", result: { credentialId: "x" } }, { frameId: 0 }).catch(() => undefined);
+  }, tabId);
+  await page.waitForTimeout(300);
+  expect(await page.evaluate(() => (window as any).__got)).toEqual([]);
+  await other.close();
+  await page.close();
+});
+
+test("a page's oversized or malformed offers are refused, and leave the panel working", async () => {
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("webauthn.html"));
+  await page.evaluate(() => {
+    const send = (id: number, options: unknown) => window.postMessage({ __pk: "offer", id, options }, location.origin);
+    send(1, { rpId: "localhost", challenge: "x".repeat(5_000_000), allow: [] });
+    send(2, { rpId: "localhost", challenge: "AAAA", allow: [null] });
+    send(3, { rpId: "localhost", challenge: "AAAA", allow: Array.from({ length: 1000 }, () => ({ id: "x" })) });
+    send(4, { rpId: "localhost", allow: [] });
+  });
+  await page.waitForTimeout(500);
+  const pop = await popupFor(rig, page);
+  await expect(pop.getByRole("button", { name: "Fill Imported site" })).toBeVisible();
+  await pop.waitForTimeout(1800);
+  await expect(pop.getByTestId("passkey-offer")).toHaveCount(0);
+  await expect(pop.getByTestId("passkey-saved")).toBeVisible();
+  const size = await pop.evaluate(async () => JSON.stringify(await chrome.storage.session.get("pkOffers")).length);
+  expect(size).toBeLessThan(5000);
+  await page.close();
+});
+
 test("with a passkey saved and no request, the panel says why nothing's happening", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(siteA("webauthn.html"));

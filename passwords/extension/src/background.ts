@@ -193,11 +193,16 @@ async function bookmarkStateForScreen() {
 }
 
 let bookmarksRunning: Promise<void> | null = null;
+let bookmarksAllowed: number | undefined;
+/** A day: long enough that a server can't take them away a few at a time. */
+const DELETION_WINDOW_MS = 24 * 60 * 60 * 1000;
 let bookmarkFailure: string | null = null;
 let bookmarksAgain = false;
 
 /** One at a time. Changes while it runs are picked up by one more run. */
-async function runBookmarks(allowMassDelete = false): Promise<void> {
+async function runBookmarks(allowUpTo?: number): Promise<void> {
+  // A yes given while a run's going is for the next one.
+  if (allowUpTo !== undefined) bookmarksAllowed = allowUpTo;
   if (bookmarksRunning) {
     bookmarksAgain = true;
     return bookmarksRunning;
@@ -205,8 +210,9 @@ async function runBookmarks(allowMassDelete = false): Promise<void> {
   bookmarksRunning = (async () => {
     do {
       bookmarksAgain = false;
-      await bookmarkPass(allowMassDelete);
-      allowMassDelete = false;
+      const allowed = bookmarksAllowed;
+      bookmarksAllowed = undefined;
+      await bookmarkPass(allowed);
     } while (bookmarksAgain);
   })().finally(() => {
     bookmarksRunning = null;
@@ -214,8 +220,9 @@ async function runBookmarks(allowMassDelete = false): Promise<void> {
   return bookmarksRunning;
 }
 
-async function bookmarkPass(allowMassDelete: boolean) {
+async function bookmarkPass(allowUpTo: number | undefined) {
   const state = await bookmarkState();
+  const allowMassDelete = allowUpTo !== undefined;
   // A held run waits for its answer. Locked, it catches up on the next run after unlocking.
   if (!state.on || !client?.unlocked || (state.held && !allowMassDelete)) return;
   if (!ext.bookmarks) {
@@ -235,16 +242,23 @@ async function bookmarkPass(allowMassDelete: boolean) {
     }
     const browser = new BrowserBookmarks();
     const base = (await store.getMeta<Base>("bookmark_base")) ?? {};
-    const r = await reconcile(browser, new VaultBookmarks(client, vaultId), base, { hash: bookmarkHash(salt), newId: () => crypto.randomUUID(), allowMassDelete });
+    const now = Date.now();
+    const recent = ((await store.getMeta<{ at: number; n: number }[]>("bookmark_deletes")) ?? []).filter((d) => now - d.at < DELETION_WINDOW_MS);
+    const r = await reconcile(browser, new VaultBookmarks(client, vaultId), base, { hash: bookmarkHash(salt), newId: () => crypto.randomUUID(), deletedLately: recent.reduce((sum, d) => sum + d.n, 0), allowUpTo });
+    // Turned off while that ran: what it was doing has finished, and off stays off.
+    if (!(await bookmarkState()).on) return;
     if (r.status === "held") {
       await store.setMeta("bookmark_sync", { ...state, held: { fromBrowser: r.fromBrowser, fromVault: r.fromVault } });
       updateBadgeAll();
       return;
     }
     await store.setMeta("bookmark_base", r.base);
+    // A person's yes starts the count again.
+    await store.setMeta("bookmark_deletes", allowMassDelete ? [] : r.deleted ? [...recent, { at: now, n: r.deleted }] : recent);
     await store.setMeta("bookmark_sync", { on: true, at: new Date().toISOString(), total: r.total, unsynced: browser.unsynced, failed: r.counts.failed });
     if (r.wroteVault) await safeSync();
   } catch (e) {
+    if (!(await bookmarkState()).on) return;
     await store.setMeta("bookmark_sync", { ...state, error: e instanceof Error ? e.message : "Couldn't sync bookmarks" });
   }
 }
@@ -1111,7 +1125,9 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       const state = await bookmarkState();
       if (!state.held) return { ok: false };
       if (m.go) {
-        await runBookmarks(true);
+        // For the number they were shown. If it's grown since, it asks again.
+        await store.setMeta("bookmark_sync", { ...state, held: undefined });
+        await runBookmarks(state.held.fromBrowser + state.held.fromVault);
         return { ok: true };
       }
       // No: nothing goes. Starting the comparison again brings each side's back to the other.

@@ -204,21 +204,24 @@ function Attachments({ item, canEdit }: { item: Item; canEdit: boolean }) {
       // in memory. Other browsers have to hold it all first. A damaged file is removed, not kept.
       const picker = (window as unknown as { showSaveFilePicker?: (o: { suggestedName: string }) => Promise<{ createWritable(): Promise<{ write(d: Uint8Array): Promise<void>; close(): Promise<void>; abort(): Promise<void> }> }> }).showSaveFilePicker;
       if (picker && ref.size > STREAM_FROM) {
-        let handle;
+        let handle: Awaited<ReturnType<typeof picker>> | null = null;
         try {
           handle = await picker.call(window, { suggestedName: ref.name });
-        } catch {
-          return; // They cancelled.
-        }
-        const out = await handle.createWritable();
-        try {
-          await streamAttachment(platform.api, item.vaultId, item.id, ref, (part) => out.write(part));
-          await out.close();
         } catch (e) {
-          await out.abort().catch(() => undefined);
-          throw e;
+          if ((e as { name?: string }).name === "AbortError") return; // They cancelled.
+          // The picker isn't available here after all, so the ordinary way below.
         }
-        return;
+        if (handle) {
+          const out = await handle.createWritable();
+          try {
+            await streamAttachment(platform.api, item.vaultId, item.id, ref, (part) => out.write(part));
+            await out.close();
+          } catch (e) {
+            await out.abort().catch(() => undefined);
+            throw e;
+          }
+          return;
+        }
       }
       const data = await downloadAttachment(platform.api, item.vaultId, item.id, ref);
       downloadBlob(data, ref.name, "application/octet-stream");

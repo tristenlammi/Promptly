@@ -1426,6 +1426,9 @@ export class VaultClient {
       const keys = await this.api.userKeys(row.grantee_id);
       const known = (await this.trustEntries())[row.grantee_id];
       if (!known || known.ed25519 !== keys.ed25519_pub || known.x25519 !== keys.x25519_pub) continue;
+      // Every key this person has, on keys only the server has vouched for so far, would be the
+      // whole game for a hostile server. So not until someone's compared the words.
+      if (!known.verified) continue;
       const grants = [];
       for (const v of mine) {
         const raw = await this.rawVaultKey(v);

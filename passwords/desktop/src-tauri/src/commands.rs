@@ -419,7 +419,7 @@ pub fn overlay_act(window: WebviewWindow, app: AppHandle, token: String, id: Str
     overlay_only(&window)?;
     let state = app.state::<App>();
     state.gestures.lock().unwrap().target(&token, Instant::now()).map_err(|e| e.to_string())?;
-    if !matches!(action.as_str(), "copy" | "copy-user" | "totp" | "type") {
+    if !matches!(action.as_str(), "copy" | "copy-user" | "totp" | "type" | "type-code") {
         return Err("Unknown action".to_string());
     }
     app.emit_to("main", "quick:act", ActAsk { token, id, action, confirmed }).map_err(|e| e.to_string())

@@ -23,7 +23,10 @@ export function gunzipLimited(data: Uint8Array, limit = MAX_INFLATED): Uint8Arra
     if (total > limit) throw new Error("That KeePass file is too large once it's unpacked");
     parts.push(chunk);
   });
-  g.push(data, true);
+  // A piece at a time, since one push inflates all it's given before saying anything. A piece
+  // can only grow about a thousand times over, so this stays near the limit.
+  const PIECE = 64 * 1024;
+  for (let at = 0; at < data.length; at += PIECE) g.push(data.subarray(at, at + PIECE), at + PIECE >= data.length);
   const out = new Uint8Array(total);
   let at = 0;
   for (const p of parts) {

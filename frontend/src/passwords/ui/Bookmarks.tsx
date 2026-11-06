@@ -4,7 +4,7 @@ import { Bookmark, ChevronDown, ChevronRight, ExternalLink, Folder, Search } fro
 import { useEffect, useMemo, useState } from "react";
 
 import { type BookmarkItem, type BookmarkRoot, bookmarkTree, type BookmarkTreeNode } from "../core/bookmarks";
-import { Callout, inputClass, safeHref, useVault } from "./kit";
+import { Button, Callout, inputClass, safeHref, useVault } from "./kit";
 
 const ROOTS: [BookmarkRoot, string][] = [
   ["bar", "Bookmarks bar"],
@@ -55,7 +55,7 @@ function NodeRow({ node }: { node: BookmarkTreeNode }) {
 }
 
 export function BookmarksScreen() {
-  const { vault, version, platform } = useVault();
+  const { vault, version, platform, bump } = useVault();
   const [query, setQuery] = useState("");
   const [personal, setPersonal] = useState<string | null>(null);
   useEffect(() => {
@@ -77,6 +77,15 @@ export function BookmarksScreen() {
     return links.filter((i) => words.every((w) => `${i.title} ${i.url}`.toLowerCase().includes(w))).slice(0, 200);
   }, [query, items]);
   const shown = ROOTS.filter(([r]) => tree[r].length > 0);
+  const deleted = vault
+    .allItems({ includeSystem: true, includeDeleted: true })
+    .filter((i) => i.deleted && i.body.kind === "bookmark" && i.vaultId === personal && i.body.bookmark?.url && safeHref(i.body.bookmark.url))
+    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const restore = async (ids: string[]) => {
+    for (const id of ids) await vault.restoreItem(id);
+    vault.sync().catch(() => undefined);
+    bump();
+  };
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 overflow-y-auto p-4" data-testid="bookmarks-screen">
       <div>
@@ -105,6 +114,21 @@ export function BookmarksScreen() {
         </div>
       ) : (
         <p className="text-sm text-[var(--text-muted)]">No bookmarks yet.</p>
+      )}
+      {deleted.length > 0 && (
+        <details data-testid="bookmarks-deleted" className="text-sm text-[var(--text)]">
+          <summary className="cursor-pointer text-[var(--text-muted)]">Recently deleted ({deleted.length})</summary>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">Kept for 30 days. Restoring puts them back in every browser that syncs.</p>
+          <Button small onClick={() => void restore(deleted.map((d) => d.id))}>Restore all</Button>
+          <ul className="mt-1 flex flex-col">
+            {deleted.slice(0, 200).map((d) => (
+              <li key={d.id} className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-[var(--surface-1)]">
+                <span className="min-w-0 flex-1 truncate">{d.body.title || d.body.bookmark!.url}</span>
+                <Button small onClick={() => void restore([d.id])}>Restore</Button>
+              </li>
+            ))}
+          </ul>
+        </details>
       )}
     </div>
   );

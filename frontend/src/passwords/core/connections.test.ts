@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { randomBytes } from "./bytes";
 import { agoText, changePageUrl, clockDriftText, commitPending, dropPending, findDuplicates, linkIsSafe, type MailCode, memoryPin, mergeDuplicates, rankMailCodes, savedDomainsOf, securityAlerts, type SecurityEvent, unwrapUnlockSecret, withPending, wrapUnlockSecret } from "./connections";
+import { touch } from "./model";
 import { type Item, type ItemBody, newBody } from "./model";
 
 function item(body: Partial<ItemBody> & { title?: string }, id = crypto.randomUUID(), vaultId = "v1"): Item {
@@ -82,7 +83,7 @@ describe("changing a password", () => {
     const dropped = dropPending(waiting);
     expect(dropped.password).toBe("old");
     expect(dropped.pendingPassword).toBeUndefined();
-    expect(dropped.passwordHistory ?? []).toEqual([]);
+    expect(dropped.passwordHistory?.map((h) => h.password)).toEqual(["new"]);
   });
 });
 
@@ -113,6 +114,37 @@ describe("duplicates", () => {
     expect(body.notes).toContain("second note");
     expect(body.totp?.secret).toBe("ABC");
     expect(body.fields?.[0].name).toBe("pin");
+  });
+
+  it("what's merged in survives a full history, and a copy's waiting password isn't lost", () => {
+    const full = Array.from({ length: 20 }, (_, i) => ({ password: `old-${i}`, at: "2024-01-01T00:00:00.000Z" }));
+    const old = item({ username: "ana", password: "from-the-copy", pendingPassword: "waiting-on-the-copy" });
+    old.body.updatedAt = "2024-01-01T00:00:00.000Z";
+    const fresh = item({ username: "ana", password: "newer", passwordHistory: full });
+    fresh.body.updatedAt = "2026-01-01T00:00:00.000Z";
+    const history = mergeDuplicates([old, fresh]).body.passwordHistory!.map((h) => h.password);
+    expect(history).toHaveLength(20);
+    expect(history).toContain("from-the-copy");
+    expect(history).toContain("waiting-on-the-copy");
+  });
+
+  it("a waiting password can't later overwrite one set another way, and saying no keeps it", () => {
+    const b = item({ username: "ana", password: "current", pendingPassword: "generated" }).body;
+    const typed = touch(b, { ...b, password: "typed-by-hand" });
+    expect(typed.pendingPassword).toBeUndefined();
+    expect(commitPending(typed).password).toBe("typed-by-hand");
+    expect(typed.passwordHistory?.map((h) => h.password)).toEqual(expect.arrayContaining(["current", "generated"]));
+
+    const dropped = dropPending(b);
+    expect(dropped.pendingPassword).toBeUndefined();
+    expect(dropped.password).toBe("current");
+    expect(dropped.passwordHistory?.map((h) => h.password)).toContain("generated");
+
+    // The ordinary way still works.
+    const done = commitPending(b);
+    expect(done.password).toBe("generated");
+    expect(done.pendingPassword).toBeUndefined();
+    expect(done.passwordHistory?.map((h) => h.password)).toContain("current");
   });
 
   it("doesn't list a dropped copy's attachment until it's been moved, and keeps a reprompt", () => {

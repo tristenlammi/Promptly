@@ -168,6 +168,10 @@ test("emergency access: asks, can be refused, and opens read-only after the wait
   await alice.getByTestId("em-person").selectOption({ label: b.username });
   await alice.getByLabel("Wait, in days").fill("2");
   await alice.getByRole("button", { name: "Add", exact: true }).click();
+  // Nothing happens until the words have been compared, and they're the ones the other person sees.
+  await expect(alice.getByTestId("em-words")).toBeVisible();
+  await expect(alice.getByTestId("em-granted")).toHaveCount(0);
+  await alice.getByRole("button", { name: "They match" }).click();
   await expect(alice.getByTestId("em-granted")).toContainText("waiting for them to accept");
 
   await openShared(bob);

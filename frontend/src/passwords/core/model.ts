@@ -199,6 +199,12 @@ export function touch(prev: ItemBody | null, next: ItemBody): ItemBody {
   } else if (!prev && next.password) {
     out.passwordChangedAt = at;
   }
+  // A password set some other way settles it: a new one still waiting would later overwrite this.
+  // It might be what the site took, so it's kept where it can be got back.
+  if (prev && prev.password !== next.password && out.pendingPassword && next.password !== out.pendingPassword) {
+    if (out.pendingPassword !== prev.password) out.passwordHistory = [{ password: out.pendingPassword, at }, ...(out.passwordHistory ?? [])].slice(0, 20);
+    delete out.pendingPassword;
+  }
   return out;
 }
 

@@ -98,7 +98,7 @@ export type SaveRequest = { token: string } & ({ t: "saveAnswer"; answer: "save"
 export type ToContent =
   | { t: "report"; fresh?: boolean }
   | { t: "doFill"; values: Record<string, string>; origin: string }
-  | { t: "pkOfferResult"; id: number; result: Record<string, unknown> }
+  | { t: "pkOfferResult"; id: number; document: string; origin: string; result: Record<string, unknown> }
   | { t: "menuCheck"; itemId: string; token: string }
   | { t: "ownsMenu"; token: string }
   | { t: "ownsSave"; token: string }

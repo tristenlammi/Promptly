@@ -251,7 +251,7 @@ function PageTools({ tab, matches, setMessage }: { tab: chrome.tabs.Tab | null; 
         }}>Describe this form for a bug report</button>
         {report && (
           <>
-            <p>The structure only, with no values or text you typed. Check it before sending it to anyone.</p>
+            <p>The form's structure, and what the page itself says in it, like labels and button text. No values or anything you typed. Check it before sending it to anyone.</p>
             <textarea className="input" rows={6} readOnly value={report} aria-label="Form description" />
             <button className="btn" onClick={async () => { await navigator.clipboard.writeText(report); setMessage("Copied the form description."); }}>Copy description</button>
           </>

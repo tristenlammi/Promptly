@@ -1,6 +1,6 @@
 // The browser's side of bookmark sync, and the vault's: frontend/src/passwords/core/bookmarks.ts
 // decides what changes. See passwords/BOOKMARKS.md.
-import { type BookmarkItem, type BookmarkNode, type BookmarkRoot, type BrowserSide, isRootKey, rootKey, syncableUrl, type VaultSide } from "../../../frontend/src/passwords/core/bookmarks";
+import { type BookmarkItem, type BookmarkNode, type BookmarkRoot, type BrowserSide, isRootKey, rootKey, syncableNode, syncableUrl, type VaultSide } from "../../../frontend/src/passwords/core/bookmarks";
 import { newBody } from "../../../frontend/src/passwords/core/model";
 import type { VaultClient } from "../../../frontend/src/passwords/core/vault";
 import { ext } from "./rpc";
@@ -10,8 +10,9 @@ type Tree = chrome.bookmarks.BookmarkTreeNode & { folderType?: string; syncing?:
 const FIREFOX_ROOTS: Record<string, BookmarkRoot> = { toolbar_____: "bar", unfiled_____: "other", menu________: "menu", mobile______: "mobile" };
 const CHROMIUM_IDS: Record<string, BookmarkRoot> = { "1": "bar", "2": "other", "3": "mobile" };
 const FOLDER_TYPES: Record<string, BookmarkRoot> = { "bookmarks-bar": "bar", other: "other", mobile: "mobile" };
-/** Chromium has no Bookmarks menu, so what's in Firefox's lives in a folder of this name. */
-const MENU_FOLDER = "Bookmarks menu";
+/** Chromium has no Bookmarks menu, and refuses its Mobile folder on a computer unless it's signed in
+ *  to its own sync, so what's in Firefox's lives in a folder of this name in Other bookmarks. */
+const STAND_INS: Partial<Record<BookmarkRoot, string>> = { menu: "Bookmarks menu", mobile: "Mobile bookmarks" };
 
 function rootOf(n: Tree): BookmarkRoot | undefined {
   if (n.folderType) return FOLDER_TYPES[n.folderType];
@@ -52,15 +53,16 @@ export class BrowserBookmarks implements BrowserSide {
       (n.children ?? []).forEach((c: Tree, index) => {
         // Managed folders can't be changed, and separators have nothing in them to sync.
         if (c.unmodifiable || c.type === "separator") return;
-        if (c.url !== undefined && !syncableUrl(c.url)) {
+        if (c.url !== undefined && !syncableNode(c.title ?? "", c.url)) {
           this.unsynced++;
           return;
         }
-        // The stand-in for Firefox's menu isn't a folder of its own.
-        if (c.url === undefined && parent === rootKey("other") && c.title === MENU_FOLDER && !this.roots.has("menu") && !inMenuFolder) {
-          this.roots.set("menu", c.id);
-          this.keyOf.set(c.id, rootKey("menu"));
-          walk(c, rootKey("menu"), true);
+        // A stand-in for a root this browser hasn't got isn't a folder of its own.
+        const standsFor = c.url === undefined && parent === rootKey("other") && !inMenuFolder ? (Object.keys(STAND_INS) as BookmarkRoot[]).find((r) => STAND_INS[r] === c.title && !this.roots.has(r)) : undefined;
+        if (standsFor) {
+          this.roots.set(standsFor, c.id);
+          this.keyOf.set(c.id, rootKey(standsFor));
+          walk(c, rootKey(standsFor), true);
           return;
         }
         out.push({ node: c.id, parent, title: c.title ?? "", url: c.url, index });
@@ -80,9 +82,10 @@ export class BrowserBookmarks implements BrowserSide {
     const name = parent.slice("root:".length) as BookmarkRoot;
     const known = this.roots.get(name);
     if (known) return known;
-    if (name === "menu" && this.roots.has("other")) {
-      const made = await ext.bookmarks.create({ parentId: this.roots.get("other")!, title: MENU_FOLDER });
-      this.roots.set("menu", made.id);
+    const standIn = STAND_INS[name];
+    if (standIn && this.roots.has("other")) {
+      const made = await ext.bookmarks.create({ parentId: this.roots.get("other")!, title: standIn });
+      this.roots.set(name, made.id);
       return made.id;
     }
     // A root this browser doesn't have. Its bookmarks still need to be somewhere.

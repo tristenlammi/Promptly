@@ -482,11 +482,15 @@ function EmergencyPanel({ people, onChange }: { people: Person[]; onChange: () =
   const [who, setWho] = useState("");
   const [days, setDays] = useState(7);
   const [error, setError] = useState("");
+  const [compare, setCompare] = useState<{ user_id: string; username: string; invite: boolean } | null>(null);
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
 
   const load = useCallback(async () => {
     try {
       await vault.refreshEmergency().catch(() => undefined);
       setRows(await vault.emergencyList());
+      const trust = await vault.trustEntries();
+      setChecked(Object.fromEntries(Object.entries(trust).map(([id, e]) => [id, !!e.verified])));
       setError("");
       setMe(vault.userId ?? "");
     } catch (e) {
@@ -523,8 +527,9 @@ function EmergencyPanel({ people, onChange }: { people: Person[]; onChange: () =
         {granted.map((r) => (
           <li key={r.id} data-testid="em-granted" className="flex flex-wrap items-center gap-2 text-sm text-[var(--text)]">
             <span className="min-w-0 flex-1">
-              {r.grantee} · {r.wait_days} day wait · <span data-testid="em-state">{stateText(r, "grantor")}</span>
+              {r.grantee} · {r.wait_days} day wait · <span data-testid="em-state">{!checked[r.grantee_id] && r.state !== "ended" ? "compare safety words to finish setting this up" : stateText(r, "grantor")}</span>
             </span>
+            {!checked[r.grantee_id] && r.state !== "ended" && <Button small kind="primary" onClick={() => setCompare({ user_id: r.grantee_id, username: r.grantee, invite: false })}>Compare safety words</Button>}
             {r.state === "requested" && <Button small kind="primary" onClick={() => act(() => vault.emergencyAct(r.id, "refuse"), "Refused")}>Refuse</Button>}
             <Button small onClick={() => act(() => vault.emergencyEnd(r), "Ended")}>{r.state === "opened" || r.state === "ended" ? "End and change the keys" : "End"}</Button>
           </li>
@@ -560,10 +565,57 @@ function EmergencyPanel({ people, onChange }: { people: Person[]; onChange: () =
         <Label text="Wait, in days">
           <input className={inputClass} type="number" min={1} max={90} value={days} onChange={(e) => setDays(Number(e.target.value))} />
         </Label>
-        <Button disabled={!who} onClick={() => act(() => vault.emergencyInvite(who, days), "Asked them").then(() => setWho(""))}>Add</Button>
+        <Button
+          disabled={!who}
+          onClick={() => {
+            setError("");
+            setCompare({ user_id: who, username: people.find((p) => p.id === who)?.username ?? "them", invite: true });
+          }}
+        >
+          Add
+        </Button>
       </div>
       {error && <Callout kind="danger">{error}</Callout>}
+      {compare && (
+        <EmergencyWords
+          person={compare}
+          onCancel={() => setCompare(null)}
+          onMatch={async () => {
+            const { user_id, invite } = compare;
+            setCompare(null);
+            await act(async () => {
+              await vault.markVerified(user_id);
+              if (invite) await vault.emergencyInvite(user_id, days);
+            }, invite ? "Asked them" : "Checked");
+            if (invite) setWho("");
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+/** Your vault keys go to these keys, and the server's the one saying they're this person's. These
+ *  words are how you find out. Nothing's sealed until you've said they match. */
+function EmergencyWords({ person, onMatch, onCancel }: { person: { user_id: string; username: string }; onMatch: () => void; onCancel: () => void }) {
+  const { vault } = useVault();
+  const [words, setWords] = useState<string[]>([]);
+  const [problem, setProblem] = useState("");
+  useEffect(() => {
+    vault.identityWordsFor(person.user_id).then(setWords).catch((e) => setProblem(errorText(e)));
+  }, [vault, person.user_id]);
+  return (
+    <Modal title={`Is this really ${person.username}?`} onClose={onCancel}>
+      <div className="flex flex-col gap-3 text-sm text-[var(--text)]">
+        <p>An emergency contact can end up with every key to your vaults, so make sure of who this is. Ask {person.username} to read out the safety words on their Shared vaults page, in person or by phone.</p>
+        {problem ? <Callout kind="danger">{problem}</Callout> : <p data-testid="em-words" className="rounded border border-[var(--border)] p-2 text-center font-mono">{words.join(" ")}</p>}
+        <p className="text-[var(--text-muted)]">If they don't match, don't go on: someone may be pretending to be them, possibly whoever runs the server.</p>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={onCancel}>Not now</Button>
+          <Button kind="primary" disabled={!words.length} onClick={onMatch}>They match</Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

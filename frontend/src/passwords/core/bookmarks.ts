@@ -48,11 +48,13 @@ export type Base = Record<string, BaseEntry>;
 
 export type SyncCounts = { addedToVault: number; changedInVault: number; removedFromVault: number; addedToBrowser: number; changedInBrowser: number; removedFromBrowser: number; merged: number; failed: number };
 export type SyncResult =
-  | { status: "ok"; base: Base; counts: SyncCounts; total: number; wroteVault: boolean }
+  | { status: "ok"; base: Base; counts: SyncCounts; total: number; deleted: number; wroteVault: boolean }
   /** Nothing was changed. Someone has to say whether this many deletions is right. */
   | { status: "held"; base: Base; fromBrowser: number; fromVault: number; total: number };
 
-export type SyncOptions = { hash: (s: string) => string; newId: () => string; allowMassDelete?: boolean };
+/** `deletedLately` is how many went recently, so a lot can't go a little at a time. `allowUpTo` is
+ *  a person's yes: for as many as they were shown, and no more. */
+export type SyncOptions = { hash: (s: string) => string; newId: () => string; allowMassDelete?: boolean; deletedLately?: number; allowUpTo?: number };
 
 /** Deleting more than this in one go needs a yes. */
 export function massDeleteLimit(total: number): number {
@@ -76,6 +78,11 @@ const MAX_TITLE = 2048;
 const MAX_URL = 16384;
 const MAX_DEPTH = 64;
 const GAP = 1024;
+
+/** Too long to be kept in the vault. It stays in the browser it's in, and is counted as not synced. */
+export function syncableNode(title: string, url: string | undefined): boolean {
+  return title.length <= MAX_TITLE && (url === undefined || (url.length <= MAX_URL && syncableUrl(url)));
+}
 
 /** Items come from this person's own vault, but that's no reason to trust the shape. */
 export function validItem(i: BookmarkItem): boolean {
@@ -154,7 +161,8 @@ export const bookmarkHash = (salt: string) => (s: string) => b64u(sha256(utf8(`$
 
 export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Base, opts: SyncOptions): Promise<SyncResult> {
   const h = opts.hash;
-  const nodes = new Map((await browser.read()).map((n) => [n.node, n]));
+  // What can't be an item never becomes one, or the next run would see it gone from the vault.
+  const nodes = new Map((await browser.read()).filter((n) => syncableNode(n.title, n.url)).map((n) => [n.node, n]));
   const items = new Map((await vault.read()).filter(validItem).map((i) => [i.id, { ...i, pos: Number.isFinite(i.pos) ? i.pos : 0 }]));
   const entries = new Map(Object.entries(base));
   const created = new Set<string>();
@@ -275,7 +283,9 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
   // One side suddenly empty says something happened to that side: a server reset or restored, a
   // wiped profile, the wrong account. A few bookmarks are worth as much as many.
   const sideEmptied = browserDelete.size + vaultDelete.size >= EMPTIED_FROM && (items.size === vaultDelete.size || nodes.size === browserDelete.size);
-  if ((browserDelete.size + vaultDelete.size > massDeleteLimit(total) || sideEmptied) && !opts.allowMassDelete) {
+  const going = browserDelete.size + vaultDelete.size;
+  const allowed = opts.allowMassDelete || (opts.allowUpTo !== undefined && going <= opts.allowUpTo);
+  if (going > 0 && (going + (opts.deletedLately ?? 0) > massDeleteLimit(total) || sideEmptied) && !allowed) {
     return { status: "held", base, fromBrowser: vaultDelete.size, fromVault: browserDelete.size, total };
   }
   for (const id of vaultDelete) {
@@ -449,6 +459,8 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
         counts.failed++;
       }
     }
+    // Asking for a root's order can create it, so not for one with nothing to go in it.
+    if (!list.length) return;
     // Only if the order's really different. That leaves separators and the like where they are.
     const want = list.map((it) => itemToNode.get(it.id)).filter((x): x is string => !!x);
     const inPlace = await browser.order(parentNode).catch(() => [] as string[]);
@@ -504,7 +516,7 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
     }
     next[it.id] = { node, parent: h(it.parent), title: h(it.title), url: h(it.url ?? ""), pos: it.pos };
   }
-  return { status: "ok", base: next, counts, total: items.size, wroteVault: dropped.size + removedItems.size + created.size + touched.size > 0 };
+  return { status: "ok", base: next, counts, total: items.size, deleted: going, wroteVault: dropped.size + removedItems.size + created.size + touched.size > 0 };
 }
 
 // ---- Showing them ---------------------------------------------------------------------------

@@ -16,6 +16,10 @@ type Req = {
   crossOrigin: boolean;
   options: Record<string, unknown>;
   windowId?: number;
+  /** The frame it's for. Gone if that frame loads something else. */
+  frameId?: number;
+  /** Answering an offer: that offer has to still be there when it comes to signing. */
+  offerKey?: string;
   resolve: (r: Record<string, unknown>) => void;
 };
 
@@ -23,8 +27,26 @@ const pending = new Map<string, Req>();
 
 /** A request a person can answer from the toolbar or the menu. Kept in session storage, since the
  *  worker can go at any time and the page will still be waiting. Holds nothing secret. */
-type Offer = { key: string; tabId: number; frameId: number; documentId?: string; pageId: number; origin: string; topOrigin?: string; crossOrigin: boolean; options: Record<string, unknown>; rp: string };
+type Offer = { key: string; tabId: number; frameId: number; documentId?: string; pageDocument: string; pageId: number; origin: string; topOrigin?: string; crossOrigin: boolean; options: Record<string, unknown>; rp: string };
 const OFFERS_PER_TAB = 4;
+const OFFERS_IN_ALL = 64;
+
+/** A page writes these, and they're kept in the same storage as the unlock secret, so only what's
+ *  needed goes in, at a size that can't crowd anything out. */
+function cleanOfferOptions(raw: unknown): Record<string, unknown> | null {
+  const o = raw as { rpId?: unknown; challenge?: unknown; allow?: unknown; userVerification?: unknown } | null;
+  if (!o || typeof o !== "object") return null;
+  if (typeof o.challenge !== "string" || !o.challenge || o.challenge.length > 1024) return null;
+  if (o.rpId !== undefined && (typeof o.rpId !== "string" || o.rpId.length > 253)) return null;
+  if (!Array.isArray(o.allow) || o.allow.length > 64) return null;
+  const allow: { id: string }[] = [];
+  for (const a of o.allow as { id?: unknown }[]) {
+    if (!a || typeof a.id !== "string" || !a.id || a.id.length > 1024) return null;
+    allow.push({ id: a.id });
+  }
+  const userVerification = o.userVerification === "required" || o.userVerification === "discouraged" ? o.userVerification : "preferred";
+  return { ...(o.rpId ? { rpId: o.rpId } : {}), challenge: o.challenge, allow, userVerification };
+}
 let offerQueue: Promise<unknown> = Promise.resolve();
 
 const readOffers = async () => ((await ext.storage.session.get("pkOffers")).pkOffers as Offer[] | undefined) ?? [];
@@ -66,11 +88,13 @@ export async function useOffer(tabId: number, key: string, credentialId: string)
     origin: offer.origin,
     crossOrigin: offer.crossOrigin,
     topOrigin: offer.topOrigin,
+    frameId: offer.frameId,
+    offerKey: key,
     options: { ...offer.options, _rp: offer.rp, _only: credentialId },
     resolve: (r) => {
       if (!r.ok) return;
       void changeOffers((now) => now.filter((o) => o.key !== key));
-      ext.tabs.sendMessage(tabId, { t: "pkOfferResult", id: offer.pageId, result: r.result }, { frameId: offer.frameId, ...(offer.documentId ? { documentId: offer.documentId } : {}) }).catch(() => undefined);
+      ext.tabs.sendMessage(tabId, { t: "pkOfferResult", id: offer.pageId, document: offer.pageDocument, origin: offer.origin, result: r.result }, { frameId: offer.frameId, ...(offer.documentId ? { documentId: offer.documentId } : {}) }).catch(() => undefined);
     },
   };
   pending.set(id, req);
@@ -81,6 +105,13 @@ export async function useOffer(tabId: number, key: string, credentialId: string)
 // A page that's gone can't be answered.
 ext.webNavigation?.onCommitted?.addListener(({ tabId, frameId }) => {
   void changeOffers((now) => now.filter((o) => !(o.tabId === tabId && (frameId === 0 || o.frameId === frameId))));
+  // Nor can a window that names the page that's just gone be left open to be approved.
+  for (const r of pending.values()) {
+    if (r.tabId !== tabId || (frameId !== 0 && r.frameId !== frameId)) continue;
+    pending.delete(r.id);
+    r.resolve(fail("NotAllowedError", "The request wasn't allowed."));
+    if (r.windowId !== undefined) ext.windows.remove(r.windowId).catch(() => undefined);
+  }
 });
 ext.tabs?.onRemoved?.addListener((tabId) => {
   void changeOffers((now) => now.filter((o) => o.tabId !== tabId));
@@ -175,17 +206,17 @@ export async function handlePasskey(
     }
     const u = new URL(sender.url);
     const origin = (sender as { origin?: string }).origin ?? u.origin;
-    const options = msg.options as Record<string, unknown>;
-    if (origin === "null" || typeof options?.challenge !== "string" || !Array.isArray(options.allow)) return null;
+    const options = cleanOfferOptions(msg.options);
+    if (origin === "null" || !options || typeof msg.document !== "string" || msg.document.length > 64) return null;
     const rp = (options.rpId as string) ?? u.hostname;
     // A page can only ever offer itself. Another site's passkeys are never on the table.
     if (typeof rp !== "string" || !rpIdAllowed(rp, origin)) return null;
     const crossOrigin = msg.crossOrigin === true;
-    const offer: Offer = { key: b64u(crypto.getRandomValues(new Uint8Array(16))), tabId, frameId, documentId: (sender as { documentId?: string }).documentId, pageId, origin, crossOrigin, topOrigin: crossOrigin ? (msg.topOrigin as string | undefined) : undefined, options, rp };
+    const offer: Offer = { key: b64u(crypto.getRandomValues(new Uint8Array(16))), tabId, frameId, documentId: (sender as { documentId?: string }).documentId, pageDocument: msg.document, pageId, origin, crossOrigin, topOrigin: crossOrigin ? (msg.topOrigin as string | undefined) : undefined, options, rp };
     await changeOffers((now) => {
       const others = now.filter((o) => o.tabId !== tabId);
       const here = now.filter((o) => o.tabId === tabId && !(o.frameId === frameId && o.pageId === pageId));
-      return [...others, ...[...here, offer].slice(-OFFERS_PER_TAB)];
+      return [...others, ...[...here, offer].slice(-OFFERS_PER_TAB)].slice(-OFFERS_IN_ALL);
     });
     offersChanged(tabId, sender.tab.url);
     return { ok: true };
@@ -220,7 +251,7 @@ export async function handlePasskey(
     if ([...pending.values()].some((r) => r.tabId === sender.tab!.id)) return fail("NotAllowedError", "Another request from this tab is waiting.");
     const id = b64u(crypto.getRandomValues(new Uint8Array(16)));
     return new Promise((resolve) => {
-      const req: Req = { id, tabId: sender.tab!.id, op, origin, crossOrigin, topOrigin: crossOrigin ? (msg.topOrigin as string | undefined) : undefined, options: { ...options, _rp: rp }, resolve };
+      const req: Req = { id, tabId: sender.tab!.id, frameId: sender.frameId, op, origin, crossOrigin, topOrigin: crossOrigin ? (msg.topOrigin as string | undefined) : undefined, options: { ...options, _rp: rp }, resolve };
       pending.set(id, req);
       openPrompt(id).then((windowId) => {
         req.windowId = windowId;
@@ -296,6 +327,8 @@ export async function handlePasskey(
     return finish({ ok: true, result });
   }
 
+  // Signing is the last thing that can stop this: the page that asked has to still be there.
+  if (req.offerKey && !(await readOffers()).some((x) => x.key === req.offerKey)) return finish(fail("NotAllowedError", "The request wasn't allowed."));
   const o = req.options as { challenge: string; _rp: string; allow: { id: string }[] };
   const usable = usablePasskeys(allPasskeys(c), o._rp, o.allow.map((x) => x.id));
   const chosen = usable.find((u) => u.passkey.credentialId === msg.credentialId);

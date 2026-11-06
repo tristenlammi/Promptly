@@ -47,9 +47,11 @@ const NORMALISE = `
     const k = r.folderType ? byType[r.folderType] : byId[r.id];
     if (k) out[k] = shape(r);
   }
-  // Chromium keeps Firefox's menu in a folder.
-  const at = out.other.findIndex((x) => typeof x === "object" && "Bookmarks menu" in x);
-  if (at >= 0) { out.menu = out.other[at]["Bookmarks menu"]; out.other.splice(at, 1); }
+  // Chromium keeps Firefox's menu, and Mobile, in folders. Empty ones are as good as not there.
+  for (const [root, name] of [["menu", "Bookmarks menu"], ["mobile", "Mobile bookmarks"]]) {
+    const at = out.other.findIndex((x) => typeof x === "object" && name in x);
+    if (at >= 0) { out[root] = out.other[at][name]; out.other.splice(at, 1); }
+  }
   return out;
 `;
 
@@ -306,6 +308,38 @@ test("deleting a lot stops and asks, and keeping them brings them back everywher
   const back = await allAgree();
   expect(JSON.stringify(back)).toContain("Link 39=");
   expect(JSON.stringify(back).match(/Link 39=/g)).toHaveLength(1);
+});
+
+test("Mobile bookmarks stay Mobile across browsers, through a stand-in folder on Chromium", async () => {
+  await ffEval(`await browser.bookmarks.create({ parentId: "mobile______", title: "Phone link", url: "https://phone.example/" }); return true;`);
+  await settle();
+  const all = await allAgree();
+  expect(JSON.stringify(all.mobile)).toContain("Phone link");
+  expect(JSON.stringify(all.other)).not.toContain("Phone link");
+  // In Firefox it's still in the real Mobile folder, and it hasn't drifted for anyone.
+  expect(await ffEval<string>(`const [h] = await browser.bookmarks.search({ url: "https://phone.example/" }); return h.parentId;`)).toBe("mobile______");
+  await ffEval(`const [h] = await browser.bookmarks.search({ url: "https://phone.example/" }); await browser.bookmarks.remove(h.id); return true;`);
+  await settle();
+  expect(JSON.stringify(await allAgree())).not.toContain("phone.example");
+});
+
+test("something deleted can be restored from the Bookmarks screen, everywhere", async () => {
+  const id = await addIn(chrome_, { title: "Restore me", url: "https://restore.example/" });
+  await settle();
+  await rigEval(second!, `const [h] = await chrome.bookmarks.search({ url: "https://restore.example/" }); await chrome.bookmarks.remove(h.id);`);
+  await settle();
+  expect(JSON.stringify(await allAgree())).not.toContain("restore.example");
+  expect(id).toBeTruthy();
+  const page = await chrome_.ctx.newPage();
+  await page.goto(`chrome-extension://${chrome_.extId}/vault.html#/bookmarks`);
+  const deleted = page.getByTestId("bookmarks-deleted");
+  await expect(deleted).toBeVisible({ timeout: 30_000 });
+  await deleted.locator("summary").click();
+  await deleted.getByRole("listitem").filter({ hasText: "Restore me" }).getByRole("button", { name: "Restore" }).click();
+  await expect(deleted.getByRole("listitem").filter({ hasText: "Restore me" })).toHaveCount(0, { timeout: 15_000 });
+  await page.close();
+  await settle();
+  expect(JSON.stringify(await allAgree())).toContain("Restore me=https://restore.example/");
 });
 
 test("while locked nothing moves, and it catches up after unlocking", async () => {

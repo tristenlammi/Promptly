@@ -153,6 +153,11 @@ describe("a hostile server", () => {
     const cid = "33333333-3333-4333-8333-333333333333";
     s.userKeys.set(cid, contact.keys);
     await c.emergencyInvite(cid, 3);
+    // Named, and marked accepted by the server, but those keys are only the server's word so far.
+    // It could as easily be the server's own, and it would then hold every key. Nothing goes.
+    await c.refreshEmergency();
+    expect(s.wrapped).toEqual([]);
+    await c.markVerified(cid);
     await c.refreshEmergency();
     expect(s.wrapped).toHaveLength(1);
     expect(s.wrapped[0].grants).toHaveLength(1);

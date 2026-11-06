@@ -644,6 +644,9 @@ function main() {
 
   const pkWaiting = new Map<number, boolean>();
   const pkOffered = new Set<number>();
+  // This document's, and out of the page's reach. An answer has to carry it back, so one can't
+  // land in a later document in this frame, on a browser that can't address a document by id.
+  const pkDocument = crypto.randomUUID();
 
   /** The frame's real Permissions-Policy, from this world. A browser with no way to ask
    *  gets the conservative answer: top-level or same-origin frames only. */
@@ -695,7 +698,7 @@ function main() {
       if (!policyAllows("get")) return;
       pkOffered.add(d.id);
       const { crossOrigin, topOrigin } = ancestry();
-      void send({ t: "pkOffer", id: d.id, options: d.options, crossOrigin, topOrigin });
+      void send({ t: "pkOffer", id: d.id, options: d.options, crossOrigin, topOrigin, document: pkDocument });
       return;
     }
     if (d?.__pk !== "req" || typeof d.id !== "number" || (d.op !== "get" && d.op !== "create") || typeof d.options !== "object") return;
@@ -775,7 +778,7 @@ function main() {
     switch (msg.t) {
       case "pkOfferResult":
         // Only for a request this document really made, and it's still waiting.
-        if (pkOffered.delete(msg.id)) window.postMessage({ __pk: "res", id: msg.id, ok: true, result: msg.result }, location.origin);
+        if (msg.document === pkDocument && self.origin === msg.origin && pkOffered.delete(msg.id)) window.postMessage({ __pk: "res", id: msg.id, ok: true, result: msg.result }, location.origin);
         reply(true);
         return false;
       case "report":

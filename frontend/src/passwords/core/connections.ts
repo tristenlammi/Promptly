@@ -5,7 +5,7 @@ import { b64u, fromB64u, randomBytes, utf8 } from "./bytes";
 import quirks from "./data/change-password-URLs.json";
 import { aad, open, seal } from "./format";
 import { baseDomain, hostOf, lookalikeOf, sharedWith } from "./match";
-import { type AttachmentRef, type Item, type ItemBody, touch } from "./model";
+import { type AttachmentRef, type HistoryEntry, type Item, type ItemBody, touch } from "./model";
 import { aesKey, argon2, hkdf, KDF_FLOOR } from "./primitives";
 
 // ---- Mail codes ----------------------------------------------------------------------
@@ -117,9 +117,11 @@ export function commitPending(body: ItemBody): ItemBody {
   return touch(body, { ...rest, password: pendingPassword });
 }
 
+/** Into the history, not away: "no" can be a mistake, and the site may have taken it. */
 export function dropPending(body: ItemBody): ItemBody {
-  const { pendingPassword: _unused, ...rest } = body;
-  return touch(body, { ...rest });
+  const { pendingPassword, ...rest } = body;
+  const passwordHistory = pendingPassword && pendingPassword !== body.password ? [{ password: pendingPassword, at: new Date().toISOString() }, ...(body.passwordHistory ?? [])].slice(0, 20) : body.passwordHistory;
+  return touch(body, { ...rest, passwordHistory });
 }
 
 // ---- Duplicates ----------------------------------------------------------------------
@@ -157,7 +159,7 @@ export function mergeDuplicates(group: Item[]): { keep: Item; body: ItemBody; dr
   const keep = order[0];
   const drop = order.slice(1);
   const body: ItemBody = { ...keep.body };
-  const history = [...(body.passwordHistory ?? [])];
+  const history: HistoryEntry[] = [];
   const seenUrls = new Set((body.urls ?? []).map((u) => u.url));
   const urls = [...(body.urls ?? [])];
   const notes: string[] = body.notes ? [body.notes] : [];
@@ -169,7 +171,7 @@ export function mergeDuplicates(group: Item[]): { keep: Item; body: ItemBody; dr
   if (drop.some((d) => d.body.reprompt)) body.reprompt = true;
   for (const d of drop) {
     if (d.body.password && d.body.password !== body.password && !history.some((h) => h.password === d.body.password)) history.push({ password: d.body.password, at: d.body.updatedAt });
-    for (const h of d.body.passwordHistory ?? []) if (!history.some((x) => x.password === h.password)) history.push(h);
+    if (d.body.pendingPassword && d.body.pendingPassword !== body.password && !history.some((h) => h.password === d.body.pendingPassword)) history.push({ password: d.body.pendingPassword, at: new Date().toISOString() });
     for (const u of d.body.urls ?? []) if (!seenUrls.has(u.url)) { seenUrls.add(u.url); urls.push(u); }
     if (d.body.notes && !notes.includes(d.body.notes)) notes.push(d.body.notes);
     for (const f of d.body.fields ?? []) if (!fields.some((x) => x.name === f.name && x.value === f.value)) fields.push(f);
@@ -177,6 +179,8 @@ export function mergeDuplicates(group: Item[]): { keep: Item; body: ItemBody; dr
     for (const a of d.body.attachments ?? []) if (!attachments.some((x) => x.id === a.id) && !moves.some((m) => m.ref.id === a.id)) moves.push({ from: d, ref: a });
     if (!body.totp && d.body.totp) body.totp = d.body.totp;
   }
+  // What's being merged in comes first, as the copies are about to go. Older history fills the rest.
+  for (const h of [...(body.passwordHistory ?? []), ...drop.flatMap((d) => d.body.passwordHistory ?? [])]) if (!history.some((x) => x.password === h.password)) history.push(h);
   return { keep, drop, moves, body: touch(keep.body, { ...body, urls, notes: notes.join("\n\n") || undefined, fields, passkeys, attachments, passwordHistory: history.slice(0, 20) }) };
 }
 

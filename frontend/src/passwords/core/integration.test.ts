@@ -80,6 +80,7 @@ describe.skipIf(!stackEnabled)("vault client against the stack", () => {
     const { c: grantee } = await ready(h);
     await grantor.saveNew(await grantor.personalVaultId(), newBody("login", "Rainy day", { password: "rainy-pw" }));
     await grantor.sync();
+    await grantor.markVerified(h.id);
     await grantor.emergencyInvite(h.id, 1);
     const [row] = await grantee.emergencyList();
     expect(row.state).toBe("invited");
@@ -578,6 +579,7 @@ describe.skipIf(!stackEnabled)("canary: the server can't read", () => {
     await a.c.sync();
     const ref = await uploadAttachment(a.c.api, vid, i1.id, { name: `${CANARY}_file.txt`, size: attached.size, slice: (x, y) => attached.slice(x, y) });
     await a.c.update(i1.id, { ...a.c.get(i1.id)!.body, attachments: [ref] });
+    await a.c.markVerified(v.id);
     await a.c.emergencyInvite(v.id, 3);
     await b.c.emergencyAct((await b.c.emergencyList())[0].id, "accept");
     await a.c.refreshEmergency();

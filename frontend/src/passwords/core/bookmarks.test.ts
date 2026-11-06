@@ -388,6 +388,53 @@ describe("bookmark sync", () => {
     expect(vault.items.size).toBe(3);
   });
 
+  it("a bookmark too long for the vault stays in the browser, on every run", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    a.browser.add(OTHER, "x".repeat(5000), "https://long.example/");
+    a.browser.add(OTHER, "Long address", `https://long.example/${"y".repeat(20000)}`);
+    a.browser.add(OTHER, "Fine", "https://fine.example/");
+    await a.run();
+    await a.run();
+    await a.run();
+    expect(a.browser.raw.size).toBe(3);
+    expect(vault.items.size).toBe(1);
+  });
+
+  it("many can't go a few at a time, and a yes covers only what was shown", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    for (let i = 0; i < 100; i++) a.browser.add(OTHER, `B${i}`, `https://b${i}.example/`);
+    await a.run();
+    const run = (o: object) => reconcile(a.browser, vault, a.base, { ...options, ...o });
+    const ids = [...vault.items.keys()];
+    for (const id of ids.slice(0, 5)) await vault.remove(id);
+    // Few enough by itself, but not on top of the 23 that went earlier today.
+    const held = await run({ deletedLately: 23 });
+    expect(held.status).toBe("held");
+    expect(a.browser.raw.size).toBe(100);
+    // The person agreed to five, and now it's six.
+    await vault.remove(ids[5]);
+    expect((await run({ deletedLately: 23, allowUpTo: 5 })).status).toBe("held");
+    const yes = await run({ deletedLately: 23, allowUpTo: 6 });
+    expect(yes.status === "ok" && yes.deleted).toBe(6);
+    expect(a.browser.raw.size).toBe(94);
+  });
+
+  it("doesn't ask for a root's order when nothing's going in it: that can create a folder", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    a.browser.add(BAR, "One", "https://one.example/");
+    const asked: string[] = [];
+    const real = a.browser.order.bind(a.browser);
+    a.browser.order = async (p) => {
+      asked.push(p);
+      return real(p);
+    };
+    await a.run();
+    expect(asked).toEqual([BAR]);
+  });
+
   it("a small delete doesn't ask", async () => {
     expect(massDeleteLimit(10)).toBe(25);
     expect(massDeleteLimit(1000)).toBe(200);
