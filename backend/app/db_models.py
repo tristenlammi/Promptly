@@ -83,6 +83,23 @@ from app.mail.models import (  # noqa: F401
     MailSnooze,
     MailThreadLabel,
 )
+from app.passwords.models import (  # noqa: F401
+    PwAccount,
+    PwActivity,
+    PwAttachment,
+    PwConnect,
+    PwDevice,
+    PwDeviceRequest,
+    PwEmergency,
+    PwHealth,
+    PwItem,
+    PwItemVersion,
+    PwSend,
+    PwSession,
+    PwSettings,
+    PwVault,
+    PwVaultMember,
+)
 from app.maps.models import (  # noqa: F401
     MapLiveLocation,
     MapParked,

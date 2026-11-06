@@ -78,6 +78,8 @@ Category = Literal[
     "calendar",
     # New mail, and snoozed mail coming back. Push only, never an inbox row.
     "mail",
+    # New-device approvals and shared-vault invites. Never any vault data.
+    "passwords",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -99,6 +101,7 @@ CATEGORIES: tuple[str, ...] = (
     "room_message",
     "calendar",
     "mail",
+    "passwords",
     "test",
 )
 

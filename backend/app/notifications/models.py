@@ -129,6 +129,10 @@ class PushPreferences(Base):
     mail: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # New-device approvals and shared-vault invites (0254). No vault data in these.
+    passwords: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     # Calendar invites, changes and reminders (0231).
     calendar: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"

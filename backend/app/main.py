@@ -98,6 +98,10 @@ async def lifespan(_: FastAPI):
     from app.today.push import start_today_loops
 
     today_loops_task = start_today_loops()
+    # Passwords: expired Sends and requests, Trash past 30 days (app/passwords/service.py).
+    from app.passwords.service import start_password_loops
+
+    password_loops_task = start_password_loops()
     # Hourly retry of anything queued or failed for the embedder (R-321).
     from app.custom_models.backfill import start_embedding_reconciler
 
@@ -159,6 +163,7 @@ async def lifespan(_: FastAPI):
             item_loops_task,
             calendar_loops_task,
             today_loops_task,
+            password_loops_task,
             reconcile_task,
             chat_upload_sweeper_task,
             stale_run_reaper_task,
@@ -676,6 +681,13 @@ app.include_router(maps_timeline_router, prefix="/api/maps", tags=["maps"])
 from app.mail.router import router as mail_router  # noqa: E402
 
 app.include_router(mail_router, prefix="/api/mail", tags=["mail"])
+
+# Passwords: end-to-end encrypted vaults (app/passwords). All opaque here.
+from app.passwords.router import admin_router as passwords_admin_router  # noqa: E402
+from app.passwords.router import router as passwords_router  # noqa: E402
+
+app.include_router(passwords_admin_router, prefix="/api/passwords", tags=["passwords"])
+app.include_router(passwords_router, prefix="/api/passwords", tags=["passwords"])
 
 # The phone's assistant (app/assistant).
 from app.assistant.router import router as assistant_router  # noqa: E402
