@@ -114,6 +114,18 @@ describe("duplicates", () => {
     expect(body.totp?.secret).toBe("ABC");
     expect(body.fields?.[0].name).toBe("pin");
   });
+
+  it("doesn't list a dropped copy's attachment until it's been moved, and keeps a reprompt", () => {
+    const ref = { id: "att-1", name: "scan.pdf", size: 10, key: "k", chunks: 1 };
+    const old = item({ username: "ana", password: "older", reprompt: true, attachments: [ref] });
+    old.body.updatedAt = "2024-01-01T00:00:00.000Z";
+    const fresh = item({ username: "ana", password: "newer" });
+    fresh.body.updatedAt = "2026-01-01T00:00:00.000Z";
+    const { body, moves } = mergeDuplicates([old, fresh]);
+    expect(body.attachments ?? []).toEqual([]);
+    expect(moves.map((m) => [m.from.id, m.ref.id])).toEqual([[old.id, "att-1"]]);
+    expect(body.reprompt).toBe(true);
+  });
 });
 
 describe("clock and PIN", () => {

@@ -22,6 +22,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ## [Unreleased]
 
 ### Added
+- Passwords: the extension can keep your bookmarks the same in every browser, end-to-end encrypted in your vault.
 - Passwords: email codes and sign-in links in the extension's toolbar button, which is how Firefox gets them.
 - Passwords: on Windows, typing a login copies its 2FA code afterwards, and Ctrl+Alt+Enter types the code.
 - Passwords: big attachments save straight to a file on Chromium browsers.

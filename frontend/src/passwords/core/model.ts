@@ -51,9 +51,10 @@ export type ItemKind =
   | "site_rule"
   | "trust"
   | "prefs"
-  | "send";
+  | "send"
+  | "bookmark";
 
-export const SYSTEM_KINDS: readonly ItemKind[] = ["folder", "site_rule", "trust", "prefs", "send"];
+export const SYSTEM_KINDS: readonly ItemKind[] = ["folder", "site_rule", "trust", "prefs", "send", "bookmark"];
 
 export type ItemBody = {
   v: 1;
@@ -72,6 +73,8 @@ export type ItemBody = {
   trustBook?: TrustBook;
   /** A new password waiting on the site saying yes, so a failed change can't lose it. */
   pendingPassword?: string;
+  /** System item: one browser bookmark or folder (a folder has no url). See BOOKMARKS.md. */
+  bookmark?: { parent: string; pos: number; url?: string };
   /** A record of a Secure Send made from here; its link is in notes. */
   sendId?: string;
   fields?: CustomField[];

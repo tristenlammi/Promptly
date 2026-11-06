@@ -555,6 +555,7 @@ describe.skipIf(!stackEnabled)("canary: the server can't read", () => {
     const i1 = await a.c.saveNew(vid, body);
     const i2 = await a.c.saveNew(shared, { ...body, title: `${CANARY}_sharedtitle` });
     await a.c.saveNew(vid, newBody("folder", `${CANARY}_folder`));
+    await a.c.saveNew(vid, newBody("bookmark", `${CANARY}_bookmark`, { bookmark: { parent: "root:bar", pos: 1, url: `https://${CANARY}.example.com/bookmark` } }));
     await a.c.saveNew(vid, newBody("site_rule", `${CANARY}_rule`, { rule: { host: `${CANARY}.example.com`, username: "#u" } }));
     await a.c.sync();
     await a.c.update(i1.id, { ...a.c.get(i1.id)!.body, password: `${CANARY}_password2` });

@@ -33,7 +33,7 @@ function manifest(engine) {
     icons: { 16: "icons/16.png", 32: "icons/32.png", 48: "icons/48.png", 128: "icons/128.png" },
     action: { default_popup: "popup.html", default_title: "Promptly Passwords", default_icon: { 16: "icons/16.png", 32: "icons/32.png" } },
     permissions: ["storage", "activeTab", "scripting", "alarms", "contextMenus", "idle", "webNavigation", "clipboardWrite", "nativeMessaging"],
-    optional_permissions: ["clipboardRead"],
+    optional_permissions: ["clipboardRead", "bookmarks"],
     optional_host_permissions: ["https://*/*", "http://*/*"],
     commands: COMMANDS,
     web_accessible_resources: [{ resources: ["menu.html", "save.html"], matches: ["<all_urls>"] }],
@@ -42,7 +42,7 @@ function manifest(engine) {
   if (TEST) base.host_permissions = ["<all_urls>"];
   // Chromium's prompt for this can't be clicked by a test, and the tests read the clipboard.
   if (TEST && engine === "chrome") {
-    base.permissions = [...base.permissions, "clipboardRead"];
+    base.permissions = [...base.permissions, "clipboardRead", "bookmarks"];
     delete base.optional_permissions;
   }
   if (engine === "chrome") {

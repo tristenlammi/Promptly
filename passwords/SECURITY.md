@@ -132,6 +132,10 @@ If you lose both the master password and the recovery kit, the vault is gone. No
 - Decrypted strings can't be wiped from Java memory until they're collected.
 - What the browser or app reports about a form is all the service has. Fields it can't see as hidden can't be refused.
 
+## Bookmarks
+
+Bookmarks are encrypted items like any other, and only ones in your own vault count, so a member of a shared vault can't plant one in your browsers. Only `http` and `https` addresses are taken from the vault, so a bad item can't add a `javascript:` bookmark. A server can withhold or roll back these items as with any other. That shows up as the same rollback warning, and a large apparent deletion stops and asks. A small one doesn't ask, so a hostile server that could hide a few items would delete those bookmarks in the browser, though sync's rollback checks should catch that first. Each browser keeps a salted hash of each bookmark's fields on disk, next to the plain copy the browser itself keeps. Your bookmarks are readable on any device while the browser has them: this protects them on the server only.
+
 ## Passkeys in the extension
 
 A page can detect the wrapper: `navigator.credentials.get.toString()` isn't native, and on Chromium a stack trace shows the extension id. Without a gesture the extension opens no window, and the browser's own UI handles it. User verification is reported only after a master password or PIN in the prompt, so a site that requires it asks every time.

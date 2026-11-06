@@ -22,7 +22,7 @@ fun isoNow(now: Instant = Instant.now()): String {
     return if (s.contains('.')) s else s.removeSuffix("Z") + ".000Z"
 }
 
-val SYSTEM_KINDS = setOf("folder", "site_rule", "trust", "prefs", "send")
+val SYSTEM_KINDS = setOf("folder", "site_rule", "trust", "prefs", "send", "bookmark")
 
 data class LoginUrl(val url: String, val match: String? = null) {
     fun toJson(): JsonObject = JsonObject(buildMap {

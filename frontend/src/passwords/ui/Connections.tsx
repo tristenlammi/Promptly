@@ -9,7 +9,7 @@ import { encodeSecretKey, lastGroup } from "../core/keys";
 import { generateForSite } from "../core/generator";
 import { hostOf } from "../core/match";
 import { type Item, newBody } from "../core/model";
-import { uploadAttachment } from "../core/attachments";
+import { moveAttachment, uploadAttachment } from "../core/attachments";
 import { Reprompt } from "./ItemView";
 import { Button, Callout, errorText, inputClass, Label, Modal, safeHref, useVault } from "./kit";
 import { downloadBlob } from "./Onboarding";
@@ -221,15 +221,19 @@ export function RotationQueue({ items, onDone }: { items: Item[]; onDone: () => 
 }
 
 export function DuplicatesPanel() {
-  const { vault, version, bump, toast } = useVault();
+  const { vault, version, bump, toast, platform } = useVault();
   const groups = useMemo(() => {
     void version;
     return findDuplicates(vault.allItems());
   }, [vault, version]);
   if (!groups.length) return null;
   const merge = async (group: Item[]) => {
-    const { keep, body, drop } = mergeDuplicates(group);
+    const { keep, body, drop, moves } = mergeDuplicates(group);
     try {
+      // Before anything's changed, so a failure here leaves all the copies as they were.
+      const moved = [];
+      for (const m of moves) moved.push(await moveAttachment(platform.api, { vaultId: m.from.vaultId, itemId: m.from.id }, { vaultId: keep.vaultId, itemId: keep.id }, m.ref));
+      if (moved.length) body.attachments = [...(body.attachments ?? []), ...moved];
       await vault.update(keep.id, body);
       for (const d of drop) await vault.trashItem(d.id);
       vault.sync().catch(() => undefined);

@@ -49,6 +49,10 @@ export type PageRequest =
   | { t: "mailForTab"; tabId: number }
   | { t: "mailCodeFill"; tabId: number; id: string }
   | { t: "mailLinkOpen"; tabId: number; id: string; confirmed?: boolean }
+  | { t: "bookmarkState" }
+  | { t: "setBookmarks"; on: boolean }
+  | { t: "bookmarkAnswer"; go: boolean }
+  | { t: "bookmarkExport" }
   | { t: "plusBase" }
   | { t: "plusAddress"; email: string; host?: string | null }
   | { t: "clipWatch"; text: string }

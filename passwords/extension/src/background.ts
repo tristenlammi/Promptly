@@ -19,6 +19,8 @@ import { IdbStore } from "../../../frontend/src/passwords/core/store";
 import { totpCode } from "../../../frontend/src/passwords/core/totp";
 import { VaultClient } from "../../../frontend/src/passwords/core/vault";
 import { canCheckClipboard, CLIP_ALARM, clearClipboardIfOurs, clipboardTest, watchClipboard, writeClipboard } from "./clipboard";
+import { BrowserBookmarks, VaultBookmarks } from "./bookmarks";
+import { type Base, bookmarkHash, bookmarksHtml, reconcile } from "../../../frontend/src/passwords/core/bookmarks";
 import { handlePasskey } from "./passkeys";
 import { packPublicKey } from "./rules-key";
 import { type Candidate, type ContentRequest, ext, type FillOutcome, type MenuRequest, type PageReport, type PageRequest, type SaveRequest, type StateOut, type ToContent } from "./rpc";
@@ -144,6 +146,7 @@ ext.alarms.onAlarm.addListener(async (a) => {
   if (a.name === CLIP_ALARM) await clearClipboardIfOurs();
   if (a.name === SYNC_ALARM && client?.unlocked) {
     await safeSync();
+    await runBookmarks();
     await refreshDeviceRequests();
   }
 });
@@ -168,6 +171,81 @@ async function safeSync() {
   // Open vault pages re-read the copy we share. Nobody listening is fine.
   ext.runtime.sendMessage({ t: "vaultChanged" }).catch(() => undefined);
 }
+
+// ---- Bookmarks (BOOKMARKS.md) -------------------------------------------------------------
+
+type BookmarkState = { on: boolean; at?: string; total?: number; unsynced?: number; failed?: number; held?: { fromBrowser: number; fromVault: number }; error?: string };
+
+const bookmarkState = async () => ((await store.getMeta<BookmarkState>("bookmark_sync")) ?? { on: false }) as BookmarkState;
+
+let bookmarksRunning: Promise<void> | null = null;
+let bookmarksAgain = false;
+
+/** One at a time. Changes while it runs are picked up by one more run. */
+async function runBookmarks(allowMassDelete = false): Promise<void> {
+  if (bookmarksRunning) {
+    bookmarksAgain = true;
+    return bookmarksRunning;
+  }
+  bookmarksRunning = (async () => {
+    do {
+      bookmarksAgain = false;
+      await bookmarkPass(allowMassDelete);
+      allowMassDelete = false;
+    } while (bookmarksAgain);
+  })().finally(() => {
+    bookmarksRunning = null;
+  });
+  return bookmarksRunning;
+}
+
+async function bookmarkPass(allowMassDelete: boolean) {
+  const state = await bookmarkState();
+  // A held run waits for its answer. Locked, it catches up on the next run after unlocking.
+  if (!state.on || !client?.unlocked || !ext.bookmarks || (state.held && !allowMassDelete)) return;
+  try {
+    const vaultId = await client.personalVaultId();
+    // In travel mode this vault's items are off the device on purpose. That isn't a deletion.
+    if ((await store.getVaults()).find((v) => v.id === vaultId)?.hidden) return;
+    let salt = await store.getMeta<string>("bookmark_salt");
+    if (!salt) {
+      salt = b64u(randomBytes(16));
+      await store.setMeta("bookmark_salt", salt);
+    }
+    const browser = new BrowserBookmarks();
+    const base = (await store.getMeta<Base>("bookmark_base")) ?? {};
+    const r = await reconcile(browser, new VaultBookmarks(client, vaultId), base, { hash: bookmarkHash(salt), newId: () => crypto.randomUUID(), allowMassDelete });
+    if (r.status === "held") {
+      await store.setMeta("bookmark_sync", { ...state, held: { fromBrowser: r.fromBrowser, fromVault: r.fromVault } });
+      updateBadgeAll();
+      return;
+    }
+    await store.setMeta("bookmark_base", r.base);
+    await store.setMeta("bookmark_sync", { on: true, at: new Date().toISOString(), total: r.total, unsynced: browser.unsynced, failed: r.counts.failed });
+    if (r.wroteVault) await safeSync();
+  } catch (e) {
+    await store.setMeta("bookmark_sync", { ...state, error: e instanceof Error ? e.message : "Couldn't sync bookmarks" });
+  }
+}
+
+let bookmarkTimer: ReturnType<typeof setTimeout> | undefined;
+/** A folder move or an import is many events. The worker may die first, and then the next
+ *  alarm does the same job, because a run compares states and doesn't need the events. */
+function bookmarksChanged() {
+  clearTimeout(bookmarkTimer);
+  bookmarkTimer = setTimeout(() => {
+    void boot().then(() => runBookmarks());
+  }, 3000);
+}
+
+function listenToBookmarks() {
+  const b = ext.bookmarks;
+  if (!b) return; // Not granted, or this browser hasn't got it.
+  for (const event of [b.onCreated, b.onRemoved, b.onChanged, b.onMoved, b.onChildrenReordered, b.onImportEnded]) {
+    if (event && !event.hasListener(bookmarksChanged)) event.addListener(bookmarksChanged);
+  }
+}
+listenToBookmarks();
 
 // ---- A new device asking to join (plan 3.4) ----------------------------------------------
 
@@ -933,6 +1011,42 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       const pin = (await session.get("pin")).pin as PinRecord | undefined;
       return { onClickOnly: await fillsOnClickOnly(), mailCodes: s.mailCodes, pin: !!pin, clipCheck: await canCheckClipboard() };
     }
+    case "bookmarkState":
+      return { ...(await bookmarkState()), granted: !!ext.bookmarks };
+    case "setBookmarks": {
+      if (!m.on) {
+        // What's in the vault stays. Turning it on again is a fresh merge, which only adds.
+        await store.setMeta("bookmark_sync", { on: false });
+        await store.setMeta("bookmark_base", {});
+        return { ok: true };
+      }
+      if (!ext.bookmarks) return { ok: false };
+      listenToBookmarks();
+      await store.setMeta("bookmark_sync", { on: true });
+      await store.setMeta("bookmark_base", {});
+      if (c.unlocked) {
+        await safeSync();
+        await runBookmarks();
+      }
+      return { ok: true };
+    }
+    case "bookmarkAnswer": {
+      const state = await bookmarkState();
+      if (!state.held) return { ok: false };
+      if (m.go) {
+        await runBookmarks(true);
+        return { ok: true };
+      }
+      // No: nothing goes. Starting the comparison again brings each side's back to the other.
+      await store.setMeta("bookmark_base", {});
+      await store.setMeta("bookmark_sync", { on: true });
+      await runBookmarks();
+      return { ok: true };
+    }
+    case "bookmarkExport": {
+      if (!ext.bookmarks) return null;
+      return bookmarksHtml(await new BrowserBookmarks().read());
+    }
     case "setMailCodes":
       await store.setMeta("ext_settings", { ...(await store.getMeta<object>("ext_settings")), mailCodes: m.on });
       return { ok: true };
@@ -1387,6 +1501,31 @@ const testLog = {
 async function handleTest(m: { op: string; [k: string]: unknown }): Promise<unknown> {
   await boot();
   switch (m.op) {
+    case "bookmarkRun": {
+      // Everything on a test machine shares one address, so nginx's limit can get in the way.
+      const sync = async () => {
+        for (let i = 0; i < 20; i++) {
+          try {
+            return await client!.sync();
+          } catch (e) {
+            if (!/too many/i.test(String(e))) throw e;
+            await new Promise((r) => setTimeout(r, 2000));
+          }
+        }
+        throw new Error("Rate limited for too long");
+      };
+      await sync();
+      await runBookmarks();
+      await sync();
+      return bookmarkState();
+    }
+    case "bookmarkPlant": {
+      const vaultId = await client!.createSharedVault(`Planted ${Date.now()}`);
+      await client!.saveNew(vaultId, newBody("bookmark", m.title as string, { bookmark: { parent: "root:bar", pos: 1, url: m.url as string } }));
+      return { vaultId };
+    }
+    case "bookmarkItems":
+      return client!.allItems({ includeSystem: true }).filter((i) => i.body.kind === "bookmark").map((i) => ({ id: i.id, vaultId: i.vaultId, title: i.body.title, ...i.body.bookmark }));
     case "idle":
       await onIdleState(m.state as string);
       return { unlocked: !!client?.unlocked };

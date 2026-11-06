@@ -65,3 +65,11 @@ export async function downloadAttachment(api: VaultApi, vaultId: string, itemId:
   }, onProgress);
   return out;
 }
+
+/** Seals an attachment again under another item, with a new id and key. The old one stays until
+ *  whoever's moving it has saved the new reference. */
+export async function moveAttachment(api: VaultApi, from: { vaultId: string; itemId: string }, to: { vaultId: string; itemId: string }, ref: AttachmentRef): Promise<AttachmentRef> {
+  const data = await downloadAttachment(api, from.vaultId, from.itemId, ref);
+  const blob = new Blob([data as BlobPart], { type: ref.mime ?? "" });
+  return uploadAttachment(api, to.vaultId, to.itemId, { name: ref.name, type: ref.mime, size: data.length, slice: (a, b) => blob.slice(a, b) });
+}

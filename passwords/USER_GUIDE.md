@@ -27,6 +27,14 @@ Install the extension from your server's Install page, connect it to your server
 
 Settings has more: filling only when you click the toolbar button, a short PIN for the browser, and offering codes from your Promptly Mail.
 
+## Bookmarks
+
+In the extension, open Settings and tick "Keep my bookmarks the same in every browser". Do this in each browser you use. Bookmarks are encrypted in your vault, so your server can't read them.
+
+They sync about once a minute while your vault's unlocked, and catch up when you next unlock. The first sync only adds, so nothing in a browser is removed by turning this on. The same bookmark in the same folder of two browsers becomes one. If you delete a lot at once, sync stops and asks first.
+
+Bookmarklets (`javascript:` addresses) and browser pages stay in the browser they're in. Bookmarks don't sync to the phone app, since Chrome on Android has no extensions. If you also use a browser's own bookmark sync, turn that off. [BOOKMARKS.md](BOOKMARKS.md) has the details.
+
 ## On your phone
 
 In Promptly for Android, open P Passwords and connect. Settings walks you through turning on autofill and passkeys. Chrome needs one extra setting, and the app takes you to it.

@@ -44,14 +44,15 @@ export function startSite(): Promise<{ close: () => void }> {
 
 export type Rig = { ctx: BrowserContext; extId: string; dir: string; close: () => Promise<void> };
 
-export async function launch(dist: string = EXT): Promise<Rig> {
+/** `executablePath` runs another Chromium browser that's installed here, with the same throwaway profile. */
+export async function launch(dist: string = EXT, opts: { executablePath?: string } = {}): Promise<Rig> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pw-ext-"));
   // Playwright's own full Chromium won't start on this machine (a Windows side-by-side
   // error, logged in DECISIONS.md), and branded Chrome ignores --load-extension. It does
   // take the DevTools route, with a throwaway profile, so this tests the real browser.
   const channel = process.env.PW_EXT_CHANNEL ?? "chrome";
   const ctx = await chromium.launchPersistentContext(dir, {
-    channel,
+    ...(opts.executablePath ? { executablePath: opts.executablePath } : { channel }),
     headless: true,
     baseURL: BASE,
     ignoreDefaultArgs: ["--disable-extensions"],

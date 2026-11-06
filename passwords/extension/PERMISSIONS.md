@@ -20,6 +20,8 @@ For store review, and for anyone who wants to know. Nothing is collected or sent
 
 `clipboardRead`. Not granted at install, and only asked for if the person ticks "Don't clear the clipboard if I've copied something else since" in Settings. It lets the extension compare what's on the clipboard with a salted hash of what it copied, when a clear is due. Nothing read is kept or sent. Without it, a clear goes ahead whatever's on the clipboard, because there's no way to tell.
 
+`bookmarks`. Not granted at install, and only asked for if the person ticks "Keep my bookmarks the same in every browser" in Settings. Unticking gives it back. It reads and changes the browser's bookmarks, to keep them in step with an encrypted copy in the person's own vault. Nothing is sent anywhere except that encrypted copy, to their own server.
+
 ## Host permissions
 
 `optional_host_permissions: ["https://*/*", "http://*/*"]`. None are granted at install.

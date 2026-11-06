@@ -5,7 +5,7 @@ import { b64u, fromB64u, randomBytes, utf8 } from "./bytes";
 import quirks from "./data/change-password-URLs.json";
 import { aad, open, seal } from "./format";
 import { baseDomain, hostOf, lookalikeOf, sharedWith } from "./match";
-import { type Item, type ItemBody, touch } from "./model";
+import { type AttachmentRef, type Item, type ItemBody, touch } from "./model";
 import { aesKey, argon2, hkdf, KDF_FLOOR } from "./primitives";
 
 // ---- Mail codes ----------------------------------------------------------------------
@@ -150,7 +150,9 @@ export function findDuplicates(items: Item[]): Item[][] {
 
 /** Keeps the newest as the main one, and nothing else is thrown away: other passwords
  *  go to history, and other URLs, notes, 2FA, passkeys and fields come across. */
-export function mergeDuplicates(group: Item[]): { keep: Item; body: ItemBody; drop: Item[] } {
+/** An attachment's chunks are bound to the item they were uploaded on, so one on a dropped copy
+ *  can't just be listed on the kept item: `moves` says which to seal again under it first. */
+export function mergeDuplicates(group: Item[]): { keep: Item; body: ItemBody; drop: Item[]; moves: { from: Item; ref: AttachmentRef }[] } {
   const order = [...group].sort((a, b) => b.body.updatedAt.localeCompare(a.body.updatedAt));
   const keep = order[0];
   const drop = order.slice(1);
@@ -162,6 +164,9 @@ export function mergeDuplicates(group: Item[]): { keep: Item; body: ItemBody; dr
   const fields = [...(body.fields ?? [])];
   const passkeys = [...(body.passkeys ?? [])];
   const attachments = [...(body.attachments ?? [])];
+  const moves: { from: Item; ref: AttachmentRef }[] = [];
+  // Someone who asked for the master password on any copy still wants that on what's left.
+  if (drop.some((d) => d.body.reprompt)) body.reprompt = true;
   for (const d of drop) {
     if (d.body.password && d.body.password !== body.password && !history.some((h) => h.password === d.body.password)) history.push({ password: d.body.password, at: d.body.updatedAt });
     for (const h of d.body.passwordHistory ?? []) if (!history.some((x) => x.password === h.password)) history.push(h);
@@ -169,10 +174,10 @@ export function mergeDuplicates(group: Item[]): { keep: Item; body: ItemBody; dr
     if (d.body.notes && !notes.includes(d.body.notes)) notes.push(d.body.notes);
     for (const f of d.body.fields ?? []) if (!fields.some((x) => x.name === f.name && x.value === f.value)) fields.push(f);
     for (const p of d.body.passkeys ?? []) if (!passkeys.some((x) => x.credentialId === p.credentialId)) passkeys.push(p);
-    for (const a of d.body.attachments ?? []) if (!attachments.some((x) => x.id === a.id)) attachments.push(a);
+    for (const a of d.body.attachments ?? []) if (!attachments.some((x) => x.id === a.id) && !moves.some((m) => m.ref.id === a.id)) moves.push({ from: d, ref: a });
     if (!body.totp && d.body.totp) body.totp = d.body.totp;
   }
-  return { keep, drop, body: touch(keep.body, { ...body, urls, notes: notes.join("\n\n") || undefined, fields, passkeys, attachments, passwordHistory: history.slice(0, 20) }) };
+  return { keep, drop, moves, body: touch(keep.body, { ...body, urls, notes: notes.join("\n\n") || undefined, fields, passkeys, attachments, passwordHistory: history.slice(0, 20) }) };
 }
 
 // ---- Clock ---------------------------------------------------------------------------

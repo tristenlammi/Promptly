@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { VaultApi } from "./api";
-import { CHUNK, downloadAttachment, streamAttachment, uploadAttachment } from "./attachments";
+import { CHUNK, downloadAttachment, moveAttachment, streamAttachment, uploadAttachment } from "./attachments";
 
 function fakeServer() {
   const blobs = new Map<string, Uint8Array>();
@@ -64,6 +64,17 @@ describe("attachments", () => {
     const written: number[] = [];
     await expect(streamAttachment(s.api, "v1", "i1", ref, (p) => void written.push(p.length))).rejects.toThrow();
     expect(written).toEqual([CHUNK]);
+  });
+
+  it("a reference copied to another item doesn't open, and a moved one does", async () => {
+    const s = fakeServer();
+    const data = sample(CHUNK + 50);
+    const ref = await uploadAttachment(s.api, "v1", "old-item", fileOf(data));
+    await expect(downloadAttachment(s.api, "v1", "kept-item", ref)).rejects.toThrow();
+    const moved = await moveAttachment(s.api, { vaultId: "v1", itemId: "old-item" }, { vaultId: "v2", itemId: "kept-item" }, ref);
+    expect(moved.id).not.toBe(ref.id);
+    expect(moved.key).not.toBe(ref.key);
+    expect(Buffer.from(await downloadAttachment(s.api, "v2", "kept-item", moved)).equals(Buffer.from(data))).toBe(true);
   });
 
   it("refuses chunks swapped by the server, a file moved to another item, and a short file", async () => {

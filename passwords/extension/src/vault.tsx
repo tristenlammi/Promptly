@@ -134,6 +134,88 @@ function Access({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** Bookmarks in this browser, kept the same as every other browser this vault is connected in. */
+function BookmarkSettings() {
+  type Shown = { on: boolean; granted: boolean; at?: string; total?: number; unsynced?: number; failed?: number; held?: { fromBrowser: number; fromVault: number }; error?: string };
+  const [s, setS] = useState<Shown | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = () => call<Shown>({ t: "bookmarkState" }).then(setS);
+  useEffect(() => {
+    void load();
+    const t = setInterval(load, 5000);
+    return () => clearInterval(t);
+  }, []);
+  if (!s) return null;
+  const toggle = async (on: boolean) => {
+    // Has to be asked for while the click still counts, so before anything else happens.
+    const asked = on ? ext.permissions.request({ permissions: ["bookmarks"] }) : Promise.resolve(true);
+    const granted = await asked.catch(() => false);
+    if (!granted) return;
+    setBusy(true);
+    try {
+      await call({ t: "setBookmarks", on });
+      if (!on) await ext.permissions.remove({ permissions: ["bookmarks"] }).catch(() => false);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const answer = async (go: boolean) => {
+    setBusy(true);
+    try {
+      await call({ t: "bookmarkAnswer", go });
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  };
+  const saveCopy = async () => {
+    const html = await call<string | null>({ t: "bookmarkExport" });
+    if (!html) return;
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "bookmarks.html";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
+  return (
+    <div data-testid="bookmark-settings" className="flex flex-col gap-2">
+      <label className="flex items-center gap-2">
+        <input type="checkbox" checked={s.on} disabled={busy} onChange={(e) => void toggle(e.target.checked)} />
+        Keep my bookmarks the same in every browser
+      </label>
+      <p className="text-xs text-[var(--text-muted)]">
+        Bookmarks are encrypted in your vault, so your server can't read them. Turn this on in each browser you use. They sync about once a minute while the vault's unlocked, and catch up when you next unlock. The first sync only adds: nothing in this browser is removed, and exact duplicates in a folder become one. If you also use a browser's own bookmark sync, turn that off to avoid surprises.
+      </p>
+      {s.on && !s.held && (
+        <p role="status" data-testid="bookmark-status" className="text-xs text-[var(--text-muted)]">
+          {s.at ? `${s.total ?? 0} bookmarks and folders, last synced ${new Date(s.at).toLocaleTimeString()}.` : "Waiting for the first sync."}
+          {s.unsynced ? ` ${s.unsynced} stay in this browser only, because they aren't web addresses.` : ""}
+          {s.failed ? ` ${s.failed} couldn't be changed in this browser, and will be tried again.` : ""}
+          {s.error ? ` Last problem: ${s.error}` : ""}
+        </p>
+      )}
+      {s.on && s.held && (
+        <Callout kind="warn">
+          <div data-testid="bookmark-held" className="flex flex-col gap-2">
+            <p>
+              Bookmark sync has stopped to check with you. It would delete {s.held.fromBrowser ? `${s.held.fromBrowser} from your vault and every other browser, because they're gone from this one` : ""}
+              {s.held.fromBrowser && s.held.fromVault ? ", and " : ""}
+              {s.held.fromVault ? `${s.held.fromVault} from this browser, because they're gone from your vault` : ""}. If you didn't mean to delete that many, keep them.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button small kind="primary" disabled={busy} onClick={() => void answer(false)}>Keep them everywhere</Button>
+              <Button small disabled={busy} onClick={() => void answer(true)}>Yes, delete them</Button>
+            </div>
+          </div>
+        </Callout>
+      )}
+      {s.granted && <Button small onClick={() => void saveCopy()}>Save a copy of this browser's bookmarks</Button>}
+    </div>
+  );
+}
+
 /** What only the extension has. Mail codes are opt-in even though the device may read them. */
 function ExtensionSettings() {
   type Shown = { onClickOnly: boolean; mailCodes: boolean; pin: boolean; clipCheck: boolean };
@@ -148,6 +230,7 @@ function ExtensionSettings() {
   return (
     <div data-testid="ext-settings" className="flex flex-col gap-2 text-sm text-[var(--text)]">
       <h2 className="text-sm font-semibold">This browser</h2>
+      <BookmarkSettings />
       <label className="flex items-center gap-2">
         <input
           type="checkbox"
