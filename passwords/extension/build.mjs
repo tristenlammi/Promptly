@@ -118,6 +118,9 @@ async function buildEngine(engine) {
   fs.mkdirSync(path.join(dist, "rules"));
   for (const f of ["pack.json", "pack.sig"]) fs.copyFileSync(path.join(here, "rules", f), path.join(dist, "rules", f));
   css(path.join(dist, "ui.css"));
+  // The shared vault page shows this, from the root of whatever's serving it.
+  fs.mkdirSync(path.join(dist, "item-icons"), { recursive: true });
+  fs.copyFileSync(path.join(frontend, "public/item-icons/passwords-192.png"), path.join(dist, "item-icons/passwords-192.png"));
   for (const size of [16, 32, 48, 128]) fs.copyFileSync(path.join(here, "icons", `${size}.png`), path.join(dist, "icons", `${size}.png`));
   fs.writeFileSync(path.join(dist, "manifest.json"), JSON.stringify(manifest(engine), null, 1));
 

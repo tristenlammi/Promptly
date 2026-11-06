@@ -28,7 +28,9 @@ import {
   Users,
   Wand2,
   X,
+  Bookmark,
 } from "lucide-react";
+import { BookmarksScreen } from "./Bookmarks";
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError, OfflineError } from "../core/api";
@@ -220,6 +222,7 @@ const TOOLS: { id: string; label: string; icon: ReactNode }[] = [
   { id: "security", label: "Security check", icon: <ShieldCheck className="h-4 w-4" /> },
   { id: "shared", label: "Shared vaults", icon: <Users className="h-4 w-4" /> },
   { id: "sends", label: "Sends", icon: <Send className="h-4 w-4" /> },
+  { id: "bookmarks", label: "Bookmarks", icon: <Bookmark className="h-4 w-4" /> },
   { id: "archive", label: "Archive", icon: <Archive className="h-4 w-4" /> },
   { id: "trash", label: "Trash", icon: <Trash2 className="h-4 w-4" /> },
   { id: "devices", label: "Devices", icon: <MonitorSmartphone className="h-4 w-4" /> },
@@ -440,6 +443,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
   else if (route === "security") content = <SecurityScreen />;
   else if (route === "shared") content = <SharedScreen />;
   else if (route === "sends") content = <SendsScreen />;
+  else if (route === "bookmarks") content = <BookmarksScreen />;
   else if (route === "trash") content = <TrashScreen />;
   else if (route === "devices") content = <DevicesScreen />;
   else if (route === "activity") content = <ActivityScreen />;

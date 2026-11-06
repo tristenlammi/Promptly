@@ -50,3 +50,7 @@ html, body { background: var(--bg); color: var(--text); font-family: system-ui, 
 .err { color: var(--danger); font-size: 12px; }
 .muted { color: var(--text-muted); font-size: 12px; padding: 4px; }
 .section { color: var(--text-muted); font-size: 11px; font-weight: 600; padding: 2px 4px; }
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 6px; color: var(--text-muted); }
+.icon-btn:hover { background: var(--surface-2); color: var(--text); }
+.row { display: flex; width: 100%; align-items: center; gap: 8px; border-radius: 8px; padding: 6px; }
+.row:hover { background: var(--surface-1); }

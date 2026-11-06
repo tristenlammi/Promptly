@@ -10,7 +10,38 @@ import { ext, type Candidate, type FillOutcome, pageHost, type StateOut } from "
 
 declare const __TEST_BUILD__: boolean;
 
-type Row = { id: string; title: string; username: string; kind: string; hasTotp: boolean; reprompt: boolean };
+type Row = { id: string; title: string; username: string; kind: string; hasTotp: boolean; reprompt: boolean; favorite?: boolean };
+type Counts = { login: number; card: number; identity: number; note: number; other: number; codes: number; favorites: number; bookmarks: number };
+
+// Inline, so the popup stays small enough to open fast. Paths from Lucide (ISC), as the vault page uses.
+const PATHS = {
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  plus: '<path d="M5 12h14M12 5v14"/>',
+  lock: '<rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>',
+  external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
+  shield: '<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/>',
+  wand: '<path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72M14 7l3 3"/>',
+  bookmark: '<path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  folder: '<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/>',
+  back: '<path d="m15 18-6-6 6-6"/>',
+  chevron: '<path d="m9 18 6-6-6-6"/>',
+  user: '<path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>',
+  card: '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/>',
+  note: '<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v5h6M8 13h8M8 17h6"/>',
+  star: '<path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20M2 12h20"/>',
+  sync: '<path d="M21 12a9 9 0 0 1-15 6.7L3 16M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M3 21v-5h5"/>',
+} as const;
+
+function Icon({ name, size = 16 }: { name: keyof typeof PATHS; size?: number }) {
+  return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" dangerouslySetInnerHTML={{ __html: PATHS[name] }} />;
+}
+
+const Mark = () => <span aria-hidden="true" className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-[var(--accent)] text-[#fff]"><Icon name="key" size={14} /></span>;
+
+const openPage = (route = "") => ext.tabs.create({ url: ext.runtime.getURL(`vault.html${route ? `#/${route}` : ""}`) });
 
 async function call<T>(m: unknown): Promise<T> {
   // The worker or event page may be on its way out, and a second try wakes a new one.
@@ -19,7 +50,6 @@ async function call<T>(m: unknown): Promise<T> {
   return r.r as T;
 }
 
-const OPEN_VAULT = () => ext.tabs.create({ url: ext.runtime.getURL("vault.html") });
 const OPEN_DEVICES = () => ext.tabs.create({ url: ext.runtime.getURL("vault.html#/devices") });
 
 /** Written here while the click still counts. The background clears it when it's due,
@@ -36,17 +66,45 @@ function Popup() {
     reload();
   }, [reload]);
   if (!state) return <p className="p-3 text-sm">Loading…</p>;
-  if (!state.connected || !state.hasKit) {
-    return (
-      <div className="flex flex-col gap-2 p-3 text-sm">
-        <p className="font-semibold">Connect to your Promptly</p>
-        <p>Set up this browser, one time, in a full tab.</p>
-        <button className="btn-primary" onClick={OPEN_VAULT}>Set up</button>
-      </div>
-    );
-  }
+  if (!state.connected || !state.hasKit) return <SetupView connected={state.connected} />;
   if (!state.unlocked) return <UnlockView onDone={reload} preview={state.preview} />;
   return <Open state={state} onLock={reload} />;
+}
+
+/** Signing in on the website doesn't connect this: the browser has to agree, and the vault's keys
+ *  never come from a page. If the page in front looks like Promptly, its address is filled in. */
+function SetupView({ connected }: { connected: boolean }) {
+  const [server, setServer] = useState<string | null>(null);
+  useEffect(() => {
+    // A test build can be opened in a tab of its own and aimed at another tab.
+    const aimed = __TEST_BUILD__ ? Number(new URLSearchParams(location.search).get("tab")) : 0;
+    (aimed ? ext.tabs.get(aimed).then((t) => [t]) : ext.tabs.query({ active: true, currentWindow: true }))
+      .then(([t]) => {
+        const u = new URL(t?.url ?? "");
+        if ((u.protocol === "https:" || u.protocol === "http:") && (u.pathname.startsWith("/passwords") || u.searchParams.get("next")?.startsWith("/passwords"))) setServer(u.origin);
+      })
+      .catch(() => undefined);
+  }, []);
+  const steps = connected ? ["Enter your Secret Key and master password, or approve this browser from another device."] : ["Connect to your server. The browser asks to allow it.", "Approve this browser in a Promptly tab.", "Enter your Secret Key and master password."];
+  return (
+    <div className="flex w-[360px] flex-col gap-3 p-4 text-sm">
+      <div className="flex items-center gap-2">
+        <Mark />
+        <h1 className="text-base font-semibold">{connected ? "Finish setting up" : "Set up Promptly Passwords"}</h1>
+      </div>
+      <p className="text-[var(--text-muted)]">{connected ? "This browser is connected. One step left." : "Signing in on the website doesn't connect the extension. It takes about a minute, once for each browser."}</p>
+      <ol className="flex flex-col gap-2">
+        {steps.map((step, i) => (
+          <li key={step} className="flex gap-2">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-xs font-semibold">{i + 1}</span>
+            <span>{step}</span>
+          </li>
+        ))}
+      </ol>
+      {server && !connected && <p data-testid="setup-server" className="rounded-lg bg-[var(--surface-1)] p-2 text-xs">Your server looks like <span className="font-medium">{server}</span>. You can check that on the next screen.</p>}
+      <button className="btn-primary" onClick={() => ext.tabs.create({ url: ext.runtime.getURL(`vault.html${server && !connected ? `?server=${encodeURIComponent(server)}` : ""}`) })}>Set up</button>
+    </div>
+  );
 }
 
 function UnlockView({ onDone, preview }: { onDone: () => void; preview: boolean }) {
@@ -66,8 +124,12 @@ function UnlockView({ onDone, preview }: { onDone: () => void; preview: boolean 
     }
   };
   return (
-    <form onSubmit={submit} className="flex flex-col gap-2 p-3 text-sm">
-      <p className="font-semibold">Unlock your vault {preview && <span className="badge">Preview</span>}</p>
+    <form onSubmit={submit} className="flex w-[360px] flex-col gap-3 p-4 text-sm">
+      <div className="flex items-center gap-2">
+        <Mark />
+        <p className="text-base font-semibold">Unlock your vault</p>
+        {preview && <span className="badge">Preview</span>}
+      </div>
       <input className="input" type="password" aria-label="Master password" placeholder="Master password" autoFocus autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
       {error && <p className="err">{error}</p>}
       <HelloLine onDone={onDone} onError={setError} />
@@ -198,15 +260,25 @@ function PageTools({ tab, matches, setMessage }: { tab: chrome.tabs.Tab | null; 
   );
 }
 
+type Tab = "vault" | "codes" | "generator" | "bookmarks" | "more";
+const TABS: { id: Tab; label: string; icon: keyof typeof PATHS }[] = [
+  { id: "vault", label: "Vault", icon: "key" },
+  { id: "codes", label: "Codes", icon: "shield" },
+  { id: "generator", label: "Generator", icon: "wand" },
+  { id: "bookmarks", label: "Bookmarks", icon: "bookmark" },
+  { id: "more", label: "More", icon: "menu" },
+];
+
 function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
-  const [tab, setTab] = useState<chrome.tabs.Tab | null>(null);
+  const [tabInfo, setTabInfo] = useState<chrome.tabs.Tab | null>(null);
   const [matches, setMatches] = useState<Candidate[]>([]);
   const [lookalike, setLookalike] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [message, setMessage] = useState("");
   const [confirm, setConfirm] = useState<{ itemId: string; outcome: FillOutcome; prior: object } | null>(null);
-  const [view, setView] = useState<"list" | "generate" | "add">("list");
+  const [tab, setTab] = useState<Tab>("vault");
+  const [adding, setAdding] = useState(false);
   const [reprompt, setReprompt] = useState<{ pass: () => void } | null>(null);
 
   useEffect(() => {
@@ -214,7 +286,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
       // A test build can be opened in a tab of its own and aimed at another tab.
       const aimed = __TEST_BUILD__ ? Number(new URLSearchParams(location.search).get("tab")) : 0;
       const t = aimed ? await ext.tabs.get(aimed) : (await ext.tabs.query({ active: true, currentWindow: true }))[0];
-      setTab(t ?? null);
+      setTabInfo(t ?? null);
       if (t?.id !== undefined) {
         const r = await call<{ candidates: Candidate[]; lookalike: string | null }>({ t: "matches", tabId: t.id });
         setMatches(r.candidates);
@@ -224,14 +296,14 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (!q) return setRows([]);
+    if (!q || tab === "bookmarks") return setRows([]);
     call<Row[]>({ t: "list", query: q }).then(setRows);
-  }, [q]);
+  }, [q, tab]);
 
   const doFill = async (itemId: string, extra: object = {}) => {
-    if (tab?.id === undefined) return;
+    if (tabInfo?.id === undefined) return;
     setMessage("");
-    const r = await call<FillOutcome>({ t: "fill", tabId: tab.id, itemId, ...extra });
+    const r = await call<FillOutcome>({ t: "fill", tabId: tabInfo.id, itemId, ...extra });
     if (r.ok) {
       if (r.left?.length) {
         // The person should know, and nothing's been closed on them.
@@ -262,57 +334,364 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
     doFill(confirm.itemId, more);
   };
 
-  const list = q ? rows : [];
+  const rowProps = { onReprompt: (pass: () => void) => setReprompt({ pass }), setMessage };
+  const searching = !!q && tab !== "bookmarks";
   return (
-    <div className="flex w-[340px] flex-col gap-2 p-2 text-sm">
-      {state.deviceRequests > 0 && (
-        <button data-testid="device-request" className="btn-primary" onClick={OPEN_DEVICES}>
-          A new device is asking to join your vault. Check it
-        </button>
-      )}
-      <div className="flex items-center gap-2">
-        <input className="input" aria-label="Search your vault" placeholder="Search" autoFocus value={q} onChange={(e) => setQ(e.target.value)} />
-        <button className="btn" aria-label="Generator" title="Generator" onClick={() => setView(view === "generate" ? "list" : "generate")}>⚙</button>
-        <button className="btn" aria-label="Add a login" title="Add a login" onClick={() => setView(view === "add" ? "list" : "add")}>＋</button>
-      </div>
-      {state.preview && <p className="text-xs"><span className="badge">Preview</span> Try it on low-value accounts first.</p>}
-      {lookalike && <p className="err">This site looks like {lookalike}, but it isn't. Be careful.</p>}
-      {message && <p role="status" className="text-xs font-medium">{message}</p>}
-      {tab?.id !== undefined && <SaveOffer tabId={tab.id} />}
-      {tab?.id !== undefined && <MailRows tabId={tab.id} setMessage={setMessage} />}
-      <PageTools tab={tab} matches={matches} setMessage={setMessage} />
-      {confirm && <ConfirmBox outcome={confirm.outcome} onYes={answer} onNo={() => setConfirm(null)} />}
-      {reprompt && (
-        <RepromptBox
-          onPass={() => {
-            const r = reprompt;
-            setReprompt(null);
-            r.pass();
+    <div className="flex h-[580px] w-[360px] flex-col text-sm">
+      <header className="flex items-center gap-1 border-b border-[var(--border)] px-3 py-2">
+        <Mark />
+        <span className="ml-1 min-w-0 flex-1 truncate font-semibold">Passwords</span>
+        {state.preview && <span className="badge" title="Try it on low-value accounts first.">Preview</span>}
+        <button className="icon-btn" aria-label="Add a login" title="Add a login" onClick={() => setAdding(!adding)}><Icon name="plus" /></button>
+        <button className="icon-btn" aria-label="Open vault" title="Open the full vault" onClick={() => openPage()}><Icon name="external" /></button>
+        <button className="icon-btn" aria-label="Lock" title="Lock" onClick={async () => { await call({ t: "lock" }); onLock(); }}><Icon name="lock" /></button>
+      </header>
+      <div className="relative px-3 pt-2">
+        <span className="pointer-events-none absolute left-5 top-[15px] text-[var(--text-muted)]"><Icon name="search" size={14} /></span>
+        <input
+          className="input !pl-7"
+          aria-label={tab === "bookmarks" ? "Search bookmarks" : "Search your vault"}
+          placeholder={tab === "bookmarks" ? "Search bookmarks" : "Search your vault"}
+          autoFocus
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setAdding(false);
+            if (tab !== "bookmarks" && e.target.value) setTab("vault");
           }}
-          onCancel={() => setReprompt(null)}
         />
-      )}
+      </div>
 
-      {view === "generate" && <Generator host={pageHost(tab?.url ?? "") ?? undefined} />}
-      {view === "add" && <AddLogin tab={tab} onDone={() => setView("list")} />}
+      <main className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 py-2">
+        {state.deviceRequests > 0 && (
+          <button data-testid="device-request" className="btn-primary" onClick={OPEN_DEVICES}>
+            A new device is asking to join your vault. Check it
+          </button>
+        )}
+        {lookalike && <p className="err">This site looks like {lookalike}, but it isn't. Be careful.</p>}
+        {message && <p role="status" className="text-xs font-medium">{message}</p>}
+        {confirm && <ConfirmBox outcome={confirm.outcome} onYes={answer} onNo={() => setConfirm(null)} />}
+        {reprompt && (
+          <RepromptBox
+            onPass={() => {
+              const r = reprompt;
+              setReprompt(null);
+              r.pass();
+            }}
+            onCancel={() => setReprompt(null)}
+          />
+        )}
+        {adding && <AddLogin tab={tabInfo} onDone={() => setAdding(false)} />}
 
-      {view === "list" && (
+        {tab === "vault" && !adding && (
+          searching ? (
+            <div className="flex flex-col">
+              {rows.map((m) => <ItemRow key={m.id} row={m} onFill={() => doFill(m.id)} {...rowProps} />)}
+              {rows.length === 0 && <p className="muted">Nothing matches that.</p>}
+            </div>
+          ) : (
+            <VaultHome tab={tabInfo} matches={matches} doFill={doFill} rowProps={rowProps} />
+          )
+        )}
+        {tab === "codes" && <CodesTab query={q} {...rowProps} />}
+        {tab === "generator" && <Generator host={pageHost(tabInfo?.url ?? "") ?? undefined} />}
+        {tab === "bookmarks" && <BookmarksTab query={q} />}
+        {tab === "more" && <MoreTab preview={state.preview} setMessage={setMessage} />}
+      </main>
+
+      <nav aria-label="Sections" className="grid grid-cols-5 border-t border-[var(--border)]">
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            aria-label={t.label}
+            aria-current={tab === t.id ? "page" : undefined}
+            className={`flex flex-col items-center gap-0.5 py-1.5 text-[10px] font-medium ${tab === t.id ? "text-[var(--accent-text)]" : "text-[var(--text-muted)] hover:text-[var(--text)]"}`}
+            onClick={() => {
+              setTab(t.id);
+              setAdding(false);
+            }}
+          >
+            <Icon name={t.icon} size={18} />
+            {t.label}
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+const CATEGORIES: { id: string; label: string; icon: keyof typeof PATHS; count: keyof Counts }[] = [
+  { id: "login", label: "Logins", icon: "key", count: "login" },
+  { id: "card", label: "Cards", icon: "card", count: "card" },
+  { id: "identity", label: "Identities", icon: "user", count: "identity" },
+  { id: "note", label: "Secure notes", icon: "note", count: "note" },
+  { id: "other", label: "Keys and documents", icon: "folder", count: "other" },
+];
+
+type RowProps = { onReprompt: (pass: () => void) => void; setMessage: (m: string) => void };
+
+function VaultHome({ tab, matches, doFill, rowProps }: { tab: chrome.tabs.Tab | null; matches: Candidate[]; doFill: (id: string) => void; rowProps: RowProps }) {
+  const [counts, setCounts] = useState<Counts | null>(null);
+  const [favourites, setFavourites] = useState<Row[]>([]);
+  const [category, setCategory] = useState<{ id: string; label: string } | null>(null);
+  const [list, setList] = useState<Row[]>([]);
+  useEffect(() => {
+    call<Counts>({ t: "counts" }).then(setCounts).catch(() => undefined);
+    call<Row[]>({ t: "list", favorite: true }).then(setFavourites).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (category) call<Row[]>({ t: "list", kind: category.id }).then(setList);
+  }, [category]);
+  if (category) {
+    return (
+      <div className="flex flex-col">
+        <button className="mb-1 flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)]" onClick={() => setCategory(null)}><Icon name="back" size={14} /> {category.label}</button>
+        {list.map((m) => <ItemRow key={m.id} row={m} onFill={() => doFill(m.id)} {...rowProps} />)}
+        {list.length === 0 && <p className="muted">Nothing here yet.</p>}
+      </div>
+    );
+  }
+  const here = new Set(matches.map((m) => m.id));
+  const stars = favourites.filter((f) => !here.has(f.id));
+  return (
+    <>
+      {tab?.id !== undefined && <SaveOffer tabId={tab.id} />}
+      {tab?.id !== undefined && <MailRows tabId={tab.id} setMessage={rowProps.setMessage} />}
+      <div className="flex flex-col">
+        <p className="section">This site</p>
+        {matches.length === 0 && <p className="muted">Nothing saved for this site.</p>}
+        {matches.map((m) => <ItemRow key={m.id} row={m} here onFill={() => doFill(m.id)} {...rowProps} />)}
+      </div>
+      {stars.length > 0 && (
         <div className="flex flex-col">
-          {!q && <p className="section">This site</p>}
-          {!q && matches.length === 0 && <p className="muted">Nothing saved for this site.</p>}
-          {(q ? list : matches).map((m) => (
-            <ItemRow key={m.id} row={m} onFill={() => doFill(m.id)} onReprompt={(pass) => setReprompt({ pass })} setMessage={setMessage} />
-          ))}
-          {q && list.length === 0 && <p className="muted">Nothing matches that.</p>}
+          <p className="section">Favourites</p>
+          {stars.map((m) => <ItemRow key={m.id} row={m} onFill={() => doFill(m.id)} {...rowProps} />)}
         </div>
       )}
+      <div className="flex flex-col">
+        <p className="section">Your vault</p>
+        {CATEGORIES.map((c) => (
+          <button key={c.id} className="row" onClick={() => setCategory(c)} aria-label={`Show ${c.label}`}>
+            <span className="text-[var(--text-muted)]"><Icon name={c.icon} /></span>
+            <span className="min-w-0 flex-1 truncate text-left">{c.label}</span>
+            <span className="text-xs text-[var(--text-muted)]">{counts ? counts[c.count] : ""}</span>
+            <span className="text-[var(--text-muted)]"><Icon name="chevron" size={14} /></span>
+          </button>
+        ))}
+      </div>
+      <PageTools tab={tab} matches={matches} setMessage={rowProps.setMessage} />
+    </>
+  );
+}
 
-      <div className="flex items-center justify-between gap-2 border-t pt-2">
-        <button className="link" onClick={OPEN_VAULT}>Open vault</button>
-        <button className="link" onClick={async () => { await call({ t: "lock" }); onLock(); }}>Lock</button>
+/** A 2FA code that keeps itself up to date. Gated the same way as showing the item. */
+function useCode(row: { id: string; hasTotp: boolean; reprompt: boolean }) {
+  const [code, setCode] = useState<string | null>(null);
+  const [left, setLeft] = useState(0);
+  const [period, setPeriod] = useState(30);
+  const [passed, setPassed] = useState(false);
+  const gated = row.reprompt && !passed;
+  useEffect(() => {
+    if (!row.hasTotp || gated) return;
+    let live = true;
+    const tick = async () => {
+      const r = await call<{ code: string; period: number } | null>({ t: "totp", id: row.id, reprompted: passed });
+      if (live && r) {
+        setCode(r.code);
+        setPeriod(r.period);
+        setLeft(r.period - (Math.floor(Date.now() / 1000) % r.period));
+      }
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [row.id, row.hasTotp, gated, passed]);
+  return { code, left, period, gated, pass: () => setPassed(true) };
+}
+
+function CodesTab({ query, onReprompt, setMessage }: { query: string } & RowProps) {
+  const [rows, setRows] = useState<Row[]>([]);
+  useEffect(() => {
+    call<Row[]>({ t: "list", query, totp: true }).then(setRows).catch(() => undefined);
+  }, [query]);
+  // A code a second each is cheap, and this many fit nobody's screen anyway.
+  const shown = rows.slice(0, 30);
+  return (
+    <div className="flex flex-col gap-1">
+      {shown.map((r) => <CodeRow key={r.id} row={r} onReprompt={onReprompt} setMessage={setMessage} />)}
+      {rows.length === 0 && <p className="muted">{query ? "No 2FA codes match that." : "No 2FA codes yet. Add one to a login in the vault."}</p>}
+      {rows.length > shown.length && <p className="muted">Search to find the rest.</p>}
+    </div>
+  );
+}
+
+function CodeRow({ row, onReprompt, setMessage }: { row: Row } & RowProps) {
+  const { code, left, period, gated, pass } = useCode(row);
+  const pretty = code && code.length > 4 ? `${code.slice(0, Math.floor(code.length / 2))} ${code.slice(Math.floor(code.length / 2))}` : code;
+  return (
+    <div className="row !cursor-default">
+      <Avatar title={row.title} />
+      <div className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{row.title}</span>
+        {row.username && <span className="block truncate text-xs text-[var(--text-muted)]">{row.username}</span>}
+      </div>
+      {gated && <button className="btn" aria-label={`Show 2FA code for ${row.title}`} onClick={() => onReprompt(pass)}>Show</button>}
+      {code && (
+        <button
+          className="flex items-center gap-2 rounded-md px-1 py-0.5 font-mono text-sm font-semibold hover:bg-[var(--surface-2)]"
+          aria-label={`Copy 2FA code for ${row.title}`}
+          title="Copy"
+          onClick={async () => {
+            try {
+              await copySecret(code);
+              setMessage("2FA code copied.");
+            } catch {
+              setMessage("Couldn't copy that.");
+            }
+          }}
+        >
+          {pretty}
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 36 36" className="shrink-0 -rotate-90">
+            <circle cx="18" cy="18" r="15" fill="none" stroke="var(--surface-2)" strokeWidth="5" />
+            <circle cx="18" cy="18" r="15" fill="none" stroke={left <= 5 ? "var(--danger)" : "var(--accent)"} strokeWidth="5" strokeDasharray={`${(left / period) * 94.2} 94.2`} />
+          </svg>
+          <span className="sr-only">{left} seconds left</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+type BookmarkRow = { id: string; title: string; url?: string; parent: string; pos: number };
+const ROOT_NAMES: [string, string][] = [["root:bar", "Bookmarks bar"], ["root:other", "Other bookmarks"], ["root:menu", "Bookmarks menu"], ["root:mobile", "Mobile bookmarks"]];
+
+/** Works from the vault, so it shows the same list in any browser, whether or not this one syncs. */
+function BookmarksTab({ query }: { query: string }) {
+  const [rows, setRows] = useState<BookmarkRow[] | null>(null);
+  const [state, setState] = useState<{ on: boolean; held?: unknown; at?: string } | null>(null);
+  const [path, setPath] = useState<{ id: string; title: string }[]>([]);
+  useEffect(() => {
+    call<BookmarkRow[]>({ t: "bookmarkTree" }).then(setRows).catch(() => setRows([]));
+    call<{ on: boolean; held?: unknown; at?: string }>({ t: "bookmarkState" }).then(setState).catch(() => undefined);
+  }, []);
+  if (!rows || !state) return null;
+  const open = (b: BookmarkRow) => call({ t: "openBookmark", id: b.id }).then(() => window.close());
+  const line = (b: BookmarkRow) => (
+    <button key={b.id} className="row" aria-label={`Open bookmark ${b.title || b.url}`} title={b.url} onClick={() => open(b)}>
+      <span className="text-[var(--text-muted)]"><Icon name="globe" /></span>
+      <span className="min-w-0 flex-1 text-left">
+        <span className="block truncate">{b.title || b.url}</span>
+        <span className="block truncate text-xs text-[var(--text-muted)]">{hostName(b.url)}</span>
+      </span>
+    </button>
+  );
+  const folder = (id: string, title: string) => (
+    <button key={id} className="row" aria-label={`Open folder ${title}`} onClick={() => setPath([...path, { id, title }])}>
+      <span className="text-[var(--text-muted)]"><Icon name="folder" /></span>
+      <span className="min-w-0 flex-1 truncate text-left">{title}</span>
+      <span className="text-xs text-[var(--text-muted)]">{rows.filter((r) => r.parent === id).length}</span>
+      <span className="text-[var(--text-muted)]"><Icon name="chevron" size={14} /></span>
+    </button>
+  );
+  const notice = !state.on ? (
+    <div data-testid="bookmarks-off" className="flex flex-col gap-2 rounded-lg bg-[var(--surface-1)] p-3 text-xs">
+      <p>{rows.length ? "This browser isn't syncing bookmarks yet." : "Keep the same bookmarks in every browser, encrypted so your server can't read them."}</p>
+      <button className="btn-primary" onClick={() => openPage("bookmarks")}>Turn on bookmark sync</button>
+    </div>
+  ) : state.held ? (
+    <button data-testid="bookmarks-held" className="btn-primary" onClick={() => openPage("bookmarks")}>Bookmark sync has stopped to check with you</button>
+  ) : null;
+
+  if (query) {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const hits = rows.filter((r) => r.url && words.every((w) => `${r.title} ${r.url}`.toLowerCase().includes(w))).slice(0, 100);
+    return (
+      <div className="flex flex-col">
+        {hits.map(line)}
+        {hits.length === 0 && <p className="muted">No bookmarks match that.</p>}
+      </div>
+    );
+  }
+  const at = path[path.length - 1];
+  const here = at ? rows.filter((r) => r.parent === at.id).sort((a, b) => a.pos - b.pos) : [];
+  return (
+    <div className="flex flex-col gap-2">
+      {notice}
+      <div className="flex flex-col">
+        {at ? (
+          <>
+            <button className="mb-1 flex items-center gap-1 text-xs font-semibold text-[var(--text-muted)]" onClick={() => setPath(path.slice(0, -1))}><Icon name="back" size={14} /> <span className="truncate">{at.title}</span></button>
+            {here.map((r) => (r.url !== undefined ? line(r) : folder(r.id, r.title)))}
+            {here.length === 0 && <p className="muted">This folder's empty.</p>}
+          </>
+        ) : (
+          ROOT_NAMES.filter(([id]) => rows.some((r) => r.parent === id)).map(([id, title]) => folder(id, title))
+        )}
       </div>
     </div>
   );
+}
+
+const hostName = (url?: string) => {
+  try {
+    return new URL(url ?? "").hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+};
+
+const MORE_LINKS: { route: string; label: string; icon: keyof typeof PATHS }[] = [
+  { route: "security", label: "Security check", icon: "shield" },
+  { route: "shared", label: "Shared vaults", icon: "user" },
+  { route: "sends", label: "Secure Send", icon: "external" },
+  { route: "devices", label: "Devices", icon: "globe" },
+  { route: "transfer", label: "Import and export", icon: "folder" },
+  { route: "trash", label: "Trash", icon: "note" },
+  { route: "settings", label: "Settings", icon: "menu" },
+];
+
+function MoreTab({ preview, setMessage }: { preview: boolean; setMessage: (m: string) => void }) {
+  const [syncing, setSyncing] = useState(false);
+  return (
+    <div className="flex flex-col">
+      <button
+        className="row"
+        disabled={syncing}
+        onClick={async () => {
+          setSyncing(true);
+          try {
+            await call({ t: "sync" });
+            setMessage("Synced.");
+          } catch {
+            setMessage("Couldn't reach your server. Your vault still works from this browser's copy.");
+          }
+          setSyncing(false);
+        }}
+      >
+        <span className="text-[var(--text-muted)]"><Icon name="sync" /></span>
+        <span className="flex-1 text-left">{syncing ? "Syncing…" : "Sync now"}</span>
+      </button>
+      {MORE_LINKS.map((l) => (
+        <button key={l.route} className="row" onClick={() => openPage(l.route)}>
+          <span className="text-[var(--text-muted)]"><Icon name={l.icon} /></span>
+          <span className="flex-1 text-left">{l.label}</span>
+          <span className="text-[var(--text-muted)]"><Icon name="external" size={13} /></span>
+        </button>
+      ))}
+      {preview && <p className="muted mt-2"><span className="badge">Preview</span> Try it on low-value accounts first.</p>}
+    </div>
+  );
+}
+
+const AVATAR_TINTS = ["#D97757", "#3B82A0", "#6B8E4E", "#9B6BB3", "#B7791F", "#4F7D7A"];
+
+function Avatar({ title }: { title: string }) {
+  let n = 0;
+  for (const ch of title) n = (n * 31 + ch.charCodeAt(0)) >>> 0;
+  return <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-semibold text-[#fff]" style={{ background: AVATAR_TINTS[n % AVATAR_TINTS.length] }}>{(title.trim()[0] ?? "?").toUpperCase()}</span>;
 }
 
 type MailRow = { id: string; domain: string; ago: string; code: string | null; linkHost: string | null };
@@ -392,37 +771,33 @@ function SaveOffer({ tabId }: { tabId: number }) {
   );
 }
 
-function ItemRow({ row, onFill, onReprompt, setMessage }: { row: Row | Candidate; onFill: () => void; onReprompt: (pass: () => void) => void; setMessage: (m: string) => void }) {
-  const [code, setCode] = useState<string | null>(null);
-  const [left, setLeft] = useState(0);
-  // An item that asks for the master password doesn't show its code until it has it.
-  const [passed, setPassed] = useState(false);
-  const gated = row.reprompt && !passed;
-  useEffect(() => {
-    if (!row.hasTotp || gated) return;
-    let live = true;
-    const tick = async () => {
-      const r = await call<{ code: string; period: number } | null>({ t: "totp", id: row.id, reprompted: passed });
-      if (live && r) {
-        setCode(r.code);
-        setLeft(r.period - (Math.floor(Date.now() / 1000) % r.period));
-      }
-    };
-    tick();
-    const t = setInterval(tick, 1000);
-    return () => {
-      live = false;
-      clearInterval(t);
-    };
-  }, [row.id, row.hasTotp, gated, passed]);
+function ItemRow({ row, onFill, onReprompt, setMessage, here = false }: { row: Row | Candidate; onFill: () => void; here?: boolean } & RowProps) {
+  const { code, left, gated, pass } = useCode(row);
+  const copyField = async (field: "username" | "password", reprompted = false) => {
+    try {
+      const r = await call<{ value?: string; reason?: string }>({ t: "secretField", id: row.id, field, reprompted });
+      if (r.reason === "reprompt") return onReprompt(() => void copyField(field, true));
+      if (r.reason === "fill-only") return setMessage("You can fill this one, but its password stays hidden.");
+      if (!r.value) return setMessage(`This item has no ${field}.`);
+      if (field === "password") await copySecret(r.value);
+      else await navigator.clipboard.writeText(r.value);
+      setMessage(`${field === "password" ? "Password" : "Username"} copied.`);
+    } catch {
+      setMessage("Couldn't copy that.");
+    }
+  };
   return (
-    <div className="flex items-center gap-2 rounded px-1 py-1.5 hover:bg-[var(--surface-1)]">
-      <button className="min-w-0 flex-1 text-left" onClick={onFill} aria-label={`Fill ${row.title}`}>
-        <span className="block truncate font-medium">{row.title}</span>
-        <span className="block truncate text-xs text-[var(--text-muted)]">{row.username || row.kind}</span>
+    <div className="row group !cursor-default">
+      <Avatar title={row.title} />
+      <button className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={onFill} aria-label={`Fill ${row.title}`} title="Fill on this page">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium">{row.title}</span>
+          <span className="block truncate text-xs text-[var(--text-muted)]">{row.username || row.kind}</span>
+        </span>
+        {here && <span aria-hidden="true" className="shrink-0 rounded-md bg-[var(--accent)] px-2 py-0.5 text-xs font-medium text-[#fff] group-hover:hidden group-focus-within:hidden">Fill</span>}
       </button>
       {row.hasTotp && gated && (
-        <button className="text-xs" aria-label={`Show 2FA code for ${row.title}`} onClick={() => onReprompt(() => setPassed(true))}>Show 2FA</button>
+        <button className="text-xs" aria-label={`Show 2FA code for ${row.title}`} onClick={() => onReprompt(pass)}>Show 2FA</button>
       )}
       {code && (
         <button
@@ -441,6 +816,15 @@ function ItemRow({ row, onFill, onReprompt, setMessage }: { row: Row | Candidate
           {code} <span className="text-[var(--text-muted)]">{left}</span>
         </button>
       )}
+      <span className="hidden items-center group-focus-within:flex group-hover:flex">
+        {row.kind === "login" && (
+          <>
+            <button className="icon-btn" aria-label={`Copy username for ${row.title}`} title="Copy username" onClick={() => void copyField("username")}><Icon name="user" size={14} /></button>
+            <button className="icon-btn" aria-label={`Copy password for ${row.title}`} title="Copy password" onClick={() => void copyField("password")}><Icon name="key" size={14} /></button>
+          </>
+        )}
+        <button className="icon-btn" aria-label={`Open ${row.title} in the vault`} title="Open in the vault" onClick={() => openPage(`item/${row.id}`)}><Icon name="external" size={14} /></button>
+      </span>
     </div>
   );
 }
@@ -499,16 +883,24 @@ function RepromptBox({ onPass, onCancel }: { onPass: () => void; onCancel: () =>
 }
 
 function Generator({ host }: { host?: string }) {
+  const [mode, setMode] = useState<"password" | "passphrase" | "pin" | "username">("password");
   const [value, setValue] = useState("");
   const [note, setNote] = useState("");
   const again = useCallback(() => {
-    call<{ password: string }>({ t: "generate", host }).then((r) => setValue(r.password));
-  }, [host]);
+    setNote("");
+    call<{ password: string }>({ t: "generate", host, mode }).then((r) => setValue(r.password));
+  }, [host, mode]);
   useEffect(again, [again]);
   return (
-    <div className="flex flex-col gap-2 rounded border p-2">
-      <code data-testid="generated" className="break-all font-mono text-xs">{value}</code>
-      <div className="flex gap-2">
+    <div className="flex flex-col gap-2">
+      <div role="group" aria-label="What to make" className="grid grid-cols-4 gap-1 rounded-lg bg-[var(--surface-1)] p-1 text-xs">
+        {(["password", "passphrase", "pin", "username"] as const).map((m) => (
+          <button key={m} aria-pressed={mode === m} className={`rounded-md py-1 font-medium capitalize ${mode === m ? "bg-[var(--surface)] shadow-sm" : "text-[var(--text-muted)]"}`} onClick={() => setMode(m)}>{m === "pin" ? "PIN" : m}</button>
+        ))}
+      </div>
+      <code data-testid="generated" className="min-h-[56px] break-all rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2 font-mono text-sm">{value}</code>
+      {host && mode === "password" && <p className="text-xs text-[var(--text-muted)]">Follows {host}'s password rules if we know them.</p>}
+      <div className="grid grid-cols-2 gap-2">
         <button className="btn" onClick={again}>Again</button>
         <button
           className="btn-primary"

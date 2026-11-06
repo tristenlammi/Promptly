@@ -22,6 +22,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ## [Unreleased]
 
 ### Added
+- Passwords on Android: import from LastPass, 1Password (.1pux), Proton Pass, Dashlane, KeePass (XML and KDBX, with its password), Credential Exchange, Aegis, 2FAS and Google Authenticator links on the phone itself, with limits so a hostile file can't hang or exhaust it.
+- Passwords: the extension's toolbar button opens a full control panel: this site's logins, categories, live 2FA codes, a generator, bookmarks and shortcuts.
+- Passwords: a Bookmarks screen in the vault, on the web, in the extension and in the Windows app.
 - Passwords: the extension can keep your bookmarks the same in every browser, end-to-end encrypted in your vault.
 - Passwords: email codes and sign-in links in the extension's toolbar button, which is how Firefox gets them.
 - Passwords: on Windows, typing a login copies its 2FA code afterwards, and Ctrl+Alt+Enter types the code.

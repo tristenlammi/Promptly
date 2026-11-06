@@ -503,6 +503,28 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
   return { status: "ok", base: next, counts, total: items.size, wroteVault: dropped.size + removedItems.size + created.size + touched.size > 0 };
 }
 
+// ---- Showing them ---------------------------------------------------------------------------
+
+export type BookmarkTreeNode = BookmarkItem & { children: BookmarkTreeNode[] };
+
+/** For showing: each root's contents in order. Repairs a copy, so an orphan's still reachable. */
+export function bookmarkTree(items: BookmarkItem[]): Record<BookmarkRoot, BookmarkTreeNode[]> {
+  const copies = new Map(items.filter(validItem).map((i) => [i.id, { ...i }]));
+  repairTree(copies, new Set());
+  const nodes = new Map([...copies.values()].map((i) => [i.id, { ...i, children: [] as BookmarkTreeNode[] }]));
+  const out: Record<BookmarkRoot, BookmarkTreeNode[]> = { bar: [], other: [], menu: [], mobile: [] };
+  for (const n of nodes.values()) {
+    if (isRootKey(n.parent)) (out[n.parent.slice("root:".length) as BookmarkRoot] ?? out.other).push(n);
+    else nodes.get(n.parent)?.children.push(n);
+  }
+  const order = (list: BookmarkTreeNode[]) => {
+    list.sort(byPlace);
+    for (const n of list) order(n.children);
+  };
+  for (const list of Object.values(out)) order(list);
+  return out;
+}
+
 // ---- Items in the vault --------------------------------------------------------------------
 
 /** A copy to keep: the format every browser can import. Titles and addresses are text from web

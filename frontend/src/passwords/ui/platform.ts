@@ -33,6 +33,8 @@ export type Platform = {
   pin?: ReturnType<typeof memoryPin>;
   /** Settings only this platform has. */
   settingsExtras?: ReactNode;
+  /** Turning bookmark sync on and off: only a browser extension can reach a browser's bookmarks. */
+  bookmarkControls?: ReactNode;
 };
 
 type Token = { value: string; exp: number };

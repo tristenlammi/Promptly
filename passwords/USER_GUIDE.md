@@ -29,7 +29,7 @@ Settings has more: filling only when you click the toolbar button, a short PIN f
 
 ## Bookmarks
 
-In the extension, open Settings and tick "Keep my bookmarks the same in every browser". Do this in each browser you use. Bookmarks are encrypted in your vault, so your server can't read them.
+In the extension's toolbar panel, open Bookmarks and click "Turn on bookmark sync". Do this in each browser you use. Bookmarks are encrypted in your vault, so your server can't read them.
 
 They sync about once a minute while your vault's unlocked, and catch up when you next unlock. The first sync only adds, so nothing in a browser is removed by turning this on. The same bookmark in the same folder of two browsers becomes one. If you delete a lot at once, sync stops and asks first.
 

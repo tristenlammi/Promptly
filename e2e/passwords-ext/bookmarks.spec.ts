@@ -167,7 +167,7 @@ async function joinFirefox(secret: string) {
 /** The real box on the real settings page. */
 async function turnOn(rig: Rig) {
   const page = await rig.ctx.newPage();
-  await page.goto(`chrome-extension://${rig.extId}/vault.html#/settings`);
+  await page.goto(`chrome-extension://${rig.extId}/vault.html#/bookmarks`);
   const panel = page.getByTestId("bookmark-settings");
   await expect(panel).toBeVisible({ timeout: 30_000 });
   await panel.getByRole("checkbox", { name: /same in every browser/ }).click();
@@ -177,7 +177,7 @@ async function turnOn(rig: Rig) {
 
 async function turnOnFirefox() {
   await driver.switchTo().window(extTab);
-  await driver.get(`${FF_EXT}/vault.html#/settings`);
+  await driver.get(`${FF_EXT}/vault.html#/bookmarks`);
   await see(driver, By.css('[data-testid="bookmark-settings"]'), 60000).catch(async () => {
     await fill(driver, labelled("Master password"), FF_MASTER);
     await click(driver, button("Unlock"));
@@ -295,7 +295,7 @@ test("deleting a lot stops and asks, and keeping them brings them back everywher
   expect(JSON.stringify(await shapeOf(second!))).toContain("Link 39=");
 
   const page = await chrome_.ctx.newPage();
-  await page.goto(`chrome-extension://${chrome_.extId}/vault.html#/settings`);
+  await page.goto(`chrome-extension://${chrome_.extId}/vault.html#/bookmarks`);
   const ask = page.getByTestId("bookmark-held");
   await expect(ask).toBeVisible({ timeout: 30_000 });
   await expect(ask).toContainText("41");
@@ -354,7 +354,7 @@ test("turning it off keeps the bookmarks, and the vault's items don't show as it
   await page.goto(`chrome-extension://${chrome_.extId}/vault.html#/all`);
   await expect(page.getByRole("navigation", { name: "Passwords" })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByText("Made while locked")).toHaveCount(0);
-  await page.goto(`chrome-extension://${chrome_.extId}/vault.html#/settings`);
+  await page.goto(`chrome-extension://${chrome_.extId}/vault.html#/bookmarks`);
   await page.getByTestId("bookmark-settings").getByRole("checkbox", { name: /same in every browser/ }).click();
   await expect(page.getByTestId("bookmark-status")).toHaveCount(0);
   await page.close();

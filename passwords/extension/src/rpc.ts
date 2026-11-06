@@ -23,7 +23,11 @@ export type PageRequest =
   | { t: "unlock"; password: string }
   | { t: "lock" }
   | { t: "session" }
-  | { t: "list"; query?: string }
+  | { t: "list"; query?: string; kind?: string; favorite?: boolean; totp?: boolean }
+  | { t: "counts" }
+  | { t: "secretField"; id: string; field: "username" | "password"; reprompted?: boolean }
+  | { t: "bookmarkTree" }
+  | { t: "openBookmark"; id: string }
   | { t: "matches"; tabId: number; url?: string }
   | { t: "item"; id: string }
   | { t: "totp"; id: string; reprompted?: boolean }
@@ -45,7 +49,7 @@ export type PageRequest =
   | { t: "reportForm"; tabId: number }
   | { t: "connected"; serverUrl: string; token: string; deviceId: string; userId: string }
   | { t: "activity" }
-  | { t: "generate"; host?: string | null }
+  | { t: "generate"; host?: string | null; mode?: "password" | "passphrase" | "pin" | "username" }
   | { t: "mailForTab"; tabId: number }
   | { t: "mailCodeFill"; tabId: number; id: string }
   | { t: "mailLinkOpen"; tabId: number; id: string; confirmed?: boolean }

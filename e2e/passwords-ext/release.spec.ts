@@ -29,7 +29,7 @@ test("loads, asks to connect, and holds no standing access", async () => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(`chrome-extension://${rig.extId}/popup.html`);
-  await expect(page.getByText("Connect to your Promptly")).toBeVisible();
+  await expect(page.getByText("Set up Promptly Passwords")).toBeVisible();
   const facts = await page.evaluate(async () => ({
     manifest: chrome.runtime.getManifest() as unknown as { permissions: string[]; optional_permissions: string[]; host_permissions?: string[] },
     scripts: (await chrome.scripting.getRegisteredContentScripts()).length,

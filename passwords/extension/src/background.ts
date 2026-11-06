@@ -12,7 +12,7 @@ import { fromB64u, b64u, randomBytes, utf8 } from "../../../frontend/src/passwor
 import { decideOffer, type SaveOffer } from "../../../frontend/src/passwords/core/autofill/capture";
 import { afterFill, codeStep, flowFor, mayFillOnLoad, type TabFlow } from "../../../frontend/src/passwords/core/autofill/flow";
 import { openSignedPack, ruleForHost } from "../../../frontend/src/passwords/core/autofill/rules";
-import { generateForSite, plusAddress } from "../../../frontend/src/passwords/core/generator";
+import { generateForSite, generatePassphrase, generatePin, generateUsername, plusAddress } from "../../../frontend/src/passwords/core/generator";
 import { baseDomain, hostOf, lookalikeOf, matchItems, matchUrl } from "../../../frontend/src/passwords/core/match";
 import { type Item, type ItemBody, newBody, type SiteRule } from "../../../frontend/src/passwords/core/model";
 import { IdbStore } from "../../../frontend/src/passwords/core/store";
@@ -20,7 +20,7 @@ import { totpCode } from "../../../frontend/src/passwords/core/totp";
 import { VaultClient } from "../../../frontend/src/passwords/core/vault";
 import { canCheckClipboard, CLIP_ALARM, clearClipboardIfOurs, clipboardTest, watchClipboard, writeClipboard } from "./clipboard";
 import { BrowserBookmarks, VaultBookmarks } from "./bookmarks";
-import { type Base, bookmarkHash, bookmarksHtml, reconcile } from "../../../frontend/src/passwords/core/bookmarks";
+import { type Base, bookmarkHash, bookmarksHtml, reconcile, syncableUrl, validItem } from "../../../frontend/src/passwords/core/bookmarks";
 import { handlePasskey } from "./passkeys";
 import { packPublicKey } from "./rules-key";
 import { type Candidate, type ContentRequest, ext, type FillOutcome, type MenuRequest, type PageReport, type PageRequest, type SaveRequest, type StateOut, type ToContent } from "./rpc";
@@ -950,7 +950,49 @@ async function handlePage(m: PageRequest): Promise<unknown> {
     case "list": {
       if (!c.unlocked) return [];
       await touchLockTimer();
-      return c.search(m.query ?? "").slice(0, 200).map((i) => ({ id: i.id, title: i.body.title, username: i.body.username ?? "", kind: i.body.kind, hasTotp: !!i.body.totp?.secret && c.canReveal(i.vaultId), reprompt: !!i.body.reprompt }));
+      const common = new Set(["login", "card", "identity", "note"]);
+      return c
+        .search(m.query ?? "")
+        .filter((i) => (m.favorite ? i.body.favorite : true) && (m.totp ? !!i.body.totp?.secret && c.canReveal(i.vaultId) : true))
+        .filter((i) => (m.kind === undefined ? true : m.kind === "other" ? !common.has(i.body.kind) : i.body.kind === m.kind))
+        .filter((i) => !i.body.archived)
+        .slice(0, 200)
+        .map((i) => ({ id: i.id, title: i.body.title, username: i.body.username ?? "", kind: i.body.kind, hasTotp: !!i.body.totp?.secret && c.canReveal(i.vaultId), reprompt: !!i.body.reprompt, favorite: !!i.body.favorite }));
+    }
+    case "counts": {
+      const n = { login: 0, card: 0, identity: 0, note: 0, other: 0, codes: 0, favorites: 0, bookmarks: 0 };
+      if (!c.unlocked) return n;
+      for (const i of c.allItems()) {
+        if (i.body.archived) continue;
+        if (i.body.kind === "login" || i.body.kind === "card" || i.body.kind === "identity" || i.body.kind === "note") n[i.body.kind]++;
+        else n.other++;
+        if (i.body.totp?.secret && c.canReveal(i.vaultId)) n.codes++;
+        if (i.body.favorite) n.favorites++;
+      }
+      return n;
+    }
+    case "secretField": {
+      const it = c.unlocked ? c.get(m.id) : undefined;
+      if (!it) return {};
+      if (m.field === "username") return { value: it.body.username };
+      // The same gates as showing the item: nothing for a fill-only member, and nothing until
+      // the master password's been asked for again on an item that wants it.
+      if (!c.canReveal(it.vaultId)) return { reason: "fill-only" };
+      if (it.body.reprompt && !m.reprompted) return { reason: "reprompt" };
+      await touchLockTimer();
+      return { value: it.body.password };
+    }
+    case "bookmarkTree": {
+      if (!c.unlocked) return [];
+      return (await new VaultBookmarks(c, await c.personalVaultId()).read()).filter(validItem);
+    }
+    case "openBookmark": {
+      const it = c.unlocked ? c.get(m.id) : undefined;
+      const url = it?.body.kind === "bookmark" && it.vaultId === (await c.personalVaultId()) ? it.body.bookmark?.url : undefined;
+      // A folder has no address, and the sync's rule on what's an address applies here too.
+      if (!url || !syncableUrl(url)) return { ok: false };
+      await ext.tabs.create({ url });
+      return { ok: true };
     }
     case "matches": {
       const tab = await ext.tabs.get(m.tabId);
@@ -1140,6 +1182,9 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       if (c.unlocked) await touchLockTimer();
       return { ok: true };
     case "generate":
+      if (m.mode === "passphrase") return { password: generatePassphrase() };
+      if (m.mode === "pin") return { password: generatePin() };
+      if (m.mode === "username") return { password: generateUsername() };
       return { password: generateForSite(m.host) };
     case "plusBase":
       return { email: mostUsedEmail() };

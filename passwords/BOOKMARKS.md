@@ -19,6 +19,11 @@ The owner asked for this during the build (2026-11-07): the extension keeps book
 - "Save a copy of this browser's bookmarks" writes an ordinary bookmarks HTML file.
 - Travel mode pauses it, since those items being off the device isn't a deletion.
 
+## Where it shows
+
+- **In the toolbar panel:** a Bookmarks section to browse and search, from the vault, so it's the same list in any browser with the vault unlocked, whether or not that browser syncs.
+- **In the vault:** a Bookmarks screen on web, in the extension and in the Windows app, for finding and opening them. The on/off box is on the extension's copy of that screen, since only an extension can reach a browser's bookmarks. Edit bookmarks in the browser.
+
 ## What moves and what doesn't
 
 - `http` and `https` bookmarks and folders move. `javascript:`, `file:` and browser pages stay in the browser they're in and are counted on screen. A `javascript:` bookmark from elsewhere would be code that runs on whatever page it's clicked on.

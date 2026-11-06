@@ -2,7 +2,7 @@
 // matters: indexes shift, a folder with something in it can't be removed, ids are its own.
 import { describe, expect, it } from "vitest";
 
-import { type Base, type BookmarkItem, type BookmarkNode, bookmarksHtml, type BrowserSide, massDeleteLimit, reconcile, rootKey, syncableUrl, type VaultSide } from "./bookmarks";
+import { type Base, type BookmarkItem, type BookmarkNode, bookmarksHtml, bookmarkTree, type BrowserSide, massDeleteLimit, reconcile, rootKey, syncableUrl, type VaultSide } from "./bookmarks";
 
 type Raw = { id: string; parent: string; title: string; url?: string };
 
@@ -500,6 +500,23 @@ describe("bookmark sync", () => {
         expect(r.status === "ok" && r.wroteVault, `seed ${seed}`).toBe(false);
       }
     }
+  });
+
+  it("the tree for showing is in order, and an orphan or a loop can still be reached", () => {
+    const tree = bookmarkTree([
+      { id: "f", parent: BAR, title: "Folder", pos: 2 },
+      { id: "b", parent: BAR, title: "First", url: "https://first.example/", pos: 1 },
+      { id: "c2", parent: "f", title: "Later", url: "https://later.example/", pos: 9 },
+      { id: "c1", parent: "f", title: "Sooner", url: "https://sooner.example/", pos: 3 },
+      { id: "o", parent: "gone", title: "Orphan", url: "https://orphan.example/", pos: 1 },
+      { id: "x", parent: "y", title: "X", pos: 1 },
+      { id: "y", parent: "x", title: "Y", pos: 2 },
+      { id: "bad", parent: BAR, title: "Evil", url: "javascript:alert(1)", pos: 0 },
+    ]);
+    expect(tree.bar.map((n) => n.title)).toEqual(["First", "Folder"]);
+    expect(tree.bar[1].children.map((n) => n.title)).toEqual(["Sooner", "Later"]);
+    expect(JSON.stringify(tree)).not.toContain("javascript:");
+    for (const t of ["Orphan", "X", "Y"]) expect(JSON.stringify(tree.other)).toContain(t);
   });
 
   it("the HTML copy escapes what came from web pages and leaves out what isn't a web address", () => {

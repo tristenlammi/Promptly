@@ -48,7 +48,9 @@ function normaliseServer(input: string): string | null {
 }
 
 function Connect({ onDone }: { onDone: () => void }) {
-  const [server, setServer] = useState("");
+  // Only ever a suggestion, from the page in front when Set up was clicked. It's on screen to check.
+  const suggested = new URLSearchParams(location.search).get("server") ?? "";
+  const [server, setServer] = useState(suggested);
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [waiting, setWaiting] = useState(false);
@@ -96,6 +98,7 @@ function Connect({ onDone }: { onDone: () => void }) {
           <Label text="Your server's address" hint="The address you use for Promptly, for example https://home.example.org">
             <input className={inputClass} autoFocus value={server} onChange={(e) => setServer(e.target.value)} />
           </Label>
+          {suggested && <p className="text-[var(--text-muted)]">This came from the page you were on. Make sure it's your own Promptly: this is where your encrypted vault will sync.</p>}
           <p className="text-[var(--text-muted)]">The browser will ask to let this extension talk to that one server. Then you'll approve this browser in a Promptly tab.</p>
           {error && <Callout kind="danger">{error}</Callout>}
           <Button kind="primary" type="submit">Connect</Button>
@@ -230,7 +233,7 @@ function ExtensionSettings() {
   return (
     <div data-testid="ext-settings" className="flex flex-col gap-2 text-sm text-[var(--text)]">
       <h2 className="text-sm font-semibold">This browser</h2>
-      <BookmarkSettings />
+      <p className="text-xs text-[var(--text-muted)]">Bookmark sync is under <a className="underline" href="#/bookmarks">Bookmarks</a>.</p>
       <label className="flex items-center gap-2">
         <input
           type="checkbox"
@@ -381,6 +384,7 @@ function Root() {
       api,
       store,
       settingsExtras: <ExtensionSettings />,
+      bookmarkControls: <BookmarkSettings />,
       // Through the desktop app's host, where it's installed and has registered this
       // extension. Otherwise it reports it's not available, and nothing's offered.
       hello: {
