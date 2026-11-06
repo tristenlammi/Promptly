@@ -233,6 +233,13 @@ async def _folder_ids(db: AsyncSession, accounts: list[uuid.UUID], role: str | N
     query = select(MailFolder.id).where(MailFolder.account_id.in_(accounts))
     if folder_id:
         query = query.where(MailFolder.id == folder_id)
+    elif role == "archive":
+        # Gmail has no Archive: what you archive there is in All Mail.
+        rows = (await db.execute(
+            select(MailFolder.id, MailFolder.account_id, MailFolder.role).where(MailFolder.account_id.in_(accounts), MailFolder.role.in_(("archive", "all")))
+        )).all()
+        own_archive = {r.account_id for r in rows if r.role == "archive"}
+        return [r.id for r in rows if r.role == "archive" or r.account_id not in own_archive]
     elif role:
         query = query.where(MailFolder.role == role)
     return list((await db.execute(query)).scalars())
@@ -452,7 +459,10 @@ async def act(account_id: uuid.UUID, key: str, body: ThreadAction, db: AsyncSess
         target = await rules.archive_folder(db, account_id)
     if target is None:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="This mailbox doesn't have that folder.")
-    rules.move(db, folders, messages, target)
+    # Your sent copies normally stay in Sent. But if that's all there is, there's
+    # nothing else to move, and it would just come straight back.
+    only_yours = all(folders[m.folder_id].role in rules.STAY_PUT or m.folder_id == target.id for m in messages)
+    rules.move(db, folders, messages, target, even_sent=only_yours and body.action != "inbox")
     # Moving it somewhere else takes it out of its label.
     await rules.clear_label(db, account_id, key)
     await db.commit()

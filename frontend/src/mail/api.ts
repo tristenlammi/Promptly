@@ -1,4 +1,4 @@
-import { apiClient } from "@/api/client";
+import { API_BASE_URL, apiClient, authHeader } from "@/api/client";
 
 export interface MailAccount {
   id: string;
@@ -179,6 +179,15 @@ export const mailApi = {
   },
   async act(accountId: string, key: string, action: ThreadAction) {
     await apiClient.post(`/mail/threads/${accountId}/${key}/action`, { action });
+  },
+  /** Survives the page closing, which an ordinary request doesn't. */
+  actAsPageCloses(accountId: string, key: string, action: ThreadAction) {
+    void fetch(`${API_BASE_URL}/mail/threads/${accountId}/${key}/action`, {
+      method: "POST",
+      keepalive: true,
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({ action }),
+    }).catch(() => undefined);
   },
   async addLabel(name: string, color: string) {
     return (await apiClient.post<MailLabel>("/mail/labels", { name, color })).data;

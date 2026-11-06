@@ -182,22 +182,36 @@ def connect(server: Server) -> IMAPClient:
     return client
 
 
-def role_of(flags: tuple[bytes, ...], path: str) -> str:
+def _marked_role(flags: tuple[bytes, ...]) -> str | None:
     for flag in flags:
         role = _SPECIAL.get(flag.lower())
         if role:
             return role
+    return None
+
+
+def role_of(flags: tuple[bytes, ...], path: str) -> str:
+    role = _marked_role(flags)
+    if role:
+        return role
     leaf = re.split(r"[/.]", path)[-1].strip().lower()
     return "inbox" if path.upper() == "INBOX" else _NAMES.get(leaf, "other")
 
 
 def folders(client: IMAPClient) -> list[dict[str, str]]:
     out = []
-    for flags, delimiter, path in client.list_folders():
+    listed = client.list_folders()
+    # The server says which is its Trash. A label that's only called Trash, like
+    # Gmail's old [Imap]/Trash, is just a label then, or mail could be sent there instead.
+    marked = {_marked_role(flags) for flags, _, _ in listed}
+    for flags, delimiter, path in listed:
         if any(f.lower() == b"\\noselect" for f in flags):
             continue
         separator = delimiter.decode() if isinstance(delimiter, bytes) else (delimiter or "/")
-        out.append({"path": path, "name": path.split(separator)[-1] if separator else path, "role": role_of(flags, path)})
+        role = role_of(flags, path)
+        if role in marked and not _marked_role(flags):
+            role = "other"
+        out.append({"path": path, "name": path.split(separator)[-1] if separator else path, "role": role})
     return out
 
 

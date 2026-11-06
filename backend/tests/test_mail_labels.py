@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.mail.models import MailFolder, MailLabel, MailMessage, MailOp, MailRule
-from app.mail import worker
+from app.mail import imap, worker
 from app.mail.rules import normalise
 
 from .test_mail import H, _connect, _deliver, _live_account, _mailbox, _rows, _sync, client, live, mk_account, mk_message, mk_user, server  # noqa: F401
@@ -536,3 +536,135 @@ async def test_undoing_a_move_straight_away_puts_it_back(client, db, server):  #
     await _sync(account)
     assert (_count_in("INBOX"), _count_in("Archive")) == (1, 0)
     await _one_row_in(db, account, "INBOX")
+
+
+# ---- a mailbox shaped like Gmail: All Mail instead of an Archive
+
+
+@pytest.fixture
+def gmail_shaped(server):  # noqa: F811
+    c = _mailbox()
+    for name in ("Archive", "Trash", "Sent"):
+        c.delete_folder(name)
+    for name in ("[Gmail]/All Mail", "[Gmail]/Trash", "[Gmail]/Sent Mail"):
+        c.create_folder(name)
+    c.logout()
+
+
+async def _subjects(client, u, role: str) -> list[str]:  # noqa: F811
+    r = await client.get(f"/api/mail/threads?role={role}", headers=H(u))
+    assert r.status_code == 200, r.text
+    return [t["subject"] for t in r.json()["threads"]]
+
+
+async def _worker_pass(account) -> None:
+    """What the worker really does, which leaves All Mail alone."""
+    c = await asyncio.to_thread(_connect, account)
+    await worker._refresh_folders(c, account.id)
+    await worker._apply_ops(c, account.id)
+    await worker._sync_folders(c, account.id, every=True)
+    c.logout()
+
+
+async def _gmail_account(client, db, name: str, subject: str):  # noqa: F811
+    u = await mk_user(db, name, role="admin")
+    account = await _live_account(db, u)
+    _deliver("alice@mailtest.example", subject=subject)
+    await _worker_pass(account)
+    m = (await _rows(db, account))[0]
+    return u, account, f"/api/mail/threads/{account.id}/{m.thread_key}/action"
+
+
+@live
+async def test_archiving_on_gmail_shows_in_the_archive_and_can_come_back(client, db, gmail_shaped):  # noqa: F811
+    u, account, url = await _gmail_account(client, db, "gm1", "Keep this")
+    assert (await client.post(url, json={"action": "archive"}, headers=H(u))).status_code == 204
+    assert await _subjects(client, u, "inbox") == []
+    assert await _subjects(client, u, "archive") == ["Keep this"]
+    await _worker_pass(account)
+    await _worker_pass(account)
+    assert await _subjects(client, u, "archive") == ["Keep this"]
+    assert (_count_in("INBOX"), _count_in("[Gmail]/All Mail")) == (0, 1)
+
+    assert (await client.post(url, json={"action": "inbox"}, headers=H(u))).status_code == 204
+    await _worker_pass(account)
+    await _worker_pass(account)
+    assert await _subjects(client, u, "inbox") == ["Keep this"]
+    assert await _subjects(client, u, "archive") == []
+    assert (_count_in("INBOX"), _count_in("[Gmail]/All Mail")) == (1, 0)
+
+
+@live
+async def test_deleting_from_the_gmail_archive_goes_to_the_trash(client, db, gmail_shaped):  # noqa: F811
+    u, account, url = await _gmail_account(client, db, "gm3", "Done with it")
+    assert (await client.post(url, json={"action": "archive"}, headers=H(u))).status_code == 204
+    await _worker_pass(account)
+    assert (await client.post(url, json={"action": "trash"}, headers=H(u))).status_code == 204
+    await _worker_pass(account)
+    await _worker_pass(account)
+    assert await _subjects(client, u, "archive") == []
+    assert await _subjects(client, u, "trash") == ["Done with it"]
+    assert (_count_in("[Gmail]/All Mail"), _count_in("[Gmail]/Trash")) == (0, 1)
+
+
+@live
+async def test_deleting_on_gmail_shows_in_the_trash(client, db, gmail_shaped):  # noqa: F811
+    u, account, url = await _gmail_account(client, db, "gm2", "Bin this")
+    assert (await client.post(url, json={"action": "trash"}, headers=H(u))).status_code == 204
+    assert await _subjects(client, u, "inbox") == []
+    assert await _subjects(client, u, "trash") == ["Bin this"]
+    await _worker_pass(account)
+    await _worker_pass(account)
+    assert await _subjects(client, u, "trash") == ["Bin this"]
+    assert (_count_in("INBOX"), _count_in("[Gmail]/Trash")) == (0, 1)
+
+
+async def test_the_archive_view_is_all_mail_only_where_theres_no_archive(client, db):  # noqa: F811
+    u = await mk_user(db, "both")
+    gmail, other = await mk_account(db, u, email="me@gmail.example"), await mk_account(db, u, email="me@other.example")
+    for account, subject, spots in ((gmail, "From All Mail", [("[Gmail]/All Mail", "all")]), (other, "From Archive", [("Archive", "archive"), ("All", "all")])):
+        for path, role in spots:
+            folder = MailFolder(account_id=account.id, path=path, name=path, role=role)
+            db.add(folder)
+            await db.flush()
+            m = await mk_message(db, account, subject=f"{subject} {role}")
+            m.folder_id = folder.id
+        await db.commit()
+    assert sorted(await _subjects(client, u, "archive")) == ["From All Mail all", "From Archive archive"]
+
+
+async def test_a_conversation_only_in_sent_can_still_be_deleted(client, db):  # noqa: F811
+    u = await mk_user(db, "sender")
+    account = await mk_account(db, u)
+    sent = MailFolder(account_id=account.id, path="Sent", name="Sent", role="sent")
+    trash = MailFolder(account_id=account.id, path="Trash", name="Trash", role="trash")
+    db.add_all([sent, trash])
+    await db.flush()
+    only_sent = await _numbered(db, account, 41, "Only sent")
+    only_sent.folder_id = sent.id
+    both = await _numbered(db, account, 42, "Replied to")
+    mine = await _numbered(db, account, 43, "Replied to")
+    mine.folder_id, mine.thread_key = sent.id, both.thread_key
+    keys = only_sent.thread_key, both.thread_key
+    await db.commit()
+
+    for key in keys:
+        assert (await client.post(f"/api/mail/threads/{account.id}/{key}/action", json={"action": "trash"}, headers=H(u))).status_code == 204
+    # Deleted from Sent, it goes. Deleting a conversation you replied to leaves your copy in Sent.
+    assert await _subjects(client, u, "sent") == ["Replied to"]
+    assert sorted(await _subjects(client, u, "trash")) == ["Only sent", "Replied to"]
+
+
+def test_the_folder_the_server_marks_wins_over_one_only_named_like_it():
+    class Listing:
+        def list_folders(self):
+            return [
+                ((b"\\HasNoChildren",), b"/", "INBOX"),
+                ((b"\\HasNoChildren",), b"/", "[Imap]/Trash"),
+                ((b"\\HasNoChildren", b"\\Trash"), b"/", "[Gmail]/Bin"),
+                ((b"\\HasNoChildren",), b"/", "Archive"),
+                ((b"\\HasNoChildren", b"\\All"), b"/", "[Gmail]/All Mail"),
+            ]
+
+    roles = {f["path"]: f["role"] for f in imap.folders(Listing())}
+    assert roles == {"INBOX": "inbox", "[Imap]/Trash": "other", "[Gmail]/Bin": "trash", "Archive": "archive", "[Gmail]/All Mail": "all"}

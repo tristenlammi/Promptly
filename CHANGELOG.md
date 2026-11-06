@@ -21,6 +21,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-06
+
+### Fixed
+- Mail: on Gmail, what you archive now shows in Archive. It went to All Mail, but Archive only looked for a folder called Archive, so it always looked empty.
+- Mail: a delete or archive now goes through as soon as you open another view or leave the app, instead of waiting out the undo time. Closing the app in those 5 seconds used to lose it, and Trash looked empty if you went straight there.
+- Mail: a conversation that's only in Sent or Drafts can now be deleted or archived. Nothing used to happen, and it came straight back.
+- Mail: an old label that's only called Trash or similar, like Gmail's [Imap]/Trash, is no longer mistaken for the mailbox's real one.
+
 ## [0.28.0] - 2026-11-06
 
 ### Fixed
