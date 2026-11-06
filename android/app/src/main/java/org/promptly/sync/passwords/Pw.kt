@@ -29,6 +29,7 @@ import org.promptly.sync.passwords.autofill.AssetLinks
 import org.promptly.sync.passwords.autofill.AutofillIndex
 import org.promptly.sync.passwords.core.Argon2Engine
 import org.promptly.sync.passwords.core.BouncyCastleArgon2
+import org.promptly.sync.passwords.core.BouncyCastleArgon2d
 import org.promptly.sync.passwords.core.CachedAccount
 import org.promptly.sync.passwords.core.CachedItem
 import org.promptly.sync.passwords.core.CachedVault
@@ -354,6 +355,7 @@ object Pw {
         prefs = PwPrefs(ctx)
         db = PasswordsDb(ctx)
         Primitives.argon2Engine = chooseArgon2()
+        Primitives.argon2dEngine = chooseArgon2d()
         fun asset(name: String) = ctx.assets.open("passwords/$name").use { it.readBytes().decodeToString() }
         Wordlist.loader = { asset("eff_large_wordlist.json") }
         Generator.rulesLoader = { asset("password-rules.json") }
@@ -371,6 +373,22 @@ object Pw {
         }.getOrDefault(false)
         return if (probe) native else BouncyCastleArgon2.also { Log.w(TAG, "Argon2: native library disagreed or failed; using BouncyCastle") }
     }
+
+    /** The same library and the same check. Only ever used to open a KeePass file. */
+    private fun chooseArgon2d(): Argon2Engine {
+        val native = nativeArgon2d() ?: return BouncyCastleArgon2d
+        val agrees = runCatching {
+            native.hash(byteArrayOf(1, 2, 3), ByteArray(16) { 7 }, 64, 1, 1, 32).contentEquals(BouncyCastleArgon2d.hash(byteArrayOf(1, 2, 3), ByteArray(16) { 7 }, 64, 1, 1, 32))
+        }.getOrDefault(false)
+        return if (agrees) native else BouncyCastleArgon2d
+    }
+
+    fun nativeArgon2d(): Argon2Engine? = runCatching {
+        val lib = Argon2Kt()
+        Argon2Engine { password, salt, m, t, p, length ->
+            lib.hash(Argon2Mode.ARGON2_D, password, salt, t, m, p, length, Argon2Version.V13).rawHashAsByteArray()
+        }
+    }.getOrNull()
 
     fun nativeArgon2(): Argon2Engine? = runCatching {
         val lib = Argon2Kt()

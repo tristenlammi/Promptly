@@ -49,10 +49,25 @@ val BouncyCastleArgon2 = Argon2Engine { password, salt, m, t, p, length ->
     out
 }
 
+/** Argon2d, which the vault never uses: KeePass files choose it for themselves. */
+val BouncyCastleArgon2d = Argon2Engine { password, salt, m, t, p, length ->
+    val params = Argon2Parameters.Builder(Argon2Parameters.ARGON2_d)
+        .withVersion(Argon2Parameters.ARGON2_VERSION_13)
+        .withSalt(salt).withMemoryAsKB(m).withIterations(t).withParallelism(p)
+        .build()
+    val out = ByteArray(length)
+    Argon2BytesGenerator().apply { init(params) }.generateBytes(password, out)
+    out
+}
+
 object Primitives {
     /** Replaced at app start with the native engine, if its library loads. */
     @Volatile
     var argon2Engine: Argon2Engine = BouncyCastleArgon2
+
+    /** For reading KeePass files only. Replaced the same way. */
+    @Volatile
+    var argon2dEngine: Argon2Engine = BouncyCastleArgon2d
 
     fun argon2(password: ByteArray, salt: ByteArray, p: KdfParams, length: Int = 32): ByteArray =
         argon2Engine.hash(password, salt, p.m, p.t, p.p, length)

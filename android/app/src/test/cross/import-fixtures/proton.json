@@ -1,0 +1,143 @@
+{
+ "vaults": {
+  "v1": {
+   "name": "Personal",
+   "items": [
+    {
+     "state": 1,
+     "data": {
+      "type": "login",
+      "metadata": {
+       "name": "A",
+       "note": "n"
+      },
+      "content": {
+       "itemUsername": "u",
+       "password": "p",
+       "urls": [
+        "https://a.example",
+        "https://a2.example/x"
+       ],
+       "totpUri": "otpauth://totp/a?secret=JBSWY3DPEHPK3PXP"
+      },
+      "extraFields": [
+       {
+        "fieldName": "k",
+        "type": "hidden",
+        "data": {
+         "content": "v"
+        }
+       },
+       {
+        "fieldName": "t",
+        "type": "text",
+        "data": {
+         "content": "w"
+        }
+       },
+       {
+        "type": "text"
+       }
+      ]
+     }
+    },
+    {
+     "state": 2,
+     "data": {
+      "type": "login",
+      "metadata": {
+       "name": "Trashed"
+      },
+      "content": {}
+     }
+    },
+    {
+     "state": 1,
+     "data": {
+      "type": "creditCard",
+      "metadata": {
+       "name": "C"
+      },
+      "content": {
+       "cardholderName": "Z",
+       "number": "4111",
+       "verificationNumber": "1",
+       "expirationDate": "2030-05"
+      }
+     }
+    },
+    {
+     "state": 1,
+     "data": {
+      "type": "note",
+      "metadata": {
+       "name": "N",
+       "note": "x"
+      },
+      "content": {}
+     }
+    },
+    {
+     "state": 1,
+     "data": {
+      "type": "identity",
+      "metadata": {
+       "name": "I"
+      },
+      "content": {
+       "firstName": "F",
+       "lastName": "L",
+       "email": "e@e.example",
+       "phoneNumber": "1",
+       "streetAddress": "S",
+       "city": "C",
+       "zipOrPostalCode": "Z",
+       "countryOrRegion": "R"
+      }
+     }
+    },
+    {
+     "state": 1,
+     "data": {
+      "type": "login",
+      "metadata": {
+       "name": "Email only"
+      },
+      "content": {
+       "itemEmail": "only@e.example",
+       "urls": [],
+       "totpUri": "not-a-code!"
+      }
+     }
+    }
+   ]
+  },
+  "v2": {
+   "name": "Work",
+   "items": [
+    {
+     "state": 1,
+     "data": {
+      "type": "alias",
+      "metadata": {
+       "name": "An alias"
+      },
+      "content": {}
+     }
+    },
+    {
+     "state": 1,
+     "data": {
+      "type": "creditCard",
+      "metadata": {
+       "name": "Short date"
+      },
+      "content": {
+       "expirationDate": "2030"
+      }
+     }
+    }
+   ]
+  }
+ }
+}

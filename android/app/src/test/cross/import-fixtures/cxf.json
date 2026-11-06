@@ -1,0 +1,217 @@
+{
+ "version": {
+  "major": 1,
+  "minor": 0
+ },
+ "exporterRpId": "x.example",
+ "exporterDisplayName": "X",
+ "timestamp": 1,
+ "accounts": [
+  {
+   "id": "a",
+   "username": "u",
+   "email": "u@x",
+   "collections": [
+    {
+     "id": "c",
+     "title": "Work",
+     "items": [
+      {
+       "item": "i1"
+      },
+      {
+       "item": "i5"
+      }
+     ]
+    }
+   ],
+   "items": [
+    {
+     "id": "i1",
+     "title": "Login",
+     "favorite": true,
+     "tags": [
+      "t1",
+      "t2"
+     ],
+     "scope": {
+      "urls": [
+       "https://a.example"
+      ],
+      "androidApps": []
+     },
+     "credentials": [
+      {
+       "type": "basic-auth",
+       "username": {
+        "fieldType": "string",
+        "value": "ana"
+       },
+       "password": {
+        "fieldType": "concealed-string",
+        "value": "pw"
+       }
+      },
+      {
+       "type": "totp",
+       "secret": "JBSWY3DPEHPK3PXP",
+       "period": 30,
+       "digits": 6,
+       "algorithm": "sha256",
+       "issuer": "A"
+      },
+      {
+       "type": "passkey",
+       "credentialId": "Y3JlZA",
+       "rpId": "a.example",
+       "username": "ana",
+       "userDisplayName": "Ana",
+       "userHandle": "dQ",
+       "key": "a2V5"
+      }
+     ]
+    },
+    {
+     "id": "i2",
+     "title": "Note",
+     "credentials": [
+      {
+       "type": "note",
+       "content": {
+        "fieldType": "string",
+        "value": "hello"
+       }
+      },
+      {
+       "type": "note",
+       "content": "and more"
+      }
+     ]
+    },
+    {
+     "id": "i3",
+     "title": "Card",
+     "credentials": [
+      {
+       "type": "credit-card",
+       "number": {
+        "value": "4111"
+       },
+       "fullName": {
+        "value": "A B"
+       },
+       "cardType": {
+        "value": "Visa"
+       },
+       "expiryDate": {
+        "value": "2031-07"
+       },
+       "verificationNumber": {
+        "value": "9"
+       }
+      }
+     ]
+    },
+    {
+     "id": "i4",
+     "title": "Odd",
+     "credentials": [
+      {
+       "type": "something-new"
+      }
+     ]
+    },
+    {
+     "id": "i5",
+     "title": "Key",
+     "credentials": [
+      {
+       "type": "api-key",
+       "key": {
+        "value": "k-1"
+       }
+      },
+      {
+       "type": "custom-fields",
+       "fields": [
+        {
+         "label": "Hidden one",
+         "fieldType": "concealed-string",
+         "value": "h"
+        },
+        {
+         "fieldType": "string",
+         "value": "no label"
+        },
+        {
+         "label": "Empty",
+         "value": ""
+        },
+        {
+         "label": "A number",
+         "value": 12
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "id": "i6",
+     "title": "Wifi",
+     "credentials": [
+      {
+       "type": "wifi",
+       "ssid": {
+        "value": "Home"
+       },
+       "passphrase": {
+        "value": "wifi-pw"
+       }
+      }
+     ]
+    },
+    {
+     "id": "i7",
+     "title": "Ssh",
+     "credentials": [
+      {
+       "type": "ssh-key",
+       "privateKey": "PRIV"
+      }
+     ]
+    },
+    {
+     "id": "i8",
+     "title": "Note after login",
+     "credentials": [
+      {
+       "type": "basic-auth",
+       "username": {
+        "value": "ana"
+       }
+      },
+      {
+       "type": "note",
+       "content": {
+        "value": "kept as a login"
+       }
+      }
+     ]
+    },
+    {
+     "id": "i9",
+     "credentials": [
+      {
+       "type": "totp",
+       "secret": "JBSWY3DP",
+       "period": "60",
+       "digits": "8",
+       "algorithm": "md5",
+       "username": "me"
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

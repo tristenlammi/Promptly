@@ -110,7 +110,7 @@ val copyPasswordAssets = tasks.register<CopyPasswordAssets>("copyPasswordAssets"
     output.set(layout.buildDirectory.dir("generated/passwordAssets"))
 }
 val copyPasswordVectors = tasks.register<CopyPasswordAssets>("copyPasswordVectors") {
-    sources.from(passwordCore.resolve("vectors.json"))
+    sources.from(passwordCore.resolve("vectors.json"), passwordCore.resolve("testing/fixture.kdbx"), fileTree(projectDir.resolve("src/test/cross/import-fixtures")))
     output.set(layout.buildDirectory.dir("generated/passwordVectors"))
 }
 androidComponents {

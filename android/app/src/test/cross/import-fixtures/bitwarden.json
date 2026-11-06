@@ -1,0 +1,98 @@
+{
+ "encrypted": false,
+ "folders": [
+  {
+   "id": "f1",
+   "name": "Work"
+  }
+ ],
+ "items": [
+  {
+   "id": "1",
+   "folderId": "f1",
+   "type": 1,
+   "reprompt": 1,
+   "name": "Login",
+   "notes": "n",
+   "favorite": true,
+   "fields": [
+    {
+     "name": "pin",
+     "value": "1234",
+     "type": 1
+    }
+   ],
+   "login": {
+    "uris": [
+     {
+      "match": 1,
+      "uri": "https://x.example"
+     },
+     {
+      "uri": "https://y.example"
+     }
+    ],
+    "username": "u",
+    "password": "p",
+    "totp": "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP",
+    "fido2Credentials": [
+     {
+      "credentialId": "abc",
+      "keyValue": "a2V5",
+      "rpId": "x.example",
+      "userHandle": "dQ",
+      "userName": "u",
+      "counter": "3",
+      "creationDate": "2026-01-01T00:00:00Z",
+      "discoverable": "true"
+     }
+    ]
+   },
+   "passwordHistory": [
+    {
+     "lastUsedDate": "2025-01-01T00:00:00Z",
+     "password": "old"
+    }
+   ]
+  },
+  {
+   "type": 2,
+   "name": "Note",
+   "notes": "text",
+   "secureNote": {
+    "type": 0
+   }
+  },
+  {
+   "type": 3,
+   "name": "Card",
+   "card": {
+    "cardholderName": "A B",
+    "number": "4111111111111111",
+    "code": "123",
+    "expMonth": "1",
+    "expYear": "2030",
+    "brand": "Visa"
+   }
+  },
+  {
+   "type": 4,
+   "name": "Me",
+   "identity": {
+    "firstName": "A",
+    "lastName": "B",
+    "email": "a@b.example",
+    "postalCode": "2000"
+   }
+  },
+  {
+   "type": 5,
+   "name": "SSH",
+   "sshKey": {
+    "publicKey": "ssh-ed25519 AAA",
+    "privateKey": "PRIV",
+    "keyFingerprint": "SHA256:x"
+   }
+  }
+ ]
+}

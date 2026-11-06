@@ -1,7 +1,8 @@
 // Bringing passwords in and out, parsed and made on this device. Mirrors importers.ts for
-// browser CSVs, Bitwarden JSON (plain and password-protected) and Promptly's own files,
-// exporter.ts for export, and send.ts for Secure Send. Input is treated as hostile: size
-// limits, and anything that doesn't parse fails with an error rather than a crash.
+// CSVs, Bitwarden JSON (plain and password-protected), Promptly's own files and working out what
+// a file is, exporter.ts for export, and send.ts for Secure Send. The other managers' formats are
+// in ImportFormats.kt and Kdbx.kt. Input is treated as hostile: size limits, and anything that
+// doesn't parse fails with an error rather than a crash.
 package org.promptly.sync.passwords.core
 
 import kotlinx.serialization.json.Json
@@ -119,6 +120,19 @@ object Importers {
         return LoginUrl("${Match.APP_SCHEME}$pkg", "never")
     }
 
+    private val WEB_SHAPED = Regex("^(https?://|[^:/]+(\\.|\\z|:\\d|/))", RegexOption.IGNORE_CASE)
+    private val ANY_SCHEME = Regex("^[a-z][a-z0-9+.-]*://", RegexOption.IGNORE_CASE)
+    private val HTTP_PREFIX = Regex("^https?://", RegexOption.IGNORE_CASE)
+
+    /** sanitizeImport's rule: what isn't a website gets match "never", so an app's id, or
+     *  `javascript:` and the like, can't match or be offered on a page. */
+    private fun safeUrlFrom(u: LoginUrl): LoginUrl {
+        val app = appUrlFrom(u)
+        if (app != u) return app
+        val webShaped = WEB_SHAPED.containsMatchIn(u.url) && !ANY_SCHEME.containsMatchIn(u.url.replaceFirst(HTTP_PREFIX, ""))
+        return if (webShaped) u else u.copy(match = "never")
+    }
+
     /** What a file can make: every item kind a person sees, and nothing the app keeps for itself. */
     private val IMPORTABLE_KINDS = setOf("login", "note", "card", "identity", "totp", "passkey", "apikey", "wifi", "ssh", "bank", "document")
 
@@ -138,7 +152,7 @@ object Importers {
             val kept = LinkedHashMap(it.body.fields)
             INTERNAL_FIELDS.forEach { f -> kept.remove(f) }
             val clean = ItemBody(kept)
-            items += Imported(if (clean["urls"] != null) clean.withUrls(clean.urls.map { u -> appUrlFrom(u) }) else clean, it.folder)
+            items += Imported(if (clean["urls"] != null) clean.withUrls(clean.urls.map { u -> safeUrlFrom(u) }) else clean, it.folder)
         }
         val warnings = if (dropped > 0) r.warnings + "$dropped entries in that file weren't items you can see, and were left out." else r.warnings
         return ImportResult(r.format, items, warnings)
@@ -170,7 +184,7 @@ object Importers {
 
     private val B32 = Regex("^[A-Z2-7]+=*$")
 
-    private fun otpFrom(text: String?, warnings: MutableList<String>, name: String): TotpConfig? {
+    internal fun otpFrom(text: String?, warnings: MutableList<String>, name: String): TotpConfig? {
         val t = text?.trim()
         if (t.isNullOrEmpty()) return null
         try {
@@ -184,7 +198,27 @@ object Importers {
         return null
     }
 
-    fun fromGenericCsv(text: String, format: String = "CSV"): ImportResult {
+    fun fromGenericCsv(text: String, format: String = "CSV"): ImportResult = genericCsv(text, format, null)
+
+    /** LastPass marks secure notes with url http://sn and a "NoteType:" body. Goes by the row
+     *  each item really came from: a row with nothing usable in it makes no item. */
+    fun fromLastPassCsv(text: String): ImportResult {
+        val rowOf = ArrayList<Int>()
+        val result = genericCsv(text, "LastPass", rowOf)
+        val rows = parseCsv(text)
+        val url = rows.firstOrNull()?.let { columnsOf(it)["url"] } ?: return result
+        val items = result.items.mapIndexed { i, item ->
+            if (rows[rowOf[i] + 1].getOrNull(url)?.trim() == "http://sn") {
+                val b = item.body
+                Imported(newBody("note", b.title).with("notes" to b["notes"], "tags" to b["tags"], "fields" to b["fields"]), item.folder)
+            } else {
+                item
+            }
+        }
+        return ImportResult(result.format, items, result.warnings)
+    }
+
+    private fun genericCsv(text: String, format: String, rowOf: MutableList<Int>?): ImportResult {
         val rows = parseCsv(text)
         if (rows.isEmpty()) return ImportResult(format, emptyList(), listOf("That file is empty."))
         val idx = columnsOf(rows[0])
@@ -216,6 +250,7 @@ object Importers {
             if (tags.isNotEmpty()) body = body.with("tags" to JsonArray(tags.map { JsonPrimitive(it) }))
             if (Regex("^(1|true|yes)$", RegexOption.IGNORE_CASE).matches(get("fav"))) body = body.withFlag("favorite", true)
             items += Imported(body, get("folder").ifEmpty { null })
+            rowOf?.add(line)
         }
         return ImportResult(format, items, warnings)
     }
@@ -377,16 +412,35 @@ object Importers {
         throw IllegalArgumentException("That password didn't open the file")
     }
 
-    /** The formats this client reads. The others (1Password, KeePass and so on) are the web
-     *  vault's, and say so rather than failing strangely. */
-    fun importFile(name: String, bytes: ByteArray, password: String? = null): ImportResult = sanitize(readFile(name, bytes, password))
+    /** Work out what a file is and read it. Password-protected ones raise NeedsPasswordError so
+     *  the screen can ask, then pass ``password`` on the next try. Anything else that goes wrong
+     *  is an IllegalArgumentException, with a message fit to show. */
+    fun importFile(name: String, bytes: ByteArray, password: String? = null): ImportResult = try {
+        sanitize(readFile(name, bytes, password))
+    } catch (e: IllegalArgumentException) {
+        throw e
+    } catch (_: RuntimeException) {
+        throw IllegalArgumentException("We can't read that file. Is it a password export?")
+    } catch (_: OutOfMemoryError) {
+        throw IllegalArgumentException("That file is too large for this phone.")
+    } catch (_: StackOverflowError) {
+        throw IllegalArgumentException("That file nests too deeply.")
+    }
 
     private fun readFile(name: String, bytes: ByteArray, password: String?): ImportResult {
         require(bytes.size <= MAX_BYTES) { "That file is too large" }
-        if (bytes.size >= 2 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte()) throw IllegalArgumentException("That's a zip file. Import 1Password and Dashlane files from the web vault.")
-        if (bytes.size >= 4 && bytes[0] == 0x03.toByte() && bytes[1] == 0xd9.toByte()) throw IllegalArgumentException("That's a KeePass file. Import it from the web vault.")
+        val lower = name.lowercase()
+        if (bytes.size >= 4 && bytes[0] == 0x03.toByte() && bytes[1] == 0xd9.toByte() && bytes[2] == 0xa2.toByte() && bytes[3] == 0x9a.toByte()) {
+            if (password.isNullOrEmpty()) throw NeedsPasswordError("KeePass")
+            return Kdbx.read(bytes, password)
+        }
+        if (bytes.size >= 2 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte()) {
+            return if (lower.endsWith(".1pux") || ImportFormats.isOnePux(bytes)) ImportFormats.from1pux(bytes) else ImportFormats.fromDashlaneZip(bytes)
+        }
         val text = runCatching { fromUtf8(bytes) }.getOrElse { throw IllegalArgumentException("We can't read that file. Is it a password export?") }
-        val trimmed = text.trimStart().removePrefix("\uFEFF")
+        val trimmed = text.removePrefix("\uFEFF").trimStart()
+        if (trimmed.startsWith("otpauth-migration://")) return ImportFormats.fromMigrationLinks(trimmed)
+        if (trimmed.startsWith("<")) return ImportFormats.fromKeepassXml(trimmed)
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
             val data = runCatching { Json.parseToJsonElement(trimmed) }.getOrElse { throw IllegalArgumentException("That JSON file is damaged") } as? JsonObject
                 ?: throw IllegalArgumentException("We don't recognise that JSON file.")
@@ -397,10 +451,16 @@ object Importers {
             if (encrypted && "encKeyValidation_DO_NOT_EDIT" in data) return fromBitwardenJson(decryptBitwarden(data, password ?: throw NeedsPasswordError("Bitwarden")))
             if (encrypted) throw IllegalArgumentException("That Bitwarden file is locked to its account. Export it as 'Password protected' or plain JSON instead.")
             if (data["items"] is JsonArray && ((data["encrypted"] as? JsonPrimitive)?.booleanOrNull == false || data["folders"] is JsonArray)) return fromBitwardenJson(data)
-            throw IllegalArgumentException("We don't recognise that JSON file. Other formats can be imported from the web vault.")
+            if (data["accounts"] is JsonArray && "exporterRpId" in data) return ImportFormats.fromCxf(data)
+            val vaults = data["vaults"]
+            if (vaults is JsonObject || vaults is JsonArray) return ImportFormats.fromProtonJson(data)
+            if ("db" in data && "header" in data) return ImportFormats.fromAegisJson(data)
+            if (data["services"] is JsonArray) return ImportFormats.from2fasJson(data)
+            throw IllegalArgumentException("We don't recognise that JSON file.")
         }
-        val header = text.lineSequence().firstOrNull()?.lowercase() ?: ""
+        val header = text.split(Regex("\\r?\\n"), 2)[0].lowercase()
         return when {
+            "grouping" in header && "extra" in header -> fromLastPassCsv(text)
             "httprealm" in header || "formactionorigin" in header -> fromGenericCsv(text, "Firefox")
             "otpauth" in header && "title" in header -> fromGenericCsv(text, "Apple Passwords")
             "name" in header && "url" in header && "username" in header && "password" in header -> fromGenericCsv(text, "Browser")

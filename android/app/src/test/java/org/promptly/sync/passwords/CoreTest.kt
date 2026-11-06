@@ -646,7 +646,9 @@ class CoreTest {
             assertThrows(bad, IllegalArgumentException::class.java) { i.importFile("x", bad.toByteArray()) }
         }
         assertThrows(IllegalArgumentException::class.java) { i.importFile("x", byteArrayOf(0x50, 0x4b, 3, 4)) }
-        assertThrows(IllegalArgumentException::class.java) { i.importFile("x", byteArrayOf(0x03, 0xd9.toByte(), 0xa2.toByte(), 0x9a.toByte())) }
+        // KeePass's magic number asks for the password first, then the rest of it's refused.
+        assertThrows(org.promptly.sync.passwords.core.NeedsPasswordError::class.java) { i.importFile("x", byteArrayOf(0x03, 0xd9.toByte(), 0xa2.toByte(), 0x9a.toByte())) }
+        assertThrows(IllegalArgumentException::class.java) { i.importFile("x", byteArrayOf(0x03, 0xd9.toByte(), 0xa2.toByte(), 0x9a.toByte()), "pw") }
         assertThrows(IllegalArgumentException::class.java) { i.importFile("x", byteArrayOf(0xff.toByte(), 0xfe.toByte(), 0)) }
         assertThrows(IllegalArgumentException::class.java) { i.importFile("x", "{\"encrypted\":true}".toByteArray()) }
     }

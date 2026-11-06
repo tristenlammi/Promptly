@@ -61,6 +61,7 @@ import org.promptly.sync.passwords.core.ImportResult
 import org.promptly.sync.passwords.core.Imported
 import org.promptly.sync.passwords.core.Importers
 import org.promptly.sync.passwords.core.Item
+import org.promptly.sync.passwords.core.Kdbx
 import org.promptly.sync.passwords.core.KeyChangedError
 import org.promptly.sync.passwords.core.MemberOut
 import org.promptly.sync.passwords.core.NeedsPasswordError
@@ -587,8 +588,14 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
     var exportEncrypted by remember { mutableStateOf(false) }
 
     fun read(name: String, bytes: ByteArray, password: String?) {
-        busy = "Reading…"
+        busy = if (password == null) "Reading…" else "Opening it. A KeePass file can take a while…"
         error = null
+        // A file chooses how much memory its password takes. It gets half of what's free at most.
+        runCatching {
+            val memory = android.app.ActivityManager.MemoryInfo()
+            ctx.getSystemService(android.app.ActivityManager::class.java).getMemoryInfo(memory)
+            Kdbx.memoryLimit = memory.availMem / 2
+        }
         scope.launch {
             val r = withContext(Dispatchers.IO) { runCatching { Importers.importFile(name, bytes, password) } }
             busy = null
@@ -614,6 +621,9 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
                 }
                 r.onSuccess { (name, bytes) ->
                     pending = name to bytes
+                    needsPassword = null
+                    filePassword = ""
+                    preview = null
                     read(name, bytes, null)
                 }.onFailure { error = (it as? IllegalArgumentException)?.message ?: "That file can't be opened." }
             }
@@ -652,7 +662,7 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
             }
         }
         Text("Import", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-        Text("Files are read on this phone and never uploaded. Browser CSVs (Chrome, Edge, Firefox, Google, Apple), Bitwarden JSON and Promptly's own exports work here. Use the web vault for 1Password, KeePass and the others.", style = MaterialTheme.typography.bodySmall)
+        Text("Files are read on this phone and never uploaded. Browser CSVs (Chrome, Edge, Firefox, Google, Apple), LastPass CSV, Bitwarden JSON, 1Password .1pux, Proton Pass JSON, Dashlane zip, KeePass XML and KDBX, Credential Exchange (CXF) JSON, Aegis and 2FAS JSON without a password, Google Authenticator migration links in a text file, and Promptly's own exports.", style = MaterialTheme.typography.bodySmall)
         OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, Modifier.testTag("import-pick")) { Text("Choose a file") }
         needsPassword?.let { format ->
             SecretField(filePassword, { filePassword = it }, "Password for this $format file", "import-password")

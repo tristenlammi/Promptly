@@ -1,0 +1,2 @@
+type,account_name,account_holder,cc_number,code,expiration_month,expiration_year,routing_number,account_number,country,issuing_bank,name,cvv
+,Ana,,,,01,2030,,12345,,,Card,1

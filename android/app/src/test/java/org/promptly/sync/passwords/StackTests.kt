@@ -1372,4 +1372,125 @@ class StackTests {
         c.endTravel(MASTER)
         assertEquals("x", c.get(item.id)!!.body.password)
     }
+
+    // ---- Importers: one file, the same items from both ----
+
+    /** A body without the times it was read at, which are all that's allowed to differ. */
+    private fun comparable(body: JsonObject): JsonObject {
+        val out = LinkedHashMap(body)
+        out.remove("createdAt")
+        out.remove("updatedAt")
+        (out["passkeys"] as? JsonArray)?.let { list -> out["passkeys"] = JsonArray(list.map { k -> JsonObject(k.jsonObject.filterKeys { it != "createdAt" }) }) }
+        return Json.parseToJsonElement(JsonObject(out).toString()).jsonObject
+    }
+
+    @Test fun importersReadTheSameFilesIntoTheSameItemsAsTheTypeScript() {
+        need()
+        val fixtures = ImportFixtures
+        val dir = Files.createTempDirectory("pw-imports").toFile()
+        val password = fixtures.KDBX_PASSWORD
+        val quick = KdbxWriter.Argon2(id = true)
+        // name to (bytes, password). Every format, and every way a KDBX can be made.
+        val files = LinkedHashMap<String, Pair<ByteArray, String?>>()
+        for (n in listOf("lastpass.csv", "chrome.csv", "firefox.csv", "apple.csv", "odd-columns.csv", "bitwarden.json", "proton.json", "cxf.json", "aegis.json", "twofas.json", "google-migration.txt", "keepass.xml")) files[n] = fixtures.bytes(n) to null
+        files["kotlin.1pux"] = fixtures.onePux() to null
+        files["kotlin-dashlane.zip"] = fixtures.dashlane() to null
+        files["fixture.kdbx"] = fixtures.kdbx to password
+        files["chacha-argon2id.kdbx"] = fixtures.bytes("chacha-argon2id.kdbx") to password
+        files["large.kdbx"] = fixtures.bytes("large.kdbx") to password
+        // Where the two are known to differ, and why. See "Differences from importers.ts and kdbx.ts"
+        // in ANDROID_NOTES.md. Each is tested for what Kotlin should do in ImportersTest.
+        val known = mapOf(
+            "large.kdbx" to "kdbx.ts loses its place in the inner stream after about 4 KiB",
+            "lastpass-name-only.csv" to "fromLastPassCsv counts rows, so a row that makes no item shifts which one becomes a note",
+            "doctype-only.xml" to "only a DOCTYPE with an entity is refused on the web",
+            "android-url.csv" to "Android keeps an app's id as androidapp://, and the web as it came",
+        )
+        files["lastpass-name-only.csv"] = utf8("url,username,password,totp,extra,name,grouping,fav\n,,,,,Only a name,,0\nhttp://sn,,,,text,A note,,0\nhttps://a.example,u,keep-this,,,Real login,,0\n") to null
+        files["doctype-only.xml"] = utf8("<!DOCTYPE KeePassFile><KeePassFile><Root><Group><Entry><String><Key>Title</Key><Value>T</Value></String></Entry></Group></Root></KeePassFile>") to null
+        files["android-url.csv"] = utf8("name,url,username,password\nApp,android://HASH@com.acme.app/,u,p\n") to null
+        files["written-argon2d.kdbx"] = KdbxWriter.write(KdbxWriter.Argon2(id = false)) to password
+        files["written-chacha.kdbx"] = KdbxWriter.write(quick, KdbxWriter.CHACHA) to password
+        files["written-aeskdf.kdbx"] = KdbxWriter.write(KdbxWriter.AesRounds(2000), compress = false) to password
+        files["written-history.kdbx"] = KdbxWriter.write(KdbxWriter.AesRounds(100), KdbxWriter.CHACHA, xml = { p ->
+            "<?xml version=\"1.0\"?><KeePassFile><Root><Group><Name>R</Name><Group><Name>Sub</Name><Entry><String><Key>Title</Key><Value>T</Value></String><String><Key>Password</Key><Value Protected=\"True\">${p("new")}</Value></String><History><Entry><String><Key>Password</Key><Value Protected=\"True\">${p("old")}</Value></String></Entry></History><String><Key>Other</Key><Value Protected=\"True\">${p("after-history")}</Value></String></Entry></Group></Group></Root></KeePassFile>"
+        }) to password
+        // Both have to refuse these.
+        val refused = linkedMapOf(
+            "bad.json" to "{\"items\":[",
+            "encrypted-aegis.json" to "{\"db\":\"x\",\"header\":{\"slots\":[{}]}}",
+            "encrypted-2fas.json" to "{\"services\":[],\"servicesEncrypted\":\"x\"}",
+            "locked-bitwarden.json" to "{\"encrypted\":true,\"data\":\"2.y\"}",
+            "unknown.json" to "{\"something\":1}",
+            "entities.xml" to "<!DOCTYPE x [<!ENTITY a \"b\">]><KeePassFile><Root/></KeePassFile>",
+            "external.xml" to "<!DOCTYPE x [<!ENTITY a SYSTEM \"file:///etc/passwd\">]><KeePassFile><Root/></KeePassFile>",
+            "broken.xml" to "<KeePassFile><Root></KeePassFile>",
+            "other.xml" to "<html></html>",
+            "deep.xml" to "<KeePassFile><Root>" + "<Group><Name>x</Name>".repeat(100) + "</Group>".repeat(100) + "</Root></KeePassFile>",
+            "columns.csv" to "colour,size\nred,big\n",
+            "not-migration.txt" to "otpauth-migration://offline",
+        )
+        for ((n, text) in refused) files[n] = utf8(text) to null
+        files["no-password.kdbx"] = fixtures.kdbx to null
+        files["wrong-password.kdbx"] = KdbxWriter.write(KdbxWriter.AesRounds(100)) to "wrong"
+        files["kdf-over-the-ceiling.kdbx"] = KdbxWriter.headerOnly(KdbxWriter.Argon2(m = 8L * 1024 * 1024 * 1024 + 1)) to password
+        files["cut.1pux"] = fixtures.onePux().let { it.copyOf(it.size / 2) } to null
+        files["cut.kdbx"] = KdbxWriter.write(KdbxWriter.AesRounds(100)).let { it.copyOf(it.size - 40) } to password
+
+        for ((n, f) in files) File(dir, n).writeBytes(f.first)
+        val stateFile = File(dir, "state.json")
+        writeState(stateFile, buildJsonObject {
+            put("dir", dir.absolutePath)
+            put("fixtures", fixtures.dir.absolutePath)
+            put("files", JsonArray(files.map { (n, f) -> buildJsonObject { put("name", n); f.second?.let { p -> put("password", p) } } }))
+        })
+        runTs("imp", stateFile)
+        val results = readState(stateFile).getValue("results").jsonObject
+        files["fflate.1pux"] = File(dir, "fflate.1pux").readBytes() to null
+        files["fflate-dashlane.zip"] = File(dir, "fflate-dashlane.zip").readBytes() to null
+
+        val problems = ArrayList<String>()
+        var compared = 0
+        val differed = HashMap<String, Int>()
+        for ((n, f) in files) {
+            val theirs = results.getValue(n).jsonObject
+            val mine = runCatching { org.promptly.sync.passwords.core.Importers.importFile(n, f.first, f.second) }
+            val error = theirs["error"]?.jsonPrimitive?.content
+            if (error != null) {
+                val refusedHere = mine.exceptionOrNull()
+                if (refusedHere == null) problems += "$n: TypeScript refused it ($error), Kotlin read it"
+                else if (n in known) problems += "$n no longer differs: both refuse it"
+                else if (refusedHere.message != error) println("$n: refused by both. TypeScript: $error. Kotlin: ${refusedHere.message}")
+                continue
+            }
+            val r = mine.getOrElse {
+                if (n in known) differed[n] = 1 else problems += "$n: Kotlin refused it (${it.message}), TypeScript read it"
+                continue
+            }
+            if (r.format != theirs.getValue("format").jsonPrimitive.content) problems += "$n: format ${r.format}, TypeScript ${theirs["format"]}"
+            val tsWarnings = theirs.getValue("warnings").jsonArray.map { it.jsonPrimitive.content }
+            if (r.warnings != tsWarnings) problems += "$n: warnings ${r.warnings}, TypeScript $tsWarnings"
+            val tsItems = theirs.getValue("items").jsonArray.map { it.jsonObject }
+            if (r.items.size != tsItems.size) {
+                if (n in known) differed[n] = 1 else problems += "$n: ${r.items.size} items, TypeScript ${tsItems.size}"
+            }
+            for ((i, pair) in r.items.zip(tsItems).withIndex()) {
+                val (item, ts) = pair
+                val folder = ts["folder"]?.jsonPrimitive?.content
+                if (item.folder != folder) problems += "$n item $i: folder ${item.folder}, TypeScript $folder"
+                val a = comparable(JsonObject(item.body.fields))
+                val b = comparable(ts.getValue("body").jsonObject)
+                if (a != b) {
+                    if (n in known) differed[n] = (differed[n] ?: 0) + 1 else problems += "$n item $i:\n  Kotlin     $a\n  TypeScript $b"
+                    continue
+                }
+                compared++
+            }
+        }
+        // Printed, not asserted: fixing the web side should turn this quiet, not fail a test.
+        for ((n, why) in known) println("Known difference, $n: ${differed[n] ?: 0} items differ. $why")
+        dir.deleteRecursively()
+        assertTrue("Differences:\n" + problems.joinToString("\n"), problems.isEmpty())
+        assertTrue("Compared $compared", compared > 60)
+    }
 }

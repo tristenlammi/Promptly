@@ -1,0 +1,193 @@
+{
+ "accounts": [
+  {
+   "attrs": {
+    "accountName": "A"
+   },
+   "vaults": [
+    {
+     "attrs": {
+      "name": "Private"
+     },
+     "items": [
+      {
+       "uuid": "1",
+       "categoryUuid": "001",
+       "state": "active",
+       "overview": {
+        "title": "Login",
+        "url": "https://a.example",
+        "urls": [
+         {
+          "label": "",
+          "url": "https://a.example"
+         },
+         {
+          "url": "https://b.example"
+         }
+        ],
+        "tags": [
+         "t"
+        ]
+       },
+       "details": {
+        "loginFields": [
+         {
+          "value": "ana",
+          "designation": "username"
+         },
+         {
+          "value": "pw",
+          "designation": "password"
+         }
+        ],
+        "notesPlain": "n",
+        "sections": [
+         {
+          "fields": [
+           {
+            "title": "code",
+            "value": {
+             "totp": "otpauth://totp/a?secret=JBSWY3DPEHPK3PXP"
+            }
+           },
+           {
+            "title": "pin",
+            "value": {
+             "concealed": "12"
+            }
+           },
+           {
+            "id": "by-id",
+            "value": {
+             "string": "s"
+            }
+           },
+           {
+            "value": {
+             "url": "https://c.example"
+            }
+           },
+           {
+            "title": "mail",
+            "value": {
+             "email": {
+              "email_address": "a@b.example"
+             }
+            }
+           },
+           {
+            "title": "tel",
+            "value": {
+             "phone": "123"
+            }
+           },
+           {
+            "title": "when",
+            "value": {
+             "monthYear": 202611
+            }
+           },
+           {
+            "title": "skip",
+            "value": {
+             "unknown": 1
+            }
+           }
+          ]
+         }
+        ],
+        "passwordHistory": [
+         {
+          "value": "old",
+          "time": 1000
+         },
+         {
+          "value": "",
+          "time": 2
+         }
+        ]
+       }
+      },
+      {
+       "uuid": "2",
+       "categoryUuid": "003",
+       "state": "active",
+       "overview": {
+        "title": "A note"
+       },
+       "details": {
+        "notesPlain": "text"
+       }
+      },
+      {
+       "uuid": "3",
+       "categoryUuid": "002",
+       "state": "active",
+       "overview": {
+        "title": "A card"
+       },
+       "details": {
+        "sections": [
+         {
+          "fields": [
+           {
+            "title": "Number",
+            "value": {
+             "creditCardNumber": "4111"
+            }
+           },
+           {
+            "title": "Type",
+            "value": {
+             "creditCardType": "visa"
+            }
+           }
+          ]
+         }
+        ]
+       }
+      },
+      {
+       "uuid": "4",
+       "categoryUuid": "001",
+       "state": "trashed",
+       "overview": {
+        "title": "Gone"
+       },
+       "details": {}
+      },
+      {
+       "uuid": "5",
+       "categoryUuid": "004",
+       "state": "archived",
+       "overview": {
+        "title": "Old one",
+        "url": "https://old.example"
+       },
+       "details": {
+        "loginFields": [
+         {
+          "value": "x",
+          "designation": "password"
+         }
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "attrs": {},
+     "items": [
+      {
+       "uuid": "6",
+       "categoryUuid": "005",
+       "overview": {},
+       "details": {}
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

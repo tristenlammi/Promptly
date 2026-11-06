@@ -3,6 +3,8 @@
 // Steps: A sets up and writes every kind; B reads what Android wrote and changes things;
 // C checks the merge after a conflict made on both sides. Driven by CrossDeviceTest.kt.
 import fs from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 
 import { ApiError, VaultApi } from "../../../../../frontend/src/passwords/core/api";
 import { downloadAttachment, uploadAttachment } from "../../../../../frontend/src/passwords/core/attachments";
@@ -314,6 +316,29 @@ it(`step ${STEP}`, async () => {
       if (skeleton(c.a) !== skeleton(c.b)) wrong.push(`skeleton ${c.a}: ${skeleton(c.a)}, ${c.b}: ${skeleton(c.b)}`);
     }
     expect(wrong).toEqual([]);
+    return;
+  }
+
+  // Every importer, on the files Importers.kt reads. Nothing here uses the server. Two zips come
+  // from fflate, so the Kotlin zip reader is tried on someone else's writer.
+  if (STEP === "imp") {
+    const require = createRequire(path.join(process.cwd(), "package.json"));
+    (globalThis as any).DOMParser = new (require("jsdom").JSDOM)("").window.DOMParser;
+    const { strToU8, zipSync } = require("fflate");
+    const dir: string = state.dir;
+    const fixture = (n: string) => new Uint8Array(fs.readFileSync(path.join(state.fixtures, n)));
+    fs.writeFileSync(path.join(dir, "fflate.1pux"), zipSync({ "export.attributes": strToU8('{"version":3}'), "export.data": fixture("onepux-export.data.json") }));
+    fs.writeFileSync(path.join(dir, "fflate-dashlane.zip"), zipSync({ "credentials.csv": fixture("dashlane-credentials.csv"), "securenotes.csv": fixture("dashlane-securenotes.csv"), "payments.csv": fixture("dashlane-payments.csv"), "ids.csv": fixture("dashlane-ids.csv"), "other.csv": fixture("dashlane-other.csv") }));
+    const results: Record<string, unknown> = {};
+    for (const f of [...state.files, { name: "fflate.1pux" }, { name: "fflate-dashlane.zip" }] as { name: string; password?: string }[]) {
+      try {
+        const r = await importFile(f.name, new Uint8Array(fs.readFileSync(path.join(dir, f.name))), f.password);
+        results[f.name] = { format: r.format, items: r.items, warnings: r.warnings };
+      } catch (e) {
+        results[f.name] = { error: (e as Error).message };
+      }
+    }
+    write({ ...state, results });
     return;
   }
 

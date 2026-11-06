@@ -1,0 +1,5 @@
+url,username,password,totp,extra,name,grouping,fav
+https://a.example,u,p,JBSWY3DPEHPK3PXP,note here,A,Work,1
+http://sn,,,,"NoteType:Note\nhello",My note,,0
+https://b.example,b-user,b-pw,,,B,Work/Deep,0
+http://sn,,,,plain secure note,Second note,Private,1

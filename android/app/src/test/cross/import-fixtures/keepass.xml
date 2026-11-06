@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<KeePassFile>
+  <Meta><Generator>Test</Generator></Meta>
+  <Root>
+    <Group>
+      <Name>Root</Name>
+      <!-- a comment -->
+      <Entry>
+        <String><Key>Title</Key><Value>A</Value></String>
+        <String><Key>UserName</Key><Value>u</Value></String>
+        <String><Key>Password</Key><Value Protected="True">p&amp;w&#33;</Value></String>
+        <String><Key>URL</Key><Value>https://a.example</Value></String>
+        <String><Key>Extra</Key><Value>e</Value></String>
+        <String><Key>Empty</Key><Value></Value></String>
+        <String><Key>TimeOtp-Secret-Base32</Key><Value>JBSWY3DPEHPK3PXP</Value></String>
+      </Entry>
+      <Group>
+        <Name>Sub</Name>
+        <Entry><String><Key>Title</Key><Value>B</Value></String><String><Key>Notes</Key><Value>line one&#10;line two
+line three</Value></String></Entry>
+        <Group>
+          <Name>Deep &lt;er&gt;</Name>
+          <Entry>
+            <String><Key>Title</Key><Value><![CDATA[C & <d>]]></Value></String>
+            <String><Key>otp</Key><Value>otpauth://totp/x:y?secret=JBSWY3DPEHPK3PXP&amp;issuer=x&amp;digits=8</Value></String>
+            <String><Key>TOTP Seed</Key><Value>not used</Value></String>
+          </Entry>
+          <Entry>
+            <String><Key>TOTP Seed</Key><Value>jbsw y3dp</Value></String>
+            <String><Key>TimeOtp-Secret-Base32</Key><Value>stays a field</Value></String>
+          </Entry>
+        </Group>
+      </Group>
+    </Group>
+  </Root>
+</KeePassFile>

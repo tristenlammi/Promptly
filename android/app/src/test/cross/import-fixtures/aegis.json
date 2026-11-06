@@ -1,0 +1,49 @@
+{
+ "version": 1,
+ "header": {
+  "slots": null,
+  "params": null
+ },
+ "db": {
+  "version": 3,
+  "entries": [
+   {
+    "type": "totp",
+    "name": "me",
+    "issuer": "A",
+    "note": "n",
+    "favorite": true,
+    "info": {
+     "secret": "JBSWY3DPEHPK3PXP",
+     "algo": "SHA256",
+     "digits": 8,
+     "period": 60
+    }
+   },
+   {
+    "type": "hotp",
+    "name": "x",
+    "info": {
+     "secret": "AA"
+    }
+   },
+   {
+    "type": "steam",
+    "name": "s",
+    "issuer": "Steam",
+    "info": {
+     "secret": "JBSWY3DP",
+     "digits": 5,
+     "period": 30
+    }
+   },
+   {
+    "type": "totp",
+    "info": {
+     "secret": "AAAA",
+     "algo": "MD5"
+    }
+   }
+  ]
+ }
+}

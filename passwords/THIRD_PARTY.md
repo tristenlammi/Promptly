@@ -31,8 +31,9 @@ No third-party source was copied. A licence scan of all 333 cargo packages found
 
 ## Android
 
-- ZXing core 3.5.3 (Apache-2.0), for QR codes. argon2kt (MIT) and BouncyCastle (MIT), for key stretching. See `android/app/build.gradle.kts` for exact versions.
+- ZXing core 3.5.3 (Apache-2.0), for QR codes. argon2kt (MIT) and BouncyCastle (MIT), for key stretching, and BouncyCastle for KeePass's ciphers. See `android/app/build.gradle.kts` for exact versions.
 - `android/app/src/main/assets/apps.json`: Google's list of browsers for Credential Manager (Apache-2.0, from the Credential Manager samples). Check its terms before a Play release.
+- The Android importers (`ImportFormats.kt`, `Kdbx.kt`, `SafeXml.kt`, `SafeZip.kt`) were written from `importers.ts` and `kdbx.ts`, the formats' public documentation and the zip and KDBX specifications. No code from KeePassXC, KeePassDX, Bitwarden or pykeepass.
 
 ## Web, core and extension
 
@@ -42,4 +43,4 @@ No third-party source was copied. A licence scan of all 333 cargo packages found
 - 2FA Directory data by 2factorauth (MIT for code, CC BY 4.0 for data, shown with credit in Security check), and Passkeys Directory.
 - `jsqr` (Apache-2.0), `qrcode` (MIT).
 
-Dev only: `@simplewebauthn/server` (MIT), `selenium-webdriver` (Apache-2.0), `web-ext` (MPL-2.0), `pykeepass` for a test fixture (GPL-3.0: used only to make a file in tests, not linked or shipped).
+Dev only: `@simplewebauthn/server` (MIT), `selenium-webdriver` (Apache-2.0), `web-ext` (MPL-2.0), `pykeepass` for test fixtures (GPL-3.0: `frontend/src/passwords/core/testing/fixture.kdbx`, and `android/app/src/test/cross/import-fixtures/*.kdbx` by `make-kdbx-fixtures.py`, which runs it in a throwaway container. Used only to make files in tests, not linked, shipped or copied from).

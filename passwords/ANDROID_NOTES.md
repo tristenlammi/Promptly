@@ -6,7 +6,7 @@ Written during the build. Decisions, what was checked and how, and the limits. C
 
 | Where | What |
 |---|---|
-| `passwords/core/` | Pure JVM, no Android imports. The Kotlin twin of `frontend/src/passwords/core`: `Bytes`, `Primitives`, `Format`, `Keys` (and safety words), `Model`, `Match`, `Totp`, `Generator`, `Passkeys`, `Store`, `VaultApi`, `VaultClient`, `Connections` (duplicates, survival, the export reminder, Send records, site icons, the directories). |
+| `passwords/core/` | Pure JVM, no Android imports. The Kotlin twin of `frontend/src/passwords/core`: `Bytes`, `Primitives`, `Format`, `Keys` (and safety words), `Model`, `Match`, `Totp`, `Generator`, `Passkeys`, `Store`, `VaultApi`, `VaultClient`, `Transfer` and `ImportFormats` (imports), `Kdbx`, `SafeXml`, `SafeZip`, `Connections` (duplicates, survival, the export reminder, Send records, site icons, the directories). |
 | `passwords/Pw.kt` | The one client for the process, SQLite offline copy, Keystore seal, settings, auto-lock. Every surface goes through it. |
 | `passwords/Biometrics.kt`, `Clip.kt`, `Surfaces.kt` | Biometric wrap, sensitive clipboard, Chrome setup, Quick Settings tile, SMS User Consent. |
 | `passwords/ui/` | Native Compose: `PasswordsActivity` (connect, join, unlock), `Items.kt` (list, view, editor), `Tools.kt` (bar, generator, 2FA, trash, devices, settings), `Extras.kt` (Security check, shared vaults, import and export, Send, emergency), `Notices.kt` (guided setup, Family, survival, kit gate, export reminder, lookalike warning), `Common.kt`. |
@@ -61,6 +61,12 @@ Written during the build. Decisions, what was checked and how, and the limits. C
 | A39 | **Site icons: only after a vault says yes, memory only, gone on lock.** A malformed or non-boolean `icon` is off. Only a plain domain is asked about, so an IP, a local name or an app's id never goes out. An answer over 256 KiB is refused, and the system decoder's given bounds first and samples down. | Which sites you asked about says which accounts you have. A shared vault's member can turn icons on for that vault, or set `icon` on one item, as on the web: the worst it does is have your server fetch a favicon. |
 | A40 | **A `/survival` answer that doesn't make sense is no answer.** Both booleans have to be real booleans, or it's ignored and the kit gate doesn't open. The notices don't show while an item's being edited. The gate has no way past it, except on a phone that can't read its own key. | A server shouldn't get to throw up the Secret Key on a whim, though one that says plainly `kit_confirmed: false` can, as it can on the web. FLAG_SECURE's on throughout. |
 | A41 | **A folder's delete, and merging, only touch vaults you can edit.** `vault.ts` tries regardless. | A write the server's going to refuse would sit dirty on this phone for good. |
+| A42 | **XML is read by our own small reader, `SafeXml`, on Android and on the JVM.** No platform parser. It has no DOCTYPE or entity code at all: a DOCTYPE of any kind is refused, and only XML's five named references and numeric ones are read. No recursion while parsing, depth 256, 2 million elements. Goes further than the web, which only refuses text containing `<!ENTITY`. | Android's and the JVM's parsers take different features and act differently on these, so a passing JVM test wouldn't say anything about the phone. With no parser to configure there's nothing to get wrong on either. KeePass doesn't write a DOCTYPE. |
+| A43 | **A KeePass file's KDF cost has two ceilings, both checked before any work.** First `kdbx.ts`'s (8 GiB, 100,000 passes, 64 lanes, 200 million AES rounds: "Unusual KDF settings"). Then the phone's: memory at most 1 GiB and half of what's free right now, half the Java heap if it's on BouncyCastle, memory times passes at most 32 GiB, AES rounds at most 60 million. Those say to lower the settings on a computer, or export XML. | A file chooses its own cost, and the password prompt comes first, so a shared file could otherwise hang or kill the app. **Web has no limit on memory times passes.** A real database on very high settings won't open here and does on the web. See "What was run" for what the ceiling costs. |
+| A44 | **What comes out of a file is limited as it comes out.** File size, everything out of one zip, and a KDBX's gunzip: 64 MiB each. Zip entries: 20,000. A zip entry has to inflate to exactly the size it declared. Overlapping entries count every time. | **Web:** 256 MiB of file, 256 MiB of zip by adding up what the headers declare, no entry limit, and **no limit at all on a KDBX's gunzip.** |
+| A45 | **Zips are read from memory through the central directory, by `SafeZip`,** as fflate does. | `ZipInputStream` reads forwards, so a truncated file would be a partial import, and it trusts local headers. `ZipFile` needs a file on disk, and a decrypted export shouldn't be put there. |
+| A46 | **Argon2d is added for KeePass only:** argon2kt with the same load-and-agree check as A1, BouncyCastle otherwise. The vault itself still only uses Argon2id. | Argon2d is what KeePass files usually choose. |
+| A47 | **Where the web has a bug, Android reads the file correctly rather than matching it.** See "Differences from `importers.ts` and `kdbx.ts`". The cross-check names each of those files, and prints how many items differ, so fixing the web side turns it quiet without failing a test. | The goal is the same items on every client, and copying a bug that silently corrupts passwords doesn't get closer to it. |
 
 ## Security notes, for `SECURITY.md`
 
@@ -114,6 +120,9 @@ Found while porting. Not changed, since `frontend/` isn't mine to edit:
 
 1. **`mergeDuplicates` breaks attachments.** It moves a dropped item's attachment reference to the kept item, but a chunk's additional data includes the item it was uploaded on (`chunkAad` in `attachments.ts`), so `downloadAttachment` under the kept item's id fails. The dropped item's purge after 30 days then deletes the chunks on the server (`service.py`). Until then it can be got back by restoring the item from Trash. Found by reading the code and the test above; I didn't run the merge on the web client. Android seals it again (A37).
 2. **The web's merge doesn't carry `reprompt`.** A guarded password can move to an unguarded item's history.
+3. **`kdbx.ts` silently imports wrong passwords from a KeePass file with more than about 4 KiB of protected values.** `takeKeystream` asks for `4096 + n` bytes, which is rarely a whole number of 64-byte blocks, then moves its counter on by a rounded-up number of blocks, so the unused end of the last block is skipped and everything after it decrypts to rubbish, with no error. Seen, not just read: on `large.kdbx` (300 entries, written by pykeepass) the TypeScript gets 194 items different from Android's, and Android's match what pykeepass wrote. Fix: generate whole blocks.
+4. **`fromLastPassCsv` can turn a login into a note and lose its password.** It lines items up with rows by counting, but a row with only a name makes no item, so everything after that row is off by one. Seen in the cross-check with `lastpass-name-only.csv`.
+5. **`kdbx.ts` has no limit on what its gunzip expands to,** and `safeUnzip` trusts the sizes a zip declares and has no limit on entries. A44 has what Android does.
 
 ## Differences from `vault.ts`
 
@@ -121,19 +130,33 @@ Found while porting. Not changed, since `frontend/` isn't mine to edit:
 - `CRYPTO_SPEC.md` section 8 says the device payload carries `A_pub`. `vault.ts` doesn't send it, and neither does this. Worth fixing the one or the other.
 - The extension's passkey item shape is used exactly, including `kind: "passkey"` for a new one.
 
+## Differences from `importers.ts` and `kdbx.ts`
+
+Android reads the same formats, with detection in the same order, and `sanitizeImport`'s rules. `StackTests.importersReadTheSameFilesIntoTheSameItemsAsTheTypeScript` compares every body. These are what's left, and the first four are named in that test:
+
+- **`large.kdbx`:** the web's inner-stream bug above. Android's right.
+- **A LastPass row with only a name:** the web's row-counting bug above. Android's right.
+- **A DOCTYPE with no entity in it:** the web reads the file and Android refuses it (A42).
+- **An app's address in a CSV (`android://HASH@com.acme.app/`):** Android keeps it as `androidapp://com.acme.app` with `match: "never"` (A6), the web as it came. Older than this work.
+- **Bigger or costlier files:** Android refuses what's past the limits in A43 and A44, including any file from 64 MiB to the web's 256 MiB.
+- **The wording of a refusal** isn't always the same, as in `That zip file is damaged` against fflate's `invalid zip data`. Both refuse.
+- **A `<parsererror>` element in otherwise good XML** makes the web refuse, because that's how a browser reports its own failure. Android reads the file.
+- **A kind of item from a Promptly plain file that isn't known:** the web only drops the system kinds, and Android keeps a list of what a person can make, and warns about the rest. Older than this work.
+
+The same on both, so not differences: KDBX 3 and files needing a key file aren't read, attachments in a `.1pux` or KDBX aren't imported, and Aegis or 2FAS exports with a password are refused with a message.
+
 ## Chromium's behaviour on the emulator
 
 A WebView gives no form at all on an `http` page, which matches "HTTP sites need a Chrome flag" in VERIFY_NOTES 14. So the http-downgrade confirm screen is tested by opening the sheet directly, and the real path needs a browser that passes http forms along.
 
 ## Not built
 
-- **Import:** only browser CSVs (Chrome, Edge, Firefox, Google, Apple), Bitwarden JSON and Promptly's own exports. The screen sends people to the web vault for 1Password, KeePass, LastPass-specific fields, Dashlane, Proton and CXF. Google's migration file isn't read.
 - **Secure Send:** opening someone's Send link goes to the web page. A Send made elsewhere and not synced yet shows as "Sent from another device", with no link to copy.
 - **Attachments:** preview is images and text. Other types are saved and opened elsewhere.
 - **Autofill:** "teach it once" isn't here. Live refresh of the allowlist (A8) isn't either. The suggestion cap is 8 logins, then Search.
 - `QR from an existing device` in the sense of 3.4: the web client doesn't have one either. Kit QR, 2FA QR, device-join QR and Wi-Fi QR are built.
 - The people list comes from `GET /people`, capped at 500 by the server and with no search on the phone.
-- From the feature audit, not asked for this round and still not here: the activity log, codes from Mail (5.1), the Today count (5.7), the security-email watch (5.8), the change-password helper (5.10), plus-address sign-ups (5.11), Files and Calendar for documents (5.12), saving your Promptly login at setup (5.14). FIDO CXF and the other importers are as above.
+- From the feature audit, not asked for this round and still not here: the activity log, codes from Mail (5.1), the Today count (5.7), the security-email watch (5.8), the change-password helper (5.10), plus-address sign-ups (5.11), Files and Calendar for documents (5.12), saving your Promptly login at setup (5.14).
 
 ## Follow-ups outside `android/`
 
