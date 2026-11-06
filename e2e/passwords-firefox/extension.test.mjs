@@ -399,6 +399,46 @@ test("Firefox: a passkey made and used here satisfies an independent WebAuthn li
   await closeTabs();
 });
 
+test("Firefox: a quiet passkey request is answered from the toolbar, and verified by a library", async () => {
+  const { verifyAuthenticationResponse } = await import("@simplewebauthn/server");
+  const crypto = await import("node:crypto");
+  const pair = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+  const guid = "c1df3f1c-2b3c-4d4e-9fa0-1b2c3d4e5f60";
+  const siteId = Buffer.from(guid.replace(/-/g, ""), "hex").toString("base64url");
+  const now = new Date().toISOString();
+  // As a Bitwarden export holds it, so the same conversion has to be working here.
+  await hook("seedBody", {
+    body: {
+      v: 1, kind: "login", title: "Imported fox", createdAt: now, updatedAt: now, username: "fox@example.com", urls: [{ url: "http://localhost:8111" }],
+      passkeys: [{ credentialId: guid, rpId: "localhost", userHandle: Buffer.from("fox").toString("base64url"), userName: "fox@example.com", key: pair.privateKey.export({ format: "der", type: "pkcs8" }).toString("base64url"), alg: -7, signCount: 0, createdAt: now, discoverable: true }],
+    },
+  });
+  const challenge = crypto.randomBytes(32).toString("base64url");
+  const url = `${siteA("webauthn.html")}?auto=${challenge}&rp=localhost&m=conditional&allow=${siteId}`;
+  await driver.switchTo().window(extTab);
+  const pg = await newTab(url);
+  await driver.sleep(800);
+  assert.equal(await driver.executeScript("return window.__result"), null, "nothing's answered by itself");
+  await popup(url);
+  const before = await driver.getAllWindowHandles();
+  await click(driver, button("Sign in with a passkey as fox@example.com"));
+  await driver.wait(async () => (await driver.getAllWindowHandles()).length > before.length, 15000);
+  const prompt = (await driver.getAllWindowHandles()).find((x) => !before.includes(x));
+  await driver.switchTo().window(prompt);
+  await click(driver, By.xpath('//button[contains(., "fox@example.com")]'));
+  await driver.sleep(400);
+  await driver.switchTo().window(pg);
+  await driver.wait(async () => driver.executeScript("return window.__result !== null"), 15000);
+  const r = await driver.executeScript("return window.__result");
+  assert.equal(r.error, undefined);
+  assert.equal(r.id, siteId);
+  const jwk = pair.publicKey.export({ format: "jwk" });
+  const cose = Buffer.concat([Buffer.from([0xa5, 0x01, 0x02, 0x03, 0x26, 0x20, 0x01, 0x21, 0x58, 0x20]), Buffer.from(jwk.x, "base64url"), Buffer.from([0x22, 0x58, 0x20]), Buffer.from(jwk.y, "base64url")]);
+  const v = await verifyAuthenticationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: "http://localhost:8111", expectedRPID: "localhost", credential: { id: siteId, publicKey: new Uint8Array(cose), counter: 0 }, requireUserVerification: false });
+  assert.ok(v.verified);
+  await closeTabs();
+});
+
 test("Firefox: saves a new login after a sign-in", async () => {
   await driver.switchTo().window(extTab);
   await newTab(`http://localhost:${PORT}/login.html`);

@@ -85,6 +85,7 @@ export type MenuRequest = { token: string } & (
   | { t: "menuList" }
   | { t: "menuPick"; itemId: string }
   | { t: "menuMailCode"; id: string }
+  | { t: "menuPasskey"; key: string; credentialId: string }
   | { t: "menuMailLink"; id: string; confirmed?: boolean }
   | { t: "menuGenerate"; itemId?: string }
   | { t: "menuClose" }
@@ -97,6 +98,7 @@ export type SaveRequest = { token: string } & ({ t: "saveAnswer"; answer: "save"
 export type ToContent =
   | { t: "report"; fresh?: boolean }
   | { t: "doFill"; values: Record<string, string>; origin: string }
+  | { t: "pkOfferResult"; id: number; result: Record<string, unknown> }
   | { t: "menuCheck"; itemId: string; token: string }
   | { t: "ownsMenu"; token: string }
   | { t: "ownsSave"; token: string }

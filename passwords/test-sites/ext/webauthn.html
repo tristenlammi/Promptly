@@ -39,6 +39,28 @@
         }
       };
 
+      const shape = (c) => ({
+        id: c.id,
+        rawId: b64u(c.rawId),
+        type: c.type,
+        clientExtensionResults: c.getClientExtensionResults(),
+        response: {
+          clientDataJSON: b64u(c.response.clientDataJSON),
+          authenticatorData: b64u(c.response.authenticatorData),
+          signature: b64u(c.response.signature),
+          userHandle: c.response.userHandle ? b64u(c.response.userHandle) : undefined,
+        },
+      });
+
+      /** A sign-in box's suggestions: stays open until someone answers, or it's called off. */
+      window.__ask = (o, mediation) => {
+        window.__stop = new AbortController();
+        window.__result = null;
+        navigator.credentials
+          .get({ ...(mediation ? { mediation } : {}), signal: window.__stop.signal, publicKey: { rpId: o.rpId, challenge: unb64u(o.challenge), allowCredentials: (o.allow ?? []).map((id) => ({ type: "public-key", id: unb64u(id) })), userVerification: "preferred" } })
+          .then((c) => (window.__result = shape(c)), (e) => (window.__result = { error: e.name }));
+      };
+
       window.__auth = async (o) => {
         try {
           const c = await navigator.credentials.get({
@@ -65,6 +87,12 @@
           return { error: e.name };
         }
       };
+    </script>
+    <form onsubmit="return false"><label>Email <input id="user" name="username" autocomplete="username webauthn"></label> <button>Next</button></form>
+    <script>
+      // Asked as the page loads, with no click behind it, as some sign-in steps do.
+      const q = new URLSearchParams(location.search);
+      if (q.get("auto")) window.__ask({ rpId: q.get("rp"), challenge: q.get("auto"), allow: q.get("allow") ? [q.get("allow")] : [] }, q.get("m") || undefined);
     </script>
   </body>
 </html>

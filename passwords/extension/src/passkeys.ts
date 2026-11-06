@@ -3,7 +3,7 @@
 // can't cover it, and the private key is used only here.
 import { b64u } from "../../../frontend/src/passwords/core/bytes";
 import { type Item, type Passkey, newBody } from "../../../frontend/src/passwords/core/model";
-import { getAssertion, makeCredential, rpIdAllowed, usablePasskeys } from "../../../frontend/src/passwords/core/passkey";
+import { getAssertion, makeCredential, rpIdAllowed, siteCredentialId, usablePasskeys } from "../../../frontend/src/passwords/core/passkey";
 import type { VaultClient } from "../../../frontend/src/passwords/core/vault";
 import { ext } from "./rpc";
 
@@ -20,6 +20,71 @@ type Req = {
 };
 
 const pending = new Map<string, Req>();
+
+/** A request a person can answer from the toolbar or the menu. Kept in session storage, since the
+ *  worker can go at any time and the page will still be waiting. Holds nothing secret. */
+type Offer = { key: string; tabId: number; frameId: number; documentId?: string; pageId: number; origin: string; topOrigin?: string; crossOrigin: boolean; options: Record<string, unknown>; rp: string };
+const OFFERS_PER_TAB = 4;
+let offerQueue: Promise<unknown> = Promise.resolve();
+
+const readOffers = async () => ((await ext.storage.session.get("pkOffers")).pkOffers as Offer[] | undefined) ?? [];
+/** One change at a time: a page can make several requests at once. */
+function changeOffers(change: (now: Offer[]) => Offer[]): Promise<void> {
+  const next = offerQueue.then(async () => {
+    await ext.storage.session.set({ pkOffers: change(await readOffers()) });
+  });
+  offerQueue = next.catch(() => undefined);
+  return next;
+}
+
+/** What can be offered on this tab now. Worked out at the time, so unlocking or a sync counts. */
+export async function offerRows(tabId: number, c: VaultClient | null, frameId?: number) {
+  if (!c?.unlocked) return [];
+  const seen = new Set<string>();
+  const rows: { key: string; credentialId: string; title: string; userName: string; rpId: string; origin: string }[] = [];
+  for (const o of (await readOffers()).filter((x) => x.tabId === tabId && (frameId === undefined || x.frameId === frameId)).reverse()) {
+    for (const u of usablePasskeys(allPasskeys(c), o.rp, (o.options.allow as { id: string }[]).map((x) => x.id))) {
+      if (seen.has(u.passkey.credentialId)) continue;
+      seen.add(u.passkey.credentialId);
+      rows.push({ key: o.key, credentialId: u.passkey.credentialId, title: u.title, userName: u.passkey.userName, rpId: o.rp, origin: o.origin });
+    }
+  }
+  return rows;
+}
+
+/** Opens the same window as any other sign-in, for this one passkey, and gives the page the
+ *  answer if there is one. The request stays open if they cancel, as the browser's still is. */
+export async function useOffer(tabId: number, key: string, credentialId: string) {
+  const offer = (await readOffers()).find((o) => o.tabId === tabId && o.key === key);
+  if (!offer) return { ok: false, reason: "gone" };
+  if ([...pending.values()].some((r) => r.tabId === tabId)) return { ok: false, reason: "busy" };
+  const id = b64u(crypto.getRandomValues(new Uint8Array(16)));
+  const req: Req = {
+    id,
+    tabId,
+    op: "get",
+    origin: offer.origin,
+    crossOrigin: offer.crossOrigin,
+    topOrigin: offer.topOrigin,
+    options: { ...offer.options, _rp: offer.rp, _only: credentialId },
+    resolve: (r) => {
+      if (!r.ok) return;
+      void changeOffers((now) => now.filter((o) => o.key !== key));
+      ext.tabs.sendMessage(tabId, { t: "pkOfferResult", id: offer.pageId, result: r.result }, { frameId: offer.frameId, ...(offer.documentId ? { documentId: offer.documentId } : {}) }).catch(() => undefined);
+    },
+  };
+  pending.set(id, req);
+  req.windowId = await openPrompt(id);
+  return { ok: true };
+}
+
+// A page that's gone can't be answered.
+ext.webNavigation?.onCommitted?.addListener(({ tabId, frameId }) => {
+  void changeOffers((now) => now.filter((o) => !(o.tabId === tabId && (frameId === 0 || o.frameId === frameId))));
+});
+ext.tabs?.onRemoved?.addListener((tabId) => {
+  void changeOffers((now) => now.filter((o) => o.tabId !== tabId));
+});
 
 function allPasskeys(client: VaultClient): { itemId: string; passkey: Passkey; title: string }[] {
   const out: { itemId: string; passkey: Passkey; title: string }[] = [];
@@ -71,8 +136,60 @@ export async function handlePasskey(
   sender: chrome.runtime.MessageSender,
   client: () => VaultClient | null,
   isThePerson: (c: VaultClient, typed: string) => Promise<boolean>,
+  offersChanged: (tabId: number, url?: string) => void = () => undefined,
 ): Promise<unknown> {
   const isPrompt = !!sender.url && sender.url.startsWith(ext.runtime.getURL("passkey.html"));
+
+  // From the toolbar panel only: a content script's sender is the web page it's in.
+  if (msg.t === "pkOffers" || msg.t === "pkUseOffer") {
+    if (!sender.url?.startsWith(ext.runtime.getURL("popup.html"))) return null;
+    const tabId = msg.tabId as number;
+    const c = client();
+    if (msg.t === "pkUseOffer") return c?.unlocked ? useOffer(tabId, msg.key as string, msg.credentialId as string) : { ok: false, reason: "locked" };
+    const offers = await offerRows(tabId, c);
+    let saved: string | null = null;
+    if (!offers.length && c?.unlocked) {
+      // Saved for this site, and the site isn't asking. Otherwise it just looks broken.
+      const tab = await ext.tabs.get(tabId).catch(() => null);
+      let origin = "";
+      try {
+        origin = new URL(tab?.url ?? "").origin;
+      } catch {
+        /* not a page with an address */
+      }
+      if (origin && origin !== "null") saved = allPasskeys(c).find((p) => rpIdAllowed(p.passkey.rpId, origin))?.passkey.rpId ?? null;
+    }
+    return { offers, saved };
+  }
+
+  if (msg.t === "pkOffer" || msg.t === "pkOfferGone") {
+    if (isPrompt || !sender.tab?.id || sender.frameId === undefined || !sender.url) return null;
+    const tabId = sender.tab.id;
+    const frameId = sender.frameId;
+    const pageId = msg.id as number;
+    if (typeof pageId !== "number") return null;
+    if (msg.t === "pkOfferGone") {
+      await changeOffers((now) => now.filter((o) => !(o.tabId === tabId && o.frameId === frameId && o.pageId === pageId)));
+      offersChanged(tabId, sender.tab.url);
+      return { ok: true };
+    }
+    const u = new URL(sender.url);
+    const origin = (sender as { origin?: string }).origin ?? u.origin;
+    const options = msg.options as Record<string, unknown>;
+    if (origin === "null" || typeof options?.challenge !== "string" || !Array.isArray(options.allow)) return null;
+    const rp = (options.rpId as string) ?? u.hostname;
+    // A page can only ever offer itself. Another site's passkeys are never on the table.
+    if (typeof rp !== "string" || !rpIdAllowed(rp, origin)) return null;
+    const crossOrigin = msg.crossOrigin === true;
+    const offer: Offer = { key: b64u(crypto.getRandomValues(new Uint8Array(16))), tabId, frameId, documentId: (sender as { documentId?: string }).documentId, pageId, origin, crossOrigin, topOrigin: crossOrigin ? (msg.topOrigin as string | undefined) : undefined, options, rp };
+    await changeOffers((now) => {
+      const others = now.filter((o) => o.tabId !== tabId);
+      const here = now.filter((o) => o.tabId === tabId && !(o.frameId === frameId && o.pageId === pageId));
+      return [...others, ...[...here, offer].slice(-OFFERS_PER_TAB)];
+    });
+    offersChanged(tabId, sender.tab.url);
+    return { ok: true };
+  }
 
   if (msg.t === "pkRequest") {
     // A content script speaks for its frame. The origin comes from the browser's record
@@ -121,11 +238,12 @@ export async function handlePasskey(
     const base = { op: req.op, origin: req.origin, rpId: rp, unlocked: !!c?.unlocked, user: req.options.user, mustVerify: req.options.userVerification === "required" };
     if (!c?.unlocked) return { ...base, candidates: [] };
     if (req.op === "get") {
-      const usable = usablePasskeys(allPasskeys(c), rp, (req.options.allow as { id: string }[]).map((x) => x.id));
+      const only = req.options._only as string | undefined;
+      const usable = usablePasskeys(allPasskeys(c), rp, (req.options.allow as { id: string }[]).map((x) => x.id)).filter((u) => !only || u.passkey.credentialId === only);
       return { ...base, candidates: usable.map((u) => ({ itemId: u.itemId, credentialId: u.passkey.credentialId, title: u.title, userName: u.passkey.userName })) };
     }
     const exclude = (req.options.exclude as { id: string }[]).map((x) => x.id);
-    const alreadySaved = allPasskeys(c).some((p) => p.passkey.rpId === rp && exclude.includes(p.passkey.credentialId));
+    const alreadySaved = allPasskeys(c).some((p) => p.passkey.rpId === rp && exclude.includes(siteCredentialId(p.passkey.credentialId)));
     return { ...base, candidates: [], alreadySaved, existing: loginFor(c, rp, (req.options.user as { name: string }).name)?.body.title };
   }
 
@@ -152,7 +270,7 @@ export async function handlePasskey(
   if (req.op === "create") {
     const o = req.options as { user: { id: string; name: string; displayName?: string }; challenge: string; residentKey: string; _rp: string; exclude: { id: string }[] };
     const excluded = o.exclude.map((x) => x.id);
-    if (allPasskeys(c).some((p) => p.passkey.rpId === o._rp && excluded.includes(p.passkey.credentialId))) return finish(fail("InvalidStateError", "That passkey is already saved here."));
+    if (allPasskeys(c).some((p) => p.passkey.rpId === o._rp && excluded.includes(siteCredentialId(p.passkey.credentialId)))) return finish(fail("InvalidStateError", "That passkey is already saved here."));
     const made = await makeCredential({
       rpId: o._rp,
       // A site's own name for itself is whatever it likes. The RP ID has been checked.

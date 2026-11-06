@@ -643,6 +643,7 @@ function main() {
   // ---- Passkeys: the bridge from the page's world. Every decision is made on this side. --
 
   const pkWaiting = new Map<number, boolean>();
+  const pkOffered = new Set<number>();
 
   /** The frame's real Permissions-Policy, from this world. A browser with no way to ask
    *  gets the conservative answer: top-level or same-origin frames only. */
@@ -685,6 +686,16 @@ function main() {
     const d = e.data as { __pk?: string; id?: number; op?: "get" | "create"; options?: unknown };
     if (d?.__pk === "cancel" && typeof d.id === "number") {
       pkWaiting.delete(d.id);
+      if (pkOffered.delete(d.id)) void send({ t: "pkOfferGone", id: d.id });
+      return;
+    }
+    // A request someone may answer from the toolbar. Everything that matters about it is checked
+    // in the background, against what the browser says this frame is.
+    if (d?.__pk === "offer" && typeof d.id === "number" && typeof d.options === "object") {
+      if (!policyAllows("get")) return;
+      pkOffered.add(d.id);
+      const { crossOrigin, topOrigin } = ancestry();
+      void send({ t: "pkOffer", id: d.id, options: d.options, crossOrigin, topOrigin });
       return;
     }
     if (d?.__pk !== "req" || typeof d.id !== "number" || (d.op !== "get" && d.op !== "create") || typeof d.options !== "object") return;
@@ -699,7 +710,7 @@ function main() {
     // No person, no window of ours: a page could open as many as it liked. The browser
     // answers such a request by its own rules.
     if (!(navigator as unknown as { userActivation?: { isActive: boolean } }).userActivation?.isActive) {
-      reply({ ok: false, native: true });
+      reply({ ok: false, native: true, offer: d.op === "get" });
       return;
     }
     pkWaiting.set(d.id, true);
@@ -762,6 +773,11 @@ function main() {
   ext.runtime.onMessage.addListener((msg: ToContent, sender, reply) => {
     if (sender.id !== ext.runtime.id) return false;
     switch (msg.t) {
+      case "pkOfferResult":
+        // Only for a request this document really made, and it's still waiting.
+        if (pkOffered.delete(msg.id)) window.postMessage({ __pk: "res", id: msg.id, ok: true, result: msg.result }, location.origin);
+        reply(true);
+        return false;
       case "report":
         // A page mid-step has just swapped its boxes, and what gets sent depends on this.
         if (msg.fresh || Date.now() - lastAnalysis > 400) analyze();

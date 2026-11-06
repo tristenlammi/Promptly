@@ -51,6 +51,8 @@ Add a code to a login by scanning its QR, pasting its setup key, or from a pictu
 
 The extension and the Android app can make and use passkeys for you, and they sync. You can always choose your browser's or a hardware key instead.
 
+A site decides when it asks for a passkey, and nothing can make it ask. When it does, the toolbar button shows **PK**, and "Sign in with a passkey" is at the top of the panel, and in the menu on the page in Chromium browsers. If you have a passkey for a site that isn't asking, the panel says so: look on the page for "Use a passkey" or "Try another way".
+
 ## Sharing
 
 **Shared vaults** are for logins you share with people on your Promptly, like streaming or the Wi-Fi.

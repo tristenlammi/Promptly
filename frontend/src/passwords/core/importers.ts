@@ -2,6 +2,7 @@
 // is never uploaded. Written from each format's public documentation and observed
 // files, with no code from those projects. Every parser treats its input as hostile:
 // size limits, no recursion without a bound, and nothing is executed or rendered.
+import { siteCredentialId } from "./passkey";
 import { strFromU8, unzipSync } from "fflate";
 
 import { fromB64u, fromUtf8 } from "./bytes";
@@ -226,7 +227,7 @@ export function fromBitwardenJson(data: Any): ImportResult {
         // Bitwarden's key is a PKCS#8 ES256 private key, base64url.
         if (str(pk.keyValue) && str(pk.rpId) && str(pk.credentialId)) {
           passkeys.push({
-            credentialId: str(pk.credentialId)!,
+            credentialId: siteCredentialId(str(pk.credentialId)!),
             rpId: str(pk.rpId)!,
             rpName: str(pk.rpName),
             userHandle: str(pk.userHandle) ?? "",

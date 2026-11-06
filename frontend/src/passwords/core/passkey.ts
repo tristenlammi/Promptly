@@ -170,7 +170,7 @@ export async function getAssertion(req: AssertRequest): Promise<AssertResult> {
   const signed = concat(auth, await sha256(clientBytes));
   const rs = new Uint8Array(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, buf(signed)));
   return {
-    credentialId: req.passkey.credentialId,
+    credentialId: siteCredentialId(req.passkey.credentialId),
     clientDataJSON: b64u(clientBytes),
     authenticatorData: b64u(auth),
     signature: b64u(derSignature(rs)),
@@ -179,6 +179,20 @@ export async function getAssertion(req: AssertRequest): Promise<AssertResult> {
 }
 
 /** Passkeys in the vault this request may use: right RP, and on the allow list if given. */
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The id a website knows a passkey by, base64url of its raw bytes. Another manager's export can
+ *  hold it another way: Bitwarden writes a GUID, or "b64." and base64url. Without this, a passkey
+ *  brought over from there matches nothing a site asks for, and answers with the wrong id. */
+export function siteCredentialId(id: string): string {
+  if (id.startsWith("b64.")) return id.slice(4);
+  if (!GUID.test(id)) return id;
+  const hex = id.replace(/-/g, "");
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 16; i++) bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return b64u(bytes);
+}
+
 export function usablePasskeys(all: { itemId: string; passkey: Passkey; title: string }[], rpId: string, allow: string[] | undefined) {
-  return all.filter(({ passkey }) => passkey.rpId === rpId && (!allow?.length ? passkey.discoverable : allow.includes(passkey.credentialId)));
+  return all.filter(({ passkey }) => passkey.rpId === rpId && (!allow?.length ? passkey.discoverable : allow.includes(siteCredentialId(passkey.credentialId))));
 }

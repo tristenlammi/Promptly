@@ -21,7 +21,7 @@ import { VaultClient } from "../../../frontend/src/passwords/core/vault";
 import { canCheckClipboard, CLIP_ALARM, clearClipboardIfOurs, clipboardTest, watchClipboard, writeClipboard } from "./clipboard";
 import { BrowserBookmarks, VaultBookmarks } from "./bookmarks";
 import { type Base, bookmarkHash, bookmarksHtml, reconcile, syncableUrl, validItem } from "../../../frontend/src/passwords/core/bookmarks";
-import { handlePasskey } from "./passkeys";
+import { handlePasskey, offerRows, useOffer } from "./passkeys";
 import { packPublicKey } from "./rules-key";
 import { type Candidate, type ContentRequest, ext, type FillOutcome, type MenuRequest, type PageReport, type PageRequest, type SaveRequest, type StateOut, type ToContent } from "./rpc";
 
@@ -709,6 +709,12 @@ async function updateBadge(tabId: number, url: string | undefined) {
     await ext.action.setBadgeText({ tabId, text: "!" }).catch(() => undefined);
     await ext.action.setBadgeBackgroundColor({ tabId, color: "#B3261E" }).catch(() => undefined);
     await ext.action.setTitle({ tabId, title: "Promptly Passwords: a new device is asking to join" }).catch(() => undefined);
+    return;
+  }
+  if ((await offerRows(tabId, client)).length) {
+    await ext.action.setBadgeText({ tabId, text: "PK" }).catch(() => undefined);
+    await ext.action.setBadgeBackgroundColor({ tabId, color: "#D97757" }).catch(() => undefined);
+    await ext.action.setTitle({ tabId, title: "Promptly Passwords: a passkey is ready for this site" }).catch(() => undefined);
     return;
   }
   const n = client?.unlocked ? candidatesFor(url).length : 0;
@@ -1493,7 +1499,9 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
       const list = await orderedCandidates(tabId, url);
       const report = await inFrame<PageReport>({ t: "report" });
       const kinds = report?.kinds ?? [];
-      return { locked: false, candidates: list, kinds, url, ...(await mailRows(kinds, url)) };
+      // Firefox's menu doesn't act on a click, so its passkeys are in the toolbar panel.
+      const passkeys = __ENGINE__ === "firefox" ? [] : await offerRows(tabId, client, hostFrame);
+      return { locked: false, candidates: list, kinds, url, passkeys, ...(await mailRows(kinds, url)) };
     }
     case "menuPick": {
       if (!client?.unlocked) return { ok: false, reason: "locked" };
@@ -1504,6 +1512,14 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
       if (!item || item.body.kind === "card" || item.body.kind === "identity" || item.body.reprompt) return { ok: false, reason: "popup" };
       const r = await fill(tabId, m.itemId, { onlyFrame: hostFrame });
       return r.ok ? r : { ok: false, reason: "popup", detail: r.reason };
+    }
+    case "menuPasskey": {
+      if (!client?.unlocked) return { ok: false };
+      // The same check as filling a login, and the prompt's window comes after it.
+      const check = await checked("passkey");
+      if (!check?.ok) return { ok: false, reason: "popup" };
+      if (!(await offerRows(tabId, client, hostFrame)).some((o) => o.key === m.key && o.credentialId === m.credentialId)) return { ok: false };
+      return useOffer(tabId, m.key, m.credentialId);
     }
     case "menuMailCode":
     case "menuMailLink": {
@@ -1597,6 +1613,11 @@ async function handleTest(m: { op: string; [k: string]: unknown }): Promise<unkn
       // So a test can see what a failed sync looks like on screen.
       bookmarkFailure = (m.error as string) ?? null;
       return { ok: true };
+    case "seedBody": {
+      const it = await client!.saveNew(await client!.personalVaultId(), m.body as ItemBody);
+      await client!.sync();
+      return { id: it.id };
+    }
     case "bookmarkPlant": {
       const vaultId = await client!.createSharedVault(`Planted ${Date.now()}`);
       await client!.saveNew(vaultId, newBody("bookmark", m.title as string, { bookmark: { parent: "root:bar", pos: 1, url: m.url as string } }));
@@ -1671,8 +1692,8 @@ ext.runtime.onMessage.addListener((msg: { t: string }, sender, reply) => {
   if (t === "vaultChanged" || t === "locked" || t === "offscreenClip") return false;
   let p: Promise<unknown>;
   if (t.startsWith("pk")) {
-    p = boot().then(() => handlePasskey(msg as never, sender, () => client, isThePerson));
-  } else if (t === "menuList" || t === "menuPick" || t === "menuMailCode" || t === "menuMailLink" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup") {
+    p = boot().then(() => handlePasskey(msg as never, sender, () => client, isThePerson, (tabId, url) => void updateBadge(tabId, url)));
+  } else if (t === "menuList" || t === "menuPick" || t === "menuPasskey" || t === "menuMailCode" || t === "menuMailLink" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup") {
     if (!isOurPage(sender, "/menu.html")) return false;
     p = handleMenu(msg as MenuRequest, sender);
   } else if (t === "saveOffer" || t === "saveAnswer") {

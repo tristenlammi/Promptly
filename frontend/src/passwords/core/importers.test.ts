@@ -115,6 +115,13 @@ describe("JSON formats", () => {
     expect(r.warnings.join()).toContain("Future");
   });
 
+  it("turns Bitwarden's passkey ids into what sites use", () => {
+    const pk = { keyValue: "a2V5", rpId: "example.com", userHandle: "dQ", userName: "ana", counter: "0", discoverable: "true" };
+    const r = fromBitwardenJson({ items: [{ type: 1, name: "Site", login: { fido2Credentials: [{ ...pk, credentialId: "b0cf2f0b-1a2b-4c3d-8e9f-0a1b2c3d4e5f" }, { ...pk, credentialId: "b64.AQIDBAUG" }] } }] });
+    const ids = r.items[0].body.passkeys!.map((p) => p.credentialId);
+    expect(ids).toEqual([Buffer.from("b0cf2f0b1a2b4c3d8e9f0a1b2c3d4e5f", "hex").toString("base64url"), "AQIDBAUG"]);
+  });
+
   it("asks for a password on encrypted Bitwarden, and refuses account-locked ones", async () => {
     const locked = { encrypted: true, encKeyValidation_DO_NOT_EDIT: "2.x", data: "2.y", salt: "s", kdfType: 0, kdfIterations: 1 };
     await expect(importFile("b.json", asFile(JSON.stringify(locked)))).rejects.toBeInstanceOf(NeedsPasswordError);

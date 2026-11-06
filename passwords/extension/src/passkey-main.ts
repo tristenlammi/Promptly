@@ -143,17 +143,59 @@
     return makeCredential(r.credentialId, attestation(r));
   } as typeof navigator.credentials.create;
 
+  /** The browser's own answer runs as usual, and a person can use one of ours instead from the
+   *  toolbar or the menu, whichever comes first. Nothing comes back from this side unless they
+   *  do, so a page can't tell from this whether there's a passkey here. With nothing listening,
+   *  it's just the browser's own request. */
+  function browserOrOurs(options: CredentialRequestOptions, req: unknown): Promise<Credential | null> {
+    return new Promise((resolve, reject) => {
+      const id = ++seq;
+      const signal = options.signal ?? undefined;
+      if (signal?.aborted) return reject(new DOMException("Aborted", "AbortError"));
+      const stop = new AbortController();
+      let done = false;
+      const finish = (then: () => void) => {
+        if (done) return;
+        done = true;
+        waiting.delete(id);
+        origPost({ __pk: "cancel", id }, location.origin);
+        then();
+      };
+      signal?.addEventListener("abort", () => {
+        stop.abort();
+        finish(() => reject(new DOMException("Aborted", "AbortError")));
+      });
+      waiting.set(id, (m) => {
+        // Someone cancelling our window isn't an answer: the browser's request is still open.
+        if (m.__pk !== "res" || !m.ok) return;
+        finish(() => {
+          stop.abort();
+          const r = m.result as Record<string, string>;
+          resolve(makeCredential(r.credentialId, assertion(r)));
+        });
+      });
+      origPost({ __pk: "offer", id, options: req }, location.origin);
+      native.get({ ...options, signal: stop.signal }).then(
+        (v) => finish(() => resolve(v)),
+        (e) => finish(() => reject(e)),
+      );
+    });
+  }
+
   navigator.credentials.get = async function (options?: CredentialRequestOptions) {
     const pk = options?.publicKey;
-    // The browser's own autofill UI handles conditional requests, and anything not ours.
-    if (!pk || (options as { mediation?: string })?.mediation === "conditional") return native.get(options);
+    if (!pk) return native.get(options);
     const req = {
       rpId: pk.rpId,
       challenge: b64u(pk.challenge as ArrayBuffer),
       allow: list(pk.allowCredentials),
       userVerification: pk.userVerification ?? "preferred",
     };
+    // A quiet request, for a sign-in box's suggestions. Nothing shows until someone picks.
+    if ((options as { mediation?: string })?.mediation === "conditional") return browserOrOurs(options!, req);
     const res = await ask("get", req, options?.signal ?? undefined);
+    // Asked with no click behind it: our window won't open by itself, but it can be chosen.
+    if (res.native && res.offer) return browserOrOurs(options!, req);
     if (res.native) return native.get(options);
     if (!res.ok) throw failure(res);
     const r = res.result as Record<string, string>;

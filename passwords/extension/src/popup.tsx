@@ -456,6 +456,7 @@ function VaultHome({ tab, matches, doFill, rowProps }: { tab: chrome.tabs.Tab | 
   const stars = favourites.filter((f) => !here.has(f.id));
   return (
     <>
+      {tab?.id !== undefined && <PasskeyRows tabId={tab.id} setMessage={rowProps.setMessage} />}
       {tab?.id !== undefined && <SaveOffer tabId={tab.id} />}
       {tab?.id !== undefined && <MailRows tabId={tab.id} setMessage={rowProps.setMessage} />}
       <div className="flex flex-col">
@@ -725,6 +726,54 @@ function Avatar({ title }: { title: string }) {
   let n = 0;
   for (const ch of title) n = (n * 31 + ch.charCodeAt(0)) >>> 0;
   return <span aria-hidden="true" className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-xs font-semibold text-[#fff]" style={{ background: AVATAR_TINTS[n % AVATAR_TINTS.length] }}>{(title.trim()[0] ?? "?").toUpperCase()}</span>;
+}
+
+type OfferRow = { key: string; credentialId: string; title: string; userName: string; rpId: string; origin: string };
+
+/** Passkeys a page is asking for right now, and if it isn't, a word on why nothing's happening.
+ *  A page can start asking while this is open. */
+function PasskeyRows({ tabId, setMessage }: { tabId: number; setMessage: (m: string) => void }) {
+  const [offers, setOffers] = useState<OfferRow[]>([]);
+  const [saved, setSaved] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    const look = () =>
+      call<{ offers: OfferRow[]; saved: string | null } | null>({ t: "pkOffers", tabId })
+        .then((r) => {
+          if (!live || !r) return;
+          setOffers(r.offers);
+          setSaved(r.saved);
+        })
+        .catch(() => undefined);
+    void look();
+    const t = setInterval(look, 1500);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [tabId]);
+  return (
+    <>
+      {offers.map((o) => (
+        <button
+          key={`${o.key}:${o.credentialId}`}
+          data-testid="passkey-offer"
+          className="btn-primary"
+          aria-label={`Sign in with a passkey as ${o.userName || o.title}`}
+          onClick={async () => {
+            const r = await call<{ ok: boolean; reason?: string }>({ t: "pkUseOffer", tabId, key: o.key, credentialId: o.credentialId });
+            if (r.ok) window.close();
+            else setMessage(r.reason === "busy" ? "A passkey window is already open." : "This page isn't asking for that passkey any more.");
+          }}
+        >
+          Sign in with a passkey: {o.userName || o.title}
+        </button>
+      ))}
+      {!offers.length && saved && (
+        <p data-testid="passkey-saved" className="rounded-lg bg-[var(--surface-1)] p-2 text-xs">You have a passkey for {saved}, but this page isn't asking for one. Sites decide when they do: look for "Use a passkey", "Sign in with a passkey" or "Try another way".</p>
+      )}
+    </>
+  );
 }
 
 type MailRow = { id: string; domain: string; ago: string; code: string | null; linkHost: string | null };

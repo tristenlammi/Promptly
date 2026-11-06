@@ -87,13 +87,21 @@ async function render() {
     note("To fill here, click the Promptly Passwords button in your toolbar. This browser can't confirm this menu is really showing, so it can't fill from here.");
     return;
   }
-  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; kinds?: string[]; mail?: MailRow[]; otherMail?: string[] } | null;
+  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; kinds?: string[]; mail?: MailRow[]; otherMail?: string[]; passkeys?: { key: string; credentialId: string; userName: string; rpId: string }[] } | null;
   if (!r) return note("Can't reach Promptly Passwords.");
   if (r.locked) {
     note("Your vault is locked.");
     root.appendChild(row("Open Promptly Passwords", "", () => call({ t: "menuOpenPopup" })));
     guard.rendered();
     return;
+  }
+  for (const k of r.passkeys ?? []) {
+    root.appendChild(
+      row(`Sign in with a passkey: ${k.userName || k.rpId}`, `From your vault, for ${k.rpId}`, async () => {
+        const out = (await call({ t: "menuPasskey", key: k.key, credentialId: k.credentialId })) as { ok: boolean } | null;
+        if (!out?.ok) toToolbar();
+      }, `Sign in with a passkey as ${k.userName || k.rpId}`),
+    );
   }
   // Shown as text and filled only on a click: what's in an email is untrusted.
   for (const m of r.mail ?? []) {

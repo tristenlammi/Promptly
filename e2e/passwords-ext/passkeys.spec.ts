@@ -208,7 +208,8 @@ test("the passkey is in the vault, syncs, and shows in the vault page", async ()
   await vault.goto(`chrome-extension://${rig.extId}/vault.html`);
   // Named for its RP ID. What the site calls itself isn't trusted with the vault's list.
   await expect(vault.getByRole("list", { name: "Items" }).getByRole("button", { name: /localhost/ }).first()).toBeVisible({ timeout: 20_000 });
-  await vault.getByRole("list", { name: "Items" }).getByRole("button", { name: /localhost/ }).first().click();
+  // Two items have that name by now, in no set order.
+  await vault.getByRole("list", { name: "Items" }).getByRole("button", { name: /localhost ana@example.com/ }).click();
   await expect(vault.getByText(/localhost · ana@example.com/)).toBeVisible();
   await vault.close();
 });
