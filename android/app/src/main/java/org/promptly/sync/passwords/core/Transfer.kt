@@ -437,7 +437,7 @@ object Importers {
                             null
                         } else {
                             // Bitwarden's key is a PKCS#8 ES256 private key, base64url.
-                            Passkey(cred, rp, pk["rpName"].text(), pk["userHandle"].text() ?: "", pk["userName"].text() ?: "", pk["userDisplayName"].text(), key, pk["counter"].any().toIntOrNull() ?: 0, pk["creationDate"].text() ?: isoNow(), null, pk["discoverable"].any() != "false")
+                            Passkey(Passkeys.siteCredentialId(cred), rp, pk["rpName"].text(), pk["userHandle"].text() ?: "", pk["userName"].text() ?: "", pk["userDisplayName"].text(), key, pk["counter"].any().toIntOrNull() ?: 0, pk["creationDate"].text() ?: isoNow(), null, pk["discoverable"].any() != "false")
                         }
                     }
                     val urls = l["uris"].list().map { u -> appUrlFrom(LoginUrl(u["uri"].any(), bwMatch(u["match"]))) }.filter { u -> u.url.isNotEmpty() }

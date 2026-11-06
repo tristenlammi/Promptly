@@ -105,6 +105,13 @@ class ImportersTest {
 
     // ---- JSON formats ----
 
+    @Test fun bitwardensPasskeyIdsBecomeWhatSitesUse() {
+        // The web test's values: the GUID's sixteen bytes, and "b64." taken off.
+        val r = Importers.importFile("b.json", ImportFixtures.bytes("bitwarden.json"))
+        val ids = r.items.flatMap { it.body.passkeys }.map { it.credentialId }
+        assertEquals(listOf("abc", "sM8vCxorTD2OnwobLD1OXw", "AQIDBAUG"), ids)
+    }
+
     @Test fun protonPass() {
         val r = Importers.importFile("proton.json", ImportFixtures.bytes("proton.json"))
         assertEquals("Proton Pass", r.format)

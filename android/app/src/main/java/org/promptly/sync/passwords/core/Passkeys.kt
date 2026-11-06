@@ -24,6 +24,17 @@ import java.security.spec.PKCS8EncodedKeySpec
 import java.time.Instant
 
 object Passkeys {
+    private val GUID = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\\z")
+
+    /** The id a website knows a passkey by, base64url of its raw bytes. Bitwarden's export writes a
+     *  GUID, or "b64." and base64url. Mirrors siteCredentialId in passkey.ts. */
+    fun siteCredentialId(id: String): String {
+        if (id.startsWith("b64.")) return id.substring(4)
+        if (!GUID.matches(id)) return id
+        val h = id.replace("-", "")
+        return b64u(ByteArray(16) { i -> h.substring(i * 2, i * 2 + 2).toInt(16).toByte() })
+    }
+
     /** An RP ID must be the page's host, or a parent domain of it, and never a public suffix. */
     fun rpIdAllowed(rpId: String, origin: String): Boolean {
         val m = Regex("^(https?)://([^/:?#]+)(?::\\d+)?/?$", RegexOption.IGNORE_CASE).find(origin) ?: return false
