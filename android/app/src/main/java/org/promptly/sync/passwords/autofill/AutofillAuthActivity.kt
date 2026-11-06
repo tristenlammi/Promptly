@@ -55,6 +55,7 @@ import org.promptly.sync.passwords.core.Match
 import org.promptly.sync.passwords.core.Totp
 import org.promptly.sync.passwords.ui.ConfirmIdentityPane
 import org.promptly.sync.passwords.ui.ErrorCard
+import org.promptly.sync.passwords.ui.LookalikeWarning
 import org.promptly.sync.passwords.ui.PwTheme
 import org.promptly.sync.passwords.ui.UnlockPane
 import org.promptly.sync.passwords.ui.hardenWindow
@@ -120,12 +121,15 @@ class AutofillAuthActivity : FragmentActivity() {
         data object Pick : Step()
         data class Confirm(val item: Item, val title: String, val detail: String, val remember: Boolean, val fields: List<String> = emptyList()) : Step()
         data class Reprompt(val item: Item) : Step()
+        data class Lookalike(val item: Item, val picked: Boolean, val looksLike: String) : Step()
         data class Fail(val text: String) : Step()
     }
 
     @Composable
     private fun Flow() {
         var step by remember { mutableStateOf<Step>(if (Pw.unlocked) Step.Pick else Step.Unlock) }
+        // Said "fill anyway" to the lookalike warning, for this one fill.
+        var lookalikeCleared by remember { mutableStateOf(false) }
         val scope = rememberCoroutineScope()
 
         fun deliver(item: Item) {
@@ -150,6 +154,20 @@ class AutofillAuthActivity : FragmentActivity() {
             if (item.body.reprompt) step = Step.Reprompt(item) else deliver(item)
         }
 
+        /** Worked out here from the decrypted vault, whatever the index said when it was offered. */
+        fun lookalike(item: Item?): String? {
+            if (lookalikeCleared) return null
+            val c = Pw.client() ?: return null
+            val host = when (val t = target) {
+                is FillTarget.Web -> if (item != null && Match.matchItems(listOf(item), t.url).isNotEmpty()) return null else t.host
+                is FillTarget.App -> {
+                    if (item != null && !spillsTo(t, item.body.urls)) return null
+                    t.claimedDomain?.substringBefore(':') ?: return null
+                }
+            }
+            return Match.lookalikeAmong(host, AutofillIndex.savedDomainsOf(c.allItems()))
+        }
+
         /** The item's real rules, now that it's decrypted. */
         fun check(item: Item, picked: Boolean) {
             val t = target
@@ -158,6 +176,11 @@ class AutofillAuthActivity : FragmentActivity() {
                 is FillTarget.Web -> onPage != null || mode == MODE_CARD || mode == MODE_IDENTITY
                 is FillTarget.App -> mode == MODE_CARD || mode == MODE_IDENTITY || appLinked(item, t)
             }
+            val looks = if (isMatch || picked) lookalike(item) else null
+            if (looks != null) {
+                step = Step.Lookalike(item, picked, looks)
+                return
+            }
             val where = when (t) {
                 is FillTarget.Web -> t.domain
                 // An app picks its own label, so the package goes beside it.
@@ -165,7 +188,8 @@ class AutofillAuthActivity : FragmentActivity() {
             }
             when {
                 !isMatch && !picked -> step = Step.Fail("This login isn't saved for $where any more.")
-                !isMatch && t is FillTarget.Web -> step = Step.Confirm(item, "Fill on $where?", "\"${item.body.title}\" isn't saved for $where. Check the address before you go on.", true)
+                // Past the warning there's nothing to add, and no remembering a lookalike.
+                !isMatch && t is FillTarget.Web && !lookalikeCleared -> step = Step.Confirm(item, "Fill on $where?", "\"${item.body.title}\" isn't saved for $where. Check the address before you go on.", true)
                 !isMatch && t is FillTarget.App -> scope.launch {
                     val viaLinks = withContext(Dispatchers.IO) { siteLinksApp(item, t) }
                     if (viaLinks) {
@@ -197,7 +221,12 @@ class AutofillAuthActivity : FragmentActivity() {
 
         when (val s = step) {
             Step.Unlock -> UnlockPane(this, "Unlock to fill", { step = Step.Pick }, { finish() })
-            Step.Pick -> if (itemId == null) PickPane { check(it, true) } else Busy()
+            Step.Pick -> if (itemId != null) Busy() else {
+                // Nothing from the vault shows behind this.
+                val looks = remember(lookalikeCleared) { lookalike(null) }
+                if (looks != null) LookalikeWarning(pageName(), looks, emptyList(), "Choose a login anyway", { finish() }) { lookalikeCleared = true }
+                else PickPane { check(it, true) }
+            }
             is Step.Confirm -> ConfirmPane(s) { remember ->
                 scope.launch {
                     val fresh = if (remember) withContext(Dispatchers.IO) { rememberTarget(s.item) } else s.item
@@ -205,6 +234,10 @@ class AutofillAuthActivity : FragmentActivity() {
                 }
             }
             is Step.Reprompt -> ConfirmIdentityPane(this, "Confirm it's you", s.item.body.title, true, { deliver(s.item) }, { finish() })
+            is Step.Lookalike -> LookalikeWarning(pageName(), s.looksLike, fieldsFilled(s.item.body), "Fill anyway", { finish() }) {
+                lookalikeCleared = true
+                check(s.item, s.picked)
+            }
             is Step.Fail -> Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 ErrorCard(s.text)
                 Button(onClick = { finish() }) { Text("Close") }
@@ -252,6 +285,11 @@ class AutofillAuthActivity : FragmentActivity() {
             }
             TextButton(onClick = { finish() }) { Text("Cancel") }
         }
+    }
+
+    private fun pageName(): String = when (val t = target) {
+        is FillTarget.Web -> t.domain
+        is FillTarget.App -> t.claimedDomain ?: ""
     }
 
     private fun appLinked(item: Item, t: FillTarget.App): Boolean {
@@ -318,7 +356,10 @@ class AutofillAuthActivity : FragmentActivity() {
                 else -> k.takeIf { b.str(k) != null }
             }
         }
-        else -> emptyList()
+        else -> listOfNotNull(
+            "username".takeIf { usernames.isNotEmpty() && (b.username ?: b.str("email")) != null },
+            "password".takeIf { passwords.isNotEmpty() && b.password != null },
+        )
     }.distinct()
 
     private fun valueFor(id: AutofillId, text: String): AutofillValue {

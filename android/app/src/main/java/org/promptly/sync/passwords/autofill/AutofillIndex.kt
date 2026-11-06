@@ -42,6 +42,21 @@ class IndexLookup(val entries: List<IndexEntry>) {
     val patterned = ArrayList<IndexEntry>()
     val byApp = HashMap<String, MutableList<IndexEntry>>()
 
+    /** Every site with a login here, for the lookalike check. Mostly the keys above, which are base
+     *  domains already, so a request on a site with no login doesn't parse the whole vault. An IP or
+     *  a single name has no base domain, and is left out by its shape. */
+    val savedDomains: Set<String> by lazy {
+        val out = HashSet<String>()
+        for (k in byKey.keys) if ('.' in k && ':' !in k && !k.last().isDigit()) out += k
+        for (e in entries) {
+            for ((i, u) in e.urls.withIndex()) {
+                val k = e.keys.getOrElse(i) { "" }
+                if (k == "*" || (k == "" && !u.url.startsWith(Match.APP_SCHEME))) out += Match.savedDomainsOf(listOf(u))
+            }
+        }
+        out
+    }
+
     init {
         for (e in entries) {
             if (e.kind != "login") continue
@@ -170,6 +185,19 @@ object AutofillIndex {
     fun vaultDomains(lookup: IndexLookup): Set<String> = lookup.byKey.keys
 
     class Hit(val entry: IndexEntry, val rank: Int, val downgrade: Boolean)
+
+    /** The saved site this page only looks like, if any. A page that a login is really saved for
+     *  isn't a lookalike, as in the extension. For an app the domain is only its claim, and a linked
+     *  app's own hits are for the app, not for whatever page it's showing, so they don't clear it. */
+    fun lookalikeFor(lookup: IndexLookup, target: FillTarget, hits: List<Hit>): String? = when (target) {
+        is FillTarget.Web -> if (hits.isEmpty()) Match.lookalikeAmong(target.host, lookup.savedDomains) else null
+        is FillTarget.App -> target.claimedDomain?.takeIf { it.isNotEmpty() }?.substringBefore(':')?.let { host ->
+            if (hits.any { !spillsTo(target, it.entry.urls) }) null else Match.lookalikeAmong(host, lookup.savedDomains)
+        }
+    }
+
+    /** Sites saved in the vault as it is now, for a screen that has it open. */
+    fun savedDomainsOf(items: Collection<Item>): Set<String> = IndexLookup(items.mapNotNull { entryOf(it, false) }).savedDomains
 
     /** Logins for this page or app, best first. Pure: the tests call it directly.
      *  `linked` says whether a site's asset links name this app (cached, no network). */

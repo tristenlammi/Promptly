@@ -6,6 +6,7 @@ package org.promptly.sync.passwords.core
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -66,6 +67,8 @@ class WrongPasswordError(val changedElsewhere: Boolean = false) : Exception("Tha
 class KeyChangedError(val userId: String, val username: String) : Exception("$username's keys have changed since you last shared with them")
 
 private const val PERSONAL_META = "personal_vault"
+private const val LAST_SYNC_META = "last_sync"
+private const val RECOVERY_META = "recovery_checked"
 
 class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKeeper, val platform: String = "android") {
     private class Unlocked(
@@ -787,6 +790,7 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
             // Keep what an emergency contact holds up to date, and finish setting one up.
             runCatching { refreshEmergency() }
             lastSyncAt = System.currentTimeMillis()
+            store.setMeta(LAST_SYNC_META, JsonPrimitive(lastSyncAt))
         } catch (e: OfflineError) {
             out.offline = true
         } catch (e: ApiError) {
@@ -1315,7 +1319,7 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
     /** Seal our vault keys to each accepted contact, signed, and again whenever a vault has
      *  been added or re-keyed since. A row in that list is only the server's word: keys go to
      *  someone this person named, on the keys they saw then, and to nobody else, ever. */
-    private fun refreshEmergency() {
+    fun refreshEmergency() {
         val s = need()
         val rows = api.emergencyList()
         // Your own vaults only. Other people's logins in a shared vault aren't yours to hand on.
@@ -1347,11 +1351,40 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
 
     // ---- Attachments: the item's body records them ----
 
-    /** Upload and record on the item. An item not on the server yet is synced first. */
+    private fun resumeMeta(itemId: String, name: String, size: Long) = "upload_resume:$itemId:$name:$size"
+
+    /** The id and key an interrupted upload of this file was using, kept under the vault's key so
+     *  the local copy holds no attachment key in the clear. */
+    private fun resumeFor(item: Item, meta: String): Pair<String, String> {
+        val v = cachedVault(item.vaultId)
+        val key = vaultKey(v)
+        val bound = aad(v.id, item.id, "upload_resume")
+        (store.getMeta(meta) as? JsonPrimitive)?.content?.let { sealed ->
+            // Sealed under a vault key that's since changed: start again.
+            val kept = runCatching {
+                val o = Json.parseToJsonElement(fromUtf8(open(key, fromB64u(sealed), bound))) as JsonObject
+                o.str("id")!! to o.str("key")!!
+            }.getOrNull()
+            if (kept != null) return kept
+        }
+        val fresh = randomUuid() to b64u(randomBytes(32))
+        val plain = buildJsonObject {
+            put("id", fresh.first)
+            put("key", fresh.second)
+        }.toString()
+        store.setMeta(meta, JsonPrimitive(b64u(seal(key, utf8(plain), bound))))
+        return fresh
+    }
+
+    /** Upload and record on the item. An item not on the server yet is synced first. An
+     *  interrupted upload picks up where it stopped if the same file's chosen again, by name and
+     *  size, as on the web vault. */
     fun addAttachment(itemId: String, name: String, mime: String?, size: Long, read: (Long, Int) -> ByteArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): Item {
         var item = get(itemId) ?: throw IllegalStateException("Unknown item")
         if (store.getItem(itemId)?.revision == 0 || store.getItem(itemId)?.dirty == true) sync()
-        val ref = Attachments.upload(api, item.vaultId, itemId, name, mime, size, read, onProgress)
+        val meta = resumeMeta(itemId, name, size)
+        val ref = Attachments.upload(api, item.vaultId, itemId, name, mime, size, read, onProgress, resumeFor(item, meta))
+        store.deleteMeta(meta)
         item = get(itemId) ?: item
         val updated = update(itemId, item.body.withAttachments(item.body.attachments + ref))
         sync()
@@ -1369,6 +1402,92 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         val updated = update(itemId, item.body.withAttachments(item.body.attachments.filter { it.id != ref.id }))
         sync()
         return updated
+    }
+
+    // ---- Folders, duplicates, Send records and site icons ----
+
+    fun renameFolder(id: String, name: String): Item {
+        val folder = get(id)?.takeIf { it.body.kind == "folder" } ?: throw IllegalStateException("Unknown folder")
+        val clean = name.trim().take(80)
+        require(clean.isNotEmpty()) { "A folder needs a name." }
+        return update(id, folder.body.with("title" to JsonPrimitive(clean)))
+    }
+
+    /** The items in it stay, just out of the folder. */
+    fun deleteFolder(id: String) {
+        val folder = get(id)?.takeIf { it.body.kind == "folder" } ?: throw IllegalStateException("Unknown folder")
+        for (i in allItems()) {
+            if (i.body.str("folderId") == id && canEdit(i.vaultId)) update(i.id, i.body.with("folderId" to JsonNull))
+        }
+        trashItem(folder.id)
+    }
+
+    /** What can be merged here: a fill-only or view-only vault can't take the write. */
+    fun duplicates(): List<List<Item>> = Duplicates.find(allItems().filter { canEdit(it.vaultId) })
+
+    /** The newest stays and the others go to Trash, with nothing thrown away. An attachment on a
+     *  copy has to be sealed again under the one that stays: its chunks are bound to their item, and
+     *  they go with that item when it's purged. If that fails nothing has changed but some unused
+     *  uploads, so it can be tried again. */
+    fun mergeDuplicates(group: List<Item>, onProgress: (Int, Int) -> Unit = { _, _ -> }) {
+        val m = Duplicates.merge(group)
+        val own = m.keep.body.attachments.mapTo(HashSet()) { it.id }
+        val moved = LinkedHashMap<String, AttachmentRef>()
+        for (d in m.drop) {
+            for (a in d.body.attachments) {
+                if (a.id in own || a.id in moved) continue
+                moved[a.id] = Attachments.rehome(api, m.keep.vaultId, d.id, m.keep.id, a, onProgress)
+            }
+        }
+        val all = m.body.attachments.map { moved[it.id] ?: it }
+        update(m.keep.id, m.body.with("attachments" to JsonArray(all.map { it.toJson() })))
+        for (d in m.drop) trashItem(d.id)
+        runCatching { sync() }
+    }
+
+    fun sendRecords(): Map<String, SendRecords.Record> = SendRecords.of(allItems(includeSystem = true))
+
+    /** Remembered in your own vault, so the server never knows what any of them are called. */
+    fun recordSend(title: String, link: String, sendId: String): Item {
+        val saved = saveNew(personalVaultId(), SendRecords.body(title, link, sendId))
+        runCatching { sync() }
+        return saved
+    }
+
+    fun deleteSend(sendId: String) {
+        api.deleteSend(sendId)
+        sendRecords()[sendId]?.let {
+            trashItem(it.itemId)
+            purgeItem(it.itemId)
+        }
+        runCatching { sync() }
+    }
+
+    fun iconVaults(): Set<String> = SiteIcons.iconVaults(allItems(includeSystem = true))
+
+    /** Who gets a say over which vaults show site icons. Off unless turned on, per vault. */
+    fun setVaultIcons(vaultId: String, on: Boolean) {
+        val row = SiteIcons.prefsRow(allItems(includeSystem = true), vaultId)
+        if (row != null) update(row.id, row.body.with("icon" to JsonPrimitive(on)))
+        else saveNew(vaultId, newBody("prefs", SiteIcons.PREFS_TITLE, "icon" to JsonPrimitive(on)))
+        runCatching { sync() }
+    }
+
+    /** When this phone last reached the server, across restarts. Null if it never has. */
+    fun lastSync(): Long? = (store.getMeta(LAST_SYNC_META) as? JsonPrimitive)?.content?.toLongOrNull()
+
+    /** The twice-yearly "do you still have your kit?". Kept on this device, as on the web. */
+    fun recoveryChecked(): String? = (store.getMeta(RECOVERY_META) as? JsonPrimitive)?.content
+
+    fun noteRecoveryChecked() = store.setMeta(RECOVERY_META, JsonPrimitive(isoNow()))
+
+    /** Your recovery kit's Secret Key, to show again until it's confirmed. */
+    fun encodedSecretKey(): String? = keeper.load()?.let { raw ->
+        try {
+            SecretKeys.encode(raw)
+        } finally {
+            raw.fill(0)
+        }
     }
 
     // ---- New devices (CRYPTO_SPEC.md section 8) ----

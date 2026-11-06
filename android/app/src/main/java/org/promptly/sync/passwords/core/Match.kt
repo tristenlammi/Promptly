@@ -172,6 +172,82 @@ object Match {
         )
     }
 
+    // ---- Lookalike check (plan 5.13), the same rules as match.ts ----
+
+    /** Common homoglyphs, to a plain latin skeleton. */
+    private val CONFUSABLE = mapOf(
+        'а' to 'a', 'е' to 'e', 'о' to 'o', 'р' to 'p', 'с' to 'c', 'у' to 'y', 'х' to 'x', 'і' to 'i', 'ј' to 'j', 'ѕ' to 's',
+        'һ' to 'h', 'ԁ' to 'd', 'ɡ' to 'g', 'ո' to 'n', 'ν' to 'v', 'ο' to 'o', 'α' to 'a', 'ι' to 'i',
+        '0' to 'o', '1' to 'l', '|' to 'l', '5' to 's', '3' to 'e', '7' to 't', '$' to 's',
+    )
+    private val COMBINING = Regex("[̀-ͯ]")
+    private val SCAM_WORD = Regex("(^|[-.])(login|secure|account|verify|signin|auth|support|update)|(login|secure|account|verify|signin|auth|support|update)($|[-.])")
+
+    fun skeleton(domain: String): String {
+        // Plain ASCII has nothing to normalize, and that's nearly every saved site.
+        val plain = if (domain.all { it.code < 128 }) domain.lowercase() else java.text.Normalizer.normalize(domain, java.text.Normalizer.Form.NFKD).lowercase().replace(COMBINING, "")
+        val s = plain.replace("rn", "m").replace("vv", "w")
+        val out = StringBuilder(s.length)
+        for (c in s) out.append(CONFUSABLE[c] ?: c)
+        return out.toString().replace('l', 'i')
+    }
+
+    /** Damerau-Levenshtein: a swap of two neighbours counts as one edit. */
+    fun editDistance(a: String, b: String, cap: Int = 3): Int {
+        if (kotlin.math.abs(a.length - b.length) > cap) return cap + 1
+        val d = Array(a.length + 1) { IntArray(b.length + 1) }
+        for (i in 0..a.length) d[i][0] = i
+        for (j in 0..b.length) d[0][j] = j
+        for (i in 1..a.length) {
+            for (j in 1..b.length) {
+                d[i][j] = minOf(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+                if (i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1]) d[i][j] = minOf(d[i][j], d[i - 2][j - 2] + 1)
+            }
+        }
+        return d[a.length][b.length]
+    }
+
+    /** The site each saved address belongs to. An app's id isn't a website, so it isn't one. */
+    fun savedDomainsOf(urls: Iterable<LoginUrl>): Set<String> {
+        val out = LinkedHashSet<String>()
+        for (u in urls) hostOf(u.url)?.let { baseDomain(it) }?.let { out += it }
+        return out
+    }
+
+    /** The domain in your vault this page looks like but isn't, if any. */
+    fun lookalikeOf(pageHost: String, savedDomains: Iterable<String>): String? {
+        val known = LinkedHashSet<String>()
+        for (d in savedDomains) baseDomain(d.lowercase())?.let { known += it }
+        return lookalikeAmong(pageHost, known)
+    }
+
+    /** The same, for sites already worked down to their base domains: nothing's parsed per site,
+     *  which on a big vault is most of the time. */
+    fun lookalikeAmong(pageHost: String, known: Set<String>): String? {
+        val host = pageHost.lowercase()
+        val ascii = baseDomain(host) ?: return null
+        if (ascii in known) return null
+        for (k in known) if (ascii in sharedWith(k)) return null
+        // A host that arrives written out in Unicode is compared as written: that's the point of
+        // a homoglyph. Browsers mostly hand over the xn-- form, which is what isPuny is for.
+        val page = if (host.all { it.code < 128 }) ascii else runCatching { java.net.IDN.toUnicode(ascii) }.getOrDefault(ascii)
+        val isPuny = page.contains("xn--")
+        val pageName = page.substringBefore('.')
+        // Read as the letters it stands for, so the warning can name the site it's dressed as.
+        val pageSkel = skeleton(if (isPuny) runCatching { java.net.IDN.toUnicode(pageName) }.getOrDefault(pageName) else pageName)
+        for (k in known) {
+            val name = k.substringBefore('.')
+            if (name.length < 4) continue
+            if (pageName == name) return k // same name, different suffix: paypal.co vs paypal.com
+            if (skeleton(name) == pageSkel) return k
+            val limit = if (name.length >= 8) 2 else 1
+            if (kotlin.math.abs(pageName.length - name.length) <= limit && editDistance(pageName, name) <= limit) return k
+            if (pageName.contains(name) && SCAM_WORD.containsMatchIn(pageName)) return k
+        }
+        // Punycode that's close to nothing here still gets the warning, as in match.ts.
+        return if (isPuny) known.firstOrNull { it.substringBefore('.').length >= 4 } else null
+    }
+
     // ---- Android apps ----
 
     const val APP_SCHEME = "androidapp://"

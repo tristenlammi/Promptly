@@ -124,7 +124,14 @@ private fun Root(activity: PasswordsActivity) {
             refresh++
         }
         !client.unlocked -> UnlockPane(activity, "Unlock Passwords", { refresh++ })
-        else -> MainScreen(activity)
+        else -> {
+            // Once. If it's all on already there's nothing to lead anyone through.
+            var guide by remember {
+                if (!Pw.prefs.setupGuideDone && SetupGuide.allOn(activity)) Pw.prefs.setupGuideDone = true
+                mutableStateOf(!Pw.prefs.setupGuideDone)
+            }
+            if (guide) Column(Modifier.fillMaxSize().safeDrawingPadding()) { SetupGuideScreen { guide = false } } else MainScreen(activity)
+        }
     }
 }
 
@@ -399,9 +406,14 @@ private fun CreateVault(activity: FragmentActivity, onDone: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var kit by remember { mutableStateOf<String?>(null) }
     var typed by remember { mutableStateOf("") }
+    var offerFamily by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     activity.hashCode()
 
+    if (offerFamily) {
+        FamilyStep(client, onDone)
+        return
+    }
     val shown = kit
     if (shown != null) {
         Text("Your Secret Key", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -413,7 +425,7 @@ private fun CreateVault(activity: FragmentActivity, onDone: () -> Unit) {
         Button(onClick = {
             scope.launch {
                 withContext(Dispatchers.IO) { runCatching { client.api.confirmKit() } }
-                onDone()
+                offerFamily = true
             }
         }, enabled = typed.trim().equals(SecretKeys.lastGroup(shown), true), modifier = Modifier.testTag("kit-done")) { Text("I've saved it") }
         return

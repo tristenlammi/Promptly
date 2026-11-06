@@ -10,7 +10,6 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 import androidx.fragment.app.FragmentActivity
@@ -54,13 +53,14 @@ object ChromeSetup {
         runCatching { context.startActivity(i) }
     }
 
-    /** Is our provider on? Read from the setting Android keeps, as this app can't ask directly. */
+    /** Is our provider on? Android answers this itself: the settings behind it aren't readable by
+     *  an app, so reading them only ever said no. */
     fun credentialProviderEnabled(context: Context): Boolean? {
         if (Build.VERSION.SDK_INT < 34) return null
-        val me = ComponentName(context, PromptlyCredentialProviderService::class.java).flattenToString()
-        val on = runCatching { Settings.Secure.getString(context.contentResolver, "credential_service") }.getOrNull()
-        val primary = runCatching { Settings.Secure.getString(context.contentResolver, "credential_service_primary") }.getOrNull()
-        return (on?.contains(me) == true) || (primary?.contains(me) == true)
+        return runCatching {
+            context.getSystemService(android.credentials.CredentialManager::class.java)
+                .isEnabledCredentialProviderService(ComponentName(context, PromptlyCredentialProviderService::class.java))
+        }.getOrDefault(false)
     }
 
     fun openCredentialSettings(context: Context) {
@@ -69,6 +69,47 @@ object ChromeSetup {
         val sent = pending != null && runCatching { pending.send() }.isSuccess
         if (!sent) runCatching { context.startActivity(Intent("android.settings.CREDENTIAL_PROVIDER")) }
     }
+}
+
+/** Site icons, once fetched, for as long as the vault's open: which sites you asked about says
+ *  which accounts you have, so they don't outlast a lock, and they're never written down. */
+object SiteIconCache {
+    private const val BIGGEST = 4096
+    private const val SHOWN = 96
+    private val known = HashMap<String, android.graphics.Bitmap?>()
+
+    @Synchronized
+    fun has(domain: String) = known.containsKey(domain)
+
+    @Synchronized
+    fun peek(domain: String) = known[domain]
+
+    /** Blocking. A site with no icon is remembered. A server that can't be reached isn't. */
+    fun load(client: org.promptly.sync.passwords.core.VaultClient, domain: String): android.graphics.Bitmap? {
+        val bytes = try {
+            client.api.icon(domain)
+        } catch (e: org.promptly.sync.passwords.core.OfflineError) {
+            return null
+        } catch (e: org.promptly.sync.passwords.core.ApiError) {
+            null
+        }
+        val image = bytes?.let { decode(it) }
+        synchronized(this) { known[domain] = image }
+        return image
+    }
+
+    /** Whatever the bytes say they are, nothing bigger than this gets as far as memory. */
+    fun decode(bytes: ByteArray): android.graphics.Bitmap? = runCatching {
+        val size = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, size)
+        if (size.outWidth <= 0 || size.outHeight <= 0 || size.outWidth > BIGGEST || size.outHeight > BIGGEST) return@runCatching null
+        var sample = 1
+        while (maxOf(size.outWidth, size.outHeight) / (sample * 2) >= SHOWN) sample *= 2
+        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample })
+    }.getOrNull()
+
+    @Synchronized
+    fun forgetMemory() = known.clear()
 }
 
 /** Quick Settings tile: shows locked or unlocked. Tapping while unlocked locks; tapping

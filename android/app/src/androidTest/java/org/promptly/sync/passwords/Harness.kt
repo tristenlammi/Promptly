@@ -52,10 +52,11 @@ object Harness {
 
     /** A real account in the real offline copy and Keystore, on no server at all: the
      *  server address refuses connections, so every sync reports offline. */
-    fun seedOffline(): VaultClient {
+    fun seedOffline(server: String = "http://localhost:1"): VaultClient {
         clearScreen()
         Pw.init(ctx)
         runCatching { Pw.forgetDevice() }
+        Pw.prefs.setupGuideDone = true
         val secret = randomBytes(16)
         val salt = randomBytes(16)
         val accountId = randomUuid()
@@ -65,7 +66,7 @@ object Harness {
         val keyset = Keyset.random()
         val vaultKey = randomBytes(32)
         val grant = grantVaultKey(userId, keyset, vaultId, userId, keyset.x25519Pub, 1, vaultKey)
-        Pw.connect("http://localhost:1", "pwd_offline", "device-1")
+        Pw.connect(server, "pwd_offline", "device-1")
         Pw.db.clear()
         Pw.db.putAccount(CachedAccount(accountId, userId, KdfParams.FLOOR, b64u(salt), b64u(wrapKeyset(root.unlock, accountId, keyset)), b64u(keyset.x25519Pub), b64u(keyset.ed25519Pub), true, null))
         Pw.db.putVault(CachedVault(vaultId, "personal", 0, 0, 1, sealField(vaultKey, vaultId, "name", JsonPrimitive("Personal")), "manage", b64u(grant.wrapped), b64u(grant.signature), userId, 1, true, 1))
@@ -265,6 +266,18 @@ object Harness {
             last = now
         }
         device.findObject(By.res(tag)).click()
+    }
+
+    /** The same scrolling, for something that's only to be looked at. */
+    fun scrollToTag(tag: String) {
+        dismissKeyboard()
+        val h = device.displayHeight
+        var tries = 0
+        while (device.findObject(By.res(tag)) == null && tries++ < 12) {
+            device.swipe(device.displayWidth / 2, h * 45 / 100, device.displayWidth / 2, h * 15 / 100, 30)
+            Thread.sleep(500)
+        }
+        waitFor(By.res(tag), 3_000)
     }
 
     fun dismissKeyboard() {

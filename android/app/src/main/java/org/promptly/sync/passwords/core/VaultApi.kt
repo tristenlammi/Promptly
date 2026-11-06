@@ -211,10 +211,32 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
     /** Five hash characters out, padded replies back: k-anonymity through the server. */
     fun breachRange(prefix: String): String = call("POST", "/breach/range", buildJsonObject { put("prefix", prefix) }) ?: ""
 
-    /** Which sites support 2FA: for the Security check's advice. */
-    fun twoFaDirectory(): Map<String, String?> {
-        val o = (obj(call("GET", "/directory"))["twofa"] as? JsonObject) ?: return emptyMap()
-        return o.mapValues { (_, v) -> (v as? JsonObject)?.str("documentation") }
+    /** Which sites support 2FA and passkeys: for the Security check's advice. */
+    fun directory(): SiteDirectory = SiteDirectory.parse(call("GET", "/directory"))
+
+    /** Null if the server's answer doesn't make sense. */
+    fun survival(): SurvivalOut? = Survival.parse(call("GET", "/survival"))
+
+    /** A site's icon, through the server, which sees the name at that moment and keeps nothing.
+     *  In the body, so it stays out of access logs. Too much back is the same as nothing. */
+    fun icon(domain: String): ByteArray? {
+        val b = Request.Builder().url("$baseUrl/api/passwords/icon").cacheControl(noStore)
+            .post(buildJsonObject { put("domain", domain) }.toString().toRequestBody(JSON))
+        auth()?.let { b.header("Authorization", "Bearer $it") }
+        session?.let { b.header("X-Vault-Session", it) }
+        val res = try {
+            http.newCall(b.build()).execute()
+        } catch (e: IOException) {
+            throw OfflineError(e)
+        }
+        res.use { r ->
+            if (r.code == 404) return null
+            if (!r.isSuccessful) throw ApiError(r.code, r.message, r.header("Retry-After")?.toIntOrNull()?.takeIf { it > 0 })
+            val source = r.body.source()
+            source.request(SiteIcons.MAX_BYTES + 1L)
+            if (source.buffer.size > SiteIcons.MAX_BYTES) return null
+            return source.buffer.readByteArray()
+        }
     }
 
     fun putHealth(weak: Int, reused: Int, breached: Int, old: Int) {
@@ -231,6 +253,16 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
     }
 
     fun deleteSend(id: String) { call("DELETE", "/sends/$id") }
+
+    /** Posts a link and nothing else: these two have nowhere to put a secret, and the server
+     *  writes the message itself. */
+    fun sendViaRooms(id: String, link: String, userId: String) {
+        call("POST", "/sends/$id/via-rooms", buildJsonObject { put("link", link); put("user_id", userId) })
+    }
+
+    fun sendViaMail(id: String, link: String, to: String) {
+        call("POST", "/sends/$id/via-mail", buildJsonObject { put("link", link); put("to", to) })
+    }
 
     private fun emergency(o: JsonObject) = EmergencyOut(
         o.str("id")!!, o.str("grantor_id")!!, o.str("grantor") ?: "", o.str("grantee_id")!!, o.str("grantee") ?: "", o.int("wait_days") ?: 0, o.str("state") ?: "",

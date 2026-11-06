@@ -6,10 +6,10 @@ Written during the build. Decisions, what was checked and how, and the limits. C
 
 | Where | What |
 |---|---|
-| `passwords/core/` | Pure JVM, no Android imports. The Kotlin twin of `frontend/src/passwords/core`: `Bytes`, `Primitives`, `Format`, `Keys` (and safety words), `Model`, `Match`, `Totp`, `Generator`, `Passkeys`, `Store`, `VaultApi`, `VaultClient`. |
+| `passwords/core/` | Pure JVM, no Android imports. The Kotlin twin of `frontend/src/passwords/core`: `Bytes`, `Primitives`, `Format`, `Keys` (and safety words), `Model`, `Match`, `Totp`, `Generator`, `Passkeys`, `Store`, `VaultApi`, `VaultClient`, `Connections` (duplicates, survival, the export reminder, Send records, site icons, the directories). |
 | `passwords/Pw.kt` | The one client for the process, SQLite offline copy, Keystore seal, settings, auto-lock. Every surface goes through it. |
 | `passwords/Biometrics.kt`, `Clip.kt`, `Surfaces.kt` | Biometric wrap, sensitive clipboard, Chrome setup, Quick Settings tile, SMS User Consent. |
-| `passwords/ui/` | Native Compose: `PasswordsActivity` (connect, join, unlock), `Items.kt` (list, view, editor), `Tools.kt` (bar, generator, 2FA, trash, devices, settings), `Common.kt`. |
+| `passwords/ui/` | Native Compose: `PasswordsActivity` (connect, join, unlock), `Items.kt` (list, view, editor), `Tools.kt` (bar, generator, 2FA, trash, devices, settings), `Extras.kt` (Security check, shared vaults, import and export, Send, emergency), `Notices.kt` (guided setup, Family, survival, kit gate, export reminder, lookalike warning), `Common.kt`. |
 | `passwords/autofill/` | `PromptlyAutofillService`, `FormParser`, `AutofillIndex`, `Trust.kt` (browser allowlist, asset links), `AutofillAuthActivity`, `AutofillSaveActivity`. |
 | `passwords/credentials/` | `PromptlyCredentialProviderService`, `CredentialActivity`. |
 | `org/promptly/sync/Updater.kt` | Downloads an update, checks its SHA-256 and signer, then hands it to Android's installer. |
@@ -52,6 +52,15 @@ Written during the build. Decisions, what was checked and how, and the limits. C
 | A30 | **"Ask again" and passkey confirmation open what's sealed under the biometric key.** If that key doesn't exist, biometric unlock isn't on and it's the master password. A new fingerprint kills the key, so it goes back to the password. | This is a change: a phone with a fingerprint but biometric unlock off now gets the password prompt. |
 | A31 | **Asset link answers: sealed, a day until they're asked again, a week until they're dropped.** Only a 200 or 404 changes one. | Replaces A10's "a cached yes is kept". Which sites got asked about shows which accounts you have. Sealing needs an unlocked phone, so one that can't be saved stays in memory until the vault locks. |
 | A32 | **Cleartext is debug only.** `src/main` allows none; `src/debug` adds `localhost` and `10.0.2.2`. `src/emulatorRelease` does the same only with `-PemulatorAbi`, so a release build can be tried against the test stack. | It's never in what ships without that property. |
+| A33 | **Guided setup shows once, after the first time a vault opens here, whichever way it was reached.** Finishing and skipping both end it, and it outlasts "Forget this device". If everything's on already it doesn't appear. Each step only opens the system's or Chrome's own screen. | It's about this phone's settings, not the vault, so a different vault on the same phone doesn't need it again. Settings keeps the same controls. "I'm done" doesn't check anything is on: Chrome's setting can't be turned on from a test, and it isn't worth trapping anyone over. |
+| A34 | **The export reminder: every 90 days, counted from this phone's last encrypted export, or from when it first opened the vault. "Later" is 14 days.** A notification from the same 30-minute worker as the alerts, once for each stretch of being due and with no vault data in it, then a notice in the app with "Export now", which opens a screen that does that and nothing else. A plain file doesn't count as an export. | Plan 5.6 leaves the interval open. Three months is short enough that a lost server costs little, and rare enough not to be tuned out. It's also posted when the server's down, which is when you'd most want a copy. |
+| A35 | **Lookalikes in autofill, by the extension's rule: only when no login is really saved for the page.** Such a page gets no logins, cards, identities or Search row, and no save prompt, since saving would make it a known site. It gets one row, "Looks like X", and only on a login form. That opens a warning: "Don't fill" on top and standing out, then a second button that ignores presses for 600 ms (the button rule from D45). Past it you pick a login, it fills once, and "remember" isn't offered. `AutofillAuthActivity` works it out again from the decrypted vault, so a stale index or a card's row can't get past it. | D49 took lookalike rows out of the extension's inline menu because anything on the page could fake a click on them. Android's row is drawn by the system, outside the page, and only opens our own screen, so it stays as the way to get to the warning. It's the closest thing here to the extension's popup. An app's `webDomain` is only a claim (A7), and it's still checked: a linked app's own login doesn't clear a claimed page that looks like a saved site. |
+| A36 | **Credential Manager: an entry for a lookalike page is labelled, and picking it opens the same warning.** It has no search, so nothing is offered on a page with no matching login at all. So the warning can only come up for a login matched by pattern, where the page's name was never typed in, or for a passkey whose browser origin isn't on its RP's domain (Related Origin Requests). | Everything else already gets nothing. **This means a phishing page gets silence from the sheet, not a warning**, which is what plan 5.13 is after: nothing fills. |
+| A37 | **Merging goes further than `mergeDuplicates` in two ways.** An attachment on a dropped copy is sealed again under the kept item, with a new id and key. And if any copy has "ask again", the merged one does. | `connections.ts` copies the reference. Its chunks are bound to the item they were uploaded on (`aChunkOnlyOpensUnderTheItemItWasUploadedOn`), so on the web a moved attachment stops opening, and the server deletes it when the dropped item's purged. See "For the web vault" below. Without the second, a guarded password would land unguarded in the kept item's history. |
+| A38 | **An upload's resume record is sealed under the vault key, in the local store's meta.** The web uses a device key. The same rule for what counts as the same file: item, name and size. | `core/` has no Keystore, and the local copy is already only safe as far as the vault key is. **A different file with the same name and size would mix chunks with an interrupted one**, same as the web. |
+| A39 | **Site icons: only after a vault says yes, memory only, gone on lock.** A malformed or non-boolean `icon` is off. Only a plain domain is asked about, so an IP, a local name or an app's id never goes out. An answer over 256 KiB is refused, and the system decoder's given bounds first and samples down. | Which sites you asked about says which accounts you have. A shared vault's member can turn icons on for that vault, or set `icon` on one item, as on the web: the worst it does is have your server fetch a favicon. |
+| A40 | **A `/survival` answer that doesn't make sense is no answer.** Both booleans have to be real booleans, or it's ignored and the kit gate doesn't open. The notices don't show while an item's being edited. The gate has no way past it, except on a phone that can't read its own key. | A server shouldn't get to throw up the Secret Key on a whim, though one that says plainly `kit_confirmed: false` can, as it can on the web. FLAG_SECURE's on throughout. |
+| A41 | **A folder's delete, and merging, only touch vaults you can edit.** `vault.ts` tries regardless. | A write the server's going to refuse would sit dirty on this phone for good. |
 
 ## Security notes, for `SECURITY.md`
 
@@ -99,6 +108,13 @@ Found while porting. Not changed, since `frontend/` isn't mine to edit:
 3. **`mergeTrustBook` in `sync` only runs on reaching a non-personal vault,** and a device with no shared vault doesn't pick up the book until then. A later `saveTrustBook` can then overwrite what other devices wrote. Android merges at the end of a sync that didn't get to it.
 4. **Two devices that both create a `trust` item offline** leave two. `vault.ts` reads one. Android unions them.
 
+### For the web vault
+
+Found while porting. Not changed, since `frontend/` isn't mine to edit:
+
+1. **`mergeDuplicates` breaks attachments.** It moves a dropped item's attachment reference to the kept item, but a chunk's additional data includes the item it was uploaded on (`chunkAad` in `attachments.ts`), so `downloadAttachment` under the kept item's id fails. The dropped item's purge after 30 days then deletes the chunks on the server (`service.py`). Until then it can be got back by restoring the item from Trash. Found by reading the code and the test above; I didn't run the merge on the web client. Android seals it again (A37).
+2. **The web's merge doesn't carry `reprompt`.** A guarded password can move to an unguarded item's history.
+
 ## Differences from `vault.ts`
 
 - Same sync, same three-way merge, same rollback check; the JVM tests run them against the stack. Differences are mechanical: synchronous, a `SecretKeeper` interface in place of IndexedDB's non-extractable key, and `lock()` as in A15.
@@ -112,12 +128,12 @@ A WebView gives no form at all on an `http` page, which matches "HTTP sites need
 ## Not built
 
 - **Import:** only browser CSVs (Chrome, Edge, Firefox, Google, Apple), Bitwarden JSON and Promptly's own exports. The screen sends people to the web vault for 1Password, KeePass, LastPass-specific fields, Dashlane, Proton and CXF. Google's migration file isn't read.
-- **Secure Send:** create, copy, list and delete, for text and a file. Opening someone's Send link goes to the web page.
-- **Emergency access:** see, refuse, accept, open once it's due, and end. Naming a new contact is on the web vault, though the Android client has `emergencyInvite` and the decision syncs through the trust book.
+- **Secure Send:** opening someone's Send link goes to the web page. A Send made elsewhere and not synced yet shows as "Sent from another device", with no link to copy.
 - **Attachments:** preview is images and text. Other types are saved and opened elsewhere.
 - **Autofill:** "teach it once" isn't here. Live refresh of the allowlist (A8) isn't either. The suggestion cap is 8 logins, then Search.
 - `QR from an existing device` in the sense of 3.4: the web client doesn't have one either. Kit QR, 2FA QR, device-join QR and Wi-Fi QR are built.
 - The people list comes from `GET /people`, capped at 500 by the server and with no search on the phone.
+- From the feature audit, not asked for this round and still not here: the activity log, codes from Mail (5.1), the Today count (5.7), the security-email watch (5.8), the change-password helper (5.10), plus-address sign-ups (5.11), Files and Calendar for documents (5.12), saving your Promptly login at setup (5.14). FIDO CXF and the other importers are as above.
 
 ## Follow-ups outside `android/`
 
@@ -127,6 +143,43 @@ These weren't touched, as asked:
 - `passwords/SECURITY.md`: the section above.
 - `CHANGELOG.md`: an `[Unreleased]` line for M8.
 - `passwords/DECISIONS.md`: M8 row and a pointer here.
+
+## What was run, 2026-11-07
+
+Final code, for the features that finished the client. AVD `PromptlyTest` (API 36, Google Play image, x86_64), the `:8092` stack.
+
+- **JVM:** `gradlew :app:cleanTestDebugUnitTest :app:testDebugUnitTest "-Dpw.stack=http://localhost:8092"`: 192 tests, 0 failed, 0 skipped. CarTemplatesTest 8, CoreTest 54, FinishingTest 33 (new), HostileTest 34, ReviewFixesTest 17, StackTests 28 (3 new), VectorsTest 18. The new stack tests have the real TypeScript client read back what these features write: a renamed and deleted folder, `prefs` and `send` items, a merged login, and a moved attachment it downloads and checks. It also runs `lookalikeOf`, `editDistance` and `skeleton` over the shared list in `match-vectors.json`, in `cross.test.ts`, with no change to `frontend/`.
+- **Instrumented:** `android/run-passwords-tests.ps1`: 89 run, OK. 86 exercised: AutofillE2ETest 24, CredentialManagerE2ETest 6, DeviceCryptoTest 11, FeaturesUiTest 12, FinishingUiTest 22 (new), VaultUiTest 11. 3 skipped by that script, as before: BiometricE2ETest 2, SmsConsentTest 1.
+- `android/run-biometric-test.ps1`: 2 of 2, on the real system prompt, as a check that the first-run screens did not get in its way.
+- SmsConsentTest wasn't run again. Nothing it uses changed.
+- `lintVitalRelease` passes.
+- **Failures on the way, and what they were.** A real bug: `credentialProviderEnabled` read two settings an app isn't allowed to read, so it always said no, in Settings too, since it was written. It now asks `CredentialManager.isEnabledCredentialProviderService`. A real problem: a lookalike check on a site with no login took 1.9 s on 5,000 items, from parsing every address three times. It now uses the index's base domains: 30 ms median. In the tests: folder chips scrolled out of reach behind nine others, so folders got their own row, which is better on a phone anyway; Android's clipboard preview took a tap meant for the button under it; the keyboard closing a moment after its dialog turned a Back into leaving the screen; and a test that hadn't called `Pw.touch()` got locked on open.
+- **One failure not explained.** In one run of the real-stack story, the Emergency screen still showed "Waiting for them to accept" 20 s after the server said the keys were sealed, with no error on screen. It passed on the next two runs, and logging showed the screen's five-second look working. My guess is one request sitting on this emulator's network, since the poll does one thing at a time, but I didn't catch it, and I raised that wait to 60 s.
+
+### What the new UI tests do through real screens
+
+- Tag filter, including a tag that goes away. Folder rename and delete, down to the JSON `null` the web writes.
+- Site icons on the Settings toggle, with a small server on the phone standing in: nothing goes out until it's on, and it goes away when it's off. The toggle on a shared vault's card against the stack. The real proxy is only asked in a JVM test, for a bad name (400) and a host with no icon. A real site's icon coming back through it hasn't been seen.
+- Duplicate merge, the passkey group, every survival warning, the kit gate, recovery check, device and recovery notices, rubbish from `/survival`, the export reminder seen as a notification, then from its notice through to the saved file, and guided setup, finished and skipped, with the real system screens opened.
+- Lookalike warning in the real autofill service, driven through the test browser: the row, the warning, its order, both answers. A card and an app's claimed page by opening the sheet directly.
+- A Family vault at first run, on the real stack. Sends named, Rooms really posted, Mail's refusal, deleted with its record. An emergency contact named, sealed, asked, refused and ended, then the same from the contact's side. An upload dropped, then resumed by picking the file again.
+
+### Compiled only, or not exercised this way
+
+- **Credential Manager's warning came from a request made inside the test,** with the debug hook letting the test browser name an origin. A real browser hasn't asked through the sheet. The label on the entry itself isn't seen on screen. The passkey branch of the warning is compiled only.
+- **No Family offer when there's nobody else:** compiled only, as every run has others on the stack. The offer's wording is seen, with the count.
+- **Chrome's step in the guide:** the row is read and its button isn't tapped. "Autofill using another service" stays on the owner's checklist.
+- **Send by Mail, posted for real:** only the refusal for a user with no Mail account. The request's shape is tested, and so is posting through Rooms.
+- **Send of a file writing its record, the key-changed notice, the emergency "Open their vault" button once a wait's passed, and a Send's "Finished" line on screen:** compiled, with what's under them tested on the JVM.
+- **Guided setup on Android 10 to 13,** where the passkey step isn't there: compiled, since the AVD's API 36.
+
+### Added to the owner's real-phone checklist
+
+- First unlock on a real phone: the guide's three steps, with Chrome's setting reached from its button and reported as done after a restart of Chrome.
+- A real lookalike in Chrome once it's set up: save a throwaway login, open a near-miss domain you control, and check the row and warning.
+- A real site's icon, with the toggle on, then the same with it off.
+- The export reminder's notification on a locked phone. Set the phone's date ahead, or wait.
+- Post a Send by Mail, from an account with Mail set up.
 
 ## What was run, 2026-11-06
 

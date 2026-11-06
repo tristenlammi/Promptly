@@ -137,6 +137,13 @@ class PromptlyAutofillService : AutofillService() {
         }
 
         val site = (target as? FillTarget.Web)?.domain ?: appLabel(pkg)
+        // Not an ordinary suggestion: no logins, cards or names, and nothing offered to save, since
+        // a saved login would turn this into a known site. One row, and it opens a warning first.
+        val looks = AutofillIndex.lookalikeFor(lookup, target, hits)
+        if (looks != null) {
+            if (form.hasLogin) addDataset(AutofillAuthActivity.MODE_PICK, null, "Looks like $looks", "It isn't. Opens a warning first")
+            return if (added == 0) null else response.build()
+        }
         if (form.hasLogin) {
             for (h in hits.take(8)) {
                 addDataset(AutofillAuthActivity.MODE_LOGIN, h.entry.itemId, h.entry.title ?: "Login for $site", h.entry.username ?: if (Pw.unlocked) null else "Tap to unlock", h.downgrade)

@@ -25,6 +25,7 @@ import kotlinx.coroutines.withContext
 import org.promptly.sync.R
 import org.promptly.sync.passwords.core.Alerts
 import org.promptly.sync.passwords.core.ApiError
+import org.promptly.sync.passwords.core.ExportReminder
 import org.promptly.sync.passwords.core.OfflineError
 import org.promptly.sync.passwords.core.VaultApi
 import org.promptly.sync.passwords.ui.PasswordsActivity
@@ -58,14 +59,14 @@ object AlertsCheck {
         prefs(context).edit().clear().apply()
         // This phone's left the account: what was waiting isn't its business any more.
         val nm = context.getSystemService(NotificationManager::class.java)
-        for (id in 1..3) nm.cancel("pw-alert", id)
+        for (id in 1..4) nm.cancel("pw-alert", id)
     }
 
     private fun channel(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Passwords", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "A new device, an invitation or an emergency request is waiting."
+                description = "A new device, an invitation or an emergency request is waiting, or it's time for an encrypted export."
             })
         }
     }
@@ -89,11 +90,21 @@ object AlertsCheck {
         context.getSystemService(NotificationManager::class.java).notify("pw-alert", id, n)
     }
 
+    /** Needs no vault session and says nothing about the vault, and it's worth saying with the
+     *  server down: that's when you'd want the copy. */
+    private fun remindAboutExport(context: Context) {
+        val p = Pw.prefs
+        if (!ExportReminder.shouldNotify(p.exportLast, p.exportSince, p.exportSnoozedUntil, p.exportNotifiedAt)) return
+        p.exportNotifiedAt = System.currentTimeMillis()
+        post(context, 4, "Time for an encrypted export", "Open Passwords to save a copy of your vault.")
+    }
+
     /** One look. Blocking. True when it can stop; false to try again later. */
     fun run(context: Context): Boolean {
         Pw.init(context)
         val server = Pw.prefs.server ?: return true
         val token = Pw.prefs.alertToken ?: Pw.prefs.deviceToken ?: return true
+        remindAboutExport(context)
         val now = try {
             VaultApi(server, { token }).alerts()
         } catch (e: OfflineError) {

@@ -47,6 +47,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonPrimitive
@@ -64,8 +65,11 @@ import org.promptly.sync.passwords.core.KeyChangedError
 import org.promptly.sync.passwords.core.MemberOut
 import org.promptly.sync.passwords.core.NeedsPasswordError
 import org.promptly.sync.passwords.core.Person
+import org.promptly.sync.passwords.core.EmergencyText
 import org.promptly.sync.passwords.core.SecureSend
 import org.promptly.sync.passwords.core.SendOut
+import org.promptly.sync.passwords.core.SendRecords
+import org.promptly.sync.passwords.core.SiteDirectory
 import org.promptly.sync.passwords.core.VaultClient
 import org.promptly.sync.passwords.core.newBody
 
@@ -103,7 +107,7 @@ private fun IssueSection(title: String, explain: String, tag: String, items: Lis
 }
 
 @Composable
-fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onBack: () -> Unit) {
+fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onExport: () -> Unit, onBack: () -> Unit) {
     var report by remember { mutableStateOf<HealthReport?>(null) }
     var progress by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -113,8 +117,8 @@ fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onBack: (
         error = null
         val r = withContext(Dispatchers.IO) {
             runCatching {
-                val dir = runCatching { client.api.twoFaDirectory() }.getOrDefault(emptyMap())
-                Health.run(client.allItems(), { client.api.breachRange(it) }, dir) { d, t -> progress = "Checking $d of $t" }
+                val dir = runCatching { client.api.directory() }.getOrDefault(SiteDirectory.EMPTY)
+                Health.run(client.allItems(), { client.api.breachRange(it) }, dir.twofa, passkeys = dir.passkeys) { d, t -> progress = "Checking $d of $t" }
             }
         }
         r.onSuccess { report = it }.onFailure { error = errorText(it) }
@@ -122,6 +126,8 @@ fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onBack: (
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Header("Security check", onBack)
+        SurvivalPanel(client, onExport)
+        DuplicatesPanel(client, onOpen)
         Text("All worked out on this phone. Only the first five characters of each password's SHA-1 leave it, through your server, to ask whether it's been in a breach.", style = MaterialTheme.typography.bodySmall)
         if (progress.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CircularProgressIndicator()
@@ -138,8 +144,55 @@ fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onBack: (
             IssueSection("Not secure", "Saved for an http address.", "http", r.http.map { it to null }, onOpen)
             IssueSection("2FA available", "These sites offer it, and you haven't set it up here.", "no2fa", r.no2fa.map { it.first to it.second }, onOpen)
             IssueSection("No 2FA saved", "Worth checking whether these sites offer it.", "nototp", r.noTotp.map { it to null }, onOpen)
+            IssueSection("Could use a passkey", "These sites support passkeys.", "nopasskey", r.noPasskey.map { it to null }, onOpen)
+            Text("Data sourced from 2FA Directory by 2factorauth (2fa.directory) and Passkeys Directory by 2factorauth (passkeys.2fa.directory). Breach data from Have I Been Pwned.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("health-credit"))
             OutlinedButton(onClick = { run++ }, Modifier.testTag("health-again")) { Text("Check again") }
         }
+    }
+}
+
+/** Same site, same username, saved twice. */
+@Composable
+private fun DuplicatesPanel(client: VaultClient, onOpen: (String) -> Unit) {
+    val ctx = LocalContext.current
+    val version by Pw.version.collectAsState()
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var groups by remember { mutableStateOf<List<List<Item>>>(emptyList()) }
+    LaunchedEffect(version) { groups = withContext(Dispatchers.IO) { runCatching { client.duplicates() }.getOrDefault(emptyList()) } }
+    if (groups.isEmpty() && error == null) return
+    Column(Modifier.testTag("duplicates"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("Saved twice", fontWeight = FontWeight.SemiBold)
+        Text("Same site, same username. Merging keeps the newest, and moves other passwords to its history, so nothing's lost.", style = MaterialTheme.typography.bodySmall)
+        error?.let { ErrorCard(it) }
+        busy?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("duplicate-busy")) }
+        for (g in groups) {
+            Row(Modifier.fillMaxWidth().testTag("duplicate-${g[0].body.title}"), verticalAlignment = Alignment.CenterVertically) {
+                Text("${g[0].body.title}, ${g[0].body.username}, ${g.size} copies", Modifier.weight(1f).clickable { onOpen(g[0].id) })
+                TextButton(onClick = {
+                    busy = "Merging"
+                    error = null
+                    scope.launch {
+                        val r = withContext(Dispatchers.IO) { runCatching { client.mergeDuplicates(g) { d, t -> busy = "Moving attachments: $d of $t MB" } } }
+                        busy = null
+                        r.onSuccess { toast(ctx, "Merged. The others are in Trash for 30 days.") }.onFailure { error = errorText(it) }
+                    }
+                }, enabled = busy == null, modifier = Modifier.testTag("duplicate-merge")) { Text("Merge") }
+            }
+        }
+    }
+}
+
+/** Who gets a say over which vaults show site icons. Off unless turned on, per vault. */
+@Composable
+fun VaultIconsToggle(client: VaultClient, vaultId: String, tag: String) {
+    val version by Pw.version.collectAsState()
+    val scope = rememberCoroutineScope()
+    val on = remember(version, vaultId) { runCatching { vaultId in client.iconVaults() }.getOrDefault(false) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Show site icons in this vault. They're fetched through your server, which sees each site's name at that moment.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+        androidx.compose.material3.Switch(on, { want -> scope.launch { withContext(Dispatchers.IO) { runCatching { client.setVaultIcons(vaultId, want) } } } }, Modifier.testTag(tag))
     }
 }
 
@@ -375,6 +428,7 @@ private fun VaultCard(client: VaultClient, v: VaultClient.VaultInfo, people: Lis
                     act { client.addMember(v.vault.id, p.id, role) }
                 }, enabled = adding != null && !busy, modifier = Modifier.testTag("invite-person")) { Text("Invite") }
             }
+            if (manager) VaultIconsToggle(client, v.vault.id, "icons-${v.displayName}")
             if (manager && v.vault.rotateNeeded) {
                 ErrorCard("Someone who could read this vault has gone, and it still has the key they knew. Change it, so nothing new can be read with that key.")
                 OutlinedButton(onClick = {
@@ -530,6 +584,7 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
     var plainTyped by remember { mutableStateOf("") }
     var plainKind by remember { mutableStateOf("json") }
     var exportText by remember { mutableStateOf<String?>(null) }
+    var exportEncrypted by remember { mutableStateOf(false) }
 
     fun read(name: String, bytes: ByteArray, password: String?) {
         busy = "Reading…"
@@ -566,6 +621,7 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
     }
 
     fun writeTo(uri: Uri, text: String) {
+        val encrypted = exportEncrypted
         scope.launch {
             val r = withContext(Dispatchers.IO) {
                 runCatching {
@@ -574,7 +630,10 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
                 }
             }
             exportText = null
-            r.onSuccess { message = "Saved." }.onFailure { error = "That file couldn't be saved." }
+            r.onSuccess {
+                if (encrypted) Pw.prefs.exportLast = System.currentTimeMillis()
+                message = "Saved."
+            }.onFailure { error = "That file couldn't be saved." }
         }
     }
     val saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -647,6 +706,7 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
                 busy = null
                 r.onSuccess {
                     exportText = it
+                    exportEncrypted = true
                     exportPassword = ""
                     exportAgain = ""
                     exportMaster = ""
@@ -676,6 +736,7 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
                 busy = null
                 r.onSuccess {
                     exportText = it
+                    exportEncrypted = false
                     plainTyped = ""
                     exportMaster = ""
                     saver.launch(if (kind == "csv") "promptly-passwords.csv" else "promptly-passwords.json")
@@ -701,6 +762,10 @@ fun SendsScreen(client: VaultClient, onBack: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var list by remember { mutableStateOf<List<SendOut>>(emptyList()) }
     var refresh by remember { mutableIntStateOf(0) }
+    var askedPassword by remember { mutableStateOf(false) }
+    var posting by remember { mutableStateOf<Posting?>(null) }
+    val version by Pw.version.collectAsState()
+    val records = remember(version) { runCatching { client.sendRecords() }.getOrDefault(emptyMap()) }
     LaunchedEffect(refresh) {
         withContext(Dispatchers.IO) { runCatching { client.api.sends() } }.onSuccess { list = it }.onFailure { error = errorText(it) }
     }
@@ -711,15 +776,19 @@ fun SendsScreen(client: VaultClient, onBack: () -> Unit) {
             val name = displayName(ctx, uri)
             val mime = ctx.contentResolver.getType(uri)
             scope.launch {
+                val hadPassword = password.isNotEmpty()
                 val r = withContext(Dispatchers.IO) {
                     runCatching {
                         val bytes = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
-                        SecureSend.create(client.api, SecureSend.filePayload(title.ifBlank { name }, name, mime, bytes), days, views.toIntOrNull(), password.ifEmpty { null })
+                        val made = SecureSend.create(client.api, SecureSend.filePayload(title.ifBlank { name }, name, mime, bytes), days, views.toIntOrNull(), password.ifEmpty { null })
+                        client.recordSend(title.ifBlank { name }, made.link, made.id)
+                        made
                     }
                 }
                 busy = false
                 r.onSuccess {
                     link = it.link
+                    askedPassword = hadPassword
                     password = ""
                     refresh++
                 }.onFailure { error = errorText(it) }
@@ -742,11 +811,19 @@ fun SendsScreen(client: VaultClient, onBack: () -> Unit) {
             Button(onClick = {
                 busy = true
                 error = null
+                val hadPassword = password.isNotEmpty()
                 scope.launch {
-                    val r = withContext(Dispatchers.IO) { runCatching { SecureSend.create(client.api, SecureSend.textPayload(title.ifBlank { "Secure Send" }, text), days, views.toIntOrNull(), password.ifEmpty { null }) } }
+                    val r = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val made = SecureSend.create(client.api, SecureSend.textPayload(title.ifBlank { "Secure Send" }, text), days, views.toIntOrNull(), password.ifEmpty { null })
+                            client.recordSend(title.ifBlank { "Text" }, made.link, made.id)
+                            made
+                        }
+                    }
                     busy = false
                     r.onSuccess {
                         link = it.link
+                        askedPassword = hadPassword
                         text = ""
                         password = ""
                         refresh++
@@ -765,25 +842,115 @@ fun SendsScreen(client: VaultClient, onBack: () -> Unit) {
                         Clip.copySecret(ctx, "Send link", it)
                         toast(ctx, "Link copied")
                     }, Modifier.testTag("send-copy")) { Text("Copy link") }
+                    if (askedPassword) Text("Tell them the password some other way, not in the same message as the link.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("send-password-note"))
                 }
             }
         }
         if (list.isNotEmpty()) Text("Your Sends", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         for (s in list) {
-            Row(Modifier.fillMaxWidth().testTag("send-row"), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Expires ${s.expiresAt.take(10)}", style = MaterialTheme.typography.bodyMedium)
-                    Text(listOfNotNull(s.viewsLeft?.let { "$it views left" }, if (s.hasPassword) "has a password" else null).joinToString(", ").ifEmpty { "No view limit" }, style = MaterialTheme.typography.bodySmall)
-                }
-                TextButton(onClick = {
-                    scope.launch {
-                        withContext(Dispatchers.IO) { runCatching { client.api.deleteSend(s.id) } }.onFailure { error = errorText(it) }
-                        refresh++
+            val rec = records[s.id]
+            val finished = SendRecords.finished(s)
+            Column(Modifier.fillMaxWidth().testTag("send-row")) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        // Only your own vault knows what it's called. Sent elsewhere and not synced yet, it isn't known here.
+                        Text(rec?.title ?: "Sent from another device", fontWeight = FontWeight.Medium, modifier = Modifier.testTag("send-name"))
+                        Text(if (finished) "Finished" else "Expires ${s.expiresAt.take(10)}", style = MaterialTheme.typography.bodySmall)
+                        Text(listOfNotNull(s.viewsLeft?.let { "$it views left" }, if (s.hasPassword) "has a password" else null).joinToString(", ").ifEmpty { "No view limit" }, style = MaterialTheme.typography.bodySmall)
                     }
-                }, Modifier.testTag("send-delete")) { Text("Delete") }
+                    TextButton(onClick = {
+                        scope.launch {
+                            withContext(Dispatchers.IO) { runCatching { client.deleteSend(s.id) } }.onFailure { error = errorText(it) }
+                            refresh++
+                        }
+                    }, Modifier.testTag("send-delete")) { Text("Delete") }
+                }
+                if (rec != null && !finished) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        TextButton(onClick = {
+                            Clip.copySecret(ctx, "Send link", rec.link)
+                            toast(ctx, "Link copied")
+                        }, Modifier.testTag("send-copy-again")) { Text("Copy link") }
+                        TextButton(onClick = { posting = Posting(s.id, rec.link, "rooms") }, Modifier.testTag("send-rooms")) { Text("Rooms") }
+                        TextButton(onClick = { posting = Posting(s.id, rec.link, "mail") }, Modifier.testTag("send-mail")) { Text("Mail") }
+                    }
+                }
+                HorizontalDivider()
             }
         }
     }
+    posting?.let { p -> PostSendDialog(client, p) { posting = null } }
+}
+
+private data class Posting(val id: String, val link: String, val via: String)
+
+/** The link, never what's behind it: there's no field to put a secret in, the record is checked
+ *  to really be a link to this Send, and the server writes the message around it. */
+@Composable
+private fun PostSendDialog(client: VaultClient, p: Posting, onClose: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var people by remember { mutableStateOf<List<Person>>(emptyList()) }
+    var who by remember { mutableStateOf<Person?>(null) }
+    var pick by remember { mutableStateOf(false) }
+    var to by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val rooms = p.via == "rooms"
+    LaunchedEffect(Unit) {
+        if (rooms) withContext(Dispatchers.IO) { runCatching { client.api.people() } }.onSuccess { people = it }.onFailure { error = errorText(it) }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        modifier = Modifier.exposeTags(),
+        title = { Text(if (rooms) "Send in Rooms" else "Send by Mail") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("The link passes through your Promptly server this way, and the link is enough to open it unless it has a password. Copying the link into something end-to-end encrypted is safer.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("send-post-warning"))
+                if (rooms) {
+                    Column {
+                        TextButton(onClick = { pick = true }, Modifier.testTag("send-post-who")) { Text(who?.username ?: "Choose someone") }
+                        DropdownMenu(pick, { pick = false }, Modifier.exposeTags()) {
+                            people.forEach { x ->
+                                DropdownMenuItem({ Text(x.username) }, {
+                                    who = x
+                                    pick = false
+                                }, Modifier.testTag("send-person-${x.username}"))
+                            }
+                        }
+                    }
+                } else {
+                    OutlinedTextField(to, { to = it }, label = { Text("Their email address") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("send-post-to"))
+                }
+                error?.let { ErrorCard(it) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (!SendRecords.isLinkTo(p.id, p.link, client.api.baseUrl)) {
+                    error = "That record doesn't hold a link to this Send, so it wasn't posted."
+                    return@TextButton
+                }
+                busy = true
+                error = null
+                val person = who
+                val address = to.trim()
+                scope.launch {
+                    val r = withContext(Dispatchers.IO) {
+                        runCatching {
+                            if (rooms) client.api.sendViaRooms(p.id, p.link, person!!.id) else client.api.sendViaMail(p.id, p.link, address)
+                        }
+                    }
+                    busy = false
+                    r.onSuccess {
+                        toast(ctx, if (rooms) "Posted in Rooms" else "Queued in Mail")
+                        onClose()
+                    }.onFailure { error = errorText(it) }
+                }
+            }, enabled = !busy && (if (rooms) who != null else to.isNotBlank()), modifier = Modifier.testTag("send-post-go")) { Text("Send the link") }
+        },
+        dismissButton = { TextButton(onClick = onClose, Modifier.testTag("send-post-cancel")) { Text("Cancel") } },
+    )
 }
 
 // ---- Emergency access ---------------------------------------------------------------------
@@ -792,50 +959,112 @@ fun SendsScreen(client: VaultClient, onBack: () -> Unit) {
 fun EmergencyScreen(client: VaultClient, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var rows by remember { mutableStateOf<List<EmergencyOut>>(emptyList()) }
+    var people by remember { mutableStateOf<List<Person>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var refresh by remember { mutableIntStateOf(0) }
+    var who by remember { mutableStateOf<Person?>(null) }
+    var pick by remember { mutableStateOf(false) }
+    var days by remember { mutableStateOf("7") }
+    var asking by remember { mutableStateOf<EmergencyOut?>(null) }
     LaunchedEffect(refresh) {
-        withContext(Dispatchers.IO) { runCatching { client.api.emergencyList() } }.onSuccess { rows = it }.onFailure { error = errorText(it) }
+        while (true) {
+            withContext(Dispatchers.IO) {
+                // A row's only the server's word: this seals keys only to someone you named, on the keys you saw.
+                runCatching { client.refreshEmergency() }
+                runCatching { client.api.emergencyList() }
+            }.onSuccess {
+                rows = it
+                error = null
+            }.onFailure { error = errorText(it) }
+            delay(5000)
+        }
+    }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { runCatching { client.api.people() } }.onSuccess { list -> people = list.filter { it.hasVault } }
     }
     fun act(block: () -> Unit) {
         scope.launch {
-            withContext(Dispatchers.IO) { runCatching { block() } }.onFailure { error = errorText(it) }
-            refresh++
+            error = null
+            val r = withContext(Dispatchers.IO) { runCatching { block() } }
+            r.onFailure { error = errorText(it) }
+            if (r.isSuccess) refresh++
         }
     }
     val me = client.userId
+    val granted = rows.filter { it.grantorId == me }
+    val received = rows.filter { it.granteeId == me }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Header("Emergency access", onBack)
-        Text("Set contacts up from the web vault. Here you can see where things stand, and refuse a request.", style = MaterialTheme.typography.bodySmall)
+        Text("Name someone who can ask for your vault if you can't reach it. When they ask, you get a push and an email, and you can refuse.", style = MaterialTheme.typography.bodySmall)
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer), modifier = Modifier.fillMaxWidth().testTag("emergency-warning")) {
+            Text(EmergencyText.WARNING, Modifier.padding(12.dp), style = MaterialTheme.typography.bodySmall)
+        }
         error?.let { ErrorCard(it) }
         if (rows.isEmpty()) Text("Nothing set up.", Modifier.testTag("emergency-empty"))
-        for (r in rows) {
-            val mine = r.grantorId == me
-            Card(Modifier.fillMaxWidth().testTag("emergency-${if (mine) r.grantee else r.grantor}")) {
+        for (r in granted) {
+            Card(Modifier.fillMaxWidth().testTag("emergency-${r.grantee}")) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(if (mine) "${r.grantee} can ask for your vault" else "You can ask for ${r.grantor}'s vault", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        when (r.state) {
-                            "requested" -> "Asked. It opens ${r.opensAt?.take(16)?.replace('T', ' ') ?: "soon"} unless it's refused."
-                            "invited" -> "Invited, and waiting for an answer."
-                            "opened" -> "Opened."
-                            "ended" -> if (mine) "They've stopped, but they saw your vault. Change the keys." else "Ended."
-                            "refused" -> "The last request was refused."
-                            else -> "Ready, after a ${r.waitDays} day wait."
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.testTag("emergency-state"),
-                    )
+                    Text("${r.grantee} can ask for your vault", fontWeight = FontWeight.SemiBold)
+                    Text("A ${r.waitDays} day wait.", style = MaterialTheme.typography.bodySmall)
+                    Text(EmergencyText.state(r, true), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("emergency-state"))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        if (mine && r.state == "requested") Button(onClick = { act { client.api.emergencyAct(r.id, "refuse") } }, Modifier.testTag("emergency-refuse")) { Text("Refuse") }
-                        if (!mine && r.state == "invited") Button(onClick = { act { client.api.emergencyAct(r.id, "accept") } }, Modifier.testTag("emergency-accept")) { Text("Accept") }
-                        if (!mine && r.state == "requested" && r.opensAt?.let { runCatching { java.time.Instant.parse(it) <= java.time.Instant.now() }.getOrDefault(false) } == true) {
-                            Button(onClick = { act { client.emergencyOpen(r.id) } }, Modifier.testTag("emergency-open")) { Text("Open their vault") }
-                        }
-                        if (mine && (r.state == "opened" || r.state == "ended")) Button(onClick = { act { client.emergencyEnd(r) } }, Modifier.testTag("emergency-end")) { Text("End and change the keys") }
+                        if (r.state == "requested") Button(onClick = { act { client.api.emergencyAct(r.id, "refuse") } }, Modifier.testTag("emergency-refuse")) { Text("Refuse") }
+                        OutlinedButton(onClick = { act { client.emergencyEnd(r) } }, Modifier.testTag("emergency-end")) { Text(if (r.state == "opened" || r.state == "ended") "End and change the keys" else "End") }
                     }
                 }
             }
         }
+        for (r in received) {
+            Card(Modifier.fillMaxWidth().testTag("emergency-${r.grantor}")) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("${r.grantor} trusts you", fontWeight = FontWeight.SemiBold)
+                    Text("A ${r.waitDays} day wait.", style = MaterialTheme.typography.bodySmall)
+                    Text(EmergencyText.state(r, false), style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("emergency-state"))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (r.state == "invited") Button(onClick = { act { client.api.emergencyAct(r.id, "accept") } }, Modifier.testTag("emergency-accept")) { Text("Accept") }
+                        if (EmergencyText.canAsk(r)) OutlinedButton(onClick = { asking = r }, Modifier.testTag("emergency-ask")) { Text("Ask for access") }
+                        if (EmergencyText.due(r)) Button(onClick = { act { client.emergencyOpen(r.id) } }, Modifier.testTag("emergency-open")) { Text("Open their vault") }
+                        OutlinedButton(onClick = { act { client.emergencyEnd(r) } }, Modifier.testTag("emergency-stop")) { Text("Stop being their contact") }
+                    }
+                }
+            }
+        }
+        HorizontalDivider()
+        Text("Add a trusted contact", fontWeight = FontWeight.SemiBold)
+        val available = people.filter { p -> granted.none { it.granteeId == p.id } }
+        Column {
+            TextButton(onClick = { pick = true }, Modifier.testTag("emergency-person")) { Text(who?.username ?: "Choose someone") }
+            DropdownMenu(pick, { pick = false }, Modifier.exposeTags()) {
+                available.forEach { p ->
+                    DropdownMenuItem({ Text(p.username) }, {
+                        who = p
+                        pick = false
+                    }, Modifier.testTag("emergency-person-${p.username}"))
+                }
+            }
+        }
+        OutlinedTextField(days, { v -> days = v.filter { it.isDigit() }.take(3) }, label = { Text("Wait, in days (1 to 90)") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("emergency-days"))
+        val wait = EmergencyText.validWait(days)
+        Button(onClick = {
+            val p = who ?: return@Button
+            val d = wait ?: return@Button
+            who = null
+            act { client.emergencyInvite(p.id, d) }
+        }, enabled = who != null && wait != null, modifier = Modifier.testTag("emergency-add")) { Text("Add") }
+    }
+    asking?.let { r ->
+        AlertDialog(
+            onDismissRequest = { asking = null },
+            modifier = Modifier.exposeTags(),
+            title = { Text("Ask for ${r.grantor}'s vault?") },
+            text = { Text("They'll be told straight away.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    asking = null
+                    act { client.api.emergencyAct(r.id, "request") }
+                }, Modifier.testTag("emergency-ask-confirm")) { Text("Ask") }
+            },
+            dismissButton = { TextButton(onClick = { asking = null }) { Text("Not now") } },
+        )
     }
 }

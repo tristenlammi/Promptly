@@ -59,6 +59,22 @@ object Attachments {
         return AttachmentRef(id, name, size, b64u(raw), chunks, mime)
     }
 
+    /** A chunk's bound to the item it was uploaded on, so a file only moves to another item by being
+     *  sealed again under it: a new id and key, one chunk at a time, and the old copy left alone. */
+    fun rehome(api: VaultApi, vaultId: String, fromItem: String, toItem: String, ref: AttachmentRef, onProgress: (Int, Int) -> Unit = { _, _ -> }): AttachmentRef {
+        val key = fromB64u(ref.key)
+        val id = randomUuid()
+        val raw = randomBytes(32)
+        api.attachmentStart(vaultId, id, toItem, ref.chunks)
+        for (i in 0 until ref.chunks) {
+            val part = openChunk(key, vaultId, fromItem, ref.id, i, ref.chunks, api.attachmentGet(vaultId, ref.id, i))
+            api.attachmentPut(vaultId, id, i, sealChunk(raw, vaultId, toItem, id, i, ref.chunks, part))
+            onProgress(i + 1, ref.chunks)
+        }
+        api.attachmentFinish(vaultId, id)
+        return ref.copy(id = id, key = b64u(raw))
+    }
+
     /** Hands each decrypted part to `write`, in order. Refuses a damaged or short file. */
     fun download(api: VaultApi, vaultId: String, itemId: String, ref: AttachmentRef, write: (ByteArray) -> Unit, onProgress: (Int, Int) -> Unit = { _, _ -> }) {
         val key = fromB64u(ref.key)

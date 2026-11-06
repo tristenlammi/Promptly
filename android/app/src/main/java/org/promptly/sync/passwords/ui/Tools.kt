@@ -98,6 +98,7 @@ private sealed class Screen {
     data object Transfer : Screen()
     data object Sends : Screen()
     data object Emergency : Screen()
+    data object ExportNow : Screen()
 }
 
 @Composable
@@ -107,6 +108,7 @@ fun MainScreen(activity: PasswordsActivity) {
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
     var syncing by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
+    var kitNeeded by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val sharedText = activity.shared.value
 
@@ -152,6 +154,25 @@ fun MainScreen(activity: PasswordsActivity) {
     }
 
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
+        // Not while typing into an item: it would push the form about.
+        if (screen !is Screen.Edit && !kitNeeded) {
+            MainNotices(
+                client,
+                onHereDevices = screen == Screen.Devices,
+                onHereShared = screen == Screen.Shared,
+                onHereSecurity = screen == Screen.Security,
+                onHereExport = screen == Screen.ExportNow || screen == Screen.Transfer,
+                onDevices = { screen = Screen.Devices },
+                onShared = { screen = Screen.Shared },
+                onSecurity = { screen = Screen.Security },
+                onExport = { screen = Screen.ExportNow },
+                onNeedKit = { kitNeeded = true },
+            )
+        }
+        if (kitNeeded) {
+            KitGate(client) { kitNeeded = false }
+            return@Column
+        }
         Column(Modifier.weight(1f)) {
             when (val s = screen) {
                 Screen.Home -> when (tab) {
@@ -166,11 +187,12 @@ fun MainScreen(activity: PasswordsActivity) {
                 Screen.Trash -> TrashScreen(client) { screen = Screen.Home }
                 Screen.Devices -> DevicesScreen(client) { screen = Screen.Home }
                 Screen.Settings -> SettingsScreen(activity, client) { screen = Screen.Home }
-                Screen.Security -> SecurityCheckScreen(client, { screen = Screen.Detail(it) }) { screen = Screen.Home }
+                Screen.Security -> SecurityCheckScreen(client, { screen = Screen.Detail(it) }, { screen = Screen.Transfer }) { screen = Screen.Home }
                 Screen.Shared -> SharedVaultsScreen(client) { screen = Screen.Home }
                 Screen.Transfer -> TransferScreen(client) { screen = Screen.Home }
                 Screen.Sends -> SendsScreen(client) { screen = Screen.Home }
                 Screen.Emergency -> EmergencyScreen(client) { screen = Screen.Home }
+                Screen.ExportNow -> ExportNowScreen(client) { screen = Screen.Home }
             }
         }
         if (screen == Screen.Home) {
@@ -626,6 +648,9 @@ private fun SettingsScreen(activity: FragmentActivity, client: VaultClient, onBa
                 }
             }
         }
+
+        Text("Site icons", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        runCatching { client.personalVaultId() }.getOrNull()?.let { VaultIconsToggle(client, it, "icons-personal") }
 
         Text("Unlocking", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         if (Biometrics.available(ctx)) {

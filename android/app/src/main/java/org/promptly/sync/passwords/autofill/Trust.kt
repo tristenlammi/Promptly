@@ -19,7 +19,9 @@ import org.promptly.sync.passwords.Pw
 import org.promptly.sync.passwords.core.LoginUrl
 import org.promptly.sync.passwords.core.Match
 import org.promptly.sync.passwords.core.b64u
+import org.promptly.sync.passwords.core.fromB64u
 import org.promptly.sync.passwords.core.fromHex
+import org.promptly.sync.passwords.core.hex
 import org.promptly.sync.passwords.core.str
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
@@ -89,7 +91,26 @@ object TrustedBrowsers {
     }
 
     fun allowlistJson(context: Context): String = rawRelease ?: synchronized(this) {
-        rawRelease ?: releaseOnlyJson(load(context)).also { rawRelease = it }
+        rawRelease ?: withDebugBrowsers(context, releaseOnlyJson(load(context))).also { rawRelease = it }
+    }
+
+    /** Debug builds name their test browser, so a request can be walked through the fill screens.
+     *  In a release build the hook's set is empty and this returns what it's given. */
+    private fun withDebugBrowsers(context: Context, json: String): String {
+        if (DebugHooks.browsersWithoutCertCheck.isEmpty()) return json
+        val root = Json.parseToJsonElement(json) as JsonObject
+        val extra = DebugHooks.browsersWithoutCertCheck.mapNotNull { pkg ->
+            val fps = signingCerts(context, pkg).map { hex(fromB64u(it)).uppercase().chunked(2).joinToString(":") }
+            if (fps.isEmpty()) return@mapNotNull null
+            JsonObject(mapOf(
+                "type" to JsonPrimitive("android"),
+                "info" to JsonObject(mapOf(
+                    "package_name" to JsonPrimitive(pkg),
+                    "signatures" to JsonArray(fps.map { JsonObject(mapOf("build" to JsonPrimitive("release"), "cert_fingerprint_sha256" to JsonPrimitive(it))) }),
+                )),
+            ))
+        }
+        return JsonObject(mapOf("apps" to JsonArray((root["apps"] as JsonArray) + extra))).toString()
     }
 
     /** Is this package a browser we believe, signed by the key we expect? */

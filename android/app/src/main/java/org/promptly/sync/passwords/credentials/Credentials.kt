@@ -77,6 +77,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.promptly.sync.passwords.Pw
 import org.promptly.sync.passwords.autofill.AssetLinks
+import org.promptly.sync.passwords.autofill.AutofillIndex
 import org.promptly.sync.passwords.autofill.TrustedBrowsers
 import org.promptly.sync.passwords.autofill.appOrigin
 import org.promptly.sync.passwords.core.Item
@@ -89,6 +90,7 @@ import org.promptly.sync.passwords.core.isoNow
 import org.promptly.sync.passwords.core.newBody
 import org.promptly.sync.passwords.ui.ConfirmIdentityPane
 import org.promptly.sync.passwords.ui.ErrorCard
+import org.promptly.sync.passwords.ui.LookalikeWarning
 import org.promptly.sync.passwords.ui.PwTheme
 import org.promptly.sync.passwords.ui.UnlockPane
 import org.promptly.sync.passwords.ui.errorText
@@ -112,6 +114,14 @@ fun callerOf(context: Context, info: CallingAppInfo): Caller {
         throw SecurityException("This app can't speak for a website.")
     }
     return Caller(info.packageName, origin?.trimEnd('/'), cert)
+}
+
+/** The saved site this page only looks like, if any, before a password or passkey goes to it. Only
+ *  a browser has a page to look like anything. A login that's really saved for the page clears it
+ *  unless it matched by pattern, where nothing says the page's name was ever typed in. */
+fun credentialLookalike(items: Collection<Item>, caller: Caller): String? {
+    val host = caller.origin?.let { Match.hostOf(it) } ?: return null
+    return Match.lookalikeAmong(host, AutofillIndex.savedDomainsOf(items))
 }
 
 /** Passwords for this caller: same rules as autofill. */
@@ -217,12 +227,15 @@ class PromptlyCredentialProviderService : CredentialProviderService() {
                     }
                     is BeginGetPasswordOption -> {
                         if (caller == null) continue
-                        for (item in passwordsFor(client, caller)) {
+                        val matched = passwordsFor(client, caller)
+                        val looks = if (matched.isEmpty()) null else credentialLookalike(client.allItems(), caller)
+                        for (item in matched) {
                             val name = item.body.username ?: continue
                             if (option.allowedUserIds.isNotEmpty() && name !in option.allowedUserIds) continue
                             val intent = Intent(context, CredentialActivity::class.java).setAction(ACTION_GET_PASSWORD).putExtra(EXTRA_ITEM, item.id)
                             val pending = PendingIntent.getActivity(context, nextCode(), intent, PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-                            out += PasswordCredentialEntry.Builder(context, name, pending, option).setDisplayName(item.body.title).build()
+                            // Not an ordinary suggestion: it says so, and picking it opens a warning first.
+                            out += PasswordCredentialEntry.Builder(context, name, pending, option).setDisplayName(if (looks != null) "Looks like $looks. Check first" else item.body.title).build()
                         }
                     }
                 }
@@ -251,6 +264,7 @@ class CredentialActivity : FragmentActivity() {
         data object Unlock : Step()
         data class Confirm(val title: String, val detail: String, val button: String = "Save", val go: () -> Unit) : Step()
         data class Biometric(val title: String, val detail: String, val go: () -> Unit) : Step()
+        data class Lookalike(val page: String, val looksLike: String, val go: () -> Unit) : Step()
         data class Fail(val text: String) : Step()
     }
 
@@ -360,12 +374,15 @@ class CredentialActivity : FragmentActivity() {
                     val caller = callerOf(this@CredentialActivity, request.callingAppInfo)
                     val origin = originForPasskey(caller, req.rpId)
                     val hash = option.clientDataHash
-                    Triple(Triple(req, item, chosen), origin, hash)
+                    // A browser's origin needn't be the site the passkey's for (Related Origin Requests).
+                    val looks = caller.origin?.takeIf { o -> Match.hostOf(o)?.let { Match.baseDomain(it) } != (Match.baseDomain(req.rpId) ?: req.rpId) }?.let { credentialLookalike(client.allItems(), caller) }
+                    Triple(Triple(req, item, chosen), origin, hash) to (caller.origin to looks)
                 }
             }
-            r.onSuccess { (t, origin, hash) ->
+            r.onSuccess { (held, seen) ->
+                val (t, origin, hash) = held
                 val (req, item, chosen) = t
-                step = Step.Biometric("Sign in to ${req.rpId}", "As ${chosen.passkey.userName}") {
+                val sign = Step.Biometric("Sign in to ${req.rpId}", "As ${chosen.passkey.userName}") {
                     lifecycleScopeLaunch {
                         val json = withContext(Dispatchers.IO) {
                             val a = Passkeys.getAssertion(chosen.passkey, req.challenge, origin, true, hash)
@@ -379,6 +396,8 @@ class CredentialActivity : FragmentActivity() {
                         finishGet(json = PublicKeyCredential(json))
                     }
                 }
+                val looks = seen.second
+                step = if (looks != null) Step.Lookalike(seen.first ?: "", looks) { step = sign } else sign
             }.onFailure {
                 Log.w(TAG, "get passkey refused: ${it.javaClass.simpleName}")
                 step = Step.Fail(it.message ?: "That request can't be answered.")
@@ -401,20 +420,24 @@ class CredentialActivity : FragmentActivity() {
                     val found = passwordsFor(client, caller).firstOrNull { it.id == itemId } ?: throw SecurityException("That login isn't for this app.")
                     // A saved https login asked for by an http page: the same question as autofill.
                     val insecure = caller.origin?.let { o -> Match.matchItems(listOf(found), "$o/").firstOrNull()?.downgrade } == true
-                    Triple(found, insecure, caller.origin)
+                    Triple(found, insecure, caller.origin) to credentialLookalike(client.allItems(), caller)
                 }
             }
-            r.onSuccess { (item, insecure, origin) ->
+            r.onSuccess { (held, looks) ->
+                val (item, insecure, origin) = held
                 val send = {
                     Pw.markUsed(item.id)
                     finishGet(password = PasswordCredential(item.body.username ?: "", item.body.password ?: ""))
                 }
                 val checked = { if (item.body.reprompt) step = Step.Biometric("Confirm it's you", item.body.title, send) else send() }
-                if (insecure) {
-                    step = Step.Confirm("Not a secure page", "$origin is http, and this login was saved for https. Anyone on the network could read it.", "Fill anyway") { checked() }
-                } else {
-                    checked()
+                val secureEnough = {
+                    if (insecure) {
+                        step = Step.Confirm("Not a secure page", "$origin is http, and this login was saved for https. Anyone on the network could read it.", "Fill anyway") { checked() }
+                    } else {
+                        checked()
+                    }
                 }
+                if (looks != null) step = Step.Lookalike(origin ?: "", looks) { secureEnough() } else secureEnough()
             }.onFailure { step = Step.Fail(it.message ?: "That request can't be answered.") }
         }
         Render(step) { failGet(GetCredentialCancellationException()) }
@@ -512,6 +535,7 @@ class CredentialActivity : FragmentActivity() {
                 TextButton(onClick = cancel, Modifier.testTag("credential-cancel")) { Text("Cancel") }
             }
             is Step.Biometric -> ConfirmIdentityPane(this, step.title, step.detail, true, step.go, cancel)
+            is Step.Lookalike -> LookalikeWarning(step.page, step.looksLike, emptyList(), "Fill anyway", cancel, step.go)
         }
     }
 

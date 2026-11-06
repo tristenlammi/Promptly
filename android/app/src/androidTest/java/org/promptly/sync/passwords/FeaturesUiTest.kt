@@ -40,6 +40,7 @@ class FeaturesUiTest {
         Harness.home()
         Pw.init(ctx)
         Pw.prefs.lockOnScreenOff = false
+        Pw.prefs.setupGuideDone = true
     }
 
     private fun open() {
@@ -155,6 +156,8 @@ class FeaturesUiTest {
         Harness.scrollTap("export-encrypted")
         saveInSystem(name)
         waitFor(By.res("transfer-message"), 20_000)
+        val exportedAt = Pw.prefs.exportLast
+        assertTrue("An encrypted export resets the reminder", exportedAt > 0)
         val text = shellCat("/sdcard/Download/$name")
         assertTrue(text, text.contains("promptly-pw-export"))
         assertFalse(text.contains("pw-Export-1!"))
@@ -177,6 +180,7 @@ class FeaturesUiTest {
         Thread.sleep(1500)
         val plain = shellCat("/sdcard/Download/$plainName")
         assertTrue(plain.take(200), plain.contains("pw-Export-1!"))
+        assertEquals("A plain file doesn't count as a backup", exportedAt, Pw.prefs.exportLast)
         Harness.shell("rm -f /sdcard/Download/$plainName")
     }
 
@@ -276,6 +280,8 @@ class FeaturesUiTest {
         val elsewhere = VaultClient(VaultApi(server, { bearer }), MemoryStore(), MemoryKeeper())
         elsewhere.unlock(Harness.MASTER, old)
         val fresh = elsewhere.rotateSecretKey(Harness.MASTER)
+        // A new key's kit was saved where the new key was made.
+        elsewhere.api.confirmKit()
         open()
         fill("master-password", Harness.MASTER)
         tap("unlock")
@@ -308,6 +314,7 @@ class FeaturesUiTest {
         assumeTrue("Needs a fresh user: this script run already used it", !alreadyHasVault)
         val secret = Harness.retrying429 { client.setup(Harness.MASTER, org.promptly.sync.passwords.core.calibrateKdf(900L)) }
         Harness.note("Secret Key size ${secret.size}")
+        client.api.confirmKit()
         val other = VaultClient(VaultApi(server, { otherBearer }), MemoryStore(), MemoryKeeper())
         val otherKey = runCatching { Harness.retrying429 { other.setup(Harness.MASTER) } }.getOrNull()
         assumeTrue("Needs a fresh second user", otherKey != null)
@@ -446,7 +453,7 @@ class FeaturesUiTest {
         tap("open-emergency", 20_000)
         assertTrue(waitFor(By.res("emergency-state"), 30_000).text.startsWith("Asked."))
         tap("emergency-refuse")
-        waitFor(By.textContains("was refused"), 20_000)
+        waitFor(By.text("Refused."), 20_000)
         assertEquals("refused", client.api.emergencyList().first { it.id == row.id }.state)
         device.pressBack()
 

@@ -36,7 +36,7 @@ async def main():
     async with SessionLocal() as db:
         # Older runs' users move down the list, so this run's are near the top of the picker.
         await db.execute(update(User).where(User.username.like("000pwandroid%")).values(username=func.concat("zz", User.username)))
-        for tag in ["a", "b", "c", "d"]:
+        for tag in ["a", "b", "c", "d", "e", "f"]:
             s = uuid.uuid4().hex[:10]
             u = User(email=f"pw-android-{tag}-{s}@example.com", username=f"000pwandroid{tag}{s}", password_hash=hash_password("An-" + secrets.token_urlsafe(16) + "!9"), role="user")
             db.add(u)
@@ -54,6 +54,7 @@ asyncio.run(main())
         "-e", "pwBearer", $users["a"][2], "-e", "pwBearer2", $users["b"][2], "-e", "pwUser2", $users["b"][3],
         "-e", "pwBearer3", $users["c"][2],
         "-e", "pwBearer4", $users["d"][2], "-e", "pwAppUser", $users["d"][3], "-e", "pwAppPassword", $users["d"][4],
+        "-e", "pwBearer5", $users["e"][2], "-e", "pwBearer6", $users["f"][2], "-e", "pwUser6", $users["f"][3],
         "-e", "pwServer", "http://10.0.2.2:8092")
     if ($Class) { $cmd += @("-e", "class", "org.promptly.sync.passwords.$Class") }
     else { $cmd += @("-e", "package", "org.promptly.sync.passwords") }

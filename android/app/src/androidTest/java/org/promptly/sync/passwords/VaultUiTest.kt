@@ -42,6 +42,7 @@ class VaultUiTest {
         Harness.home()
         Pw.init(ctx)
         Pw.prefs.lockOnScreenOff = false
+        Pw.prefs.setupGuideDone = true
     }
 
     private fun open() {
@@ -244,6 +245,8 @@ class VaultUiTest {
         Harness.clearScreen()
         Pw.init(ctx)
         runCatching { Pw.forgetDevice() }
+        Pw.prefs.setupGuideDone = false
+        Harness.shell("settings delete secure autofill_service")
         val store = Store(ctx)
         // The path a phone already paired for photo backup takes.
         store.account = Store.Account(server, args.getString("pwAppUser")!!, args.getString("pwAppPassword")!!, "Instrumented test")
@@ -264,6 +267,18 @@ class VaultUiTest {
         assertTrue(made.m >= 65536 && made.t >= 3)
         fill("kit-last-group", SecretKeys.lastGroup(text))
         tap("kit-done")
+        // Others on this Promptly, so a Family vault's suggested (plan 5.3), and made through the real server.
+        waitFor(By.res("family-offer"), 30_000)
+        val others = Harness.retrying429 { Pw.client()!!.api.people() }.size
+        assertTrue(others > 0)
+        assertTrue(waitFor(By.res("family-text")).text.contains(if (others == 1) "is 1 other person" else "are $others other people"))
+        Harness.tapThrough("family-make", By.res("family-made"))
+        assertTrue(Pw.client()!!.vaults().any { it.vault.kind == "shared" && it.displayName == "Family" })
+        tap("family-continue")
+        // Then the guided setup, once, and only then the vault (plan 5.2).
+        waitFor(By.res("setup-guide"), 20_000)
+        assertFalse(has(By.res("search"), 300))
+        Harness.scrollTap("setup-skip")
         waitFor(By.res("search"), 30_000)
         val client = Pw.client()!!
         val item = client.saveNew(client.personalVaultId(), newBody("login", "Over the wire").withText("username", "u").withText("password", "wire-Password-1!").withUrls(listOf(LoginUrl("https://wire.example"))))

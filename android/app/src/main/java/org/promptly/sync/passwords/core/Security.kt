@@ -189,6 +189,8 @@ class HealthReport(
     val checked: Int,
     /** The breach service couldn't be asked, or it's off on this server. */
     val breachSkipped: String?,
+    /** Saved with no passkey, on a site the directory says supports them. */
+    val noPasskey: List<Item> = emptyList(),
 ) {
     val reusedCount: Int get() = reused.sumOf { it.size }
 }
@@ -220,6 +222,7 @@ object Health {
         range: ((String) -> String)? = null,
         twofa: Map<String, String?> = emptyMap(),
         now: Long = System.currentTimeMillis(),
+        passkeys: Set<String> = emptySet(),
         onProgress: (Int, Int) -> Unit = { _, _ -> },
     ): HealthReport {
         val logins = items.filter { it.body.kind == "login" && !it.body.password.isNullOrEmpty() && !it.deleted && !it.body.archived }
@@ -229,6 +232,7 @@ object Health {
         val http = ArrayList<Item>()
         val no2fa = ArrayList<Pair<Item, String?>>()
         val noTotp = ArrayList<Item>()
+        val noPasskey = ArrayList<Item>()
         val strength = HashMap<String, Int>()
         for ((done, i) in logins.withIndex()) {
             val pw = i.body.password!!
@@ -247,6 +251,7 @@ object Health {
                     noTotp += i
                 }
             }
+            if (host != null && i.body.passkeys.isEmpty() && (Match.baseDomain(host) ?: host) in passkeys) noPasskey += i
             onProgress(done + 1, logins.size)
         }
         val breached = ArrayList<Pair<Item, Int>>()
@@ -267,6 +272,6 @@ object Health {
         } else {
             skipped = "Breaches weren't checked."
         }
-        return HealthReport(weak, reused, old, http, breached, no2fa, noTotp, logins.size, skipped)
+        return HealthReport(weak, reused, old, http, breached, no2fa, noTotp, logins.size, skipped, noPasskey)
     }
 }

@@ -13,7 +13,7 @@ import { dedupe, fromBitwardenJson, fromGenericCsv, importFile } from "../../../
 import { openSend, sendMeta } from "../../../../../frontend/src/passwords/core/send";
 import { strengthOf } from "../../../../../frontend/src/passwords/core/strength";
 import { b64u, fromB64u, utf8 } from "../../../../../frontend/src/passwords/core/bytes";
-import { hostOf, matchUrl } from "../../../../../frontend/src/passwords/core/match";
+import { editDistance, hostOf, lookalikeOf, matchUrl, skeleton } from "../../../../../frontend/src/passwords/core/match";
 import { newBody } from "../../../../../frontend/src/passwords/core/model";
 import { getAssertion, makeCredential } from "../../../../../frontend/src/passwords/core/passkey";
 import { MemoryStore } from "../../../../../frontend/src/passwords/core/store";
@@ -260,9 +260,39 @@ it(`step ${STEP}`, async () => {
     return;
   }
 
+  // What Android wrote for folders, icons, Sends and a merge, in the shapes the web vault reads.
+  if (STEP === "fin") {
+    const c = client(state.token);
+    await c.unlock(MASTER, fromB64u(state.secretKey));
+    const all = c.allItems({ includeSystem: true });
+    const kept = c.get(state.keptFolder)!;
+    expect(kept.body.kind).toBe("folder");
+    expect(kept.body.title).toBe("After");
+    expect(all.filter((i) => i.body.kind === "folder").map((i) => i.id)).toEqual([state.keptFolder]);
+    expect(c.get(state.inside)!.body.folderId ?? null).toBe(null);
+    expect(c.get(state.inside)!.body.tags).toEqual(["work"]);
+    expect(c.get(state.staying)!.body.folderId).toBe(state.keptFolder);
+    const prefs = all.filter((i) => i.body.kind === "prefs" && i.body.title === "vault-prefs");
+    expect(prefs.length).toBe(1);
+    expect(prefs[0].vaultId).toBe(state.vault);
+    expect(prefs[0].body.icon).toBe(true);
+    const send = all.filter((i) => i.body.kind === "send");
+    expect(send.length).toBe(1);
+    expect(send[0].body.title).toBe("Named");
+    expect(send[0].body.notes).toBe(state.sendLink);
+    expect(send[0].body.sendId).toBe(state.sendId);
+    const merged = c.get(state.newer)!;
+    expect(merged.body.password).toBe("pw-newer");
+    expect((merged.body.passwordHistory ?? []).map((h) => h.password)).toEqual(["pw-older"]);
+    expect(c.allItems({ includeDeleted: true }).find((i) => i.id === state.older)!.deleted).toBe(true);
+    const moved = merged.body.attachments!.find((a) => a.name === "moved.bin")!;
+    expect(await sha256Hex(await downloadAttachment(c.api, state.vault, merged.id, moved))).toBe(state.movedSha);
+    return;
+  }
+
   // One list of which address matches which page, read by both clients.
   if (STEP === "match") {
-    const v = JSON.parse(fs.readFileSync(new URL("./match-vectors.json", import.meta.url), "utf8")) as { match: any[]; host: any[] };
+    const v = JSON.parse(fs.readFileSync(new URL("./match-vectors.json", import.meta.url), "utf8")) as { match: any[]; host: any[]; lookalike: any[]; lookalikeVault: string[]; editDistance: any[]; skeleton: any[] };
     const wrong: string[] = [];
     for (const c of v.match) {
       const got = matchUrl({ url: c.url, match: c.mode }, c.page);
@@ -271,6 +301,17 @@ it(`step ${STEP}`, async () => {
     for (const c of v.host) {
       const got = hostOf(c.url);
       if (got !== c.want) wrong.push(`hostOf ${c.url}: ${got}, wanted ${c.want}`);
+    }
+    for (const c of v.lookalike) {
+      const got = lookalikeOf(c.page, c.saved ?? v.lookalikeVault);
+      if (got !== c.want) wrong.push(`lookalikeOf ${c.page}: ${got}, wanted ${c.want}`);
+    }
+    for (const c of v.editDistance) {
+      const got = editDistance(c.a, c.b);
+      if (got !== c.want) wrong.push(`editDistance ${c.a}, ${c.b}: ${got}, wanted ${c.want}`);
+    }
+    for (const c of v.skeleton) {
+      if (skeleton(c.a) !== skeleton(c.b)) wrong.push(`skeleton ${c.a}: ${skeleton(c.a)}, ${c.b}: ${skeleton(c.b)}`);
     }
     expect(wrong).toEqual([]);
     return;

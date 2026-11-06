@@ -6,6 +6,7 @@ package org.promptly.sync.passwords
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -19,6 +20,7 @@ import okhttp3.OkHttpClient
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
@@ -614,6 +616,163 @@ class StackTests {
         val empty = org.promptly.sync.passwords.core.Attachments.upload(c.api, vault, item.id, "empty", null, 0, { _, _ -> ByteArray(0) })
         assertEquals(1, empty.chunks)
         assertEquals(0, downloadAll(c, vault, item.id, empty).size)
+    }
+
+    /** The real client: an upload that dies partway picks up, by name and size, from what the server
+     *  has, under the same id and key, and that key's not in the local copy in the clear. */
+    @Test fun anInterruptedAttachmentPicksUpWhereItStopped() {
+        need()
+        val u = makeUser("res")
+        val store = MemoryStore()
+        val c = VaultClient(VaultApi(BASE, { u.token }, patient), store, MemoryKeeper())
+        setupRetrying(c)
+        val vault = c.personalVaultId()
+        val item = c.saveNew(vault, newBody("note", "T"))
+        c.sync()
+        val data = patternBytes(2_200_000, 9)
+        assertThrows(IOException::class.java) {
+            c.addAttachment(item.id, "r.bin", null, data.size.toLong(), { off, len ->
+                if (off > 0) throw IOException("the network went")
+                data.copyOfRange(off.toInt(), off.toInt() + len)
+            })
+        }
+        val meta = "upload_resume:${item.id}:r.bin:${data.size}"
+        assertTrue("Nothing was recorded on the item", c.get(item.id)!!.body.attachments.isEmpty())
+        val sealed = store.getMeta(meta)!!.jsonPrimitive.content
+        assertFalse("A sealed blob, no id or key to read", sealed.contains("\"key\""))
+        val asked = ArrayList<Long>()
+        val done = c.addAttachment(item.id, "r.bin", null, data.size.toLong(), { off, len ->
+            asked += off
+            data.copyOfRange(off.toInt(), off.toInt() + len)
+        })
+        assertEquals("Only what the server hadn't got", listOf(1048576L, 2097152L), asked)
+        assertEquals(shaHex(data), shaHex(downloadAll(c, vault, item.id, done.body.attachments.single())))
+        assertNull("Nothing's left waiting", store.getMeta(meta))
+        // The same file again isn't a resume of that one: it's a new upload, of every chunk.
+        asked.clear()
+        c.addAttachment(item.id, "r.bin", null, data.size.toLong(), { off, len ->
+            asked += off
+            data.copyOfRange(off.toInt(), off.toInt() + len)
+        })
+        assertEquals(listOf(0L, 1048576L, 2097152L), asked)
+        assertEquals(2, c.get(item.id)!!.body.attachments.map { it.id }.toSet().size)
+        // A different size is a different file.
+        val other = patternBytes(1_500_000, 10)
+        assertThrows(IOException::class.java) { c.addAttachment(item.id, "r.bin", null, other.size.toLong(), { _, _ -> throw IOException("no") }) }
+        assertNotNull(store.getMeta("upload_resume:${item.id}:r.bin:${other.size}"))
+    }
+
+    /** Everything else the features write, read back by the real TypeScript client: it has to be
+     *  the shapes the web vault uses. Merging, with an attachment that has to keep opening. */
+    @Test fun whatTheFinishingFeaturesWriteCrossesWithTheTypeScriptClient() {
+        need()
+        useSimpleBaseDomains()
+        val u = makeUser("fin")
+        val c = device(u)
+        val secret = setupRetrying(c)
+        val vault = c.personalVaultId()
+        // Folders: one renamed, one deleted with an item in it.
+        val kept = c.saveNew(vault, newBody("folder", "Before"))
+        val gone = c.saveNew(vault, newBody("folder", "To delete"))
+        val inside = c.saveNew(vault, newBody("login", "In a folder").with("folderId" to JsonPrimitive(gone.id), "tags" to JsonArray(listOf(JsonPrimitive("work")))))
+        val staying = c.saveNew(vault, newBody("login", "Stays in").with("folderId" to JsonPrimitive(kept.id)))
+        c.renameFolder(kept.id, "  After  ")
+        c.deleteFolder(gone.id)
+        c.sync()
+        assertEquals("After", c.get(kept.id)!!.body.title)
+        assertEquals(JsonNull, c.get(inside.id)!!.body["folderId"])
+        assertTrue(c.get(gone.id)!!.deleted)
+        assertThrows(IllegalStateException::class.java) { c.renameFolder(inside.id, "not a folder") }
+        assertThrows(IllegalArgumentException::class.java) { c.renameFolder(kept.id, "   ") }
+        // Site icons for this vault.
+        assertFalse(vault in c.iconVaults())
+        c.setVaultIcons(vault, true)
+        c.setVaultIcons(vault, false)
+        c.setVaultIcons(vault, true)
+        assertTrue(vault in c.iconVaults())
+        assertEquals("One row, turned on and off", 1, c.allItems(includeSystem = true).count { it.body.kind == "prefs" && it.body.title == "vault-prefs" })
+        // A Send, remembered in the vault.
+        val send = org.promptly.sync.passwords.core.SecureSend.create(c.api, org.promptly.sync.passwords.core.SecureSend.textPayload("Named", "pw-Send-1!"), 1, null, null)
+        c.recordSend("Named", send.link, send.id)
+        assertEquals("Named", c.sendRecords().getValue(send.id).title)
+        // Duplicates, the older with an attachment and another password.
+        val older = c.saveNew(vault, newBody("login", "Dup").withText("username", "Ana").withText("password", "pw-older").withUrls(listOf(LoginUrl("https://dup.example"))))
+        val data = patternBytes(1_300_000, 12)
+        c.sync()
+        c.addAttachment(older.id, "moved.bin", "application/x-test", data.size.toLong(), { off, len -> data.copyOfRange(off.toInt(), off.toInt() + len) })
+        Thread.sleep(5)
+        val newer = c.saveNew(vault, newBody("login", "Dup").withText("username", "ana").withText("password", "pw-newer").withUrls(listOf(LoginUrl("https://dup.example"))))
+        c.sync()
+        val groups = c.duplicates()
+        assertEquals(1, groups.size)
+        c.mergeDuplicates(groups.single())
+        val merged = c.get(newer.id)!!
+        assertEquals("pw-newer", merged.body.password)
+        assertEquals("pw-older", merged.body.passwordHistory.single().first)
+        assertTrue(c.get(older.id)!!.deleted)
+        val moved = merged.body.attachments.single()
+        assertEquals("moved.bin", moved.name)
+        assertEquals(shaHex(data), shaHex(downloadAll(c, vault, newer.id, moved)))
+        assertTrue(c.duplicates().isEmpty())
+        c.sync()
+        // And the other side reads it all.
+        withState { file ->
+            writeState(file, buildJsonObject {
+                put("token", u.token)
+                put("secretKey", b64u(secret))
+                put("vault", vault)
+                put("keptFolder", kept.id)
+                put("goneFolder", gone.id)
+                put("inside", inside.id)
+                put("staying", staying.id)
+                put("sendId", send.id)
+                put("sendLink", send.link)
+                put("older", older.id)
+                put("newer", newer.id)
+                put("movedSha", shaHex(data))
+            })
+            runTs("fin", file)
+        }
+    }
+
+    @Test fun postingASendAskingTheDirectoriesAndSurvivalOnTheRealServer() {
+        need()
+        val a = makeUser("snA")
+        val b = makeUser("snB")
+        val c = device(a)
+        setupRetrying(c)
+        val send = org.promptly.sync.passwords.core.SecureSend.create(c.api, org.promptly.sync.passwords.core.SecureSend.textPayload("T", "pw-Send-2!"), 1, 2, null)
+        assertTrue(send.link, org.promptly.sync.passwords.core.SendRecords.isLinkTo(send.id, send.link, c.api.baseUrl))
+        c.api.sendViaRooms(send.id, send.link, b.id)
+        // Nobody on the server can be handed plain text: what it's sent has to be this Send's link.
+        for (bad in listOf("the wifi is pw-Send-2!", send.link.substringBefore('#'), send.link.replace(send.id, org.promptly.sync.passwords.core.randomUuid()))) {
+            val e = assertThrows(ApiError::class.java) { c.api.sendViaRooms(send.id, bad, b.id) }
+            assertEquals(bad, 400, e.status)
+        }
+        // No Mail account here: it says so, and the link can still be copied.
+        val noMail = assertThrows(ApiError::class.java) { c.api.sendViaMail(send.id, send.link, "someone@example.com") }
+        assertEquals(409, noMail.status)
+        // The record goes with the Send.
+        c.recordSend("T", send.link, send.id)
+        c.deleteSend(send.id)
+        assertTrue(c.api.sends().none { it.id == send.id })
+        assertTrue(c.sendRecords().isEmpty())
+
+        val survival = c.api.survival()!!
+        assertFalse("Made by setup alone, no kit's been confirmed", survival.kitConfirmed)
+        c.api.confirmKit()
+        val after = c.api.survival()!!
+        assertTrue(after.kitConfirmed)
+        assertNotNull(org.promptly.sync.passwords.core.parseInstant(after.kitConfirmedAt))
+        assertFalse(org.promptly.sync.passwords.core.Survival.recoveryDue(after.kitConfirmedAt, null))
+
+        // What's in them comes from outside the stack, so only their shape's checked.
+        val dir = c.api.directory()
+        assertTrue(dir.twofa.keys.all { it.isNotEmpty() } && dir.passkeys.all { it.isNotEmpty() })
+        // The icon proxy: the server refuses a name that isn't one, and this client doesn't ask.
+        assertEquals(400, assertThrows(ApiError::class.java) { c.api.icon("not-a-domain") }.status)
+        assertNull(c.api.icon("no-such-host.promptly.test"))
+        assertEquals(null, org.promptly.sync.passwords.core.SiteIcons.domainOf("http://not-a-domain/"))
     }
 
     @Test fun sharingCrossWithTheTypeScriptClient() {

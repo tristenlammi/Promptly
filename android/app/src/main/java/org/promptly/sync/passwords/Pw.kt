@@ -285,9 +285,33 @@ class PwPrefs(context: Context) {
         }.toMap()
         set(v) = prefs.edit().putStringSet("recents", v.entries.sortedByDescending { it.value }.take(200).map { "${it.key}|${it.value}" }.toSet()).apply()
 
+    /** Finished or skipped: it's about this phone's settings, so it outlasts forgetting a vault. */
+    var setupGuideDone: Boolean
+        get() = prefs.getBoolean("setup_guide_done", false)
+        set(v) = prefs.edit().putBoolean("setup_guide_done", v).apply()
+
+    /** When this phone first opened the vault. The export reminder counts from here. */
+    var exportSince: Long
+        get() = prefs.getLong("export_since", 0)
+        set(v) = prefs.edit().putLong("export_since", v).apply()
+
+    /** The last encrypted export from this phone. A plain file doesn't count. */
+    var exportLast: Long
+        get() = prefs.getLong("export_last", 0)
+        set(v) = prefs.edit().putLong("export_last", v).apply()
+
+    var exportSnoozedUntil: Long
+        get() = prefs.getLong("export_snoozed", 0)
+        set(v) = prefs.edit().putLong("export_snoozed", v).apply()
+
+    var exportNotifiedAt: Long
+        get() = prefs.getLong("export_notified", 0)
+        set(v) = prefs.edit().putLong("export_notified", v).apply()
+
     fun forgetDevice() {
         val keep = prefs.getString("server", null)
-        prefs.edit().clear().putString("server", keep).apply()
+        val guide = setupGuideDone
+        prefs.edit().clear().putString("server", keep).putBoolean("setup_guide_done", guide).apply()
     }
 }
 
@@ -381,6 +405,7 @@ object Pw {
             if (!c.unlocked) {
                 AutofillIndex.forgetMemory()
                 AssetLinks.forgetMemory()
+                SiteIconCache.forgetMemory()
             }
             unlockedFlow.value = c.unlocked
             version.value = version.value + 1

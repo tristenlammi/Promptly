@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.Checkbox
@@ -60,6 +62,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import org.promptly.sync.passwords.Clip
 import org.promptly.sync.passwords.Pw
+import org.promptly.sync.passwords.SiteIconCache
 import org.promptly.sync.passwords.core.AttachmentRef
 import org.promptly.sync.passwords.core.Attachments
 import org.promptly.sync.passwords.core.CustomField
@@ -68,6 +71,7 @@ import org.promptly.sync.passwords.core.Item
 import org.promptly.sync.passwords.core.ItemBody
 import org.promptly.sync.passwords.core.LoginUrl
 import org.promptly.sync.passwords.core.Match
+import org.promptly.sync.passwords.core.SiteIcons
 import org.promptly.sync.passwords.core.StrengthCheck
 import org.promptly.sync.passwords.core.wifiQrText
 import org.promptly.sync.passwords.core.Totp
@@ -100,9 +104,16 @@ fun ItemListScreen(client: VaultClient, onOpen: (String) -> Unit, onNew: () -> U
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf("all") }
     var folder by remember { mutableStateOf<String?>(null) }
+    var tag by remember { mutableStateOf<String?>(null) }
     val version by Pw.version.collectAsState()
-    val folders = remember(version) { runCatching { client.allItems(includeSystem = true) }.getOrDefault(emptyList()).filter { it.body.kind == "folder" } }
-    val shown = remember(query, filter, folder, version) {
+    val everything = remember(version) { runCatching { client.allItems(includeSystem = true) }.getOrDefault(emptyList()) }
+    val folders = remember(everything) { everything.filter { it.body.kind == "folder" } }
+    val tags = remember(everything) { everything.filter { !it.body.isSystem }.flatMap { it.body.tags }.toSortedSet().toList() }
+    val iconVaults = remember(everything) { SiteIcons.iconVaults(everything) }
+    // What was picked can go: a rename elsewhere, or the last item with that tag.
+    if (tag != null && tag !in tags) tag = null
+    if (folder != null && folders.none { it.id == folder }) folder = null
+    val shown = remember(query, filter, folder, tag, version) {
         // Locking can land between two frames: an empty list for that one is fine.
         val base = runCatching { if (query.isBlank()) client.allItems() else client.search(query) }.getOrDefault(emptyList())
         base.filter { i ->
@@ -113,7 +124,7 @@ fun ItemListScreen(client: VaultClient, onOpen: (String) -> Unit, onNew: () -> U
                 "all" -> !b.archived
                 else -> b.kind == filter && !b.archived
             }
-            fits && (folder == null || b.str("folderId") == folder)
+            fits && (folder == null || b.str("folderId") == folder) && (tag == null || tag in b.tags)
         }
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
@@ -135,20 +146,102 @@ fun ItemListScreen(client: VaultClient, onOpen: (String) -> Unit, onNew: () -> U
             listOf("all" to "All", "fav" to "Favourites", "login" to "Logins", "card" to "Cards", "identity" to "Identities", "note" to "Notes", "totp" to "2FA", "passkey" to "Passkeys", "archive" to "Archive").forEach { (k, l) ->
                 FilterChip(filter == k, { filter = k }, { Text(l) })
             }
-            folders.forEach { f -> FilterChip(folder == f.id, { folder = if (folder == f.id) null else f.id }, { Text(f.body.title) }) }
         }
+        if (folders.isNotEmpty()) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).testTag("folder-row"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                folders.forEach { f -> FilterChip(folder == f.id, { folder = if (folder == f.id) null else f.id }, { Text(f.body.title) }, Modifier.testTag("folder-${f.body.title}")) }
+            }
+        }
+        if (tags.isNotEmpty()) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).testTag("tag-row"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                tags.forEach { t -> FilterChip(tag == t, { tag = if (tag == t) null else t }, { Text("#$t") }, Modifier.testTag("tag-$t")) }
+            }
+        }
+        folders.firstOrNull { it.id == folder }?.let { FolderTools(client, it) }
         Button(onClick = onNew, modifier = Modifier.fillMaxWidth().testTag("new-item")) { Text("New item") }
         LazyColumn(Modifier.weight(1f).testTag("item-list")) {
             items(shown, key = { it.id }) { item ->
-                Column(Modifier.fillMaxWidth().clickable { onOpen(item.id) }.padding(vertical = 10.dp).testTag("item-${item.body.title}")) {
-                    Text(item.body.title.ifEmpty { "Untitled" }, fontWeight = FontWeight.Medium)
-                    val sub = item.body.username ?: item.body.str("cardholder") ?: item.body.str("ssid") ?: KIND_LABEL[item.body.kind]
-                    if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(Modifier.fillMaxWidth().clickable { onOpen(item.id) }.padding(vertical = 10.dp).testTag("item-${item.body.title}"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (SiteIcons.show(item, iconVaults)) SiteIcon(client, item.body.urls.firstOrNull()?.url)
+                    Column {
+                        Text(item.body.title.ifEmpty { "Untitled" }, fontWeight = FontWeight.Medium)
+                        val sub = item.body.username ?: item.body.str("cardholder") ?: item.body.str("ssid") ?: KIND_LABEL[item.body.kind]
+                        if (sub != null) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                 }
                 HorizontalDivider()
             }
         }
         if (shown.isEmpty()) Text(if (query.isBlank()) "Nothing here yet." else "No matches.", Modifier.padding(16.dp).testTag("empty"))
+    }
+}
+
+/** Fetched through your server, only for a vault that's said yes. Nothing shows until it's here. */
+@Composable
+private fun SiteIcon(client: VaultClient, url: String?) {
+    val domain = remember(url) { SiteIcons.domainOf(url) } ?: return
+    var image by remember(domain) { mutableStateOf(SiteIconCache.peek(domain)) }
+    LaunchedEffect(domain) {
+        if (!SiteIconCache.has(domain)) image = withContext(Dispatchers.IO) { SiteIconCache.load(client, domain) }
+    }
+    image?.let { androidx.compose.foundation.Image(it.asImageBitmap(), null, Modifier.size(24.dp).testTag("site-icon-$domain")) }
+}
+
+/** Rename or delete a folder. The items in it stay, just out of the folder. */
+@Composable
+private fun FolderTools(client: VaultClient, folder: Item) {
+    if (!client.canEdit(folder.vaultId)) return
+    val scope = rememberCoroutineScope()
+    var renaming by remember(folder.id) { mutableStateOf(false) }
+    var deleting by remember(folder.id) { mutableStateOf(false) }
+    var name by remember(folder.id, renaming) { mutableStateOf(folder.body.title) }
+    var error by remember(folder.id) { mutableStateOf<String?>(null) }
+    fun act(block: () -> Unit) {
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    block()
+                    runCatching { client.sync() }
+                }
+            }.onFailure { error = errorText(it) }
+        }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Folder: ${folder.body.title}", Modifier.weight(1f).testTag("folder-now"), style = MaterialTheme.typography.bodySmall)
+        TextButton(onClick = { renaming = true }, Modifier.testTag("folder-rename")) { Text("Rename") }
+        TextButton(onClick = { deleting = true }, Modifier.testTag("folder-delete")) { Text("Delete folder") }
+    }
+    error?.let { ErrorCard(it) }
+    if (renaming) {
+        AlertDialog(
+            onDismissRequest = { renaming = false },
+            modifier = Modifier.exposeTags(),
+            title = { Text("Rename folder") },
+            text = { OutlinedTextField(name, { name = it.take(80) }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("folder-name")) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val n = name
+                    renaming = false
+                    act { client.renameFolder(folder.id, n) }
+                }, enabled = name.isNotBlank(), modifier = Modifier.testTag("folder-name-save")) { Text("Save") }
+            },
+            dismissButton = { TextButton(onClick = { renaming = false }) { Text("Cancel") } },
+        )
+    }
+    if (deleting) {
+        AlertDialog(
+            onDismissRequest = { deleting = false },
+            modifier = Modifier.exposeTags(),
+            title = { Text("Delete the folder ${folder.body.title}?") },
+            text = { Text("What's in it stays, out of the folder.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    deleting = false
+                    act { client.deleteFolder(folder.id) }
+                }, Modifier.testTag("folder-delete-confirm")) { Text("Delete folder") }
+            },
+            dismissButton = { TextButton(onClick = { deleting = false }) { Text("Keep it") } },
+        )
     }
 }
 

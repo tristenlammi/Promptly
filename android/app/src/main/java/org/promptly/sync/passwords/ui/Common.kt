@@ -77,6 +77,10 @@ fun PwTheme(content: @Composable () -> Unit) {
     }
 }
 
+/** Dialogs and menus are their own windows, so what PwTheme switches on doesn't reach them. */
+@OptIn(ExperimentalComposeUiApi::class)
+fun Modifier.exposeTags(): Modifier = semantics { testTagsAsResourceId = true }
+
 fun errorText(e: Throwable): String = when (e) {
     is WrongPasswordError -> if (e.changedElsewhere) "That didn't open your vault, and your master password or Secret Key was changed on another device since this phone last unlocked." else "That master password isn't right."
     is OfflineError -> "The server can't be reached."

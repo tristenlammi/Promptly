@@ -41,6 +41,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: emergency access, where a trusted contact can ask for your vault and it opens after a wait unless you refuse.
 - Passwords (preview): Promptly for Android gets the vault too: autofill in apps and browsers that support it, passkeys through Credential Manager, fingerprint unlock, sharing, Security check, attachments, import and export, and adding a device by QR code.
 - Passwords (preview): a fresh review of the crypto, the extension, Android and the server's access rules. Trust in other people's keys now lives in your own encrypted vault, removing someone from a shared vault can't be blocked by them, and imports can't plant internal items. `passwords/SECURITY.md` says what it still doesn't defend against.
+- Passwords on Android: a guided setup after your first unlock turns on autofill, passkeys and Chrome's autofill setting, and a new vault offers to make a Family vault when others are on your Promptly.
+- Passwords on Android: warns before filling on a site that only looks like one you have a login for, in autofill and Credential Manager. Such a page gets no ordinary suggestions, and "Don't fill" comes first.
+- Passwords on Android: the same warnings as the web vault about what could lose your vault, a recovery kit check, and a reminder every three months to save an encrypted export, right from the reminder.
+- Passwords on Android: filter by tag, rename and delete folders, site icons you can turn on per vault, merge logins saved twice, and the passkey directory in the Security check.
+- Passwords on Android: Sends show their name and can copy their link again, or post it in Rooms or by Mail. Name an emergency contact and ask for access from the phone. A dropped attachment upload picks up where it stopped.
 
 ## [0.28.0] - 2026-11-06
 
