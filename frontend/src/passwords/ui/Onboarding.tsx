@@ -8,6 +8,7 @@ import { buf } from "../core/bytes";
 import { buildKitPdf } from "../core/kit";
 import { encodeSecretKey, lastGroup } from "../core/keys";
 import { newBody } from "../core/model";
+import { parseOtpauth } from "../core/totp";
 import { KDF_FLOOR, type KdfParams } from "../core/primitives";
 import { type Strength, strengthOf } from "../core/strength";
 import type { VaultClient } from "../core/vault";
@@ -192,10 +193,11 @@ export function Onboarding({ vault, username, preview, serverUrl, onDone }: Prop
           <p className="font-medium">Your vault is ready.</p>
           <p>Next you might want to:</p>
           <ul className="list-disc pl-5">
-            <li>Bring in your passwords from another manager or browser: Import, in the sidebar.</li>
-            <li>Install the browser extension so filling just works: see Devices.</li>
-            <li>Turn on Passwords in Promptly for Android.</li>
+            <li>Bring in your passwords from another manager or browser: Import and export, in the sidebar.</li>
+            <li>Install the browser extension so filling just works, or the Windows app: <a className="underline" href="/apps/install" target="_blank" rel="noopener noreferrer">the Install page</a> has them.</li>
+            <li>Turn on Passwords in Promptly for Android, from the same page.</li>
           </ul>
+          <FamilyOffer vault={vault} />
           <SavePromptly vault={vault} />
           <Button kind="primary" onClick={onDone}>Open my vault</Button>
         </div>
@@ -209,6 +211,7 @@ function SavePromptly({ vault }: { vault: VaultClient }) {
   const [saved, setSaved] = useState(false);
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
+  const [otp, setOtp] = useState("");
   const [error, setError] = useState("");
   if (saved) return <Callout>Saved your Promptly login. Your master password is the one thing it can't hold for you.</Callout>;
   return (
@@ -217,12 +220,15 @@ function SavePromptly({ vault }: { vault: VaultClient }) {
       <div className="mt-2 flex flex-col gap-2">
         <Label text="Username or email"><input className={inputClass} autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} /></Label>
         <Label text="Promptly password"><input className={inputClass} type="password" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} /></Label>
+        <Label text="Promptly 2FA setup key, if you have one" hint="An otpauth link, or the key your authenticator shows."><input className={inputClass} autoComplete="off" value={otp} onChange={(e) => setOtp(e.target.value)} /></Label>
+        <Callout kind="warn">This is the one login you need to reach your server. If it's only in here and you lose your kit too, keep in mind you'd have neither. Keep your kit, and keep your Promptly password somewhere else as well.</Callout>
         {error && <Callout kind="danger">{error}</Callout>}
         <Button
           disabled={!username || !password}
           onClick={async () => {
             try {
-              await vault.saveNew(await vault.personalVaultId(), newBody("login", "Promptly", { username, password, urls: [{ url: location.origin }] }));
+              const totp = otp.trim() ? (otp.trim().startsWith("otpauth://") ? parseOtpauth(otp.trim()) : { secret: otp.replace(/\s/g, "").toUpperCase() }) : undefined;
+              await vault.saveNew(await vault.personalVaultId(), newBody("login", "Promptly", { username, password, totp, urls: [{ url: location.origin }] }));
               await vault.sync();
               setPassword("");
               setSaved(true);
@@ -235,5 +241,35 @@ function SavePromptly({ vault }: { vault: VaultClient }) {
         </Button>
       </div>
     </details>
+  );
+}
+
+/** Offered when there's someone to share with. */
+function FamilyOffer({ vault }: { vault: VaultClient }) {
+  const [others, setOthers] = useState(0);
+  const [made, setMade] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    vault.api.request<unknown[]>("GET", "/people").then((p) => setOthers(p.length)).catch(() => undefined);
+  }, [vault]);
+  if (!others) return null;
+  if (made) return <Callout>Made a Family vault. Add people from Shared vaults.</Callout>;
+  return (
+    <div data-testid="family-offer" className="flex flex-col gap-2 rounded-lg border border-[var(--border)] p-2">
+      <p>There {others === 1 ? "is 1 other person" : `are ${others} other people`} on this Promptly. A Family vault is an easy place for logins you share, like streaming or the Wi-Fi.</p>
+      {error && <Callout kind="danger">{error}</Callout>}
+      <Button
+        onClick={async () => {
+          try {
+            await vault.createSharedVault("Family");
+            setMade(true);
+          } catch (e) {
+            setError(errorText(e));
+          }
+        }}
+      >
+        Make a Family vault
+      </Button>
+    </div>
   );
 }

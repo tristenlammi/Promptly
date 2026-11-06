@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wrenfield Radio Club</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 Georgia,serif;color:#1b1f24;background:#fdf6ee}a{color:#7c2d12}h1{font-size:1.5em;margin:0 0 10px}h2{font-size:1.15em;margin:0 0 8px}p{margin:0 0 12px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #cfd5dc;border-radius:6px;background:#fff;color:#222;width:100%}input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 16px;border:0;border-radius:6px;background:#7c2d12;color:#fff;cursor:pointer}[hidden]{display:none!important}
+header{padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}header b{margin-right:auto}main{max-width:960px;margin:28px auto;padding:0 20px}footer{margin-top:40px;padding:18px 24px;border-top:1px solid #cfd5dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between}
+.o3{max-width:420px;margin:0 auto}.o3 .l{font-weight:700;margin:12px 0 3px}.tg{background:none;color:#7c2d12;padding:2px 6px;font-size:.85em}.mt{height:5px;background:#e8dcc9;margin-top:4px}.mt i{display:block;height:5px;width:0;background:#7c2d12}.nf{display:none}
+</style>
+</head>
+<body>
+<header><b>Wrenfield Radio Club</b></header><main><div id="mount"><p>Preparing the form&hellip;</p></div></main>
+<script>setTimeout(function(){document.getElementById('mount').innerHTML='<form class="o3" onsubmit="return false"><h1>Sign up to the club</h1><div class="l">Email</div><div><input id="n1" type="text"></div><div class="l">Username</div><div><input id="n2" type="text"></div><div class="l">Choose a password <button type="button" class="tg">Show</button></div><div><input id="n3" type="password"></div><div class="mt"><i></i></div><div class="l">Promo code</div><div><input id="n4" type="text"></div><div class="l">How did you hear about us?</div><div><textarea id="n5" rows="2"></textarea></div><div class="nf"><input id="n6" name="url" type="text"></div><p style="margin-top:12px"><button>Join</button></p></form>';var p=document.getElementById('n3');document.querySelector('.tg').addEventListener('click',function(){p.type=p.type==='password'?'text':'password';});p.addEventListener('input',function(){document.querySelector('.mt i').style.width=Math.min(100,p.value.length*10)+'%';});},700);</script>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"email":r("#n1",[]),"username":r("#n2",[]),"new-password":r("#n3",[])};}};</script>
+</body>
+</html>

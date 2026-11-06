@@ -108,6 +108,10 @@ export function ItemEditor({ initial, vaultId, id, onDone, onCancel }: { initial
     setError("");
     const t = text.trim();
     if (!t) return set("totp", null);
+    if (t.startsWith("otpauth-migration://")) {
+      setError("That's a transfer code for several accounts at once. Use Import and export, and choose From a QR image.");
+      return set("totp", null);
+    }
     if (t.startsWith("otpauth://") || t.startsWith("steam://")) {
       try {
         const cfg = parseOtpauth(t);
@@ -275,12 +279,6 @@ export function ItemEditor({ initial, vaultId, id, onDone, onCancel }: { initial
         <Button small className="w-fit" onClick={() => set("fields", [...fields, { name: "", value: "", type: "text" }])}><Plus className="h-3 w-3" /> Add field</Button>
       </div>
 
-      {body.kind === "login" && (
-        <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-          <input type="checkbox" checked={!!body.icon} onChange={(e) => set("icon", e.target.checked)} />
-          Show this site's icon. It's fetched through your server, which sees the site's name at that moment.
-        </label>
-      )}
       <div className="flex flex-wrap gap-3">
         <Label text="Folder">
           <select className={inputClass} value={body.folderId ?? ""} onChange={(e) => set("folderId", e.target.value || null)}>

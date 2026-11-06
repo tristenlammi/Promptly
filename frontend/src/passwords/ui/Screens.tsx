@@ -1,5 +1,6 @@
 // The smaller screens: Generator, 2FA codes, Trash, Devices, Activity, Settings,
 // and the page that approves a new client.
+import type { VaultClient } from "../core/vault";
 import { Check, MonitorSmartphone, RefreshCw, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -8,8 +9,9 @@ import { buf } from "../core/bytes";
 import { DEFAULT_PASSWORD, DEFAULT_PASSPHRASE, generatePassphrase, generatePassword, generatePin, generateUsername, plusAddress } from "../core/generator";
 import { Button, Callout, CopyButton, errorText, inputClass, Label, Modal, useVault } from "./kit";
 import { StrengthMeter } from "./Onboarding";
-import { TotpRow } from "./ItemView";
-import { ClockWarning, PasskeyUnlockPanel, PinPanel, TravelPanel } from "./Connections";
+import { Reprompt, TotpRow } from "./ItemView";
+import { ClockWarning, KeysPanel, PasskeyUnlockPanel, PinPanel, TravelPanel, VaultIconsToggle } from "./Connections";
+import { decodeQrFile, scanQrFromCamera } from "./qr";
 
 export function GeneratorScreen() {
   const { copy } = useVault();
@@ -107,20 +109,40 @@ export function GeneratorScreen() {
 export function CodesScreen() {
   const { vault, version } = useVault();
   const [q, setQ] = useState("");
+  const [asking, setAsking] = useState<string | null>(null);
+  const [passed, setPassed] = useState<Set<string>>(new Set());
   const items = useMemo(() => {
     void version;
-    return vault.search(q).filter((i) => i.body.totp?.secret);
+    return vault.search(q).filter((i) => i.body.totp?.secret && vault.canReveal(i.vaultId));
   }, [vault, q, version]);
   return (
     <section className="flex max-w-xl flex-col gap-3">
       <h1 className="text-lg font-semibold text-[var(--text)]">2FA codes</h1>
+      {asking && (
+        <Modal title="Your master password" onClose={() => setAsking(null)}>
+          <Reprompt
+            onPass={() => {
+              setPassed(new Set([...passed, asking]));
+              setAsking(null);
+            }}
+            onCancel={() => setAsking(null)}
+          />
+        </Modal>
+      )}
       <ClockWarning />
       <input className={inputClass} placeholder="Search" aria-label="Search codes" value={q} onChange={(e) => setQ(e.target.value)} />
       {items.length === 0 && <p className="text-sm text-[var(--text-muted)]">No 2FA codes yet. Add one to a login, or scan a QR from a new 2FA code item.</p>}
       <div className="flex flex-col gap-2">
         {items.map((i) => (
           <div key={i.id} className="rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3">
-            <TotpRow cfg={i.body.totp!} label={i.body.title} />
+            {i.body.reprompt && !passed.has(i.id) ? (
+              <div className="flex items-center justify-between gap-2 py-2 text-sm text-[var(--text)]">
+                <span className="truncate">{i.body.title}</span>
+                <Button small onClick={() => setAsking(i.id)}>Show code</Button>
+              </div>
+            ) : (
+              <TotpRow cfg={i.body.totp!} label={i.body.title} />
+            )}
           </div>
         ))}
       </div>
@@ -200,7 +222,7 @@ function ApproveDevice({ request, onDone }: { request: DeviceRequestOut; onDone:
 }
 
 export function DevicesScreen() {
-  const { vault, toast } = useVault();
+  const { vault, toast, platform } = useVault();
   const [devices, setDevices] = useState<DeviceOut[]>([]);
   const [requests, setRequests] = useState<DeviceRequestOut[]>([]);
   const [approving, setApproving] = useState<DeviceRequestOut | null>(null);
@@ -224,6 +246,18 @@ export function DevicesScreen() {
     toast(`${d.name} removed`);
     load();
   };
+  /** The QR carries the request and the new device's key, so what we approve is what's on that screen. */
+  const fromQr = async (text: string | null) => {
+    if (!text) return;
+    const m = /^pwdev:([0-9a-f-]{36}):([A-Za-z0-9_-]+)$/.exec(text.trim());
+    if (!m) return setError("That isn't a Promptly Passwords device code.");
+    const list = await vault.api.deviceRequests();
+    const found = list.find((r) => r.id === m[1]);
+    if (!found) return setError("That request has gone, or it's for another account.");
+    if (found.device_pub !== m[2]) return setError("The server's copy of that request doesn't match the screen you scanned. Don't approve it.");
+    setError("");
+    setApproving(found);
+  };
   return (
     <section className="flex max-w-xl flex-col gap-3">
       <h1 className="text-lg font-semibold text-[var(--text)]">Devices</h1>
@@ -236,6 +270,13 @@ export function DevicesScreen() {
           </div>
         </Callout>
       ))}
+      <div className="flex flex-wrap gap-2">
+        <Button small onClick={() => scanQrFromCamera().then(fromQr)}>Scan a new device's QR</Button>
+        <label className="inline-flex cursor-pointer items-center rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text)]">
+          From an image
+          <input type="file" accept="image/*" aria-label="New device's QR image" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) await fromQr(await decodeQrFile(f)); }} />
+        </label>
+      </div>
       <ul className="flex flex-col gap-2">
         {devices.map((d) => (
           <li key={d.id} className="flex items-center gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-sm text-[var(--text)]">
@@ -250,6 +291,13 @@ export function DevicesScreen() {
       </ul>
       {devices.length === 0 && <p className="text-sm text-[var(--text-muted)]">Connect the browser extension, the Windows app or Promptly for Android, and they'll appear here. This browser doesn't need adding.</p>}
       <p className="text-xs text-[var(--text-muted)]">Removing a device stops it syncing. What it already downloaded stays there, encrypted.</p>
+      <details className="text-sm text-[var(--text)]">
+        <summary className="cursor-pointer font-medium">Add Passwords to another device</summary>
+        <ul className="mt-1 list-disc pl-5 text-xs text-[var(--text-muted)]">
+          <li>Browser extension, Windows app and Promptly for Android: downloads and steps are on <a className="underline" href={`${platform.baseUrl}/apps/install`} target="_blank" rel="noopener noreferrer">your server's Install page</a>.</li>
+          <li>Each one connects to this server, then you approve it here or use your recovery kit.</li>
+        </ul>
+      </details>
       {approving && (
         <ApproveDevice
           request={approving}
@@ -334,6 +382,11 @@ export function SettingsScreen() {
     await new Promise((r) => setTimeout(r, 30));
     try {
       await vault.changePassword(current, next);
+      // Hello, a PIN and a passkey all hold a secret made from the old password.
+      await platform.hello?.disable().catch(() => undefined);
+      await vault.store.setMeta("hello_enabled", false);
+      setHelloOn(false);
+      platform.pin?.clear();
       setCurrent("");
       setNext("");
       setAgain("");
@@ -360,6 +413,8 @@ export function SettingsScreen() {
           <input className={inputClass} type="number" min={5} max={600} value={settings.clipboardSeconds} onChange={(e) => setSettings({ ...settings, clipboardSeconds: Math.max(5, Number(e.target.value) || 30) })} />
         </Label>
         {platform.settingsExtras}
+        <PersonalIcons />
+        <KeysPanel />
         {platform.pin && <PinPanel />}
         <PasskeyUnlockPanel />
         <TravelPanel />
@@ -407,13 +462,14 @@ export function SettingsScreen() {
         {error && <Callout kind="danger">{error}</Callout>}
         <Button kind="primary" type="submit" disabled={busy || !current || !next}>Change it</Button>
       </form>
-      <ResetVault />
+      <ResetVault vault={vault} kind={platform.kind} baseUrl={platform.baseUrl} />
     </section>
   );
 }
 
-function ResetVault() {
-  const { vault, toast } = useVault();
+/** Only for someone who can't unlock, so it's on the lock screen as well. It needs a real
+ *  Promptly sign-in, which a device token isn't, so other clients send you to the website. */
+export function ResetVault({ vault, kind, baseUrl }: { vault: VaultClient; kind: string; baseUrl: string }) {
   const [open, setOpen] = useState(false);
   const [confirmText, setConfirm] = useState("");
   const [password, setPassword] = useState("");
@@ -425,7 +481,6 @@ function ResetVault() {
     try {
       await vault.api.reset({ confirm: confirmText, password: password || undefined, totp_code: code || undefined });
       await vault.store.clear();
-      toast("Vault reset");
       location.reload();
     } catch (err) {
       setError(errorText(err));
@@ -435,7 +490,11 @@ function ResetVault() {
     <div className="flex flex-col gap-2">
       <h2 className="text-sm font-semibold text-[var(--danger)]">Reset vault</h2>
       <p className="text-sm text-[var(--text-muted)]">Only for someone who lost both their master password and recovery kit. It destroys everything in your personal vault, for good. Nobody can undo it.</p>
-      <Button kind="danger" className="w-fit" onClick={() => setOpen(true)}>Reset vault…</Button>
+      {kind === "web" ? (
+        <Button kind="danger" className="w-fit" onClick={() => setOpen(true)}>Reset vault…</Button>
+      ) : (
+        <p className="text-sm text-[var(--text)]">Do this from Promptly in your browser, at <span className="font-mono">{baseUrl}/passwords</span>, where you can sign in.</p>
+      )}
       {open && (
         <Modal title="Destroy this vault?" onClose={() => setOpen(false)}>
           <form onSubmit={submit} className="flex flex-col gap-3">
@@ -521,4 +580,13 @@ function PlusRule({ address }: { address: string }) {
       Label its mail in Promptly Mail
     </Button>
   );
+}
+
+function PersonalIcons() {
+  const { vault } = useVault();
+  const [id, setId] = useState("");
+  useEffect(() => {
+    vault.personalVaultId().then(setId).catch(() => undefined);
+  }, [vault]);
+  return id ? <VaultIconsToggle vaultId={id} /> : null;
 }

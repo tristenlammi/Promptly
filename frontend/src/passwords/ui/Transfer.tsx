@@ -6,6 +6,7 @@ import { AFTER_IMPORT, dedupe, type Imported, importFile, type ImportResult, Nee
 import { newBody } from "../core/model";
 import { Button, Callout, errorText, inputClass, Label, Modal, Spinner, useVault } from "./kit";
 import { downloadBlob } from "./Onboarding";
+import { decodeQrFile, scanQrFromCamera } from "./qr";
 
 export function TransferScreen() {
   return (
@@ -57,6 +58,17 @@ function ImportPanel() {
     read(loaded);
   };
 
+  /** A transfer QR from Google Authenticator, from a picture of it or the camera. */
+  const fromQr = async (text: string | null) => {
+    if (!text) return setError("No QR code found there.");
+    if (!text.startsWith("otpauth-migration://") && !text.startsWith("otpauth://")) return setError("That QR code isn't a 2FA transfer code.");
+    setResult(null);
+    setDone(null);
+    const loaded = { name: "authenticator-transfer.txt", bytes: new TextEncoder().encode(text) };
+    setFile(loaded);
+    await read(loaded);
+  };
+
   const commit = async () => {
     setBusy("Encrypting and saving…");
     await new Promise((r) => setTimeout(r, 20));
@@ -90,6 +102,14 @@ function ImportPanel() {
       <h2 className="text-sm font-semibold text-[var(--text)]">Import</h2>
       <p className="text-sm text-[var(--text-muted)]">From Chrome, Edge, Firefox, Google Password Manager, Bitwarden, 1Password, LastPass, Dashlane, Proton Pass, Apple Passwords, KeePass, a Credential Exchange file, Aegis or 2FAS. The file stays on this device.</p>
       <input aria-label="Choose a file to import" type="file" className="text-sm text-[var(--text)]" onChange={(e) => choose(e.target.files?.[0])} />
+      <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--text)]">
+        <span>A 2FA transfer QR, from Google Authenticator:</span>
+        <label className="inline-flex cursor-pointer items-center rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-medium">
+          From a QR image
+          <input aria-label="From a QR image" type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) await fromQr(await decodeQrFile(f)); }} />
+        </label>
+        <button type="button" className="rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-medium" onClick={() => { void scanQrFromCamera().then((t) => { if (t) void fromQr(t); }); }}>Scan with camera</button>
+      </div>
       {needPw && file && (
         <form
           className="flex flex-col gap-2"

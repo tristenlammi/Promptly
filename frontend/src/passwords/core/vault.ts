@@ -52,6 +52,10 @@ export class VaultClient {
   private state: Unlocked | null = null;
   onChange?: () => void;
   serverTimeOffsetMs = 0;
+  minKdf: KdfParams | null = null;
+  /** Vaults that can't open because whoever gave us the key now has a different one. */
+  keyChanges = new Map<string, KeyChangedError>();
+  private roles = new Map<string, string>();
   lastSyncAt: number | null = null;
   rollbackWarnings: string[] = [];
 
@@ -105,7 +109,9 @@ export class VaultClient {
   // ---- Setup and unlock ----------------------------------------------------
 
   /** Create the account. Returns the Secret Key's raw bytes for the recovery kit. */
-  async setup(password: string, kdf: KdfParams = KDF_FLOOR): Promise<{ secretKey: Uint8Array }> {
+  async setup(password: string, wanted: KdfParams = KDF_FLOOR): Promise<{ secretKey: Uint8Array }> {
+    await this.refreshServerFacts();
+    const kdf = this.strongerKdf(wanted);
     const secretKey = newSecretKey();
     const salt = randomBytes(16);
     const accountId = randomUuid();
@@ -171,6 +177,7 @@ export class VaultClient {
     try {
       const pre = await this.api.prelogin();
       this.serverTimeOffsetMs = new Date(pre.server_time).getTime() - Date.now();
+      this.minKdf = pre.min_kdf;
       if (pre.exists && pre.kdf && pre.salt) {
         kdf = pre.kdf;
         salt = pre.salt;
@@ -242,6 +249,7 @@ export class VaultClient {
     this.api.session = sessionToken;
     this.state = { keyset, authKey: secret.slice(32), userId: cached.userId, accountId: cached.accountId, vaultKeys: new Map(), items: new Map(), search: new Map() };
     await this.loadLocal();
+    void this.refreshServerFacts();
   }
 
   /** The session ended while we still hold the keys: prove again without the password. */
@@ -309,6 +317,7 @@ export class VaultClient {
     this.state = { keyset, authKey, userId: cached.userId, accountId: cached.accountId, vaultKeys: new Map(), items: new Map(), search: new Map() };
     await this.loadLocal();
     if (!offline) await this.sync();
+    void this.refreshServerFacts();
     return { offline };
   }
 
@@ -337,15 +346,57 @@ export class VaultClient {
 
   // ---- Change the master password ------------------------------------------
 
+  /** Stretching settings at least as strong as they are now and as the server asks for. */
+  private strongerKdf(current: KdfParams, wanted?: KdfParams): KdfParams {
+    // (never below the floor, whatever's asked)
+    const a = wanted ?? current;
+    const min = this.minKdf;
+    return min ? { alg: "argon2id", m: Math.max(a.m, min.m), t: Math.max(a.t, min.t), p: a.p } : a;
+  }
+
+  /** The server's clock and minimum settings, when unlocking didn't already fetch them. */
+  private async refreshServerFacts(): Promise<void> {
+    try {
+      const pre = await this.api.prelogin();
+      this.serverTimeOffsetMs = new Date(pre.server_time).getTime() - Date.now();
+      this.minKdf = pre.min_kdf;
+    } catch {
+      /* offline: nothing to compare with */
+    }
+  }
+
+  /** True if this device's copy is below what the server now asks for. */
+  kdfBelowMinimum(account: { kdf: KdfParams }): boolean {
+    const min = this.minKdf;
+    return !!min && (account.kdf.m < min.m || account.kdf.t < min.t);
+  }
+
   async changePassword(current: string, next: string, kdf?: KdfParams): Promise<void> {
+    await this.rekeyWith(current, next, kdf, null);
+  }
+
+  /** A new Secret Key, same master password. Other devices have to join again, and the
+   *  old kit stops working. Returns the new key for a new kit. */
+  async rotateSecretKey(password: string): Promise<Uint8Array> {
+    const fresh = newSecretKey();
+    await this.rekeyWith(password, password, undefined, fresh);
+    return fresh;
+  }
+
+  /** Raise the stretching settings without changing anything else. */
+  async upgradeKdf(password: string, kdf?: KdfParams): Promise<void> {
+    await this.rekeyWith(password, password, kdf, null);
+  }
+
+  private async rekeyWith(current: string, next: string, kdf: KdfParams | undefined, newKey: Uint8Array | null): Promise<void> {
     const s = this.need();
     const secretKey = await this.loadSecretKey();
     const account = await this.store.getAccount();
     if (!secretKey || !account) throw new Error("This device isn't set up");
     const { authKey: currentAuth } = await deriveRoot(current, secretKey, fromB64u(account.salt), account.kdf);
     const salt = randomBytes(16);
-    const params = kdf ?? account.kdf;
-    const { unlockKey, authKey } = await deriveRoot(next, secretKey, salt, params);
+    const params = this.strongerKdf(account.kdf, kdf);
+    const { unlockKey, authKey } = await deriveRoot(next, newKey ?? secretKey, salt, params);
     const wrapped = await wrapKeyset(unlockKey, s.accountId, s.keyset);
     await this.api.rekey({
       auth_key: b64u(currentAuth),
@@ -355,7 +406,10 @@ export class VaultClient {
       new_wrapped_keyset: b64u(wrapped),
     });
     await this.store.putAccount({ ...account, kdf: params, salt: b64u(salt), wrappedKeyset: b64u(wrapped) });
+    if (newKey) await this.saveSecretKey(newKey);
     s.authKey = authKey;
+    // A shortcut in that wraps the old secret would just say the password's wrong.
+    await this.store.deleteMeta("passkey_unlock");
   }
 
   // ---- Local data ----------------------------------------------------------
@@ -462,11 +516,16 @@ export class VaultClient {
     const s = this.need();
     s.items.clear();
     s.search.clear();
+    this.keyChanges.clear();
+    this.roles.clear();
     for (const v of await this.store.getVaults()) {
+      this.roles.set(v.id, v.role);
       try {
         await this.vaultKey(v);
       } catch (e) {
-        if (e instanceof KeyChangedError) throw e;
+        // One person's changed key can't stop everything else opening. That vault stays
+        // shut, and the Shared vaults screen asks what to do about it.
+        if (e instanceof KeyChangedError) this.keyChanges.set(v.id, e);
         continue;
       }
       if (v.hidden) continue;
@@ -548,6 +607,7 @@ export class VaultClient {
           next.revision = 0;
         }
         await this.store.putVault(next);
+        this.roles.set(next.id, next.role);
         if (next.hidden) continue;
         if (next.accepted || rv.kind === "personal") {
           await this.pushVault(next, out);
@@ -935,6 +995,12 @@ export class VaultClient {
     return toChange;
   }
 
+  /** Fill-only members can't see secrets on screen. It's a convenience: their device still
+   *  gets the password in order to fill it, and the Shared screen says so. */
+  canReveal(vaultId: string): boolean {
+    return this.roles.get(vaultId) !== "fill";
+  }
+
   // ---- Travel mode ----------------------------------------------------------
 
   /** Take these vaults off this device: their items go from the local copy and memory,
@@ -1059,7 +1125,25 @@ export class VaultClient {
 
   /** Everything a person's own export covers, decrypted, in memory. */
   exportable(): Item[] {
-    return this.allItems({ includeSystem: false, includeDeleted: false });
+    // A fill-only member isn't meant to see those secrets, so they don't go in a file.
+    return this.allItems({ includeSystem: false, includeDeleted: false }).filter((i) => this.canReveal(i.vaultId));
+  }
+
+  /** Small secrets for this device only, under the same device key as the Secret Key. */
+  async putDeviceSealed(name: string, value: unknown): Promise<void> {
+    const key = await this.store.getMeta<CryptoKey>(DEVICE_KEY_META);
+    if (!key) throw new Error("This device isn't set up");
+    const iv = randomBytes(12);
+    const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as Uint8Array<ArrayBuffer> }, key, utf8(JSON.stringify(value)) as Uint8Array<ArrayBuffer>);
+    await this.store.setMeta(name, { iv: b64u(iv), ct: b64u(new Uint8Array(ct)) });
+  }
+
+  async getDeviceSealed<T>(name: string): Promise<T | null> {
+    const stored = await this.store.getMeta<{ iv: string; ct: string }>(name);
+    const key = await this.store.getMeta<CryptoKey>(DEVICE_KEY_META);
+    if (!stored || !key) return null;
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64u(stored.iv) as Uint8Array<ArrayBuffer> }, key, fromB64u(stored.ct) as Uint8Array<ArrayBuffer>);
+    return JSON.parse(fromUtf8(new Uint8Array(plain))) as T;
   }
 
   fingerprint(): string {
@@ -1108,6 +1192,11 @@ export class DeviceJoin {
     private sk: Uint8Array,
     private pub: Uint8Array,
   ) {}
+
+  /** For the QR on the new device's screen: the same exchange, with the key to expect. */
+  get qrText(): string {
+    return `pwdev:${this.id}:${b64u(this.pub)}`;
+  }
 
   /** Returns "pending" until approved. Words appear as soon as the approver has
    *  posted its key, so the person can compare before approving. */

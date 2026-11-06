@@ -4,17 +4,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { changePageUrl, clockDriftText, commitPending, createPasskeyUnlock, dropPending, findDuplicates, mergeDuplicates, type PasskeyUnlock, type SecurityAlert, securityAlerts, type SecurityEvent, withPending } from "../core/connections";
+import { buildKitPdf } from "../core/kit";
+import { encodeSecretKey, lastGroup } from "../core/keys";
 import { generateForSite } from "../core/generator";
 import { hostOf } from "../core/match";
-import type { Item } from "../core/model";
+import { type Item, newBody } from "../core/model";
 import { uploadAttachment } from "../core/attachments";
+import { Reprompt } from "./ItemView";
 import { Button, Callout, errorText, inputClass, Label, Modal, safeHref, useVault } from "./kit";
+import { downloadBlob } from "./Onboarding";
 
 const RECOVERY_CHECK_DAYS = 182;
 const UNREACHABLE_WARN_DAYS = 3;
 const BACKUP_WARN_DAYS = 8;
 
-type SurvivalOut = { is_admin: boolean; kit_confirmed: boolean; offsite_configured: boolean; last_backup_at: string | null; backup_age_days: number | null };
+type SurvivalOut = { is_admin: boolean; kit_confirmed: boolean; kit_confirmed_at: string | null; offsite_configured: boolean; last_backup_at: string | null; backup_age_days: number | null };
 
 /** What could lose you this vault, in plain words, with the fix beside it. */
 export function SurvivalPanel() {
@@ -47,7 +51,7 @@ export function SurvivalPanel() {
   }
   const unreachable = lastSync ? Math.floor((Date.now() - lastSync) / 86_400_000) : 0;
   if (unreachable >= UNREACHABLE_WARN_DAYS) items.push({ key: "unreachable", kind: "warn", text: `This device hasn't reached your server for ${unreachable} days. It keeps working from its own copy, but what you change here isn't backed up anywhere else yet.` });
-  const due = lastCheck !== undefined && (!lastCheck || Date.now() - new Date(lastCheck).getTime() > RECOVERY_CHECK_DAYS * 86_400_000);
+  const due = lastCheck !== undefined && recoveryDue(data?.kit_confirmed_at, lastCheck);
 
   const check = async () => {
     setError("");
@@ -137,6 +141,7 @@ export function ChangePassword({ item, onDone, next }: { item: Item; onDone: () 
   const host = hostOf(current.body.urls?.[0]?.url ?? "");
   const [pending, setPending] = useState(current.body.pendingPassword ?? "");
   const [error, setError] = useState("");
+  const [passed, setPassed] = useState(!current.body.reprompt);
 
   const start = async () => {
     setError("");
@@ -161,6 +166,13 @@ export function ChangePassword({ item, onDone, next }: { item: Item; onDone: () 
     else onDone();
   };
 
+  if (!passed) {
+    return (
+      <Modal title="Your master password" onClose={onDone}>
+        <Reprompt onPass={() => setPassed(true)} onCancel={onDone} />
+      </Modal>
+    );
+  }
   return (
     <Modal title={`Change password for ${current.body.title}`} onClose={onDone}>
       <div data-testid="change-flow" className="flex flex-col gap-3 text-sm text-[var(--text)]">
@@ -527,6 +539,312 @@ export function PinPanel() {
         </>
       )}
       {error && <Callout kind="danger">{error}</Callout>}
+    </div>
+  );
+}
+
+export const VAULT_PREFS = "vault-prefs";
+
+/** Who gets a say over which vaults show site icons. Off unless turned on, per vault. */
+export function VaultIconsToggle({ vaultId }: { vaultId: string }) {
+  const { vault, version, bump, toast } = useVault();
+  const row = useMemo(() => {
+    void version;
+    return vault.allItems({ includeSystem: true }).find((i) => i.vaultId === vaultId && i.body.kind === "prefs" && i.body.title === VAULT_PREFS);
+  }, [vault, vaultId, version]);
+  return (
+    <label className="flex items-center gap-2 text-xs text-[var(--text)]">
+      <input
+        type="checkbox"
+        checked={!!row?.body.icon}
+        onChange={async (e) => {
+          try {
+            if (row) await vault.update(row.id, { ...row.body, icon: e.target.checked });
+            else await vault.saveNew(vaultId, newBody("prefs", VAULT_PREFS, { icon: e.target.checked }));
+            vault.sync().catch(() => undefined);
+            bump();
+          } catch (err) {
+            toast(errorText(err), "err");
+          }
+        }}
+      />
+      Show site icons in this vault. They're fetched through your server, which sees each site's name at that moment.
+    </label>
+  );
+}
+
+/** Rename or delete a folder. The items in it stay, just out of the folder. */
+export function FolderTools({ folderId }: { folderId: string }) {
+  const { vault, bump, go, toast } = useVault();
+  const [renaming, setRenaming] = useState(false);
+  const folder = vault.get(folderId);
+  const [name, setName] = useState(folder?.body.title ?? "");
+  if (!folder) return null;
+  const remove = async () => {
+    if (!confirm(`Delete the folder ${folder.body.title}? What's in it stays, out of the folder.`)) return;
+    for (const i of vault.allItems()) {
+      if (i.body.folderId === folderId) await vault.update(i.id, { ...i.body, folderId: null });
+    }
+    await vault.trashItem(folderId);
+    vault.sync().catch(() => undefined);
+    bump();
+    go("all");
+    toast("Folder deleted");
+  };
+  return (
+    <span className="flex gap-1">
+      <Button small onClick={() => setRenaming(true)}>Rename</Button>
+      <Button small onClick={remove}>Delete folder</Button>
+      {renaming && (
+        <Modal title="Rename folder" onClose={() => setRenaming(false)}>
+          <div className="flex flex-col gap-3">
+            <Label text="Name"><input className={inputClass} autoFocus maxLength={80} value={name} onChange={(e) => setName(e.target.value)} /></Label>
+            <Button
+              kind="primary"
+              disabled={!name.trim()}
+              onClick={async () => {
+                await vault.update(folderId, { ...folder.body, title: name.trim() });
+                vault.sync().catch(() => undefined);
+                bump();
+                setRenaming(false);
+              }}
+            >
+              Save
+            </Button>
+          </div>
+        </Modal>
+      )}
+    </span>
+  );
+}
+
+/** Everything that happens with the kit: first run, picked up after a reload, and after a
+ *  new Secret Key. Download it, then prove it by typing its last group. */
+export function KitGate({ onDone, username, fresh }: { onDone: () => void; username?: string; fresh?: boolean }) {
+  const { vault, platform } = useVault();
+  const [encoded, setEncoded] = useState("");
+  const [saved, setSaved] = useState(false);
+  const [typed, setTyped] = useState("");
+  const [error, setError] = useState("");
+  useEffect(() => {
+    void (async () => {
+      const raw = await vault.loadSecretKey();
+      if (raw) {
+        setEncoded(await encodeSecretKey(raw));
+        raw.fill(0);
+      }
+    })();
+  }, [vault]);
+  return (
+    <Modal title={fresh ? "Your new recovery kit" : "Save your recovery kit"} onClose={() => undefined}>
+      <div data-testid="kit-gate" className="flex flex-col gap-3 text-sm text-[var(--text)]">
+        <Callout kind="danger">
+          {fresh ? "Your old kit no longer works. Keep this one instead." : "You haven't confirmed saving your kit yet."} If you forget your master password and don't have this, your vault is gone for good. Nobody can get it back for you.
+        </Callout>
+        <p className="break-all rounded border border-[var(--border)] p-2 text-center font-mono text-sm" data-testid="secret-key">{encoded}</p>
+        <Button
+          onClick={() => {
+            downloadBlob(buildKitPdf({ secretKey: encoded, serverUrl: platform.baseUrl, username: username ?? "", createdOn: new Date().toISOString().slice(0, 10) }), "Promptly-Recovery-Kit.pdf", "application/pdf");
+            setSaved(true);
+          }}
+        >
+          Download my kit
+        </Button>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
+          I've saved or printed it somewhere safe
+        </label>
+        <Label text="Last group of your Secret Key">
+          <input className={inputClass} autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} />
+        </Label>
+        {error && <Callout kind="danger">{error}</Callout>}
+        <Button
+          kind="primary"
+          disabled={!saved || !typed}
+          onClick={async () => {
+            if (typed.trim().toUpperCase() !== lastGroup(encoded)) return setError("That's not the last group. Look at your kit again.");
+            try {
+              await vault.api.confirmKit();
+              onDone();
+            } catch (e) {
+              setError(errorText(e));
+            }
+          }}
+        >
+          Done
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
+/** Things that need a look, on any screen. */
+export function MainNotices({ onNeedKit }: { onNeedKit: () => void }) {
+  const { vault, version, go, route } = useVault();
+  const [due, setDue] = useState(false);
+  const [requests, setRequests] = useState(0);
+  useEffect(() => {
+    let live = true;
+    const check = async () => {
+      try {
+        const s = await vault.api.request<SurvivalOut>("GET", "/survival");
+        const checked = await vault.store.getMeta<string>("recovery_checked");
+        if (!live) return;
+        if (!s.kit_confirmed) onNeedKit();
+        setDue(recoveryDue(s.kit_confirmed_at, checked ?? null));
+        setRequests((await vault.api.deviceRequests()).length);
+      } catch {
+        /* offline: the Security check says what it can */
+      }
+    };
+    void check();
+    const t = setInterval(check, 60_000);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, [vault, onNeedKit]);
+  void version;
+  const changed = [...vault.keyChanges.values()];
+  return (
+    <>
+      {requests > 0 && route !== "devices" && (
+        <div className="p-2"><Callout kind="warn"><span data-testid="request-notice">A new device wants to join your vault.</span> <Button small onClick={() => go("devices")}>Review</Button></Callout></div>
+      )}
+      {changed.length > 0 && route !== "shared" && (
+        <div className="p-2"><Callout kind="warn">A shared vault can't open, because someone's keys changed. <Button small onClick={() => go("shared")}>Look at it</Button></Callout></div>
+      )}
+      {due && route !== "security" && (
+        <div className="p-2"><Callout>Time to check you still have your recovery kit. <Button small onClick={() => go("security")}>Check</Button></Callout></div>
+      )}
+    </>
+  );
+}
+
+function recoveryDue(kitAt: string | null | undefined, checked: string | null): boolean {
+  const times = [kitAt, checked].filter(Boolean).map((t) => new Date(t as string).getTime());
+  if (!times.length) return false;
+  return Date.now() - Math.max(...times) > RECOVERY_CHECK_DAYS * 86_400_000;
+}
+
+/** Someone who shared with you has new keys. Their vault stays shut until you've looked. */
+export function KeyChanges({ onChange }: { onChange: () => void }) {
+  const { vault, bump } = useVault();
+  const changed = [...vault.keyChanges.entries()];
+  if (!changed.length) return null;
+  return (
+    <section data-testid="key-changes" className="flex flex-col gap-2">
+      {changed.map(([vaultId, e]) => (
+        <Callout key={vaultId} kind="danger">
+          <p className="mb-2">{e.username || "Someone"}'s keys changed, so a vault they shared with you won't open. They may have reset their vault, or something may be wrong with the server. Check with them directly, and compare safety words.</p>
+          <Button
+            small
+            onClick={async () => {
+              await vault.acceptChangedKey(e.userId);
+              await vault.reload();
+              await vault.sync().catch(() => undefined);
+              bump();
+              onChange();
+            }}
+          >
+            I've checked, use the new keys
+          </Button>
+        </Callout>
+      ))}
+    </section>
+  );
+}
+
+export function ExpiryReminder({ item }: { item: Item }) {
+  const { vault, bump, toast } = useVault();
+  const [busy, setBusy] = useState(false);
+  if (item.body.remindExpiry) return <p className="text-xs text-[var(--text-muted)]">A reminder is on your Calendar for {item.body.expiresOn}.</p>;
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        small
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await vault.api.request("POST", "/reminder", { on: item.body.expiresOn });
+            await vault.update(item.id, { ...vault.get(item.id)!.body, remindExpiry: true });
+            vault.sync().catch(() => undefined);
+            bump();
+            toast("Reminder added");
+          } catch (e) {
+            toast(errorText(e), "err");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Remind me in Calendar
+      </Button>
+      <span className="text-xs text-[var(--text-muted)]">It'll just say "Document expires soon", since Calendar isn't end-to-end encrypted.</span>
+    </div>
+  );
+}
+
+/** Stronger stretching, or a whole new Secret Key. */
+export function KeysPanel() {
+  const { vault, toast, platform } = useVault();
+  const [account, setAccount] = useState<{ kdf: { m: number; t: number; p: number; alg: "argon2id" } } | null>(null);
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [newKit, setNewKit] = useState(false);
+  const load = useCallback(() => vault.store.getAccount().then((a) => setAccount(a ?? null)), [vault]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  if (!account) return null;
+  const run = async (fn: () => Promise<unknown>, done: string) => {
+    setBusy(true);
+    setError("");
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      await fn();
+      await platform.hello?.disable().catch(() => undefined);
+      await vault.store.setMeta("hello_enabled", false);
+      platform.pin?.clear();
+      setPw("");
+      await load();
+      toast(done);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const mib = Math.round(account.kdf.m / 1024);
+  return (
+    <div data-testid="keys" className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold text-[var(--text)]">Your keys</h2>
+      <p className="text-xs text-[var(--text-muted)]">Your master password is stretched with {mib} MiB of memory and {account.kdf.t} passes. Higher is harder to guess at, and slower to unlock on older devices.</p>
+      {vault.kdfBelowMinimum(account) && <Callout kind="warn">Your server now asks for stronger settings than this vault uses.</Callout>}
+      <Label text="Master password, to change either of these">
+        <input className={inputClass} type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
+      </Label>
+      <div className="flex flex-wrap gap-2">
+        <Button disabled={!pw || busy} onClick={() => run(() => vault.upgradeKdf(pw, { ...account.kdf, m: Math.min(account.kdf.m * 2, 1048576) }), "Stronger settings saved")}>Use more memory</Button>
+        <Button
+          disabled={!pw || busy}
+          onClick={() => {
+            if (!confirm("Make a new Secret Key? Your old kit stops working, and every other device has to join again.")) return;
+            void run(async () => {
+              const fresh = await vault.rotateSecretKey(pw);
+              fresh.fill(0);
+              setNewKit(true);
+            }, "New Secret Key made");
+          }}
+        >
+          Make a new Secret Key
+        </Button>
+      </div>
+      <p className="text-xs text-[var(--text-muted)]">A new Secret Key is for when an old kit may have been seen. Unlocking with Windows Hello, a PIN or a passkey has to be set up again after either change.</p>
+      {error && <Callout kind="danger">{error}</Callout>}
+      {newKit && <KitGate fresh onDone={() => setNewKit(false)} />}
     </div>
   );
 }

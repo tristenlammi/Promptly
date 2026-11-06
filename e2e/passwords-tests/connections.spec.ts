@@ -78,12 +78,30 @@ test("the survival warnings say what could lose the vault, and the recovery chec
   await nav(page, "Security check");
   const s = page.getByTestId("survival");
   await expect(s).toContainText("off-site backups");
-  await expect(s).toContainText("Do you still have your recovery kit");
+  // The reminder only comes round after six months; pretend they've passed.
+  py(`
+import asyncio, uuid
+from datetime import timedelta
+from sqlalchemy import select
+import app.db_models
+from app.database import SessionLocal
+from app.passwords.models import PwAccount
+async def main():
+    async with SessionLocal() as db:
+        a = await db.scalar(select(PwAccount).where(PwAccount.user_id == uuid.UUID("${u.id}")))
+        a.kit_confirmed_at = a.kit_confirmed_at - timedelta(days=200)
+        await db.commit()
+asyncio.run(main())
+`);
+  await page.reload();
+  await page.getByLabel("Master password").fill(MASTER);
+  await page.getByRole("button", { name: "Unlock", exact: true }).click();
+  await expect(s).toContainText("Do you still have your recovery kit", { timeout: 30_000 });
   await s.getByRole("button", { name: "Check my kit" }).click();
-  await page.getByLabel("Master password").fill("not this");
+  await page.getByRole("dialog").getByLabel("Master password").fill("not this");
   await page.getByRole("button", { name: "I have the kit" }).click();
   await expect(page.getByText("isn't right")).toBeVisible({ timeout: 30_000 });
-  await page.getByLabel("Master password").fill(MASTER);
+  await page.getByRole("dialog").getByLabel("Master password").fill(MASTER);
   await page.getByRole("button", { name: "I have the kit" }).click();
   await expect(s.getByText("Do you still have your recovery kit")).toHaveCount(0, { timeout: 30_000 });
 });

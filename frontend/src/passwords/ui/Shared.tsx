@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { MemberOut } from "../core/api";
 import type { Item } from "../core/model";
 import { type EmergencyOut, KeyChangedError, type VaultInfo } from "../core/vault";
+import { KeyChanges, VaultIconsToggle } from "./Connections";
 import { Button, Callout, errorText, inputClass, Label, Modal, useVault } from "./kit";
 
 type Person = { id: string; username: string; has_vault: boolean };
@@ -58,6 +59,8 @@ export function SharedScreen() {
           Your safety words: <span data-testid="my-words" className="font-mono text-[var(--text)]">{myWords.join(" ")}</span>. Someone sharing with you can compare these with what their screen says, in person or by phone.
         </p>
       )}
+
+      <KeyChanges onChange={load} />
 
       {invited.map((v) => (
         <Invitation key={v.id} v={v} onDone={load} />
@@ -211,7 +214,7 @@ function VaultCard({ v, people, onChange }: { v: VaultInfo; people: Person[]; on
           <p className="text-xs text-[var(--text-muted)]">{ROLE_TEXT[v.role] ?? v.role}</p>
         </div>
         <div className="flex gap-2">
-          <Button small onClick={() => go("all")}>Items</Button>
+          <Button small onClick={() => go(`vault/${v.id}`)}>Items</Button>
           <Button
             small
             onClick={async () => {
@@ -295,6 +298,7 @@ function VaultCard({ v, people, onChange }: { v: VaultInfo; people: Person[]; on
           <Button disabled={!adding} onClick={add}>Invite</Button>
         </div>
       )}
+      {manager && <VaultIconsToggle vaultId={v.id} />}
       {manager && role === "fill" && <p className="text-xs text-[var(--text-muted)]">Fill only is a convenience, not a lock: their browser holds the password to fill it, so someone determined could still get at it.</p>}
       {error && <Callout kind="danger">{error}</Callout>}
 

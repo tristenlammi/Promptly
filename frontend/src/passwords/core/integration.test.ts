@@ -2,11 +2,12 @@
 //   PW_STACK_URL=http://localhost:8092 npx vitest run src/passwords/core/integration.test.ts
 // Includes the canary test (plan 13.2): distinctive strings in every field, then a
 // search of the database dump, logs, Redis, uploads and a real backup for any of them.
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
-import { VaultApi } from "./api";
+import { ApiError, VaultApi } from "./api";
 import { b64u, fromB64u, randomBytes } from "./bytes";
 import { type ItemBody, newBody } from "./model";
+import { uploadAttachment } from "./attachments";
 import { createSend, openSend, parseSendLink, sendMeta } from "./send";
 import { MemoryStore } from "./store";
 import { BACKEND, BASE_URL, dockerText, makeUsers, stackEnabled, type TestUser } from "./testing/stack";
@@ -19,10 +20,18 @@ function client(user: TestUser, store = new MemoryStore(), fetcher?: typeof fetc
   return new VaultClient(api, store);
 }
 
+/** Account creation is rate limited per address, and other suites may be running. */
 async function ready(user: TestUser) {
-  const c = client(user);
-  const { secretKey } = await c.setup(MASTER);
-  return { c, secretKey };
+  for (let tries = 0; ; tries++) {
+    const c = client(user);
+    try {
+      const { secretKey } = await c.setup(MASTER);
+      return { c, secretKey };
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.status !== 429 || tries > 4) throw e;
+      await new Promise((r) => setTimeout(r, 20_000));
+    }
+  }
 }
 
 async function second(user: TestUser, secretKey: Uint8Array, fetcher?: typeof fetch) {
@@ -30,6 +39,8 @@ async function second(user: TestUser, secretKey: Uint8Array, fetcher?: typeof fe
   await c.unlock(MASTER, secretKey);
   return c;
 }
+
+vi.setConfig({ testTimeout: 240_000 });
 
 describe.skipIf(!stackEnabled)("vault client against the stack", () => {
   let alice: TestUser;
@@ -121,6 +132,70 @@ asyncio.run(main())
     // The right password without the key opens nothing.
     await expect(openSend(anon, id, b64u(randomBytes(32)), meta, "swordfish")).rejects.toThrow();
   });
+
+  it("someone's changed keys shut only their vault, and don't lock you out of yours", async () => {
+    const [ua, ub] = makeUsers("lockouta", "lockoutb");
+    const a = await ready(ua);
+    const b = await ready(ub);
+    const shared = await a.c.createSharedVault("Theirs");
+    await a.c.saveNew(shared, newBody("login", "Shared login", { password: "x" }));
+    await a.c.sync();
+    await a.c.addMember(shared, ub.id, "view");
+    await b.c.api.acceptVault(shared);
+    await b.c.sync();
+    await b.c.saveNew(await b.c.personalVaultId(), newBody("login", "My own", { password: "y" }));
+    await b.c.sync();
+    expect(b.c.allItems().map((i) => i.body.title).sort()).toEqual(["My own", "Shared login"]);
+
+    // What Bob's device remembers about Alice no longer matches what the server says.
+    const trust = await b.c.trustEntries();
+    trust[ua.id].ed25519 = b64u(randomBytes(32));
+    await b.c.store.setMeta("trust", trust);
+    await b.c.lock();
+    await b.c.unlock(MASTER);
+    expect(b.c.allItems().map((i) => i.body.title)).toEqual(["My own"]);
+    expect([...b.c.keyChanges.keys()]).toEqual([shared]);
+
+    await b.c.acceptChangedKey(ua.id);
+    await b.c.reload();
+    expect(b.c.keyChanges.size).toBe(0);
+    expect(b.c.allItems().map((i) => i.body.title).sort()).toEqual(["My own", "Shared login"]);
+  });
+
+  it("a new Secret Key: the old one stops working everywhere, and the vault's intact", async () => {
+    const [u] = makeUsers("rotate");
+    const { c, secretKey } = await ready(u);
+    await c.saveNew(await c.personalVaultId(), newBody("login", "Kept", { password: "kept" }));
+    await c.sync();
+    const fresh = await c.rotateSecretKey(MASTER);
+    expect(b64u(fresh)).not.toBe(b64u(secretKey));
+    expect(await c.checkPassword(MASTER)).toBe(true);
+
+    await expect(second(u, secretKey)).rejects.toBeTruthy();
+    const other = await second(u, fresh);
+    expect(other.allItems().map((i) => i.body.password)).toEqual(["kept"]);
+    await c.lock();
+    await c.unlock(MASTER);
+    expect(c.allItems().map((i) => i.body.password)).toEqual(["kept"]);
+  });
+
+  it("stretching can go up, and never below what the server asks for", async () => {
+    const [u] = makeUsers("kdfup");
+    const { c, secretKey } = await ready(u);
+    const account = (await c.store.getAccount())!;
+    expect(account.kdf.m).toBeGreaterThanOrEqual(65536);
+    await c.upgradeKdf(MASTER, { ...account.kdf, m: account.kdf.m * 2 });
+    expect((await c.store.getAccount())!.kdf.m).toBe(account.kdf.m * 2);
+    const other = await second(u, secretKey);
+    expect(other.unlocked).toBe(true);
+    // The server's minimum wins over a lower request.
+    c.minKdf = { alg: "argon2id", m: account.kdf.m * 3, t: 4, p: 1 };
+    expect(c.kdfBelowMinimum(await c.store.getAccount() as { kdf: typeof account.kdf })).toBe(true);
+    await c.changePassword(MASTER, MASTER);
+    const now = (await c.store.getAccount())!.kdf;
+    expect(now.m).toBe(account.kdf.m * 3);
+    expect(now.t).toBe(4);
+  }, 180_000);
 
   it("sets up, syncs to a second device, and unlocks", async () => {
     const [u] = makeUsers("sync");
@@ -494,6 +569,19 @@ describe.skipIf(!stackEnabled)("canary: the server can't read", () => {
     await a.c.api.noteExport();
     await a.c.requestDevice("laptop");
 
+    // Sharing beyond a vault: a Send with a password, an attachment, emergency access.
+    const sent = await createSend(a.c.api, BASE_URL, { kind: "text", title: `${CANARY}_sendtitle`, text: `${CANARY}_sendtext` }, { days: 1, views: 2, password: `${CANARY}_sendpass` });
+    expect(sent.link).not.toContain(CANARY);
+    const attached = new Blob([`${CANARY}_attachment`]);
+    await a.c.sync();
+    const ref = await uploadAttachment(a.c.api, vid, i1.id, { name: `${CANARY}_file.txt`, size: attached.size, slice: (x, y) => attached.slice(x, y) });
+    await a.c.update(i1.id, { ...a.c.get(i1.id)!.body, attachments: [ref] });
+    await a.c.emergencyInvite(v.id, 3);
+    await b.c.emergencyAct((await b.c.emergencyList())[0].id, "accept");
+    await a.c.refreshEmergency();
+    await a.c.setTravelHidden([]);
+    await a.c.sync();
+
     // 1. The whole database, as text and with binary columns.
     const dump = dockerText(["exec", "PromptlyPw-Postgres", "pg_dump", "-U", "promptly", "-d", "promptly", "--inserts"]);
     expect(dump.length).toBeGreaterThan(10000);
@@ -520,23 +608,82 @@ describe.skipIf(!stackEnabled)("canary: the server can't read", () => {
     const grep = dockerText(["exec", BACKEND, "sh", "-c", `grep -rIl ${CANARY} /app/uploads /app/backups 2>/dev/null | head -5; echo done`]);
     expect(grep.trim()).toBe("done");
 
-    // 5. A real backup file. Make one, then read it through.
-    const backup = dockerText([
-      "exec",
-      BACKEND,
-      "sh",
-      "-c",
-      `python - <<'PY'
+    // 5. A real backup, made the way the server makes them. It's pg_dump's compressed
+    // format, so a plain search would find nothing whatever was in it: read it back as SQL,
+    // and prove the search works with a marker planted in an ordinary column first.
+    const MARK = "PWPOSITIVEMARK9d2b";
+    dockerText(["exec", "PromptlyPw-Postgres", "psql", "-U", "promptly", "-d", "promptly", "-c", `INSERT INTO pw_activity (id, user_id, event, at) VALUES (gen_random_uuid(), '${u.id}', '${MARK}', now())`]);
+    const made = dockerText(
+      ["exec", "-i", BACKEND, "python"],
+      `
 import asyncio
+import app.db_models
 from app.backups import service
-import inspect
-fn = getattr(service, "run_backup", None) or getattr(service, "create_backup", None) or getattr(service, "dump_database", None)
-print("FN", fn.__name__ if fn else None)
-PY`,
-    ]);
-    expect(backup).toContain("FN");
-    const scan = dockerText(["exec", BACKEND, "sh", "-c", `for f in /app/backups/*; do [ -f "$f" ] || continue; case "$f" in *.gz) gunzip -c "$f";; *) cat "$f";; esac; done | grep -c ${CANARY} || true`]);
-    expect(scan.trim().split(/\s+/).pop()).toBe("0");
+async def main():
+    run = await service.run_backup("manual")
+    print("BACKUP", run.status, run.filename)
+asyncio.run(main())
+`,
+    );
+    const line = made.split(/\r?\n/).find((l) => l.startsWith("BACKUP "));
+    expect(line, made).toContain("BACKUP ok ");
+    const file = line!.split(" ")[2];
+    const sql = dockerText(["exec", BACKEND, "sh", "-c", `pg_restore -f - /app/backups/${file}`]);
+    expect(sql, "the search must be able to see into a backup").toContain(MARK);
+    expect(sql).toContain("pw_items");
+    assertNoCanary("backup file", sql);
+    expect(sql.toLowerCase().includes(canaryHex), "canary hex in backup").toBe(false);
+    dockerText(["exec", "PromptlyPw-Postgres", "psql", "-U", "promptly", "-d", "promptly", "-c", `DELETE FROM pw_activity WHERE event = '${MARK}'`]);
+    dockerText(["exec", BACKEND, "rm", "-f", `/app/backups/${file}`]);
+
+    // 6. Push payloads. Anything the server sends a device is built from its own words.
+    const pushed = dump.split("\n").filter((l) => l.includes("INSERT INTO public.notifications"));
+    assertNoCanary("notifications", pushed.join("\n"));
+  });
+});
+
+describe.skipIf(!stackEnabled)("canary: what the client sends", () => {
+  it("no plaintext, key or master password in any request, for a full round", async () => {
+    const [u] = makeUsers("canaryreq");
+    const sent: string[] = [];
+    const recording: typeof fetch = async (input, init) => {
+      const body = init?.body;
+      const text = typeof body === "string" ? body : body instanceof Uint8Array ? new TextDecoder("latin1").decode(body) : "";
+      sent.push(`${String(input)} ${JSON.stringify(init?.headers ?? {})} ${text}`);
+      return fetch(input, init);
+    };
+    const store = new MemoryStore();
+    const c = client(u, store, recording);
+    const master = `${CANARY}_master`;
+    // Waits out the rate limit a busy test run can hit, as ready() does.
+    const { secretKey } = await (async () => {
+      for (let tries = 0; ; tries++) {
+        try {
+          return await c.setup(master);
+        } catch (e) {
+          if (!(e instanceof ApiError) || e.status !== 429 || tries > 4) throw e;
+          await new Promise((r) => setTimeout(r, 20_000));
+        }
+      }
+    })();
+    const vid = await c.personalVaultId();
+    const item = await c.saveNew(vid, canaries());
+    await c.sync();
+    await c.update(item.id, { ...c.get(item.id)!.body, notes: `${CANARY}_notes2` });
+    const shared = await c.createSharedVault(`${CANARY}_vault`);
+    await c.saveNew(shared, { ...canaries(), title: `${CANARY}_shared` });
+    await c.sync();
+    await createSend(c.api, BASE_URL, { kind: "text", title: `${CANARY}_s`, text: `${CANARY}_t` }, { days: 1, views: 1, password: `${CANARY}_p` });
+    await c.lock();
+    await c.unlock(master, secretKey);
+    await c.sync();
+
+    expect(sent.length).toBeGreaterThan(10);
+    const all = sent.join("\n");
+    assertNoCanary("requests", all);
+    expect(all.toLowerCase().includes(Buffer.from(CANARY).toString("hex"))).toBe(false);
+    expect(all.includes(Buffer.from(CANARY).toString("base64").slice(0, 16))).toBe(false);
+    expect(all).not.toContain(b64u(secretKey));
   });
 });
 

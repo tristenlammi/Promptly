@@ -787,8 +787,9 @@ async def test_device_approval_flow(client, db):
     # Approve needs the approver key published first, so both sides can show words.
     assert (await client.post(f"/api/passwords/device-requests/{req['id']}/approve", headers=v.h, json={"payload": b64(payload)})).status_code == 409
     assert (await client.post(f"/api/passwords/device-requests/{req['id']}/approver", headers=v.h, json={"approver_pub": b64(approver_pub)})).status_code == 204
-    # A second approver can't swap the key.
-    assert (await client.post(f"/api/passwords/device-requests/{req['id']}/approver", headers=v.h, json={"approver_pub": b64(os.urandom(32))})).status_code == 409
+    # Reopening starts the exchange over, with new words on both screens.
+    assert (await client.post(f"/api/passwords/device-requests/{req['id']}/approver", headers=v.h, json={"approver_pub": b64(os.urandom(32))})).status_code == 204
+    assert (await client.post(f"/api/passwords/device-requests/{req['id']}/approver", headers=v.h, json={"approver_pub": b64(approver_pub)})).status_code == 204
 
     poll = {"poll_secret": req["poll_secret"]}
     state = (await client.post(f"/api/passwords/device-requests/{req['id']}/poll", headers=bearer(u), json=poll)).json()
@@ -978,3 +979,24 @@ def test_tables_have_no_plaintext_looking_columns():
     for table in models.Base.metadata.tables.values():
         if table.name.startswith("pw_"):
             assert not banned & {c.name for c in table.columns}, table.name
+
+async def test_changes_never_splits_a_revision_across_pages(client, db):
+    """One batch is one revision. A device that carries on from the last revision it saw
+    would otherwise never get the rest of a batch cut by a page boundary."""
+    v = await setup_vault(client, await make_user(db))
+    ids = [str(uuid.uuid4()) for _ in range(30)]
+    await write(client, v, v.vault_id, [{"id": i, "blob": b64(os.urandom(50))} for i in ids[:10]])
+    await write(client, v, v.vault_id, [{"id": i, "blob": b64(os.urandom(50))} for i in ids[10:25]])
+    await write(client, v, v.vault_id, [{"id": i, "blob": b64(os.urandom(50))} for i in ids[25:]])
+
+    seen, since, pages = [], 0, 0
+    while True:
+        page = (await client.get(f"/api/passwords/vaults/{v.vault_id}/changes", headers=v.h, params={"since": since, "limit": 4})).json()
+        pages += 1
+        seen += [i["id"] for i in page["items"]]
+        since = max([i["revision"] for i in page["items"]] + [since])
+        if not page["more"]:
+            break
+        assert pages < 20
+    assert sorted(seen) == sorted(ids)
+    assert len(seen) == len(set(seen))

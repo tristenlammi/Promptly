@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vantrel Insurance</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#1b1f24;background:#faf7fd}a{color:#8a2be2}h1{font-size:1.5em;margin:0 0 10px}h2{font-size:1.15em;margin:0 0 8px}p{margin:0 0 12px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #cfd5dc;border-radius:6px;background:#fff;color:#222;width:100%}input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 16px;border:0;border-radius:6px;background:#8a2be2;color:#fff;cursor:pointer}[hidden]{display:none!important}
+header{padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}header b{margin-right:auto}main{max-width:960px;margin:28px auto;padding:0 20px}footer{margin-top:40px;padding:18px 24px;border-top:1px solid #cfd5dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between}
+.sl{max-width:400px;margin:0 auto;background:#fff;padding:24px;border-radius:10px;border:1px solid #e6dcf3}.sl label{display:block;margin:8px 0 3px}.col{max-height:0;overflow:hidden;visibility:hidden;transition:none}.col.open{max-height:200px;visibility:visible}.q{margin-top:26px;max-width:400px;margin-left:auto;margin-right:auto}
+</style>
+</head>
+<body>
+<header><b>Vantrel Insurance</b><a href="#">Claims</a></header>
+<main><form class="sl" onsubmit="return false"><h1>Your policies</h1><label for="pe">Policyholder email</label><input id="pe" type="text"><div class="col" id="col"><label for="pp">Password</label><input id="pp" type="password"></div><div style="margin-top:14px"><button type="button" id="cont">Continue</button></div></form>
+<div class="q"><h2>New here? Get a quote</h2><form onsubmit="return false" style="display:flex;gap:8px"><input id="q-pc" type="text" placeholder="Postcode of the property"><button type="button">Quote</button></form></div></main>
+<script>document.getElementById('cont').addEventListener('click',function(){document.getElementById('col').classList.add('open');this.textContent='Sign in';});</script>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"email":r("#pe",[]),"password":r("#pp",[])};}};</script>
+</body>
+</html>

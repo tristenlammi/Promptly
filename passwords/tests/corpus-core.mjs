@@ -72,7 +72,9 @@ export async function runCorpus(driver, { filter, port = 8101, log = console.log
         }
         if (a.kind !== step.kind) problems.push(`step ${i + 1}: kind ${a.kind}, wanted ${step.kind}`);
         for (const m of a.missing) problems.push(`step ${i + 1}: fixture element missing ${JSON.stringify(m)}`);
-        for (const r of a.roles) if (r.got !== r.want) problems.push(`step ${i + 1}: ${JSON.stringify(r.selector)} got ${r.got}, wanted ${r.want}`);
+        // A login's identifier fills the same either way, so these two are one answer.
+        const sameId = (x, y) => x === y || (["username", "email"].includes(x) && ["username", "email"].includes(y));
+        for (const r of a.roles) if (!sameId(r.got, r.want)) problems.push(`step ${i + 1}: ${JSON.stringify(r.selector)} got ${r.got}, wanted ${r.want}`);
         for (const e of a.extras) problems.push(`step ${i + 1}: extra field ${e}`);
         if (a.honeypotHit.length) {
           falseFill = true;

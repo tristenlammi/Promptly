@@ -131,6 +131,9 @@ export function SecurityScreen() {
           <Group title="Could use 2FA" why="These sites offer two-factor sign-in, and you haven't saved a code here." count={report.no2fa.length}>
             {report.no2fa.map(({ item }) => <Row key={item.id} item={item} />)}
           </Group>
+          <Group title="No 2FA" why="No 2FA code saved here. Worth adding wherever the site offers it." count={report.noTotp.length}>
+            {report.noTotp.map((item) => <Row key={item.id} item={item} />)}
+          </Group>
           <Group title="Could use a passkey" why="These sites support passkeys." count={report.noPasskey.length}>
             {report.noPasskey.map((item) => <Row key={item.id} item={item} />)}
           </Group>

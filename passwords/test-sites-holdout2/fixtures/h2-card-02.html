@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mossgate Hostels - Secure payment</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}body{margin:0;font:14px/1.5 Verdana,sans-serif;color:#1b1f24;background:#f0fdf4}a{color:#166534}h1{font-size:1.5em;margin:0 0 10px}h2{font-size:1.15em;margin:0 0 8px}p{margin:0 0 12px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #cfd5dc;border-radius:6px;background:#fff;color:#222;width:100%}input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 16px;border:0;border-radius:6px;background:#166534;color:#fff;cursor:pointer}[hidden]{display:none!important}
+header{padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}header b{margin-right:auto}main{max-width:960px;margin:28px auto;padding:0 20px}footer{margin-top:40px;padding:18px 24px;border-top:1px solid #cfd5dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between}
+.pm{max-width:440px;margin:0 auto;background:#fff;padding:24px;border-radius:8px}.ll{font-weight:600;margin:12px 0 3px}.ro{display:flex;gap:8px}
+</style>
+</head>
+<body>
+<header><b>Mossgate Hostels</b></header>
+<main><form class="pm" onsubmit="return false"><h1>Secure payment</h1><div class="ll">Credit card no.</div><div><input name="f4" type="text" inputmode="numeric"></div><div class="ll">Valid until</div><div class="ro"><select name="f5"><option value="">MM</option><option value="01">01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option></select><select name="f6"><option value="">YYYY</option><option value="2026">2026</option><option value="2027">2027</option><option value="2028">2028</option><option value="2029">2029</option><option value="2030">2030</option><option value="2031">2031</option></select></div><div class="ll">CVC</div><div><input name="f7" type="password" inputmode="numeric" maxlength="4" style="max-width:110px"></div><div class="ll">Cardholder</div><div><input name="f8" type="text"></div><p style="margin-top:14px"><button>Confirm booking</button></p></form></main>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"card-number":r("input[name=\"f4\"]",[]),"card-exp-month":r("select[name=\"f5\"]",[]),"card-exp-year":r("select[name=\"f6\"]",[]),"card-cvv":r("input[name=\"f7\"]",[]),"card-name":r("input[name=\"f8\"]",[])};}};</script>
+</body>
+</html>

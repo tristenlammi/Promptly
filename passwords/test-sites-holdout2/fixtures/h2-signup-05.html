@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cirrusfold - Try it for your team</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#1b1f24;background:#f0f9ff}a{color:#0369a1}h1{font-size:1.5em;margin:0 0 10px}h2{font-size:1.15em;margin:0 0 8px}p{margin:0 0 12px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #cfd5dc;border-radius:6px;background:#fff;color:#222;width:100%}input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 16px;border:0;border-radius:6px;background:#0369a1;color:#fff;cursor:pointer}[hidden]{display:none!important}
+header{padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}header b{margin-right:auto}main{max-width:960px;margin:28px auto;padding:0 20px}footer{margin-top:40px;padding:18px 24px;border-top:1px solid #cfd5dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between}
+.MuiBox{max-width:460px;margin:0 auto;background:#fff;padding:26px;border-radius:10px}.MuiF{margin-bottom:12px}.MuiF label{display:block;font-size:.85em;color:#456}
+</style>
+</head>
+<body>
+<header><b>Cirrusfold</b></header>
+<main><form class="MuiBox" onsubmit="return false"><h1>Try it for your team</h1><div class="MuiF"><label for=":r5:">Company</label><input id=":r5:" class="MuiI" type="text"></div><div class="MuiF"><label for=":r6:">Your full name</label><input id=":r6:" class="MuiI" type="text"></div><div class="MuiF"><label for=":r7:">Work email</label><input id=":r7:" class="MuiI" type="text"></div><div class="MuiF"><label for=":r8:">Work phone</label><input id=":r8:" class="MuiI" type="tel"></div><div class="MuiF"><label for=":r9:">Password</label><input id=":r9:" class="MuiI" type="password"></div><div class="MuiF"><label for=":ra:">Confirm password</label><input id=":ra:" class="MuiI" type="password"></div><button>Start trial</button></form></main>
+<script>var __st={};var __f=[];function __render(){__f.forEach(function(f){if(f.el.value!==__st[f.k])f.el.value=__st[f.k];});}
+function __bind(el,k){if(__st[k]===undefined)__st[k]='';var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');var tracked=d.get.call(el);
+Object.defineProperty(el,'value',{configurable:true,get:function(){return d.get.call(el);},set:function(v){tracked=''+v;d.set.call(el,v);}});
+el.addEventListener('input',function(){var v=d.get.call(el);if(v===tracked)return;tracked=v;__st[k]=v;__render();});__f.push({el:el,k:k});}
+[':r5:',':r6:',':r7:',':r8:',':r9:',':ra:'].forEach(function(i){__bind(document.getElementById(i),i);});</script>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"company":(__st[":r5:"]||''),"full-name":(__st[":r6:"]||''),"email":(__st[":r7:"]||''),"phone":(__st[":r8:"]||''),"new-password":(__st[":r9:"]||''),"confirm-password":(__st[":ra:"]||'')};}};</script>
+</body>
+</html>

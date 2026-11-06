@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cobalt Ferries</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#1b1f24;background:#eaf1fb}a{color:#0b3d91}h1{font-size:1.5em;margin:0 0 10px}h2{font-size:1.15em;margin:0 0 8px}p{margin:0 0 12px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #cfd5dc;border-radius:6px;background:#fff;color:#222;width:100%}input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 16px;border:0;border-radius:6px;background:#0b3d91;color:#fff;cursor:pointer}[hidden]{display:none!important}
+header{padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}header b{margin-right:auto}main{max-width:960px;margin:28px auto;padding:0 20px}footer{margin-top:40px;padding:18px 24px;border-top:1px solid #cfd5dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between}
+.cw{display:flex;gap:30px;flex-wrap:wrap}.cw>form{flex:1;min-width:260px;background:#fff;padding:20px;border-radius:8px}.cw label{display:block;margin-bottom:4px}.cw input{margin-bottom:12px}
+</style>
+</head>
+<body>
+<header><b>Cobalt Ferries</b><a href="#">Timetables</a></header>
+<main><div class="cw"><form id="f1"><h1>My sailings</h1><label for="cn">Customer number</label><input id="cn" name="cn" type="text"><button id="go1">Next</button></form>
+<form onsubmit="return false"><h2>Just checking a sailing?</h2><label for="sr">Sailing number</label><input id="sr" type="text" placeholder="CF 0000"><button type="button">Look up</button></form></div></main>
+<script>document.getElementById('f1').addEventListener('submit',function(ev){ev.preventDefault();sessionStorage.setItem('cf_u',document.getElementById('cn').value);location.href='steps/h2-multi-03-b.html';});</script>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"username":r("#cn",[]),"password":r("#pw7",[])};}};</script>
+</body>
+</html>

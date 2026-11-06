@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wickham Bindery - Billing</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 Georgia,serif;color:#1b1f24;background:#f8fafc}a{color:#1e40af}h1{font-size:1.5em;margin:0 0 10px}h2{font-size:1.15em;margin:0 0 8px}p{margin:0 0 12px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #cfd5dc;border-radius:6px;background:#fff;color:#222;width:100%}input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 16px;border:0;border-radius:6px;background:#1e40af;color:#fff;cursor:pointer}[hidden]{display:none!important}
+header{padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}header b{margin-right:auto}main{max-width:960px;margin:28px auto;padding:0 20px}footer{margin-top:40px;padding:18px 24px;border-top:1px solid #cfd5dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between}
+.bl{max-width:480px;margin:0 auto}.bl>div{margin-bottom:10px}.lk{background:#eef2ff;padding:12px;border-radius:6px;margin-bottom:16px}
+</style>
+</head>
+<body>
+<header><b>Wickham Bindery</b></header>
+<main><form class="bl" onsubmit="return false"><h1>Billing details</h1><div class="lk"><label for="lku">Find your address</label><input id="lku" type="text" placeholder="Start typing a postcode to search"></div><div class="v1"><input type="text" placeholder="Full name" aria-label="Full name"></div><div class="v2"><input type="text" placeholder="House number and street" aria-label="House number and street"></div><div class="v3"><input type="text" placeholder="Flat or floor (optional)" aria-label="Flat or floor"></div><div class="v4"><input type="text" placeholder="Town or city" aria-label="Town or city"></div><div class="v5"><input type="text" placeholder="County" aria-label="County"></div><div class="v6"><input type="text" placeholder="Postal code" aria-label="Postal code"></div><div class="v7"><select aria-label="Country"><option value="GB">United Kingdom</option><option value="IE">Ireland</option></select></div><div class="v8"><input type="text" placeholder="Contact number" aria-label="Contact number"></div><button>Review order</button></form></main>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"full-name":r(".v1 input",[]),"address1":r(".v2 input",[]),"address2":r(".v3 input",[]),"city":r(".v4 input",[]),"state":r(".v5 input",[]),"postcode":r(".v6 input",[]),"country":r(".v7 select",[]),"phone":r(".v8 input",[])};}};</script>
+</body>
+</html>

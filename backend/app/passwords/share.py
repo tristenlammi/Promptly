@@ -20,7 +20,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from limits import parse
 from pydantic import Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import rate_limit as rl
@@ -29,8 +29,8 @@ from app.database import get_db
 from app.notifications.dispatch import notify_user
 from app.passwords import schemas as s
 from app.passwords import service
-from app.passwords.deps import VaultSession, parse_uuid, require_enabled, require_session
-from app.passwords.models import PwAccount, PwEmergency, PwSend, PwVault, PwVaultMember
+from app.passwords.deps import VaultIdentity, VaultSession, get_vault_user, parse_uuid, require_enabled, require_session
+from app.passwords.models import PwAccount, PwDeviceRequest, PwEmergency, PwSend, PwVault, PwVaultMember
 from app.passwords.router import _QuietRoute
 from app.rate_limit import rate_limit
 
@@ -537,6 +537,34 @@ async def emergency_delete(emergency_id: str, session: VaultSession = Depends(re
     await service.activity(db, session.user.id, "emergency_ended", session.device.id if session.device else None)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# ------------------------------------------------------------------ alerts
+
+
+class AlertsOut(s._Base):
+    device_requests: int
+    invitations: int
+    emergency: int
+
+
+@router.get("/alerts", response_model=AlertsOut)
+async def alerts(identity: VaultIdentity = Depends(get_vault_user), db: AsyncSession = Depends(get_db)) -> AlertsOut:
+    """Things waiting on you, as bare counts, for a client that's locked: the Android app
+    has no Web Push and can't open a vault session to look. No names, no vault content."""
+    requests = await db.scalar(
+        select(func.count()).select_from(PwDeviceRequest).where(PwDeviceRequest.user_id == identity.user.id, PwDeviceRequest.status == "pending", PwDeviceRequest.expires_at > _now())
+    )
+    invited = await db.scalar(select(func.count()).select_from(PwVaultMember).where(PwVaultMember.user_id == identity.user.id, PwVaultMember.accepted_at.is_(None)))
+    emergency = await db.scalar(
+        select(func.count())
+        .select_from(PwEmergency)
+        .where(
+            ((PwEmergency.grantor_id == identity.user.id) & (PwEmergency.state == "requested"))
+            | ((PwEmergency.grantee_id == identity.user.id) & (PwEmergency.state == "invited"))
+        )
+    )
+    return AlertsOut(device_requests=int(requests or 0), invitations=int(invited or 0), emergency=int(emergency or 0))
 
 
 __all__ = ["router", "post_to_dm"]

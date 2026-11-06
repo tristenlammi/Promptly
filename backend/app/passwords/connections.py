@@ -344,6 +344,7 @@ async def add_reminder(body: Reminder, session: VaultSession = Depends(require_s
 class Survival(s._Base):
     is_admin: bool
     kit_confirmed: bool
+    kit_confirmed_at: datetime | None
     offsite_configured: bool
     last_backup_at: datetime | None
     backup_age_days: int | None
@@ -362,6 +363,7 @@ async def survival(session: VaultSession = Depends(require_session), db: AsyncSe
     return Survival(
         is_admin=session.user.role == "admin",
         kit_confirmed=bool(account and account.kit_confirmed_at),
+        kit_confirmed_at=account.kit_confirmed_at if account else None,
         offsite_configured=enabled,
         last_backup_at=last,
         backup_age_days=age,

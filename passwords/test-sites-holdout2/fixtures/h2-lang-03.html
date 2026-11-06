@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="hu">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jelszó módosítása - Dunapart</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#1b1f24;background:#faf5ff}a{color:#7e22ce}h1{font-size:1.5em;margin:0 0 10px}h2{font-size:1.15em;margin:0 0 8px}p{margin:0 0 12px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #cfd5dc;border-radius:6px;background:#fff;color:#222;width:100%}input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 16px;border:0;border-radius:6px;background:#7e22ce;color:#fff;cursor:pointer}[hidden]{display:none!important}
+header{padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}header b{margin-right:auto}main{max-width:960px;margin:28px auto;padding:0 20px}footer{margin-top:40px;padding:18px 24px;border-top:1px solid #cfd5dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between}
+.hb{max-width:440px;margin:0 auto;background:#fff;padding:22px;border-radius:8px}.hb label{display:block;margin:10px 0 3px}.hb hr{border:0;border-top:1px solid #e9d5ff;margin:18px 0}
+</style>
+</head>
+<body>
+<header><b>Dunapart</b><a href="#">Kijelentkez&eacute;s</a></header>
+<main><div class="hb"><form onsubmit="return false"><label for="bc">Becen&eacute;v</label><input id="bc" name="f0" type="text"><p style="margin-top:8px"><button type="button">Ment&eacute;s</button></p></form><hr><h1>Jelsz&oacute; m&oacute;dos&iacute;t&aacute;sa</h1><form onsubmit="return false"><label for="j1">Jelenlegi jelsz&oacute;</label><input id="j1" name="f1" type="password"><label for="j2">&Uacute;j jelsz&oacute;</label><input id="j2" name="f2" type="password"><label for="j3">&Uacute;j jelsz&oacute; &uacute;jra</label><input id="j3" name="f3" type="password"><p style="margin-top:12px"><button>M&oacute;dos&iacute;t&aacute;s</button></p></form></div></main>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"current-password":r("#j1",[]),"new-password":r("#j2",[]),"confirm-password":r("#j3",[])};}};</script>
+</body>
+</html>

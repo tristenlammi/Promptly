@@ -1,4 +1,6 @@
 // The vault's shell: what state are we in, and the main layout once unlocked.
+import { FolderTools, KitGate, MainNotices, VAULT_PREFS } from "./Connections";
+import { type VaultInfo } from "../core/vault";
 import { openPasskeyUnlock, type PasskeyUnlock } from "../core/connections";
 import {
   Activity,
@@ -162,6 +164,8 @@ export function VaultApp({ platform }: { platform: Platform }) {
                 : undefined
             }
             onOpen={() => setPhase("open")}
+            resetKind={platform.kind}
+            resetUrl={platform.baseUrl}
             pin={
               platform.pin?.has()
                 ? async (p) => {
@@ -231,6 +235,9 @@ function routeFromHash(): string {
 function Main({ platform, vault, preview, onLock }: { platform: Platform; vault: VaultClient; preview: boolean; onLock: () => void }) {
   const [version, setVersion] = useState(0);
   const bump = useCallback(() => setVersion((v) => v + 1), []);
+  // A reload part-way through setup lands here, with the kit still unconfirmed.
+  const [kitNeeded, setKitNeeded] = useState(false);
+  const needKit = useCallback(() => setKitNeeded(true), []);
   const [route, setRoute] = useState(routeFromHash());
   const [settings, setSettingsState] = useState<Settings>(DEFAULT_SETTINGS);
   const [toasts, setToasts] = useState<{ id: number; text: string; kind: string }[]>([]);
@@ -384,6 +391,13 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
     return [...set].sort();
   }, [vault, version]);
 
+  const [vaultRows, setVaultRows] = useState<VaultInfo[]>([]);
+  useEffect(() => {
+    void version;
+    if (!vault.unlocked) return;
+    vault.vaults().then((all) => setVaultRows(all.filter((v) => (v.accepted || v.kind === "personal") && !v.hidden)));
+  }, [vault, version]);
+
   const nav = (
     <nav aria-label="Passwords" className="flex h-full flex-col gap-1 overflow-y-auto p-2 text-sm">
       <div className="flex items-center justify-between px-2 py-1">
@@ -395,6 +409,9 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
       {SECTIONS.map((s) => (
         <NavRow key={s.id} active={route === s.id} icon={s.icon} label={s.label} onClick={() => go(s.id)} />
       ))}
+      {vaultRows.length > 1 && <div className="mt-2 px-2 text-xs font-medium text-[var(--text-muted)]">Vaults</div>}
+      {vaultRows.length > 1 &&
+        vaultRows.map((v) => <NavRow key={v.id} active={route === `vault/${v.id}`} icon={<Users className="h-4 w-4" />} label={v.displayName} onClick={() => go(`vault/${v.id}`)} />)}
       <div className="mt-2 flex items-center justify-between px-2 text-xs font-medium text-[var(--text-muted)]">
         Folders
         <IconButton label="New folder" onClick={() => setFolderOpen(true)}><FolderPlus className="h-3.5 w-3.5" /></IconButton>
@@ -417,7 +434,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
   );
 
   let content: ReactNode;
-  const f = /^(folder|tag|item)\/(.+)$/.exec(route);
+  const f = /^(folder|tag|item|vault)\/(.+)$/.exec(route);
   if (route === "codes") content = <CodesScreen />;
   else if (route === "generator") content = <GeneratorScreen />;
   else if (route === "security") content = <SecurityScreen />;
@@ -444,6 +461,10 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
       filter = { tag: f[2] };
       title = f[2];
     }
+    if (f?.[1] === "vault") {
+      filter = { vaultId: f[2] };
+      title = vaultRows.find((v) => v.id === f[2])?.displayName ?? "Vault";
+    }
     content = <ItemsScreen title={title} filter={filter} other={route === "other"} initialId={f?.[1] === "item" ? f[2] : null} />;
   }
 
@@ -458,6 +479,8 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
           </div>
         )}
         <div className="flex min-w-0 flex-1 flex-col">
+          <MainNotices onNeedKit={needKit} />
+          {kitNeeded && <KitGate onDone={() => setKitNeeded(false)} />}
           <header className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] p-2 md:hidden">
             <IconButton label="Menu" onClick={() => setDrawer(true)}><Menu className="h-5 w-5" /></IconButton>
             <span className="font-semibold text-[var(--text)]">Passwords</span>
@@ -577,9 +600,20 @@ function ItemsScreen({ title, filter, other, initialId }: { title: string; filte
 
   const current = selected ? vault.get(selected) : undefined;
 
+  // Only worth saying which vault when it isn't your own.
+  const [vaultNames, setVaultNames] = useState<Map<string, string>>(new Map());
+  useEffect(() => {
+    void version;
+    vault.vaults().then((all) => setVaultNames(new Map(all.filter((v) => v.kind !== "personal").map((v) => [v.id, v.displayName]))));
+  }, [vault, version]);
+  const iconVaults = useMemo(() => {
+    void version;
+    return new Set(vault.allItems({ includeSystem: true }).filter((i) => i.body.kind === "prefs" && i.body.title === VAULT_PREFS && i.body.icon).map((i) => i.vaultId));
+  }, [vault, version]);
+
   const detail = creating ? (
     <ItemEditor
-      vaultId={vid}
+      vaultId={filter.vaultId ?? vid}
       initial={newBody(creating, "", creating === "login" ? { urls: [{ url: "" }] } : {})}
       onCancel={() => setCreating(null)}
       onDone={(id) => {
@@ -602,6 +636,7 @@ function ItemsScreen({ title, filter, other, initialId }: { title: string; filte
       <section className={`flex w-full flex-col gap-2 md:w-72 md:shrink-0 ${showDetailOnPhone ? "hidden md:flex" : ""}`}>
         <div className="flex items-center justify-between gap-2">
           <h1 className="text-lg font-semibold text-[var(--text)]">{title}</h1>
+          {filter.folderId && <FolderTools folderId={filter.folderId} />}
           <div className="relative">
             <Button small kind="primary" onClick={() => setMenu(!menu)} aria-haspopup="menu" aria-expanded={menu}><Plus className="h-3.5 w-3.5" /> New</Button>
             {menu && (
@@ -645,10 +680,10 @@ function ItemsScreen({ title, filter, other, initialId }: { title: string; filte
                 className={`flex w-full flex-col rounded-lg px-2 py-2 text-left ${selected === i.id ? "bg-[var(--surface-2)]" : "hover:bg-[var(--surface-1)]"}`}
               >
                 <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium text-[var(--text)]">
-                  {i.body.icon && <SiteIcon url={i.body.urls?.[0]?.url} />}
+                  {(i.body.icon || iconVaults.has(i.vaultId)) && <SiteIcon url={i.body.urls?.[0]?.url} />}
                   {i.body.favorite ? "★ " : ""}{i.body.title || "(no name)"}
                 </span>
-                <span className="truncate text-xs text-[var(--text-muted)]">{subtitle(i)}</span>
+                <span className="truncate text-xs text-[var(--text-muted)]">{subtitle(i)}{vaultNames.get(i.vaultId) ? ` · ${vaultNames.get(i.vaultId)}` : ""}</span>
               </button>
             </li>
           ))}

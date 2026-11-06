@@ -599,8 +599,10 @@ async def device_request_approver(
     request_id: str, body: s.DeviceRequestApprover, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)
 ) -> Response:
     row = await _own_request(db, request_id, session.user)
-    if row.status != "pending" or row.approver_pub is not None:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Another device is already handling this.")
+    # Re-opening the approval on this or another device starts the exchange over, so
+    # both screens get new words. Approving still needs them to match.
+    if row.status != "pending":
+        raise HTTPException(status.HTTP_409_CONFLICT, "This request has already been answered.")
     row.approver_pub = body.approver_pub
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -788,7 +790,19 @@ async def changes(
         )
     ).scalars().all()
     more = len(rows) > limit
-    rows = rows[:limit]
+    if more and rows[limit].revision == rows[limit - 1].revision:
+        # The client carries on from the last revision it saw, and a batch or a key rotation
+        # gives many items one revision. A page must never end part-way through one, or the
+        # rest are skipped for good on that device.
+        same = rows[limit - 1].revision
+        rows = (
+            await db.execute(
+                select(PwItem).where(PwItem.vault_id == vault.id, PwItem.revision > since, PwItem.revision <= same).order_by(PwItem.revision, PwItem.id)
+            )
+        ).scalars().all()
+        more = (await db.scalar(select(func.count()).select_from(PwItem).where(PwItem.vault_id == vault.id, PwItem.revision > same))) > 0
+    else:
+        rows = rows[:limit]
     return s.ChangesOut(
         revision=vault.revision,
         generation=vault.generation,

@@ -253,6 +253,8 @@ type Signals = {
   placeholder: ReturnType<typeof tokens>;
   near: ReturnType<typeof tokens>;
   rawOwn: string;
+  rawId: string;
+  idOwn: ReturnType<typeof tokens>;
   name: string;
   readonlyFilled: boolean;
   months: boolean;
@@ -266,11 +268,16 @@ function signalsOf(el: FillableElement): Signals {
   const type = isTextual(el) ? (el.type || "text").toLowerCase() : el.tagName.toLowerCase();
   const attr = (a: string) => el.getAttribute(a) ?? "";
   const dataAttrs = [...el.attributes].filter((a) => a.name.startsWith("data-") && a.value.length < 60).map((a) => `${a.name.slice(5)} ${a.value}`).join(" ");
+  // What the field calls itself. Classes aren't in this: utility CSS is full of words like
+  // "min" and "max", and they say nothing about what a box is for.
+  const rawId = [attr("name"), attr("id"), attr("aria-label"), attr("title"), attr("formcontrolname"), attr("ng-model"), attr("v-model")].join(" ");
   const rawOwn = [attr("name"), attr("id"), attr("class"), attr("aria-label"), attr("title"), attr("formcontrolname"), attr("ng-model"), attr("v-model"), dataAttrs].join(" ");
   return {
     type,
     autocomplete: attr("autocomplete").toLowerCase().trim(),
     own: tokens(rawOwn),
+    idOwn: tokens(rawId),
+    rawId,
     label: tokens(labelText(el)),
     placeholder: tokens(attr("placeholder")),
     near: tokens(nearbyText(el)),
@@ -360,6 +367,9 @@ function scoreRoles(s: Signals): Map<FieldRole, number> {
   for (const [t, weight] of [[s.own, 2], [s.label, 2.5], [s.placeholder, 2]] as const) {
     if (t.joined === "name" || t.joined === "yourname" || s.name === "name") add("full-name", weight * 2);
   }
+  if (s.autocomplete.startsWith("tel") && hits(s.own, W.EMAIL) > 0) add("email", 9);
+  // An "email address" or a type=email box isn't a street address.
+  if (s.type === "email" || hits(s.placeholder, W.EMAIL) > 0 || hits(s.label, W.EMAIL) > 0) scores.delete("address1");
   // What the example looks like says more than any word, in any language.
   if (s.placeholderRaw.includes("@")) add("email", 6);
   if (/^\s*(\d{4}[ -]){3}\d{1,4}\s*$/.test(s.placeholderRaw)) add("card-number", 7);
@@ -399,13 +409,13 @@ const CARD_ROLES: FieldRole[] = ["card-number", "card-name", "card-exp", "card-e
 const IDENTITY_ROLES: FieldRole[] = ["first-name", "last-name", "full-name", "address1", "address2", "city", "state", "postcode", "country", "phone", "company", "email"];
 
 function isSearchField(s: Signals): boolean {
-  return s.type === "search" || s.name === "q" || hits(s.own, W.SEARCH) > 0 || hits(s.placeholder, W.SEARCH) > 1 || hits(s.label, W.SEARCH) > 1;
+  return s.type === "search" || s.name === "q" || hits(s.idOwn, W.SEARCH) > 0 || hits(s.placeholder, W.SEARCH) > 1 || hits(s.label, W.SEARCH) > 1;
 }
 
 function notLoginField(s: Signals): boolean {
   // "Client address" of type email, a box that says "Email address": still an email.
   if (s.type === "email" || hits(s.placeholder, W.EMAIL) > 0 || hits(s.label, W.EMAIL) > 0) return false;
-  return hits(s.own, W.NOT_LOGIN_FIELD) > 0 || hits(s.label, W.NOT_LOGIN_FIELD) > 1 || hits(s.placeholder, W.NOT_LOGIN_FIELD) > 1;
+  return hits(s.idOwn, W.NOT_LOGIN_FIELD) > 0 || hits(s.label, W.NOT_LOGIN_FIELD) > 1 || hits(s.placeholder, W.NOT_LOGIN_FIELD) > 1;
 }
 
 // ---- Grouping into forms ------------------------------------------------------------
@@ -513,7 +523,7 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
     // with "passport" is a passport.
     if (s.el.tagName !== "INPUT" || (s.el as HTMLInputElement).value) return false;
     const top = topRole(s.scores);
-    return top?.[0] === "password" && top[1] >= 6 && !isOtpBox(s.el) && !hitsOtp(s) && !/passport|min|max|length|policy|expir/i.test(s.signals.rawOwn);
+    return top?.[0] === "password" && top[1] >= 6 && !isOtpBox(s.el) && !hitsOtp(s) && hits(s.signals.idOwn, ["passport", "min", "max", "minlength", "maxlength", "length", "policy", "expiry", "expires", "expiration"]) === 0;
   });
   const textFields = visible.filter((s) => !passwords.includes(s));
 
@@ -533,7 +543,7 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
       if (s.signals.numeric && (s.el as HTMLInputElement).maxLength >= 3 && (s.el as HTMLInputElement).maxLength <= 4 && /code|security|back|digits/i.test(s.signals.labelRaw)) s.scores.set("card-cvv", Math.max(s.scores.get("card-cvv") ?? 0, 6));
     }
   }
-  const giftish = (s: Scored) => /gift|voucher|coupon|loyalty|member/i.test(`${s.signals.rawOwn} ${[...s.signals.label.words].join(" ")}`);
+  const giftish = (s: Scored) => /gift|voucher|coupon|loyalty|member/i.test(`${s.signals.rawId} ${[...s.signals.label.words].join(" ")}`);
   const cardFields = visible.filter((s) => topScore(s, CARD_ROLES) && !hitsOtp(s) && !giftish(s));
   const hasCardNumber = cardFields.some((s) => bestOf(s, CARD_ROLES)?.[0] === "card-number");
   const strongCard = cardFields.some((s) => s.signals.autocomplete.split(/\s+/).some((t) => t.startsWith("cc-")));
@@ -541,14 +551,14 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
   const framed = doc(group).defaultView !== doc(group).defaultView?.top;
   const hostedHere = !passwords.length && cardFields.length > 0 && !!doc(group).querySelector("iframe");
   if (hasCardNumber || hostedHere || (framed && cardFields.length > 0 && strongCard) || (strongCard && cardFields.length >= 1 && !passwords.length)) {
-    const named = visible.filter((s) => !cardFields.includes(s) && !giftish(s) && (topRole(s.scores)?.[0] === "full-name" || (s.scores.get("card-name") ?? 0) > 0 || /\bname\b/i.test(s.signals.labelRaw)) && /card|holder|name/i.test(`${s.signals.rawOwn} ${[...s.signals.label.words].join(" ")}`));
+    const named = visible.filter((s) => !cardFields.includes(s) && !giftish(s) && (topRole(s.scores)?.[0] === "full-name" || (s.scores.get("card-name") ?? 0) > 0 || /\bname\b/i.test(s.signals.labelRaw)) && /card|holder|name/i.test(`${s.signals.rawId} ${[...s.signals.label.words].join(" ")}`));
     for (const s of named) s.scores.set("card-name", Math.max(s.scores.get("card-name") ?? 0, 5));
     const fields = assign([...cardFields, ...named], CARD_ROLES);
     return { kind: "card", fields, container: group, submit: submitOf(group, fields.map((f) => f.el), dom) };
   }
 
   if (phrase(text, W.NOT_LOGIN_INTENT) && !passwords.length && !phrase(text, W.LOGIN_STRONG)) return none;
-  const fieldText = visible.map((s) => `${s.signals.rawOwn} ${[...s.signals.label.words].join(" ")} ${[...s.signals.placeholder.words].join(" ")}`).join(" ");
+  const fieldText = visible.map((s) => `${s.signals.rawId} ${[...s.signals.label.words].join(" ")} ${[...s.signals.placeholder.words].join(" ")}`).join(" ");
   if ((phrase(fieldText, W.BACKUP_CODE_INTENT) || /backup|recovery|scratch/i.test(fieldText) || phrase(headingsOf(group), W.BACKUP_CODE_INTENT)) && !passwords.length) return none;
   if (visible.some((s) => s.el.tagName === "TEXTAREA") && !passwords.length && visible.every((s) => topRole(s.scores)?.[0] !== "address1")) return none;
 
@@ -559,7 +569,7 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
   if (passwords.length) return classifyPasswords(group, visible, passwords, textFields, text, dom);
 
   // Identity: enough person-and-address fields.
-  const idFields = visible.filter((s) => topScore(s, IDENTITY_ROLES) && !/coupon|promo|gift|voucher|comment|message|subject|captcha/i.test(`${s.signals.rawOwn} ${s.signals.labelRaw}`));
+  const idFields = visible.filter((s) => topScore(s, IDENTITY_ROLES) && !/coupon|promo|gift|voucher|comment|message|subject|captcha/i.test(`${s.signals.rawId} ${s.signals.labelRaw}`));
   const addressy = idFields.filter((s) => ["address1", "city", "postcode", "state", "country"].includes(bestOf(s, IDENTITY_ROLES)?.[0] ?? ""));
   const whoish = idFields.filter((s) => ["first-name", "last-name", "full-name", "phone", "email"].includes(bestOf(s, IDENTITY_ROLES)?.[0] ?? ""));
   // An address on its own could be anyone's: a delivery spot, a store search. It takes
@@ -666,7 +676,7 @@ function detectOtp(visible: Scored[], text: string, pageText: string): Field[] |
     const s = onlyOne[0];
     const el = s.el as HTMLInputElement;
     const shortNumber = (s.signals.numeric && el.maxLength >= 4 && el.maxLength <= 10) || /^\s*\d{2,4}[ -]?\d{2,4}\s*$/.test(s.signals.placeholderRaw);
-    const looksElse = /coupon|promo|gift|discount|zip|postal|post ?code|tracking|voucher|redeem|invite|referral|order|member|look ?up|check|find|search/i.test(`${text} ${s.signals.rawOwn} ${s.signals.labelRaw} ${s.signals.placeholderRaw}`.replace(/quick check/i, ""));
+    const looksElse = /coupon|promo|gift|discount|zip|postal|post ?code|tracking|voucher|redeem|invite|referral|order|member|look ?up|check|find|search/i.test(`${text} ${s.signals.rawId} ${s.signals.labelRaw} ${s.signals.placeholderRaw}`.replace(/quick check/i, ""));
     if (shortNumber && !looksElse && (s.scores.get("username") ?? 0) === 0 && (s.scores.get("email") ?? 0) === 0) return [{ el: s.el, role: "otp", score: 4 }];
   }
   const coded = visible.filter((s) => !notLoginField(s.signals) && (s.signals.autocomplete.includes("one-time-code") || otpScore(s) >= 4));

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hopsack & Thread - Delivery</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 Arial,sans-serif;color:#1b1f24;background:#fefce8}a{color:#a16207}h1{font-size:1.5em;margin:0 0 10px}h2{font-size:1.15em;margin:0 0 8px}p{margin:0 0 12px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #cfd5dc;border-radius:6px;background:#fff;color:#222;width:100%}input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 16px;border:0;border-radius:6px;background:#a16207;color:#fff;cursor:pointer}[hidden]{display:none!important}
+header{padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}header b{margin-right:auto}main{max-width:960px;margin:28px auto;padding:0 20px}footer{margin-top:40px;padding:18px 24px;border-top:1px solid #cfd5dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between}
+.gf{max-width:560px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}.gf .w{grid-column:1/3}.gf label{display:block;font-size:.9em}
+</style>
+</head>
+<body>
+<header><b>Hopsack &amp; Thread</b><a href="#">Bag (2)</a></header>
+<main><h1 style="text-align:center">Where should we send it?</h1><form class="gf" onsubmit="return false"><div><label for="input_3_1">First name</label><input id="input_3_1" name="input_1" type="text"></div><div><label for="input_3_2">Last name</label><input id="input_3_2" name="input_2" type="text"></div><div class="w"><label for="input_3_3">Business name (optional)</label><input id="input_3_3" name="input_3" type="text"></div><div class="w"><label for="input_3_4">Street address</label><input id="input_3_4" name="input_4" type="text"></div><div class="w"><label for="input_3_5">Unit, level etc.</label><input id="input_3_5" name="input_5" type="text"></div><div><label for="input_3_6">Suburb</label><input id="input_3_6" name="input_6" type="text"></div><div><label for="input_3_7">State</label><select id="input_3_7" name="input_7"><option value="">Select</option><option value="NSW">NSW</option><option value="VIC">VIC</option><option value="QLD">QLD</option><option value="WA">WA</option></select></div><div><label for="input_3_8">Postcode</label><input id="input_3_8" name="input_8" type="text" maxlength="4"></div><div><label for="input_3_9">Country</label><select id="input_3_9" name="input_9"><option value="AU">Australia</option><option value="NZ">New Zealand</option></select></div><div class="w"><label for="input_3_10">Mobile</label><input id="input_3_10" name="input_10" type="tel"></div><div class="w"><label for="input_3_11">Delivery instructions</label><textarea id="input_3_11" name="input_11" rows="2" placeholder="Leave by the side gate"></textarea></div><div class="w"><button>Continue to payment</button></div></form></main>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"first-name":r("#input_3_1",[]),"last-name":r("#input_3_2",[]),"company":r("#input_3_3",[]),"address1":r("#input_3_4",[]),"address2":r("#input_3_5",[]),"city":r("#input_3_6",[]),"state":r("#input_3_7",[]),"postcode":r("#input_3_8",[]),"country":r("#input_3_9",[]),"phone":r("#input_3_10",[])};}};</script>
+</body>
+</html>

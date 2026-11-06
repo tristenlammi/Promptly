@@ -32,6 +32,21 @@ describe("classifier basics", () => {
     expect(best?.submit?.textContent).toBe("Log in");
   });
 
+  it("CSS classes can't make a field something it isn't", () => {
+    // Real sites' utility classes, found on public pages: these are all just styling.
+    const noise = "min-h-10 max-w-md search-wrap comment-box phone-row coupon-style address-grid length-4 policy-note gift-card-shadow member-form";
+    set(`<form><input id="email" type="email" class="${noise}"><input id="password" type="password" autocomplete="current-password" class="${noise}"><button>Log in</button></form>`);
+    const { best } = analyzePage(document, DOM);
+    expect(best?.kind).toBe("signin");
+    expect(best?.fields.map((f) => f.role)).toEqual(["username", "password"]);
+  });
+
+  it("a box for a phone or an email is an identifier, whatever autocomplete says", () => {
+    set(`<form><h1>Log in or sign up</h1><input id="phone-or-email" autocomplete="tel-national"><button>Continue</button></form>`);
+    const { best } = analyzePage(document, DOM);
+    expect(best?.kind).toBe("email-first");
+  });
+
   it("a search box and a newsletter box don't count", () => {
     set(`<form role="search"><input name="q"><button>Go</button></form><form><h3>Newsletter</h3><input type="email" name="email"><button>Subscribe</button></form>`);
     const page = analyzePage(document, DOM);

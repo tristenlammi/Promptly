@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hollis Supply - Settings</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 system-ui,sans-serif;color:#1b1f24;background:#f1f5f9}a{color:#334155}h1{font-size:1.5em;margin:0 0 10px}h2{font-size:1.15em;margin:0 0 8px}p{margin:0 0 12px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #cfd5dc;border-radius:6px;background:#fff;color:#222;width:100%}input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 16px;border:0;border-radius:6px;background:#334155;color:#fff;cursor:pointer}[hidden]{display:none!important}
+header{padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}header b{margin-right:auto}main{max-width:960px;margin:28px auto;padding:0 20px}footer{margin-top:40px;padding:18px 24px;border-top:1px solid #cfd5dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between}
+.ly{display:flex;gap:24px;flex-wrap:wrap}.ly nav{width:160px}.ly nav a{display:block;padding:4px 0}.ly>div{flex:1;min-width:280px}.sec{background:#fff;padding:20px;border-radius:8px;margin-bottom:18px}.sec label{display:block;margin:10px 0 3px}
+</style>
+</head>
+<body>
+<header style="background:#334155;color:#fff"><b>Hollis Supply</b><span>Signed in as P. Hollis</span></header>
+<main><div class="ly"><nav><a href="#">Orders</a><a href="#">Invoices</a><a href="#"><b>Settings</b></a></nav><div>
+<section class="sec"><h2>Profile</h2><form onsubmit="return false"><label for="p1">Display name</label><input id="p1" type="text" value="P. Hollis"><label for="p2">Bio</label><textarea id="p2" rows="2"></textarea><label for="p3">Contact email</label><input id="p3" type="email" value="p.hollis@hollis.example"><p style="margin-top:12px"><button>Save profile</button></p></form></section>
+<section class="sec"><h2>Password</h2><form onsubmit="return false"><label for="w1">Current password</label><input id="w1" type="password"><label for="w2">New password</label><input id="w2" type="password"><label for="w3">Confirm new password</label><input id="w3" type="password"><p style="margin-top:12px"><button>Update password</button></p></form></section></div></div></main>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"current-password":r("#w1",[]),"new-password":r("#w2",[]),"confirm-password":r("#w3",[])};}};</script>
+</body>
+</html>

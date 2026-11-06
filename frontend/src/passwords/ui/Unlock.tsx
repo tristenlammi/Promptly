@@ -7,9 +7,10 @@ import { parseKitQr } from "../core/kit";
 import { parseSecretKey } from "../core/keys";
 import { type DeviceJoin, type VaultClient, WrongPasswordError } from "../core/vault";
 import { Button, Callout, errorText, inputClass, Label, Spinner } from "./kit";
-import { scanQrFromCamera } from "./qr";
+import { QrImage, scanQrFromCamera } from "./qr";
+import { ResetVault } from "./Screens";
 
-export function Unlock({ vault, preview, onOpen, hello, delegate, passkey, pin }: { passkey?: () => Promise<void>; pin?: (pin: string) => Promise<void>; vault: VaultClient; preview: boolean; onOpen: () => void; hello?: () => Promise<void>; delegate?: (password: string) => Promise<void> }) {
+export function Unlock({ vault, preview, onOpen, hello, delegate, passkey, pin, resetKind, resetUrl }: { resetKind?: string; resetUrl?: string; passkey?: () => Promise<void>; pin?: (pin: string) => Promise<void>; vault: VaultClient; preview: boolean; onOpen: () => void; hello?: () => Promise<void>; delegate?: (password: string) => Promise<void> }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -72,6 +73,14 @@ export function Unlock({ vault, preview, onOpen, hello, delegate, passkey, pin }
         {passkey && <Button onClick={() => { setError(""); passkey().then(onOpen).catch((e) => setError(errorText(e))); }}>Unlock with a passkey</Button>}
         {hello && <Button onClick={() => hello().then(onOpen).catch((e) => setError(errorText(e)))}>Unlock with Windows Hello</Button>}
       </form>
+      {resetKind && (
+        <details className="text-sm text-[var(--text-muted)]">
+          <summary className="cursor-pointer">I've lost my master password and my kit</summary>
+          <div className="mt-2">
+            <ResetVault vault={vault} kind={resetKind} baseUrl={resetUrl ?? ""} />
+          </div>
+        </details>
+      )}
     </main>
   );
 }
@@ -165,6 +174,8 @@ export function JoinDevice({ vault, deviceName, onReady }: { vault: VaultClient;
       )}
       {mode === "approve" && join && status === "" && (
         <div className="flex flex-col gap-3 text-sm text-[var(--text)]">
+          <div className="self-center"><QrImage text={join.qrText} size={180} /></div>
+          <p className="text-xs text-[var(--text-muted)]">On your other device, Devices then Scan a new device's QR opens this request directly. Or:</p>
           <p>Open Passwords on a device that's unlocked, go to Devices, and approve <strong>{deviceName}</strong>. Your code is <code className="font-mono">{join.code}</code>.</p>
           {words ? (
             <Callout>

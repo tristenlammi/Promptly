@@ -221,3 +221,23 @@ async def test_people_lists_others_and_needs_a_session(client, db):
     ids = {p["id"]: p for p in r.json()}
     assert str(a.user.id) not in ids and ids[str(b.id)]["has_vault"] is False
     assert (await client.get("/api/passwords/people")).status_code in (401, 403)
+
+async def test_alerts_are_bare_counts_for_a_locked_client(client, db):
+    from tests.test_passwords import bearer, grant
+
+    a = await setup_vault(client, await make_user(db))
+    b = await setup_vault(client, await make_user(db))
+    assert (await client.get("/api/passwords/alerts")).status_code in (401, 403)
+    # Works with no vault session, because a locked app has none.
+    empty = await client.get("/api/passwords/alerts", headers=bearer(b.user))
+    assert empty.status_code == 200, empty.text
+    assert empty.json() == {"device_requests": 0, "invitations": 0, "emergency": 0}
+    vault = await shared_vault(client, a)
+    r = await client.post(f"/api/passwords/vaults/{vault}/members", headers=a.h, json={"user_id": str(b.user.id), "role": "view", "grant": grant()})
+    assert r.status_code == 204, r.text
+    r = await client.post("/api/passwords/emergency", headers=a.h, json={"grantee_id": str(b.user.id), "wait_days": 2})
+    assert r.status_code == 201
+    got = (await client.get("/api/passwords/alerts", headers=bearer(b.user))).json()
+    assert got == {"device_requests": 0, "invitations": 1, "emergency": 1}
+    # Someone else's counts stay their own.
+    assert (await client.get("/api/passwords/alerts", headers=bearer(a.user))).json()["invitations"] == 0

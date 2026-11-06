@@ -1,5 +1,6 @@
 // One item, read-only, with copy buttons. Secrets stay as dots until asked for.
-import { ChangePassword, FromFiles } from "./Connections";
+import { b64u, randomBytes, randomUuid } from "../core/bytes";
+import { ChangePassword, ClockWarning, ExpiryReminder, FromFiles } from "./Connections";
 import { ArchiveRestore, Archive, Download, ExternalLink, History, Pencil, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -172,7 +173,15 @@ function Attachments({ item, canEdit }: { item: Item; canEdit: boolean }) {
     setBusy(`Encrypting ${file.name}…`);
     try {
       await vault.sync();
-      const ref = await uploadAttachment(platform.api, item.vaultId, item.id, file, (d, t) => setBusy(`Uploading ${file.name}: ${d} of ${t} MB`));
+      // An interrupted upload picks up where it stopped, if the same file's chosen again.
+      const resumeName = `upload_resume:${item.id}:${file.name}:${file.size}`;
+      let resume = await vault.getDeviceSealed<{ id: string; key: string }>(resumeName).catch(() => null);
+      if (!resume) {
+        resume = { id: randomUuid(), key: b64u(randomBytes(32)) };
+        await vault.putDeviceSealed(resumeName, resume);
+      }
+      const ref = await uploadAttachment(platform.api, item.vaultId, item.id, file, (d, t) => setBusy(`Uploading ${file.name}: ${d} of ${t} MB`), resume);
+      await vault.store.deleteMeta(resumeName);
       const fresh = vault.get(item.id)!;
       await vault.update(item.id, { ...fresh.body, attachments: [...(fresh.body.attachments ?? []), ref] });
       await vault.sync();
@@ -319,7 +328,7 @@ export function ItemView({ item, onClosed }: { item: Item; onClosed: () => void 
           <IconButton label={b.favorite ? "Remove from favourites" : "Add to favourites"} disabled={!canEdit} onClick={() => save({ ...b, favorite: !b.favorite })}>
             <Star className={`h-4 w-4 ${b.favorite ? "fill-[var(--accent)] text-[var(--accent)]" : ""}`} />
           </IconButton>
-          <IconButton label="History" onClick={() => setHistory(true)}><History className="h-4 w-4" /></IconButton>
+          {!fillOnly && <IconButton label="History" onClick={() => setHistory(true)}><History className="h-4 w-4" /></IconButton>}
           <IconButton label={b.archived ? "Take out of archive" : "Archive"} disabled={!canEdit} onClick={() => save({ ...b, archived: !b.archived })}>
             {b.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
           </IconButton>
@@ -354,9 +363,11 @@ export function ItemView({ item, onClosed }: { item: Item; onClosed: () => void 
         {b.sshFingerprint && <PlainRow label="Fingerprint" value={b.sshFingerprint} />}
         {b.documentType && <PlainRow label="Type" value={b.documentType} copyable={false} />}
         {b.expiresOn && <PlainRow label="Expires" value={b.expiresOn} copyable={false} />}
+        {b.totp?.secret && <ClockWarning />}
+        {b.kind === "document" && b.expiresOn && canEdit && <ExpiryReminder item={item} />}
         {!fillOnly && secretFields.map((r) => <SecretRow key={r.label} label={r.label} value={r.value} />)}
         {b.fields?.map((f, i) =>
-          f.type === "hidden" ? <SecretRow key={i} label={f.name || "Field"} value={f.value} mono={false} /> : <PlainRow key={i} label={f.name || "Field"} value={f.value} />,
+          f.type === "hidden" && fillOnly ? null : f.type === "hidden" ? <SecretRow key={i} label={f.name || "Field"} value={f.value} mono={false} /> : <PlainRow key={i} label={f.name || "Field"} value={f.value} />,
         )}
         {b.notes && <PlainRow label="Notes" value={b.notes} />}
       </section>

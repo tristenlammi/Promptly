@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ferrovia Staff Gateway</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}body{margin:0;font:15px/1.5 Tahoma,sans-serif;color:#1b1f24;background:#e9edf2}a{color:#123c69}h1{font-size:1.5em;margin:0 0 10px}h2{font-size:1.15em;margin:0 0 8px}p{margin:0 0 12px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #cfd5dc;border-radius:3px;background:#fff;color:#222;width:100%}input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 16px;border:0;border-radius:3px;background:#123c69;color:#fff;cursor:pointer}[hidden]{display:none!important}
+header{padding:12px 24px;display:flex;gap:14px;align-items:center;flex-wrap:wrap}header b{margin-right:auto}main{max-width:960px;margin:28px auto;padding:0 20px}footer{margin-top:40px;padding:18px 24px;border-top:1px solid #cfd5dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:24px;justify-content:space-between}
+.cols{display:flex;gap:28px;flex-wrap:wrap}.cols>div{flex:1;min-width:260px;background:#fff;padding:20px;border:1px solid #cdd4dc}.f{margin-bottom:12px}.f label{display:block;font-weight:600}.dots{-webkit-text-security:disc}
+</style>
+</head>
+<body>
+<header style="background:#123c69;color:#fff"><b>Ferrovia</b><span>Staff gateway</span></header>
+<main><div class="cols"><div><h1>Staff sign in</h1><form onsubmit="return false" autocomplete="off"><div class="f"><label for="u9">Staff number</label><input id="u9" name="u" type="text" inputmode="numeric" autocomplete="off"></div><div class="f"><label for="k4">Passphrase</label><input id="k4" name="k" type="text" class="dots" autocomplete="off" spellcheck="false"></div><button>Sign in</button></form></div>
+<div><h2>Departures board</h2><form onsubmit="return false"><div class="f"><label for="dp">Departures from</label><input id="dp" name="st" type="text" placeholder="Station name"></div><button type="button">Show trains</button></form></div></div></main>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"username":r("#u9",[]),"password":r("#k4",[])};}};</script>
+</body>
+</html>

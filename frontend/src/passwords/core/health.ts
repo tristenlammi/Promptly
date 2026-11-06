@@ -13,6 +13,8 @@ export type HealthReport = {
   http: Item[];
   breached: { item: Item; count: number }[];
   no2fa: { item: Item; doc?: string }[];
+  /** No 2FA saved here, on a site the directory says nothing about. */
+  noTotp: Item[];
   noPasskey: Item[];
   checked: number;
 };
@@ -57,7 +59,7 @@ export async function runHealth(
 ): Promise<HealthReport> {
   const now = opts.now ?? Date.now();
   const logins = items.filter((i) => i.body.kind === "login" && i.body.password && !i.deleted && !i.body.archived);
-  const report: HealthReport = { weak: [], reused: [], old: [], http: [], breached: [], no2fa: [], noPasskey: [], checked: logins.length };
+  const report: HealthReport = { weak: [], reused: [], old: [], http: [], breached: [], no2fa: [], noTotp: [], noPasskey: [], checked: logins.length };
 
   const byPassword = new Map<string, Item[]>();
   for (const i of logins) {
@@ -82,9 +84,10 @@ export async function runHealth(
     if (changed && now - new Date(changed).getTime() > OLD_MS) report.old.push(i);
     if ((i.body.urls ?? []).some((u) => u.url.startsWith("http://") && !/^http:\/\/(localhost|127\.|192\.168\.|10\.|\[?::1)/.test(u.url))) report.http.push(i);
     const host = hostOf(i.body.urls?.[0]?.url ?? "");
-    if (host && !i.body.totp && opts.twofa) {
-      const hit = supports2fa(host, opts.twofa);
+    if (!i.body.totp) {
+      const hit = host && opts.twofa ? supports2fa(host, opts.twofa) : null;
       if (hit) report.no2fa.push({ item: i, doc: hit.doc });
+      else report.noTotp.push(i);
     }
     if (host && !i.body.passkeys?.length && opts.passkeys) {
       if (opts.passkeys[baseDomain(host) ?? host]) report.noPasskey.push(i);
