@@ -191,7 +191,7 @@ Final code for the importers. AVD `PromptlyTest` (API 36, Google Play image, x86
 - **The busy lock on the import buttons (A49):** compiled. No test taps twice.
 - **The free-memory limit:** `read()` sets it on every open, and a device test shows a low limit refuses a file, but nothing checks the value worked out from `availMem` is sensible on a phone short of memory.
 - **R8:** no release build was run this round, and nothing on arm64. `lintVitalRelease` compiles the release Kotlin and no more.
-- **A passkey already in a vault with a Bitwarden-style id isn't fixed on Android.** `passkey.ts` now also converts the id when it answers a site, so one imported on the web before that change still works there. `Passkeys.usable` and `assertion` here don't, so it won't match on the phone. Importing on Android now stores the right id. Not changed here, since that's the passkey path and not importing.
+- **A passkey already in a vault with a Bitwarden-style id isn't fixed on Android.** `passkey.ts` now also converts the id when it answers a site, so one imported on the web before that change still works there. `Passkeys.usable` and `getAssertion` here don't, so it won't match on the phone. Importing on Android now stores the right id. Not changed here, since that's the passkey path and not importing.
 
 ### Added to the owner's real-phone checklist
 
