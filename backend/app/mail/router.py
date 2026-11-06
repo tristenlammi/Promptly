@@ -303,6 +303,15 @@ async def threads(
     # A label is its own place: what's under one isn't in the Inbox or Archive too.
     if not label and role in ("inbox", "archive") and not query:
         where += " AND (account_id, thread_key) NOT IN (SELECT account_id, thread_key FROM mail_thread_labels)"
+    # All Mail holds the older emails of conversations that are in your Inbox or under
+    # a label too. As on Gmail, those conversations are there, not in the archive.
+    if not label and role == "archive" and not query:
+        where += (
+            " AND (folder_id NOT IN (SELECT id FROM mail_folders WHERE role = 'all') OR NOT EXISTS ("
+            "SELECT 1 FROM mail_messages other JOIN mail_folders place ON place.id = other.folder_id "
+            "WHERE other.account_id = mail_messages.account_id AND other.thread_key = mail_messages.thread_key "
+            "AND (place.role = 'inbox' OR place.label_id IS NOT NULL)))"
+        )
     if needs_reply:
         where += " AND " + _NEEDS_REPLY
     if label:

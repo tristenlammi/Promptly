@@ -667,4 +667,308 @@ def test_the_folder_the_server_marks_wins_over_one_only_named_like_it():
             ]
 
     roles = {f["path"]: f["role"] for f in imap.folders(Listing())}
-    assert roles == {"INBOX": "inbox", "[Imap]/Trash": "other", "[Gmail]/Bin": "trash", "Archive": "archive", "[Gmail]/All Mail": "all"}
+    assert roles == {"INBOX": "inbox", "[Imap]/Trash": "other", "[Gmail]/Bin": "trash", "Archive": "other", "[Gmail]/All Mail": "all"}
+
+
+def test_elsewhere_a_folder_called_archive_is_still_the_archive():
+    class Listing:
+        def list_folders(self):
+            return [((b"\\HasNoChildren",), b"/", "Archive"), ((b"\\HasNoChildren", b"\\All"), b"/", "Virtual/All")]
+
+    assert {f["path"]: f["role"] for f in imap.folders(Listing())} == {"Archive": "archive", "Virtual/All": "all"}
+
+
+# ---- All Mail copied as the archive
+
+
+ALL_MAIL = "[Gmail]/All Mail"
+
+
+def _gmail_delivers(subject: str, labels: tuple[str, ...] = (), inbox: bool = True, **headers: str) -> str:
+    """As Gmail keeps mail: in All Mail, and in the Inbox and each label too."""
+    message_id = _deliver("alice@mailtest.example", subject=subject, **headers)
+    c = _mailbox()
+    c.select_folder("INBOX")
+    uid = max(c.search(["HEADER", "Message-ID", message_id]))
+    c.copy([uid], ALL_MAIL)
+    for label in labels:
+        c.copy([uid], label)
+    if not inbox:
+        c.delete_messages([uid])
+        c.expunge()
+    c.logout()
+    return message_id
+
+
+def _gmail_takes_out_of(folder: str, message_id: str) -> None:
+    c = _mailbox()
+    c.select_folder(folder)
+    c.delete_messages(c.search(["HEADER", "Message-ID", message_id]))
+    c.expunge()
+    c.logout()
+
+
+def _gmail_copies(source: str, message_id: str, target: str) -> None:
+    c = _mailbox()
+    c.select_folder(source)
+    c.copy(c.search(["HEADER", "Message-ID", message_id]), target)
+    c.logout()
+
+
+async def _new_gmail_user(db, name: str):
+    u = await mk_user(db, name, role="admin")
+    return u, await _live_account(db, u)
+
+
+@live
+async def test_mail_already_archived_shows_in_the_archive_and_search(client, db, gmail_shaped):  # noqa: F811
+    _gmail_delivers("Old one", inbox=False)
+    u, account = await _new_gmail_user(db, "am1")
+    await _worker_pass(account)
+    assert await _subjects(client, u, "archive") == ["Old one"]
+    assert await _subjects(client, u, "inbox") == []
+    found = (await client.get("/api/mail/threads?q=Old", headers=H(u))).json()["threads"]
+    assert [t["subject"] for t in found] == ["Old one"]
+
+
+@live
+async def test_what_is_in_another_folder_isnt_copied_again(client, db, gmail_shaped, monkeypatch):  # noqa: F811
+    c = _mailbox()
+    c.create_folder("Homes")
+    c.logout()
+    _gmail_delivers("In the inbox")
+    _gmail_delivers("Under a label", labels=("Homes",), inbox=False)
+    _deliver("alice@mailtest.example", subject="I sent this")
+    c = _mailbox()
+    c.select_folder("INBOX")
+    sent = max(c.search(["SUBJECT", "I sent this"]))
+    c.copy([sent], "[Gmail]/Sent Mail")
+    c.copy([sent], ALL_MAIL)
+    c.delete_messages([sent])
+    c.expunge()
+    c.logout()
+    fetched: list[int] = []
+    real = imap.fetch_messages
+
+    def noting(client_, uids):
+        fetched.extend(uids)
+        return real(client_, uids)
+
+    monkeypatch.setattr(imap, "fetch_messages", noting)
+    u, account = await _new_gmail_user(db, "am2")
+    await _worker_pass(account)
+    await _worker_pass(account)
+    rows = await _rows(db, account)
+    assert sorted(m.subject for m in rows) == ["I sent this", "In the inbox", "Under a label"]
+    # Only three emails downloaded, with six copies of them around.
+    assert len(fetched) == 3
+    assert await _subjects(client, u, "archive") == []
+
+
+@live
+async def test_archived_in_gmail_stays_in_promptly(client, db, gmail_shaped):  # noqa: F811
+    message_id = _gmail_delivers("Archived elsewhere")
+    u, account = await _new_gmail_user(db, "am3")
+    await _worker_pass(account)
+    assert await _subjects(client, u, "inbox") == ["Archived elsewhere"]
+    before = (await _rows(db, account))[0].id
+
+    _gmail_takes_out_of("INBOX", message_id)
+    await _worker_pass(account)
+    assert await _subjects(client, u, "inbox") == []
+    assert await _subjects(client, u, "archive") == ["Archived elsewhere"]
+    rows = await _rows(db, account)
+    assert [m.id for m in rows] == [before] and rows[0].uid is not None
+
+
+@live
+async def test_label_taken_off_in_gmail_moves_it_to_the_archive(client, db, gmail_shaped):  # noqa: F811
+    c = _mailbox()
+    c.create_folder("Homes")
+    c.logout()
+    message_id = _gmail_delivers("Lot 2245", labels=("Homes",), inbox=False)
+    u, account = await _new_gmail_user(db, "am4")
+    await _worker_pass(account)
+    assert await _subjects(client, u, "archive") == []
+    _gmail_takes_out_of("Homes", message_id)
+    await _worker_pass(account)
+    assert await _subjects(client, u, "archive") == ["Lot 2245"]
+    assert len(await _rows(db, account)) == 1
+
+
+@live
+async def test_in_the_inbox_and_a_label_only_loses_the_one_it_left(client, db, gmail_shaped):  # noqa: F811
+    c = _mailbox()
+    c.create_folder("Homes")
+    c.logout()
+    message_id = _gmail_delivers("Both", labels=("Homes",))
+    u, account = await _new_gmail_user(db, "am5")
+    await _worker_pass(account)
+    assert len(await _rows(db, account)) == 2
+    _gmail_takes_out_of("INBOX", message_id)
+    await _worker_pass(account)
+    rows = await _rows(db, account)
+    assert len(rows) == 1
+    assert (await db.get(MailFolder, rows[0].folder_id)).path == "Homes"
+    assert await _subjects(client, u, "archive") == []
+
+
+@live
+async def test_moved_back_to_the_inbox_in_gmail_isnt_duplicated(client, db, gmail_shaped):  # noqa: F811
+    message_id = _gmail_delivers("Back again", inbox=False)
+    u, account = await _new_gmail_user(db, "am6")
+    await _worker_pass(account)
+    before = (await _rows(db, account))[0].id
+    _gmail_copies(ALL_MAIL, message_id, "INBOX")
+    await _worker_pass(account)
+    rows = await _rows(db, account)
+    assert [m.id for m in rows] == [before]
+    assert await _subjects(client, u, "inbox") == ["Back again"]
+    assert await _subjects(client, u, "archive") == []
+
+
+@live
+async def test_deleted_in_gmail_goes_to_the_trash_once(client, db, gmail_shaped):  # noqa: F811
+    in_inbox = _gmail_delivers("From the inbox")
+    archived = _gmail_delivers("From the archive", inbox=False)
+    u, account = await _new_gmail_user(db, "am7")
+    await _worker_pass(account)
+    for folder, message_id in (("INBOX", in_inbox), (ALL_MAIL, archived)):
+        _gmail_copies(folder, message_id, "[Gmail]/Trash")
+    for folder, message_id in (("INBOX", in_inbox), (ALL_MAIL, in_inbox), (ALL_MAIL, archived)):
+        _gmail_takes_out_of(folder, message_id)
+    await _worker_pass(account)
+    await _worker_pass(account)
+    assert sorted(await _subjects(client, u, "trash")) == ["From the archive", "From the inbox"]
+    assert await _subjects(client, u, "inbox") == []
+    assert await _subjects(client, u, "archive") == []
+    assert len(await _rows(db, account)) == 2
+
+
+@live
+async def test_deleted_for_good_in_gmail_goes(client, db, gmail_shaped):  # noqa: F811
+    in_inbox = _gmail_delivers("Gone from the inbox")
+    archived = _gmail_delivers("Gone from the archive", inbox=False)
+    u, account = await _new_gmail_user(db, "am8")
+    await _worker_pass(account)
+    assert len(await _rows(db, account)) == 2
+    for folder, message_id in (("INBOX", in_inbox), (ALL_MAIL, in_inbox), (ALL_MAIL, archived)):
+        _gmail_takes_out_of(folder, message_id)
+    await _worker_pass(account)
+    assert await _rows(db, account) == []
+
+
+@live
+async def test_a_conversation_still_in_the_inbox_isnt_in_the_archive_too(client, db, gmail_shaped):  # noqa: F811
+    first = _gmail_delivers("Ongoing", inbox=False)
+    _gmail_delivers("Re: Ongoing", in_reply_to=first)
+    u, account = await _new_gmail_user(db, "am9")
+    await _worker_pass(account)
+    assert await _subjects(client, u, "inbox") == ["Re: Ongoing"]
+    assert await _subjects(client, u, "archive") == []
+    m = (await _rows(db, account))[0]
+    whole = (await client.get(f"/api/mail/threads/{account.id}/{m.thread_key}", headers=H(u))).json()
+    assert len(whole["messages"]) == 2
+    # Archiving the rest puts the whole conversation there.
+    url = f"/api/mail/threads/{account.id}/{m.thread_key}/action"
+    assert (await client.post(url, json={"action": "archive"}, headers=H(u))).status_code == 204
+    # Once, whichever of the two is named: they were sent in the same second.
+    assert len(await _subjects(client, u, "archive")) == 1
+
+
+@live
+async def test_old_mail_coming_in_sets_off_no_rules_or_notifications(client, db, gmail_shaped, monkeypatch):  # noqa: F811
+    told: list[str] = []
+
+    async def noting(account_id, messages):
+        told.extend(m.subject for m in messages)
+
+    monkeypatch.setattr(worker, "_announce", noting)
+    u, account = await _new_gmail_user(db, "am10")
+    await _worker_pass(account)
+    label = await _label(client, u)
+    made = await client.post("/api/mail/rules", json={"kind": "from", "value": "sam@mailtest.example", "label_id": label}, headers=H(u))
+    assert made.status_code == 201
+    _gmail_delivers("Skipped the inbox", inbox=False)
+    await _worker_pass(account)
+    assert told == []
+    assert await _subjects(client, u, "archive") == ["Skipped the inbox"]
+
+
+@live
+async def test_new_mail_seen_in_all_mail_first_is_still_announced(client, db, gmail_shaped, monkeypatch):  # noqa: F811
+    told: list[str] = []
+
+    async def noting(account_id, messages):
+        told.extend(m.subject for m in messages)
+
+    monkeypatch.setattr(worker, "_announce", noting)
+    u, account = await _new_gmail_user(db, "am11")
+    await _worker_pass(account)
+    _gmail_delivers("Just arrived")
+    c = await asyncio.to_thread(_connect, account)
+    folders = {f.role: f for f in (await db.execute(select(MailFolder).where(MailFolder.account_id == account.id))).scalars()}
+    await worker._sync_folder(c, account.id, folders["all"])
+    assert await _subjects(client, u, "archive") == ["Just arrived"]
+    await worker._sync_folder(c, account.id, folders["inbox"])
+    c.logout()
+    assert told == ["Just arrived"]
+    assert await _subjects(client, u, "inbox") == ["Just arrived"]
+    assert len(await _rows(db, account)) == 1
+
+
+@live
+async def test_archiving_here_learns_its_number_in_all_mail(client, db, gmail_shaped):  # noqa: F811
+    _gmail_delivers("Number please")
+    u, account = await _new_gmail_user(db, "am12")
+    await _worker_pass(account)
+    m = next(r for r in await _rows(db, account))
+    assert (await client.post(f"/api/mail/threads/{account.id}/{m.thread_key}/action", json={"action": "archive"}, headers=H(u))).status_code == 204
+    # Gmail keeps its old number in All Mail, so it doesn't turn up as something new.
+    c = await asyncio.to_thread(_connect, account)
+    await worker._apply_ops(c, account.id)
+    folder = (await db.execute(select(MailFolder).where(MailFolder.account_id == account.id, MailFolder.role == "all"))).scalars().one()
+    c.select_folder(ALL_MAIL, readonly=True)
+    folder.last_uid = max(c.search(["ALL"]))
+    await db.commit()
+    await worker._sync_folders(c, account.id, every=True)
+    c.logout()
+    assert (await _rows(db, account))[0].uid is not None
+
+
+@live
+async def test_all_mail_isnt_copied_where_theres_a_real_archive(client, db, server):  # noqa: F811
+    c = _mailbox()
+    c.create_folder(ALL_MAIL)
+    c.logout()
+    _gmail_delivers("Only once")
+    u, account = await _new_gmail_user(db, "am13")
+    await _worker_pass(account)
+    await _worker_pass(account)
+    rows = await _rows(db, account)
+    assert [(await db.get(MailFolder, m.folder_id)).role for m in rows] == ["inbox"]
+    folder = (await db.execute(select(MailFolder).where(MailFolder.account_id == account.id, MailFolder.role == "all"))).scalars().one()
+    assert folder.last_uid == 0
+
+
+@live
+async def test_older_mail_stops_for_the_day_well_before_gmails_limit(client, db, gmail_shaped, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(worker, "INITIAL_FROM_ALL_MAIL", 1)
+    monkeypatch.setattr(worker, "BACKFILL_BATCH", 1)
+    for n in range(3):
+        _gmail_delivers(f"Older {n}", inbox=False)
+    u, account = await _new_gmail_user(db, "am14")
+    await _worker_pass(account)
+    assert len(await _rows(db, account)) == 1
+    c = await asyncio.to_thread(_connect, account)
+
+    monkeypatch.setattr(worker, "BACKFILL_BYTES_PER_DAY", 1)
+    await worker._backfill(c, account.id)
+    assert len(await _rows(db, account)) == 1
+
+    # Tomorrow, it carries on.
+    worker._downloaded[account.id] = (datetime.now(timezone.utc).date() - timedelta(days=1), 10_000)
+    await worker._backfill(c, account.id)
+    c.logout()
+    assert len(await _rows(db, account)) == 2
+

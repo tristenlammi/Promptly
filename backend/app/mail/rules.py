@@ -153,7 +153,8 @@ async def apply_to_new(db: AsyncSession, account_id: uuid.UUID, folder: MailFold
     """Runs as mail arrives. A reply follows its conversation to its label. Otherwise
     a rule takes mail newer than itself, so older mail coming in later stays where it
     is. Returns what a rule filed, which doesn't need to interrupt anyone."""
-    if not messages or folder.role in NOT_FOR_RULES:
+    # What's in All Mail is your archive coming in, not mail arriving.
+    if not messages or folder.role in NOT_FOR_RULES or folder.role == "all":
         return set()
     owner = select(MailAccount.user_id).where(MailAccount.id == account_id).scalar_subquery()
     found = (await db.execute(select(MailRule).where(MailRule.user_id == owner).order_by(MailRule.created_at))).scalars().all()

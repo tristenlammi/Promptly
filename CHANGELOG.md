@@ -21,6 +21,13 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-06
+
+### Changed
+- Mail: on Gmail, Archive now holds everything you've ever archived, and search reaches it, because All Mail is copied in gradually without downloading or showing anything twice. Archiving, deleting or moving an email in Gmail's own app is followed here too, instead of the email disappearing from Promptly.
+- Mail: copying older mail stops at 1 GB a day per mailbox and carries on the next day, well short of Gmail's 2500 MB limit, which would shut off your mail for a while. Set `MAIL_BACKFILL_BYTES_PER_DAY` to change it.
+- Mail: on Gmail, a label called Archive is now just a label, and archiving goes to All Mail.
+
 ## [0.28.1] - 2026-11-06
 
 ### Fixed
