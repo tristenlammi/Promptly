@@ -3,7 +3,7 @@
 // and are never kept. Its DOM footprint is one empty host element, shown only when a
 // person focuses a field, carrying nothing about whether the vault's locked.
 import { capture, type Captured, looksFailed, requestVerdict } from "../../../frontend/src/passwords/core/autofill/capture";
-import { analyzePage, type DomAdapter, type FillableElement, type FormInfo } from "../../../frontend/src/passwords/core/autofill/classify";
+import { analyzePage, type DomAdapter, type FillableElement, type FormInfo, isVisible } from "../../../frontend/src/passwords/core/autofill/classify";
 import { fillField, fillFields, type FillValues } from "../../../frontend/src/passwords/core/autofill/fill";
 import { checkAtClick, fieldIsClear, fieldIsFillable, type GuardState, inViewport, visibilityV2 } from "../../../frontend/src/passwords/core/autofill/guard";
 import { applyRule, describeForm, selectorFor } from "../../../frontend/src/passwords/core/autofill/rules";
@@ -123,6 +123,41 @@ function main() {
 
   /** ``strict`` is for a fill: only boxes that can be seen count, so a hidden one isn't
    *  even sent a value. It takes layout, so ordinary reports don't. */
+  /** For a bug report: the page's structure, and what was decided about each box and why. No values. */
+  function diagnose(): string {
+    analyze();
+    const about = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      return {
+        name: el.getAttribute("name"),
+        type: el.getAttribute("type"),
+        size: [Math.round(r.width), Math.round(r.height)],
+        tabindex: el.getAttribute("tabindex"),
+        aria_hidden_above: !!el.closest('[aria-hidden="true"]'),
+        visible: isVisible(el, dom),
+        fillable: fieldIsFillable(el),
+        on_screen: inViewport(el),
+        clear: fieldIsClear(el, dom.shadowRoot),
+        role: forms.flatMap((f) => f.fields).find((f) => f.el === el)?.role ?? null,
+      };
+    };
+    return JSON.stringify(
+      {
+        structure: JSON.parse(describeForm(document, location.hostname)),
+        decided: {
+          frames: window.parent === window ? "top" : "framed",
+          forms: forms.map((f) => ({ kind: f.kind, roles: f.fields.map((x) => x.role), has_submit: !!f.submit, submit_text: f.submit?.textContent?.trim().slice(0, 30) ?? null })),
+          best: best?.kind ?? null,
+          strict_field_count: report(true).fieldCount,
+          boxes: [...document.querySelectorAll("input")].filter((i) => i.type !== "hidden" && i.type !== "checkbox").slice(0, 30).map(about),
+          last_fill: lastFill,
+        },
+      },
+      null,
+      1,
+    );
+  }
+
   function report(strict = false): PageReport {
     const fields = strict ? (best?.fields ?? []).filter(showing) : best?.fields ?? [];
     return {
@@ -338,6 +373,8 @@ function main() {
   /** The check for each box, right before its value goes in. A box off screen is scrolled
    *  to and looked at again, but only if it's near the box before it: a form's boxes sit
    *  together, and one 5000 px away from the rest isn't meant to be seen. */
+  let lastFill: Record<string, unknown> | null = null;
+
   function readyToFill(): (el: Element) => boolean {
     let last: { x: number; y: number } | null = null;
     return (el) => {
@@ -357,13 +394,19 @@ function main() {
   }
 
   async function doFill(values: FillValues, origin: string): Promise<{ filled: string[]; left: string[] }> {
+    const out = await doFillInner(values, origin);
+    lastFill = { at: new Date().toISOString(), asked: Object.keys(values), filled: out.filled, left: out.left, form: best?.kind ?? null, ...out.how };
+    return { filled: out.filled, left: out.left };
+  }
+
+  async function doFillInner(values: FillValues, origin: string): Promise<{ filled: string[]; left: string[]; how?: Record<string, unknown> }> {
     // The frame may not hold what the background checked by now. Secrets stop here.
-    if (self.origin !== origin || self.origin === "null") return { filled: [], left: [] };
+    if (self.origin !== origin || self.origin === "null") return { filled: [], left: [], how: { stopped: "origin" } };
     // First, since our own menu covers boxes below the one it opened on.
     closeMenu();
     analyze();
     const form = best;
-    if (!form) return { filled: [], left: [] };
+    if (!form) return { filled: [], left: [], how: { stopped: "no form" } };
     // From inside a frame, a parent hiding the whole frame can't be seen by style. Where
     // the browser can say, it decides. A background tab can't, and then this adds nothing.
     if (window !== window.top && (await readVisibility(document.documentElement)) === false) return { filled: [], left: form.fields.map((f) => f.role) };
@@ -377,7 +420,7 @@ function main() {
     const filled = wanted.filter((f) => results.some((r) => r.el === f.el && r.ok)).map((f) => f.role);
     const left = wanted.filter((f) => results.some((r) => r.el === f.el && r.method === "skipped")).map((f) => f.role);
     if (filled.some(isPassword)) markDirty(form);
-    return { filled, left };
+    return { filled, left, how: { wanted: wanted.map((f) => f.role), results: results.map((r) => ({ ok: r.ok, method: r.method })) } };
   }
 
   // ---- Noticing a submit --------------------------------------------------------------
@@ -781,7 +824,7 @@ function main() {
         reply(true);
         return false;
       case "describeForm":
-        reply(describeForm(document, location.hostname));
+        reply(diagnose());
         return false;
       case "routeChanged":
         schedule();

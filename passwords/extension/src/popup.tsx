@@ -253,6 +253,7 @@ function PageTools({ tab, matches, setMessage }: { tab: chrome.tabs.Tab | null; 
           <>
             <p>The structure only, with no values or text you typed. Check it before sending it to anyone.</p>
             <textarea className="input" rows={6} readOnly value={report} aria-label="Form description" />
+            <button className="btn" onClick={async () => { await navigator.clipboard.writeText(report); setMessage("Copied the form description."); }}>Copy description</button>
           </>
         )}
       </div>
@@ -316,7 +317,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
     }
     if (r.reason === "reprompt") return setReprompt({ pass: () => doFill(itemId, { ...extra, reprompted: true }) });
     if (r.reason.startsWith("confirm")) return setConfirm({ itemId, outcome: r, prior: extra });
-    setMessage(r.reason === "no-fields" ? "No fields to fill on this page." : r.reason === "locked" ? "Locked." : "Couldn't fill this page.");
+    setMessage(r.reason === "no-fields" ? "No fields to fill on this page. If you can see one, This page below can describe it for a bug report." : r.reason === "locked" ? "Locked." : "Couldn't fill this page.");
   };
 
   const answer = () => {

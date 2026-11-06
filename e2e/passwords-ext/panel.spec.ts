@@ -129,6 +129,30 @@ test("the sections all open, with this site's logins first", async () => {
   expect((await opened).url()).toContain("vault.html#/security");
 });
 
+test("describing a form says what was decided about each box, and holds no values", async () => {
+  const page = await rig.ctx.newPage();
+  await page.goto(SITE);
+  await page.fill("#user", "typed-user-value");
+  await page.fill("#pass", "typed-secret-value");
+  const pop = await popupFor(rig, page);
+  await pop.setViewportSize({ width: 360, height: 580 });
+  await pop.getByRole("button", { name: "Fill Panel Site" }).click();
+  await page.waitForTimeout(300);
+  const again = await popupFor(rig, page);
+  await again.getByText("This page", { exact: true }).click();
+  await again.getByRole("button", { name: "Describe this form for a bug report" }).click();
+  const text = await again.getByLabel("Form description").inputValue();
+  const parsed = JSON.parse(text);
+  expect(parsed.decided.best).toBeTruthy();
+  const box = parsed.decided.boxes.find((b: { type: string }) => b.type === "password");
+  expect(box).toMatchObject({ visible: true, fillable: { ok: true }, clear: { ok: true }, role: "password" });
+  expect(parsed.decided.last_fill.filled).toContain("password");
+  for (const secret of ["typed-user-value", "typed-secret-value", "panel-Pass-1", "ana@example.com"]) expect(text).not.toContain(secret);
+  await again.close();
+  await pop.close();
+  await page.close();
+});
+
 test("copying a password respects a reprompt, and searching finds it from any section", async () => {
   const pop = await panel();
   await pop.bringToFront();
