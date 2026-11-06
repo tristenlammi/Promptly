@@ -407,11 +407,16 @@ private fun CreateVault(activity: FragmentActivity, onDone: () -> Unit) {
     var kit by remember { mutableStateOf<String?>(null) }
     var typed by remember { mutableStateOf("") }
     var offerFamily by remember { mutableStateOf(false) }
+    var offerPromptly by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     activity.hashCode()
 
+    if (offerPromptly) {
+        SavePromptlyStep(client, onDone)
+        return
+    }
     if (offerFamily) {
-        FamilyStep(client, onDone)
+        FamilyStep(client) { offerPromptly = true }
         return
     }
     val shown = kit

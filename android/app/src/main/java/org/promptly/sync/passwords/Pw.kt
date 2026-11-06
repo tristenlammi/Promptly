@@ -326,6 +326,29 @@ class PwPrefs(context: Context) {
     }
 }
 
+/** Where a change-password run has got to. In memory, and it outlasts the vault locking, since going
+ *  to the site's page is enough to lock it with "Lock after: Leaving". Only item ids. */
+object ChangeQueue {
+    @Volatile
+    var ids: List<String> = emptyList()
+        private set
+
+    @Volatile
+    var at = 0
+
+    val active: Boolean get() = ids.isNotEmpty()
+
+    fun start(list: List<String>) {
+        ids = list
+        at = 0
+    }
+
+    fun clear() {
+        ids = emptyList()
+        at = 0
+    }
+}
+
 object Pw {
     private const val TAG = "PromptlyPasswords"
 
@@ -572,6 +595,7 @@ object Pw {
     @Synchronized
     fun forgetDevice() {
         val ctx = appContext
+        ChangeQueue.clear()
         clientInstance?.forgetDevice()
         clientInstance = null
         prefs.forgetDevice()

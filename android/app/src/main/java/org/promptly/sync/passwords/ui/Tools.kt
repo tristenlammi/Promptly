@@ -68,6 +68,7 @@ import kotlinx.coroutines.withContext
 import org.promptly.sync.BuildConfig
 import org.promptly.sync.passwords.AlertsCheck
 import org.promptly.sync.passwords.Biometrics
+import org.promptly.sync.passwords.ChangeQueue
 import org.promptly.sync.passwords.ChromeSetup
 import org.promptly.sync.passwords.Clip
 import org.promptly.sync.passwords.Pw
@@ -100,13 +101,15 @@ private sealed class Screen {
     data object Emergency : Screen()
     data object ExportNow : Screen()
     data object Activity : Screen()
+    data object Change : Screen()
 }
 
 @Composable
 fun MainScreen(activity: PasswordsActivity) {
     val client = Pw.client()!!
     var tab by remember { mutableStateOf(Tab.ITEMS) }
-    var screen by remember { mutableStateOf<Screen>(Screen.Home) }
+    // A password change in progress survives the vault locking, as leaving for the site's page can.
+    var screen by remember { mutableStateOf<Screen>(if (ChangeQueue.active) Screen.Change else Screen.Home) }
     var syncing by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
     var kitNeeded by remember { mutableStateOf(false) }
@@ -179,16 +182,23 @@ fun MainScreen(activity: PasswordsActivity) {
                 Screen.Home -> when (tab) {
                     Tab.ITEMS -> ItemListScreen(client, { screen = Screen.Detail(it) }, { screen = Screen.PickKind }, { sync() }, syncing, banner)
                     Tab.CODES -> CodesScreen(client)
-                    Tab.GENERATOR -> GeneratorScreen()
+                    Tab.GENERATOR -> GeneratorScreen(client)
                     Tab.MORE -> MoreScreen(client, { screen = it }, { Pw.lock("user") })
                 }
-                is Screen.Detail -> ItemDetailScreen(activity, client, s.id, { screen = Screen.Home }, { screen = Screen.Edit(s.id, "") })
+                is Screen.Detail -> ItemDetailScreen(activity, client, s.id, { screen = Screen.Home }, { screen = Screen.Edit(s.id, "") }) {
+                    ChangeQueue.start(listOf(s.id))
+                    screen = Screen.Change
+                }
                 is Screen.Edit -> ItemEditorScreen(client, s.id, s.kind, s.url) { saved -> screen = if (saved != null) Screen.Detail(saved) else if (s.id != null) Screen.Detail(s.id) else Screen.Home }
                 Screen.PickKind -> KindPicker({ screen = Screen.Edit(null, it) }, { screen = Screen.Home })
                 Screen.Trash -> TrashScreen(client) { screen = Screen.Home }
                 Screen.Devices -> DevicesScreen(client) { screen = Screen.Home }
                 Screen.Settings -> SettingsScreen(activity, client) { screen = Screen.Home }
-                Screen.Security -> SecurityCheckScreen(client, { screen = Screen.Detail(it) }, { screen = Screen.Transfer }) { screen = Screen.Home }
+                Screen.Security -> SecurityCheckScreen(client, { screen = Screen.Detail(it) }, { screen = Screen.Transfer }, {
+                    ChangeQueue.start(it)
+                    screen = Screen.Change
+                }) { screen = Screen.Home }
+                Screen.Change -> ChangePasswordScreen(client) { screen = Screen.Home }
                 Screen.Shared -> SharedVaultsScreen(client) { screen = Screen.Home }
                 Screen.Transfer -> TransferScreen(client) { screen = Screen.Home }
                 Screen.Sends -> SendsScreen(client) { screen = Screen.Home }
@@ -313,7 +323,7 @@ private fun CodesScreen(client: VaultClient) {
 // ---- Generator --------------------------------------------------------------------
 
 @Composable
-private fun GeneratorScreen() {
+private fun GeneratorScreen(client: VaultClient) {
     val ctx = LocalContext.current
     var mode by remember { mutableIntStateOf(0) }
     var length by remember { mutableFloatStateOf(20f) }
@@ -328,14 +338,16 @@ private fun GeneratorScreen() {
     var site by remember { mutableStateOf("") }
     var output by remember { mutableStateOf("") }
     var bump by remember { mutableIntStateOf(0) }
+    var email by remember { mutableStateOf("") }
+    var plusTag by remember { mutableStateOf("") }
     val opts = Generator.PasswordOptions(length.toInt(), lower, upper, digits, symbols, ambiguous)
-    LaunchedEffect(mode, length, words, digitsLen, lower, upper, digits, symbols, ambiguous, capitalize, site, bump) {
+    LaunchedEffect(mode, length, words, digitsLen, lower, upper, digits, symbols, ambiguous, capitalize, site, bump, email, plusTag) {
         output = runCatching {
             when (mode) {
                 0 -> Generator.forSite(site.trim().ifEmpty { null }, opts)
                 1 -> Generator.passphrase(words.toInt(), "-", capitalize, false)
                 2 -> Generator.pin(digitsLen.toInt())
-                else -> Generator.username(false)
+                else -> if (email.isNotBlank() && plusTag.isNotBlank()) Generator.plusAddress(email.trim(), plusTag) else Generator.username(false)
             }
         }.getOrElse { it.message ?: "" }
     }
@@ -381,6 +393,7 @@ private fun GeneratorScreen() {
                 Text("Digits: ${digitsLen.toInt()}")
                 Slider(digitsLen, { digitsLen = it }, valueRange = 4f..12f)
             }
+            3 -> PlusAddressPanel(client, email, { email = it }, plusTag, { plusTag = it }, output)
         }
     }
 }

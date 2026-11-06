@@ -332,7 +332,7 @@ fun TotpRow(cfg: TotpConfig, tag: String) {
 }
 
 @Composable
-fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String, onBack: () -> Unit, onEdit: () -> Unit) {
+fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String, onBack: () -> Unit, onEdit: () -> Unit, onChange: () -> Unit) {
     val ctx = LocalContext.current
     val version by Pw.version.collectAsState()
     val item = remember(id, version) { client.get(id) }
@@ -352,6 +352,11 @@ fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String
     var showHistory by remember { mutableStateOf(false) }
     var versions by remember { mutableStateOf<List<VaultClient.Version>?>(null) }
     var showWifiQr by remember { mutableStateOf(false) }
+    var fromFiles by remember { mutableStateOf(false) }
+    if (fromFiles) {
+        FromFilesPane(client, item) { fromFiles = false }
+        return
+    }
     // Fill only: nothing on screen that reveals a secret or copies one. It fills, nothing else.
     val canReveal = client.canReveal(item.vaultId)
     val canEdit = client.canEdit(item.vaultId)
@@ -379,6 +384,18 @@ fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String
         b.username?.let { PlainRow("Username", it, "detail-username") }
         if (canReveal) b.password?.let { SecretRow("Password", it, "detail-password") }
         if (canReveal) b.totp?.let { TotpRow(it, "detail-totp") }
+        if (canEdit && !item.deleted && b.kind == "login" && !b.password.isNullOrEmpty()) {
+            if (b.str("pendingPassword") != null) {
+                Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("detail-pending")) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("A new password is waiting on the site.")
+                        OutlinedButton(onClick = onChange, Modifier.testTag("detail-change")) { Text("Finish changing it") }
+                    }
+                }
+            } else {
+                TextButton(onClick = onChange, Modifier.testTag("detail-change")) { Text("Change password") }
+            }
+        }
         for (u in b.urls) {
             val app = Match.parseAppUrl(u.url)
             PlainRow(if (app != null) "App" else "Website", app?.pkg ?: u.url, "detail-url")
@@ -406,9 +423,10 @@ fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String
                 }
             }
         }
+        ExpiryReminderRow(client, item, canEdit && !item.deleted)
         b.notes?.let { PlainRow("Notes", it, "detail-notes", secretCopy = true) }
         if (b.tags.isNotEmpty()) PlainRow("Tags", b.tags.joinToString(", "), "detail-tags")
-        if (b.kind != "folder") AttachmentsPanel(client, item, canEdit)
+        if (b.kind != "folder") AttachmentsPanel(client, item, canEdit) { fromFiles = true }
         Spacer(Modifier.height(10.dp))
         if (item.deleted) {
             OutlinedButton(onClick = { act { client.restoreItem(id) } }, Modifier.fillMaxWidth().testTag("restore")) { Text("Restore") }
@@ -443,7 +461,7 @@ fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String
 /** Files on an item. Opened here in memory: images and text show on this secure screen, and
  *  nothing decrypted is written anywhere unless you pick where to save a copy. */
 @Composable
-private fun AttachmentsPanel(client: VaultClient, item: Item, canEdit: Boolean) {
+private fun AttachmentsPanel(client: VaultClient, item: Item, canEdit: Boolean, onFromFiles: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val list = item.body.attachments
@@ -536,6 +554,7 @@ private fun AttachmentsPanel(client: VaultClient, item: Item, canEdit: Boolean) 
     }
     busy?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("attachment-busy")) }
     if (canEdit) OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = busy == null, modifier = Modifier.testTag("attachment-add")) { Text("Attach a file") }
+    if (canEdit) OutlinedButton(onClick = onFromFiles, enabled = busy == null, modifier = Modifier.testTag("attachment-from-files")) { Text("Add from Files") }
     preview?.let { (ref, bytes) ->
         Card(Modifier.fillMaxWidth().padding(vertical = 6.dp).testTag("attachment-preview")) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {

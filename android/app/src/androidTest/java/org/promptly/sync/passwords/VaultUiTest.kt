@@ -275,6 +275,21 @@ class VaultUiTest {
         Harness.tapThrough("family-make", By.res("family-made"))
         assertTrue(Pw.client()!!.vaults().any { it.vault.kind == "shared" && it.displayName == "Family" })
         tap("family-continue")
+        // Then Promptly's own login, with the warning, saved in the vault it's offered from (plan 5.14).
+        waitFor(By.res("promptly-offer"), 20_000)
+        waitFor(By.res("promptly-warning"))
+        assertEquals("It takes the name from what this phone's paired with, and never the password", args.getString("pwAppUser"), waitFor(By.res("promptly-username")).text)
+        assertEquals("", waitFor(By.res("promptly-password")).text ?: "")
+        assertFalse(waitFor(By.res("promptly-save")).isEnabled)
+        fill("promptly-password", "Promptly-Test-1!")
+        fill("promptly-otp", "JBSWY3DP EHPK3PXP")
+        Harness.tapThrough("promptly-save", By.res("promptly-saved"))
+        val own = Pw.client()!!.allItems().single { it.body.title == "Promptly" }
+        assertEquals(args.getString("pwAppUser"), own.body.username)
+        assertEquals("Promptly-Test-1!", own.body.password)
+        assertEquals(server, own.body.urls.single().url)
+        assertEquals("JBSWY3DPEHPK3PXP", own.body.totp?.secret)
+        tap("promptly-continue")
         // Then the guided setup, once, and only then the vault (plan 5.2).
         waitFor(By.res("setup-guide"), 20_000)
         assertFalse(has(By.res("search"), 300))

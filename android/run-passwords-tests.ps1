@@ -38,7 +38,7 @@ async def main():
     async with SessionLocal() as db:
         # Older runs' users move down the list, so this run's are near the top of the picker.
         await db.execute(update(User).where(User.username.like("000pwandroid%")).values(username=func.concat("zz", User.username)))
-        for tag in ["a", "b", "c", "d", "e", "f", "g", "h"]:
+        for tag in ["a", "b", "c", "d", "e", "f", "g", "h", "i"]:
             s = uuid.uuid4().hex[:10]
             u = User(email=f"pw-android-{tag}-{s}@example.com", username=f"000pwandroid{tag}{s}", password_hash=hash_password("An-" + secrets.token_urlsafe(16) + "!9"), role="user")
             db.add(u)
@@ -58,7 +58,7 @@ asyncio.run(main())
         "-e", "pwBearer4", $users["d"][2], "-e", "pwAppUser", $users["d"][3], "-e", "pwAppPassword", $users["d"][4],
         "-e", "pwBearer5", $users["e"][2], "-e", "pwBearer6", $users["f"][2], "-e", "pwUser6", $users["f"][3],
         "-e", "pwBearer7", $users["g"][2], "-e", "pwAppUser7", $users["g"][3], "-e", "pwAppPassword7", $users["g"][4],
-        "-e", "pwBearer8", $users["h"][2],
+        "-e", "pwBearer8", $users["h"][2], "-e", "pwBearer9", $users["i"][2],
         "-e", "pwServer", "http://10.0.2.2:8092")
     $runner = "org.promptly.app.test/androidx.test.runner.AndroidJUnitRunner"
     $mailClass = "org.promptly.sync.passwords.MailRealStackTest"

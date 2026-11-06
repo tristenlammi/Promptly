@@ -27,6 +27,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: passkeys imported from Bitwarden now work: their ids are converted to the form sites use.
 
 ### Added
+- Passwords on Android: security emails on the Security check, matched against your logins on the phone.
+- Passwords on Android: a change-password helper from the Security check, with a queue, a new password that waits until you confirm it, and autofill that offers the current and new password on the site's change form.
+- Passwords on Android: the generator makes a plus-address and can have Mail label what's sent to it.
+- Passwords on Android: move a document from Files into an item, with an offer to bin the original and a Calendar reminder that says nothing about it.
+- Passwords on Android: saving your Promptly login when you make a vault, with the warning about your kit.
 - Passwords on Android: codes and sign-in links from Promptly Mail on the fill sheet, if you turn them on. Only the site's own sender gets a row, nothing fills until you tap it, and a phone connected earlier can add what it needs from Settings.
 - Passwords on Android: an Activity screen, and an opt-in to post coarse counts to your Today page.
 - Passwords: the extension offers your passkeys when a site asks quietly or with no click, from the toolbar panel and the on-page menu.

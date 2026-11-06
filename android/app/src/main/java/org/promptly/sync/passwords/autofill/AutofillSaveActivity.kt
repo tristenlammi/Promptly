@@ -36,6 +36,7 @@ import org.promptly.sync.passwords.Pw
 import org.promptly.sync.passwords.core.Item
 import org.promptly.sync.passwords.core.LoginUrl
 import org.promptly.sync.passwords.core.Match
+import org.promptly.sync.passwords.core.PasswordChange
 import org.promptly.sync.passwords.core.newBody
 import org.promptly.sync.passwords.ui.ErrorCard
 import org.promptly.sync.passwords.ui.PwTheme
@@ -82,6 +83,8 @@ class AutofillSaveActivity : FragmentActivity() {
         }
         val existing = remember { c.allItems().firstOrNull { it.body.kind == "login" && sameAccount(save, it) } }
         val unchanged = existing != null && existing.body.password == save.password
+        // Partway through changing it: this is the new one the helper made, whoever it says is signing in.
+        val changing = remember { c.allItems().firstOrNull { it.body.kind == "login" && it.body.str("pendingPassword") == save.password && hitsTarget(save.target, it) && c.canEdit(it.vaultId) } }
         var title by remember { mutableStateOf(existing?.body?.title ?: where) }
         var error by remember { mutableStateOf<String?>(null) }
         var busy by remember { mutableStateOf(false) }
@@ -105,8 +108,18 @@ class AutofillSaveActivity : FragmentActivity() {
             }
         }
 
-        if (unchanged) {
+        if (unchanged && changing == null) {
             finish()
+            return
+        }
+        if (changing != null) {
+            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("Did $where take your new password?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("\"${changing.body.title}\" has a new password waiting. If the site accepted it, it becomes the password, and the old one goes to its history.", style = MaterialTheme.typography.bodyMedium)
+                error?.let { ErrorCard(it) }
+                Button(onClick = { run { c.update(changing.id, PasswordChange.commit(changing.body)) } }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("save-commit")) { Text("Yes, it's changed") }
+                TextButton(onClick = { finish() }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("save-not-now")) { Text("Not yet") }
+            }
             return
         }
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {

@@ -171,6 +171,17 @@ object Harness {
         throw AssertionError("$desc was \"$last\", wanted \"$want\"\nWindow:\n${dumpWindow()}")
     }
 
+    fun waitTextRes(tag: String, want: String, ms: Long = 8_000) {
+        val end = System.currentTimeMillis() + ms
+        var last = ""
+        while (System.currentTimeMillis() < end) {
+            last = runCatching { device.findObject(By.res(tag))?.text ?: "" }.getOrDefault("")
+            if (last == want) return
+            Thread.sleep(150)
+        }
+        throw AssertionError("$tag was \"$last\", wanted \"$want\"\nWindow:\n${dumpWindow()}")
+    }
+
     /** Type into a Compose field found by its test tag. */
     fun fill(tag: String, text: String) {
         val f = waitFor(By.res(tag))

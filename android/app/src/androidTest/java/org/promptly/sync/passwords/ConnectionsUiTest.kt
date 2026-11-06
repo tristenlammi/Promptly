@@ -261,6 +261,221 @@ class ConnectionsUiTest {
         assertEquals("device-1", Pw.prefs.deviceId)
     }
 
+    // ---- Security emails ------------------------------------------------------------------------
+
+    private fun event(id: String, kind: String, name: String, domain: String, subject: String) =
+        """{"id":"$id","kind":"$kind","from_name":"$name","from_domain":"$domain","subject":"$subject","at":"${java.time.Instant.now().minusSeconds(3600)}"}"""
+
+    private fun login(client: VaultClient, title: String, pw: String, url: String) =
+        client.saveNew(client.personalVaultId(), org.promptly.sync.passwords.core.newBody("login", title).withText("username", "ana").withText("password", pw).withUrls(listOf(org.promptly.sync.passwords.core.LoginUrl(url))))
+
+    private fun security() {
+        open()
+        tap("tab-more", 30_000)
+        tap("open-security")
+    }
+
+    @Test fun aSecurityEmailIsRaisedAgainstItsLoginMatchedHere() {
+        val (client, s) = seed()
+        val insta = login(client, "Instagram", "Long-Passphrase-For-Instagram-1", "https://www.instagram.com")
+        login(client, "Other", "Long-Passphrase-For-Other-2", "https://other.example")
+        s.json("/mail/security-events", "[" + listOf(
+            event("real", "password_changed", "Insta\u202Egram", "mail.instagram.com", "Your password was changed"),
+            event("fake", "new_signin", "Instagram", "instagram.com.evil.example", "New sign-in"),
+            event("nobody", "new_signin", "Elsewhere", "elsewhere.example", "New sign-in"),
+            event("odd", "steal_things", "Instagram", "instagram.com", "New sign-in"),
+        ).joinToString(",") + "]")
+        security()
+        waitFor(By.res("mail-alert-real"), 20_000)
+        assertEquals("Instagram says your password changed. Was that you?", waitFor(By.res("mail-alert-text")).text)
+        waitFor(By.textContains("Your password was changed"))
+        for (id in listOf("fake", "nobody", "odd")) assertFalse(id, has(By.res("mail-alert-$id"), 300))
+
+        // Not me leads to changing it, and the login's untouched until a step there says otherwise.
+        tap("alert-change")
+        waitFor(By.res("change-start"), 15_000)
+        assertEquals("Instagram", waitFor(By.res("change-title")).text)
+        assertEquals("Long-Passphrase-For-Instagram-1", client.get(insta.id)!!.body.password)
+        tap("back")
+
+        // That was me: gone, and it stays gone on this phone.
+        tap("tab-more", 30_000)
+        tap("open-security")
+        tap("alert-dismiss", 20_000)
+        assertTrue(Harness.gone(By.res("mail-alert-real")))
+        waitUntil("It's remembered") { client.store.getMeta("alerts_dismissed").toString().contains("real") }
+        tap("back")
+        tap("open-security")
+        waitFor(By.res("health-checked"), 30_000)
+        assertFalse(has(By.res("mail-alert-real"), 500))
+    }
+
+    @Test fun aPhoneWithoutTheScopeGetsNoAlertsAndAWayToAddIt() {
+        val (client, s) = seed()
+        login(client, "Instagram", "Long-Passphrase-For-Instagram-1", "https://www.instagram.com")
+        s.answersFor403("GET /api/passwords/mail/security-events")
+        security()
+        tap("mail-alerts-add", 20_000)
+        waitFor(By.res("mail-scope-add"), 15_000)
+        assertFalse(has(By.res("mail-alerts"), 300))
+    }
+
+    // ---- Changing a password --------------------------------------------------------------------
+
+    @Test fun theHelperWorksThroughAQueueOneStepAtATime() {
+        val (client, s) = seed()
+        val first = login(client, "First weak", "aaaaaa", "https://first.example/login")
+        val second = login(client, "Second weak", "bbbbbb", "https://www.23andme.com/login")
+        val third = login(client, "Third weak", "cccccc", "https://third.example")
+        Links.opener = { _, url -> opened += url }
+        s.answersFor("POST /api/passwords/vaults", "application/json", "{}".toByteArray())
+        security()
+        tap("change-queue", 30_000)
+
+        // The first: made and saved first, with the old one still the password.
+        Harness.waitTextRes("change-position", "1 of 3", 15_000)
+        tap("change-start")
+        waitFor(By.res("change-waiting"), 15_000)
+        val pending = client.get(first.id)!!.body.str("pendingPassword")!!
+        assertTrue(pending.length >= 16)
+        assertEquals("aaaaaa", client.get(first.id)!!.body.password)
+        assertTrue("Nothing's offered on the page's behalf", opened.isEmpty())
+        tap("change-open")
+        assertEquals("https://first.example/.well-known/change-password", opened.single())
+        waitFor(By.res("change-copy-current"))
+        waitFor(By.res("change-copy-new"))
+        waitFor(By.res("change-note"))
+        tap("change-yes")
+
+        // Saved with history, and on to the next, whose page is known.
+        Harness.waitTextRes("change-position", "2 of 3", 15_000)
+        val done = client.get(first.id)!!.body
+        assertEquals(pending, done.password)
+        assertEquals(null, done.str("pendingPassword"))
+        assertEquals("aaaaaa", done.passwordHistory.first().first)
+        tap("change-start")
+        waitFor(By.res("change-waiting"), 15_000)
+        tap("change-open")
+        assertEquals("https://you.23andme.com/user/edit/password/", opened[1])
+        tap("change-no")
+
+        // A no leaves it as it was.
+        Harness.waitTextRes("change-position", "3 of 3", 15_000)
+        assertEquals("bbbbbb", client.get(second.id)!!.body.password)
+        assertEquals(null, client.get(second.id)!!.body.str("pendingPassword"))
+        assertTrue(client.get(second.id)!!.body.passwordHistory.isEmpty())
+        tap("change-skip")
+
+        waitFor(By.res("change-all-done"), 15_000)
+        assertEquals("cccccc", client.get(third.id)!!.body.password)
+        tap("change-close")
+        waitFor(By.res("tab-more"), 15_000)
+        assertFalse(ChangeQueue.active)
+    }
+
+    @Test fun aChangeInProgressOutlastsTheVaultLocking() {
+        val (client, _) = seed()
+        val item = login(client, "Weak one", "aaaaaa", "https://first.example/login")
+        Links.opener = { _, url -> opened += url }
+        security()
+        tap("change-queue", 30_000)
+        tap("change-start", 15_000)
+        waitFor(By.res("change-waiting"), 15_000)
+        Pw.lock("test")
+        Harness.fill("master-password", Harness.MASTER)
+        tap("unlock")
+        tap("change-yes", 30_000)
+        waitFor(By.res("tab-more"), 15_000)
+        assertEquals("aaaaaa", Pw.client()!!.get(item.id)!!.body.passwordHistory.first().first)
+    }
+
+    @Test fun aLoginSaysWhenAChangeIsWaitingAndCanFinishIt() {
+        val (client, _) = seed()
+        val item = login(client, "Waiting one", "Old-Password-1!", "https://first.example")
+        client.update(item.id, org.promptly.sync.passwords.core.PasswordChange.withPending(item.body, "New-Password-2!"))
+        open()
+        tap("item-${item.body.title}", 30_000)
+        waitFor(By.res("detail-pending"), 15_000)
+        tap("detail-change")
+        waitFor(By.res("change-waiting"), 15_000)
+        tap("change-no")
+        waitFor(By.res("tab-more"), 15_000)
+        assertEquals("Old-Password-1!", client.get(item.id)!!.body.password)
+    }
+
+    /** The extension does this from its fill path. On Android it's the system's own sheet, on the real page. */
+    @Test fun autofillOnAChangePageFillsTheCurrentPasswordAndTheNewOne() {
+        val (client, _) = seed()
+        Harness.setAutofill(true)
+        val item = login(client, "Change me", "Old-Password-1!", "https://first.example")
+        client.update(item.id, org.promptly.sync.passwords.core.PasswordChange.withPending(item.body, "New-Password-2!"))
+        Harness.rebuildIndex()
+        browser("https://first.example/account/password", "change")
+        Harness.tapWebField("current")
+        Harness.pick("Change me")
+        Harness.waitText("web-pass-echo", "Old-Password-1!", 15_000)
+        Harness.waitText("web-new-echo", "New-Password-2!", 15_000)
+        assertEquals("Filling it doesn't decide anything", "Old-Password-1!", client.get(item.id)!!.body.password)
+        assertEquals("New-Password-2!", client.get(item.id)!!.body.str("pendingPassword"))
+    }
+
+    @Test fun anOrdinarySignInStillOnlyGetsTheCurrentPassword() {
+        val (client, _) = seed()
+        Harness.setAutofill(true)
+        val item = login(client, "Sign in", "Old-Password-1!", "https://first.example")
+        client.update(item.id, org.promptly.sync.passwords.core.PasswordChange.withPending(item.body, "New-Password-2!"))
+        Harness.rebuildIndex()
+        browser("https://first.example/login", "login")
+        Harness.tapWebField("user")
+        Harness.pick("Sign in")
+        Harness.waitText("web-pass-echo", "Old-Password-1!", 15_000)
+    }
+
+    /** Typed or pasted, Android's own "save?" comes up. It's the change finishing, not a new login. */
+    @Test fun savingTheWaitingPasswordFinishesTheChange() {
+        val (client, _) = seed()
+        val item = login(client, "Change me", "Old-Password-1!", "https://first.example")
+        client.update(item.id, org.promptly.sync.passwords.core.PasswordChange.withPending(item.body, "New-Password-2!"))
+        val id = org.promptly.sync.passwords.autofill.PendingSaves.put(org.promptly.sync.passwords.autofill.PendingSaves.Save(org.promptly.sync.passwords.autofill.FillTarget.Web("first.example", "https", Harness.TEST_BROWSER), null, "New-Password-2!"))
+        ctx.startActivity(Intent(ctx, org.promptly.sync.passwords.autofill.AutofillSaveActivity::class.java).putExtra(org.promptly.sync.passwords.autofill.AutofillSaveActivity.EXTRA_ID, id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        tap("save-commit", 15_000)
+        waitUntil("It's the password now") { client.get(item.id)!!.body.password == "New-Password-2!" }
+        assertEquals(null, client.get(item.id)!!.body.str("pendingPassword"))
+        assertEquals("Old-Password-1!", client.get(item.id)!!.body.passwordHistory.first().first)
+        assertEquals("No second login", 1, client.allItems().size)
+    }
+
+    // ---- Plus addresses ---------------------------------------------------------------------------
+
+    @Test fun theGeneratorMakesAPlusAddressAndAsksMailToLabelIt() {
+        val (_, s) = seed()
+        s.answersFor("POST /api/passwords/mail/plus-rule", "application/json", """{"label":"Plus addresses/shopnow"}""".toByteArray())
+        open()
+        tap("tab-generator", 30_000)
+        tap("gen-mode-3")
+        Harness.scrollToTag("plus-tag")
+        assertFalse(has(By.res("plus-label"), 300))
+        Harness.fill("plus-email", "me+old@example.com")
+        Harness.fill("plus-tag", "Shop Now!")
+        Harness.waitTextRes("gen-output", "me+shopnow@example.com")
+        Harness.scrollTap("plus-label")
+        waitFor(By.res("plus-result"), 15_000)
+        assertTrue(has(By.textContains("labelled Plus addresses/shopnow")))
+        assertEquals("""{"address":"me+shopnow@example.com"}""", s.bodies[s.calls.indexOf("POST /api/passwords/mail/plus-rule")])
+    }
+
+    @Test fun aPlusRuleSaysWhatTheServerSays() {
+        val (_, s) = seed()
+        s.answersFor("POST /api/passwords/mail/plus-rule", "application/json", "not json".toByteArray())
+        open()
+        tap("tab-generator", 30_000)
+        tap("gen-mode-3")
+        Harness.fill("plus-email", "not an address")
+        Harness.fill("plus-tag", "shop")
+        Harness.waitTextRes("gen-output", "That isn't an email address")
+        assertFalse(has(By.res("plus-label"), 300))
+    }
+
     // ---- Activity ---------------------------------------------------------------------------
 
     @Test fun theActivityScreenShowsTheLogAsPlainWords() {

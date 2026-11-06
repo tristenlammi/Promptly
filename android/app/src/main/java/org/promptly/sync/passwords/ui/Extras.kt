@@ -65,6 +65,7 @@ import org.promptly.sync.passwords.core.Kdbx
 import org.promptly.sync.passwords.core.KeyChangedError
 import org.promptly.sync.passwords.core.MemberOut
 import org.promptly.sync.passwords.core.NeedsPasswordError
+import org.promptly.sync.passwords.core.PasswordChange
 import org.promptly.sync.passwords.core.Person
 import org.promptly.sync.passwords.core.EmergencyText
 import org.promptly.sync.passwords.core.SecureSend
@@ -86,7 +87,7 @@ internal fun Header(title: String, onBack: () -> Unit) {
 // ---- Security check -------------------------------------------------------------
 
 @Composable
-private fun IssueSection(title: String, explain: String, tag: String, items: List<Pair<Item, String?>>, onOpen: (String) -> Unit) {
+private fun IssueSection(title: String, explain: String, tag: String, items: List<Pair<Item, String?>>, onOpen: (String) -> Unit, onChange: ((Item) -> Unit)? = null) {
     var open by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth().clickable { open = !open }.testTag("health-$tag")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -97,9 +98,12 @@ private fun IssueSection(title: String, explain: String, tag: String, items: Lis
             Text(explain, style = MaterialTheme.typography.bodySmall)
             if (open) {
                 for ((item, note) in items) {
-                    Column(Modifier.fillMaxWidth().clickable { onOpen(item.id) }.padding(vertical = 6.dp)) {
-                        Text(item.body.title)
-                        if (note != null) Text(note, style = MaterialTheme.typography.bodySmall)
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f).clickable { onOpen(item.id) }.padding(vertical = 6.dp)) {
+                            Text(item.body.title)
+                            if (note != null) Text(note, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (onChange != null) TextButton(onClick = { onChange(item) }, Modifier.testTag("health-change-${item.body.title}")) { Text("Change") }
                     }
                 }
             }
@@ -108,7 +112,7 @@ private fun IssueSection(title: String, explain: String, tag: String, items: Lis
 }
 
 @Composable
-fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onExport: () -> Unit, onBack: () -> Unit) {
+fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onExport: () -> Unit, onChange: (List<String>) -> Unit, onBack: () -> Unit) {
     var report by remember { mutableStateOf<HealthReport?>(null) }
     var progress by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -133,6 +137,7 @@ fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onExport:
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Header("Security check", onBack)
         SurvivalPanel(client, onExport)
+        MailAlertsPanel(client, { onChange(listOf(it.id)) }, onOpen)
         DuplicatesPanel(client, onOpen)
         Text("All worked out on this phone. Only the first five characters of each password's SHA-1 leave it, through your server, to ask whether it's been in a breach.", style = MaterialTheme.typography.bodySmall)
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -161,10 +166,13 @@ fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onExport:
         report?.let { r ->
             Text("Checked ${r.checked} logins.", Modifier.testTag("health-checked"))
             r.breachSkipped?.let { ErrorCard(it) }
-            IssueSection("Breached", "Seen in a known breach. Change these first.", "breached", r.breached.map { it.first to "Seen ${it.second} times" }, onOpen)
-            IssueSection("Weak", "Quick to guess.", "weak", r.weak.map { it to null }, onOpen)
-            IssueSection("Reused", "If one site leaks, the others are open too.", "reused", r.reused.flatten().map { it to null }, onOpen)
-            IssueSection("Old", "Not changed for over a year.", "old", r.old.map { it to null }, onOpen)
+            val change: (Item) -> Unit = { onChange(listOf(it.id)) }
+            val toChange = PasswordChange.toChange(r).filter { client.canEdit(it.vaultId) }
+            if (toChange.isNotEmpty()) OutlinedButton(onClick = { onChange(toChange.map { it.id }) }, Modifier.testTag("change-queue")) { Text("Change these one by one (${toChange.size})") }
+            IssueSection("Breached", "Seen in a known breach. Change these first.", "breached", r.breached.map { it.first to "Seen ${it.second} times" }, onOpen, change.takeIf { r.breached.all { b -> client.canEdit(b.first.vaultId) } })
+            IssueSection("Weak", "Quick to guess.", "weak", r.weak.map { it to null }, onOpen, change.takeIf { r.weak.all { client.canEdit(it.vaultId) } })
+            IssueSection("Reused", "If one site leaks, the others are open too.", "reused", r.reused.flatten().map { it to null }, onOpen, change.takeIf { r.reused.flatten().all { client.canEdit(it.vaultId) } })
+            IssueSection("Old", "Not changed for over a year.", "old", r.old.map { it to null }, onOpen, change.takeIf { r.old.all { client.canEdit(it.vaultId) } })
             IssueSection("Not secure", "Saved for an http address.", "http", r.http.map { it to null }, onOpen)
             IssueSection("2FA available", "These sites offer it, and you haven't set it up here.", "no2fa", r.no2fa.map { it.first to it.second }, onOpen)
             IssueSection("No 2FA saved", "Worth checking whether these sites offer it.", "nototp", r.noTotp.map { it to null }, onOpen)

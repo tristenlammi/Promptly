@@ -7,6 +7,8 @@ import android.content.Intent
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.By
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -129,6 +131,86 @@ class MailRealStackTest {
         assertFalse(has(By.textContains("999111"), 300))
         row.click()
         Harness.waitText("web-user-echo", "730194", 15_000)
+
+        // The real security email, against the real login, and the real label in Mail.
+        Harness.home()
+        open()
+        // Back where it was left, in Settings.
+        tap("back", 30_000)
+        tap("tab-more", 30_000)
+        tap("open-security")
+        waitFor(By.res("mail-alerts"), 30_000)
+        assertTrue(waitFor(By.res("mail-alert-text")).text.contains("says your password changed"))
+        tap("back")
+        tap("tab-generator", 15_000)
+        tap("gen-mode-3")
+        Harness.fill("plus-email", "ana@example.com")
+        Harness.fill("plus-tag", "shop")
+        Harness.waitTextRes("gen-output", "ana+shop@example.com")
+        Harness.scrollTap("plus-label")
+        waitFor(By.res("plus-result"), 20_000)
+        assertTrue(has(By.textContains("labelled Plus addresses/shop")))
+    }
+
+    /** A real file in the real Files, moved through the real screens. */
+    @Test fun aDocumentMovesFromFilesThroughTheScreens() {
+        val bearer = args.getString("pwBearer9")
+        assumeTrue("No -e pwBearer9", !bearer.isNullOrEmpty())
+        val t = Harness.retrying429 { VaultApi(server, { null }).registerDevice("Bearer $bearer", "Docs phone") }
+        Pw.connect(server, t.token, t.deviceId)
+        val client = Pw.client()!!
+        assumeTrue("Needs a fresh user", !Harness.retrying429 { client.api.prelogin() }.exists)
+        Harness.retrying429 { client.setup(Harness.MASTER, org.promptly.sync.passwords.core.calibrateKdf(900L)) }
+        client.api.confirmKit()
+        Pw.touch()
+        val scan = "A throwaway scan. ".repeat(4000).toByteArray()
+        val upload = MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("file", "licence-scan.txt", scan.toRequestBody("text/plain".toMediaType())).build()
+        OkHttpClient().newCall(Request.Builder().url("$server/api/files/").header("Authorization", "Bearer $bearer").post(upload).build()).execute().use { assertTrue(it.body.string(), it.isSuccessful) }
+        val doc = client.saveNew(client.personalVaultId(), newBody("document", "Driver licence").withText("expiresOn", "2031-05-01"))
+        client.sync()
+
+        open()
+        tap("item-Driver licence", 30_000)
+        Harness.scrollTap("attachment-from-files")
+        waitFor(By.res("files-row-licence-scan.txt"), 20_000)
+        Harness.fill("files-search", "nothing called this")
+        waitFor(By.res("files-empty"), 15_000)
+        Harness.fill("files-search", "LICENCE")
+        tap("files-row-licence-scan.txt", 20_000)
+        waitFor(By.res("files-moved"), 60_000)
+        waitFor(By.res("files-remind-why"))
+        assertEquals("It starts from the document's own date", "2031-05-01", waitFor(By.res("files-remind")).text)
+
+        // Sealed: the ref's on the item, and it opens again.
+        val ref = client.get(doc.id)!!.body.attachments.single()
+        assertEquals("licence-scan.txt", ref.name)
+        val out = java.io.ByteArrayOutputStream()
+        org.promptly.sync.passwords.core.Attachments.download(client.api, doc.vaultId, doc.id, ref, { out.write(it) })
+        assertTrue(scan.contentEquals(out.toByteArray()))
+
+        assertEquals("The original's still there until asked", 1, client.api.driveFiles("licence").size)
+        tap("files-trash")
+        waitFor(By.res("files-trashed"), 20_000)
+        assertTrue(client.api.driveFiles("licence").isEmpty())
+
+        Harness.fill("files-remind", "not a day")
+        assertFalse(waitFor(By.res("files-remind-add")).isEnabled)
+        Harness.fill("files-remind", "2031-04-01")
+        tap("files-remind-add")
+        waitFor(By.res("files-reminded"), 20_000)
+        tap("files-done")
+        waitFor(By.res("attachment-licence-scan.txt"), 15_000)
+
+        // The one on the item itself, which then says it's done.
+        Harness.scrollTap("reminder-add")
+        waitFor(By.res("reminder-set"), 20_000)
+        assertTrue(client.get(doc.id)!!.body.bool("remindExpiry"))
+
+        // What happened shows in the log, from the real server.
+        Harness.device.pressBack()
+        tap("tab-more", 15_000)
+        tap("open-activity")
+        waitFor(By.text("Vault created"), 20_000)
     }
 
     /** With no app password: a code, a page opened in the browser and approved there, and the same result.
