@@ -198,8 +198,12 @@ class MailRealStackTest {
         Harness.fill("files-remind", "2031-04-01")
         tap("files-remind-add")
         waitFor(By.res("files-reminded"), 20_000)
+        // The keyboard goes first, here: a Back that lands just after it's gone would leave the item.
+        Harness.dismissKeyboard()
+        Thread.sleep(1_000)
         tap("files-done")
         waitFor(By.res("attachment-licence-scan.txt"), 15_000)
+        Thread.sleep(1_000)
 
         // The one on the item itself, which then says it's done.
         Harness.scrollTap("reminder-add")

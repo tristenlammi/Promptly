@@ -373,6 +373,22 @@ class ConnectionsUiTest {
         assertFalse(ChangeQueue.active)
     }
 
+    /** From one login in the check, on its own, and back with nothing left in the queue. */
+    @Test fun aRowInTheCheckChangesJustThatLogin() {
+        val (client, _) = seed()
+        val weak = login(client, "Only weak", "aaaaaa", "https://first.example/login")
+        security()
+        tap("health-weak", 30_000)
+        tap("health-change-Only weak", 15_000)
+        assertFalse("One login isn't a queue", has(By.res("change-position"), 500))
+        tap("change-start", 15_000)
+        waitFor(By.res("change-waiting"), 15_000)
+        tap("change-yes")
+        waitFor(By.res("tab-more"), 15_000)
+        assertTrue(client.get(weak.id)!!.body.password != "aaaaaa")
+        assertFalse(ChangeQueue.active)
+    }
+
     @Test fun aChangeInProgressOutlastsTheVaultLocking() {
         val (client, _) = seed()
         val item = login(client, "Weak one", "aaaaaa", "https://first.example/login")
