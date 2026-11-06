@@ -642,8 +642,9 @@ export class VaultClient {
   /** Decrypt the whole offline copy into memory for search and listing. */
   private async loadLocal(): Promise<void> {
     const s = this.need();
-    s.items.clear();
-    s.search.clear();
+    // Built aside and swapped in at the end: another part of the app may be reading the list
+    // meanwhile, and it shouldn't see it empty.
+    const fresh: Item[] = [];
     this.keyChanges.clear();
     this.roles.clear();
     const all = await this.store.getVaults();
@@ -670,13 +671,20 @@ export class VaultClient {
       for (const c of await this.store.getItems(v.id)) {
         try {
           const item = await this.decode(c, v);
-          if (item) this.index(item);
+          if (item) {
+            fresh.push(item);
+            // The trust book's needed before the shared vaults are judged.
+            if (item.body.kind === "trust") this.index(item);
+          }
         } catch {
           // A blob that fails to open is reported by health checks, not by a crash.
           this.undecryptable.add(c.id);
         }
       }
     }
+    s.items.clear();
+    s.search.clear();
+    for (const item of fresh) this.index(item);
   }
 
   /** Another client sharing this offline copy changed it (extension pages do). */

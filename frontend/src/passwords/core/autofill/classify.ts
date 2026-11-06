@@ -521,7 +521,14 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
 
   const passwords = visible.filter((s) => {
     // A PIN beside a username is the login. A PIN alone is something else: see detectOtp.
-    if (s.signals.type === "password") return !s.el.getAttribute("value") && (!looksLikePin(s) || visible.some((x) => x.signals.type !== "password" && isIdentifier(x)));
+    if (s.signals.type === "password") {
+      const idBeside = visible.some((x) => x.signals.type !== "password" && isIdentifier(x));
+      // A filled-in box that doesn't call itself a password, with no username beside it, is a
+      // setting being shown: an API secret, say. (React mirrors typed values into the attribute,
+      // so a value there alone means nothing.)
+      const showing = !!s.el.getAttribute("value") && !idBeside && hits(s.signals.label, W.PASSWORD_ONLY) === 0 && hits(s.signals.idOwn, W.PASSWORD_ONLY) === 0;
+      return !showing && (!looksLikePin(s) || idBeside);
+    }
     // Some password boxes start as text until focused. Those say so more than once,
     // and hold nothing yet: "password_min" with 12 in it is a setting, and a label
     // with "passport" is a passport.
@@ -688,7 +695,7 @@ function detectOtp(visible: Scored[], text: string, pageText: string): Field[] |
     const el = s.el as HTMLInputElement;
     const framedHere = doc(s.el).defaultView !== doc(s.el).defaultView?.top;
     const shortNumber = !framedHere && ((s.signals.numeric && el.maxLength >= 4 && el.maxLength <= 10) || (s.signals.numeric && s.signals.type !== "tel" && el.maxLength < 0 && phrase(`${text} ${pageText}`, W.OTP_INTENT)) || /^\s*\d{2,4}[ -]?\d{2,4}\s*$/.test(s.signals.placeholderRaw));
-    const looksElse = /\b(coupon|promo|gift|discount|zip|postal|post ?code|tracking|voucher|redeem|invite|referral|order|member|look ?up|find|search|quantity|qty|amount|age|year)\b/i.test(`${s.signals.rawId} ${s.signals.labelRaw} ${s.signals.placeholderRaw}`) || /coupon|promo|gift|discount|voucher|redeem|tracking|postcode|zip code/i.test(text);
+    const looksElse = /\b(coupon|promo|gift|discount|zip|postal|post ?code|pin ?code|delivery|shipping|tracking|voucher|redeem|invite|referral|order|member|look ?up|find|search|quantity|qty|amount|age|year)\b/i.test(`${s.signals.rawId} ${s.signals.labelRaw} ${s.signals.placeholderRaw}`) || /coupon|promo|gift|discount|voucher|redeem|tracking|postcode|zip code/i.test(text);
     if (shortNumber && !looksElse && (s.scores.get("username") ?? 0) <= 2 && (s.scores.get("email") ?? 0) <= 2 && (s.scores.get("phone") ?? 0) <= 2) return [{ el: s.el, role: "otp", score: 4 }];
   }
   const coded = visible.filter((s) => !notLoginField(s.signals) && (s.signals.autocomplete.includes("one-time-code") || otpScore(s) >= 4));
@@ -765,6 +772,8 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
     // A name as well as a login: you're signing up, not in.
     kind = "signup";
   } else if (textFields.filter(isIdentifier).length === 0) {
+    // A password box with nothing to send it, like a strength tester, isn't a sign-in.
+    if (!changeWords && !submitOf(group, passwords.map((p) => p.el), dom)) return { kind: "none", fields: [], container: group, submit: null };
     kind = changeWords ? "change-password" : "password-next";
   } else {
     // Both words about: a tab page or a "no account? sign up" link. Field count decides.
