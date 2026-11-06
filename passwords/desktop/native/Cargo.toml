@@ -1,0 +1,46 @@
+# Everything native with no Tauri in it, so the logic has plain unit tests and the
+# browser's native messaging host stays small. Secrets pass through here only for the
+# moment a call needs them, and are zeroed.
+[package]
+name = "promptly-native"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+base64 = "=0.22.1"
+getrandom = "=0.3.4"
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
+sha2 = "=0.10.9"
+tokio = { version = "=1.48.0", features = ["io-util", "net", "rt", "sync", "time", "macros"] }
+zeroize = "=1.8.2"
+windows-future = "=0.3.2"
+windows = { version = "=0.62.2", features = [
+  "Foundation",
+  "Security_Credentials_UI",
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_Security_Cryptography",
+  "Win32_Storage_FileSystem",
+  "Win32_System_DataExchange",
+  "Win32_System_Diagnostics_ToolHelp",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Memory",
+  "Win32_System_Ole",
+  "Win32_System_Pipes",
+  "Win32_System_Registry",
+  "Win32_System_StationsAndDesktops",
+  "Win32_System_Threading",
+  "Win32_System_WinRT",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[dev-dependencies]
+ed25519-dalek = "=3.0.0"
+windows = { version = "=0.62.2", features = ["Win32_Graphics_Gdi"] }
+tokio = { version = "=1.48.0", features = ["rt-multi-thread"] }

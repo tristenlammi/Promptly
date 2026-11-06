@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Promptly quick search</title>
+    <link rel="stylesheet" href="overlay.css" />
+  </head>
+  <body>
+    <main>
+      <input id="q" type="text" placeholder="Find a login" aria-label="Find a login" autocomplete="off" spellcheck="false" />
+      <p id="target" class="hint"></p>
+      <ul id="results" role="listbox" aria-label="Results"></ul>
+      <p id="feedback" role="status"></p>
+      <footer class="hint">Enter copies the password · Ctrl+Enter types it · Shift+Enter copies the username · Alt+Enter copies the 2FA code · Esc closes</footer>
+    </main>
+    <script type="module" src="overlay.js"></script>
+  </body>
+</html>

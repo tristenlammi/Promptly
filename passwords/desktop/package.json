@@ -1,0 +1,21 @@
+{
+  "name": "promptly-passwords-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build:ui": "node build-ui.mjs",
+    "typecheck": "tsc --noEmit",
+    "test:js": "node --test src/ssh.test.ts",
+    "build:e2e": "node build-ui.mjs && cargo tauri build --debug --no-bundle --features e2e",
+    "test:e2e": "node --test --test-concurrency=1 e2e/app.test.mjs",
+    "build": "cargo tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.4"
+  },
+  "devDependencies": {
+    "selenium-webdriver": "4.52.0"
+  }
+}

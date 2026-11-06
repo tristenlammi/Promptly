@@ -1,0 +1,6 @@
+target/
+node_modules/
+ui-dist/
+dist/
+src-tauri/gen/
+.e2e/

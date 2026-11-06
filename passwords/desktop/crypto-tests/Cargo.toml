@@ -1,0 +1,26 @@
+# The vault's format in Rust, built only from audited RustCrypto and dalek crates, and
+# tested against the same vectors.json as TypeScript and Kotlin (PLAN 13.1). Not linked
+# into the app: the app's crypto runs in the shared TypeScript core. It proves the format
+# is what CRYPTO_SPEC.md says, and it's here for when native code needs it.
+[package]
+name = "promptly-pw-crypto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+aes-gcm = "=0.11.1"
+argon2 = "=0.6.0"
+hkdf = "=0.13.0"
+hmac = "=0.13.0"
+sha1 = "=0.11.0"
+sha2 = "=0.11.0"
+x25519-dalek = { version = "=3.0.0", features = ["static_secrets"] }
+ed25519-dalek = "=3.0.0"
+unicode-normalization = "=0.1.25"
+
+[dev-dependencies]
+base64 = "0.22"
+hex = "0.4"
+serde_json = "1"
