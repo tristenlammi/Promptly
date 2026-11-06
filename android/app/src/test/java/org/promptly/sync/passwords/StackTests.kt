@@ -88,7 +88,20 @@ private fun makeUser(tag: String): StackUser {
     return StackUser(s("id"), s("username"), s("token"), s("app_full"), s("app_old"))
 }
 
-private fun device(u: StackUser, http: OkHttpClient? = null) = VaultClient(VaultApi(BASE, { u.token }, http), MemoryStore(), MemoryKeeper())
+/** Other suites share this stack and its rate limits: wait those out, the way a person would. */
+private val patient: OkHttpClient = OkHttpClient.Builder().readTimeout(120, TimeUnit.SECONDS).addInterceptor(Interceptor { chain ->
+    var res = chain.proceed(chain.request())
+    var tries = 0
+    while (res.code == 429 && tries++ < 8) {
+        val s = res.header("Retry-After")?.toLongOrNull() ?: 30
+        res.close()
+        Thread.sleep((s + 1) * 1000)
+        res = chain.proceed(chain.request())
+    }
+    res
+}).build()
+
+private fun device(u: StackUser, http: OkHttpClient? = null) = VaultClient(VaultApi(BASE, { u.token }, http ?: patient), MemoryStore(), MemoryKeeper())
 
 private fun rewriting(block: (String, String) -> String?): OkHttpClient = OkHttpClient.Builder().addInterceptor(Interceptor { chain ->
     val res = chain.proceed(chain.request())
@@ -312,7 +325,7 @@ class StackTests {
         assertEquals("pending", s1.status)
         assertEquals(approval.words, s1.words)
         assertEquals(5, approval.words.size)
-        old.finishApproval(req.id, req.devicePub)
+        old.finishApproval(approval)
         val s2 = join.poll()
         assertEquals("approved", s2.status)
         assertEquals(SecretKeys.encode(sk), SecretKeys.encode(s2.secretKey!!))
@@ -370,6 +383,15 @@ class StackTests {
         val out = p.inputStream.bufferedReader().readText()
         assertTrue("TS step $step timed out", p.waitFor(240, TimeUnit.SECONDS))
         assertEquals("TS step $step failed:\n$out", 0, p.exitValue())
+    }
+
+    /** OkHttp's list needs Robolectric to load, as CoreTest does. These hosts don't need it. */
+    private val realBaseDomains = org.promptly.sync.passwords.core.Match.baseDomainOf
+    private fun useSimpleBaseDomains() {
+        org.promptly.sync.passwords.core.Match.baseDomainOf = { host -> host.split('.').takeLast(2).joinToString(".") }
+    }
+    @org.junit.After fun restoreBaseDomains() {
+        org.promptly.sync.passwords.core.Match.baseDomainOf = realBaseDomains
     }
 
     private fun readState(f: File) = Json.parseToJsonElement(f.readText()).jsonObject
@@ -483,5 +505,704 @@ class StackTests {
         } finally {
             dir.deleteRecursively()
         }
+    }
+
+    // ---- The features added after the first pass ----
+
+    private fun setupRetrying(c: VaultClient): ByteArray {
+        while (true) {
+            try {
+                return c.setup(MASTER)
+            } catch (e: ApiError) {
+                if (e.status != 429) throw e
+                Thread.sleep(((e.retryAfter ?: 30) + 1) * 1000L)
+            }
+        }
+    }
+
+    private fun tmpState(): File = File(Files.createTempDirectory("pwcross").toFile(), "state.json")
+
+    private fun withState(block: (File) -> Unit) {
+        val f = tmpState()
+        try {
+            block(f)
+        } finally {
+            f.parentFile!!.deleteRecursively()
+        }
+    }
+
+    private fun patternBytes(n: Int, seed: Int): ByteArray {
+        var v = seed
+        return ByteArray(n) {
+            v = (v * 31 + 7) and 255
+            v.toByte()
+        }
+    }
+
+    private fun shaHex(b: ByteArray) = org.promptly.sync.passwords.core.hex(Primitives.sha256(b))
+
+    private fun downloadAll(c: VaultClient, vault: String, item: String, ref: org.promptly.sync.passwords.core.AttachmentRef): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        org.promptly.sync.passwords.core.Attachments.download(c.api, vault, item, ref, { out.write(it) })
+        return out.toByteArray()
+    }
+
+    @Test fun attachmentsCrossWithTheTypeScriptClient() {
+        need()
+        val u = makeUser("att")
+        withState { file ->
+            writeState(file, buildJsonObject { put("token", u.token) })
+            runTs("att1", file)
+            val st = readState(file)
+            fun s(k: String) = st.getValue(k).jsonPrimitive.content
+            val phone = device(u)
+            phone.unlock(MASTER, fromB64u(s("secretKey")))
+            val itemId = s("itemId")
+            val vault = s("vault")
+            val item = phone.get(itemId)!!
+            val big = item.body.attachments.first { it.name == "big.bin" }
+            val small = item.body.attachments.first { it.name == "small.txt" }
+            assertEquals(3, big.chunks)
+            assertEquals(2_500_000L, big.size)
+            assertEquals(s("bigSha"), shaHex(downloadAll(phone, vault, itemId, big)))
+            assertEquals(s("smallSha"), shaHex(downloadAll(phone, vault, itemId, small)))
+            // What the list says about a file survives a trip through JSON.
+            assertEquals(big, org.promptly.sync.passwords.core.AttachmentRef.from(big.toJson()))
+            // A wrong place for a chunk doesn't open: its index is in the additional data.
+            val wrong = big.copy(id = small.id)
+            assertThrows(Exception::class.java) { downloadAll(phone, vault, itemId, wrong) }
+
+            val mine = patternBytes(1_200_000, 33)
+            phone.addAttachment(itemId, "from-android.bin", "application/x-test", mine.size.toLong(), { off, len -> mine.copyOfRange(off.toInt(), off.toInt() + len) })
+            phone.removeAttachment(itemId, small)
+            assertEquals(setOf("big.bin", "from-android.bin"), phone.get(itemId)!!.body.attachments.map { it.name }.toSet())
+            writeState(file, JsonObject(st + mapOf(
+                "androidSha" to JsonPrimitive(shaHex(mine)),
+                "androidSize" to JsonPrimitive(mine.size),
+                "deletedId" to JsonPrimitive(small.id),
+            )))
+            runTs("att2", file)
+        }
+    }
+
+    @Test fun attachmentResumesAndEmptyFileWorks() {
+        need()
+        val u = makeUser("att2")
+        val c = device(u)
+        setupRetrying(c)
+        val vault = c.personalVaultId()
+        val item = c.saveNew(vault, newBody("note", "T"))
+        c.sync()
+        val data = patternBytes(2_200_000, 5)
+        val id = org.promptly.sync.passwords.core.randomUuid()
+        val key = b64u(randomBytes(32))
+        // A first try that dies after one chunk...
+        assertThrows(IOException::class.java) {
+            org.promptly.sync.passwords.core.Attachments.upload(c.api, vault, item.id, "r.bin", null, data.size.toLong(), { off, len ->
+                if (off > 0) throw IOException("the network went")
+                data.copyOfRange(off.toInt(), off.toInt() + len)
+            }, resume = id to key)
+        }
+        // ...and a second that only asks for what the server hasn't got.
+        val asked = ArrayList<Long>()
+        val ref = org.promptly.sync.passwords.core.Attachments.upload(c.api, vault, item.id, "r.bin", null, data.size.toLong(), { off, len ->
+            asked += off
+            data.copyOfRange(off.toInt(), off.toInt() + len)
+        }, resume = id to key)
+        assertEquals(listOf(1048576L, 2097152L), asked)
+        assertEquals(shaHex(data), shaHex(downloadAll(c, vault, item.id, ref)))
+        val empty = org.promptly.sync.passwords.core.Attachments.upload(c.api, vault, item.id, "empty", null, 0, { _, _ -> ByteArray(0) })
+        assertEquals(1, empty.chunks)
+        assertEquals(0, downloadAll(c, vault, item.id, empty).size)
+    }
+
+    @Test fun sharingCrossWithTheTypeScriptClient() {
+        need()
+        val alice = makeUser("shalice")
+        val bob = makeUser("shbob")
+        val phone = device(bob)
+        setupRetrying(phone)
+        withState { file ->
+            writeState(file, buildJsonObject {
+                put("alice", alice.token)
+                put("bobId", bob.id)
+            })
+            runTs("sh1", file)
+            val st = readState(file)
+            val tsVault = st.getValue("tsVault").jsonPrimitive.content
+            phone.sync()
+            // Invited: not trusted yet, so no name, and nothing's come down.
+            val invited = phone.vaults().first { it.vault.id == tsVault }
+            assertFalse(invited.vault.accepted)
+            assertEquals("(can't open)", invited.displayName)
+            assertEquals("edit", invited.vault.role)
+            assertTrue(phone.allItems().none { it.vaultId == tsVault })
+            assertTrue(phone.trustEntries().isEmpty())
+            phone.acceptVault(tsVault)
+            assertEquals("TS shared", phone.vaults().first { it.vault.id == tsVault }.displayName)
+            val shared = phone.allItems().first { it.vaultId == tsVault }
+            assertEquals("shared-Pass-1!", shared.body.password)
+            assertTrue(phone.canReveal(tsVault))
+            assertTrue(phone.canEdit(tsVault))
+            // Pinned by accepting, and the safety words agree with what the web client shows.
+            val aliceId = st.getValue("aliceId").jsonPrimitive.content
+            assertEquals(st.getValue("aliceWords").jsonArray.map { it.jsonPrimitive.content }, phone.identityWordsFor(aliceId))
+            assertTrue(aliceId in phone.trustEntries())
+
+            phone.update(shared.id, shared.body.withText("password", "edited-by-android"))
+            phone.saveNew(tsVault, newBody("login", "Added by Android").withText("username", "kt").withText("password", "kt-Added-1!"))
+            phone.sync()
+
+            val ktVault = phone.createSharedVault("KT shared")
+            phone.saveNew(ktVault, newBody("login", "KT login").withText("password", "kt-Vault-1!"))
+            phone.sync()
+            phone.addMember(ktVault, aliceId, "fill")
+            writeState(file, JsonObject(st + ("ktVault" to JsonPrimitive(ktVault))))
+            runTs("sh2", file)
+
+            // Removed, and the local copy and keys went with it.
+            val after = readState(file)
+            assertEquals(after.getValue("bobWordsSeenByAlice").jsonArray.map { it.jsonPrimitive.content }, phone.myIdentityWords())
+            phone.sync()
+            assertTrue(phone.vaults().none { it.vault.id == tsVault })
+            assertTrue(phone.allItems().none { it.vaultId == tsVault })
+
+            // Android removes Alice from its own vault: rotation, and its list.
+            val toChange = phone.removeMembers(ktVault, listOf(aliceId))
+            assertEquals(listOf("KT login"), toChange.map { it.body.title })
+            assertEquals("kt-Vault-1!", phone.allItems().first { it.vaultId == ktVault }.body.password)
+            assertEquals(2, phone.store.getVaults().first { it.id == ktVault }.generation)
+            runTs("sh3", file)
+        }
+    }
+
+    @Test fun theTrustBookAndSeqCrossWithTheTypeScriptClient() {
+        need()
+        val alice = makeUser("bka")
+        val bob = makeUser("bkb")
+        val carol = makeUser("bkc")
+        val dan = makeUser("bkd")
+        withState { file ->
+            writeState(file, buildJsonObject {
+                put("alice", alice.token)
+                put("bob", bob.token)
+                put("carol", carol.token)
+                put("bobId", bob.id)
+            })
+            runTs("bk1", file)
+            val st = readState(file)
+            fun s(k: String) = st.getValue(k).jsonPrimitive.content
+            // Android, as Alice's second device: what she decided on the web came with it.
+            val phone = device(alice)
+            phone.unlock(MASTER, fromB64u(s("aliceKey")))
+            val trust = phone.trustEntries()
+            assertEquals(true, trust[bob.id]?.verified)
+            assertTrue(trust.containsKey(s("carolId")))
+            assertEquals("From Carol", phone.vaults().first { it.vault.id == s("fromCarol") }.displayName)
+            assertTrue(phone.chosen(phone.store.getVaults().first { it.id == s("fromCarol") }))
+            assertTrue(phone.keyChanges.isEmpty())
+            assertEquals(2L, phone.get(s("seqItem"))!!.body.seq)
+            // And the other way: Android's choices, and an edit past the web's seq.
+            val danDevice = device(dan)
+            setupRetrying(danDevice)
+            val ktVault = phone.createSharedVault("KT team")
+            phone.addMember(ktVault, dan.id, "view")
+            val edited = phone.update(s("seqItem"), phone.get(s("seqItem"))!!.body.withText("password", "seq-android"))
+            assertEquals(3L, edited.body.seq)
+            phone.sync()
+            writeState(file, JsonObject(st + mapOf(
+                "danId" to JsonPrimitive(dan.id),
+                "danEd" to JsonPrimitive(phone.trustEntries().getValue(dan.id).ed25519),
+                "ktVault" to JsonPrimitive(ktVault),
+                "androidSeq" to JsonPrimitive(edited.body.seq),
+            )))
+            runTs("bk2", file)
+            // The web's edit comes back past this one, without being taken for a rollback.
+            val before = phone.rollbackWarnings.size
+            phone.sync()
+            assertEquals(before, phone.rollbackWarnings.size)
+            assertEquals(4L, phone.get(s("seqItem"))!!.body.seq)
+            assertEquals("from ts", phone.get(s("seqItem"))!!.body.notes)
+        }
+    }
+
+    @Test fun threePeopleRotationKeepsTheOneWhoStays() {
+        need()
+        val aUser = makeUser("rotaa")
+        val bUser = makeUser("rotab")
+        val cUser = makeUser("rotac")
+        val owner = device(aUser)
+        val stays = device(bUser)
+        val goes = device(cUser)
+        setupRetrying(owner)
+        val staysKey = setupRetrying(stays)
+        setupRetrying(goes)
+        val v = owner.createSharedVault("Three")
+        val item = owner.saveNew(v, newBody("login", "L").withText("password", "one"))
+        owner.sync()
+        owner.update(item.id, owner.get(item.id)!!.body.withText("password", "two"))
+        owner.sync()
+        owner.addMember(v, bUser.id, "view")
+        owner.addMember(v, cUser.id, "edit")
+        stays.acceptVault(v)
+        goes.acceptVault(v)
+        assertEquals("two", stays.get(item.id)!!.body.password)
+        assertFalse("view can't write", stays.canEdit(v))
+        assertTrue(stays.canReveal(v))
+        // Roles change on the server and reach the member.
+        owner.api.setRole(v, bUser.id, "fill")
+        stays.sync()
+        assertFalse(stays.canReveal(v))
+        assertTrue(stays.exportable().none { it.vaultId == v })
+        owner.api.setRole(v, bUser.id, "view")
+        stays.sync()
+
+        val change = owner.removeMembers(v, listOf(cUser.id))
+        assertEquals(listOf("L"), change.map { it.body.title })
+        stays.sync()
+        goes.sync()
+        assertEquals("two", stays.get(item.id)!!.body.password)
+        assertEquals("one", stays.versions(item.id).last().body.password)
+        assertTrue(goes.vaults().none { it.vault.id == v })
+        assertNull(goes.get(item.id))
+        // A second device of the one who stays: the rotated vault opens from scratch.
+        val again = device(bUser)
+        again.unlock(MASTER, staysKey)
+        assertEquals("two", again.get(item.id)!!.body.password)
+        // Leaving and declining.
+        val invited = owner.createSharedVault("Declined")
+        owner.addMember(invited, bUser.id, "view")
+        stays.sync()
+        assertTrue(stays.vaults().any { it.vault.id == invited })
+        stays.leaveVault(invited)
+        assertTrue(stays.vaults().none { it.vault.id == invited })
+        stays.leaveVault(v)
+        assertTrue(stays.vaults().none { it.vault.id == v })
+        // The list is capped at 500 and this stack holds more throwaway users than that, so
+        // only say what's true of any list: you aren't offered yourself.
+        assertTrue(owner.api.people().none { it.username == aUser.username })
+    }
+
+    @Test fun aChangedKeyShutsOnlyThatVault() {
+        need()
+        val aUser = makeUser("chg1")
+        val bUser = makeUser("chg2")
+        val owner = device(aUser)
+        val member = device(bUser)
+        setupRetrying(owner)
+        val key = setupRetrying(member)
+        val mine = member.saveNew(member.personalVaultId(), newBody("login", "Still mine").withText("password", "mine"))
+        member.sync()
+        val v = owner.createSharedVault("Theirs")
+        val shared = owner.saveNew(v, newBody("login", "Theirs").withText("password", "theirs"))
+        owner.sync()
+        owner.addMember(v, bUser.id, "view")
+        member.acceptVault(v)
+        assertEquals("theirs", member.get(shared.id)!!.body.password)
+
+        // The server starts saying the owner's keys are different.
+        val swap = java.util.concurrent.atomic.AtomicBoolean(true)
+        val hostile = rewriting { path, body ->
+            if (swap.get() && path.contains("/users/") && path.endsWith("/keys")) {
+                val o = Json.parseToJsonElement(body).jsonObject
+                JsonObject(o + ("ed25519_pub" to JsonPrimitive(b64u(randomBytes(32))))).toString()
+            } else {
+                null
+            }
+        }
+        val phone = VaultClient(VaultApi(BASE, { bUser.token }, hostile), member.store, member.keeper)
+        phone.unlock(MASTER, key)
+        // Not locked out. Their own vault opens; that one stays shut, and says who.
+        assertTrue(phone.unlocked)
+        assertEquals("mine", phone.get(mine.id)!!.body.password)
+        assertNull(phone.get(shared.id))
+        assertEquals(aUser.id, phone.keyChanges[v]!!.userId)
+        // A sync doesn't throw, or lose the good vault.
+        assertFalse(phone.sync().offline)
+        assertEquals("mine", phone.get(mine.id)!!.body.password)
+        assertNull(phone.get(shared.id))
+        assertTrue(v in phone.keyChanges)
+        // Inviting that person refuses too.
+        assertThrows(org.promptly.sync.passwords.core.KeyChangedError::class.java) { phone.addMember(phone.createSharedVault("New"), aUser.id, "view") }
+        // Once the server's honest again and the person's looked, it opens.
+        swap.set(false)
+        phone.acceptChangedKey(aUser.id)
+        assertTrue(phone.keyChanges.isEmpty())
+        assertEquals("theirs", phone.get(shared.id)!!.body.password)
+    }
+
+    @Test fun exportImportSendAndHealthCrossWithTheTypeScriptClient() {
+        need()
+        val u = makeUser("tx")
+        val fixtures = mapOf(
+            "Chrome Passwords.csv" to "name,url,username,password,note\nGitHub,https://github.com/login,ana,pw1,hello\n,https://www.x.org,bo,pw2,\n",
+            "logins.csv" to "\"url\",\"username\",\"password\",\"httpRealm\",\"formActionOrigin\",\"guid\",\"timeCreated\",\"timeLastUsed\",\"timePasswordChanged\"\n\"https://f.example\",\"u\",\"p\",,\"https://f.example\",\"{abc}\",\"1\",\"2\",\"3\"\n",
+            "Passwords.csv" to "Title,URL,Username,Password,Notes,OTPAuth\nExample,https://e.example,me,secret,,otpauth://totp/E:me?secret=JBSWY3DPEHPK3PXP&issuer=E\n",
+            "quotes.csv" to "\uFEFFname,url,username,password,folder,tags,favorite\r\n\"A, comma\",https://a.example,\"he said \"\"hi\"\"\",\"multi\nline\",Work,\"x;y\",true\r\n",
+        )
+        val bitwarden = """{"encrypted":false,"folders":[{"id":"f1","name":"Work"}],"items":[
+          {"id":"1","type":1,"name":"BW login","folderId":"f1","favorite":true,"reprompt":1,"notes":"n","fields":[{"name":"pin","value":"1","type":1},{"name":"empty","value":"","type":0}],"login":{"username":"u","password":"p","totp":"JBSWY3DPEHPK3PXP","uris":[{"uri":"https://bw.example","match":1},{"uri":"https://bw2.example","match":null}],"fido2Credentials":[{"keyValue":"a2V5","rpId":"bw.example","credentialId":"Y3JlZA","userHandle":"dQ","userName":"un","counter":"3","creationDate":"2024-01-01T00:00:00.000Z","discoverable":"true"}]},"passwordHistory":[{"password":"old","lastUsedDate":"2023-01-01T00:00:00.000Z"}]},
+          {"id":"2","type":2,"name":"BW note","notes":"text"},
+          {"id":"3","type":3,"name":"BW card","card":{"cardholderName":"A","number":"4111","brand":"Visa","expMonth":"1","expYear":"2030","code":"123"}},
+          {"id":"4","type":4,"name":"BW identity","identity":{"firstName":"F","lastName":"L","postalCode":"6000","country":"AU"}},
+          {"id":"5","type":5,"name":"BW ssh","sshKey":{"publicKey":"pub","privateKey":"priv","keyFingerprint":"fp"}},
+          {"id":"6","type":9,"name":"BW unknown","notes":"keep"}
+        ]}"""
+        val strengthList = listOf(
+            "password", "123456", "qwerty", "letmein", "Password1", "iloveyou", "abc123", "aaaaaa", "1234567890", "dragon", "Summer2024", "p@ssw0rd", "monkey123", "qazwsx", "trustno1", "correcthorse",
+            "Tr0ub4dor&3", "correct horse battery staple", "kX9!vQ2#mL7\$pR4z", "ghJ8#kLm2\$xZ9qWv4!", "xkcd-pails-graft-mints", "7Hq2vN9pLw3ZbX6t", "q8Z!r2\$Lx0", "aB3dE6gH", "Zx9#", "hunter2", "mypassword2021", "ilovemydog", "London1999", "wibble-wobble-99",
+        )
+        // A password-protected Bitwarden file, built to the format notes bitwarden.ts reads.
+        val bwProtected = run {
+            val salt = "c2FsdHNhbHRzYWx0c2FsdA=="
+            val master = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(javax.crypto.spec.PBEKeySpec("bw-file-password".toCharArray(), salt.toByteArray(), 1000, 256)).encoded
+            fun expand(info: String): ByteArray {
+                val m = javax.crypto.Mac.getInstance("HmacSHA256")
+                m.init(javax.crypto.spec.SecretKeySpec(master, "HmacSHA256"))
+                return m.doFinal(info.toByteArray() + byteArrayOf(1))
+            }
+            val enc = expand("enc")
+            val macKey = expand("mac")
+            fun cipher(plain: String): String {
+                val iv = randomBytes(16)
+                val c = javax.crypto.Cipher.getInstance("AES/CBC/PKCS5Padding")
+                c.init(javax.crypto.Cipher.ENCRYPT_MODE, javax.crypto.spec.SecretKeySpec(enc, "AES"), javax.crypto.spec.IvParameterSpec(iv))
+                val ct = c.doFinal(plain.toByteArray())
+                val m = javax.crypto.Mac.getInstance("HmacSHA256")
+                m.init(javax.crypto.spec.SecretKeySpec(macKey, "HmacSHA256"))
+                val tag = m.doFinal(iv + ct)
+                val b = java.util.Base64.getEncoder()
+                return "2.${b.encodeToString(iv)}|${b.encodeToString(ct)}|${b.encodeToString(tag)}"
+            }
+            buildJsonObject {
+                put("encrypted", true)
+                put("passwordProtected", true)
+                put("salt", salt)
+                put("kdfType", 0)
+                put("kdfIterations", 1000)
+                put("encKeyValidation_DO_NOT_EDIT", cipher("validation"))
+                put("data", cipher("""{"encrypted":false,"folders":[],"items":[{"id":"1","type":2,"name":"Inside protected","notes":"x"}]}"""))
+            }.toString()
+        }
+        val dedupeFixture = "name,url,username,password\nA,https://www.d.example,u,p\nB,https://d.example/other,u,p\nC,https://d.example,u,q\n"
+        withState { file ->
+            writeState(file, buildJsonObject {
+                put("token", u.token)
+                put("strengthList", JsonArray(strengthList.map { JsonPrimitive(it) }))
+                put("csvFixtures", JsonObject(fixtures.mapValues { JsonPrimitive(it.value) }))
+                put("bitwardenFixture", bitwarden)
+                put("bitwardenProtected", bwProtected)
+                put("dedupeFixture", dedupeFixture)
+            })
+            runTs("tx1", file)
+            val st = readState(file)
+            val phone = device(u)
+            phone.unlock(MASTER, fromB64u(st.getValue("secretKey").jsonPrimitive.content))
+
+            // Importers agree with the web client's, field for field.
+            fun comparable(b: org.promptly.sync.passwords.core.ItemBody): JsonObject = JsonObject(b.fields.filterKeys { it !in setOf("createdAt", "updatedAt", "v") })
+            fun tsComparable(o: JsonObject): JsonObject = JsonObject(o.filterKeys { it !in setOf("createdAt", "updatedAt", "v") })
+            val cases = st.getValue("csvCases").jsonObject
+            for ((name, text) in fixtures) {
+                val mine = org.promptly.sync.passwords.core.Importers.importFile(name, text.toByteArray())
+                val theirs = cases.getValue(name).jsonObject
+                assertEquals(name, theirs.getValue("format").jsonPrimitive.content, mine.format)
+                val ts = theirs.getValue("items").jsonArray
+                assertEquals(name, ts.size, mine.items.size)
+                for ((i, it) in mine.items.withIndex()) {
+                    assertEquals(name, stableOf(tsComparable(ts[i].jsonObject.getValue("body").jsonObject)), stableOf(comparable(it.body)))
+                    assertEquals(name, (ts[i].jsonObject["folder"] as? JsonPrimitive)?.takeIf { p -> p.isString }?.content, it.folder)
+                }
+            }
+            val bw = org.promptly.sync.passwords.core.Importers.importFile("b.json", bitwarden.toByteArray())
+            assertEquals("Bitwarden", bw.format)
+            val bwTs = st.getValue("bw").jsonObject.getValue("items").jsonArray
+            assertEquals(bwTs.size, bw.items.size)
+            for ((i, it) in bw.items.withIndex()) {
+                assertEquals(it.body.title, stableOf(tsComparable(bwTs[i].jsonObject.getValue("body").jsonObject)), stableOf(comparable(it.body)))
+                assertEquals((bwTs[i].jsonObject["folder"] as? JsonPrimitive)?.takeIf { p -> p.isString }?.content, it.folder)
+            }
+            assertThrows(org.promptly.sync.passwords.core.NeedsPasswordError::class.java) { org.promptly.sync.passwords.core.Importers.importFile("p.json", bwProtected.toByteArray()) }
+            assertThrows(IllegalArgumentException::class.java) { org.promptly.sync.passwords.core.Importers.importFile("p.json", bwProtected.toByteArray(), "wrong") }
+            assertEquals(st.getValue("bwOpened").jsonArray.map { it.jsonPrimitive.content }, org.promptly.sync.passwords.core.Importers.importFile("p.json", bwProtected.toByteArray(), "bw-file-password").items.map { it.body.title })
+            val (fresh, dups) = org.promptly.sync.passwords.core.Importers.dedupe(org.promptly.sync.passwords.core.Importers.fromGenericCsv(dedupeFixture).items, emptyList())
+            assertEquals(st.getValue("dupFresh").jsonPrimitive.content.toInt(), fresh.size)
+            assertEquals(st.getValue("dupCount").jsonPrimitive.content.toInt(), dups)
+
+            // Export: byte-identical CSV, and TS's encrypted file opens here.
+            val items = phone.exportable()
+            val plainCsvOf = org.promptly.sync.passwords.core.Exporter.plainCsv(items.sortedBy { i -> st.getValue("plainCsv").jsonPrimitive.content.indexOf(i.body.title) })
+            assertEquals(st.getValue("plainCsv").jsonPrimitive.content, plainCsvOf)
+            val tsFile = st.getValue("tsEncrypted").jsonPrimitive.content
+            assertThrows(NeedsPw::class.java) {
+                try {
+                    org.promptly.sync.passwords.core.Importers.importFile("e.json", tsFile.toByteArray())
+                } catch (e: org.promptly.sync.passwords.core.NeedsPasswordError) {
+                    throw NeedsPw()
+                }
+            }
+            assertEquals(4, org.promptly.sync.passwords.core.Importers.importFile("e.json", tsFile.toByteArray(), "ts-export-password").items.size)
+            assertThrows(IllegalArgumentException::class.java) { org.promptly.sync.passwords.core.Importers.importFile("e.json", tsFile.toByteArray(), "wrong") }
+            // A plain re-import of its own file adds nothing new.
+            val plainAgain = org.promptly.sync.passwords.core.Importers.importFile("plain.json", org.promptly.sync.passwords.core.Exporter.plainJson(items).toByteArray())
+            assertEquals(0, org.promptly.sync.passwords.core.Importers.dedupe(plainAgain.items, items.map { it.body }).first.size)
+
+            // Security check against the same items as the web client's.
+            useSimpleBaseDomains()
+            val h = org.promptly.sync.passwords.core.Health.run(phone.allItems())
+            val tsH = st.getValue("health").jsonObject
+            assertEquals(tsH.getValue("checked").jsonPrimitive.content.toInt(), h.checked)
+            assertEquals(tsH.getValue("reused").jsonPrimitive.content.toInt(), h.reusedCount)
+            assertEquals(tsH.getValue("http").jsonPrimitive.content.toInt(), h.http.size)
+            assertEquals(tsH.getValue("old").jsonPrimitive.content.toInt(), h.old.size)
+            assertEquals(tsH.getValue("weak").jsonPrimitive.content.toInt(), h.weak.size)
+            // The real breach route: "password" is in every list there is.
+            val breached = org.promptly.sync.passwords.core.Health.run(phone.allItems(), { phone.api.breachRange(it) })
+            if (breached.breachSkipped == null) assertTrue("password should be breached", breached.breached.any { it.first.body.title == "Weak one" })
+            println("BREACH: " + (breached.breachSkipped ?: "checked, ${breached.breached.size} hits"))
+
+            // Strength next to zxcvbn-ts on the same list. Reported, and held to a floor.
+            val scores = st.getValue("scores").jsonObject
+            var sameWeak = 0
+            val differs = ArrayList<String>()
+            for (pw in strengthList) {
+                val ts = scores.getValue(pw).jsonPrimitive.content.toInt()
+                val mine = org.promptly.sync.passwords.core.StrengthCheck.check(pw).score
+                if ((ts <= 1) == (mine <= 1)) sameWeak++ else differs += "$pw ts=$ts kt=$mine"
+            }
+            println("STRENGTH: weak/not-weak agrees on $sameWeak of ${strengthList.size}. Differs: $differs")
+            assertTrue("agrees on only $sameWeak of ${strengthList.size}: $differs", sameWeak >= strengthList.size * 8 / 10)
+
+            // Android's own files and Sends, read by the web client.
+            val ktFile = org.promptly.sync.passwords.core.Exporter.encrypted(phone.exportable(), "kt-export-password")
+            val send1 = org.promptly.sync.passwords.core.SecureSend.create(phone.api, org.promptly.sync.passwords.core.SecureSend.textPayload("From Android", "send text \uD83D\uDD11"), 7, null, null)
+            val send2 = org.promptly.sync.passwords.core.SecureSend.create(phone.api, org.promptly.sync.passwords.core.SecureSend.textPayload("With a password", "secret text"), 1, 2, "send-password")
+            val send3 = org.promptly.sync.passwords.core.SecureSend.create(phone.api, org.promptly.sync.passwords.core.SecureSend.filePayload("A file", "note.txt", "text/plain", "file body".toByteArray()), 1, null, null)
+            assertTrue(phone.api.sends().any { it.id == send2.id && it.hasPassword })
+            writeState(file, JsonObject(st + mapOf(
+                "ktEncrypted" to JsonPrimitive(ktFile),
+                "ktSend" to JsonPrimitive(send1.link),
+                "ktSendPw" to JsonPrimitive(send2.link),
+                "ktSendFile" to JsonPrimitive(send3.link),
+            )))
+            runTs("tx2", file)
+            phone.api.deleteSend(send1.id)
+            assertTrue(phone.api.sends().none { it.id == send1.id })
+        }
+    }
+
+    private class NeedsPw : Exception()
+
+    private fun stableOf(o: JsonObject) = org.promptly.sync.passwords.core.stable(o)
+
+    @Test fun emergencyRefuseAndAlerts() {
+        need()
+        val aUser = makeUser("emA")
+        val bUser = makeUser("emB")
+        val a = device(aUser)
+        val b = device(bUser)
+        setupRetrying(a)
+        setupRetrying(b)
+        // Bare counts, with a device token and no session.
+        val deviceToken = VaultApi(BASE, { null }).registerDevice("Bearer ${aUser.token}", "Alerts test").token
+        val alerts = VaultApi(BASE, { deviceToken })
+        assertEquals(org.promptly.sync.passwords.core.Alerts(0, 0, 0), alerts.alerts())
+        // A new device, an invitation.
+        val join = device(aUser).requestDevice("New one")
+        assertEquals(1, alerts.alerts().deviceRequests)
+        join.hashCode()
+        val v = b.createSharedVault("For A")
+        b.addMember(v, aUser.id, "view")
+        assertEquals(1, alerts.alerts().invitations)
+        // An emergency: B can ask for A's vault; A is told, and refuses.
+        a.emergencyInvite(bUser.id, 1)
+        val row = b.api.emergencyList().first { it.grantorId == aUser.id }
+        assertEquals("invited", row.state)
+        b.api.emergencyAct(row.id, "accept")
+        a.sync() // Seals A's keys to the contact, as the web client does.
+        val ready = a.api.emergencyList().first { it.id == row.id }
+        assertTrue("wrapped: ${ready.wrapped}", ready.wrapped.isNotEmpty())
+        assertEquals(a.personalVaultId(), ready.wrapped.keys.first())
+        b.api.emergencyAct(row.id, "request")
+        assertEquals("requested", a.api.emergencyList().first { it.id == row.id }.state)
+        assertEquals(1, alerts.alerts().emergency)
+        assertEquals("refused", a.api.emergencyAct(row.id, "refuse").state)
+        assertEquals(0, alerts.alerts().emergency)
+        a.emergencyEnd(a.api.emergencyList().first { it.id == row.id })
+        assertTrue(a.api.emergencyList().isEmpty())
+    }
+
+    @Test fun deviceQrBothSidesAndRefusals() {
+        need()
+        val u = makeUser("qr")
+        val stranger = makeUser("qrs")
+        withState { file ->
+            writeState(file, buildJsonObject { put("token", u.token) })
+            runTs("qr1", file)
+            val st = readState(file)
+            val phone = device(u)
+            phone.unlock(MASTER, fromB64u(st.getValue("secretKey").jsonPrimitive.content))
+            // The web client's QR, through Android's scanner check.
+            val text = st.getValue("qrText").jsonPrimitive.content
+            assertEquals(st.getValue("requestId").jsonPrimitive.content, phone.requestForQr(text).id)
+            // A different key for the same request: refused, not guessed at.
+            val swapped = "pwdev:${st.getValue("requestId").jsonPrimitive.content}:${b64u(randomBytes(32))}"
+            val mismatch = assertThrows(org.promptly.sync.passwords.core.DeviceQr.Refused::class.java) { phone.requestForQr(swapped) }
+            assertTrue(mismatch.message!!, mismatch.message!!.contains("doesn't match"))
+            val unknown = assertThrows(org.promptly.sync.passwords.core.DeviceQr.Refused::class.java) { phone.requestForQr("pwdev:${org.promptly.sync.passwords.core.randomUuid()}:${b64u(randomBytes(32))}") }
+            assertTrue(unknown.message!!, unknown.message!!.contains("gone"))
+            assertThrows(org.promptly.sync.passwords.core.DeviceQr.Refused::class.java) { phone.requestForQr("https://example.com") }
+            // Someone else's request looks the same as none at all.
+            val other = device(stranger)
+            setupRetrying(other)
+            val strangers = other.requestDevice("Theirs")
+            assertThrows(org.promptly.sync.passwords.core.DeviceQr.Refused::class.java) { phone.requestForQr(strangers.qrText) }
+
+            // Android as the joining device, the web client's scanner approving it.
+            val joining = device(u)
+            val join = joining.requestDevice("Android joining")
+            writeState(file, JsonObject(readState(file) + ("androidQr" to JsonPrimitive(join.qrText))))
+            runTs("qr2", file)
+            var state = join.poll()
+            val end = System.currentTimeMillis() + 10_000
+            while (state.status != "approved" && System.currentTimeMillis() < end) {
+                Thread.sleep(300)
+                state = join.poll()
+            }
+            assertEquals("approved", state.status)
+            assertEquals(readState(file).getValue("tsApprovalWords").jsonArray.map { it.jsonPrimitive.content }, state.words)
+            joining.unlock(MASTER)
+            assertTrue(joining.unlocked)
+        }
+    }
+
+    @Test fun secretKeyRotationBothWays() {
+        need()
+        val u = makeUser("rot")
+        val first = device(u)
+        val sk = setupRetrying(first)
+        val item = first.saveNew(first.personalVaultId(), newBody("login", "T").withText("password", "x"))
+        first.sync()
+        val other = device(u)
+        other.unlock(MASTER, sk)
+        other.lock()
+        withState { file ->
+            writeState(file, buildJsonObject {
+                put("token", u.token)
+                put("secretKey", b64u(sk))
+            })
+            // The web client rotates. This device still holds the old key.
+            runTs("rot1", file)
+            val rotated = fromB64u(readState(file).getValue("rotatedKey").jsonPrimitive.content)
+            val out = assertThrows(WrongPasswordError::class.java) { other.unlock(MASTER) }
+            assertTrue("It should say this was changed elsewhere", out.changedElsewhere)
+            // Offline, the old copy still opens: nothing online to compare with, and it's old data.
+            // Rejoin with the new key.
+            other.keeper.clear()
+            other.unlock(MASTER, rotated)
+            assertEquals("x", other.get(item.id)!!.body.password)
+            // A plain wrong password on a device that's up to date doesn't blame another device.
+            other.lock()
+            val plainWrong = assertThrows(WrongPasswordError::class.java) { other.unlock("not it") }
+            assertFalse(plainWrong.changedElsewhere)
+
+            // Now Android rotates.
+            other.unlock(MASTER)
+            val fresh = other.rotateSecretKey(MASTER)
+            assertFalse(fresh.contentEquals(rotated))
+            assertTrue(other.keeper.load()!!.contentEquals(fresh))
+            writeState(file, JsonObject(readState(file) + ("ktRotated" to JsonPrimitive(b64u(fresh)))))
+            runTs("rot2", file)
+            // Same device, new key, still opens.
+            other.lock()
+            other.unlock(MASTER)
+            assertEquals("x", other.get(item.id)!!.body.password)
+        }
+    }
+
+    @Test fun kdfCalibrationAndTheServersMinimum() {
+        need()
+        val u = makeUser("kdf1")
+        val c = device(u)
+        // A raised setting, as a quick phone picks at setup.
+        val sk = run {
+            while (true) {
+                try {
+                    return@run c.setup(MASTER, org.promptly.sync.passwords.core.calibrateKdf(100L))
+                } catch (e: ApiError) {
+                    if (e.status != 429) throw e
+                    Thread.sleep(((e.retryAfter ?: 30) + 1) * 1000L)
+                }
+            }
+            @Suppress("UNREACHABLE_CODE") ByteArray(0)
+        }
+        assertEquals(262144, c.currentKdf()!!.m)
+        val item = c.saveNew(c.personalVaultId(), newBody("note", "Raised"))
+        c.sync()
+        withState { file ->
+            writeState(file, buildJsonObject {
+                put("token", u.token)
+                put("secretKey", b64u(sk))
+                put("itemId", item.id)
+                put("expectM", 262144)
+            })
+            runTs("kdf", file)
+        }
+        // A server asking for more than the device picked: setup uses the larger.
+        val minimum = rewriting { path, body ->
+            if (path.endsWith("/account") && body.contains("min_kdf")) {
+                val o = Json.parseToJsonElement(body).jsonObject
+                JsonObject(o + ("min_kdf" to Json.parseToJsonElement("""{"alg":"argon2id","m":131072,"t":4,"p":1}"""))).toString()
+            } else {
+                null
+            }
+        }
+        val raised = device(makeUser("kdf2"), minimum)
+        while (true) {
+            try {
+                raised.setup(MASTER)
+                break
+            } catch (e: ApiError) {
+                if (e.status != 429) throw e
+                Thread.sleep(((e.retryAfter ?: 30) + 1) * 1000L)
+            }
+        }
+        assertEquals(131072, raised.currentKdf()!!.m)
+        assertEquals(4, raised.currentKdf()!!.t)
+        assertFalse(raised.kdfBelowMinimum())
+
+        // An account below what the server now asks for is told, and can catch up.
+        val belowUser = makeUser("kdf3")
+        val plain = device(belowUser)
+        val belowKey = setupRetrying(plain)
+        val told = device(belowUser, minimum)
+        told.unlock(MASTER, belowKey)
+        assertTrue(told.kdfBelowMinimum())
+        told.upgradeKdf(MASTER)
+        assertFalse(told.kdfBelowMinimum())
+        assertEquals(131072, told.currentKdf()!!.m)
+        told.lock()
+        told.unlock(MASTER)
+        assertTrue(told.unlocked)
+    }
+
+    @Test fun travelModeTakesAVaultOffTheDevice() {
+        need()
+        val u = makeUser("trav")
+        val c = device(u)
+        setupRetrying(c)
+        val v = c.createSharedVault("Trip")
+        val item = c.saveNew(v, newBody("login", "Hidden").withText("password", "x"))
+        val keep = c.saveNew(c.personalVaultId(), newBody("login", "Kept").withText("password", "y"))
+        c.sync()
+        c.setTravelHidden(listOf(v))
+        assertNull(c.get(item.id))
+        assertTrue(c.store.getItems(v).isEmpty())
+        assertEquals("y", c.get(keep.id)!!.body.password)
+        c.sync()
+        assertNull(c.get(item.id))
+        assertThrows(WrongPasswordError::class.java) { c.endTravel("not it") }
+        c.endTravel(MASTER)
+        assertEquals("x", c.get(item.id)!!.body.password)
     }
 }

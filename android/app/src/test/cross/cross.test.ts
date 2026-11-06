@@ -4,7 +4,14 @@
 // C checks the merge after a conflict made on both sides. Driven by CrossDeviceTest.kt.
 import fs from "node:fs";
 
-import { VaultApi } from "../../../../../frontend/src/passwords/core/api";
+import { ApiError, VaultApi } from "../../../../../frontend/src/passwords/core/api";
+import { downloadAttachment, uploadAttachment } from "../../../../../frontend/src/passwords/core/attachments";
+import { decryptBitwardenExport } from "../../../../../frontend/src/passwords/core/bitwarden";
+import { encryptedExport, plainCsvExport, plainJsonExport, readEncryptedExport } from "../../../../../frontend/src/passwords/core/exporter";
+import { coarseCounts, runHealth } from "../../../../../frontend/src/passwords/core/health";
+import { dedupe, fromBitwardenJson, fromGenericCsv, importFile } from "../../../../../frontend/src/passwords/core/importers";
+import { openSend, sendMeta } from "../../../../../frontend/src/passwords/core/send";
+import { strengthOf } from "../../../../../frontend/src/passwords/core/strength";
 import { b64u, fromB64u, utf8 } from "../../../../../frontend/src/passwords/core/bytes";
 import { newBody } from "../../../../../frontend/src/passwords/core/model";
 import { getAssertion, makeCredential } from "../../../../../frontend/src/passwords/core/passkey";
@@ -28,6 +35,39 @@ function client(token: string) {
   return new VaultClient(new VaultApi(BASE, () => token), new MemoryStore());
 }
 
+/** Several suites share this stack, and account creation has a rate limit: wait it out. */
+async function setupRetrying(c: VaultClient): Promise<Uint8Array> {
+  for (;;) {
+    try {
+      return (await c.setup(MASTER)).secretKey;
+    } catch (e) {
+      if (!(e instanceof ApiError) || e.status !== 429) throw e;
+      await new Promise((r) => setTimeout(r, ((e.retryAfter ?? 30) + 1) * 1000));
+    }
+  }
+}
+
+async function sha256Hex(b: Uint8Array): Promise<string> {
+  return [...new Uint8Array(await crypto.subtle.digest("SHA-256", b as Uint8Array<ArrayBuffer>))].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+function patternBytes(n: number, seed: number): Uint8Array {
+  const out = new Uint8Array(n);
+  let v = seed;
+  for (let i = 0; i < n; i++) {
+    v = (v * 31 + 7) & 255;
+    out[i] = v;
+  }
+  return out;
+}
+
+const asFile = (name: string, bytes: Uint8Array, type?: string) => ({
+  name,
+  type,
+  size: bytes.length,
+  slice: (a: number, b: number) => new Blob([bytes.subarray(a, b) as Uint8Array<ArrayBuffer>]),
+});
+
 async function verifyEs256(spki: Uint8Array, signed: Uint8Array, derSig: Uint8Array): Promise<boolean> {
   // DER back to r||s for WebCrypto.
   const part = (b: Uint8Array, at: number): [Uint8Array, number] => {
@@ -44,6 +84,16 @@ async function verifyEs256(spki: Uint8Array, signed: Uint8Array, derSig: Uint8Ar
   return crypto.subtle.verify({ name: "ECDSA", hash: "SHA-256" }, key, rs as Uint8Array<ArrayBuffer>, signed as Uint8Array<ArrayBuffer>);
 }
 
+async function expectRejects(f: () => Promise<unknown>): Promise<void> {
+  let threw = false;
+  try {
+    await f();
+  } catch {
+    threw = true;
+  }
+  expect(threw).toBe(true);
+}
+
 const concat = (a: Uint8Array, b: Uint8Array) => {
   const out = new Uint8Array(a.length + b.length);
   out.set(a);
@@ -55,7 +105,7 @@ it(`step ${STEP}`, async () => {
   const state = read();
   if (STEP === "A") {
     const c = client(state.token);
-    const { secretKey } = await c.setup(MASTER);
+    const secretKey = await setupRetrying(c);
     const vault = await c.personalVaultId();
     const made = await makeCredential({
       rpId: "cross.example",
@@ -111,6 +161,248 @@ it(`step ${STEP}`, async () => {
       tsPublicKey: made.publicKey,
       tsCredentialId: made.credentialId,
     });
+    return;
+  }
+
+  // ---- Steps that manage their own clients ----
+
+  if (STEP === "att1") {
+    const c = client(state.token);
+    const secretKey = await setupRetrying(c);
+    const vault = await c.personalVaultId();
+    const item = await c.saveNew(vault, newBody("note", "With files", { notes: "n" }));
+    await c.sync();
+    const big = patternBytes(2_500_000, 11);
+    const small = patternBytes(1234, 22);
+    const r1 = await uploadAttachment(c.api, vault, item.id, asFile("big.bin", big, "application/octet-stream"));
+    const r2 = await uploadAttachment(c.api, vault, item.id, asFile("small.txt", small, "text/plain"));
+    await c.update(item.id, { ...c.get(item.id)!.body, attachments: [r1, r2] });
+    await c.sync();
+    write({ ...state, secretKey: b64u(secretKey), vault, itemId: item.id, bigSha: await sha256Hex(big), smallSha: await sha256Hex(small) });
+    return;
+  }
+  if (STEP === "att2") {
+    const c = client(state.token);
+    await c.unlock(MASTER, fromB64u(state.secretKey));
+    const item = c.get(state.itemId)!;
+    const list = item.body.attachments ?? [];
+    expect(list.map((a) => a.name).sort()).toEqual(["big.bin", "from-android.bin"]);
+    const fromAndroid = list.find((a) => a.name === "from-android.bin")!;
+    expect(fromAndroid.mime).toBe("application/x-test");
+    expect(fromAndroid.size).toBe(state.androidSize);
+    const got = await downloadAttachment(c.api, state.vault, item.id, fromAndroid);
+    expect(await sha256Hex(got)).toBe(state.androidSha);
+    // What Android deleted is gone from the server too.
+    let gone = false;
+    try {
+      await c.api.attachmentGet(state.vault, state.deletedId, 0);
+    } catch (e) {
+      gone = e instanceof ApiError && e.status === 404;
+    }
+    expect(gone).toBe(true);
+    return;
+  }
+
+  if (STEP === "sh1") {
+    const c = client(state.alice);
+    const secretKey = await setupRetrying(c);
+    const vault = await c.createSharedVault("TS shared");
+    await c.saveNew(vault, newBody("login", "Shared login", { username: "both", password: "shared-Pass-1!", urls: [{ url: "https://shared.example" }] }));
+    await c.sync();
+    await c.addMember(vault, state.bobId, "edit");
+    write({ ...state, aliceKey: b64u(secretKey), aliceId: c.userId, tsVault: vault, aliceWords: await c.myIdentityWords() });
+    return;
+  }
+  if (STEP === "sh2") {
+    const c = client(state.alice);
+    await c.unlock(MASTER, fromB64u(state.aliceKey));
+    // Android's edit and Android's new item, in a vault TS made.
+    const items = c.allItems().filter((i) => i.vaultId === state.tsVault);
+    expect(items.find((i) => i.body.title === "Shared login")!.body.password).toBe("edited-by-android");
+    expect(items.find((i) => i.body.title === "Added by Android")!.body.username).toBe("kt");
+    // A vault Android made, invited as fill only. Its name opens here, and so do its items.
+    const vaults = await c.vaults();
+    const kt = vaults.find((v) => v.id === state.ktVault)!;
+    // Nobody's trusted until the person says so: no name yet.
+    expect(kt.displayName).toBe("(can't open)");
+    expect(kt.accepted).toBe(false);
+    expect(kt.role).toBe("fill");
+    await c.acceptVault(state.ktVault);
+    expect((await c.vaults()).find((v) => v.id === state.ktVault)!.displayName).toBe("KT shared");
+    const inKt = c.allItems().find((i) => i.vaultId === state.ktVault)!;
+    expect(inKt.body.password).toBe("kt-Vault-1!");
+    expect(c.canReveal(state.ktVault)).toBe(false);
+    expect(c.exportable().some((i) => i.vaultId === state.ktVault)).toBe(false);
+    const bobWords = await c.identityWordsFor(state.bobId);
+    // Remove Android's user: a new vault key, and the list of passwords to change.
+    const toChange = await c.removeMembers(state.tsVault, [state.bobId]);
+    expect(toChange.map((i) => i.body.title).sort()).toEqual(["Added by Android", "Shared login"]);
+    write({ ...read(), bobWordsSeenByAlice: bobWords });
+    return;
+  }
+  if (STEP === "sh3") {
+    const c = client(state.alice);
+    await c.unlock(MASTER, fromB64u(state.aliceKey));
+    // Android removed Alice from its vault, with rotation.
+    expect((await c.vaults()).some((v) => v.id === state.ktVault)).toBe(false);
+    expect(c.allItems().some((i) => i.vaultId === state.ktVault)).toBe(false);
+    return;
+  }
+
+  // The trust book and seq, between the two clients on one account.
+  if (STEP === "bk1") {
+    const c = client(state.alice);
+    const secretKey = await setupRetrying(c);
+    const bob = client(state.bob);
+    await setupRetrying(bob);
+    const carol = client(state.carol);
+    await setupRetrying(carol);
+    const vault = await c.createSharedVault("TS team");
+    await c.addMember(vault, state.bobId, "edit");
+    await c.markVerified(state.bobId);
+    // An invitation from Carol, accepted here. Android shouldn't have to ask again.
+    const fromCarol = await carol.createSharedVault("From Carol");
+    await carol.addMember(fromCarol, c.userId!, "view");
+    await c.sync();
+    await c.acceptVault(fromCarol);
+    const item = await c.saveNew(await c.personalVaultId(), newBody("login", "Seq item", { password: "seq-1" }));
+    await c.update(item.id, { ...c.get(item.id)!.body, password: "seq-2" });
+    await c.sync();
+    write({ ...state, aliceKey: b64u(secretKey), aliceId: c.userId, carolId: carol.userId, tsVault: vault, fromCarol, seqItem: item.id });
+    return;
+  }
+  if (STEP === "bk2") {
+    const c = client(state.alice);
+    await c.unlock(MASTER, fromB64u(state.aliceKey));
+    // What Android decided, with no prompt here.
+    const trust = await c.trustEntries();
+    expect(trust[state.danId]?.ed25519).toBe(state.danEd);
+    expect(trust[state.bobId]?.verified).toBe(true);
+    const ktVault = (await c.vaults()).find((v) => v.id === state.ktVault)!;
+    expect(ktVault.displayName).toBe("KT team");
+    const body = c.get(state.seqItem)!.body;
+    expect(body.password).toBe("seq-android");
+    expect(body.seq).toBe(state.androidSeq);
+    const edited = await c.update(state.seqItem, { ...body, notes: "from ts" });
+    expect(edited.body.seq).toBe(state.androidSeq + 1);
+    await c.sync();
+    return;
+  }
+
+  if (STEP === "tx1") {
+    const c = client(state.token);
+    const secretKey = await setupRetrying(c);
+    const vault = await c.personalVaultId();
+    await c.saveNew(vault, newBody("login", "Weak one", { username: "w", password: "password", urls: [{ url: "http://insecure.example/login" }] }));
+    await c.saveNew(vault, newBody("login", "Reused A", { username: "a", password: "kX9!vQ2#mL7$pR4z", urls: [{ url: "https://a.example" }] }));
+    await c.saveNew(vault, newBody("login", "Reused B", { username: "b", password: "kX9!vQ2#mL7$pR4z", urls: [{ url: "https://b.example" }], totp: { secret: "JBSWY3DPEHPK3PXP" } }));
+    await c.saveNew(vault, newBody("note", "A note", { notes: "formula =1+1, \"quoted\"" }));
+    await c.sync();
+    const items = c.exportable();
+    const health = await runHealth(c.allItems());
+    const scores: Record<string, number> = {};
+    for (const pw of state.strengthList as string[]) scores[pw] = (await strengthOf(pw)).score;
+    const csvCases: Record<string, unknown> = {};
+    for (const [name, text] of Object.entries(state.csvFixtures as Record<string, string>)) {
+      const r = await importFile(name, utf8(text));
+      csvCases[name] = { format: r.format, warnings: r.warnings, items: r.items.map((i) => ({ folder: i.folder ?? null, body: i.body })) };
+    }
+    const bw = fromBitwardenJson(JSON.parse(state.bitwardenFixture));
+    const opened = fromBitwardenJson(await decryptBitwardenExport(JSON.parse(state.bitwardenProtected), "bw-file-password"));
+    const dup = dedupe(fromGenericCsv(state.dedupeFixture).items, []);
+    write({
+      ...state,
+      secretKey: b64u(secretKey),
+      health: { checked: health.checked, reused: health.reused.reduce((n, g) => n + g.items.length, 0), http: health.http.length, old: health.old.length, weak: health.weak.length, coarse: coarseCounts(health) },
+      scores,
+      csvCases,
+      bw: { warnings: bw.warnings, items: bw.items.map((i) => ({ folder: i.folder ?? null, body: i.body })) },
+      bwOpened: opened.items.map((i) => i.body.title),
+      dupFresh: dup.fresh.length,
+      dupCount: dup.duplicates,
+      plainCsv: plainCsvExport(items),
+      plainJsonItems: JSON.parse(plainJsonExport(items)).items.length,
+      tsEncrypted: await encryptedExport(items, "ts-export-password"),
+    });
+    return;
+  }
+  if (STEP === "tx2") {
+    const c = client(state.token);
+    await c.unlock(MASTER, fromB64u(state.secretKey));
+    // Android's encrypted export opens here.
+    const r = await readEncryptedExport(JSON.parse(state.ktEncrypted), "kt-export-password");
+    expect(r.items.map((i) => i.body.title).sort()).toEqual(["A note", "Reused A", "Reused B", "Weak one"]);
+    expect(r.items.find((i) => i.body.title === "Weak one")!.body.password).toBe("password");
+    await expectRejects(() => readEncryptedExport(JSON.parse(state.ktEncrypted), "wrong"));
+    // Android's Sends open here, with and without a password.
+    const open = async (link: string, password?: string) => {
+      const u = new URL(link);
+      const id = u.pathname.split("/").pop()!;
+      const anon = new VaultApi(BASE, () => null);
+      return openSend(anon, id, u.hash.slice(1), await sendMeta(anon, id), password);
+    };
+    const plain = await open(state.ktSend);
+    expect(plain.payload).toEqual({ kind: "text", title: "From Android", text: "send text \u{1F511}" });
+    const protectedOne = await open(state.ktSendPw, "send-password");
+    expect(protectedOne.payload).toEqual({ kind: "text", title: "With a password", text: "secret text" });
+    expect(protectedOne.viewsLeft).toBe(1);
+    await expectRejects(() => open(state.ktSendPw, "wrong-password"));
+    const file = await open(state.ktSendFile);
+    expect(file.payload.kind).toBe("file");
+    if (file.payload.kind === "file") {
+      expect(file.payload.name).toBe("note.txt");
+      expect(atob(file.payload.data)).toBe("file body");
+    }
+    return;
+  }
+
+  if (STEP === "qr1") {
+    // A joining device on the web client, for Android's scanner to check.
+    const c = client(state.token);
+    const secretKey = await setupRetrying(c);
+    const other = client(state.token);
+    const join = await other.requestDevice("TS phone");
+    write({ ...state, secretKey: b64u(secretKey), qrText: join.qrText, requestId: join.id, joinPub: join.qrText.split(":")[2] });
+    return;
+  }
+  if (STEP === "qr2") {
+    // A joining device on Android: the web scanner's own regex accepts its text.
+    const m = /^pwdev:([0-9a-f-]{36}):([A-Za-z0-9_-]+)$/.exec(state.androidQr);
+    expect(m).toBeTruthy();
+    const c = client(state.token);
+    await c.unlock(MASTER, fromB64u(state.secretKey));
+    const found = (await c.api.deviceRequests()).find((r) => r.id === m![1])!;
+    expect(found.device_pub).toBe(m![2]);
+    const approval = await c.beginApproval(found.id, found.device_pub);
+    expect(approval.words).toEqual(state.androidWordsCheck ?? approval.words);
+    await c.finishApproval(found.id, found.device_pub);
+    write({ ...read(), tsApprovalWords: approval.words });
+    return;
+  }
+
+  if (STEP === "rot1") {
+    // The web client rotates the Secret Key; Android has to notice it's been rotated out.
+    const c = client(state.token);
+    await c.unlock(MASTER, fromB64u(state.secretKey));
+    const fresh = await c.rotateSecretKey(MASTER);
+    write({ ...read(), rotatedKey: b64u(fresh) });
+    return;
+  }
+  if (STEP === "rot2") {
+    // Android rotated it: the web client opens with Android's new key, and not the old one.
+    const c = client(state.token);
+    await c.unlock(MASTER, fromB64u(state.ktRotated));
+    expect(c.unlocked).toBe(true);
+    const old = client(state.token);
+    await expectRejects(() => old.unlock(MASTER, fromB64u(state.rotatedKey)));
+    return;
+  }
+  if (STEP === "kdf") {
+    // A vault Android made at a raised setting opens here.
+    const c = client(state.token);
+    await c.unlock(MASTER, fromB64u(state.secretKey));
+    expect((await c.store.getAccount())!.kdf.m).toBe(state.expectM);
+    expect(c.get(state.itemId)!.body.title).toBe("Raised");
     return;
   }
 
@@ -173,3 +465,4 @@ it(`step ${STEP}`, async () => {
 
   throw new Error(`Unknown step ${STEP}`);
 });
+

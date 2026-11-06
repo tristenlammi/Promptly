@@ -70,7 +70,7 @@ fun PwTheme(content: @Composable () -> Unit) {
 }
 
 fun errorText(e: Throwable): String = when (e) {
-    is WrongPasswordError -> "That master password isn't right."
+    is WrongPasswordError -> if (e.changedElsewhere) "That didn't open your vault, and your master password or Secret Key was changed on another device since this phone last unlocked." else "That master password isn't right."
     is OfflineError -> "The server can't be reached."
     is ApiError if e.status == 401 && e.detail != "vault_locked" -> "The server no longer knows this phone."
     is KeyChangedError -> e.message ?: "Someone's keys have changed."
@@ -123,6 +123,7 @@ fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Un
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var removed by remember { mutableStateOf(false) }
+    var rotatedOut by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val canBio = Biometrics.enrolled && Biometrics.available(ctx)
@@ -171,6 +172,7 @@ fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Un
                 // /session answers wrong proofs as WrongPasswordError, so a 401 here is the
                 // device token itself: removed in Devices, or "sign out everywhere".
                 if (it is ApiError && it.status == 401) removed = true
+                if (it is WrongPasswordError && it.changedElsewhere) rotatedOut = true
                 error = errorText(it)
             }
         }
@@ -185,6 +187,13 @@ fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Un
         Text(heading, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         SecretField(password, { password = it }, "Master password", "master-password")
         error?.let { ErrorCard(it) }
+        if (rotatedOut) {
+            Text("If it was the master password, try the new one. If the Secret Key was changed, this phone holds the old one, and has to join again with your new kit or another device.", style = MaterialTheme.typography.bodyMedium)
+            OutlinedButton(onClick = {
+                Pw.forgetSecretKey()
+                onUnlocked()
+            }, modifier = Modifier.testTag("rejoin")) { Text("Join this phone again") }
+        }
         if (removed) {
             Text("This phone was removed from your account, or you signed out everywhere. Its encrypted copy is still here.", style = MaterialTheme.typography.bodyMedium)
             OutlinedButton(onClick = {

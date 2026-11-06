@@ -575,6 +575,143 @@ class CoreTest {
         assertNull(org.promptly.sync.passwords.SmsCode.extract("No digits here"))
     }
 
+    @Test fun strengthCatchesTheObvious() {
+        fun score(pw: String, vararg inputs: String) = org.promptly.sync.passwords.core.StrengthCheck.check(pw, inputs.toList()).score
+        for (weak in listOf("password", "123456", "qwerty", "qwertyuiop", "aaaaaaaa", "abcdefgh", "12345678", "P@ssw0rd", "letmein", "iloveyou", "abcabcabc", "1990", "01012000")) {
+            assertTrue("$weak scored ${score(weak)}", score(weak) <= 1)
+        }
+        for (strong in listOf("kX9!vQ2#mL7\$pR4z", "correct-pails-graft-mints-vague-otter", "7Hq2vN9pLw3ZbX6t")) {
+            assertTrue("$strong scored ${score(strong)}", score(strong) >= 3)
+        }
+        // Your own name counts against you.
+        assertTrue(score("anastasia99", "anastasia") < score("zqmvwkpbxj99"))
+        assertEquals(0, score(""))
+    }
+
+    @Test fun healthFindsEachIssue() {
+        val now = java.time.Instant.parse("2026-11-06T00:00:00Z").toEpochMilli()
+        fun login(title: String, pw: String, url: String, changed: String = "2026-10-01T00:00:00.000Z", totp: Boolean = false): Item {
+            var b = newBody("login", title).withText("password", pw).withText("passwordChangedAt", changed).withUrls(listOf(LoginUrl(url)))
+            if (totp) b = b.withTotp(org.promptly.sync.passwords.core.TotpConfig("JBSWY3DPEHPK3PXP"))
+            return Item(title, "v", 1, false, "", b)
+        }
+        val items = listOf(
+            login("weak", "password", "https://w.example", totp = true),
+            login("r1", "same-kX9!vQ2#mL7p", "https://r1.example", totp = true),
+            login("r2", "same-kX9!vQ2#mL7p", "https://r2.example", totp = true),
+            login("old", "old-kX9!vQ2#mL7p", "https://old.example", changed = "2024-01-01T00:00:00.000Z", totp = true),
+            login("http", "http-kX9!vQ2#mL7p", "http://site.example/x", totp = true),
+            login("lan", "lan-kX9!vQ2#mL7p", "http://192.168.1.1", totp = true),
+            login("no2fa", "no2-kX9!vQ2#mL7p", "https://has2fa.example"),
+            login("nototp", "not-kX9!vQ2#mL7p", "https://unknown.example"),
+            Item("trashed", "v", 1, true, "", login("x", "password", "https://t.example").body),
+            Item("note", "v", 1, false, "", newBody("note", "n")),
+        )
+        val pwned = org.promptly.sync.passwords.core.Health.sha1Hex("password")
+        val asked = ArrayList<String>()
+        val r = org.promptly.sync.passwords.core.Health.run(items, { prefix ->
+            asked += prefix
+            if (prefix == pwned.substring(0, 5)) "0000000000000000000000000000000000A:0\r\n${pwned.substring(5)}:9000\r\n" else "0000000000000000000000000000000000A:0\r\n"
+        }, mapOf("has2fa.example" to "https://doc.example"), now)
+        assertEquals(8, r.checked)
+        assertEquals(listOf("weak"), r.weak.map { it.id })
+        assertEquals(setOf("r1", "r2"), r.reused.single().map { it.id }.toSet())
+        assertEquals(listOf("old"), r.old.map { it.id })
+        assertEquals(listOf("http"), r.http.map { it.id })
+        assertEquals(listOf("no2fa" to "https://doc.example"), r.no2fa.map { it.first.id to it.second })
+        assertEquals(listOf("nototp"), r.noTotp.map { it.id })
+        assertEquals(listOf("weak" to 9000), r.breached.map { it.first.id to it.second })
+        // Only five characters ever leave, and each password's asked about once.
+        assertTrue(asked.all { it.length == 5 })
+        assertEquals(7, asked.size)
+    }
+
+    @Test fun healthSaysWhenBreachesWerentChecked() {
+        val i = Item("a", "v", 1, false, "", newBody("login", "a").withText("password", "x"))
+        val off = org.promptly.sync.passwords.core.Health.run(listOf(i), { throw org.promptly.sync.passwords.core.ApiError(403, "Breach checks are off on this server.") })
+        assertEquals("Breach checks are off on this server.", off.breachSkipped)
+        assertTrue(org.promptly.sync.passwords.core.Health.run(listOf(i)).breachSkipped != null)
+    }
+
+    @Test fun csvParserHandlesTheMesses() {
+        val p = org.promptly.sync.passwords.core.Importers::parseCsv
+        assertEquals(listOf(listOf("a", "b"), listOf("1,x", "he said \"hi\"\nthere")), p("\uFEFFa,b\r\n\"1,x\",\"he said \"\"hi\"\"\nthere\"\r\n"))
+        assertEquals(listOf(listOf("a", "b"), listOf("1", "2")), p("a,b\n\n1,2\n"))
+        assertTrue(p("").isEmpty())
+    }
+
+    @Test fun importRefusesWhatItCantRead() {
+        val i = org.promptly.sync.passwords.core.Importers
+        for (bad in listOf("{not json", "[1,2,3]", "{\"a\":1}", "just,some,columns\n1,2,3\n")) {
+            assertThrows(bad, IllegalArgumentException::class.java) { i.importFile("x", bad.toByteArray()) }
+        }
+        assertThrows(IllegalArgumentException::class.java) { i.importFile("x", byteArrayOf(0x50, 0x4b, 3, 4)) }
+        assertThrows(IllegalArgumentException::class.java) { i.importFile("x", byteArrayOf(0x03, 0xd9.toByte(), 0xa2.toByte(), 0x9a.toByte())) }
+        assertThrows(IllegalArgumentException::class.java) { i.importFile("x", byteArrayOf(0xff.toByte(), 0xfe.toByte(), 0)) }
+        assertThrows(IllegalArgumentException::class.java) { i.importFile("x", "{\"encrypted\":true}".toByteArray()) }
+    }
+
+    @Test fun csvExportDefusesFormulas() {
+        val b = newBody("login", "=SUM(A1)").withText("username", "+1").withText("password", "a,\"b").withText("notes", "@x")
+        val csv = org.promptly.sync.passwords.core.Exporter.plainCsv(listOf(Item("i", "v", 1, false, "", b)))
+        assertEquals("name,url,username,password,otpauth,notes\r\n'=SUM(A1),,'+1,\"a,\"\"b\",,'@x\r\n", csv)
+    }
+
+    @Test fun qrsDrawAndReadBack() {
+        fun read(text: String): String {
+            val m = org.promptly.sync.passwords.ui.QrMatrix.encode(text)
+            val px = IntArray(m.width * m.height) { i -> if (m.get(i % m.width, i / m.width)) 0xFF000000.toInt() else 0xFFFFFFFF.toInt() }
+            val src = com.google.zxing.RGBLuminanceSource(m.width, m.height, px)
+            return com.google.zxing.qrcode.QRCodeReader().decode(com.google.zxing.BinaryBitmap(com.google.zxing.common.HybridBinarizer(src)), mapOf(com.google.zxing.DecodeHintType.PURE_BARCODE to true)).text
+        }
+        val join = org.promptly.sync.passwords.core.DeviceQr.text("11111111-1111-4111-8111-111111111111", ByteArray(32) { 7 })
+        assertEquals(join, read(join))
+        assertEquals("11111111-1111-4111-8111-111111111111" to b64u(ByteArray(32) { 7 }), org.promptly.sync.passwords.core.DeviceQr.parse(join))
+        assertNull(org.promptly.sync.passwords.core.DeviceQr.parse("pwdev:nope:abc"))
+        assertNull(org.promptly.sync.passwords.core.DeviceQr.parse("https://example.com"))
+        val wifi = newBody("wifi", "Home").withText("ssid", "My;Net:1").withText("wifiPassword", "pa\"ss,\\w")
+        val text = org.promptly.sync.passwords.core.wifiQrText(wifi)
+        assertEquals("WIFI:T:WPA;S:My\\;Net\\:1;P:pa\\\"ss\\,\\\\w;;", text)
+        assertEquals(text, read(text))
+        val nopass = newBody("wifi", "Open").withText("ssid", "Cafe").withText("wifiSecurity", "nopass")
+        assertEquals("WIFI:T:nopass;S:Cafe;P:;;", org.promptly.sync.passwords.core.wifiQrText(nopass))
+    }
+
+    @Test fun kdfCalibrationSteps() {
+        assertEquals(262144, org.promptly.sync.passwords.core.calibrateKdf(100L).m)
+        assertEquals(131072, org.promptly.sync.passwords.core.calibrateKdf(300L).m)
+        assertEquals(65536, org.promptly.sync.passwords.core.calibrateKdf(900L).m)
+        // BouncyCastle on the Java heap never picks more than the floor.
+        assertEquals(65536, org.promptly.sync.passwords.core.calibrateKdf(org.promptly.sync.passwords.core.BouncyCastleArgon2).m)
+    }
+
+    @Test fun alertsOnlySayWhatsNew() {
+        val a = org.promptly.sync.passwords.AlertDiff
+        fun al(d: Int, i: Int, e: Int) = org.promptly.sync.passwords.core.Alerts(d, i, e)
+        assertFalse(a.news(al(0, 0, 0), al(0, 0, 0)).any)
+        assertTrue(a.news(al(0, 0, 0), al(1, 0, 0)).devices)
+        assertFalse(a.news(al(1, 0, 0), al(1, 0, 0)).any)
+        assertFalse(a.news(al(2, 1, 1), al(1, 0, 0)).any)
+        val n = a.news(al(0, 1, 0), al(0, 2, 1))
+        assertTrue(n.invitations && n.emergency && !n.devices)
+    }
+
+    @Test fun attachmentChunksMatchTheFormat() {
+        val key = ByteArray(32) { 3 }
+        val part = ByteArray(10) { 9 }
+        val blob = org.promptly.sync.passwords.core.Attachments.sealChunk(key, "v", "i", "a", 0, 2, part)
+        // Every chunk's the same size on the wire: 1 MiB plus the length, nonce, tag and header.
+        assertEquals(1024 * 1024 + 4 + 12 + 16 + 2, blob.size)
+        assertArrayEquals(part, org.promptly.sync.passwords.core.Attachments.openChunk(key, "v", "i", "a", 0, 2, blob))
+        // It can't move position, or be passed off as a shorter file.
+        assertThrows(Exception::class.java) { org.promptly.sync.passwords.core.Attachments.openChunk(key, "v", "i", "a", 1, 2, blob) }
+        assertThrows(Exception::class.java) { org.promptly.sync.passwords.core.Attachments.openChunk(key, "v", "i", "a", 0, 1, blob) }
+        assertThrows(Exception::class.java) { org.promptly.sync.passwords.core.Attachments.openChunk(key, "v", "j", "a", 0, 2, blob) }
+        assertEquals(1, org.promptly.sync.passwords.core.Attachments.chunksFor(0))
+        assertEquals(1, org.promptly.sync.passwords.core.Attachments.chunksFor(1024 * 1024))
+        assertEquals(2, org.promptly.sync.passwords.core.Attachments.chunksFor(1024 * 1024 + 1L))
+    }
+
     @Test fun updaterHashFieldFailsClosed() {
         assertNull(UpdateVerifier.validHash(null))
         assertNull(UpdateVerifier.validHash(""))

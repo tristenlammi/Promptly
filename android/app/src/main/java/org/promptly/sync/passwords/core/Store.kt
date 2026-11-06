@@ -68,6 +68,10 @@ data class CachedVault(
     val memberGeneration: Int,
     val accepted: Boolean,
     val memberCount: Int,
+    /** Travel mode: taken off this device until it's turned off. */
+    val hidden: Boolean = false,
+    /** Someone left, and this vault still has the key they knew. */
+    val rotateNeeded: Boolean = false,
 ) {
     fun toJson(): JsonObject = buildJsonObject {
         put("id", id)
@@ -83,13 +87,15 @@ data class CachedVault(
         put("memberGeneration", memberGeneration)
         put("accepted", accepted)
         put("memberCount", memberCount)
+        if (hidden) put("hidden", true)
+        if (rotateNeeded) put("rotateNeeded", true)
     }
 
     companion object {
         fun from(o: JsonObject) = CachedVault(
             o.str("id")!!, o.str("kind")!!, o.int("revision") ?: 0, o.int("highWater") ?: 0, o.int("generation") ?: 1,
             o.str("name") ?: "", o.str("role") ?: "view", o.str("wrappedKey") ?: "", o.str("signature") ?: "", o.str("grantedBy"),
-            o.int("memberGeneration") ?: 1, o.bool("accepted") ?: false, o.int("memberCount") ?: 1,
+            o.int("memberGeneration") ?: 1, o.bool("accepted") ?: false, o.int("memberCount") ?: 1, o.bool("hidden") ?: false, o.bool("rotateNeeded") ?: false,
         )
     }
 }
@@ -145,7 +151,7 @@ interface LocalStore {
     fun clear()
 }
 
-class MemoryStore : LocalStore {
+open class MemoryStore : LocalStore {
     private val meta = HashMap<String, JsonElement>()
     private var account: CachedAccount? = null
     private val vaults = LinkedHashMap<String, CachedVault>()

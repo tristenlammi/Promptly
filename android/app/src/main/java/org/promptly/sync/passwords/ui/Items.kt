@@ -3,6 +3,8 @@
 package org.promptly.sync.passwords.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -42,6 +44,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
@@ -57,12 +60,16 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import org.promptly.sync.passwords.Clip
 import org.promptly.sync.passwords.Pw
+import org.promptly.sync.passwords.core.AttachmentRef
+import org.promptly.sync.passwords.core.Attachments
 import org.promptly.sync.passwords.core.CustomField
 import org.promptly.sync.passwords.core.Generator
 import org.promptly.sync.passwords.core.Item
 import org.promptly.sync.passwords.core.ItemBody
 import org.promptly.sync.passwords.core.LoginUrl
 import org.promptly.sync.passwords.core.Match
+import org.promptly.sync.passwords.core.StrengthCheck
+import org.promptly.sync.passwords.core.wifiQrText
 import org.promptly.sync.passwords.core.Totp
 import org.promptly.sync.passwords.core.TotpConfig
 import org.promptly.sync.passwords.core.VaultClient
@@ -159,6 +166,16 @@ fun KindPicker(onPick: (String) -> Unit, onCancel: () -> Unit) {
 
 // ---- Viewing ------------------------------------------------------------------
 
+/** Local only: the password never leaves the phone. */
+@Composable
+fun StrengthLine(password: String, inputs: List<String> = emptyList()) {
+    val s = remember(password, inputs) { StrengthCheck.check(password, inputs) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LinearProgressIndicator(progress = { (s.score + 1) / 5f }, modifier = Modifier.weight(1f))
+        Text(s.label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("strength"))
+    }
+}
+
 @Composable
 private fun SecretRow(label: String, value: String, tag: String) {
     val ctx = LocalContext.current
@@ -220,6 +237,7 @@ fun TotpRow(cfg: TotpConfig, tag: String) {
 
 @Composable
 fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String, onBack: () -> Unit, onEdit: () -> Unit) {
+    val ctx = LocalContext.current
     val version by Pw.version.collectAsState()
     val item = remember(id, version) { client.get(id) }
     BackHandler(onBack = onBack)
@@ -237,6 +255,10 @@ fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String
     var message by remember { mutableStateOf<String?>(null) }
     var showHistory by remember { mutableStateOf(false) }
     var versions by remember { mutableStateOf<List<VaultClient.Version>?>(null) }
+    var showWifiQr by remember { mutableStateOf(false) }
+    // Fill only: nothing on screen that reveals a secret or copies one. It fills, nothing else.
+    val canReveal = client.canReveal(item.vaultId)
+    val canEdit = client.canEdit(item.vaultId)
     fun act(block: () -> Unit) {
         scope.launch {
             withContext(Dispatchers.IO) {
@@ -251,24 +273,35 @@ fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String
         Row(verticalAlignment = Alignment.CenterVertically) {
             TextButton(onClick = onBack, Modifier.testTag("back")) { Text("Back") }
             Spacer(Modifier.weight(1f))
-            if (!item.deleted) TextButton(onClick = onEdit, Modifier.testTag("edit")) { Text("Edit") }
+            if (!item.deleted && canEdit) TextButton(onClick = onEdit, Modifier.testTag("edit")) { Text("Edit") }
         }
         Text(b.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.testTag("detail-title"))
         Text(KIND_LABEL[b.kind] ?: b.kind, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         message?.let { ErrorCard(it) }
+        if (!canReveal) Text("This vault lets you fill passwords but not see them. It isn't secure against a determined member: their device holds the key.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("fill-only-note"))
         ConflictPanel(client, item)
         b.username?.let { PlainRow("Username", it, "detail-username") }
-        b.password?.let { SecretRow("Password", it, "detail-password") }
-        b.totp?.let { TotpRow(it, "detail-totp") }
+        if (canReveal) b.password?.let { SecretRow("Password", it, "detail-password") }
+        if (canReveal) b.totp?.let { TotpRow(it, "detail-totp") }
         for (u in b.urls) {
             val app = Match.parseAppUrl(u.url)
             PlainRow(if (app != null) "App" else "Website", app?.pkg ?: u.url, "detail-url")
         }
         for (f in FIELDS[b.kind] ?: emptyList()) {
             val v = b.str(f.key) ?: continue
-            if (f.secret) SecretRow(f.label, v, "detail-${f.key}") else PlainRow(f.label, v, "detail-${f.key}")
+            if (f.secret) {
+                if (canReveal) SecretRow(f.label, v, "detail-${f.key}")
+            } else {
+                PlainRow(f.label, v, "detail-${f.key}")
+            }
         }
-        for (f in b.customFields) if (f.type == "hidden") SecretRow(f.name, f.value, "detail-field-${f.name}") else PlainRow(f.name, f.value, "detail-field-${f.name}")
+        for (f in b.customFields) {
+            if (f.type != "hidden") PlainRow(f.name, f.value, "detail-field-${f.name}") else if (canReveal) SecretRow(f.name, f.value, "detail-field-${f.name}")
+        }
+        if (b.kind == "wifi" && !b.str("ssid").isNullOrEmpty() && canReveal) {
+            TextButton(onClick = { showWifiQr = !showWifiQr }, Modifier.testTag("wifi-qr-toggle")) { Text(if (showWifiQr) "Hide the join QR" else "Show a QR to join this network") }
+            if (showWifiQr) QrImage(wifiQrText(b), Modifier.testTag("wifi-qr"))
+        }
         for (p in b.passkeys) {
             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("detail-passkey")) {
                 Column(Modifier.padding(12.dp)) {
@@ -279,12 +312,11 @@ fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String
         }
         b.notes?.let { PlainRow("Notes", it, "detail-notes") }
         if (b.tags.isNotEmpty()) PlainRow("Tags", b.tags.joinToString(", "), "detail-tags")
-        val attachments = (b["attachments"] as? kotlinx.serialization.json.JsonArray)?.size ?: 0
-        if (attachments > 0) Text("$attachments attachment${if (attachments == 1) "" else "s"}: open these from the web vault.", style = MaterialTheme.typography.bodySmall)
+        if (b.kind != "folder") AttachmentsPanel(client, item, canEdit)
         Spacer(Modifier.height(10.dp))
         if (item.deleted) {
             OutlinedButton(onClick = { act { client.restoreItem(id) } }, Modifier.fillMaxWidth().testTag("restore")) { Text("Restore") }
-        } else {
+        } else if (canEdit) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(onClick = { act { client.update(id, b.withFlag("favorite", !b.favorite)) } }, Modifier.testTag("favorite")) { Text(if (b.favorite) "Unfavourite" else "Favourite") }
                 OutlinedButton(onClick = { act { client.update(id, b.withFlag("archived", !b.archived)) } }, Modifier.testTag("archive")) { Text(if (b.archived) "Unarchive" else "Archive") }
@@ -294,18 +326,150 @@ fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String
                 }, Modifier.testTag("trash")) { Text("Trash") }
             }
         }
-        TextButton(onClick = {
+        if (canReveal) TextButton(onClick = {
             showHistory = !showHistory
             if (showHistory && versions == null) {
                 scope.launch { versions = withContext(Dispatchers.IO) { runCatching { client.versions(id) }.getOrDefault(emptyList()) } }
             }
         }, Modifier.testTag("history")) { Text("History") }
-        if (showHistory) {
+        if (showHistory && canReveal) {
             for ((pw, at) in b.passwordHistory) SecretRow("Old password, $at", pw, "history-password")
             versions?.forEach { v ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(v.createdAt, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                     TextButton(onClick = { act { client.update(id, v.body) } }) { Text("Restore") }
+                }
+            }
+        }
+    }
+}
+
+/** Files on an item. Opened here in memory: images and text show on this secure screen, and
+ *  nothing decrypted is written anywhere unless you pick where to save a copy. */
+@Composable
+private fun AttachmentsPanel(client: VaultClient, item: Item, canEdit: Boolean) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val list = item.body.attachments
+    var busy by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var preview by remember { mutableStateOf<Pair<AttachmentRef, ByteArray>?>(null) }
+    var saving by remember { mutableStateOf<AttachmentRef?>(null) }
+    val maxPreview = 20L * 1024 * 1024
+
+    val saver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val ref = saving
+        saving = null
+        if (uri != null && ref != null) {
+            busy = "Saving ${ref.name}"
+            scope.launch {
+                val r = withContext(Dispatchers.IO) {
+                    runCatching {
+                        ctx.contentResolver.openOutputStream(uri, "wt")!!.use { out ->
+                            Attachments.download(client.api, item.vaultId, item.id, ref, { out.write(it) }) { d, t -> busy = "Saving ${ref.name}: $d of $t MB" }
+                        }
+                    }
+                }
+                busy = null
+                r.onSuccess { toast(ctx, "Saved") }.onFailure { error = errorText(it) }
+            }
+        }
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val name = displayName(ctx, uri)
+            val mime = ctx.contentResolver.getType(uri)
+            error = null
+            busy = "Uploading $name"
+            scope.launch {
+                val r = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val size = ctx.contentResolver.openAssetFileDescriptor(uri, "r")!!.use { it.length }.takeIf { it >= 0 } ?: throw IllegalStateException("That file's size can't be read.")
+                        ctx.contentResolver.openInputStream(uri)!!.use { input ->
+                            var at = 0L
+                            // Chunks are asked for in order, so one forward read serves them all.
+                            client.addAttachment(item.id, name, mime, size, { offset, length ->
+                                while (at < offset) {
+                                    val skipped = input.skip(offset - at)
+                                    if (skipped <= 0) throw java.io.IOException("That file got shorter.")
+                                    at += skipped
+                                }
+                                val part = ByteArray(length)
+                                var got = 0
+                                while (got < length) {
+                                    val n = input.read(part, got, length - got)
+                                    if (n < 0) throw java.io.IOException("That file got shorter.")
+                                    got += n
+                                }
+                                at += got
+                                part
+                            }) { d, t -> busy = "Uploading $name: $d of $t MB" }
+                        }
+                    }
+                }
+                busy = null
+                r.onFailure { error = errorText(it) }
+            }
+        }
+    }
+
+    if (list.isEmpty() && !canEdit) return
+    Text("Attachments", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    error?.let { ErrorCard(it) }
+    for (a in list) {
+        Row(Modifier.fillMaxWidth().testTag("attachment-${a.name}"), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(a.name)
+                Text("${a.size / 1024} KB", style = MaterialTheme.typography.bodySmall)
+            }
+            TextButton(onClick = {
+                error = null
+                if (a.size > maxPreview) {
+                    error = "That's too big to show here. Save a copy instead."
+                    return@TextButton
+                }
+                busy = "Opening ${a.name}"
+                scope.launch {
+                    val r = withContext(Dispatchers.IO) {
+                        runCatching {
+                            val out = java.io.ByteArrayOutputStream()
+                            Attachments.download(client.api, item.vaultId, item.id, a, { out.write(it) }) { d, t -> busy = "Opening ${a.name}: $d of $t MB" }
+                            out.toByteArray()
+                        }
+                    }
+                    busy = null
+                    r.onSuccess { preview = a to it }.onFailure { error = errorText(it) }
+                }
+            }, Modifier.testTag("attachment-open")) { Text("Open") }
+            TextButton(onClick = {
+                saving = a
+                saver.launch(a.name)
+            }, Modifier.testTag("attachment-save")) { Text("Save") }
+            if (canEdit) TextButton(onClick = {
+                error = null
+                busy = "Removing ${a.name}"
+                scope.launch {
+                    withContext(Dispatchers.IO) { runCatching { client.removeAttachment(item.id, a) } }.onFailure { error = errorText(it) }
+                    busy = null
+                }
+            }, Modifier.testTag("attachment-delete")) { Text("Delete") }
+        }
+    }
+    busy?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("attachment-busy")) }
+    if (canEdit) OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, enabled = busy == null, modifier = Modifier.testTag("attachment-add")) { Text("Attach a file") }
+    preview?.let { (ref, bytes) ->
+        Card(Modifier.fillMaxWidth().padding(vertical = 6.dp).testTag("attachment-preview")) {
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(ref.name, Modifier.weight(1f), fontWeight = FontWeight.Medium)
+                    TextButton(onClick = { preview = null }, Modifier.testTag("attachment-close")) { Text("Close") }
+                }
+                val image = remember(bytes) { if (ref.mime?.startsWith("image/") == true) runCatching { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }.getOrNull() else null }
+                val asText = remember(bytes) { if (image == null && bytes.size <= 256 * 1024) runCatching { org.promptly.sync.passwords.core.fromUtf8(bytes) }.getOrNull() else null }
+                when {
+                    image != null -> androidx.compose.foundation.Image(image, ref.name, Modifier.fillMaxWidth())
+                    asText != null -> Text(asText, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("attachment-text"))
+                    else -> Text("This kind of file can't be shown here. Save a copy to open it in another app.", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -383,6 +547,10 @@ fun ItemEditorScreen(client: VaultClient, id: String?, kind: String, prefillUrl:
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val folders = remember { runCatching { client.allItems(includeSystem = true) }.getOrDefault(emptyList()).filter { it.body.kind == "folder" } }
+    // Where a new item goes: any vault you can write to, your own by default.
+    val writable = remember { runCatching { client.vaults() }.getOrDefault(emptyList()).filter { client.chosen(it.vault) && it.vault.role in setOf("manage", "edit") && it.vault.id !in client.keyChanges } }
+    var targetVault by remember { mutableStateOf(runCatching { client.personalVaultId() }.getOrNull()) }
+    var vaultMenu by remember { mutableStateOf(false) }
 
     fun save() {
         var body = start.withText("username", username.takeIf { k == "login" || k == "passkey" || k == "totp" } ?: start.username)
@@ -416,7 +584,7 @@ fun ItemEditorScreen(client: VaultClient, id: String?, kind: String, prefillUrl:
         scope.launch {
             val r = withContext(Dispatchers.IO) {
                 runCatching {
-                    val saved = if (existing != null) client.update(existing.id, finalBody) else client.saveNew(client.personalVaultId(), finalBody)
+                    val saved = if (existing != null) client.update(existing.id, finalBody) else client.saveNew(targetVault ?: client.personalVaultId(), finalBody)
                     runCatching { client.sync() }
                     saved.id
                 }
@@ -427,11 +595,26 @@ fun ItemEditorScreen(client: VaultClient, id: String?, kind: String, prefillUrl:
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(if (existing != null) "Edit ${KIND_LABEL[k] ?: k}" else "New ${KIND_LABEL[k] ?: "folder"}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        if (existing == null && writable.size > 1) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Vault: ${writable.firstOrNull { it.vault.id == targetVault }?.displayName ?: "Personal"}", Modifier.weight(1f))
+                TextButton(onClick = { vaultMenu = true }, Modifier.testTag("edit-vault")) { Text("Change") }
+                DropdownMenu(vaultMenu, { vaultMenu = false }) {
+                    writable.forEach { v ->
+                        DropdownMenuItem({ Text(v.displayName) }, {
+                            targetVault = v.vault.id
+                            vaultMenu = false
+                        }, Modifier.testTag("edit-vault-${v.displayName}"))
+                    }
+                }
+            }
+        }
         OutlinedTextField(title, { title = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("edit-title"))
         if (k == "login" || k == "passkey" || k == "totp") OutlinedTextField(username, { username = it }, label = { Text("Username") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("edit-username"))
         if (k == "login") {
             var showPw by remember { mutableStateOf(false) }
             SecretField(password, { password = it }, "Password", "edit-password", visible = showPw)
+            if (password.isNotEmpty()) StrengthLine(password, listOf(username, title))
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 OutlinedButton(onClick = {
                     val host = urls.firstOrNull()?.url?.let { Match.hostOf(it) }

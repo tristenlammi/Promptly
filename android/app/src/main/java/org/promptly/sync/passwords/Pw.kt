@@ -46,6 +46,40 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
+/** Only for the device token, read by the alert check while the phone is locked, which the
+ *  other key refuses to do. The token alone can't open anything: the vault needs its session. */
+object AlertSeal {
+    private const val ALIAS = "promptly_pw_alerts"
+
+    private fun key(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (ks.getKey(ALIAS, null) as? SecretKey)?.let { return it }
+        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        gen.init(
+            KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build(),
+        )
+        return gen.generateKey()
+    }
+
+    fun seal(plain: ByteArray): String {
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.ENCRYPT_MODE, key())
+        val ct = c.doFinal(plain)
+        return b64u(c.iv) + ":" + b64u(ct)
+    }
+
+    fun open(sealed: String): ByteArray? = runCatching {
+        val (iv, ct) = sealed.split(":", limit = 2)
+        val c = Cipher.getInstance("AES/GCM/NoPadding")
+        c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, fromB64u(iv)))
+        c.doFinal(fromB64u(ct))
+    }.getOrNull()
+}
+
 /** A key in the Android Keystore, for secrets that must be usable without a prompt (so
  *  the app can ask for the master password) but useless off this phone. */
 object DeviceSeal {
@@ -203,6 +237,10 @@ class PwPrefs(context: Context) {
         get() = prefs.getString("device_token", null)?.let { DeviceSeal.open(it) }?.let { String(it) }
         set(v) = prefs.edit().putString("device_token", v?.let { DeviceSeal.seal(it.toByteArray()) }).apply()
 
+    var alertToken: String?
+        get() = prefs.getString("alert_token", null)?.let { AlertSeal.open(it) }?.let { String(it) }
+        set(v) = prefs.edit().putString("alert_token", v?.let { AlertSeal.seal(it.toByteArray()) }).apply()
+
     /** Minutes of no use before the vault locks. 0 is as soon as you leave the app. */
     var autoLockMinutes: Int
         get() = prefs.getInt("auto_lock", 15)
@@ -357,7 +395,9 @@ object Pw {
         clientInstance = null
         prefs.server = server.trimEnd('/')
         prefs.deviceToken = token
+        prefs.alertToken = token
         prefs.deviceId = deviceId
+        appContext?.let { runCatching { AlertsCheck.schedule(it) } }
         version.value = version.value + 1
     }
 
@@ -367,6 +407,17 @@ object Pw {
         clientInstance = null
         prefs.deviceId = null
         prefs.deviceToken = null
+        prefs.alertToken = null
+        appContext?.let { runCatching { AlertsCheck.cancel(it) } }
+        version.value = version.value + 1
+    }
+
+    /** This device's Secret Key isn't the current one any more. The token still works, and
+     *  the offline copy is ciphertext it can't open: join again through the usual ways. */
+    @Synchronized
+    fun forgetSecretKey() {
+        clientInstance?.keeper?.clear()
+        Biometrics.forget()
         version.value = version.value + 1
     }
 
@@ -439,7 +490,10 @@ object Pw {
         clientInstance = null
         prefs.forgetDevice()
         Biometrics.forget()
-        if (ctx != null) AutofillIndex.clear(ctx)
+        if (ctx != null) {
+            AutofillIndex.clear(ctx)
+            runCatching { AlertsCheck.cancel(ctx) }
+        }
         unlockedFlow.value = false
         version.value = version.value + 1
     }

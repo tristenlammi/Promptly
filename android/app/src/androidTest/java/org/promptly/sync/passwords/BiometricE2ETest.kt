@@ -59,8 +59,8 @@ class BiometricE2ETest {
         // Lock, then the app's own unlock asks for the fingerprint by itself.
         tap("back")
         tap("lock-now")
+        // No password's typed here. The host's touches can answer before the button's ever seen.
         val deadline = System.currentTimeMillis() + 30_000
-        waitFor(By.res("use-biometric"), 30_000)
         while (!client.unlocked && System.currentTimeMillis() < deadline) Thread.sleep(250)
         assertTrue("A fingerprint should have unlocked the vault", client.unlocked)
         assertEquals("pw-Bio-1!", client.get(item.id)!!.body.password)

@@ -132,14 +132,24 @@ object Harness {
     /** Tap a suggestion, in the keyboard's strip or the dropdown. The field keeps focus, so
      *  a second tap on it asks again if the first answer lost a race with the keyboard. */
     fun pick(title: String) {
-        val first = device.wait(Until.findObject(By.text(title)), 8_000)
-        if (first != null) {
-            first.click()
-            return
+        suggestion(By.text(title)).click()
+    }
+
+    fun waitSuggestion(text: String) {
+        suggestion(By.textContains(text))
+    }
+
+    /** A suggestion chip. The system log says it's shown (`onShown`) on the runs that miss here:
+     *  its window just isn't always visible to UiAutomator. So hide the keyboard and ask again. */
+    fun suggestion(sel: BySelector): UiObject2 {
+        for (i in 1..3) {
+            device.wait(Until.findObject(sel), 8_000)?.let { return it }
+            note("Suggestion $sel hadn't shown after 8 s; asked again")
+            dismissKeyboard()
+            Thread.sleep(500)
+            device.findObject(By.focused(true))?.click()
         }
-        note("Suggestion \"$title\" hadn't shown after 8 s; tapped the field again")
-        device.findObject(By.focused(true))?.click()
-        waitFor(By.text(title), 12_000).click()
+        return waitFor(sel, 8_000)
     }
 
     fun tapField(desc: String) {
@@ -171,9 +181,75 @@ object Harness {
         waitFor(By.res(tag), ms).click()
     }
 
+    /** Several suites share this stack, and its rate limits: wait them out rather than fail. */
+    fun <T> retrying429(block: () -> T): T {
+        var waited = 0
+        while (true) {
+            try {
+                return block()
+            } catch (e: org.promptly.sync.passwords.core.ApiError) {
+                if (e.status != 429 || waited > 180) throw e
+                val s = (e.retryAfter ?: 30) + 1
+                note("429 from the stack; waiting $s s")
+                waited += s
+                Thread.sleep(s * 1000L)
+            }
+        }
+    }
+
+    /** Everything known about what just went wrong, for the instrumentation output. */
+    fun capture(label: String) {
+        note("CAPTURE $label: window: ${dumpWindow()}")
+        note("CAPTURE $label: last network problem: ${Pw.client()?.api?.lastProblem}")
+        note("CAPTURE $label: app log: " + shell("logcat -d -t 400 -s PwTest:* PromptlyPasswords:* AndroidRuntime:E").takeLast(1500))
+        runCatching {
+            val out = java.io.File(ctx.cacheDir, "capture-$label.png")
+            device.takeScreenshot(out)
+            note("CAPTURE $label: screenshot at ${out.path} (black if FLAG_SECURE)")
+        }
+    }
+
+    /** Tap something that talks to the server, and wait for what should come next. A 429 is
+     *  waited out. "Can't be reached" gets captured, so it's explained, then tried again. */
+    fun tapThrough(tag: String, next: BySelector, ms: Long = 60_000) {
+        var tries = 0
+        while (true) {
+            tap(tag)
+            val end = System.currentTimeMillis() + ms
+            var problem: String? = null
+            while (System.currentTimeMillis() < end) {
+                if (device.hasObject(next)) return
+                problem = runCatching { device.findObject(By.res("error"))?.text }.getOrNull()
+                if (problem != null) break
+                Thread.sleep(250)
+            }
+            if (problem == null) {
+                capture("timeout-$tag")
+                throw AssertionError("Nothing came after $tag")
+            }
+            tries++
+            when {
+                problem.contains("Too many tries") && tries < 8 -> {
+                    val s = Regex("Wait (\\d+)").find(problem)?.groupValues?.get(1)?.toIntOrNull() ?: 60
+                    note("$tag: rate limited, waiting ${s + 1} s")
+                    Thread.sleep((s + 1) * 1000L)
+                }
+                problem.contains("can't be reached") && tries < 4 -> {
+                    capture("unreachable-$tag-$tries")
+                    Thread.sleep(15_000)
+                }
+                else -> {
+                    capture("error-$tag")
+                    throw AssertionError("$tag: $problem")
+                }
+            }
+        }
+    }
+
     /** Scroll a long screen slowly until this is there and has stopped moving, then tap it.
      *  The keyboard goes first: it covers the bottom of the form and eats swipes. */
     fun scrollTap(tag: String) {
+        dismissKeyboard()
         val h = device.displayHeight
         var tries = 0
         while (device.findObject(By.res(tag)) == null && tries++ < 12) {
@@ -189,6 +265,13 @@ object Harness {
             last = now
         }
         device.findObject(By.res(tag)).click()
+    }
+
+    fun dismissKeyboard() {
+        if (shell("dumpsys input_method").contains("mInputShown=true")) {
+            device.pressBack()
+            Thread.sleep(400)
+        }
     }
 
     /** Dismiss any leftover autofill dropdown and keyboard. */

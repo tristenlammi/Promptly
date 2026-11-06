@@ -148,6 +148,8 @@ dependencies {
     implementation("androidx.autofill:autofill:1.3.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
     implementation("com.google.android.gms:play-services-auth-api-phone:18.3.1")
+    // Drawing QR codes on screen (a joining device, Wi-Fi). Scanning stays with ML Kit.
+    implementation("com.google.zxing:core:3.5.3")
 
     // P Maps' driving screen and Android Auto (see the maps package). Android's
     // own GPS: Ferrostar's google-play-services module is deliberately left out.

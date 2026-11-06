@@ -128,7 +128,7 @@ class AutofillAuthActivity : FragmentActivity() {
             }
             Pw.markUsed(item.id)
             val totp = item.body.totp
-            if (mode == MODE_LOGIN && totp != null && otps.isEmpty() && Pw.prefs.copyTotpAfterFill) {
+            if (mode == MODE_LOGIN && totp != null && otps.isEmpty() && Pw.prefs.copyTotpAfterFill && Pw.client()?.canReveal(item.vaultId) == true) {
                 runCatching {
                     Clip.copySecret(this, "2FA code", Totp.code(totp))
                     toast(this, "2FA code copied")

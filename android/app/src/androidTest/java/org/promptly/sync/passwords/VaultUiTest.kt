@@ -234,12 +234,13 @@ class VaultUiTest {
 
     /** The real server: an app password connects the phone, the vault is made in the app's
      *  screens, another device gets approved here with safety words, and this phone rejoins
-     *  by recovery kit and by approval. The host mints throwaway credentials and passes them. */
+     *  by recovery kit and by approval. The host mints throwaway credentials and passes them.
+     *  This stack is shared, so 429s are waited out, and "can't be reached" is captured. */
     @Test fun againstTheRealStack() {
         val args = InstrumentationRegistry.getArguments()
-        val bearer = args.getString("pwBearer")
+        val bearer = args.getString("pwBearer4") ?: args.getString("pwBearer")
         val server = args.getString("pwServer") ?: "http://10.0.2.2:8092"
-        assumeTrue("No -e pwBearer", !bearer.isNullOrEmpty())
+        assumeTrue("No -e pwBearer4", !bearer.isNullOrEmpty())
         Harness.clearScreen()
         Pw.init(ctx)
         runCatching { Pw.forgetDevice() }
@@ -248,14 +249,19 @@ class VaultUiTest {
         store.account = Store.Account(server, args.getString("pwAppUser")!!, args.getString("pwAppPassword")!!, "Instrumented test")
         open()
         fill("server", server)
-        tap("connect")
-        tap("join-create", 40_000)
+        Harness.tapThrough("connect", By.res("join-create"), 40_000)
+        tap("join-create")
         tap("understood")
         fill("new-master", Harness.MASTER)
+        waitFor(By.res("strength"))
         fill("new-master-again", Harness.MASTER)
-        tap("create-vault")
-        val text = waitFor(By.res("kit-secret-key"), 60_000).text
+        Harness.tapThrough("create-vault", By.res("kit-secret-key"))
+        val text = waitFor(By.res("kit-secret-key")).text
         val secret = SecretKeys.parse(text)
+        // Setup raised the stretching, on a device this quick, and never went below the floor.
+        val made = Pw.client()!!.currentKdf()!!
+        Harness.note("Vault made at m=${made.m} t=${made.t} p=${made.p} on this emulator")
+        assertTrue(made.m >= 65536 && made.t >= 3)
         fill("kit-last-group", SecretKeys.lastGroup(text))
         tap("kit-done")
         waitFor(By.res("search"), 30_000)
@@ -268,17 +274,16 @@ class VaultUiTest {
         // Lock, and unlock through the app's screen, with the session proved again.
         client.lock()
         fill("master-password", Harness.MASTER)
-        tap("unlock")
-        waitFor(By.res("search"), 60_000)
+        Harness.tapThrough("unlock", By.res("search"))
         assertEquals("wire-Password-1!", client.get(item.id)!!.body.password)
 
         // A new device asks: this phone shows the words, and approves.
         val anon = VaultApi(server, { null })
-        val second = anon.registerDevice("Bearer $bearer", "Second device")
+        val second = Harness.retrying429 { anon.registerDevice("Bearer $bearer", "Second device") }
         val other = VaultClient(VaultApi(server, { second.token }), MemoryStore(), MemoryKeeper())
-        val join = other.requestDevice("Second device")
+        val join = Harness.retrying429 { other.requestDevice("Second device") }
         tap("tab-more")
-        tap("open-devices")
+        Harness.scrollTap("open-devices")
         waitFor(By.textContains("(this one)"), 15_000)
         waitFor(By.res("request-${join.code}"), 15_000)
         tap("request-begin")
@@ -293,46 +298,45 @@ class VaultUiTest {
         }
         assertEquals("approved", state.status)
         assertTrue(secret.contentEquals(state.secretKey))
-        other.unlock(Harness.MASTER)
+        Harness.retrying429 { other.unlock(Harness.MASTER) }
         assertEquals("wire-Password-1!", other.get(item.id)!!.body.password)
 
         // Forget this phone. Back through the recovery kit.
         device.pressBack()
-        tap("open-settings")
+        Harness.scrollTap("open-settings")
         Harness.scrollTap("forget-device")
         waitFor(By.text("Forget")).click() // Dialogs are their own window, without test-tag ids
         waitFor(By.res("server"), 15_000)
-        val third = anon.registerDevice("Bearer $bearer", "Rejoining phone")
+        val third = Harness.retrying429 { anon.registerDevice("Bearer $bearer", "Rejoining phone") }
         Pw.connect(server, third.token, third.deviceId)
         Harness.home()
         open()
-        tap("join-kit", 40_000)
+        Harness.tapThrough("join-kit", By.res("secret-key"), 40_000)
         fill("secret-key", text.lowercase().replace("-", " "))
         fill("master-password", Harness.MASTER)
-        tap("kit-unlock")
-        waitFor(By.res("search"), 60_000)
+        Harness.tapThrough("kit-unlock", By.res("search"))
         assertEquals("wire-Password-1!", Pw.client()!!.get(item.id)!!.body.password)
 
-        // And once more by approval, this phone being the new device.
+        // And once more by approval, this phone being the new device. It shows the QR too.
         tap("tab-more")
-        tap("open-settings")
+        Harness.scrollTap("open-settings")
         Harness.scrollTap("forget-device")
-        waitFor(By.text("Forget")).click() // Dialogs are their own window, without test-tag ids
+        waitFor(By.text("Forget")).click()
         waitFor(By.res("server"), 15_000)
-        val fourth = anon.registerDevice("Bearer $bearer", "Approved phone")
+        val fourth = Harness.retrying429 { anon.registerDevice("Bearer $bearer", "Approved phone") }
         Pw.connect(server, fourth.token, fourth.deviceId)
         Harness.home()
         open()
         tap("join-approve", 40_000)
-        val code = waitFor(By.res("request-code"), 20_000).text
+        val code = waitFor(By.res("request-code"), 40_000).text
+        waitFor(By.res("request-qr"))
         val req = other.api.deviceRequests().first { it.code == code }
         val approval = other.beginApproval(req.id, req.devicePub)
         val phoneWords = waitFor(By.res("safety-words"), 15_000).text
         assertEquals(approval.words.joinToString(" "), phoneWords)
-        other.finishApproval(req.id, req.devicePub)
+        other.finishApproval(approval)
         fill("master-password", Harness.MASTER)
-        tap("approve-unlock")
-        waitFor(By.res("search"), 60_000)
+        Harness.tapThrough("approve-unlock", By.res("search"))
         assertEquals("wire-Password-1!", Pw.client()!!.get(item.id)!!.body.password)
         store.clear()
     }

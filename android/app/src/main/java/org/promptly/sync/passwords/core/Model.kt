@@ -22,7 +22,7 @@ fun isoNow(now: Instant = Instant.now()): String {
     return if (s.contains('.')) s else s.removeSuffix("Z") + ".000Z"
 }
 
-val SYSTEM_KINDS = setOf("folder", "site_rule", "trust", "prefs")
+val SYSTEM_KINDS = setOf("folder", "site_rule", "trust", "prefs", "send")
 
 data class LoginUrl(val url: String, val match: String? = null) {
     fun toJson(): JsonObject = JsonObject(buildMap {
@@ -107,6 +107,29 @@ data class Passkey(
     }
 }
 
+/** A file recorded on an item. Its key lives only in the body, so the server can't place it. */
+data class AttachmentRef(val id: String, val name: String, val size: Long, val key: String, val chunks: Int, val mime: String? = null) {
+    fun toJson(): JsonObject = JsonObject(buildMap {
+        put("id", JsonPrimitive(id))
+        put("name", JsonPrimitive(name))
+        // Not plain `size`: inside buildMap that would be the map's own entry count.
+        put("size", JsonPrimitive(this@AttachmentRef.size))
+        put("key", JsonPrimitive(key))
+        put("chunks", JsonPrimitive(chunks))
+        if (mime != null) put("mime", JsonPrimitive(mime))
+    })
+
+    companion object {
+        fun from(e: JsonElement): AttachmentRef? {
+            val o = e as? JsonObject ?: return null
+            return AttachmentRef(
+                o.str("id") ?: return null, o.str("name") ?: "file", (o["size"] as? JsonPrimitive)?.content?.toDoubleOrNull()?.toLong() ?: 0L,
+                o.str("key") ?: return null, o.int("chunks") ?: 0, o.str("mime"),
+            )
+        }
+    }
+}
+
 /** An immutable item body: a JSON object with typed reads. Edits make a copy. */
 class ItemBody(val fields: Map<String, JsonElement>) {
     operator fun get(k: String): JsonElement? = fields[k]
@@ -124,6 +147,10 @@ class ItemBody(val fields: Map<String, JsonElement>) {
     val reprompt: Boolean get() = bool("reprompt")
     val updatedAt: String get() = text("updatedAt")
     val isSystem: Boolean get() = kind in SYSTEM_KINDS
+
+    /** Goes up with every edit, and it's inside the encryption. The revision is only the
+     *  server's word, so this is what shows an older copy being passed off as new. */
+    val seq: Long get() = (fields["seq"] as? JsonPrimitive)?.content?.toDoubleOrNull()?.toLong() ?: 0L
 
     val urls: List<LoginUrl>
         get() = (fields["urls"] as? JsonArray)?.mapNotNull { e ->
@@ -143,6 +170,8 @@ class ItemBody(val fields: Map<String, JsonElement>) {
         } ?: emptyList()
 
     val totp: TotpConfig? get() = TotpConfig.from(fields["totp"])
+    val attachments: List<AttachmentRef> get() = (fields["attachments"] as? JsonArray)?.mapNotNull { AttachmentRef.from(it) } ?: emptyList()
+    fun withAttachments(list: List<AttachmentRef>) = with("attachments" to if (list.isEmpty()) null else JsonArray(list.map { it.toJson() }))
     val passkeys: List<Passkey> get() = (fields["passkeys"] as? JsonArray)?.mapNotNull { Passkey.from(it) } ?: emptyList()
     val conflicts: List<JsonObject> get() = (fields["conflicts"] as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
     val passwordHistory: List<Pair<String, String>>
@@ -198,7 +227,7 @@ fun newBody(kind: String, title: String, vararg extra: Pair<String, JsonElement?
 /** On save: note an old password in the history, and when it changed. */
 fun touch(prev: ItemBody?, next: ItemBody): ItemBody {
     val at = isoNow()
-    var out = next.with("updatedAt" to JsonPrimitive(at))
+    var out = next.with("updatedAt" to JsonPrimitive(at), "seq" to JsonPrimitive(maxOf(prev?.seq ?: 0L, next.seq) + 1))
     val before = prev?.password
     if (prev != null && !before.isNullOrEmpty() && before != next.password) {
         val entry = JsonObject(mapOf("password" to JsonPrimitive(before), "at" to JsonPrimitive(at)))
@@ -235,7 +264,7 @@ fun stable(v: JsonElement?): String = when (v) {
 
 private fun same(a: JsonElement?, b: JsonElement?) = stable(a) == stable(b)
 
-private fun strip(b: ItemBody): JsonObject = JsonObject(b.fields.filterKeys { it != "updatedAt" && it != "conflicts" })
+private fun strip(b: ItemBody): JsonObject = JsonObject(b.fields.filterKeys { it != "updatedAt" && it != "conflicts" && it != "seq" })
 
 class MergeResult(val body: ItemBody, val conflicted: Boolean)
 
@@ -247,7 +276,8 @@ fun mergeBodies(base: ItemBody?, local: ItemBody, server: ItemBody): MergeResult
     var conflicted = base == null && !same(strip(local), strip(server))
     if (base != null) {
         for (key in base.fields.keys + local.fields.keys + server.fields.keys) {
-            if (key == "updatedAt" || key == "conflicts") continue
+            // `seq` is set by whoever calls this: two sides having edited isn't a conflict in itself.
+            if (key == "updatedAt" || key == "conflicts" || key == "seq") continue
             val b = base[key]
             val l = local[key]
             val s = server[key]

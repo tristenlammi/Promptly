@@ -7,6 +7,8 @@ import android.os.Build
 import android.provider.Settings
 import android.view.autofill.AutofillManager
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -64,6 +66,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.promptly.sync.BuildConfig
+import org.promptly.sync.passwords.AlertsCheck
 import org.promptly.sync.passwords.Biometrics
 import org.promptly.sync.passwords.ChromeSetup
 import org.promptly.sync.passwords.Clip
@@ -71,8 +74,10 @@ import org.promptly.sync.passwords.Pw
 import org.promptly.sync.passwords.SmsCode
 import org.promptly.sync.passwords.core.ApiError
 import org.promptly.sync.passwords.core.DeviceOut
+import org.promptly.sync.passwords.core.DeviceQr
 import org.promptly.sync.passwords.core.DeviceRequestOut
 import org.promptly.sync.passwords.core.Generator
+import org.promptly.sync.passwords.core.SecretKeys
 import org.promptly.sync.passwords.core.Totp
 import org.promptly.sync.passwords.core.VaultClient
 import org.promptly.sync.passwords.core.newBody
@@ -87,7 +92,11 @@ private sealed class Screen {
     data object Trash : Screen()
     data object Devices : Screen()
     data object Settings : Screen()
-    data object Invites : Screen()
+    data object Security : Screen()
+    data object Shared : Screen()
+    data object Transfer : Screen()
+    data object Sends : Screen()
+    data object Emergency : Screen()
 }
 
 @Composable
@@ -131,6 +140,15 @@ fun MainScreen(activity: PasswordsActivity) {
         }
     }
     LaunchedEffect(Unit) { sync() }
+    LaunchedEffect(Unit) { runCatching { AlertsCheck.schedule(activity) } }
+    val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    LaunchedEffect(Unit) {
+        // For new-device, invitation and emergency alerts. Asked once.
+        if (Build.VERSION.SDK_INT >= 33 && !Pw.prefs.prefs.getBoolean("asked_notifications", false)) {
+            Pw.prefs.prefs.edit().putBoolean("asked_notifications", true).apply()
+            askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         Column(Modifier.weight(1f)) {
@@ -147,7 +165,11 @@ fun MainScreen(activity: PasswordsActivity) {
                 Screen.Trash -> TrashScreen(client) { screen = Screen.Home }
                 Screen.Devices -> DevicesScreen(client) { screen = Screen.Home }
                 Screen.Settings -> SettingsScreen(activity, client) { screen = Screen.Home }
-                Screen.Invites -> InvitesScreen(client) { screen = Screen.Home }
+                Screen.Security -> SecurityCheckScreen(client, { screen = Screen.Detail(it) }) { screen = Screen.Home }
+                Screen.Shared -> SharedVaultsScreen(client) { screen = Screen.Home }
+                Screen.Transfer -> TransferScreen(client) { screen = Screen.Home }
+                Screen.Sends -> SendsScreen(client) { screen = Screen.Home }
+                Screen.Emergency -> EmergencyScreen(client) { screen = Screen.Home }
             }
         }
         if (screen == Screen.Home) {
@@ -172,10 +194,14 @@ private fun MoreScreen(client: VaultClient, go: (Screen) -> Unit, lock: () -> Un
     val invites = remember(version) { client.store.getVaults().count { !it.accepted && it.kind != "personal" } }
     Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("More", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        OutlinedButton(onClick = { go(Screen.Security) }, Modifier.fillMaxWidth().testTag("open-security")) { Text("Security check") }
+        OutlinedButton(onClick = { go(Screen.Shared) }, Modifier.fillMaxWidth().testTag("open-shared")) { Text(if (invites > 0) "Shared vaults ($invites waiting)" else "Shared vaults") }
+        OutlinedButton(onClick = { go(Screen.Sends) }, Modifier.fillMaxWidth().testTag("open-sends")) { Text("Secure Send") }
+        OutlinedButton(onClick = { go(Screen.Emergency) }, Modifier.fillMaxWidth().testTag("open-emergency")) { Text("Emergency access") }
+        OutlinedButton(onClick = { go(Screen.Transfer) }, Modifier.fillMaxWidth().testTag("open-transfer")) { Text("Import and export") }
         OutlinedButton(onClick = { go(Screen.Trash) }, Modifier.fillMaxWidth().testTag("open-trash")) { Text("Trash") }
         OutlinedButton(onClick = { go(Screen.Devices) }, Modifier.fillMaxWidth().testTag("open-devices")) { Text("Devices") }
         OutlinedButton(onClick = { go(Screen.Settings) }, Modifier.fillMaxWidth().testTag("open-settings")) { Text("Settings") }
-        if (invites > 0) OutlinedButton(onClick = { go(Screen.Invites) }, Modifier.fillMaxWidth().testTag("open-invites")) { Text("Shared vault invites ($invites)") }
         Button(onClick = lock, Modifier.fillMaxWidth().testTag("lock-now")) { Text("Lock now") }
     }
 }
@@ -187,7 +213,7 @@ private fun CodesScreen(client: VaultClient) {
     val ctx = LocalContext.current
     val activity = ctx as FragmentActivity
     val version by Pw.version.collectAsState()
-    val items = remember(version) { runCatching { client.allItems() }.getOrDefault(emptyList()).filter { it.body.totp != null } }
+    val items = remember(version) { runCatching { client.allItems() }.getOrDefault(emptyList()).filter { it.body.totp != null && client.canReveal(it.vaultId) } }
     var error by remember { mutableStateOf<String?>(null) }
     var smsCode by remember { mutableStateOf<String?>(null) }
     var waiting by remember { mutableStateOf(false) }
@@ -383,7 +409,9 @@ private fun DevicesScreen(client: VaultClient, onBack: () -> Unit) {
     var requests by remember { mutableStateOf<List<DeviceRequestOut>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var bump by remember { mutableIntStateOf(0) }
-    var words by remember { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
+    // An approval holds the key its words were worked out from. It's never swapped for a newer
+    // copy of the list: if the list stops agreeing with it, the answer is thrown away.
+    var approvals by remember { mutableStateOf<Map<String, VaultClient.Approval>>(emptyMap()) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(bump) {
         while (true) {
@@ -392,6 +420,11 @@ private fun DevicesScreen(client: VaultClient, onBack: () -> Unit) {
                 devices = it.first
                 requests = it.second
                 error = null
+                val kept = approvals.filterValues { a -> a.stillMatches(it.second) }
+                if (kept.size != approvals.size) {
+                    approvals = kept
+                    error = "A request changed or went away while you were checking it, so that check was thrown away. If it's still yours, start again."
+                }
             }.onFailure { error = errorText(it) }
             delay(5000)
         }
@@ -408,18 +441,38 @@ private fun DevicesScreen(client: VaultClient, onBack: () -> Unit) {
             Text("Devices", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         }
         error?.let { ErrorCard(it) }
+        val ctx = LocalContext.current
+        OutlinedButton(onClick = {
+            scanQr(ctx, { text ->
+                scope.launch {
+                    error = null
+                    val r = withContext(Dispatchers.IO) {
+                        runCatching {
+                            // The QR carries the request and the key, so what's approved is
+                            // what's on that screen. A mismatch or an unknown request is refused.
+                            val found = client.requestForQr(text)
+                            found to client.beginApproval(found.id, found.devicePub)
+                        }
+                    }
+                    r.onSuccess { (found, approval) ->
+                        requests = listOf(found) + requests.filter { it.id != found.id }
+                        approvals = approvals + (found.id to approval)
+                    }.onFailure { error = if (it is DeviceQr.Refused) it.message else errorText(it) }
+                }
+            }, { error = it })
+        }, Modifier.fillMaxWidth().testTag("devices-scan")) { Text("Scan a new device's QR") }
         for (r in requests.filter { it.status == "pending" || it.status == "answered" }) {
-            val w = words[r.id]
+            val approval = approvals[r.id]
             Card(Modifier.fillMaxWidth().testTag("request-${r.code}"), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("${r.name} wants your vault", fontWeight = FontWeight.SemiBold)
                     Text("Its code: ${r.code}", fontFamily = FontFamily.Monospace)
-                    if (w == null) {
+                    if (approval == null) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Button(onClick = {
                                 scope.launch {
                                     withContext(Dispatchers.IO) { runCatching { client.beginApproval(r.id, r.devicePub) } }
-                                        .onSuccess { words = words + (r.id to it.words) }
+                                        .onSuccess { approvals = approvals + (r.id to it) }
                                         .onFailure { error = errorText(it) }
                                 }
                             }, Modifier.testTag("request-begin")) { Text("Check it's mine") }
@@ -427,9 +480,9 @@ private fun DevicesScreen(client: VaultClient, onBack: () -> Unit) {
                         }
                     } else {
                         Text("Do these words match the new device exactly?")
-                        Text(w.joinToString(" "), style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("approve-words"))
+                        Text(approval.words.joinToString(" "), style = MaterialTheme.typography.titleMedium, modifier = Modifier.testTag("approve-words"))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Button(onClick = { act { client.finishApproval(r.id, r.devicePub) } }, Modifier.testTag("request-approve")) { Text("They match") }
+                            Button(onClick = { act { client.finishApproval(approval) } }, Modifier.testTag("request-approve")) { Text("They match") }
                             TextButton(onClick = { act { client.api.deviceRequestDeny(r.id) } }, Modifier.testTag("request-deny")) { Text("They don't") }
                         }
                     }
@@ -445,31 +498,6 @@ private fun DevicesScreen(client: VaultClient, onBack: () -> Unit) {
                 if (!d.current) TextButton(onClick = { act { client.api.revokeDevice(d.id) } }, Modifier.testTag("device-revoke")) { Text("Remove") }
             }
             HorizontalDivider()
-        }
-    }
-}
-
-@Composable
-private fun InvitesScreen(client: VaultClient, onBack: () -> Unit) {
-    BackHandler(onBack = onBack)
-    val scope = rememberCoroutineScope()
-    val version by Pw.version.collectAsState()
-    val invites = remember(version) { client.store.getVaults().filter { !it.accepted && it.kind != "personal" } }
-    var error by remember { mutableStateOf<String?>(null) }
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack, Modifier.testTag("back")) { Text("Back") }
-            Text("Shared vaults", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-        }
-        Text("Sharing is managed from the web vault. Here you can accept an invite so it syncs to this phone.")
-        error?.let { ErrorCard(it) }
-        invites.forEach { v ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("A vault with ${v.memberCount} members", Modifier.weight(1f))
-                Button(onClick = {
-                    scope.launch { withContext(Dispatchers.IO) { runCatching { client.acceptVault(v.id) } }.onFailure { error = errorText(it) } }
-                }) { Text("Accept") }
-            }
         }
     }
 }
@@ -620,6 +648,8 @@ private fun SettingsScreen(activity: FragmentActivity, client: VaultClient, onBa
 
         Text("Security", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         OutlinedButton(onClick = { changing = true }, Modifier.fillMaxWidth().testTag("change-password")) { Text("Change master password") }
+        KdfAndKeyPanel(client)
+        TravelPanel(client)
         Text("Your identity words: ${runCatching { client.myIdentityWords().joinToString(" ") }.getOrDefault("")}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("identity-words"))
         Text("Server: ${client.api.baseUrl}", style = MaterialTheme.typography.bodySmall)
         Text("Promptly for Android ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
@@ -638,6 +668,102 @@ private fun SettingsScreen(activity: FragmentActivity, client: VaultClient, onBa
             },
             dismissButton = { TextButton(onClick = { forget = false }) { Text("Keep") } },
         )
+    }
+}
+
+/** Stronger stretching, and a new Secret Key. Both need the master password. */
+@Composable
+private fun KdfAndKeyPanel(client: VaultClient) {
+    var password by remember { mutableStateOf("") }
+    var open by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var fresh by remember { mutableStateOf<String?>(null) }
+    var typed by remember { mutableStateOf("") }
+    var kdf by remember { mutableStateOf(client.currentKdf()) }
+    val below = remember(kdf) { client.kdfBelowMinimum() }
+    val scope = rememberCoroutineScope()
+    fun run(block: () -> Unit) {
+        busy = true
+        error = null
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { block() } }
+            busy = false
+            r.onSuccess {
+                kdf = client.currentKdf()
+                password = ""
+                Biometrics.forget()
+            }.onFailure { error = if (it is ApiError && it.status == 401) "That master password isn't right." else errorText(it) }
+        }
+    }
+    Text("Key stretching: ${kdf?.let { "${it.m / 1024} MiB, ${it.t} passes" } ?: "unknown"}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("kdf-now"))
+    if (below) ErrorCard("Your server now asks for stronger settings than this vault uses.")
+    fresh?.let { key ->
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Your new Secret Key", fontWeight = FontWeight.SemiBold)
+                Text("Your old recovery kit no longer works, and your other devices have to join again. Write this down, away from this phone.")
+                Text(key, fontFamily = FontFamily.Monospace, modifier = Modifier.testTag("rotated-key"))
+                OutlinedTextField(typed, { typed = it }, label = { Text("To prove you saved it, type its last group") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("rotated-last-group"))
+                Button(onClick = {
+                    fresh = null
+                    scope.launch { withContext(Dispatchers.IO) { runCatching { client.api.confirmKit() } } }
+                }, enabled = typed.trim().equals(SecretKeys.lastGroup(key), true), modifier = Modifier.testTag("rotated-done")) { Text("I've saved it") }
+            }
+        }
+    }
+    if (!open) {
+        OutlinedButton(onClick = { open = true }, Modifier.fillMaxWidth().testTag("key-settings")) { Text("Stronger stretching or a new Secret Key") }
+    } else {
+        SecretField(password, { password = it }, "Master password", "keys-password")
+        error?.let { ErrorCard(it) }
+        OutlinedButton(onClick = {
+            val pw = password
+            val now = client.currentKdf()
+            run { client.upgradeKdf(pw, now?.copy(m = minOf(now.m * 2, 1048576))) }
+        }, enabled = !busy && password.isNotEmpty(), modifier = Modifier.fillMaxWidth().testTag("kdf-upgrade")) { Text("Use more memory") }
+        OutlinedButton(onClick = {
+            val pw = password
+            run { fresh = SecretKeys.encode(client.rotateSecretKey(pw)) }
+        }, enabled = !busy && password.isNotEmpty(), modifier = Modifier.fillMaxWidth().testTag("rotate-key")) { Text("Make a new Secret Key") }
+        if (busy) CircularProgressIndicator()
+    }
+}
+
+/** Travel mode: take chosen vaults off this phone until you're back. */
+@Composable
+private fun TravelPanel(client: VaultClient) {
+    val version by Pw.version.collectAsState()
+    var vaults by remember { mutableStateOf<List<VaultClient.VaultInfo>>(emptyList()) }
+    var password by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(version) { vaults = withContext(Dispatchers.IO) { runCatching { client.vaults() }.getOrDefault(emptyList()) } }
+    val hidden = vaults.filter { it.vault.hidden }
+    fun run(block: () -> Unit) {
+        busy = true
+        error = null
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { block() } }.onFailure { error = errorText(it) }
+            busy = false
+            password = ""
+        }
+    }
+    Text("Travel mode", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    Text("Takes a vault off this phone until you turn it back on. It stays on your server. It helps at a border as long as you don't unlock it while someone's watching.", style = MaterialTheme.typography.bodySmall)
+    error?.let { ErrorCard(it) }
+    if (hidden.isEmpty()) {
+        for (v in vaults) {
+            OutlinedButton(onClick = { run { client.setTravelHidden(listOf(v.vault.id)) } }, enabled = !busy, modifier = Modifier.fillMaxWidth().testTag("travel-hide-${v.displayName}")) { Text("Hide ${v.displayName} from this phone") }
+        }
+    } else {
+        Text("Hidden: ${hidden.joinToString(", ") { it.displayName }}", Modifier.testTag("travel-hidden"))
+        SecretField(password, { password = it }, "Master password", "travel-password")
+        Button(onClick = {
+            val pw = password
+            run { client.endTravel(pw) }
+        }, enabled = !busy && password.isNotEmpty(), modifier = Modifier.testTag("travel-end")) { Text("I'm back: bring them back") }
     }
 }
 

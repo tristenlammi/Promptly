@@ -21,14 +21,40 @@ import java.util.concurrent.TimeUnit
 
 class ApiError(val status: Int, val detail: String?, val retryAfter: Int? = null) : Exception(detail ?: "Request failed ($status)")
 
-/** The server couldn't be reached at all, which clients treat as "work offline". */
-class OfflineError : Exception("The server can't be reached")
+/** The server couldn't be reached at all, which clients treat as "work offline". The
+ *  cause says why, for the log: a refused connection isn't a timeout. */
+class OfflineError(cause: Throwable? = null) : Exception("The server can't be reached", cause)
 
-data class Prelogin(val userId: String, val exists: Boolean, val accountId: String?, val kdf: KdfParams?, val salt: String?, val preview: Boolean, val enabled: Boolean, val serverTime: String)
+data class Prelogin(val userId: String, val exists: Boolean, val accountId: String?, val kdf: KdfParams?, val salt: String?, val preview: Boolean, val enabled: Boolean, val serverTime: String, val minKdf: KdfParams? = null, val wrappedKeyset: String? = null)
+
+data class MemberOut(val userId: String, val username: String, val role: String, val grantedBy: String?, val generation: Int, val accepted: Boolean, val x25519Pub: String?, val ed25519Pub: String?)
+
+data class Person(val id: String, val username: String, val hasVault: Boolean)
+
+data class AttachmentOut(val id: String, val itemId: String, val chunkCount: Int, val sizeBytes: Long, val complete: Boolean, val received: List<Int>)
+
+data class SendOut(val id: String, val expiresAt: String, val viewsLeft: Int?, val hasPassword: Boolean, val disabled: Boolean, val createdAt: String)
+
+data class EmergencyOut(
+    val id: String,
+    val grantorId: String,
+    val grantor: String,
+    val granteeId: String,
+    val grantee: String,
+    val waitDays: Int,
+    val state: String,
+    val requestedAt: String?,
+    val opensAt: String?,
+    val wrapped: Map<String, Int>,
+    val openedVaults: List<String>,
+)
+
+/** Bare counts of what's waiting. They take only a device token, for a locked phone. */
+data class Alerts(val deviceRequests: Int, val invitations: Int, val emergency: Int)
 
 data class SessionOut(val token: String, val accountId: String, val wrappedKeyset: String, val kdf: KdfParams, val salt: String, val x25519Pub: String, val ed25519Pub: String, val kitConfirmed: Boolean, val kitCheckedAt: String?, val userId: String)
 
-data class VaultOut(val id: String, val kind: String, val revision: Int, val generation: Int, val name: String, val role: String, val wrappedKey: String, val signature: String, val grantedBy: String?, val memberGeneration: Int, val accepted: Boolean, val memberCount: Int)
+data class VaultOut(val id: String, val kind: String, val revision: Int, val generation: Int, val name: String, val role: String, val wrappedKey: String, val signature: String, val grantedBy: String?, val memberGeneration: Int, val accepted: Boolean, val memberCount: Int, val rotateNeeded: Boolean = false)
 
 data class ItemOut(val id: String, val revision: Int, val blob: String?, val deleted: Boolean, val purged: Boolean, val updatedAt: String)
 
@@ -63,28 +89,51 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
 
     private val noStore = CacheControl.Builder().noStore().noCache().build()
 
-    private fun call(method: String, path: String, body: JsonElement? = null, public: Boolean = false, authHeader: String? = null, sessionOverride: String? = null): String? {
+    /** What the last network failure was: a method, a path with no query, and a status or an
+     *  exception's name. Never a body. So "the server can't be reached" can be explained. */
+    @Volatile
+    var lastProblem: String? = null
+
+    private fun call(method: String, path: String, body: JsonElement? = null, public: Boolean = false, authHeader: String? = null, sessionOverride: String? = null, raw: ByteArray? = null, noSession: Boolean = false): String? {
         val b = Request.Builder().url("$baseUrl/api/passwords$path").cacheControl(noStore)
-        val reqBody = body?.toString()?.toRequestBody(JSON)
+        val reqBody = raw?.toRequestBody(OCTET) ?: body?.toString()?.toRequestBody(JSON)
         b.method(method, reqBody ?: if (method == "POST" || method == "PUT" || method == "PATCH") ByteArray(0).toRequestBody(null) else null)
         if (!public) {
             val header = authHeader ?: auth()?.let { "Bearer $it" }
             if (header != null) b.header("Authorization", header)
-            (sessionOverride ?: session)?.let { b.header("X-Vault-Session", it) }
+            if (!noSession) (sessionOverride ?: session)?.let { b.header("X-Vault-Session", it) }
         }
         val res = try {
             http.newCall(b.build()).execute()
         } catch (e: IOException) {
-            throw OfflineError()
+            lastProblem = "${method} ${path.substringBefore('?')}: ${e.javaClass.simpleName}"
+            throw OfflineError(e)
         }
         res.use { r ->
             if (r.code == 204) return null
             val text = r.body.string()
             if (!r.isSuccessful) {
                 val detail = runCatching { ((Json.parseToJsonElement(text) as JsonObject)["detail"] as? JsonPrimitive)?.content }.getOrNull() ?: r.message
+                if (r.code >= 500 || r.code == 429) lastProblem = "${method} ${path.substringBefore('?')}: HTTP ${r.code}"
                 throw ApiError(r.code, detail, r.header("Retry-After")?.toIntOrNull()?.takeIf { it > 0 })
             }
             return text
+        }
+    }
+
+    private fun callBytes(method: String, path: String): ByteArray {
+        val b = Request.Builder().url("$baseUrl/api/passwords$path").cacheControl(noStore).method(method, null)
+        auth()?.let { b.header("Authorization", "Bearer $it") }
+        session?.let { b.header("X-Vault-Session", it) }
+        val res = try {
+            http.newCall(b.build()).execute()
+        } catch (e: IOException) {
+            lastProblem = "$method $path: ${e.javaClass.simpleName}"
+            throw OfflineError(e)
+        }
+        res.use { r ->
+            if (!r.isSuccessful) throw ApiError(r.code, r.message)
+            return r.body.bytes()
         }
     }
 
@@ -93,7 +142,7 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
 
     fun prelogin(): Prelogin {
         val o = obj(call("GET", "/account"))
-        return Prelogin(o.str("user_id")!!, o.bool("exists") ?: false, o.str("account_id"), parseKdf(o["kdf"]), o.str("salt"), o.bool("preview") ?: true, o.bool("enabled") ?: true, o.str("server_time") ?: "")
+        return Prelogin(o.str("user_id")!!, o.bool("exists") ?: false, o.str("account_id"), parseKdf(o["kdf"]), o.str("salt"), o.bool("preview") ?: true, o.bool("enabled") ?: true, o.str("server_time") ?: "", parseKdf(o["min_kdf"]), o.str("wrapped_keyset"))
     }
 
     private fun session(o: JsonObject) = SessionOut(
@@ -111,11 +160,93 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
         val o = it as JsonObject
         VaultOut(
             o.str("id")!!, o.str("kind")!!, o.int("revision") ?: 0, o.int("generation") ?: 1, o.str("name") ?: "", o.str("role") ?: "view",
-            o.str("wrapped_key") ?: "", o.str("signature") ?: "", o.str("granted_by"), o.int("member_generation") ?: 1, o.bool("accepted") ?: false, o.int("member_count") ?: 1,
+            o.str("wrapped_key") ?: "", o.str("signature") ?: "", o.str("granted_by"), o.int("member_generation") ?: 1, o.bool("accepted") ?: false, o.int("member_count") ?: 1, o.bool("rotate_needed") ?: false,
         )
     }
 
     fun acceptVault(id: String) { call("POST", "/vaults/$id/accept") }
+    fun leaveVault(id: String) { call("POST", "/vaults/$id/leave") }
+    fun deleteVault(id: String) { call("DELETE", "/vaults/$id") }
+    fun createVault(id: String, name: String, grant: JsonObject) { call("POST", "/vaults", buildJsonObject { put("id", id); put("name", name); put("grant", grant) }) }
+
+    fun members(id: String): List<MemberOut> = arr(call("GET", "/vaults/$id/members")).map {
+        val o = it as JsonObject
+        MemberOut(o.str("user_id")!!, o.str("username") ?: "", o.str("role") ?: "view", o.str("granted_by"), o.int("generation") ?: 1, o.bool("accepted") ?: false, o.str("x25519_pub"), o.str("ed25519_pub"))
+    }
+
+    fun addMember(id: String, userId: String, role: String, grant: JsonObject) {
+        call("POST", "/vaults/$id/members", buildJsonObject { put("user_id", userId); put("role", role); put("grant", grant) })
+    }
+
+    /** Cuts them off at once. The key change that should follow is a separate step. */
+    fun removeMember(id: String, userId: String) { call("DELETE", "/vaults/$id/members/$userId") }
+
+    fun setRole(id: String, userId: String, role: String) { call("PATCH", "/vaults/$id/members/$userId", buildJsonObject { put("role", role) }) }
+    fun rotate(id: String, body: JsonObject) { call("POST", "/vaults/$id/rotate", body) }
+
+    fun people(): List<Person> = arr(call("GET", "/people")).map {
+        val o = it as JsonObject
+        Person(o.str("id")!!, o.str("username") ?: "", o.bool("has_vault") ?: false)
+    }
+
+    private fun attachment(o: JsonObject) = AttachmentOut(
+        o.str("id")!!, o.str("item_id") ?: "", o.int("chunk_count") ?: 0, (o["size_bytes"] as? JsonPrimitive)?.content?.toLongOrNull() ?: 0L, o.bool("complete") ?: false,
+        (o["received"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content?.toIntOrNull() } ?: emptyList(),
+    )
+
+    fun attachmentStart(vaultId: String, id: String, itemId: String, chunks: Int): AttachmentOut =
+        attachment(obj(call("POST", "/vaults/$vaultId/attachments", buildJsonObject { put("id", id); put("item_id", itemId); put("chunk_count", chunks) })))
+
+    fun attachmentPut(vaultId: String, id: String, index: Int, blob: ByteArray) {
+        call("PUT", "/vaults/$vaultId/attachments/$id/chunks/$index", raw = blob)
+    }
+
+    fun attachmentFinish(vaultId: String, id: String) { call("POST", "/vaults/$vaultId/attachments/$id/finish") }
+    fun attachmentGet(vaultId: String, id: String, index: Int): ByteArray = callBytes("GET", "/vaults/$vaultId/attachments/$id/chunks/$index")
+    fun attachmentDelete(vaultId: String, id: String) { call("DELETE", "/vaults/$vaultId/attachments/$id") }
+
+    /** Five hash characters out, padded replies back: k-anonymity through the server. */
+    fun breachRange(prefix: String): String = call("POST", "/breach/range", buildJsonObject { put("prefix", prefix) }) ?: ""
+
+    /** Which sites support 2FA: for the Security check's advice. */
+    fun twoFaDirectory(): Map<String, String?> {
+        val o = (obj(call("GET", "/directory"))["twofa"] as? JsonObject) ?: return emptyMap()
+        return o.mapValues { (_, v) -> (v as? JsonObject)?.str("documentation") }
+    }
+
+    fun putHealth(weak: Int, reused: Int, breached: Int, old: Int) {
+        call("PUT", "/health", buildJsonObject { put("weak", weak); put("reused", reused); put("breached", breached); put("old", old) })
+    }
+
+    fun noteExport() { call("POST", "/activity/export") }
+
+    fun createSend(body: JsonObject) { call("POST", "/sends", body) }
+
+    fun sends(): List<SendOut> = arr(call("GET", "/sends")).map {
+        val o = it as JsonObject
+        SendOut(o.str("id")!!, o.str("expires_at") ?: "", o.int("views_left"), o.bool("has_password") ?: false, o.bool("disabled") ?: false, o.str("created_at") ?: "")
+    }
+
+    fun deleteSend(id: String) { call("DELETE", "/sends/$id") }
+
+    private fun emergency(o: JsonObject) = EmergencyOut(
+        o.str("id")!!, o.str("grantor_id")!!, o.str("grantor") ?: "", o.str("grantee_id")!!, o.str("grantee") ?: "", o.int("wait_days") ?: 0, o.str("state") ?: "",
+        o.str("requested_at"), o.str("opens_at"),
+        (o["wrapped"] as? JsonObject)?.mapValues { (it.value as? JsonPrimitive)?.content?.toIntOrNull() ?: 0 } ?: emptyMap(),
+        (o["opened_vaults"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.content } ?: emptyList(),
+    )
+
+    fun emergencyList(): List<EmergencyOut> = arr(call("GET", "/emergency")).map { emergency(it as JsonObject) }
+    fun emergencyInvite(granteeId: String, waitDays: Int) { call("POST", "/emergency", buildJsonObject { put("grantee_id", granteeId); put("wait_days", waitDays) }) }
+    fun emergencyAct(id: String, action: String): EmergencyOut = emergency(obj(call("POST", "/emergency/$id/$action")))
+    fun emergencyWrap(id: String, grants: JsonArray) { call("PUT", "/emergency/$id/wrap", buildJsonObject { put("grants", grants) }) }
+    fun emergencyDelete(id: String) { call("DELETE", "/emergency/$id") }
+
+    /** A device token is enough, with no vault session: bare counts for a locked phone. */
+    fun alerts(): Alerts {
+        val o = obj(call("GET", "/alerts", noSession = true))
+        return Alerts(o.int("device_requests") ?: 0, o.int("invitations") ?: 0, o.int("emergency") ?: 0)
+    }
 
     fun changes(id: String, since: Int, limit: Int = 500): ChangesOut {
         val o = obj(call("GET", "/vaults/$id/changes?since=$since&limit=$limit"))
@@ -129,7 +260,8 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
         )
     }
 
-    fun writeItems(id: String, items: List<ItemWrite>): BatchOut {
+    /** `generation`: the vault key these were encrypted under. 409 means a newer one exists. */
+    fun writeItems(id: String, items: List<ItemWrite>, generation: Int? = null): BatchOut {
         val body = buildJsonObject {
             put("items", buildJsonArray {
                 for (w in items) add(buildJsonObject {
@@ -140,6 +272,7 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
                     put("purge", w.purge)
                 })
             })
+            if (generation != null) put("generation", generation)
         }
         val o = obj(call("POST", "/vaults/$id/items", body))
         return BatchOut(
@@ -222,6 +355,7 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
 
     companion object {
         private val JSON = "application/json".toMediaType()
+        private val OCTET = "application/octet-stream".toMediaType()
         fun basic(username: String, password: String) = Credentials.basic(username, password)
     }
 }

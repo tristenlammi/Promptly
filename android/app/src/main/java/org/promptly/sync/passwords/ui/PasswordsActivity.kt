@@ -58,6 +58,7 @@ import org.promptly.sync.passwords.core.ApiError
 import org.promptly.sync.passwords.core.DeviceJoin
 import org.promptly.sync.passwords.core.SecretKeys
 import org.promptly.sync.passwords.core.VaultApi
+import org.promptly.sync.passwords.core.calibrateKdf
 import org.promptly.sync.passwords.core.parseKitQr
 
 class PasswordsActivity : FragmentActivity() {
@@ -354,6 +355,8 @@ private fun ApproveJoin(onDone: () -> Unit) {
         join?.let {
             Text("On a device that's already unlocked, open Passwords, then Devices. This request's code:")
             Text(it.code, style = MaterialTheme.typography.titleLarge, fontFamily = FontFamily.Monospace, modifier = Modifier.testTag("request-code"))
+            Text("Or scan this from there: Devices, then Scan a new device's QR.")
+            QrImage(it.qrText, Modifier.testTag("request-qr"))
         }
         words?.let {
             Card(Modifier.fillMaxWidth()) {
@@ -417,6 +420,7 @@ private fun CreateVault(activity: FragmentActivity, onDone: () -> Unit) {
         Text("I understand")
     }
     SecretField(password, { password = it }, "Master password", "new-master")
+    if (password.isNotEmpty()) StrengthLine(password)
     SecretField(again, { again = it }, "Type it again", "new-master-again")
     error?.let { ErrorCard(it) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -424,7 +428,7 @@ private fun CreateVault(activity: FragmentActivity, onDone: () -> Unit) {
             busy = true
             error = null
             scope.launch {
-                val r = withContext(Dispatchers.IO) { runCatching { client.setup(password) } }
+                val r = withContext(Dispatchers.IO) { runCatching { client.setup(password, calibrateKdf()) } }
                 busy = false
                 r.onSuccess {
                     Pw.touch()

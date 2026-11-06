@@ -22,7 +22,8 @@ try {
         }
     }
 
-    # A throwaway user's bearer token for the one test that talks to the real stack.
+    # Throwaway users on the stack: the one whose app password connects the phone, and
+    # others for the sharing and rotation stories. Fresh on each run.
     $seed = @'
 import asyncio, secrets, uuid
 import app.db_models
@@ -32,19 +33,25 @@ from app.auth.app_passwords import AppPassword, new_token, token_hash, hint
 from app.database import SessionLocal
 async def main():
     async with SessionLocal() as db:
-        s = uuid.uuid4().hex[:10]
-        u = User(email=f"pw-android-{s}@example.com", username=f"pwandroid{s}", password_hash=hash_password("An-" + secrets.token_urlsafe(16) + "!9"), role="user")
-        db.add(u)
-        await db.flush()
-        app = new_token()
-        db.add(AppPassword(user_id=u.id, name="phone", token_hash=token_hash(app), hint=hint(app), scopes=["upload", "dav:read", "maps", "assistant"]))
-        print("PW_TOKEN " + create_access_token(u.id, token_version=u.token_version) + " " + u.username + " " + app)
+        for tag in ["a", "b", "c", "d"]:
+            s = uuid.uuid4().hex[:10]
+            u = User(email=f"pw-android-{tag}-{s}@example.com", username=f"000pwandroid{tag}{s}", password_hash=hash_password("An-" + secrets.token_urlsafe(16) + "!9"), role="user")
+            db.add(u)
+            await db.flush()
+            app = new_token()
+            db.add(AppPassword(user_id=u.id, name="phone", token_hash=token_hash(app), hint=hint(app), scopes=["upload", "dav:read", "maps", "assistant"]))
+            print("PW_TOKEN " + tag + " " + create_access_token(u.id, token_version=u.token_version) + " " + u.username + " " + app)
         await db.commit()
 asyncio.run(main())
 '@
-    $parts = (($seed | docker exec -i PromptlyPw-Backend python - | Select-String '^PW_TOKEN ').Line -split ' ')
+    $users = @{}
+    $seed | docker exec -i PromptlyPw-Backend python - 2>$null | Select-String '^PW_TOKEN ' | ForEach-Object { $p = $_.Line -split ' '; $users[$p[1]] = $p }
 
-    $cmd = @("-s", $Serial, "shell", "am", "instrument", "-w", "-e", "pwBearer", $parts[1], "-e", "pwAppUser", $parts[2], "-e", "pwAppPassword", $parts[3], "-e", "pwServer", "http://10.0.2.2:8092")
+    $cmd = @("-s", $Serial, "shell", "am", "instrument", "-w",
+        "-e", "pwBearer", $users["a"][2], "-e", "pwBearer2", $users["b"][2], "-e", "pwUser2", $users["b"][3],
+        "-e", "pwBearer3", $users["c"][2],
+        "-e", "pwBearer4", $users["d"][2], "-e", "pwAppUser", $users["d"][3], "-e", "pwAppPassword", $users["d"][4],
+        "-e", "pwServer", "http://10.0.2.2:8092")
     if ($Class) { $cmd += @("-e", "class", "org.promptly.sync.passwords.$Class") }
     else { $cmd += @("-e", "package", "org.promptly.sync.passwords") }
     $cmd += "org.promptly.app.test/androidx.test.runner.AndroidJUnitRunner"

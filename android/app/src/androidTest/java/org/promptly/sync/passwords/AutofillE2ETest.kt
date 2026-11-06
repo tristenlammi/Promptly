@@ -95,7 +95,7 @@ class AutofillE2ETest {
         login("Expired login", "ana-expired", "pw-Expired-1!", appLink())
         launch(TEST_APP, "LoginActivity")
         tapField("username")
-        val chip = waitFor(By.text("Expired login"))
+        val chip = Harness.suggestion(By.text("Expired login"))
         assertTrue(Pw.unlocked)
         Pw.prefs.autoLockMinutes = 0
         try {
@@ -129,7 +129,7 @@ class AutofillE2ETest {
         launch(TEST_APP, "LoginActivity")
         tapField("username")
         // "Search Passwords" is always there, the login isn't.
-        waitFor(By.textContains("Search Passwords"))
+        Harness.waitSuggestion("Search Passwords")
         assertFalse(has(By.text("Impostor target"), 800))
     }
 
@@ -137,7 +137,7 @@ class AutofillE2ETest {
         login("Site login", "ana-site", "pw-Site-1!", LoginUrl("https://some-other-site.example"))
         launch(TEST_APP, "LoginActivity")
         tapField("username")
-        waitFor(By.textContains("Search Passwords")).click()
+        Harness.suggestion(By.textContains("Search Passwords")).click()
         tap("pick-Site login")
         // No link and no asset links (the site isn't reachable): it says so, and asks.
         waitFor(By.res("confirm-remember"), 25_000).click()
@@ -150,14 +150,14 @@ class AutofillE2ETest {
         Harness.rebuildIndex()
         launch(TEST_APP, "LoginActivity")
         tapField("username")
-        waitFor(By.text("Site login"))
+        Harness.suggestion(By.text("Site login"))
     }
 
     @Test fun anUntrustedAppsWebViewCantClaimASite() {
         login("Bank", "ana-bank", "pw-Bank-1!", LoginUrl("https://pwtest.promptly.test"))
         launch(TEST_APP, "WebActivity")
         Harness.tapWebField("user")
-        waitFor(By.textContains("Search Passwords"), 20_000)
+        Harness.waitSuggestion("Search Passwords")
         assertFalse("Offered a site login to an app that only claims the site", has(By.text("Bank"), 800))
     }
 
@@ -166,7 +166,7 @@ class AutofillE2ETest {
         login("Other site", "ana-other", "pw-Other-1!", LoginUrl("https://elsewhere.example"))
         launch(TEST_BROWSER, "WebActivity")
         Harness.tapWebField("user")
-        waitFor(By.text("Browser site"), 20_000).click()
+        Harness.suggestion(By.text("Browser site")).click()
         waitText("web-user-echo", "ana-browser", 15_000)
         waitText("web-pass-echo", "pw-Browser-1!")
         assertFalse(has(By.text("Other site"), 500))
@@ -176,7 +176,7 @@ class AutofillE2ETest {
         login("Real bank", "ana-real", "pw-Real-1!", LoginUrl("https://bank.example.com"))
         launch(TEST_BROWSER, "WebActivity", "--es url https://bank.example.com.evil.test/login")
         Harness.tapWebField("user")
-        waitFor(By.textContains("Search Passwords"), 20_000)
+        Harness.suggestion(By.textContains("Search Passwords"))
         assertFalse(has(By.text("Real bank"), 800))
     }
 
@@ -205,7 +205,7 @@ class AutofillE2ETest {
         login("Inline login", "ana-inline", "pw-Inline-1!", appLink())
         launch(TEST_APP, "LoginActivity")
         tapField("username")
-        val chip = waitFor(By.text("Inline login"))
+        val chip = Harness.suggestion(By.text("Inline login"))
         Harness.note("Suggestion drawn by ${chip.applicationPackage}; inline presentations in the last answer: ${PromptlyAutofillService.lastInlineCount}")
         assertTrue("Gboard on this image supports inline, so the answer should carry them", PromptlyAutofillService.lastInlineCount > 0)
         chip.click()
