@@ -23,6 +23,15 @@ data class FieldNode<T>(
     val webScheme: String? = null,
     val options: List<String>? = null,
     val isTextInput: Boolean = true,
+    /** Where it is in its window, after scrolling. Null where nothing says. */
+    val left: Int? = null,
+    val top: Int? = null,
+    val windowWidth: Int = 0,
+    val windowHeight: Int = 0,
+    /** Multiplied down from its ancestors. */
+    val alpha: Float = 1f,
+    /** The window and HTML form it belongs to. A card or an identity fills only in the focused one. */
+    val section: String? = null,
 )
 
 class ParsedForm<T> {
@@ -112,10 +121,22 @@ object FormParser {
         n.idEntry, n.hint, n.htmlAttrs["name"], n.htmlAttrs["id"], n.htmlAttrs["placeholder"], n.htmlAttrs["aria-label"], n.htmlAttrs["label"],
     ).joinToString(" ")
 
-    /** Never hidden or off-screen fields: plan 6.6. */
+    /** Off to the side, or further above or below than scrolling a form would put it. Pages hide
+     *  fields at left:-9999px to collect what a manager fills without being seen. */
+    private fun offScreen(n: FieldNode<*>): Boolean {
+        val x = n.left ?: return false
+        val y = n.top ?: return false
+        val w = n.windowWidth
+        val h = n.windowHeight
+        if (w <= 0 || h <= 0) return false
+        return x + n.width <= 0 || x >= w || y + n.height <= -h || y >= 2 * h
+    }
+
+    /** Never hidden, see-through or off-screen fields: plan 6.6. */
     private fun fillable(n: FieldNode<*>): Boolean {
         if (!n.visible || !n.isTextInput) return false
         if (n.width <= 1 || n.height <= 1) return false
+        if (n.alpha <= 0.05f || offScreen(n)) return false
         val tag = n.htmlTag?.lowercase()
         val type = n.htmlAttrs["type"]?.lowercase()
         if (tag != null && tag != "input" && tag != "select" && tag != "textarea") return false
@@ -129,6 +150,11 @@ object FormParser {
         return out.filter { it.isNotEmpty() && it != "on" && it != "off" }
     }
 
+    private val SECTION_TOKEN = Regex("^(section-.+|shipping|billing)$")
+
+    /** The form, and autocomplete's own `section-*`, `shipping` and `billing`. */
+    private fun sectionOf(n: FieldNode<*>): String = n.section.orEmpty() + "/" + tokens(n).filter { SECTION_TOKEN.matches(it) }.joinToString(",")
+
     fun <T> parse(nodes: List<FieldNode<T>>): ParsedForm<T> {
         val form = ParsedForm<T>()
         val focused = nodes.firstOrNull { it.focused }
@@ -141,6 +167,9 @@ object FormParser {
         // Only fields in the same frame as the one being filled.
         val inFrame = nodes.filter { fillable(it) && (domain == null || it.webDomain == null || it.webDomain == domain) }
         if (focused != null && inFrame.any { it.id == focused.id }) form.focused = focused.id
+
+        val focusedSection = focused?.let { sectionOf(it) }
+        fun inSection(n: FieldNode<T>) = focusedSection == null || sectionOf(n) == focusedSection
 
         val plain = ArrayList<FieldNode<T>>()
         var firstPassword = -1
@@ -156,15 +185,15 @@ object FormParser {
                 tok.any { it in NEW_PASSWORD_HINTS } -> form.newPasswords += n.id
                 tok.any { it in PASSWORD_HINTS } -> form.passwords += n.id
                 tok.any { it in USERNAME_HINTS } -> form.usernames += n.id
-                card != null -> form.cards.putIfAbsent(card, n.id)
-                tok.firstNotNullOfOrNull { IDENTITY_HINTS[it] } != null -> form.identity.putIfAbsent(tok.firstNotNullOf { IDENTITY_HINTS[it] }, n.id)
+                card != null -> if (inSection(n)) form.cards.putIfAbsent(card, n.id)
+                tok.firstNotNullOfOrNull { IDENTITY_HINTS[it] } != null -> if (inSection(n)) form.identity.putIfAbsent(tok.firstNotNullOf { IDENTITY_HINTS[it] }, n.id)
                 type == "password" || isPasswordInput(n.inputType) -> if (NEW_WORDS.containsMatchIn(words)) form.newPasswords += n.id else form.passwords += n.id
                 OTP_WORDS.containsMatchIn(words) && !PASSWORD_WORDS.containsMatchIn(words) -> form.otps += n.id
                 PASSWORD_WORDS.containsMatchIn(words) && !NOT_LOGIN.containsMatchIn(words) -> form.passwords += n.id
                 type == "email" || isEmailInput(n.inputType) -> form.usernames += n.id
                 USER_WORDS.containsMatchIn(words) && !NOT_LOGIN.containsMatchIn(words) -> form.usernames += n.id
                 IDENTITY_WORDS.firstOrNull { it.second.containsMatchIn(words) } != null ->
-                    form.identity.putIfAbsent(IDENTITY_WORDS.first { it.second.containsMatchIn(words) }.first, n.id)
+                    if (inSection(n)) form.identity.putIfAbsent(IDENTITY_WORDS.first { it.second.containsMatchIn(words) }.first, n.id)
                 else -> plain += n
             }
             if (firstPassword < 0 && (n.id in form.passwords || n.id in form.newPasswords)) firstPassword = index

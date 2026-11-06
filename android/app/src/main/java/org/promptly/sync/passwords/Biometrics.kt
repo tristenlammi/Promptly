@@ -1,7 +1,7 @@
 // Biometric unlock (plan 3.5). The derived unlock and auth keys are sealed under a
 // Keystore key that needs a strong biometric for every use and dies when a new biometric
 // is enrolled. The master password never reaches the Keystore. Reprompt and passkey
-// signing use `confirm`, a plain prompt tied to the same key.
+// signing use `confirm`, which has to open what's sealed under that same key.
 package org.promptly.sync.passwords
 
 import android.content.Context
@@ -94,7 +94,9 @@ object Biometrics {
     }
 
     /** Hands the wrapped keys back to `onDone`. The caller passes them to the client. */
-    fun unlock(activity: FragmentActivity, onDone: (Result<ByteArray>) -> Unit) {
+    fun unlock(activity: FragmentActivity, onDone: (Result<ByteArray>) -> Unit) = open(activity, "Unlock Passwords", null, onDone)
+
+    private fun open(activity: FragmentActivity, title: String, subtitle: String?, onDone: (Result<ByteArray>) -> Unit) {
         val blob = Pw.prefs.biometricBlob
         val iv = Pw.prefs.biometricIv
         val key = runCatching { store().getKey(ALIAS, null) as? SecretKey }.getOrNull()
@@ -114,14 +116,17 @@ object Biometrics {
             onDone(Result.failure(e))
             return
         }
-        prompt(activity, "Unlock Passwords", null, BiometricPrompt.CryptoObject(cipher)) { r ->
+        prompt(activity, title, subtitle, BiometricPrompt.CryptoObject(cipher)) { r ->
             onDone(r.mapCatching { res -> (res.cryptoObject?.cipher ?: error("No cipher")).doFinal(fromB64u(blob)) })
         }
     }
 
-    /** A yes/no from a strong biometric, for "reprompt" items and before signing a passkey. */
+    /** For "reprompt" items and before signing a passkey. Not just a callback: the answer has
+     *  to open what's sealed under the key, which dies when a new fingerprint's enrolled. */
     fun confirm(activity: FragmentActivity, title: String, subtitle: String?, onDone: (Result<Unit>) -> Unit) {
-        prompt(activity, title, subtitle, null) { r -> onDone(r.map { }) }
+        open(activity, title, subtitle) { r ->
+            onDone(r.map { it.fill(0) })
+        }
     }
 
     fun forget() {

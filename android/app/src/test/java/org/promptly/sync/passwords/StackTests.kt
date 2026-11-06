@@ -676,6 +676,14 @@ class StackTests {
         }
     }
 
+    @Test fun matchVectorsPassInTheWebClientToo() {
+        // The list itself is checked against Match.kt in ReviewFixesTest.
+        withState { file ->
+            writeState(file, buildJsonObject { })
+            runTs("match", file)
+        }
+    }
+
     @Test fun theTrustBookAndSeqCrossWithTheTypeScriptClient() {
         need()
         val alice = makeUser("bka")

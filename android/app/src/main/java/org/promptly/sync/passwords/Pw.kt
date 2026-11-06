@@ -14,6 +14,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Log
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import org.promptly.sync.passwords.autofill.AssetLinks
 import org.promptly.sync.passwords.autofill.AutofillIndex
 import org.promptly.sync.passwords.core.Argon2Engine
 import org.promptly.sync.passwords.core.BouncyCastleArgon2
@@ -376,6 +378,10 @@ object Pw {
         c.onChange = {
             val ctx = appContext
             if (ctx != null && c.unlocked) AutofillIndex.rebuild(ctx, c)
+            if (!c.unlocked) {
+                AutofillIndex.forgetMemory()
+                AssetLinks.forgetMemory()
+            }
             unlockedFlow.value = c.unlocked
             version.value = version.value + 1
         }
@@ -424,7 +430,7 @@ object Pw {
     /** Record use, restart the idle timer, and watch for the screen going off. */
     fun touch() {
         if (!unlocked) return
-        lastUse = System.currentTimeMillis()
+        lastUse = SystemClock.elapsedRealtime()
         scheduleLock()
         watchScreen()
     }
@@ -432,7 +438,8 @@ object Pw {
     private fun expired(): Boolean {
         val mins = prefs.autoLockMinutes
         if (mins < 0) return false
-        return System.currentTimeMillis() - lastUse >= mins * 60_000L
+        // Not the wall clock, which anyone can set back. This one counts deep sleep too.
+        return SystemClock.elapsedRealtime() - lastUse >= mins * 60_000L
     }
 
     private fun scheduleLock() {
@@ -447,9 +454,16 @@ object Pw {
         if (unlocked && expired()) lock("expired")
     }
 
-    /** The app left the foreground. With "immediately", that's the end of the session. */
-    fun onBackgrounded() {
-        if (unlocked && prefs.autoLockMinutes == 0) lock("background")
+    /** The app, or a fill it opened for another app, left the foreground. With "immediately",
+     *  that's the end of the session. `graceMs` leaves time for a next step that's on its way. */
+    fun onBackgrounded(graceMs: Long = 0) {
+        if (!unlocked || prefs.autoLockMinutes != 0) return
+        if (graceMs <= 0) {
+            lock("background")
+        } else {
+            main.removeCallbacks(lockRunnable)
+            main.postDelayed(lockRunnable, graceMs)
+        }
     }
 
     fun lock(why: String = "user") {

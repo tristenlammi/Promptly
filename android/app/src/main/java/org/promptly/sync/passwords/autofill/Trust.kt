@@ -10,10 +10,13 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.promptly.sync.passwords.DebugHooks
+import org.promptly.sync.passwords.DeviceSeal
 import org.promptly.sync.passwords.Pw
+import org.promptly.sync.passwords.core.LoginUrl
 import org.promptly.sync.passwords.core.Match
 import org.promptly.sync.passwords.core.b64u
 import org.promptly.sync.passwords.core.fromHex
@@ -38,6 +41,11 @@ fun appOrigin(certB64u: String) = "android:apk-key-hash:$certB64u"
 object TrustedBrowsers {
     private val NOT_BROWSERS = setOf("com.google.android.gms", "com.fido.fido2client", "com.oplus.credential", "com.citrix.Receiver")
 
+    /** Debug and internal builds on the published list. Nobody's phone should be trusting these. */
+    private val INTERNAL_BUILD = Regex("debug|\\.local$|internal", RegexOption.IGNORE_CASE)
+
+    private fun listed(pkg: String) = !INTERNAL_BUILD.containsMatchIn(pkg)
+
     @Volatile
     private var parsed: Map<String, Set<String>>? = null
 
@@ -50,6 +58,7 @@ object TrustedBrowsers {
         for (a in apps) {
             val info = (a as JsonObject)["info"] as? JsonObject ?: continue
             val pkg = info.str("package_name") ?: continue
+            if (!listed(pkg)) continue
             for (s in (info["signatures"] as? JsonArray) ?: continue) {
                 val sig = s as? JsonObject ?: continue
                 if (sig.str("build") != "release") continue
@@ -66,6 +75,7 @@ object TrustedBrowsers {
         val apps = (root["apps"] as JsonArray).mapNotNull { a ->
             val o = a as JsonObject
             val info = o["info"] as? JsonObject ?: return@mapNotNull null
+            if (!listed(info.str("package_name") ?: "")) return@mapNotNull null
             val sigs = (info["signatures"] as? JsonArray)?.filter { (it as? JsonObject)?.str("build") == "release" } ?: emptyList()
             if (sigs.isEmpty()) null else JsonObject(o + ("info" to JsonObject(info + ("signatures" to JsonArray(sigs)))))
         }
@@ -94,18 +104,84 @@ object TrustedBrowsers {
 
 /** What the page or app is, once we've decided what to believe. */
 sealed class FillTarget {
-    data class Web(val domain: String, val scheme: String, val pkg: String) : FillTarget() {
+    /** `domain` keeps a port if whoever asked gave one. Android's own `webDomain` doesn't, so on
+     *  most fills the port isn't known, and only logins saved with no port match. `schemeKnown`
+     *  is false if nothing said whether this page is secure, which then gets a warning. */
+    data class Web(val domain: String, val scheme: String, val pkg: String, val schemeKnown: Boolean = true) : FillTarget() {
         val url: String get() = "$scheme://$domain/"
+        val host: String get() = url.toHttpUrlOrNull()?.host ?: domain.substringBefore(':')
     }
 
     data class App(val pkg: String, val cert: String?, val claimedDomain: String?) : FillTarget()
+}
+
+/** An app's own WebView can show anyone's page. A login linked to the app isn't for that page
+ *  unless it's saved for it, however much the app is trusted (AutoSpill). */
+fun spillsTo(target: FillTarget.App, urls: List<LoginUrl>): Boolean {
+    val claimed = target.claimedDomain?.takeIf { it.isNotEmpty() } ?: return false
+    return urls.none { Match.matchUrl(it, "https://$claimed/") != null }
+}
+
+/** The answers from sites' asset links, kept sealed, since which sites you asked about says
+ *  which accounts you have. A "yes" or "no" lasts a week; after a day it's asked again in the
+ *  background. Past the week it's as if it was never asked, so a passkey needs the site to
+ *  answer again. Only a 200 or a 404 changes it: an outage leaves what's known alone. */
+class AssetLinkCache(private val now: () -> Long, private val load: () -> String?, private val save: (String) -> Unit) {
+    private class Entry(val yes: Boolean, val at: Long)
+
+    private var loaded = false
+    private val entries = HashMap<String, Entry>()
+
+    private fun key(pkg: String, cert: String, domain: String) = "$pkg|$cert|$domain"
+
+    private fun ensure() {
+        if (loaded) return
+        loaded = true
+        val o = runCatching { load()?.let { Json.parseToJsonElement(it) as JsonObject } }.getOrNull() ?: return
+        for ((k, v) in o) {
+            val s = (v as? JsonPrimitive)?.content ?: continue
+            entries[k] = Entry(s.startsWith("1"), s.substringAfter('|').toLongOrNull() ?: continue)
+        }
+    }
+
+    @Synchronized
+    fun get(pkg: String, cert: String, domain: String): Boolean? {
+        ensure()
+        val e = entries[key(pkg, cert, domain)] ?: return null
+        return if (now() - e.at > TTL_MS) null else e.yes
+    }
+
+    @Synchronized
+    fun needsAsking(pkg: String, cert: String, domain: String): Boolean {
+        ensure()
+        val e = entries[key(pkg, cert, domain)] ?: return true
+        return now() - e.at > REFRESH_MS
+    }
+
+    @Synchronized
+    fun put(pkg: String, cert: String, domain: String, yes: Boolean) {
+        ensure()
+        entries[key(pkg, cert, domain)] = Entry(yes, now())
+        save(JsonObject(entries.mapValues { (_, e) -> JsonPrimitive("${if (e.yes) 1 else 0}|${e.at}") }).toString())
+    }
+
+    /** Out of memory, for a locked vault. It reads back from the sealed copy when it's needed. */
+    @Synchronized
+    fun forgetMemory() {
+        entries.clear()
+        loaded = false
+    }
+
+    companion object {
+        const val TTL_MS = 7L * 24 * 3600 * 1000
+        const val REFRESH_MS = 24L * 3600 * 1000
+    }
 }
 
 /** Digital Asset Links: does this site say this app may use its credentials? */
 object AssetLinks {
     private const val RELATION = "delegate_permission/common.get_login_creds"
     private const val MAX_BYTES = 1024 * 1024
-    private const val TTL_MS = 7L * 24 * 3600 * 1000
 
     private val http: OkHttpClient by lazy {
         OkHttpClient.Builder().connectTimeout(4, TimeUnit.SECONDS).readTimeout(5, TimeUnit.SECONDS).followRedirects(false).followSslRedirects(false).build()
@@ -131,35 +207,52 @@ object AssetLinks {
 
     fun urlFor(domain: String): String = DebugHooks.assetLinksBase[domain]?.let { "$it/.well-known/assetlinks.json" } ?: "https://$domain/.well-known/assetlinks.json"
 
-    private fun fetch(domain: String): String? = runCatching {
+    /** What the site said: null if it didn't say anything we can go on. A 404 is an answer: the
+     *  site has no such file, so it names nobody. */
+    fun answer(status: Int, body: String?, pkg: String, cert: String): Boolean? = when (status) {
+        200 -> body != null && allows(body, pkg, cert)
+        404 -> false
+        else -> null
+    }
+
+    private fun fetch(domain: String, pkg: String, cert: String): Boolean? = runCatching {
         http.newCall(Request.Builder().url(urlFor(domain)).header("Accept", "application/json").build()).execute().use { r ->
-            if (!r.isSuccessful) return null
+            if (r.code != 200) return@use answer(r.code, null, pkg, cert)
             val source = r.body.source()
             source.request(MAX_BYTES + 1L)
-            if (source.buffer.size > MAX_BYTES) return null
-            source.buffer.readUtf8()
+            if (source.buffer.size > MAX_BYTES) return@use null
+            answer(200, source.buffer.readUtf8(), pkg, cert)
         }
     }.getOrNull()
 
-    private fun key(pkg: String, cert: String, domain: String) = "dal|$pkg|$cert|$domain"
+    private const val SEALED = "dal_sealed"
+
+    private val store: AssetLinkCache by lazy {
+        val prefs = Pw.prefs.prefs
+        AssetLinkCache(
+            { System.currentTimeMillis() },
+            {
+                // What older builds left in the clear goes.
+                val old = prefs.all.keys.filter { it.startsWith("dal|") }
+                if (old.isNotEmpty()) prefs.edit().apply { old.forEach { remove(it) } }.apply()
+                prefs.getString(SEALED, null)?.let { DeviceSeal.open(it) }?.let { String(it) }
+            },
+            { text -> runCatching { prefs.edit().putString(SEALED, DeviceSeal.seal(text.toByteArray())).apply() } },
+        )
+    }
 
     /** The cached answer: true, false, or null for "never asked or too old". */
-    fun cached(pkg: String, cert: String, domain: String): Boolean? {
-        val v = Pw.prefs.prefs.getString(key(pkg, cert, domain), null) ?: return null
-        val at = v.substringAfter('|').toLongOrNull() ?: return null
-        val yes = v.startsWith("1")
-        // A "yes" stays until it's checked again; a "no" is asked again after a week.
-        if (!yes && System.currentTimeMillis() - at > TTL_MS) return null
+    fun cached(pkg: String, cert: String, domain: String): Boolean? = store.get(pkg, cert, domain)
+
+    /** Asks the site. Blocking; never on the autofill answer's path. Null if there's no answer
+     *  from the site and none recent enough here, which a passkey treats as a no. */
+    fun check(pkg: String, cert: String, domain: String): Boolean? {
+        val yes = fetch(domain, pkg, cert) ?: return cached(pkg, cert, domain)
+        store.put(pkg, cert, domain, yes)
         return yes
     }
 
-    /** Asks the site. Blocking; never on the autofill answer's path. Null if unreachable. */
-    fun check(pkg: String, cert: String, domain: String): Boolean? {
-        val text = fetch(domain) ?: return cached(pkg, cert, domain)
-        val yes = allows(text, pkg, cert)
-        Pw.prefs.prefs.edit().putString(key(pkg, cert, domain), "${if (yes) 1 else 0}|${System.currentTimeMillis()}").apply()
-        return yes
-    }
+    fun forgetMemory() = store.forgetMemory()
 
     /** Sites worth asking about for an app we don't recognise: its reversed package name,
      *  plus vault domains whose name appears in the package. Never more than five. */
@@ -175,7 +268,7 @@ object AssetLinks {
     }
 
     fun refreshInBackground(pkg: String, cert: String, vaultDomains: Set<String>) {
-        val todo = candidates(pkg, vaultDomains).filter { cached(pkg, cert, it) == null }
+        val todo = candidates(pkg, vaultDomains).filter { store.needsAsking(pkg, cert, it) }
         if (todo.isEmpty()) return
         Thread {
             for (d in todo) runCatching { check(pkg, cert, d) }

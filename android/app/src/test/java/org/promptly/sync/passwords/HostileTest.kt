@@ -88,6 +88,11 @@ private class HostileServer(val userId: String = ALICE) {
     var approvedPayload: String? = null
     var hideVault: String? = null
     var refuseNextWrite = false
+    var omitWrapped = false
+    var sessionKdf: JsonObject? = null
+    var sessionWrapped: String? = null
+    var preKdf: JsonObject? = null
+    var pollPayload: ((String) -> String)? = null
 
     private fun str(o: JsonObject, k: String) = (o[k] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content
 
@@ -95,8 +100,8 @@ private class HostileServer(val userId: String = ALICE) {
         val a = account!!
         put("token", "t")
         put("account_id", sessionAccountId ?: str(a, "account_id"))
-        put("wrapped_keyset", str(a, "wrapped_keyset"))
-        put("kdf", a["kdf"]!!)
+        put("wrapped_keyset", sessionWrapped ?: str(a, "wrapped_keyset"))
+        put("kdf", sessionKdf ?: a["kdf"]!!)
         put("salt", str(a, "salt"))
         put("x25519_pub", str(a, "x25519_pub"))
         put("ed25519_pub", str(a, "ed25519_pub"))
@@ -166,8 +171,8 @@ private class HostileServer(val userId: String = ALICE) {
                 put("user_id", userId)
                 put("exists", a != null)
                 put("account_id", a?.let { str(it, "account_id") })
-                put("wrapped_keyset", a?.let { str(it, "wrapped_keyset") })
-                put("kdf", a?.get("kdf") ?: JsonNull)
+                put("wrapped_keyset", if (omitWrapped) null else a?.let { str(it, "wrapped_keyset") })
+                put("kdf", preKdf ?: a?.get("kdf") ?: JsonNull)
                 put("salt", a?.let { str(it, "salt") })
                 put("min_kdf", buildJsonObject { put("alg", "argon2id"); put("m", 65536); put("t", 3); put("p", 1) })
                 put("preview", false)
@@ -316,6 +321,11 @@ private class HostileServer(val userId: String = ALICE) {
                 200 to buildJsonObject { put("id", "req-1"); put("code", "ABC"); put("poll_secret", "p") }
             }
             method == "GET" && path == "/device-requests" -> 200 to JsonArray(requests)
+            parts[0] == "device-requests" && parts.getOrNull(2) == "poll" -> 200 to buildJsonObject {
+                put("status", "approved")
+                put("approver_pub", b64u(randomBytes(32)))
+                put("payload", pollPayload!!(str(requests.last(), "device_pub")!!))
+            }
             parts[0] == "device-requests" && parts.getOrNull(2) == "approver" -> 204 to null
             parts[0] == "device-requests" && parts.getOrNull(2) == "approve" -> {
                 approvedPayload = str(b!!, "payload")
@@ -369,6 +379,116 @@ class HostileTest {
 
     private fun opened(p: Persona, vaultId: String, memberId: String, grant: JsonObject) =
         openSealed(p.x, fromB64u(grant["wrapped_key"]!!.jsonPrimitive.content), aad(vaultId, "", "vault_key:$memberId"))
+
+    // ---- From the independent review: each of these worked before ----
+
+    private fun kdfJson(m: Int) = buildJsonObject { put("alg", "argon2id"); put("m", m); put("t", 3); put("p", 1) }
+
+    private fun payloadFor(secret: ByteArray, account: String?): (String) -> String = { pub ->
+        val plain = buildJsonObject {
+            put("secret_key", b64u(secret))
+            if (account != null) put("account_id", account)
+        }.toString()
+        b64u(sealTo(fromB64u(pub), plain.toByteArray(), aad("req-1", "", "device_payload")))
+    }
+
+    @Test fun leavingOutTheKeysetGetsNoAuthKey() {
+        val w = fresh()
+        val attackerKey = randomBytes(16)
+        val before = w.s.authKeys.size
+        w.s.omitWrapped = true
+        val phone = VaultClient(w.s.api, MemoryStore(), MemoryKeeper())
+        val e = assertThrows(IllegalStateException::class.java) { phone.unlock(MASTER, attackerKey) }
+        assertTrue(e.message, e.message!!.contains("nothing was sent"))
+        assertEquals(before, w.s.authKeys.size)
+        // The same for a device that already has its copy.
+        w.c.lock()
+        assertThrows(IllegalStateException::class.java) { w.c.unlock(MASTER) }
+        assertEquals(before, w.s.authKeys.size)
+    }
+
+    @Test fun aSecretKeyChosenByTheServerIsNotSavedOrUsed() {
+        val w = fresh()
+        val attackerKey = randomBytes(16)
+        val before = w.s.authKeys.size
+        for (account in listOf("whatever", null)) {
+            w.s.pollPayload = payloadFor(attackerKey, account)
+            val phone = VaultClient(w.s.api, MemoryStore(), MemoryKeeper())
+            val st = phone.requestDevice("new phone").poll()
+            assertEquals(org.promptly.sync.passwords.core.DeviceJoin.REFUSED, st.status)
+            assertFalse(phone.keeper.has())
+        }
+        // With the right account named it's kept, and the keyset check is what stops it.
+        w.s.pollPayload = payloadFor(attackerKey, w.store.getAccount()!!.accountId)
+        val phone = VaultClient(w.s.api, MemoryStore(), MemoryKeeper())
+        assertEquals("approved", phone.requestDevice("new phone").poll().status)
+        assertThrows(WrongPasswordError::class.java) { phone.unlock(MASTER) }
+        assertEquals(before, w.s.authKeys.size)
+    }
+
+    @Test fun aSessionCantLowerTheKeySettings() {
+        val s = HostileServer()
+        val store = MemoryStore()
+        val c = VaultClient(s.api, store, MemoryKeeper())
+        c.setup(MASTER, KdfParams("argon2id", 131072, 3, 1))
+        c.lock()
+        s.sessionKdf = kdfJson(65536)
+        val e = assertThrows(IllegalStateException::class.java) { c.unlock(MASTER) }
+        assertTrue(e.message, e.message!!.contains("weaker"))
+        assertEquals(131072, store.getAccount()!!.kdf.m)
+        // So prelogin can't follow it down either, keyset or no keyset.
+        s.sessionKdf = null
+        s.preKdf = kdfJson(65536)
+        s.omitWrapped = true
+        val before = s.authKeys.size
+        assertThrows(IllegalStateException::class.java) { c.unlock(MASTER) }
+        assertEquals(before, s.authKeys.size)
+    }
+
+    @Test fun whatAKeySessionStoresIsWhatRealOpened() {
+        val s = HostileServer()
+        val store = MemoryStore()
+        val c = VaultClient(s.api, store, MemoryKeeper())
+        c.setup(MASTER)
+        val good = store.getAccount()!!
+        c.lock()
+        // A keyset that doesn't open isn't stored.
+        s.sessionWrapped = b64u(randomBytes(200))
+        assertThrows(WrongPasswordError::class.java) { c.unlock(MASTER) }
+        assertEquals(good.wrappedKeyset, store.getAccount()!!.wrappedKeyset)
+        s.sessionWrapped = null
+        // Settings stronger than what the key was really made with aren't believed.
+        s.sessionKdf = kdfJson(1048576)
+        c.unlock(MASTER)
+        assertEquals(good.kdf.m, store.getAccount()!!.kdf.m)
+        s.sessionKdf = null
+        // Re-proving has no password to check a new keyset with, so what's here stays.
+        s.sessionWrapped = b64u(randomBytes(200))
+        c.reprove()
+        assertEquals(good.wrappedKeyset, store.getAccount()!!.wrappedKeyset)
+        c.lock()
+        assertThrows(WrongPasswordError::class.java) { c.unlock(MASTER) }
+        assertEquals(good.wrappedKeyset, store.getAccount()!!.wrappedKeyset)
+    }
+
+    @Test fun anImportedTrustBookMakesNobodyAContact() {
+        val w = fresh()
+        val evil = Persona("mallory")
+        w.s.userKeys[malloryId] = evil
+        w.s.emergency = mutableListOf(w.s.emergencyRow("e1", malloryId, "accepted"))
+        val file = """{"format":"promptly-pw-plain","version":1,"items":[
+          {"v":1,"kind":"login","title":"Team wifi portal","username":"guest","password":"guest"},
+          {"v":1,"kind":"trust","title":"trust-book","trustBook":{"people":{"$malloryId":{"x25519":"${evil.xPub}","ed25519":"${evil.ePub}","firstSeen":"2026-01-01T00:00:00.000Z"}},"accepted":[],"contacts":["$malloryId"],"generations":{}}}
+        ]}"""
+        val res = org.promptly.sync.passwords.core.Importers.importFile("team.json", file.toByteArray())
+        val vault = w.c.personalVaultId()
+        for (it in res.items) w.c.saveNew(vault, it.body)
+        w.c.sync()
+        w.c.sync()
+        assertEquals(emptyList<JsonObject>(), w.s.wrapped)
+        assertNull(w.c.trustEntries()[malloryId])
+        assertEquals(1, w.c.allItems(includeSystem = true).count { it.body.kind == "trust" })
+    }
 
     // ---- The attacks in hostile.test.ts ----
 

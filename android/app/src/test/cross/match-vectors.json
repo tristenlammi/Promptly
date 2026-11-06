@@ -1,0 +1,83 @@
+{
+  "_": "Which saved address matches which page. Read by Match.kt's tests and, through cross.test.ts, by match.ts, so the two can't drift. Taken from match.test.ts, with the review's attacks added.",
+  "match": [
+    { "url": "https://accounts.example.com/x", "page": "https://www.example.com/login", "want": "base" },
+    { "url": "https://example.com", "page": "https://example.com/login", "want": "host" },
+    { "url": "example.com", "page": "https://shop.example.com", "want": "base" },
+    { "url": "https://a.example.co.uk", "page": "https://b.example.co.uk", "want": "base" },
+    { "url": "https://alice.github.io", "page": "https://bob.github.io", "want": null },
+    { "url": "https://example.co.uk", "page": "https://other.co.uk", "want": null },
+    { "url": "https://a.herokuapp.com", "page": "https://b.herokuapp.com", "want": null },
+
+    { "url": "https://a.example.com", "mode": "host", "page": "https://b.example.com", "want": null },
+    { "url": "https://a.example.com", "mode": "host", "page": "https://a.example.com/x", "want": "host" },
+    { "url": "https://a.example.com/login", "mode": "exact", "page": "https://a.example.com/login/", "want": "exact" },
+    { "url": "https://a.example.com/login", "mode": "exact", "page": "https://a.example.com/other", "want": null },
+    { "url": "https://a.example.com/app", "mode": "prefix", "page": "https://a.example.com/app/x", "want": "prefix" },
+    { "url": "^https://a\\.example\\.com/", "mode": "regex", "page": "https://a.example.com/q", "want": "regex" },
+    { "url": "https://a.example.com", "mode": "never", "page": "https://a.example.com", "want": null },
+    { "url": "(", "mode": "regex", "page": "https://x.example", "want": null },
+    { "url": "(a+)+$", "mode": "regex", "page": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", "want": null },
+
+    { "url": "https://bank.example.com", "page": "https://bank.example.com.evil.test/", "want": null },
+    { "url": "https://bank.example.com", "page": "https://evil.test/bank.example.com", "want": null },
+    { "url": "https://bank.example.com", "page": "https://bank.example.com@evil.test/", "want": null },
+    { "url": "https://bank.example.com", "page": "https://user:pw@bank.example.com/", "want": null },
+    { "url": "https://bank.example.com", "page": "https://evil.test/?u=https://bank.example.com", "want": null },
+    { "url": "https://bank.example.com", "page": "data:text/html,<input>", "want": null },
+    { "url": "https://bank.example.com", "page": "about:blank", "want": null },
+    { "url": "https://bank.example.com", "page": "blob:https://bank.example.com/1", "want": null },
+    { "url": "https://bank.example.com", "page": "file:///c:/bank.example.com/x.html", "want": null },
+    { "url": "https://bank.example.com", "page": "javascript:alert(1)", "want": null },
+    { "url": "https://bank.example.com", "page": "chrome-extension://abc/page.html", "want": null },
+    { "url": "https://bank.example.com", "page": "not a url", "want": null },
+    { "url": "https://apple.com", "page": "https://xn--pple-43d.com/", "want": null },
+
+    { "url": "http://192.168.1.10", "page": "http://192.168.1.11/", "want": null },
+    { "url": "http://192.168.1.10", "page": "http://192.168.1.10/admin", "want": "host" },
+    { "url": "http://router", "page": "http://router/", "want": "host" },
+    { "url": "http://other", "page": "http://router/", "want": null },
+    { "url": "https://nas.example.com:5001", "page": "https://nas.example.com:8443/", "want": null },
+    { "url": "https://nas.example.com:5001", "page": "https://nas.example.com:5001/x", "want": "host" },
+
+    { "url": "https://bank.example", "page": "https://bank.example/", "want": "host" },
+    { "url": "https://bank.example:443", "page": "https://bank.example/", "want": "host" },
+    { "url": "bank.example", "page": "https://bank.example/", "want": "host" },
+    { "url": "https://bank.example", "page": "https://bank.example:8443/", "want": null },
+    { "url": "https://bank.example", "page": "http://bank.example:8080/", "want": null },
+    { "url": "https://bank.example", "page": "https://app.bank.example:8443/", "want": null },
+    { "url": "https://bank.example", "page": "https://app.bank.example/", "want": "base" },
+    { "url": "https://bank.example:8443", "page": "https://app.bank.example:8443/", "want": "base" },
+    { "url": "https://bank.example", "page": "http://bank.example/", "want": "host" },
+
+    { "url": "https://bank.example", "mode": "prefix", "page": "https://bank.example/login", "want": "prefix" },
+    { "url": "https://bank.example", "mode": "prefix", "page": "https://bank.example.evil.test/login", "want": null },
+    { "url": "https://bank.example", "mode": "prefix", "page": "https://bank.example@evil.test/login", "want": null },
+    { "url": "https://bank.example/app", "mode": "prefix", "page": "https://bank.example/other", "want": null },
+    { "url": "https://bank.example", "mode": "prefix", "page": "http://bank.example/login", "want": null },
+
+    { "url": "^https://bank\\.example/", "mode": "regex", "page": "https://bank.example/login", "want": "regex" },
+    { "url": "https://bank\\.example", "mode": "regex", "page": "https://bank.example/login", "want": "regex" },
+    { "url": "bank\\.example", "mode": "regex", "page": "https://evil.test/?bank.example", "want": null },
+    { "url": "https://bank\\.example", "mode": "regex", "page": "https://bank.example.evil.test/", "want": null },
+    { "url": "bank\\.example", "mode": "regex", "page": "https://bank.example.evil.test/", "want": null },
+    { "url": "bank\\.example.*", "mode": "regex", "page": "https://evil.test/?bank.example-and-plenty-more-text", "want": null },
+
+    { "url": "https://themeforest.net", "page": "https://envato.com/login", "want": "shared" },
+
+    { "url": "android://H==@com.acme.app/", "page": "https://acme.app/", "want": null },
+    { "url": "android://H==@com.acme.app/", "page": "https://com.acme.app/", "want": null },
+    { "url": "androidapp://com.acme.app", "page": "https://acme.app/", "want": null },
+    { "url": "androidapp://com.acme.app", "page": "https://com.acme.app/", "want": null },
+    { "url": "ftp://acme.app", "page": "https://acme.app/", "want": null }
+  ],
+  "host": [
+    { "url": "https://Example.com/x", "want": "example.com" },
+    { "url": "http://example.com", "want": "example.com" },
+    { "url": "example.com", "want": "example.com" },
+    { "url": "android://H==@com.acme.app/", "want": null },
+    { "url": "androidapp://com.acme.app", "want": null },
+    { "url": "ftp://acme.app", "want": null },
+    { "url": "", "want": null }
+  ]
+}

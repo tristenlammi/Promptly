@@ -149,7 +149,14 @@ object AutofillIndex {
         val empty = IndexLookup(emptyList())
         if (!f.exists()) return empty
         val plain = DeviceSeal.open(f.readText()) ?: return empty
-        return runCatching { IndexLookup(decode(String(plain))) }.getOrDefault(empty).also { memory = it }
+        // Read fresh for each request while the vault's locked: nothing stays in memory then.
+        return runCatching { IndexLookup(decode(String(plain))) }.getOrDefault(empty).also { if (Pw.unlocked) memory = it }
+    }
+
+    /** The vault locked: the names and addresses in here shouldn't outlive that. */
+    fun forgetMemory() {
+        memory = null
+        keyCache.clear()
     }
 
     @Synchronized
@@ -170,7 +177,7 @@ object AutofillIndex {
         val hits = ArrayList<Hit>()
         when (target) {
             is FillTarget.Web -> {
-                val host = target.domain.lowercase()
+                val host = target.host.lowercase()
                 val base = Match.baseDomain(host)
                 val keys = LinkedHashSet<String>()
                 keys += host
@@ -191,7 +198,7 @@ object AutofillIndex {
                             savedHttps = u.url.startsWith("https://") || !u.url.contains("://")
                         }
                     }
-                    if (best != null) hits += Hit(e, best.rank, target.scheme == "http" && savedHttps)
+                    if (best != null) hits += Hit(e, best.rank, !target.schemeKnown || (target.scheme == "http" && savedHttps))
                 }
             }
             is FillTarget.App -> {

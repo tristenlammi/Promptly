@@ -75,7 +75,8 @@ class CredentialManagerE2ETest {
         Harness.shell("settings put secure credential_service ${Harness.CREDENTIAL}")
         Harness.shell("settings put secure credential_service_primary ${Harness.CREDENTIAL}")
         // AssetLinks caches per package and site across runs.
-        Pw.prefs.prefs.edit().apply { Pw.prefs.prefs.all.keys.filter { it.startsWith("dal|") }.forEach { remove(it) } }.apply()
+        Pw.prefs.prefs.edit().remove("dal_sealed").commit()
+        org.promptly.sync.passwords.autofill.AssetLinks.forgetMemory()
     }
 
     @After fun tearDown() {
@@ -190,6 +191,17 @@ class CredentialManagerE2ETest {
         v.update(Primitives.sha256(cd))
         assertTrue(v.verify(fromB64u(auth.getValue("signature").jsonPrimitive.content)))
         assertEquals(b64u(utf8("user-1")), auth.getValue("userHandle").jsonPrimitive.content)
+    }
+
+    /** Which sites got asked about says which accounts you have, so it's kept sealed. */
+    @Test fun assetLinkAnswersAreKeptSealed() {
+        serveAssetLinks(assetLinksFor(TEST_APP, Harness.certOf(TEST_APP)))
+        assertEquals(true, org.promptly.sync.passwords.autofill.AssetLinks.check(TEST_APP, Harness.certOf(TEST_APP), "passkey-test.promptly.test"))
+        val text = Pw.prefs.prefs.all.entries.joinToString { "${it.key}=${it.value}" }
+        assertTrue(Pw.prefs.prefs.contains("dal_sealed"))
+        assertFalse(text, text.contains("passkey-test"))
+        org.promptly.sync.passwords.autofill.AssetLinks.forgetMemory()
+        assertEquals(true, org.promptly.sync.passwords.autofill.AssetLinks.cached(TEST_APP, Harness.certOf(TEST_APP), "passkey-test.promptly.test"))
     }
 
     @Test fun refusesAPasskeyWhenTheSiteDoesntListTheApp() {

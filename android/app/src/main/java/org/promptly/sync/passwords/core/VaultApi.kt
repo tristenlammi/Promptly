@@ -85,6 +85,9 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(45, TimeUnit.SECONDS)
         .writeTimeout(45, TimeUnit.SECONDS)
+        // A redirect would carry the device token and the auth key somewhere else.
+        .followRedirects(false)
+        .followSslRedirects(false)
         .build()
 
     private val noStore = CacheControl.Builder().noStore().noCache().build()

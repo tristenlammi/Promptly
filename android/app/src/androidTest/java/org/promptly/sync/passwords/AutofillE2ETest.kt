@@ -161,6 +161,60 @@ class AutofillE2ETest {
         assertFalse("Offered a site login to an app that only claims the site", has(By.text("Bank"), 800))
     }
 
+    /** AutoSpill: a login linked to this app, and its WebView showing someone else's page. */
+    @Test fun aLinkedAppsWebViewAsksBeforeFillingAnotherSite() {
+        login("Linked web", "ana-spill", "pw-Spill-1!", appLink())
+        launch(TEST_APP, "WebActivity")
+        Harness.tapWebField("user")
+        Harness.pick("Linked web")
+        waitFor(By.textContains("showing a page from pwtest.promptly.test"), 20_000)
+        waitFor(By.textContains(TEST_APP))
+        tap("confirm-cancel")
+        Thread.sleep(500)
+        assertEquals("", waitFor(By.desc("web-pass-echo")).text ?: "")
+    }
+
+    @Test fun aLoginSavedForThePageItsWebViewShowsFillsWithoutAsking() {
+        login("Linked and saved", "ana-saved", "pw-Saved-1!", appLink(), LoginUrl("https://pwtest.promptly.test"))
+        launch(TEST_APP, "WebActivity")
+        Harness.tapWebField("user")
+        Harness.pick("Linked and saved")
+        waitText("web-pass-echo", "pw-Saved-1!", 20_000)
+    }
+
+    /** "Lock after: Leaving" with nothing of ours in the foreground. */
+    @Test fun aFillUnlockedWithLeavingSetLocksAfterwards() {
+        login("Leaving login", "ana-leave", "pw-Leave-1!", appLink())
+        Pw.prefs.autoLockMinutes = 0
+        try {
+            client.lock()
+            launch(TEST_APP, "LoginActivity")
+            tapField("username")
+            Harness.pick("Leaving login")
+            Harness.fill("master-password", Harness.MASTER)
+            tap("unlock")
+            waitText("password-echo", "pw-Leave-1!", 30_000)
+            val end = System.currentTimeMillis() + 8_000
+            while (client.unlocked && System.currentTimeMillis() < end) Thread.sleep(200)
+            assertFalse("Still unlocked after the fill", client.unlocked)
+        } finally {
+            Pw.prefs.autoLockMinutes = 15
+        }
+    }
+
+    @Test fun lockingClearsWhatTheIndexHeldInMemory() {
+        login("In memory", "ana-mem", "pw-Mem-1!", appLink())
+        val memory = AutofillIndex::class.java.getDeclaredField("memory").apply { isAccessible = true }
+        assertTrue(memory.get(null) != null)
+        client.lock()
+        val end = System.currentTimeMillis() + 3_000
+        while (memory.get(null) != null && System.currentTimeMillis() < end) Thread.sleep(100)
+        assertEquals(null, memory.get(null))
+        // Answers still come, read fresh from the sealed copy, and nothing stays.
+        assertEquals(1, AutofillIndex.lookup(Harness.ctx).entries.size)
+        assertEquals(null, memory.get(null))
+    }
+
     @Test fun anAllowlistedBrowsersWebDomainIsBelieved() {
         login("Browser site", "ana-browser", "pw-Browser-1!", LoginUrl("https://pwtest.promptly.test"))
         login("Other site", "ana-other", "pw-Other-1!", LoginUrl("https://elsewhere.example"))

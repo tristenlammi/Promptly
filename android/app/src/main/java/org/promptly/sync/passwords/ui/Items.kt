@@ -180,6 +180,7 @@ fun StrengthLine(password: String, inputs: List<String> = emptyList()) {
 private fun SecretRow(label: String, value: String, tag: String) {
     val ctx = LocalContext.current
     var shown by remember { mutableStateOf(false) }
+    SensitiveWhile(shown)
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -194,16 +195,17 @@ private fun SecretRow(label: String, value: String, tag: String) {
 }
 
 @Composable
-private fun PlainRow(label: String, value: String, tag: String) {
+private fun PlainRow(label: String, value: String, tag: String, secretCopy: Boolean = false) {
     val ctx = LocalContext.current
+    SensitiveWhile(secretCopy)
     Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(value, Modifier.weight(1f).testTag(tag))
             TextButton(onClick = {
-                Clip.copyPlain(ctx, label, value)
+                if (secretCopy) Clip.copySecret(ctx, label, value) else Clip.copyPlain(ctx, label, value)
                 toast(ctx, "$label copied")
-            }) { Text("Copy") }
+            }, Modifier.testTag("$tag-copy")) { Text("Copy") }
         }
     }
 }
@@ -221,6 +223,7 @@ fun TotpRow(cfg: TotpConfig, tag: String) {
     val offset = Pw.client()?.serverTimeOffsetMs ?: 0L
     val code = runCatching { Totp.code(cfg, now) }.getOrElse { "invalid" }
     val left = Totp.secondsLeft(cfg, now)
+    SensitiveWhile(true)
     Column(Modifier.fillMaxWidth().clickable {
         Clip.copySecret(ctx, "2FA code", code)
         toast(ctx, "2FA code copied")
@@ -292,11 +295,11 @@ fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String
             if (f.secret) {
                 if (canReveal) SecretRow(f.label, v, "detail-${f.key}")
             } else {
-                PlainRow(f.label, v, "detail-${f.key}")
+                PlainRow(f.label, v, "detail-${f.key}", secretCopy = true)
             }
         }
         for (f in b.customFields) {
-            if (f.type != "hidden") PlainRow(f.name, f.value, "detail-field-${f.name}") else if (canReveal) SecretRow(f.name, f.value, "detail-field-${f.name}")
+            if (f.type != "hidden") PlainRow(f.name, f.value, "detail-field-${f.name}", secretCopy = true) else if (canReveal) SecretRow(f.name, f.value, "detail-field-${f.name}")
         }
         if (b.kind == "wifi" && !b.str("ssid").isNullOrEmpty() && canReveal) {
             TextButton(onClick = { showWifiQr = !showWifiQr }, Modifier.testTag("wifi-qr-toggle")) { Text(if (showWifiQr) "Hide the join QR" else "Show a QR to join this network") }
@@ -310,7 +313,7 @@ fun ItemDetailScreen(activity: FragmentActivity, client: VaultClient, id: String
                 }
             }
         }
-        b.notes?.let { PlainRow("Notes", it, "detail-notes") }
+        b.notes?.let { PlainRow("Notes", it, "detail-notes", secretCopy = true) }
         if (b.tags.isNotEmpty()) PlainRow("Tags", b.tags.joinToString(", "), "detail-tags")
         if (b.kind != "folder") AttachmentsPanel(client, item, canEdit)
         Spacer(Modifier.height(10.dp))
@@ -646,7 +649,7 @@ fun ItemEditorScreen(client: VaultClient, id: String?, kind: String, prefillUrl:
             TextButton(onClick = { urls.add(LoginUrl("")) }, Modifier.testTag("edit-add-url")) { Text("Add a website") }
         }
         if (k == "login" || k == "totp") {
-            OutlinedTextField(totpText, { totpText = it }, label = { Text("2FA secret or otpauth link") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("edit-totp"))
+            VisibleSecretField(totpText, { totpText = it }, "2FA secret or otpauth link", "edit-totp")
             OutlinedButton(onClick = { scanQr(ctx, { totpText = it }, { error = it }) }, Modifier.testTag("edit-scan-totp")) { Text("Scan a 2FA QR") }
         }
         for (f in FIELDS[k] ?: emptyList()) {
@@ -656,6 +659,8 @@ fun ItemEditorScreen(client: VaultClient, id: String?, kind: String, prefillUrl:
                 var show by remember { mutableStateOf(false) }
                 SecretField(v, set, f.label, "edit-${f.key}", visible = show)
                 TextButton(onClick = { show = !show }) { Text(if (show) "Hide" else "Show") }
+            } else if (f.secret) {
+                VisibleSecretField(v, set, f.label, "edit-${f.key}", singleLine = !f.area, minLines = if (f.area) 3 else 1)
             } else {
                 OutlinedTextField(v, set, label = { Text(f.label) }, singleLine = !f.area, minLines = if (f.area) 3 else 1, modifier = Modifier.fillMaxWidth().testTag("edit-${f.key}"))
             }

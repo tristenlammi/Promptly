@@ -159,16 +159,30 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
     }
 
     /** A different account here means someone else signed in, or a server trying to wipe this
-     *  device's trust and unsynced edits. It only counts if the new keyset really opens. */
-    private fun cacheAccount(s: SessionOut, unlockKey: ByteArray? = null, setup: Boolean = false) {
+     *  device's trust and unsynced edits. It only counts if the new keyset really opens. What a
+     *  session says is checked before it's stored: settings only go up, and with the key to hand
+     *  the keyset has to open. `provenKdf` and `provenSalt` are what really made that key. */
+    private fun cacheAccount(session: SessionOut, unlockKey: ByteArray? = null, setup: Boolean = false, provenKdf: KdfParams? = null, provenSalt: String? = null) {
+        var s = session
         val prev = store.getAccount()
-        if (prev != null && prev.accountId != s.accountId && !setup) {
-            if (unlockKey == null) throw IllegalStateException("The server says this is a different account. Lock and unlock again to check.")
-            try {
-                unwrapKeyset(unlockKey, s.accountId, fromB64u(s.wrappedKeyset)).wipe()
-            } catch (e: Exception) {
-                throw WrongPasswordError()
+        if (!setup) {
+            if (prev != null && prev.accountId != s.accountId && unlockKey == null) {
+                throw IllegalStateException("The server says this is a different account. Lock and unlock again to check.")
             }
+            if (prev != null && (s.kdf.m < prev.kdf.m || s.kdf.t < prev.kdf.t)) {
+                throw IllegalStateException("The server sent weaker key settings than this device has seen, so they weren't accepted.")
+            }
+            if (unlockKey != null) {
+                try {
+                    unwrapKeyset(unlockKey, s.accountId, fromB64u(s.wrappedKeyset)).wipe()
+                } catch (e: Exception) {
+                    throw WrongPasswordError()
+                }
+            } else if (prev != null && s.wrappedKeyset != prev.wrappedKeyset) {
+                // Re-proving a session has no password to check a new keyset with. Keep what's here.
+                s = s.copy(wrappedKeyset = prev.wrappedKeyset, salt = prev.salt, kdf = prev.kdf)
+            }
+            if (provenKdf != null && provenSalt != null) s = s.copy(kdf = provenKdf, salt = provenSalt)
         }
         // A different account signed in on this device: don't mix their data.
         if (prev != null && prev.accountId != s.accountId) store.clear()
@@ -206,6 +220,8 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
                 preWrapped = pre.wrappedKeyset
                 preAccount = pre.accountId
             }
+            // Leaving these out would switch off the check below.
+            if (preWrapped == null || preAccount == null) throw IllegalStateException("The server didn't send what's needed to check your keys, so nothing was sent to it.")
         } catch (e: OfflineError) {
             offline = true
         } catch (e: ApiError) {
@@ -218,9 +234,9 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         // Open the keyset here before anything derived from the password goes anywhere. If a
         // server handed this device a Secret Key of its own choosing, what it would get back is
         // something it could guess the master password from, so nothing goes unless this works.
-        if (!offline && preWrapped != null && preAccount != null) {
+        if (!offline) {
             try {
-                unwrapKeyset(raw.unlock, preAccount, fromB64u(preWrapped)).wipe()
+                unwrapKeyset(raw.unlock, preAccount!!, fromB64u(preWrapped!!)).wipe()
             } catch (e: Exception) {
                 throw WrongPasswordError(changedElsewhere)
             }
@@ -229,7 +245,7 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
             try {
                 val session = api.createSession(b64u(raw.auth))
                 api.session = session.token
-                cacheAccount(session, raw.unlock)
+                cacheAccount(session, raw.unlock, provenKdf = kdf, provenSalt = salt)
                 cached = store.getAccount()
             } catch (e: ApiError) {
                 if (e.status == 401) throw WrongPasswordError(changedElsewhere)
@@ -244,7 +260,7 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         } catch (e: java.security.GeneralSecurityException) {
             throw WrongPasswordError()
         }
-        if (secretKeyOverride != null) keeper.save(secretKey)
+        if (secretKeyOverride != null) keeper.save(secretKey) else secretKey.fill(0)
         state = Unlocked(keyset, raw.auth, raw.unlock, account.userId, account.accountId)
         loadLocal()
         if (!offline) sync()
@@ -255,12 +271,18 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
     fun checkPassword(password: String): Boolean {
         val s = need()
         val secretKey = keeper.load() ?: return false
-        val account = store.getAccount() ?: return false
-        return runCatching {
-            val r = deriveRoot(password, secretKey, fromB64u(account.salt), account.kdf)
-            unwrapKeyset(r.unlock, s.accountId, fromB64u(account.wrappedKeyset))
-            true
-        }.getOrDefault(false)
+        try {
+            val account = store.getAccount() ?: return false
+            return runCatching {
+                val r = deriveRoot(password, secretKey, fromB64u(account.salt), account.kdf)
+                unwrapKeyset(r.unlock, s.accountId, fromB64u(account.wrappedKeyset)).wipe()
+                r.unlock.fill(0)
+                r.auth.fill(0)
+                true
+            }.getOrDefault(false)
+        } finally {
+            secretKey.fill(0)
+        }
     }
 
     /** The derived keys for the Keystore's biometric-gated wrap. Never the master password. */
@@ -381,6 +403,7 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         })
         store.putAccount(account.copy(kdf = params, salt = b64u(salt), wrappedKeyset = b64u(wrapped)))
         if (newKey != null) keeper.save(newKey)
+        secretKey.fill(0)
         s.authKey = root.auth
     }
 
@@ -1420,6 +1443,10 @@ class DeviceJoin(
 
     class State(val status: String, val words: List<String>?, val secretKey: ByteArray?)
 
+    companion object {
+        const val REFUSED = "refused"
+    }
+
     /** "pending" until approved. Words appear as soon as the approver has posted its key,
      *  so the person can compare before approving. */
     fun poll(): State {
@@ -1428,7 +1455,11 @@ class DeviceJoin(
         val payload = state.payload
         if (state.status != "approved" || payload == null) return State(state.status, words, null)
         val plain = openSealed(sk, fromB64u(payload), aad(id, "", "device_payload"))
-        val secretKey = fromB64u((Json.parseToJsonElement(fromUtf8(plain)) as JsonObject).str("secret_key")!!)
+        val o = Json.parseToJsonElement(fromUtf8(plain)) as JsonObject
+        val secretKey = fromB64u(o.str("secret_key") ?: return State(REFUSED, words, null))
+        // It has to be this account's. A key from anywhere else is never saved, or used.
+        val account = client.api.prelogin().accountId
+        if (secretKey.size != 16 || account == null || o.str("account_id") != account) return State(REFUSED, words, null)
         client.keeper.save(secretKey)
         return State("approved", words, secretKey)
     }

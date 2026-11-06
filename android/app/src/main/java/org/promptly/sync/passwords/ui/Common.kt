@@ -1,5 +1,9 @@
 package org.promptly.sync.passwords.ui
 
+import android.os.Build
+import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import android.widget.Toast
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +27,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -33,7 +38,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -84,17 +92,80 @@ fun errorText(e: Throwable): String = when (e) {
     else -> e.message ?: "That didn't work."
 }
 
+/** Touches through an overlay don't count, and other apps' overlays go where Android allows. */
+fun hardenWindow(activity: android.app.Activity) {
+    activity.window.decorView.filterTouchesWhenObscured = true
+    if (Build.VERSION.SDK_INT >= 31) activity.window.setHideOverlayWindows(true)
+}
+
+/** Asks the keyboard not to learn from what's typed in here. Compose has no option for it. */
+@OptIn(ExperimentalComposeUiApi::class)
+@Composable
+fun NoKeyboardLearning(content: @Composable () -> Unit) {
+    InterceptPlatformTextInput(
+        interceptor = { request, next ->
+            next.startInputMethod(object : PlatformTextInputMethodRequest {
+                override fun createInputConnection(outAttributes: EditorInfo): InputConnection {
+                    val connection = request.createInputConnection(outAttributes)
+                    outAttributes.imeOptions = outAttributes.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                    return connection
+                }
+            })
+        },
+        content = content,
+    )
+}
+
+private val sensitiveViews = java.util.WeakHashMap<View, Int>()
+
+/** While a secret's on show, only accessibility tools can read this window (Android 14 on). */
+@Composable
+fun SensitiveWhile(shown: Boolean) {
+    if (!shown || Build.VERSION.SDK_INT < 34) return
+    val view = LocalView.current
+    DisposableEffect(view) {
+        sensitiveViews[view] = (sensitiveViews[view] ?: 0) + 1
+        if (Build.VERSION.SDK_INT >= 34) view.setAccessibilityDataSensitive(View.ACCESSIBILITY_DATA_SENSITIVE_YES)
+        onDispose {
+            val left = (sensitiveViews[view] ?: 1) - 1
+            sensitiveViews[view] = left
+            if (left <= 0 && Build.VERSION.SDK_INT >= 34) view.setAccessibilityDataSensitive(View.ACCESSIBILITY_DATA_SENSITIVE_AUTO)
+        }
+    }
+}
+
 @Composable
 fun SecretField(value: String, onChange: (String) -> Unit, label: String, tag: String, modifier: Modifier = Modifier.fillMaxWidth(), visible: Boolean = false) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onChange,
-        label = { Text(label) },
-        singleLine = true,
-        visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
-        modifier = modifier.testTag(tag),
-    )
+    SensitiveWhile(visible)
+    NoKeyboardLearning {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            label = { Text(label) },
+            singleLine = true,
+            visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+            modifier = modifier.testTag(tag),
+        )
+    }
+}
+
+/** A secret that's easier to get right when you can read it: a Secret Key, a 2FA secret, a
+ *  private key. Shown, but typed like a password, and kept out of what the keyboard learns. */
+@Composable
+fun VisibleSecretField(value: String, onChange: (String) -> Unit, label: String, tag: String, modifier: Modifier = Modifier.fillMaxWidth(), singleLine: Boolean = true, minLines: Int = 1) {
+    SensitiveWhile(value.isNotEmpty())
+    NoKeyboardLearning {
+        OutlinedTextField(
+            value = value,
+            onValueChange = onChange,
+            label = { Text(label) },
+            singleLine = singleLine,
+            minLines = minLines,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+            modifier = modifier.testTag(tag),
+        )
+    }
 }
 
 @Composable
@@ -220,10 +291,12 @@ fun ConfirmIdentityPane(activity: FragmentActivity, heading: String, detail: Str
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
-    val canBio = biometricFirst && Biometrics.available(ctx)
+    // Only with the key that dies when a new fingerprint's added. Without it, the password.
+    var canBio by remember { mutableStateOf(biometricFirst && Biometrics.enrolled && Biometrics.available(ctx)) }
 
     fun bio() {
         Biometrics.confirm(activity, heading, detail) { r ->
+            if (r.exceptionOrNull() is Biometrics.Invalidated) canBio = false
             r.onSuccess { onConfirmed() }.onFailure { e -> if (!(e is Biometrics.Failed && e.cancelled)) error = e.message }
         }
     }

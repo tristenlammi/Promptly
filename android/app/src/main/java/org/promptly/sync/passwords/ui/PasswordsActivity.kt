@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -68,6 +67,7 @@ class PasswordsActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        hardenWindow(this)
         enableEdgeToEdge()
         Pw.init(this)
         takeIntent(intent)
@@ -290,7 +290,7 @@ private fun KitJoin(onDone: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     Text("Your recovery kit", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-    OutlinedTextField(key, { key = it }, label = { Text("Secret Key") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("secret-key"))
+    VisibleSecretField(key, { key = it }, "Secret Key", "secret-key")
     OutlinedButton(onClick = {
         scanQr(ctx, { text ->
             val kit = parseKitQr(text)
@@ -344,6 +344,10 @@ private fun ApproveJoin(onDone: () -> Unit) {
             words = s.words
             if (s.status == "denied") {
                 error = "That was turned down on your other device."
+                return@LaunchedEffect
+            }
+            if (s.status == DeviceJoin.REFUSED) {
+                error = "What came back wasn't this account's Secret Key, so it wasn't saved. Don't enter your master password here, and tell your server's admin."
                 return@LaunchedEffect
             }
             if (s.status == "approved" && s.secretKey != null) approved = true
@@ -402,8 +406,9 @@ private fun CreateVault(activity: FragmentActivity, onDone: () -> Unit) {
     if (shown != null) {
         Text("Your Secret Key", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         Text("Keep this somewhere safe, away from this phone, like on paper with your passport. With your master password it opens your vault on a new device. Screenshots are blocked here, so write it down, or get the printable kit from the web vault.")
-        SelectionContainer { Text(shown, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace, modifier = Modifier.testTag("kit-secret-key")) }
-        OutlinedTextField(typed, { typed = it }, label = { Text("To prove you saved it, type its last group") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("kit-last-group"))
+        SensitiveWhile(true)
+        Text(shown, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace, modifier = Modifier.testTag("kit-secret-key"))
+        VisibleSecretField(typed, { typed = it }, "To prove you saved it, type its last group", "kit-last-group")
         error?.let { ErrorCard(it) }
         Button(onClick = {
             scope.launch {

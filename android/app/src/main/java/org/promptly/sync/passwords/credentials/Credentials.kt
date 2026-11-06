@@ -249,7 +249,7 @@ class CredentialActivity : FragmentActivity() {
     private sealed class Step {
         data object Loading : Step()
         data object Unlock : Step()
-        data class Confirm(val title: String, val detail: String, val go: () -> Unit) : Step()
+        data class Confirm(val title: String, val detail: String, val button: String = "Save", val go: () -> Unit) : Step()
         data class Biometric(val title: String, val detail: String, val go: () -> Unit) : Step()
         data class Fail(val text: String) : Step()
     }
@@ -257,9 +257,17 @@ class CredentialActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        org.promptly.sync.passwords.ui.hardenWindow(this)
         Pw.init(this)
         Pw.lockIfExpired()
         setContent { PwTheme { Flow() } }
+    }
+
+    /** An unlock from here has no app of ours in front, so "Lock after: Leaving" counts here too.
+     *  After a bare unlock, the entries it was for are about to be offered: a minute for that. */
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) Pw.onBackgrounded(if (intent.action == PromptlyCredentialProviderService.ACTION_UNLOCK) 60_000L else 0L)
     }
 
     private fun finishGet(json: PublicKeyCredential? = null, password: PasswordCredential? = null) {
@@ -390,15 +398,23 @@ class CredentialActivity : FragmentActivity() {
                     if (request.credentialOptions.none { it is GetPasswordOption }) throw SecurityException("That isn't a password request.")
                     val caller = callerOf(this@CredentialActivity, request.callingAppInfo)
                     val itemId = intent.getStringExtra(PromptlyCredentialProviderService.EXTRA_ITEM)!!
-                    passwordsFor(client, caller).firstOrNull { it.id == itemId } ?: throw SecurityException("That login isn't for this app.")
+                    val found = passwordsFor(client, caller).firstOrNull { it.id == itemId } ?: throw SecurityException("That login isn't for this app.")
+                    // A saved https login asked for by an http page: the same question as autofill.
+                    val insecure = caller.origin?.let { o -> Match.matchItems(listOf(found), "$o/").firstOrNull()?.downgrade } == true
+                    Triple(found, insecure, caller.origin)
                 }
             }
-            r.onSuccess { item ->
+            r.onSuccess { (item, insecure, origin) ->
                 val send = {
                     Pw.markUsed(item.id)
                     finishGet(password = PasswordCredential(item.body.username ?: "", item.body.password ?: ""))
                 }
-                if (item.body.reprompt) step = Step.Biometric("Confirm it's you", item.body.title, send) else send()
+                val checked = { if (item.body.reprompt) step = Step.Biometric("Confirm it's you", item.body.title, send) else send() }
+                if (insecure) {
+                    step = Step.Confirm("Not a secure page", "$origin is http, and this login was saved for https. Anyone on the network could read it.", "Fill anyway") { checked() }
+                } else {
+                    checked()
+                }
             }.onFailure { step = Step.Fail(it.message ?: "That request can't be answered.") }
         }
         Render(step) { failGet(GetCredentialCancellationException()) }
@@ -492,7 +508,7 @@ class CredentialActivity : FragmentActivity() {
             is Step.Confirm -> Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(step.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Text(step.detail)
-                Button(onClick = step.go, Modifier.testTag("credential-confirm")) { Text("Save") }
+                Button(onClick = step.go, Modifier.testTag("credential-confirm")) { Text(step.button) }
                 TextButton(onClick = cancel, Modifier.testTag("credential-cancel")) { Text("Cancel") }
             }
             is Step.Biometric -> ConfirmIdentityPane(this, step.title, step.detail, true, step.go, cancel)

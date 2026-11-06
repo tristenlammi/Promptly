@@ -63,6 +63,9 @@ android {
         }
     }
 
+    // A release build tried on the emulator talks to the test stack on the host. Nothing that ships.
+    if (hasProperty("emulatorAbi")) sourceSets.getByName("release").res.srcDir("src/emulatorRelease/res")
+
     packaging {
         jniLibs {
             // Compressed, for a smaller download from your server.

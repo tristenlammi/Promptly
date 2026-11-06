@@ -32,19 +32,18 @@ public class SetupActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        // Any web page can open this link. It only ever fills the form in: the person sees the
+        // address and taps, or nothing changes.
         Uri link = getIntent().getData();
+        String offered = null;
         if (link != null && "setup".equals(link.getHost())) {
-            String origin = Server.normalise(link.getQueryParameter("server"));
-            if (origin != null) {
-                apps = link.getQueryParameter("apps");
-                done(origin);
-                return;
-            }
+            offered = Server.normalise(link.getQueryParameter("server"));
+            if (offered != null) apps = link.getQueryParameter("apps");
         }
-        buildForm();
+        buildForm(offered);
     }
 
-    private void buildForm() {
+    private void buildForm(String offered) {
         int pad = dp(24);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -53,13 +52,19 @@ public class SetupActivity extends Activity {
         box.setBackgroundColor(Color.parseColor("#1C1917"));
 
         TextView title = new TextView(this);
-        title.setText("Your Promptly address");
+        title.setText(offered != null ? "Use this server?" : "Your Promptly address");
         title.setTextColor(Color.WHITE);
         title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         box.addView(title);
 
         TextView hint = new TextView(this);
-        hint.setText("The web address you open Promptly at, e.g. promptly.example.com");
+        String saved = Server.get(this);
+        if (offered != null) {
+            String now = saved != null && !saved.equals(offered) ? " This phone uses " + saved + " now." : "";
+            hint.setText("A link wants this phone to use " + offered + ". Only continue if that's your own Promptly server, because these apps will send what you do to it." + now);
+        } else {
+            hint.setText("The web address you open Promptly at, e.g. promptly.example.com");
+        }
         hint.setTextColor(Color.parseColor("#A8A29E"));
         hint.setPadding(0, dp(8), 0, dp(16));
         box.addView(hint);
@@ -71,8 +76,8 @@ public class SetupActivity extends Activity {
         address.setTextColor(Color.WHITE);
         address.setHintTextColor(Color.parseColor("#78716C"));
         address.setHint("promptly.example.com");
-        String saved = Server.get(this);
-        if (saved != null) address.setText(saved);
+        if (offered != null) address.setText(offered);
+        else if (saved != null) address.setText(saved);
         address.setOnEditorActionListener((v, actionId, e) -> {
             save();
             return true;
@@ -91,6 +96,13 @@ public class SetupActivity extends Activity {
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = dp(16);
         box.addView(go, lp);
+
+        if (offered != null) {
+            Button no = new Button(this);
+            no.setText("Not my server");
+            no.setOnClickListener(v -> finish());
+            box.addView(no, new LinearLayout.LayoutParams(lp));
+        }
 
         setContentView(box);
     }

@@ -22,12 +22,17 @@ object Match {
 
     private val SCHEME = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://")
 
-    fun hostOf(url: String): String? {
+    /** A saved address, read as the web would. Anything with another scheme (`android://`,
+     *  `androidapp://`, `ftp://`) isn't a website, even when its package looks like a hostname. */
+    private fun parseSaved(url: String): HttpUrl? {
         if (url.isEmpty()) return null
-        val withScheme = if (url.contains("://")) url else "https://$url"
-        val swapped = if (withScheme.startsWith("http://", true) || withScheme.startsWith("https://", true)) withScheme else SCHEME.replace(withScheme, "https://")
-        return swapped.toHttpUrlOrNull()?.host?.lowercase()?.takeIf { it.isNotEmpty() }
+        val hasScheme = SCHEME.containsMatchIn(url)
+        if (hasScheme && !url.startsWith("http://", true) && !url.startsWith("https://", true)) return null
+        val u = (if (hasScheme) url else "https://$url").toHttpUrlOrNull() ?: return null
+        return if (u.username.isNotEmpty() || u.password.isNotEmpty()) null else u
     }
+
+    fun hostOf(url: String): String? = parseSaved(url)?.host?.lowercase()?.takeIf { it.isNotEmpty() }
 
     @Volatile
     private var groups: Map<String, Set<String>> = emptyMap()
@@ -58,14 +63,47 @@ object Match {
     fun sharedWith(domain: String): Set<String> = groups[domain] ?: emptySet()
 
     private const val SAFE_REGEX_LEN = 200
+    private const val SAFE_HREF_LEN = 2048
+    private const val REGEX_MS = 250L
     private val CATASTROPHIC = Regex("(\\([^)]*[+*][^)]*\\))[+*{]")
+    private val QUANTIFIED_CHOICE = Regex("\\([^)]*\\|[^)]*\\)[+*{]")
 
-    private fun regexMatches(pattern: String, url: String): Boolean {
-        if (pattern.length > SAFE_REGEX_LEN || CATASTROPHIC.containsMatchIn(pattern)) return false
-        return runCatching { Regex(pattern).containsMatchIn(url) }.getOrDefault(false)
+    private fun originOf(u: HttpUrl): String = u.newBuilder().encodedPath("/").query(null).fragment(null).build().toString().removeSuffix("/")
+
+    /** A person's own regex, kept away from catastrophic patterns by shape and size, and given
+     *  a time limit since Android's engine can't be stopped from inside. It has to match from
+     *  the start of the address and take in the whole origin, so "example.com" can't match
+     *  example.com.evil.test or evil.test/?example.com. */
+    private fun regexMatches(pattern: String, page: HttpUrl): Boolean {
+        if (pattern.length > SAFE_REGEX_LEN || CATASTROPHIC.containsMatchIn(pattern) || QUANTIFIED_CHOICE.containsMatchIn(pattern)) return false
+        val href = page.toString()
+        if (href.length > SAFE_HREF_LEN) return false
+        val originLength = originOf(page).length
+        val answer = java.util.concurrent.atomic.AtomicBoolean(false)
+        val worker = Thread({
+            val hit = runCatching {
+                val m = Regex(pattern).find(href)
+                m != null && m.range.first == 0 && m.value.length >= originLength
+            }.getOrDefault(false)
+            answer.set(hit)
+        }, "pw-regex")
+        worker.isDaemon = true
+        worker.start()
+        worker.join(REGEX_MS)
+        return !worker.isAlive && answer.get()
+    }
+
+    /** Same origin first: a plain string prefix lets https://bank.example match
+     *  https://bank.example.evil.test. */
+    private fun prefixMatches(saved: String, page: HttpUrl): Boolean {
+        val s = parseSaved(saved) ?: return false
+        return originOf(s) == originOf(page) && page.toString().startsWith(s.toString())
     }
 
     private fun defaultPort(u: HttpUrl) = HttpUrl.defaultPort(u.scheme)
+
+    /** Null for the scheme's default, as `URL.port` is empty for it in match.ts. */
+    private fun portOf(u: HttpUrl): Int? = if (u.port == defaultPort(u)) null else u.port
 
     private fun normalize(u: String): String {
         val x = u.toHttpUrlOrNull() ?: return u
@@ -75,11 +113,11 @@ object Match {
         return "${x.scheme}://${x.host}$port$path$q"
     }
 
+    /** The same port, and no saved port means the scheme's default: another port on the same
+     *  host is often a different program. */
     private fun portsMatch(savedUrl: String, page: HttpUrl): Boolean {
-        val u = (if (savedUrl.contains("://")) savedUrl else "https://$savedUrl").toHttpUrlOrNull() ?: return true
-        // A saved port must match. No saved port means any standard one.
-        if (u.port == defaultPort(u)) return true
-        return u.port == page.port
+        val u = parseSaved(savedUrl) ?: return true
+        return portOf(u) == portOf(page)
     }
 
     enum class Kind(val rank: Int) { EXACT(0), HOST(1), REGEX(2), PREFIX(2), BASE(3), SHARED(4) }
@@ -90,13 +128,14 @@ object Match {
         val mode = saved.match ?: "base"
         when (mode) {
             "never" -> return null
-            "regex" -> return if (regexMatches(saved.url, pageUrl)) Kind.REGEX else null
+            "regex" -> return if (regexMatches(saved.url, page)) Kind.REGEX else null
             "exact" -> return if (normalize(saved.url) == normalize(pageUrl)) Kind.EXACT else null
-            "prefix" -> return if (pageUrl.startsWith(saved.url)) Kind.PREFIX else null
+            "prefix" -> return if (prefixMatches(saved.url, page)) Kind.PREFIX else null
         }
         val savedHost = hostOf(saved.url) ?: return null
         val pageHost = page.host.lowercase()
-        if (savedHost == pageHost) return if (portsMatch(saved.url, page)) Kind.HOST else null
+        if (!portsMatch(saved.url, page)) return null
+        if (savedHost == pageHost) return Kind.HOST
         if (mode == "host") return null
         // IP addresses and single-label hosts only ever match exactly.
         val savedBase = baseDomain(savedHost) ?: return null

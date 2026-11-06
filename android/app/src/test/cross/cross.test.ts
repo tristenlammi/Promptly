@@ -13,6 +13,7 @@ import { dedupe, fromBitwardenJson, fromGenericCsv, importFile } from "../../../
 import { openSend, sendMeta } from "../../../../../frontend/src/passwords/core/send";
 import { strengthOf } from "../../../../../frontend/src/passwords/core/strength";
 import { b64u, fromB64u, utf8 } from "../../../../../frontend/src/passwords/core/bytes";
+import { hostOf, matchUrl } from "../../../../../frontend/src/passwords/core/match";
 import { newBody } from "../../../../../frontend/src/passwords/core/model";
 import { getAssertion, makeCredential } from "../../../../../frontend/src/passwords/core/passkey";
 import { MemoryStore } from "../../../../../frontend/src/passwords/core/store";
@@ -31,8 +32,18 @@ type State = Record<string, any>;
 const read = (): State => JSON.parse(fs.readFileSync(FILE, "utf8"));
 const write = (s: State) => fs.writeFileSync(FILE, JSON.stringify(s, null, 1));
 
+/** Other suites share this stack and its rate limits: wait those out. */
+const patientFetch: typeof fetch = async (input, init) => {
+  for (let tries = 0; ; tries++) {
+    const res = await fetch(input, init);
+    if (res.status !== 429 || tries >= 6) return res;
+    const wait = Number(res.headers.get("Retry-After")) || 30;
+    await new Promise((r) => setTimeout(r, (wait + 1) * 1000));
+  }
+};
+
 function client(token: string) {
-  return new VaultClient(new VaultApi(BASE, () => token), new MemoryStore());
+  return new VaultClient(new VaultApi(BASE, () => token, patientFetch), new MemoryStore());
 }
 
 /** Several suites share this stack, and account creation has a rate limit: wait it out. */
@@ -246,6 +257,22 @@ it(`step ${STEP}`, async () => {
     // Android removed Alice from its vault, with rotation.
     expect((await c.vaults()).some((v) => v.id === state.ktVault)).toBe(false);
     expect(c.allItems().some((i) => i.vaultId === state.ktVault)).toBe(false);
+    return;
+  }
+
+  // One list of which address matches which page, read by both clients.
+  if (STEP === "match") {
+    const v = JSON.parse(fs.readFileSync(new URL("./match-vectors.json", import.meta.url), "utf8")) as { match: any[]; host: any[] };
+    const wrong: string[] = [];
+    for (const c of v.match) {
+      const got = matchUrl({ url: c.url, match: c.mode }, c.page);
+      if (got !== c.want) wrong.push(`${c.url} (${c.mode ?? "base"}) on ${c.page}: ${got}, wanted ${c.want}`);
+    }
+    for (const c of v.host) {
+      const got = hostOf(c.url);
+      if (got !== c.want) wrong.push(`hostOf ${c.url}: ${got}, wanted ${c.want}`);
+    }
+    expect(wrong).toEqual([]);
     return;
   }
 

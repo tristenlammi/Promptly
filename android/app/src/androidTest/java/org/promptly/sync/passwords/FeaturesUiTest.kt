@@ -140,10 +140,18 @@ class FeaturesUiTest {
         open()
         tap("tab-more", 30_000)
         tap("open-transfer")
+        // A wrong master password stops it, and no file picker opens.
+        Harness.scrollTap("export-master")
+        fill("export-master", "not the master password")
         Harness.scrollTap("export-password")
         fill("export-password", "export-file-password")
         Harness.dismissKeyboard()
         fill("export-password-again", "export-file-password")
+        Harness.scrollTap("export-encrypted")
+        waitFor(By.textContains("master password isn't right"), 20_000)
+        assertFalse(has(By.pkg("com.google.android.documentsui"), 500))
+        Harness.scrollTap("export-master")
+        fill("export-master", Harness.MASTER)
         Harness.scrollTap("export-encrypted")
         saveInSystem(name)
         waitFor(By.res("transfer-message"), 20_000)
@@ -153,7 +161,9 @@ class FeaturesUiTest {
         val back = Importers.importFile(name, text.toByteArray(), "export-file-password")
         assertEquals("pw-Export-1!", back.items.single().body.password)
         Harness.shell("rm -f /sdcard/Download/$name")
-        // Plain needs the word typed, in full.
+        // Plain needs the master password too, and the word typed in full.
+        waitFor(By.res("export-master"))
+        fill("export-master", Harness.MASTER)
         Harness.scrollTap("export-typed")
         fill("export-typed", "export")
         Harness.scrollTap("export-plain")
@@ -168,6 +178,85 @@ class FeaturesUiTest {
         val plain = shellCat("/sdcard/Download/$plainName")
         assertTrue(plain.take(200), plain.contains("pw-Export-1!"))
         Harness.shell("rm -f /sdcard/Download/$plainName")
+    }
+
+    /** Any page can open this link. It fills the form in, and changes nothing until a tap. */
+    @Test fun aSetupLinkShowsTheServerAndWaitsForATap() {
+        val prefs = ctx.getSharedPreferences("promptly", android.content.Context.MODE_PRIVATE)
+        val before = prefs.getString("server", null)
+        try {
+            prefs.edit().putString("server", "https://mine.example").commit()
+            Harness.shell("am start -a android.intent.action.VIEW -d promptlyapp://setup?server=https://evil.example")
+            waitFor(By.textContains("wants this phone to use https://evil.example"), 15_000)
+            Thread.sleep(1000)
+            assertEquals("https://mine.example", prefs.getString("server", null))
+            waitFor(By.text(java.util.regex.Pattern.compile("(?i)not my server"))).click()
+            Thread.sleep(800)
+            assertEquals("https://mine.example", prefs.getString("server", null))
+        } finally {
+            prefs.edit().putString("server", before).commit()
+        }
+    }
+
+    @Test fun aRepromptItemsCodeWaitsForTheMasterPassword() {
+        val client = Harness.seedOffline()
+        client.saveNew(client.personalVaultId(), newBody("login", "Guarded").withTotp(org.promptly.sync.passwords.core.TotpConfig("JBSWY3DPEHPK3PXP")).withFlag("reprompt", true))
+        client.saveNew(client.personalVaultId(), newBody("login", "Open").withTotp(org.promptly.sync.passwords.core.TotpConfig("JBSWY3DPEHPK3PXP")))
+        open()
+        tap("tab-codes", 30_000)
+        waitFor(By.res("code-Open"))
+        waitFor(By.res("code-reveal-Guarded"))
+        assertFalse(has(By.res("code-Guarded"), 300))
+        tap("code-reveal-Guarded")
+        fill("confirm-password", Harness.MASTER)
+        tap("confirm")
+        waitFor(By.res("code-Guarded"), 20_000)
+    }
+
+    /** Password-style keyboards that don't learn, on the secrets that are shown as typed. */
+    @Test fun secretFieldsAskTheKeyboardNotToLearn() {
+        val client = Harness.seedOffline()
+        client.saveNew(client.personalVaultId(), newBody("login", "To edit").withText("password", "pw-Edit-1!"))
+        open()
+        tap("item-To edit", 30_000)
+        tap("edit")
+        Harness.scrollTap("edit-totp")
+        Thread.sleep(800)
+        val noLearning = 0x1000000
+        val dump = Harness.shell("dumpsys input_method")
+        val options = Regex("imeOptions=0x([0-9a-fA-F]+)").findAll(dump).map { it.groupValues[1].toLong(16).toInt() }.toList()
+        Harness.note("imeOptions in dumpsys: ${options.joinToString { Integer.toHexString(it) }}")
+        assertTrue("No field asked the keyboard not to learn: $options", options.any { it and noLearning != 0 })
+        val inputTypes = Regex("inputType=0x([0-9a-fA-F]+)").findAll(dump).map { it.groupValues[1].toInt(16) }.toList()
+        assertTrue("Not a password-style field: $inputTypes", inputTypes.any { it and 0xFF0 == android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD })
+    }
+
+    @Test fun notesAndCustomFieldsCopyAsSecrets() {
+        val client = Harness.seedOffline()
+        client.saveNew(client.personalVaultId(), newBody("note", "A note").withText("notes", "pw-Note-1!"))
+        open()
+        tap("item-A note", 30_000)
+        tap("detail-notes-copy")
+        Thread.sleep(500)
+        val clip = ctx.getSystemService(android.content.ClipboardManager::class.java).primaryClipDescription
+        assertTrue(clip?.extras?.getBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE) == true)
+    }
+
+    @Test fun assetLinkAnswersDontSitInTheClear() {
+        Pw.init(ctx)
+        val prefs = Pw.prefs.prefs
+        prefs.edit().putString("dal|com.x|CERT|vault-domain.example", "1|1").commit()
+        org.promptly.sync.passwords.autofill.AssetLinks.forgetMemory()
+        // Nothing listens on this host, so the answer is whatever's kept: nothing, here.
+        org.promptly.sync.passwords.autofill.AssetLinks.cached("com.x", "CERT", "vault-domain.example")
+        val text = prefs.all.entries.joinToString { "${it.key}=${it.value}" }
+        assertFalse(text, text.contains("vault-domain.example"))
+    }
+
+    @Test fun updatesGoOnlyToTheSystemInstaller() {
+        val pkg = org.promptly.sync.Updater.installerPackage(ctx)
+        Harness.note("Installer: $pkg")
+        assertTrue("$pkg", pkg != null && pkg.contains("packageinstaller"))
     }
 
     @Test fun rotatedOutSaysSoAndRejoins() {

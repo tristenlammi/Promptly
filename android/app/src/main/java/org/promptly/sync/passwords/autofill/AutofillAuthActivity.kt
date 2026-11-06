@@ -57,6 +57,7 @@ import org.promptly.sync.passwords.ui.ConfirmIdentityPane
 import org.promptly.sync.passwords.ui.ErrorCard
 import org.promptly.sync.passwords.ui.PwTheme
 import org.promptly.sync.passwords.ui.UnlockPane
+import org.promptly.sync.passwords.ui.hardenWindow
 import org.promptly.sync.passwords.ui.toast
 
 class AutofillAuthActivity : FragmentActivity() {
@@ -77,6 +78,7 @@ class AutofillAuthActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        hardenWindow(this)
         Pw.init(this)
         Pw.lockIfExpired()
         val i = intent
@@ -102,6 +104,12 @@ class AutofillAuthActivity : FragmentActivity() {
         setContent { PwTheme { Flow() } }
     }
 
+    /** A fill unlocks the vault with no app of ours in front, so "Lock after: Leaving" counts here too. */
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) Pw.onBackgrounded()
+    }
+
     private fun ids(i: Intent, key: String): ArrayList<AutofillId> {
         @Suppress("DEPRECATION")
         return i.getParcelableArrayListExtra<AutofillId>(key) ?: ArrayList()
@@ -110,7 +118,7 @@ class AutofillAuthActivity : FragmentActivity() {
     private sealed class Step {
         data object Unlock : Step()
         data object Pick : Step()
-        data class Confirm(val item: Item, val title: String, val detail: String, val remember: Boolean) : Step()
+        data class Confirm(val item: Item, val title: String, val detail: String, val remember: Boolean, val fields: List<String> = emptyList()) : Step()
         data class Reprompt(val item: Item) : Step()
         data class Fail(val text: String) : Step()
     }
@@ -145,13 +153,15 @@ class AutofillAuthActivity : FragmentActivity() {
         /** The item's real rules, now that it's decrypted. */
         fun check(item: Item, picked: Boolean) {
             val t = target
+            val onPage = (t as? FillTarget.Web)?.let { Match.matchItems(listOf(item), it.url).firstOrNull() }
             val isMatch = when (t) {
-                is FillTarget.Web -> Match.matchItems(listOf(item), t.url).isNotEmpty() || mode == MODE_CARD || mode == MODE_IDENTITY
+                is FillTarget.Web -> onPage != null || mode == MODE_CARD || mode == MODE_IDENTITY
                 is FillTarget.App -> mode == MODE_CARD || mode == MODE_IDENTITY || appLinked(item, t)
             }
             val where = when (t) {
                 is FillTarget.Web -> t.domain
-                is FillTarget.App -> appLabel(this, t.pkg)
+                // An app picks its own label, so the package goes beside it.
+                is FillTarget.App -> "${appLabel(this, t.pkg)} (${t.pkg})"
             }
             when {
                 !isMatch && !picked -> step = Step.Fail("This login isn't saved for $where any more.")
@@ -166,10 +176,13 @@ class AutofillAuthActivity : FragmentActivity() {
                         step = Step.Confirm(item, "Fill in $where?", "\"${item.body.title}\" isn't linked to this app, and its site doesn't list it.$claim Only go on if you trust this app.", true)
                     }
                 }
-                downgrade -> step = Step.Confirm(item, "Not a secure page", "$where is http, and this login was saved for https. Anyone on the network could read it.", false)
+                t is FillTarget.Web && !t.schemeKnown -> step = Step.Confirm(item, "Is this page secure?", "This browser didn't say whether $where is http or https. If it's http, anyone on the network could read this.", false)
+                downgrade || onPage?.downgrade == true -> step = Step.Confirm(item, "Not a secure page", "$where is http, and this login was saved for https. Anyone on the network could read it.", false)
+                t is FillTarget.App && (mode == MODE_LOGIN || mode == MODE_OTP || mode == MODE_PICK) && spillsTo(t, item.body.urls) ->
+                    step = Step.Confirm(item, "This app is showing a web page", "$where is showing a page from ${t.claimedDomain}, and \"${item.body.title}\" isn't saved for that site. Only fill it if you expected to sign in there.", false)
                 frameDomain != null -> step = Step.Confirm(item, "A form inside another site", "This form comes from $frameDomain, inside the page you're on. Only fill it if you expected that.", false)
-                mode == MODE_CARD -> step = Step.Confirm(item, "Fill this card?", "\"${item.body.title}\" into $where.", false)
-                mode == MODE_IDENTITY -> step = Step.Confirm(item, "Fill this identity?", "\"${item.body.title}\" into $where.", false)
+                mode == MODE_CARD -> step = Step.Confirm(item, "Fill this card?", "\"${item.body.title}\" into $where.", false, fieldsFilled(item.body))
+                mode == MODE_IDENTITY -> step = Step.Confirm(item, "Fill this identity?", "\"${item.body.title}\" into $where.", false, fieldsFilled(item.body))
                 else -> afterChecks(item)
             }
         }
@@ -209,6 +222,7 @@ class AutofillAuthActivity : FragmentActivity() {
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(s.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
             Text(s.detail, style = MaterialTheme.typography.bodyMedium)
+            if (s.fields.isNotEmpty()) Text("It will fill: ${s.fields.joinToString(", ")}.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("confirm-fields"))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = { onYes(false) }, modifier = Modifier.testTag("confirm-fill")) { Text("Fill") }
                 if (s.remember) OutlinedButton(onClick = { onYes(true) }, modifier = Modifier.testTag("confirm-remember")) { Text("Fill and remember") }
@@ -283,6 +297,30 @@ class AutofillAuthActivity : FragmentActivity() {
         }
     }
 
+    /** What a card or identity would put on the page, in words, for the confirm screen. */
+    private fun fieldsFilled(b: ItemBody): List<String> = when (mode) {
+        MODE_CARD -> cardKeys.mapNotNull { k ->
+            when (k) {
+                "number" -> "card number".takeIf { b.str("cardNumber") != null }
+                "cvv" -> "security code".takeIf { b.str("cardCvv") != null }
+                "name" -> "name on the card".takeIf { b.str("cardholder") != null }
+                "month", "year", "exp" -> "expiry".takeIf { b.text("cardExpMonth").isNotEmpty() || b.text("cardExpYear").isNotEmpty() }
+                else -> null
+            }
+        }
+        MODE_IDENTITY -> identityKeys.mapNotNull { k ->
+            when (k) {
+                "fullName" -> "full name".takeIf { listOf("firstName", "middleName", "lastName").any { n -> b.str(n) != null } }
+                "firstName" -> "first name".takeIf { b.str(k) != null }
+                "middleName" -> "middle name".takeIf { b.str(k) != null }
+                "lastName" -> "last name".takeIf { b.str(k) != null }
+                "address1", "address2" -> "address".takeIf { b.str(k) != null }
+                else -> k.takeIf { b.str(k) != null }
+            }
+        }
+        else -> emptyList()
+    }.distinct()
+
     private fun valueFor(id: AutofillId, text: String): AutofillValue {
         val opts = optionsFor[id] ?: return AutofillValue.forText(text)
         val at = opts.indexOfFirst { it.equals(text, true) || it.trimStart('0') == text.trimStart('0') }
@@ -344,6 +382,7 @@ class AutofillAuthActivity : FragmentActivity() {
         private const val EXTRA_KIND = "pw.target.kind"
         private const val EXTRA_DOMAIN = "pw.target.domain"
         private const val EXTRA_SCHEME = "pw.target.scheme"
+        private const val EXTRA_SCHEME_KNOWN = "pw.target.scheme.known"
         private const val EXTRA_PKG = "pw.target.pkg"
         private const val EXTRA_CERT = "pw.target.cert"
         private const val EXTRA_DOWNGRADE = "pw.downgrade"
@@ -374,14 +413,14 @@ class AutofillAuthActivity : FragmentActivity() {
                 .putParcelableArrayListExtra(EXTRA_OPTION_IDS, ArrayList(form.options.keys))
                 .putStringArrayListExtra(EXTRA_OPTION_VALUES, ArrayList(form.options.values.map { it.joinToString("\u0001") }))
             when (target) {
-                is FillTarget.Web -> i.putExtra(EXTRA_KIND, "web").putExtra(EXTRA_DOMAIN, target.domain).putExtra(EXTRA_SCHEME, target.scheme).putExtra(EXTRA_PKG, target.pkg)
+                is FillTarget.Web -> i.putExtra(EXTRA_KIND, "web").putExtra(EXTRA_DOMAIN, target.domain).putExtra(EXTRA_SCHEME, target.scheme).putExtra(EXTRA_SCHEME_KNOWN, target.schemeKnown).putExtra(EXTRA_PKG, target.pkg)
                 is FillTarget.App -> i.putExtra(EXTRA_KIND, "app").putExtra(EXTRA_PKG, target.pkg).putExtra(EXTRA_CERT, target.cert).putExtra(EXTRA_DOMAIN, target.claimedDomain)
             }
             return i
         }
 
         private fun readTarget(i: Intent): FillTarget = if (i.getStringExtra(EXTRA_KIND) == "web") {
-            FillTarget.Web(i.getStringExtra(EXTRA_DOMAIN)!!, i.getStringExtra(EXTRA_SCHEME) ?: "https", i.getStringExtra(EXTRA_PKG) ?: "")
+            FillTarget.Web(i.getStringExtra(EXTRA_DOMAIN)!!, i.getStringExtra(EXTRA_SCHEME) ?: "https", i.getStringExtra(EXTRA_PKG) ?: "", i.getBooleanExtra(EXTRA_SCHEME_KNOWN, false))
         } else {
             FillTarget.App(i.getStringExtra(EXTRA_PKG) ?: "", i.getStringExtra(EXTRA_CERT), i.getStringExtra(EXTRA_DOMAIN))
         }

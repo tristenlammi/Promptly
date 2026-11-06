@@ -47,6 +47,7 @@ class AutofillSaveActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
+        org.promptly.sync.passwords.ui.hardenWindow(this)
         Pw.init(this)
         Pw.lockIfExpired()
         val save = intent.getStringExtra(EXTRA_ID)?.let { PendingSaves.take(it) }
@@ -77,7 +78,7 @@ class AutofillSaveActivity : FragmentActivity() {
         val c = Pw.client()!!
         val where = when (val t = save.target) {
             is FillTarget.Web -> t.domain
-            is FillTarget.App -> AutofillAuthActivity.appLabel(this, t.pkg)
+            is FillTarget.App -> "${AutofillAuthActivity.appLabel(this, t.pkg)} (${t.pkg})"
         }
         val existing = remember { c.allItems().firstOrNull { it.body.kind == "login" && sameAccount(save, it) } }
         val unchanged = existing != null && existing.body.password == save.password

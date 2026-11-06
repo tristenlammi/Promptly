@@ -524,6 +524,7 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
     var fresh by remember { mutableStateOf<List<Imported>>(emptyList()) }
     var duplicates by remember { mutableIntStateOf(0) }
 
+    var exportMaster by remember { mutableStateOf("") }
     var exportPassword by remember { mutableStateOf("") }
     var exportAgain by remember { mutableStateOf("") }
     var plainTyped by remember { mutableStateOf("") }
@@ -552,12 +553,15 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
 
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
-            val name = displayName(ctx, uri)
-            runCatching { ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() } }
-                .onSuccess {
-                    pending = name to it
-                    read(name, it, null)
-                }.onFailure { error = "That file can't be opened." }
+            scope.launch {
+                val r = withContext(Dispatchers.IO) {
+                    runCatching { displayName(ctx, uri) to ctx.contentResolver.openInputStream(uri)!!.use { Importers.readLimited(it) } }
+                }
+                r.onSuccess { (name, bytes) ->
+                    pending = name to bytes
+                    read(name, bytes, null)
+                }.onFailure { error = (it as? IllegalArgumentException)?.message ?: "That file can't be opened." }
+            }
         }
     }
 
@@ -623,23 +627,33 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
         Text("Export", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         val fillOnlyLeftOut = remember { runCatching { client.allItems().size - client.exportable().size }.getOrDefault(0) }
         if (fillOnlyLeftOut > 0) Text("$fillOnlyLeftOut items from fill-only vaults aren't included.", style = MaterialTheme.typography.bodySmall)
+        Text("Either kind of export asks for your master password first.", style = MaterialTheme.typography.bodySmall)
+        SecretField(exportMaster, { exportMaster = it }, "Your master password", "export-master")
         Text("An encrypted file opens only with the password you choose here.", style = MaterialTheme.typography.bodySmall)
         SecretField(exportPassword, { exportPassword = it }, "Password for the file", "export-password")
         SecretField(exportAgain, { exportAgain = it }, "Type it again", "export-password-again")
         Button(onClick = {
             busy = "Encrypting…"
             val pw = exportPassword
+            val master = exportMaster
+            error = null
             scope.launch {
-                val r = withContext(Dispatchers.IO) { runCatching { Exporter.encrypted(client.exportable(), pw) } }
+                val r = withContext(Dispatchers.IO) {
+                    runCatching {
+                        if (!client.checkPassword(master)) throw IllegalStateException("That master password isn't right.")
+                        Exporter.encrypted(client.exportable(), pw)
+                    }
+                }
                 busy = null
                 r.onSuccess {
                     exportText = it
                     exportPassword = ""
                     exportAgain = ""
+                    exportMaster = ""
                     saver.launch("promptly-passwords-export.json")
                 }.onFailure { error = errorText(it) }
             }
-        }, enabled = exportPassword.length >= 8 && exportPassword == exportAgain, modifier = Modifier.testTag("export-encrypted")) { Text("Save encrypted export") }
+        }, enabled = exportMaster.isNotEmpty() && exportPassword.length >= 8 && exportPassword == exportAgain, modifier = Modifier.testTag("export-encrypted")) { Text("Save encrypted export") }
         Text("A plain file holds every password in readable text. Anything on this phone, or any place you copy it to, can read it. To go ahead, type EXPORT.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         OutlinedTextField(plainTyped, { plainTyped = it }, label = { Text("Type EXPORT") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("export-typed"))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -647,11 +661,27 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
             FilterChip(plainKind == "csv", { plainKind = "csv" }, { Text("CSV, logins only") }, Modifier.testTag("export-kind-csv"))
         }
         OutlinedButton(onClick = {
-            val items = client.exportable()
-            exportText = if (plainKind == "csv") Exporter.plainCsv(items) else Exporter.plainJson(items)
-            plainTyped = ""
-            saver.launch(if (plainKind == "csv") "promptly-passwords.csv" else "promptly-passwords.json")
-        }, enabled = plainTyped == "EXPORT", modifier = Modifier.testTag("export-plain")) { Text("Save plain file") }
+            val master = exportMaster
+            val kind = plainKind
+            busy = "Checking…"
+            error = null
+            scope.launch {
+                val r = withContext(Dispatchers.IO) {
+                    runCatching {
+                        if (!client.checkPassword(master)) throw IllegalStateException("That master password isn't right.")
+                        val items = client.exportable()
+                        if (kind == "csv") Exporter.plainCsv(items) else Exporter.plainJson(items)
+                    }
+                }
+                busy = null
+                r.onSuccess {
+                    exportText = it
+                    plainTyped = ""
+                    exportMaster = ""
+                    saver.launch(if (kind == "csv") "promptly-passwords.csv" else "promptly-passwords.json")
+                }.onFailure { error = errorText(it) }
+            }
+        }, enabled = exportMaster.isNotEmpty() && plainTyped == "EXPORT", modifier = Modifier.testTag("export-plain")) { Text("Save plain file") }
     }
 }
 

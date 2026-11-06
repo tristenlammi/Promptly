@@ -65,6 +65,13 @@ class BiometricE2ETest {
         assertTrue("A fingerprint should have unlocked the vault", client.unlocked)
         assertEquals("pw-Bio-1!", client.get(item.id)!!.body.password)
 
+        // "Ask again" items too, and that answer comes through the same key.
+        val guarded = client.saveNew(client.personalVaultId(), newBody("login", "Guarded by bio").withText("password", "pw-Guard-1!").withFlag("reprompt", true))
+        waitFor(By.res("item-Guarded by bio"), 15_000).click()
+        waitFor(By.res("detail-title"), 30_000)
+        Harness.device.pressBack()
+        Harness.note("Reprompt answered by the fingerprint: ${guarded.id.take(4)}")
+
         // The same from an autofill suggestion, with the vault locked.
         Harness.home()
         Harness.setAutofill(true)
@@ -94,5 +101,10 @@ class BiometricE2ETest {
         tap("unlock")
         waitFor(By.res("search"), 30_000)
         assertTrue(client.unlocked)
+        // With the key gone, "ask again" is the master password, not a prompt a new finger answers.
+        client.saveNew(client.personalVaultId(), newBody("login", "Guarded after").withText("password", "pw-Guard-2!").withFlag("reprompt", true))
+        waitFor(By.res("item-Guarded after"), 15_000).click()
+        waitFor(By.res("confirm-password"), 15_000)
+        assertFalse(Harness.has(By.res("use-biometric"), 500))
     }
 }

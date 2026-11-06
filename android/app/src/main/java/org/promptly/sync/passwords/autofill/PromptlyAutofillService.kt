@@ -37,33 +37,43 @@ class PromptlyAutofillService : AutofillService() {
     private fun walk(structure: AssistStructure): Walked {
         val out = ArrayList<FieldNode<AutofillId>>()
         val values = HashMap<AutofillId, String>()
-        fun visit(n: AssistStructure.ViewNode, inherited: String?, scheme: String?) {
-            val domain = n.webDomain?.takeIf { it.isNotEmpty() } ?: inherited
-            val sch = n.webScheme?.takeIf { it.isNotEmpty() } ?: scheme
-            val id = n.autofillId
-            val html = n.htmlInfo
-            val isField = n.autofillType != View.AUTOFILL_TYPE_NONE && n.importantForAutofill != View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
-            if (id != null && isField) {
-                val attrs = HashMap<String, String>()
-                html?.attributes?.forEach { attrs[it.first.lowercase()] = it.second ?: "" }
-                val options = n.autofillOptions?.map { it.toString() }
-                out += FieldNode(
-                    id, n.className, n.autofillHints?.toList() ?: emptyList(), html?.tag, attrs, n.inputType, n.idEntry,
-                    n.hint?.toString(), n.visibility == View.VISIBLE, n.isFocused, n.width, n.height, domain, sch, options,
-                    n.autofillType == View.AUTOFILL_TYPE_TEXT || n.autofillType == View.AUTOFILL_TYPE_LIST,
-                )
-                n.autofillValue?.takeIf { it.isText }?.textValue?.toString()?.let { values[id] = it }
+        var forms = 0
+        for (w in 0 until structure.windowNodeCount) {
+            val window = structure.getWindowNodeAt(w)
+            fun visit(n: AssistStructure.ViewNode, inherited: String?, scheme: String?, offsetX: Int, offsetY: Int, alpha: Float, shown: Boolean, form: String?) {
+                val domain = n.webDomain?.takeIf { it.isNotEmpty() } ?: inherited
+                val sch = n.webScheme?.takeIf { it.isNotEmpty() } ?: scheme
+                val id = n.autofillId
+                val html = n.htmlInfo
+                val x = offsetX + n.left
+                val y = offsetY + n.top
+                val a = alpha * n.alpha
+                val isShown = shown && n.visibility == View.VISIBLE
+                val section = if (html?.tag.equals("form", true)) "f${forms++}" else form
+                val isField = n.autofillType != View.AUTOFILL_TYPE_NONE && n.importantForAutofill != View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+                if (id != null && isField) {
+                    val attrs = HashMap<String, String>()
+                    html?.attributes?.forEach { attrs[it.first.lowercase()] = it.second ?: "" }
+                    val options = n.autofillOptions?.map { it.toString() }
+                    out += FieldNode(
+                        id, n.className, n.autofillHints?.toList() ?: emptyList(), html?.tag, attrs, n.inputType, n.idEntry,
+                        n.hint?.toString(), isShown, n.isFocused, n.width, n.height, domain, sch, options,
+                        n.autofillType == View.AUTOFILL_TYPE_TEXT || n.autofillType == View.AUTOFILL_TYPE_LIST,
+                        x, y, window.width, window.height, a, "w$w/${section ?: ""}",
+                    )
+                    n.autofillValue?.takeIf { it.isText }?.textValue?.toString()?.let { values[id] = it }
+                }
+                for (i in 0 until n.childCount) visit(n.getChildAt(i), domain, sch, x - n.scrollX, y - n.scrollY, a, isShown, section)
             }
-            for (i in 0 until n.childCount) visit(n.getChildAt(i), domain, sch)
+            visit(window.rootViewNode, null, null, 0, 0, 1f, true, null)
         }
-        for (w in 0 until structure.windowNodeCount) visit(structure.getWindowNodeAt(w).rootViewNode, null, null)
         return Walked(out, values)
     }
 
     /** What we believe this request is for. `webDomain` from an unknown package isn't believed. */
     private fun targetOf(pkg: String, form: ParsedForm<AutofillId>): FillTarget {
         val domain = form.webDomain?.lowercase()
-        if (domain != null && TrustedBrowsers.isTrusted(this, pkg)) return FillTarget.Web(domain, form.webScheme?.lowercase() ?: "https", pkg)
+        if (domain != null && TrustedBrowsers.isTrusted(this, pkg)) return FillTarget.Web(domain, form.webScheme?.lowercase() ?: "https", pkg, form.webScheme != null)
         return FillTarget.App(pkg, signingCerts(this, pkg).singleOrNull(), domain)
     }
 
@@ -76,6 +86,7 @@ class PromptlyAutofillService : AutofillService() {
             Log.w(TAG, "fill request failed: ${e.javaClass.simpleName}")
             callback.onSuccess(null)
         } finally {
+            if (!Pw.unlocked) AssetLinks.forgetMemory()
             Log.i(TAG, "fill answered in ${(System.nanoTime() - started) / 1_000_000} ms")
         }
     }
@@ -230,7 +241,7 @@ class PromptlyAutofillService : AutofillService() {
         var lastInlineCount = 0
 
         fun saveKey(target: FillTarget): String = when (target) {
-            is FillTarget.Web -> "web:${org.promptly.sync.passwords.core.Match.baseDomain(target.domain) ?: target.domain}"
+            is FillTarget.Web -> "web:${org.promptly.sync.passwords.core.Match.baseDomain(target.host) ?: target.host}"
             is FillTarget.App -> "app:${target.pkg}"
         }
     }

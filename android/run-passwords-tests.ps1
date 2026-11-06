@@ -31,8 +31,11 @@ from app.auth.models import User
 from app.auth.utils import create_access_token, hash_password
 from app.auth.app_passwords import AppPassword, new_token, token_hash, hint
 from app.database import SessionLocal
+from sqlalchemy import func, update
 async def main():
     async with SessionLocal() as db:
+        # Older runs' users move down the list, so this run's are near the top of the picker.
+        await db.execute(update(User).where(User.username.like("000pwandroid%")).values(username=func.concat("zz", User.username)))
         for tag in ["a", "b", "c", "d"]:
             s = uuid.uuid4().hex[:10]
             u = User(email=f"pw-android-{tag}-{s}@example.com", username=f"000pwandroid{tag}{s}", password_hash=hash_password("An-" + secrets.token_urlsafe(16) + "!9"), role="user")

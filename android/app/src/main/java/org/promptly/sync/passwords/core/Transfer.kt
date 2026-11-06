@@ -29,7 +29,7 @@ data class Imported(val body: ItemBody, val folder: String? = null)
 class ImportResult(val format: String, val items: List<Imported>, val warnings: List<String>)
 
 object Importers {
-    private const val MAX_BYTES = 64 * 1024 * 1024
+    const val MAX_BYTES = 64 * 1024 * 1024
     private const val MAX_ITEMS = 200_000
 
     /** RFC 4180 with the usual messes: BOM, CRLF or LF, quotes in the middle of cells. */
@@ -107,9 +107,59 @@ object Importers {
         return idx
     }
 
+    private val ANDROID_URL = Regex("^android(?:app)?://(?:[^@/?#]*@)?([A-Za-z0-9_.]+)/?(?:[?#].*)?$", RegexOption.IGNORE_CASE)
+
+    /** Chrome's `android://HASH@com.acme.app/` and Bitwarden's `androidapp://com.acme.app` name
+     *  an app. Kept as one, with match "never", so a package that reads like a hostname never
+     *  matches a website. With no certificate to go on, it fills only after a person picks it. */
+    private fun appUrlFrom(u: LoginUrl): LoginUrl {
+        if (!u.url.startsWith("android", true)) return u
+        val pkg = ANDROID_URL.find(u.url)?.groupValues?.get(1) ?: return u
+        if (u.url.contains("?cert=") && u.url.startsWith(Match.APP_SCHEME)) return u.copy(match = "never")
+        return LoginUrl("${Match.APP_SCHEME}$pkg", "never")
+    }
+
+    /** What a file can make: every item kind a person sees, and nothing the app keeps for itself. */
+    private val IMPORTABLE_KINDS = setOf("login", "note", "card", "identity", "totp", "passkey", "apikey", "wifi", "ssh", "bank", "document")
+
+    /** Fields only this app writes. A file naming them could plant a trust book, or make an
+     *  item's version look newer than it is. */
+    private val INTERNAL_FIELDS = setOf("trustBook", "conflicts", "seq", "pendingPassword", "sendId")
+
+    /** A file can say anything, so only what a person could have made comes in. */
+    fun sanitize(r: ImportResult): ImportResult {
+        val items = ArrayList<Imported>()
+        var dropped = 0
+        for (it in r.items) {
+            if (it.body.kind !in IMPORTABLE_KINDS) {
+                dropped++
+                continue
+            }
+            val kept = LinkedHashMap(it.body.fields)
+            INTERNAL_FIELDS.forEach { f -> kept.remove(f) }
+            val clean = ItemBody(kept)
+            items += Imported(if (clean["urls"] != null) clean.withUrls(clean.urls.map { u -> appUrlFrom(u) }) else clean, it.folder)
+        }
+        val warnings = if (dropped > 0) r.warnings + "$dropped entries in that file weren't items you can see, and were left out." else r.warnings
+        return ImportResult(r.format, items, warnings)
+    }
+
+    /** Reads no more than the limit, wherever the bytes come from. */
+    fun readLimited(input: java.io.InputStream): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val n = input.read(buffer)
+            if (n < 0) break
+            if (out.size() + n > MAX_BYTES) throw IllegalArgumentException("That file is too large")
+            out.write(buffer, 0, n)
+        }
+        return out.toByteArray()
+    }
+
     private fun cleanUrl(u: String): List<LoginUrl> {
         val t = u.trim()
-        return if (t.isEmpty() || t == "http://sn" || t == "http://" || t == "https://") emptyList() else listOf(LoginUrl(t))
+        return if (t.isEmpty() || t == "http://sn" || t == "http://" || t == "https://") emptyList() else listOf(appUrlFrom(LoginUrl(t)))
     }
 
     private fun titleFrom(title: String?, url: String?, user: String?): String {
@@ -226,7 +276,7 @@ object Importers {
                             Passkey(cred, rp, pk["rpName"].text(), pk["userHandle"].text() ?: "", pk["userName"].text() ?: "", pk["userDisplayName"].text(), key, pk["counter"].any().toIntOrNull() ?: 0, pk["creationDate"].text() ?: isoNow(), null, pk["discoverable"].any() != "false")
                         }
                     }
-                    val urls = l["uris"].list().map { u -> LoginUrl(u["uri"].any(), bwMatch(u["match"])) }.filter { u -> u.url.isNotEmpty() }
+                    val urls = l["uris"].list().map { u -> appUrlFrom(LoginUrl(u["uri"].any(), bwMatch(u["match"]))) }.filter { u -> u.url.isNotEmpty() }
                     val history = it["passwordHistory"].list().mapNotNull { h ->
                         val pw = h["password"].any()
                         if (pw.isEmpty()) null else JsonObject(mapOf("password" to JsonPrimitive(pw), "at" to JsonPrimitive(h["lastUsedDate"].text() ?: "1970-01-01T00:00:00.000Z")))
@@ -329,7 +379,9 @@ object Importers {
 
     /** The formats this client reads. The others (1Password, KeePass and so on) are the web
      *  vault's, and say so rather than failing strangely. */
-    fun importFile(name: String, bytes: ByteArray, password: String? = null): ImportResult {
+    fun importFile(name: String, bytes: ByteArray, password: String? = null): ImportResult = sanitize(readFile(name, bytes, password))
+
+    private fun readFile(name: String, bytes: ByteArray, password: String?): ImportResult {
         require(bytes.size <= MAX_BYTES) { "That file is too large" }
         if (bytes.size >= 2 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte()) throw IllegalArgumentException("That's a zip file. Import 1Password and Dashlane files from the web vault.")
         if (bytes.size >= 4 && bytes[0] == 0x03.toByte() && bytes[1] == 0xd9.toByte()) throw IllegalArgumentException("That's a KeePass file. Import it from the web vault.")

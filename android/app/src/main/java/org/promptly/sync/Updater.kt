@@ -67,6 +67,14 @@ object Updater {
         list.map { sig -> MessageDigest.getInstance("SHA-256").digest(sig.toByteArray()).joinToString("") { "%02x".format(it) } }.toSet()
     }.getOrNull()
 
+    private const val APK_TYPE = "application/vnd.android.package-archive"
+
+    /** The system's package installer, by package name. */
+    fun installerPackage(context: Context): String? {
+        val probe = Intent(Intent.ACTION_VIEW).setDataAndType(android.net.Uri.parse("content://${context.packageName}.updates/update.apk"), APK_TYPE)
+        return context.packageManager.queryIntentActivities(probe, android.content.pm.PackageManager.MATCH_SYSTEM_ONLY).firstOrNull()?.activityInfo?.packageName
+    }
+
     /** Blocking. Downloads, checks the hash and the signer, and starts Android's installer. */
     fun downloadAndInstall(context: Context, update: Api.Update, progress: (Long) -> Unit = {}) {
         val dest = File(context.cacheDir, "updates/Promptly-${update.code}.apk")
@@ -78,8 +86,11 @@ object Updater {
             throw IOException("That download isn't signed by the same key as this app, so it wasn't installed.")
         }
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", dest)
+        // Only the phone's own installer gets the file, not whatever else claims this type.
+        val installer = installerPackage(context) ?: throw IOException("This phone has no system installer to hand that to.")
         val install = Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, "application/vnd.android.package-archive")
+            .setDataAndType(uri, APK_TYPE)
+            .setPackage(installer)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
             // Android sends the person through "allow from this source" when it opens.

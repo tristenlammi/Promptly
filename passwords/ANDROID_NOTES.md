@@ -29,7 +29,7 @@ Written during the build. Decisions, what was checked and how, and the limits. C
 | A7 | **A non-browser app's `webDomain` is never believed**, whatever it claims. It only gets a login linked to its package and certificate, or one whose site's asset links name it. Otherwise "Search Passwords" with a warning and "Fill and remember". | Plan section 9. Tested with a WebView in the plain test app. |
 | A8 | **Browser allowlist: Google's `apps.json`, bundled, `release` signatures only, minus four non-browsers** (`com.google.android.gms`, `com.fido.fido2client`, `com.oplus.credential`, `com.citrix.Receiver`). The same list, release signatures only, goes to `CallingAppInfo.getOrigin`. Fetched 2026-11-06, 73 entries. No refresh from the server yet. | `userdebug` entries are keys that sign development builds. VERIFY_NOTES 15 suggests a signed copy refreshed from the server: the file ships inside the signed APK, so an update refreshes it. A live refresh isn't built. |
 | A9 | **Package visibility: `<queries>` for launchable apps and https browsers, not `QUERY_ALL_PACKAGES`.** | Signing certificates need visibility, and this is enough for any app with an icon. An app with no launcher icon reads as having no certificate, so it gets nothing. |
-| A10 | **Passkeys in native apps need asset links on every use**, fail closed if unreachable (a cached yes is kept). Privileged browsers: their origin is taken, and the origin-to-RP check skipped per VERIFY_NOTES 15. | Plan section 9. |
+| A10 | **Passkeys in native apps need asset links on every use**, fail closed if unreachable (a cached answer lasts a week: A31). Privileged browsers: their origin is taken, and the origin-to-RP check skipped per VERIFY_NOTES 15. | Plan section 9. |
 | A11 | **Where there's no biometric, signing a passkey asks for the master password.** | The plan says a biometric; many phones and this emulator's default image have none. Never skips the check. |
 | A12 | **Updater fails closed.** A manifest with no valid `sha256` offers no update. The APK downloads in the app, the hash is checked while streaming, and the signer must match this app's. New permission: `REQUEST_INSTALL_PACKAGES`. | The old code opened a browser at the URL. Android enforces the signature too; the check gives a clear error first. |
 | A13 | **Launcher is an `activity-alias`, `org.promptly.app.PasswordsLauncher`, on by default**, and in the Choose apps picker. `ChooseAppsActivity.isOn` now reads the manifest default rather than treating "never changed" as off. | The picker disables components: an alias lets it hide the icon without disabling autofill's screens. Unlike the web apps it's on by default, because it's where autofill is set up. |
@@ -45,6 +45,13 @@ Written during the build. Decisions, what was checked and how, and the limits. C
 | A23 | **Only your own vault's `trust` items count, and all of them.** Goes further than `vault.ts`: see "For `vault.ts`" below. | Anyone who can write to a shared vault can put an item of that kind there. Two offline devices can each make one. |
 | A24 | **The approval holds its own `devicePub`.** `Approval` carries the request id and key the words came from, `finishApproval` takes only that, and Devices throws an approval away if a refresh no longer agrees with it. | Sealing to the latest list entry let a server show one key's words and get the Secret Key sealed to another. |
 | A25 | **An invitation has no name until it's accepted.** It shows who the server says it's from and their safety words. The name's sealed under a key nobody's trusted yet, so "(can't open)" isn't a bug. | No trust on first use, so a stranger's grant isn't verified, and a name from it would be the server's choice. |
+| A26 | **Online, unlock refuses to go on without `wrapped_keyset` and `account_id` from prelogin.** A session's settings and keyset are checked before they're stored: `kdf` only goes up, the keyset has to open, and what's stored is the salt and settings that really made the key. `account_id` in a device payload has to be this account's, or the key isn't saved. | Otherwise a server leaves the field out and gets an `auth_key` to guess a master password against. |
+| A27 | **Regex matching has a shape rule, a length rule and a 250 ms limit.** It goes further than `match.ts`: alternation under a quantifier, like `(a\|aa)+`, is refused too, so a saved `(www\.\|m\.)+` pattern stops matching. | Android's regex engine can't be interrupted, so a pattern that runs out of time leaves a background thread spinning until the process goes. Only an imported or hand-made regex can do that, and it can't hold up a fill. |
+| A28 | **Android doesn't tell autofill the port.** `ViewStructure.setWebDomain` keeps only the host, so a page on `:8443` looks like the default port. `FillTarget.Web` keeps a port when it's given one, and Credential Manager's origin has one. On a normal autofill, a login saved for a non-default port isn't offered as a suggestion: Search asks first. A login saved with no port can't be told apart from a page on another port of the same host. | There's nothing else to read it from without an Accessibility service, and there isn't going to be one. |
+| A29 | **AutoSpill: a confirm screen, not a refusal.** When a non-browser target claims a `webDomain` the login isn't saved for, it asks, naming the app, its package and the page. | A linked app's own sign-in page in a WebView is common, and refusing would break it. The claim is the app's word, so a dishonest app can also say nothing: this protects against an honest app showing someone else's page. |
+| A30 | **"Ask again" and passkey confirmation open what's sealed under the biometric key.** If that key doesn't exist, biometric unlock isn't on and it's the master password. A new fingerprint kills the key, so it goes back to the password. | This is a change: a phone with a fingerprint but biometric unlock off now gets the password prompt. |
+| A31 | **Asset link answers: sealed, a day until they're asked again, a week until they're dropped.** Only a 200 or 404 changes one. | Replaces A10's "a cached yes is kept". Which sites got asked about shows which accounts you have. Sealing needs an unlocked phone, so one that can't be saved stays in memory until the vault locks. |
+| A32 | **Cleartext is debug only.** `src/main` allows none; `src/debug` adds `localhost` and `10.0.2.2`. `src/emulatorRelease` does the same only with `-PemulatorAbi`, so a release build can be tried against the test stack. | It's never in what ships without that property. |
 
 ## Security notes, for `SECURITY.md`
 
@@ -75,6 +82,13 @@ Mirrors `vault.ts` and `hostile.test.ts`. `HostileTest.kt` runs each attack thro
 - `seq` inside the encrypted body: a lower one on pull is refused.
 - Unlock opens `wrapped_keyset` from prelogin before `auth_key` is sent, and refuses lower KDF settings than it's seen. KDF only goes up.
 - A different `account_id` doesn't wipe the store unless the new keyset opens.
+
+### Limits of the second review's fixes
+
+- **Hidden fields:** position, size, visibility and alpha are what Android's structure says. Chromium doesn't report CSS opacity, so an `opacity:0` field inside a page isn't caught. Fields more than a screen above or two screens below the window are refused, not ones just out of view, so a long form still fills.
+- **Sections:** a card or identity fills only the focused HTML form or autocomplete section. A native app has neither, so it's the whole window there.
+- **Overlays:** `filterTouchesWhenObscured` and `setHideOverlayWindows` are set on the unlock, fill, save and Credential Manager windows, and `accessibilityDataSensitive` while a secret shows. No test draws an overlay or runs a third-party accessibility service.
+- **Task affinity:** the fill screens already had their own, so nothing changed for API 29.
 
 ### For `vault.ts`
 
@@ -118,17 +132,18 @@ These weren't touched, as asked:
 
 Final code, on AVD `PromptlyTest` (API 36, Google Play image, x86_64) and the `:8092` stack.
 
-- **JVM:** `gradlew :app:cleanTestDebugUnitTest :app:testDebugUnitTest "-Dpw.stack=http://localhost:8092"`: 133 tests, 0 failed. CoreTest 54, HostileTest 29, StackTests 24, VectorsTest 18, plus the 8 CarTemplatesTest that were already there. StackTests drive the TypeScript client through vitest for attachments, sharing, the trust book and `seq`, export and import, Send, QR and Secret Key rotation.
-- **Instrumented:** `android/run-passwords-tests.ps1`: 56 tests, 56 OK on the last full run. 3 of those are skipped by that script (BiometricE2ETest 2, SmsConsentTest 1, which need their own runs), so 53 exercised: AutofillE2ETest 20, CredentialManagerE2ETest 5, DeviceCryptoTest 11, VaultUiTest 11, FeaturesUiTest 6.
-- **Flakes seen on the way:** autofill suggestions missed in 4 of 6 full or class runs before the lookup was made to ask again, and in none of the 3 since. Each run lost 1 or 2 of the 20, and not the same ones. The system log shows `onShown` on those runs, so the chip was there and UiAutomator couldn't see its window. The harness now hides the keyboard and asks again. That's a change to the test, not the app. One full run failed the sharing story because leftover alerts from the run before bundled together in the shade, so forgetting the device now clears posted alerts.
-- **"The server can't be reached":** `againstTheRealStack` now waits out 429s, and captures the window, `api.lastProblem` and the log on that message. It didn't happen in the 5 full runs that reached that test since, and neither did a 429 there, so the one earlier failure is still unexplained. The message now carries the method, path and status or exception when it does happen.
-- `android/run-biometric-test.ps1`: 2 of 2, real Keystore key, real system prompt, emulated fingerprint. The test no longer insists on seeing the "Use fingerprint" button, since the host's touches can answer first.
+- **JVM:** `gradlew :app:cleanTestDebugUnitTest :app:testDebugUnitTest "-Dpw.stack=http://localhost:8092"`: 156 tests, 0 failed. CoreTest 54, HostileTest 34, ReviewFixesTest 17, StackTests 25, VectorsTest 18, plus the 8 CarTemplatesTest that were already there. StackTests drive the TypeScript client through vitest for attachments, sharing, the trust book and `seq`, export and import, Send, QR, Secret Key rotation, and the shared match list in `app/src/test/cross/match-vectors.json`.
+- **Instrumented:** `android/run-passwords-tests.ps1`: 67 tests, 67 OK on the last full run. 3 of those are skipped by that script (BiometricE2ETest 2, SmsConsentTest 1, which need their own runs), so 64 exercised: AutofillE2ETest 24, CredentialManagerE2ETest 6, DeviceCryptoTest 11, VaultUiTest 11, FeaturesUiTest 12.
+- **Failures on the way, all in the tests:** a button's text is upper-cased on screen; a leftover check of cleanup that only ran once per process (that one moved the cleanup, so it now runs on each load); the people picker had grown past one screen from earlier runs, so older test users now get renamed down the list. Autofill's suggestion lookup still needed its retry on some runs. The earlier miss had `onShown` in the system log.
+- **"The server can't be reached":** `againstTheRealStack` waits out 429s and captures the window, `api.lastProblem` and the log on that message. It hasn't happened in any full run since, so the one early failure is still unexplained.
+- `android/run-biometric-test.ps1`: 2 of 2, real Keystore key, real system prompt, emulated fingerprint, now including a reprompt item answered through the key, and the master password asked after a new finger kills it.
 - SmsConsentTest with `-e pwSms 1` and `adb emu sms send`: 1 of 1, through the real Play services sheet.
-- **Release build with R8** on the emulator, throwaway key, driven by adb: pairing link, connect, create a vault, add a login, lock, unlock, inline autofill, a password through Credential Manager, a passkey refused without asset links. Then the Wi-Fi QR, Security check, a shared vault and a Send. The log shows `AlertsWorker` finishing with `SUCCESS` in that build.
-- **Mutation check on HostileTest:** 24 checks in `VaultClient` weakened one at a time. 20 were caught first time. The other 4 showed tests that were too weak (one mutation also had to be rewritten to compile), so those tests were tightened, and all 4 are now caught. It's a check of these tests, not proof of the code.
+- **Release build with R8** on the emulator, throwaway key, driven by adb: pairing link, connect, create a vault, add a login, lock, unlock, inline autofill, a password through Credential Manager, a passkey refused without asset links, then the Wi-Fi QR, Security check, a shared vault and a Send. `AlertsWorker` was seen finishing with `SUCCESS` in an earlier release build this session, not repeated on the last one.
+- **Mutation checks:** first round, 24 checks in `VaultClient`; second round, 25 from the review across `VaultClient`, `Match`, `Transfer`, `Trust`, `FormParser` and `AutofillIndex`. Second round: 22 caught first time, 1 showed a gap in the list (a regex matching late in a long URL, vector added, then caught), and 2 can't be caught because they change nothing: OkHttp already refuses other schemes, and its canonical URL ends the host with a slash, so the origin check in `prefixMatches` is a second lock on the same door. It's a check of these tests, not proof of the code.
+- **Scan of the unsigned release APK:** no resource holds `10.0.2.2`.
 - **KDF calibration** on this emulator gave m=131072 to 262144, t=3, p=1 between runs, depending on what else the machine was doing. It's never under the floor or the server's minimum.
 - **Lint:** `lintVitalRelease` passes. `lintDebug` fails on 12 errors, all in older code (`CarApp`, `PhoneActions`, `Crashes`), none in Passwords.
-- **Size:** arm64 release, unsigned: 14,312,348 bytes against 12,597,451 shipped: +1,714,897, +13.6%.
+- **Size:** arm64 release, unsigned: 14,281,908 bytes against 12,597,451 shipped: +1,684,457, +13.4%.
 
 ### Verified only on the JVM, not on a screen
 
@@ -137,6 +152,11 @@ Final code, on AVD `PromptlyTest` (API 36, Google Play image, x86_64) and the `:
 - Secret Key rotation and KDF upgrade from Settings: the client's tested, including being rotated out on screen. The Settings buttons themselves aren't tapped by a test.
 - Scanning a device QR: `requestForQr` and its refusals are tested. The camera scanner needs a real phone.
 - CSV export, Send of a file, attachment save through the picker, and emergency open and end buttons: compiled, with the client code under them tested.
+- A downgrade through Credential Manager: needs a real browser's http origin. The check under it is tested through `matchItems`, the confirm screen is only compiled.
+- An http page with no scheme from the browser: the hit's flag is tested, the "Is this page secure?" screen is only compiled.
+- Off-screen and section rules: tested on `FormParser`'s input. What a real page's WebView reports for them is exercised only by ordinary fills still working.
+- Overlay filtering, `setHideOverlayWindows`, and `accessibilityDataSensitive`: compiled and set, no attacker app in the test.
+- The updater: `installerPackage` finds `com.google.android.packageinstaller` on the emulator. Installing through it wasn't run.
 
 ### Owner's real-phone checklist, added to the earlier one
 
@@ -146,3 +166,6 @@ Final code, on AVD `PromptlyTest` (API 36, Google Play image, x86_64) and the `:
 - The import, export and attachment pickers, including Drive as a location.
 - Time a vault made on a low-end phone: calibration should stay near a second, and unlock shouldn't feel broken.
 - Share a vault with someone on the web, and check the safety words match on both.
+- Autofill on a real Chrome: a login saved for `https://nas.example:5001` isn't suggested, and Search asks first. An ordinary login still fills, including on a long form you've scrolled.
+- A banking app that signs in through its own WebView: expect the "showing a web page" question unless the site's saved on that login.
+- Turn on an overlay app (a screen dimmer, a chat head), and check the unlock and fill screens hide it or refuse the tap.

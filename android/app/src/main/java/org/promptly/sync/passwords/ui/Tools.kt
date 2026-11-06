@@ -79,6 +79,7 @@ import org.promptly.sync.passwords.core.DeviceRequestOut
 import org.promptly.sync.passwords.core.Generator
 import org.promptly.sync.passwords.core.SecretKeys
 import org.promptly.sync.passwords.core.Totp
+import org.promptly.sync.passwords.core.Item
 import org.promptly.sync.passwords.core.VaultClient
 import org.promptly.sync.passwords.core.newBody
 
@@ -218,6 +219,17 @@ private fun CodesScreen(client: VaultClient) {
     var smsCode by remember { mutableStateOf<String?>(null) }
     var waiting by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    // "Ask again before showing": a code is showing it.
+    var passed by remember { mutableStateOf(setOf<String>()) }
+    var asking by remember { mutableStateOf<Item?>(null) }
+    asking?.let { i ->
+        BackHandler { asking = null }
+        ConfirmIdentityPane(activity, "Confirm it's you", i.body.title, true, {
+            passed = passed + i.id
+            asking = null
+        }, { asking = null })
+        return
+    }
 
     fun addFromQr(text: String) {
         scope.launch {
@@ -261,7 +273,11 @@ private fun CodesScreen(client: VaultClient) {
             items(items, key = { it.id }) { item ->
                 Column(Modifier.padding(vertical = 6.dp)) {
                     Text(item.body.title, fontWeight = FontWeight.Medium)
-                    item.body.totp?.let { TotpRow(it, "code-${item.body.title}") }
+                    if (item.body.reprompt && item.id !in passed) {
+                        OutlinedButton(onClick = { asking = item }, Modifier.testTag("code-reveal-${item.body.title}")) { Text("Show code") }
+                    } else {
+                        item.body.totp?.let { TotpRow(it, "code-${item.body.title}") }
+                    }
                 }
                 HorizontalDivider()
             }
