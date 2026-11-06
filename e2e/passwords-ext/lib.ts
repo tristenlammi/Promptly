@@ -24,6 +24,11 @@ export function startSite(): Promise<{ close: () => void }> {
   const servers = [PORT_A, PORT_B].map((port) =>
     http.createServer((req, res) => {
       const url = new URL(req.url ?? "/", "http://x");
+      // A stand-in for a site's login API: answers with the status it's asked for.
+      if (url.pathname === "/api/login") {
+        res.writeHead(Number(url.searchParams.get("status") ?? 200), { "Content-Type": "application/json", "Timing-Allow-Origin": "*" }).end("{}");
+        return;
+      }
       const rel = url.pathname.replace(/^\/ext\//, "").replace(/^\//, "");
       const file = path.join(SITE, rel);
       if (!file.startsWith(SITE) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
@@ -116,7 +121,7 @@ export async function popupFor(rig: Rig, page: Page): Promise<Page> {
 export async function bg<T>(rig: Rig, fnBody: string, arg?: unknown): Promise<T> {
   const page = await rig.ctx.newPage();
   try {
-    await page.goto(`chrome-extension://${rig.extId}/menu.html`);
+    await page.goto(`chrome-extension://${rig.extId}/test.html`);
     return await page.evaluate(new Function("arg", `return (async () => { ${fnBody} })()`) as (a: unknown) => Promise<T>, arg);
   } finally {
     await page.close();
@@ -146,6 +151,40 @@ export async function addItem(rig: Rig, fields: { title: string; url: string; us
     await chrome.runtime.sendMessage({ t: "addLogin", title: f.title, url: f.url, username: f.username, password: f.password });
   }, fields);
   await p.close();
+}
+
+/** A test-only hook in the background. See handleTest in background.ts. */
+export async function testHook<T>(rig: Rig, op: string, args: Record<string, unknown> = {}): Promise<T> {
+  return bg<T>(rig, `const r = await chrome.runtime.sendMessage({ t: "test", ...arg }); if (!r?.ok) throw new Error(r?.error ?? "no answer"); return r.r;`, { op, ...args });
+}
+
+/** What's on the clipboard, read in one of the extension's pages. Test builds have
+ *  clipboardRead on Chromium. */
+export async function readClipboard(rig: Rig): Promise<string> {
+  const page = await rig.ctx.newPage();
+  try {
+    await page.goto(`chrome-extension://${rig.extId}/test.html`);
+    await page.bringToFront();
+    return await page.evaluate(() => {
+      let text = "";
+      document.addEventListener("paste", (e) => {
+        text = e.clipboardData?.getData("text/plain") ?? "";
+        e.preventDefault();
+      });
+      const box = document.createElement("textarea");
+      document.body.appendChild(box);
+      box.focus();
+      document.execCommand("paste");
+      return text;
+    });
+  } finally {
+    await page.close();
+  }
+}
+
+export async function writeClipboard(rig: Rig, text: string): Promise<void> {
+  const r = await testHook<{ ok: boolean }>(rig, "clipWrite", { text });
+  if (!r.ok) throw new Error("Couldn't write the clipboard");
 }
 
 export function menuFrame(page: Page): Frame | undefined {

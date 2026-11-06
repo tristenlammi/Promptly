@@ -1,0 +1,18 @@
+<!doctype html>
+<html>
+  <head><title>Sign in</title></head>
+  <body>
+    <h1>Sign in</h1>
+    <!-- A server-rendered login that refuses: it comes straight back with an error. -->
+    <p id="err" role="alert"></p>
+    <form action="reload-fail.html" method="get">
+      <label>Email <input id="user" name="email" autocomplete="username" /></label>
+      <label>Password <input id="pass" name="password" type="password" autocomplete="current-password" /></label>
+      <input type="hidden" name="tried" value="1" />
+      <button id="go">Sign in</button>
+    </form>
+    <script>
+      if (location.search.includes("tried")) document.getElementById("err").textContent = "Incorrect password. Try again.";
+    </script>
+  </body>
+</html>

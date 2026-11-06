@@ -106,9 +106,16 @@ export async function see(driver, locator, timeout = 30000) {
 }
 
 export async function click(driver, locator, timeout = 30000) {
-  const el = await see(driver, locator, timeout);
-  await driver.wait(until.elementIsEnabled(el), timeout);
-  await el.click();
+  try {
+    const el = await see(driver, locator, timeout);
+    await driver.wait(until.elementIsEnabled(el), timeout);
+    await el.click();
+  } catch (e) {
+    // What was on the page says more than the timeout does.
+    const seen = await driver.executeScript(`return location.href + " :: " + document.body.innerText.slice(0, 500)`).catch(() => "");
+    e.message += `\nOn the page: ${seen}`;
+    throw e;
+  }
 }
 
 export async function fill(driver, locator, value) {

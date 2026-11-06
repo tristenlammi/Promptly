@@ -28,6 +28,7 @@ async function call<T>(m: unknown): Promise<T> {
 
 const store = new IdbStore("promptly-vault");
 let changedTimer: ReturnType<typeof setTimeout> | null = null;
+let lockingHere = false;
 
 function deviceName(): string {
   const ua = navigator.userAgent;
@@ -135,10 +136,11 @@ function Access({ onDone }: { onDone: () => void }) {
 
 /** What only the extension has. Mail codes are opt-in even though the device may read them. */
 function ExtensionSettings() {
-  const [s, setS] = useState<{ onClickOnly: boolean; mailCodes: boolean; pin: boolean } | null>(null);
+  type Shown = { onClickOnly: boolean; mailCodes: boolean; pin: boolean; clipCheck: boolean };
+  const [s, setS] = useState<Shown | null>(null);
   const [pin, setPin] = useState("");
   const [error, setError] = useState("");
-  const load = () => call<{ onClickOnly: boolean; mailCodes: boolean; pin: boolean }>({ t: "extSettings" }).then(setS);
+  const load = () => call<Shown>({ t: "extSettings" }).then(setS);
   useEffect(() => {
     void load();
   }, []);
@@ -162,13 +164,35 @@ function ExtensionSettings() {
         <input
           type="checkbox"
           checked={s.onClickOnly}
-          onChange={async (e) => {
-            await call({ t: "setAccess", onClickOnly: e.target.checked });
-            await load();
+          onChange={(e) => {
+            setError("");
+            const onClickOnly = e.target.checked;
+            // Turning this off needs every site, and the browser only asks inside the click.
+            const asked = onClickOnly ? Promise.resolve(true) : ext.permissions.request({ origins: ["https://*/*", "http://*/*"] });
+            void asked.then(async (granted) => {
+              if (granted) await call({ t: "setAccess", onClickOnly });
+              else setError("The browser didn't give the extension access to all sites, so filling stays on click.");
+              await load();
+            });
           }}
         />
         Only fill when I click the toolbar button
       </label>
+      <p className="text-xs text-[var(--text-muted)]">When this is on the extension can't read pages until you click, so sites' passkey requests go to your browser's own passkeys instead of your vault.</p>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={s.clipCheck}
+          onChange={(e) => {
+            setError("");
+            const on = e.target.checked;
+            const asked = on ? ext.permissions.request({ permissions: ["clipboardRead"] }) : ext.permissions.remove({ permissions: ["clipboardRead"] });
+            void asked.catch(() => false).then(load);
+          }}
+        />
+        Don't clear the clipboard if I've copied something else since
+      </label>
+      <p className="text-xs text-[var(--text-muted)]">Copied codes and passwords get cleared after the time in Settings. To see whether what's there is still ours, the browser has to let the extension read your clipboard, so this is off unless you turn it on.</p>
       {s.pin ? (
         <Button
           small
@@ -239,6 +263,31 @@ function Root() {
     reload();
   }, []);
 
+  // Using this page counts as using the vault, so the background's auto-lock waits. It's
+  // told at most every 20 seconds, which is plenty next to a timer in minutes.
+  useEffect(() => {
+    let last = 0;
+    const active = () => {
+      const now = Date.now();
+      if (now - last < 20_000) return;
+      last = now;
+      call({ t: "activity" }).catch(() => undefined);
+    };
+    const events = ["mousemove", "keydown", "pointerdown", "scroll", "touchstart"];
+    events.forEach((e) => window.addEventListener(e, active, { passive: true }));
+    return () => events.forEach((e) => window.removeEventListener(e, active));
+  }, []);
+
+  // Locked from somewhere else: the popup, the timer, the machine going to sleep. This
+  // page holds keys of its own, so it starts over and comes back locked.
+  useEffect(() => {
+    const listener = (m: { t?: string }) => {
+      if (m?.t === "locked" && !lockingHere) location.reload();
+    };
+    ext.runtime.onMessage.addListener(listener);
+    return () => ext.runtime.onMessage.removeListener(listener);
+  }, []);
+
   const platform = useMemo<Platform | null>(() => {
     if (!connected) return null;
     const api = new VaultApi(connected.server, () => connected.token);
@@ -259,14 +308,26 @@ function Root() {
           return secret;
         },
       },
-      copy: (text) => navigator.clipboard.writeText(text),
-      clearClipboard: () => navigator.clipboard.writeText(""),
+      // The background keeps time for sensitive copies, so they clear with this page closed.
+      copy: async (text, sensitive) => {
+        await navigator.clipboard.writeText(text);
+        if (sensitive) await call({ t: "clipWatch", text });
+      },
+      clearClipboard: async () => {
+        await call({ t: "clipClear" });
+      },
       restore: async () => {
         const s = await call<{ unlock: string | null; session: string | null }>({ t: "session" });
         return s.unlock ? { secret: fromB64u(s.unlock), session: s.session } : null;
       },
-      unlock: (password: string) => call({ t: "unlock", password }),
-      lock: () => call({ t: "lock" }),
+      unlock: (password: string) => {
+        lockingHere = false;
+        return call({ t: "unlock", password });
+      },
+      lock: () => {
+        lockingHere = true;
+        return call({ t: "lock" });
+      },
       notifyChanged: () => {
         // Now, in case this page closes straight after a save, and once more when a
         // burst of changes has settled.

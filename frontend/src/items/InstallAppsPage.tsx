@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Download, Loader2, Share, Smartphone } from "lucide-react";
+import { ArrowUpRight, Download, KeyRound, Loader2, Monitor, Share, Smartphone } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -142,6 +142,123 @@ function isIos(): boolean {
   return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
+function isWindows(): boolean {
+  return /windows/i.test(navigator.userAgent);
+}
+
+function megabytes(bytes: number): string {
+  return `${(bytes / 1048576).toFixed(1)} MB`;
+}
+
+const DOWNLOAD_BUTTON = "inline-flex h-9 items-center gap-1.5 rounded-xl bg-[var(--accent)] px-3.5 font-semibold text-white";
+
+/** A version file in /downloads, or null if this server doesn't have that download. */
+function useDownloadInfo<T>(file: string) {
+  return useQuery({
+    queryKey: ["download-info", file],
+    queryFn: async () => {
+      const r = await fetch(`/downloads/${file}`, { cache: "no-store" });
+      return r.ok ? ((await r.json()) as T) : null;
+    },
+    retry: false,
+    staleTime: 60_000,
+  }).data;
+}
+
+/** Promptly Passwords for Windows: quick search, Windows Hello and typing logins into other
+ *  programs. Not code-signed yet, so Windows warns about it. */
+function WindowsPasswordsCard() {
+  const info = useDownloadInfo<{ version: string; size_bytes: number }>("PromptlyPasswords.json");
+  if (!info) return null;
+  return (
+    <section className="flex flex-col gap-3 rounded-2xl border border-[var(--accent)]/40 bg-[var(--surface)] p-4">
+      <div className="flex items-center gap-3">
+        <img src="/item-icons/passwords-192.png" alt="" className="h-12 w-12 shrink-0 rounded-2xl" />
+        <div className="min-w-0 flex-1">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text)]">
+            <Monitor className="h-4 w-4 text-[var(--accent-text)]" /> Promptly Passwords for Windows
+          </h2>
+          <p className="text-xs text-[var(--text-muted)]">
+            Your vault in its own window, with Windows Hello, quick search on Ctrl+Shift+Space, and typing logins into other
+            programs. Version {info.version}.
+          </p>
+        </div>
+      </div>
+      <ol className="flex flex-col gap-2 text-sm text-[var(--text)]">
+        <li className="flex flex-wrap items-center gap-2">
+          <span>1.</span>
+          <a href="/downloads/PromptlyPasswords-Setup.exe" download className={DOWNLOAD_BUTTON}>
+            <Download className="h-4 w-4" /> Download ({megabytes(info.size_bytes)})
+          </a>
+        </li>
+        <li>
+          2. Open the download. This build isn't code-signed yet, so Windows may say <b>Windows protected your PC</b>. Choose{" "}
+          <b>More info</b>, then <b>Run anyway</b>. It installs for you alone and doesn't ask for administrator rights.
+        </li>
+        <li>
+          3. Open it and enter this address: <code className="font-mono text-xs">{location.origin}</code>
+        </li>
+      </ol>
+    </section>
+  );
+}
+
+type ExtensionInfo = { version: string; chrome: { size_bytes: number }; firefox: { size_bytes: number } };
+
+/** The browser extension, until it's in the stores: loaded by hand from a zip. */
+function BrowserExtensionCard() {
+  const info = useDownloadInfo<ExtensionInfo>("PromptlyPasswordsExtension.json");
+  if (!info) return null;
+  return (
+    <section className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="flex items-center gap-3">
+        <img src="/item-icons/passwords-192.png" alt="" className="h-12 w-12 shrink-0 rounded-2xl" />
+        <div className="min-w-0 flex-1">
+          <h2 className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text)]">
+            <KeyRound className="h-4 w-4 text-[var(--accent-text)]" /> Promptly Passwords browser extension
+          </h2>
+          <p className="text-xs text-[var(--text-muted)]">
+            Fills your logins, 2FA codes and passkeys on websites. It isn't in the browser stores yet, so it's installed by hand,
+            and doesn't update itself. Version {info.version}.
+          </p>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 text-sm text-[var(--text)]">
+        <h3 className="font-semibold">Chrome, Edge, Brave and other Chromium browsers</h3>
+        <ol className="flex flex-col gap-2">
+          <li className="flex flex-wrap items-center gap-2">
+            <span>1.</span>
+            <a href="/downloads/promptly-passwords-chrome.zip" download className={DOWNLOAD_BUTTON}>
+              <Download className="h-4 w-4" /> Download ({megabytes(info.chrome.size_bytes)})
+            </a>
+          </li>
+          <li>2. Unzip it to a folder you'll keep. The browser goes on using that folder.</li>
+          <li>
+            3. Go to <code className="font-mono text-xs">chrome://extensions</code> (in Edge, <code className="font-mono text-xs">edge://extensions</code>) and turn
+            on <b>Developer mode</b>.
+          </li>
+          <li>
+            4. Choose <b>Load unpacked</b> and pick the folder.
+          </li>
+        </ol>
+        <h3 className="mt-1 font-semibold">Firefox</h3>
+        <ol className="flex flex-col gap-2">
+          <li className="flex flex-wrap items-center gap-2">
+            <span>1.</span>
+            <a href="/downloads/promptly-passwords-firefox.zip" download className={DOWNLOAD_BUTTON}>
+              <Download className="h-4 w-4" /> Download ({megabytes(info.firefox.size_bytes)})
+            </a>
+          </li>
+          <li>
+            2. Go to <code className="font-mono text-xs">about:debugging#/runtime/this-firefox</code>, choose <b>Load Temporary Add-on</b>, and pick the zip.
+          </li>
+          <li>Firefox removes it when it closes, until there's a signed version.</li>
+        </ol>
+      </div>
+    </section>
+  );
+}
+
 export function InstallAppsPage() {
   const navigate = useNavigate();
   const { data: apps, isLoading } = useQuery({ queryKey: ["apps-launcher"], queryFn: itemsApi.launcher });
@@ -214,6 +331,8 @@ export function InstallAppsPage() {
             Promptly menus around it. Everything stays in your Promptly, so search and chats still see it.
           </p>
           {isAndroid() && <AndroidAppCard kinds={(apps ?? []).map((a) => a.kind)} />}
+          {isWindows() && <WindowsPasswordsCard />}
+          {!isAndroid() && !isIos() && <BrowserExtensionCard />}
           {isIos() && (
             <p className="flex items-start gap-2 rounded-2xl bg-[var(--surface)] px-4 py-3 text-sm text-[var(--text)]">
               <Share className="mt-0.5 h-4 w-4 shrink-0 text-[var(--accent)]" />

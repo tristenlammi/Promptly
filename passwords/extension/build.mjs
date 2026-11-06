@@ -33,18 +33,24 @@ function manifest(engine) {
     icons: { 16: "icons/16.png", 32: "icons/32.png", 48: "icons/48.png", 128: "icons/128.png" },
     action: { default_popup: "popup.html", default_title: "Promptly Passwords", default_icon: { 16: "icons/16.png", 32: "icons/32.png" } },
     permissions: ["storage", "activeTab", "scripting", "alarms", "contextMenus", "idle", "webNavigation", "clipboardWrite", "nativeMessaging"],
+    optional_permissions: ["clipboardRead"],
     optional_host_permissions: ["https://*/*", "http://*/*"],
     commands: COMMANDS,
     web_accessible_resources: [{ resources: ["menu.html", "save.html"], matches: ["<all_urls>"] }],
     content_security_policy: { extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self';" },
   };
   if (TEST) base.host_permissions = ["<all_urls>"];
+  // Chromium's prompt for this can't be clicked by a test, and the tests read the clipboard.
+  if (TEST && engine === "chrome") {
+    base.permissions = [...base.permissions, "clipboardRead"];
+    delete base.optional_permissions;
+  }
   if (engine === "chrome") {
     return {
       ...base,
       minimum_chrome_version: "122",
       background: { service_worker: "background.js", type: "module" },
-      permissions: [...base.permissions, "sidePanel"],
+      permissions: [...base.permissions, "sidePanel", "offscreen"],
       side_panel: { default_path: "vault.html" },
       web_accessible_resources: [{ ...base.web_accessible_resources[0], use_dynamic_url: true }],
     };
@@ -82,7 +88,8 @@ async function buildEngine(engine) {
     nodePaths: [path.join(frontend, "node_modules")],
     define: { __ENGINE__: JSON.stringify(engine), __TEST_BUILD__: JSON.stringify(TEST) },
     legalComments: "none",
-    minify: !TEST,
+    // --minify on a test build: to time a popup the same size as a release's.
+    minify: !TEST || process.argv.includes("--minify"),
     loader: { ".json": "json" },
   };
   await esbuild.build({
@@ -96,13 +103,20 @@ async function buildEngine(engine) {
       menu: path.join(here, "src/menu.ts"),
       save: path.join(here, "src/save.ts"),
       passkey: path.join(here, "src/passkey.ts"),
+      // Chromium's service worker has no document for the clipboard. Firefox's background does.
+      ...(engine === "chrome" ? { offscreen: path.join(here, "src/offscreen.ts") } : {}),
     },
     splitting: false,
   });
   // Content scripts and the MAIN-world wrapper can't be ES modules.
   await esbuild.build({ ...common, format: "iife", outdir: dist, entryPoints: { content: path.join(here, "src/content.ts"), "passkey-main": path.join(here, "src/passkey-main.ts") } });
 
-  for (const f of ["popup.html", "vault.html", "menu.html", "save.html", "passkey.html"]) fs.copyFileSync(path.join(here, "src", f), path.join(dist, f));
+  for (const f of ["popup.html", "vault.html", "menu.html", "save.html", "passkey.html", ...(engine === "chrome" ? ["offscreen.html"] : [])]) fs.copyFileSync(path.join(here, "src", f), path.join(dist, f));
+  // A blank extension page for tests to run privileged calls in.
+  if (TEST) fs.writeFileSync(path.join(dist, "test.html"), "<!doctype html><title>Test</title>");
+  // The rules pack and its signature, and never the test key beside them.
+  fs.mkdirSync(path.join(dist, "rules"));
+  for (const f of ["pack.json", "pack.sig"]) fs.copyFileSync(path.join(here, "rules", f), path.join(dist, "rules", f));
   css(path.join(dist, "ui.css"));
   for (const size of [16, 32, 48, 128]) fs.copyFileSync(path.join(here, "icons", `${size}.png`), path.join(dist, "icons", `${size}.png`));
   fs.writeFileSync(path.join(dist, "manifest.json"), JSON.stringify(manifest(engine), null, 1));

@@ -24,7 +24,7 @@ export function capture(form: FormInfo, location: Location): Captured | null {
 }
 
 /** After a submit, has the page clearly refused? */
-export function looksFailed(doc: Document, submitted: Captured, dom: DomAdapter = {}): boolean {
+export function looksFailed(doc: Document, submitted: Pick<Captured, "kind">, dom: DomAdapter = {}): boolean {
   const page = analyzePage(doc, dom);
   const same = page.forms.find((f) => f.kind === submitted.kind && f.fields.some((x) => x.role === "password" || x.role === "new-password"));
   if (same) {
@@ -38,13 +38,40 @@ export function looksFailed(doc: Document, submitted: Captured, dom: DomAdapter 
   return false;
 }
 
-export type SaveOffer = { kind: "save" | "update"; itemId?: string; username?: string; password: string; host: string; url: string };
+/** What a background request after a submit says. A page gains nothing by faking this:
+ *  it only decides whether a person gets asked about saving. Status 0 is a cross-origin
+ *  request the browser won't describe, so it says nothing. */
+export function requestVerdict(status: number): "ok" | "failed" | "unknown" {
+  if (status >= 200 && status < 400) return "ok";
+  if ([400, 401, 403, 422, 429].includes(status)) return "failed";
+  return "unknown";
+}
+
+export type SaveOffer = {
+  kind: "save" | "update";
+  itemId?: string;
+  username?: string;
+  password: string;
+  host: string;
+  url: string;
+  /** A password we generated and saved before the site said yes. */
+  generated?: "signup" | "change";
+};
+
+/** What's already saved for this site. ``unconfirmed`` is a generated sign-up the site
+ *  hasn't accepted yet, ``pendingPassword`` a generated change it hasn't accepted yet. */
+export type KnownLogin = { id: string; username?: string; password?: string; pendingPassword?: string; unconfirmed?: boolean };
 
 /** What to ask, knowing what's already saved for this site. Same password: nothing. */
-export function decideOffer(c: Captured, existing: { id: string; username?: string; password?: string }[], neverHosts: string[]): SaveOffer | null {
-  if (neverHosts.includes(c.host)) return null;
+export function decideOffer(c: Captured, existing: KnownLogin[], neverHosts: string[]): SaveOffer | null {
   const password = c.newPassword ?? c.password;
   if (!password) return null;
+  // A password we made for this site went through: finish that item, don't make another.
+  const changing = existing.find((e) => e.pendingPassword === password);
+  if (changing) return { kind: "update", itemId: changing.id, username: changing.username ?? c.username, password, host: c.host, url: c.url, generated: "change" };
+  const signup = existing.find((e) => e.unconfirmed && e.password === password);
+  if (signup) return { kind: "save", itemId: signup.id, username: c.username ?? signup.username, password, host: c.host, url: c.url, generated: "signup" };
+  if (neverHosts.includes(c.host)) return null;
   const same = existing.find((e) => (e.username ?? "") === (c.username ?? ""));
   if (same) {
     if (same.password === password) return null;

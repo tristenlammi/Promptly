@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+  <head><title>App</title></head>
+  <body>
+    <h1 id="head">Home</h1>
+    <p id="label">Find something</p>
+    <!-- The same boxes all along. A route change only rewrites attributes the extension
+         doesn't watch, so nothing but the route change itself can say to look again. -->
+    <input id="a" aria-labelledby="label" placeholder="Search" name="q" />
+    <input id="b" style="display: inline-block" placeholder="" name="filter" />
+    <script>
+      const a = document.getElementById("a");
+      const b = document.getElementById("b");
+      window.__toSignIn = (how) => {
+        document.getElementById("head").textContent = "Sign in";
+        a.name = "email";
+        a.placeholder = "Email";
+        a.autocomplete = "username";
+        b.name = "password";
+        b.placeholder = "Password";
+        b.autocomplete = "current-password";
+        if (how === "push") history.pushState({}, "", "/spa-routes.html/sign-in");
+        if (how === "hash") location.hash = "#/sign-in";
+      };
+      // A page that won't stop changing route. It must not get an analysis for each one.
+      window.__storm = () => {
+        let n = 0;
+        const t = setInterval(() => {
+          history.pushState({}, "", `/spa-routes.html/r${n++}`);
+          if (n > 180) clearInterval(t);
+        }, 25);
+      };
+    </script>
+  </body>
+</html>

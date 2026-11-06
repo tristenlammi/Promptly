@@ -13,7 +13,7 @@ function send(message: Record<string, unknown>): Promise<Reply> {
   return ext.runtime.sendNativeMessage(NATIVE_HOST, message) as Promise<Reply>;
 }
 
-function toB64u(bytes: Uint8Array): string {
+export function toB64u(bytes: Uint8Array): string {
   let s = "";
   for (const b of bytes) s += String.fromCharCode(b);
   return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");

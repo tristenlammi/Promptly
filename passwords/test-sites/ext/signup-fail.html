@@ -1,0 +1,20 @@
+<!doctype html>
+<html>
+  <head><title>Create your account</title></head>
+  <body>
+    <h1>Create your account</h1>
+    <div id="err" role="alert"></div>
+    <form id="f" onsubmit="return false">
+      <label>Email <input id="email" name="email" type="email" autocomplete="email" /></label>
+      <label>Choose a password <input id="p1" name="new" type="password" autocomplete="new-password" /></label>
+      <label>Confirm password <input id="p2" name="confirm" type="password" autocomplete="new-password" /></label>
+      <button id="go">Sign up</button>
+    </form>
+    <script>
+      document.getElementById("f").addEventListener("submit", () => {
+        document.getElementById("err").textContent = "That email is invalid. Try again.";
+      });
+      window.__state = () => ({ p1: document.getElementById("p1").value, p2: document.getElementById("p2").value });
+    </script>
+  </body>
+</html>

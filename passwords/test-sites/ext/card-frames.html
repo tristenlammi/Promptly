@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+  <head><title>Checkout</title></head>
+  <body>
+    <h1>Payment</h1>
+    <!-- Hosted card fields: one frame per box, usually from a payment provider. ?at= says
+         where they're served from. ?hide=cvc hides that frame from the parent's side. -->
+    <form onsubmit="return false">
+      <label>Name on card <input id="name" name="ccname" autocomplete="cc-name" /></label>
+      <p><iframe id="f-number" title="Card number" style="width: 360px; height: 70px; border: 0"></iframe></p>
+      <p><iframe id="f-exp" title="Expiry" style="width: 360px; height: 70px; border: 0"></iframe></p>
+      <p><iframe id="f-cvc" title="Security code" style="width: 360px; height: 70px; border: 0"></iframe></p>
+      <button>Pay now</button>
+    </form>
+    <script>
+      const q = new URLSearchParams(location.search);
+      const at = q.get("at") || location.origin;
+      for (const field of ["number", "exp", "cvc"]) {
+        const f = document.getElementById(`f-${field}`);
+        f.src = `${at}/card-frame.html?field=${field}`;
+        if (q.get("hide") === field) f.style.opacity = "0.001";
+      }
+      window.__state = () => ({ name: document.getElementById("name").value });
+    </script>
+  </body>
+</html>

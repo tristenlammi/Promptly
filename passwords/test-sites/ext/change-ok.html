@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Change your password</title></head>
+<body>
+<h1>Change your password</h1>
+<form action="welcome.html" method="get">
+  <label for="current">Current password</label>
+  <input id="current" name="c" type="password" autocomplete="current-password">
+  <label for="next">New password</label>
+  <input id="next" name="n" type="password" autocomplete="new-password">
+  <label for="again">Confirm new password</label>
+  <input id="again" name="a" type="password" autocomplete="new-password">
+  <button id="go" type="submit">Change password</button>
+</form>
+<script>window.__state = () => ({ current: document.getElementById("current").value, next: document.getElementById("next").value, again: document.getElementById("again").value });</script>
+</body>
+</html>

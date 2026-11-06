@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head><title>Card field</title></head>
+  <body>
+    <form onsubmit="return false" id="f"></form>
+    <script>
+      const field = new URLSearchParams(location.search).get("field");
+      const inputs = {
+        number: '<label>Card number <input id="box" name="cardnumber" autocomplete="cc-number"></label>',
+        exp: '<label>Expiry <input id="box" name="exp" autocomplete="cc-exp"></label>',
+        cvc: '<label>Security code <input id="box" name="cvc" autocomplete="cc-csc"></label>',
+      };
+      document.getElementById("f").innerHTML = inputs[field];
+      window.__value = () => document.getElementById("box").value;
+    </script>
+  </body>
+</html>

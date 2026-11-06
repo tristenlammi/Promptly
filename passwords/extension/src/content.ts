@@ -2,10 +2,10 @@
 // for nothing it doesn't need. Secrets arrive only at fill time, for fields it checked,
 // and are never kept. Its DOM footprint is one empty host element, shown only when a
 // person focuses a field, carrying nothing about whether the vault's locked.
-import { capture, type Captured, looksFailed } from "../../../frontend/src/passwords/core/autofill/capture";
+import { capture, type Captured, looksFailed, requestVerdict } from "../../../frontend/src/passwords/core/autofill/capture";
 import { analyzePage, type DomAdapter, type FillableElement, type FormInfo } from "../../../frontend/src/passwords/core/autofill/classify";
 import { fillField, fillFields, type FillValues } from "../../../frontend/src/passwords/core/autofill/fill";
-import { checkAtClick, fieldIsFillable, type GuardState, hiddenByStyle } from "../../../frontend/src/passwords/core/autofill/guard";
+import { checkAtClick, fieldIsFillable, type GuardState, visibilityV2 } from "../../../frontend/src/passwords/core/autofill/guard";
 import { applyRule, describeForm, selectorFor } from "../../../frontend/src/passwords/core/autofill/rules";
 import type { SiteRule } from "../../../frontend/src/passwords/core/model";
 import { ext, type PageReport, type ToContent } from "./rpc";
@@ -14,6 +14,46 @@ const w = window as unknown as { __promptlyContent?: boolean };
 if (!w.__promptlyContent) {
   w.__promptlyContent = true;
   main();
+}
+
+function isPassword(role: string): boolean {
+  return role === "password" || role === "new-password" || role === "current-password";
+}
+
+/** IntersectionObserver v2, which only Chromium has. */
+function ioSupported(): boolean {
+  return typeof IntersectionObserverEntry !== "undefined" && "isVisible" in IntersectionObserverEntry.prototype;
+}
+
+function watchVisibility(el: Element, onReading: (visible: boolean) => void): IntersectionObserver {
+  const io = new IntersectionObserver(
+    (entries) => onReading((entries[entries.length - 1] as unknown as { isVisible: boolean }).isVisible),
+    { threshold: [0, 1], trackVisibility: true, delay: 100 } as IntersectionObserverInit,
+  );
+  io.observe(el);
+  return io;
+}
+
+/** One reading for an element, or undefined if the browser can't say. */
+function readVisibility(el: Element): Promise<boolean | undefined> {
+  // A tab in the background has nothing on screen to read. Its answer means nothing.
+  if (!ioSupported() || document.visibilityState !== "visible") return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    // A frame in another process reads false until its parent's answer gets to it, so
+    // false only counts if it's still false when the time's up.
+    let reading: boolean | undefined;
+    const timer = setTimeout(() => {
+      io.disconnect();
+      resolve(reading);
+    }, 500);
+    const io = watchVisibility(el, (visible) => {
+      reading = visible;
+      if (!visible) return;
+      clearTimeout(timer);
+      io.disconnect();
+      resolve(true);
+    });
+  });
 }
 
 function main() {
@@ -40,6 +80,15 @@ function main() {
   let lastCapture: Captured | null = null;
   let lookAgain: ReturnType<typeof setTimeout> | null = null;
 
+  // Noticing a submit that has no submit event: the password box a person typed in, what
+  // it held, and what background requests said since. Page memory only.
+  let dirty: { form: FormInfo; snapshot: Captured } | null = null;
+  let gone: { snapshot: Captured; at: number } | null = null;
+  let submittedAt = 0;
+  let submittedPerf = 0;
+  let requestOkAt = 0;
+  let requests: PerformanceObserver | null = null;
+
   const roleOf = (el: EventTarget | null) => forms.flatMap((f) => f.fields).find((f) => f.el === el);
 
   function analyze() {
@@ -58,6 +107,7 @@ function main() {
     }
     lastAnalysis = Date.now();
     analyses++;
+    noticeFormGone();
   }
 
   function report(): PageReport {
@@ -70,7 +120,14 @@ function main() {
     };
   }
 
-  const send = (m: unknown) => ext.runtime.sendMessage(m).catch(() => null);
+  // After an extension update or removal this frame is orphaned, and the call throws.
+  const send = (m: unknown): Promise<unknown> => {
+    try {
+      return ext.runtime.sendMessage(m).catch(() => null);
+    } catch {
+      return Promise.resolve(null);
+    }
+  };
 
   function publish() {
     send({ t: "pageReport", report: report() });
@@ -88,17 +145,24 @@ function main() {
       if (Date.now() - lastAnalysis < wait / 2) return schedule();
       analyze();
       publish();
+      if (menuField && !menuField.isConnected) closeMenu();
     }, wait);
   };
 
+  const hasField = (n: Node) => n.nodeType === 1 && ((n as Element).tagName === "INPUT" || !!(n as Element).querySelector?.("input,select,textarea"));
+
   const observer = new MutationObserver((records) => {
+    if (pending) return;
     for (const r of records) {
       if (r.type === "attributes") {
-        if (["INPUT", "SELECT", "TEXTAREA", "FORM"].includes((r.target as Element).tagName)) return schedule();
+        if (dirty || ["INPUT", "SELECT", "TEXTAREA", "FORM"].includes((r.target as Element).tagName)) return schedule();
         continue;
       }
       for (const n of r.addedNodes) {
-        if (n.nodeType === 1 && ((n as Element).tagName === "INPUT" || (n as Element).querySelector?.("input,select,textarea") || (n as Element).shadowRoot)) return schedule();
+        if (hasField(n) || (n as Element).shadowRoot) return schedule();
+      }
+      for (const n of r.removedNodes) {
+        if (hasField(n)) return schedule();
       }
     }
   });
@@ -107,12 +171,30 @@ function main() {
     observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["type", "style", "class", "hidden", "disabled"] });
   }
 
+  // Routes that change with no field added or removed. schedule() is the same budget.
+  // pushState can't be seen from here: the background tells us, from webNavigation.
+  window.addEventListener("hashchange", schedule);
+  window.addEventListener("popstate", schedule);
+
   async function hello() {
-    const r = (await send({ t: "hello", url: location.href })) as { r?: { rule: SiteRule | null; pendingSave: boolean; unlocked: boolean } } | null;
+    const r = (await send({ t: "hello", url: location.href })) as { r?: { rule: SiteRule | null; pendingSave: boolean; submittedKind?: string; unlocked: boolean } } | null;
     rule = r?.r?.rule ?? null;
     analyze();
     publish();
-    if (r?.r?.pendingSave) checkPendingSave();
+    if (r?.r?.pendingSave) arrived(r.r.submittedKind ?? "signin");
+  }
+
+  let arriving: ReturnType<typeof setTimeout> | null = null;
+
+  /** A new page with a save waiting, from a submit on the page before. If that form's
+   *  back, or there's an error, the login failed and the page reloaded. */
+  function arrived(kind: string) {
+    if (window !== window.top || arriving) return;
+    arriving = setTimeout(() => {
+      arriving = null;
+      if (looksFailed(document, { kind: kind as FormInfo["kind"] }, dom)) send({ t: "submitFailed" });
+      else showSaveBar();
+    }, 600);
   }
 
   // ---- The inline menu ---------------------------------------------------------------
@@ -124,10 +206,15 @@ function main() {
   let hostObserver: MutationObserver | null = null;
   let menuField: Element | null = null;
   let closedRoot: ShadowRoot | null = null;
+  let io: IntersectionObserver | null = null;
+  let ioReading: boolean | undefined;
 
   function closeMenu() {
     hostObserver?.disconnect();
     hostObserver = null;
+    io?.disconnect();
+    io = null;
+    ioReading = undefined;
     host?.remove();
     host = null;
     frame = null;
@@ -171,6 +258,11 @@ function main() {
     }
     const b = host.getBoundingClientRect();
     guard = { shownAt: performance.now(), rect: { left: b.left, top: b.top, width: b.width, height: b.height } };
+    if (ioSupported()) {
+      io = watchVisibility(host, (visible) => {
+        ioReading = visible;
+      });
+    }
     hostObserver = new MutationObserver(() => {
       tampered = true;
     });
@@ -217,41 +309,144 @@ function main() {
   // ---- Filling ----------------------------------------------------------------------
 
   async function doFill(values: FillValues): Promise<string[]> {
+    // First, since our own menu covers boxes below the one it opened on.
+    closeMenu();
     analyze();
     const form = best;
     if (!form) return [];
     // The guard applies whatever the classifier said: no hidden or off-screen fields.
-    const visible = form.fields.filter((f) => fieldIsFillable(f.el).ok);
+    let visible = form.fields.filter((f) => fieldIsFillable(f.el).ok);
+    // From inside a frame, a parent hiding the whole frame can't be seen by style. Where
+    // the browser can say, it decides. A background tab can't, and then this adds nothing.
+    if (window !== window.top) {
+      const seen = await Promise.all(visible.map((f) => readVisibility(f.el)));
+      visible = visible.filter((_, i) => seen[i] !== false);
+    }
     const results = await fillFields(visible, values, (role) => {
       analyze();
       return (best?.fields.find((f) => f.role === role)?.el as FillableElement | undefined) ?? null;
     });
-    closeMenu();
     const filled = visible.filter((f) => results.some((r) => r.el === f.el && r.ok)).map((f) => f.role);
+    if (filled.some(isPassword)) markDirty(form);
     return filled;
   }
 
   // ---- Noticing a submit --------------------------------------------------------------
 
-  function grab() {
-    if (!best) analyze();
-    const form = forms.find((f) => f.fields.some((x) => x.role === "password" || x.role === "new-password" || x.role === "current-password")) ?? best;
-    if (!form) return;
-    const c = capture(form, location);
+  function grab(form0?: FormInfo, snapshot?: Captured) {
+    if (!form0 && !snapshot && !best) analyze();
+    const form = form0 ?? forms.find((f) => f.fields.some((x) => isPassword(x.role))) ?? best;
+    if (!form && !snapshot) return;
+    const c = snapshot ?? capture(form!, location);
     if (!c || (!c.password && !c.newPassword)) {
-      // Username on one page, password on the next: remember it for this tab.
-      if (c?.username) lastCapture = c;
+      // Username on one page, password on the next. It may be a full navigation, so the
+      // background keeps it for this tab. It never comes back here.
+      if (c?.username) {
+        lastCapture = c;
+        send({ t: "capturedUser", username: c.username });
+      }
       return;
     }
     if (!c.username && lastCapture?.username) c.username = lastCapture.username;
     lastCapture = c;
+    submittedAt = Date.now();
+    submittedPerf = performance.now();
+    watchRequests();
     send({ t: "captured", capture: c });
     // SPAs: no navigation. Look again shortly, once however many events said "submit".
+    lookIn(1800);
+  }
+
+  function lookIn(ms: number) {
     if (lookAgain) clearTimeout(lookAgain);
     lookAgain = setTimeout(() => {
-      if (lastCapture) checkPendingSave();
-    }, 1800);
+      lookAgain = null;
+      if (lastCapture) void checkPendingSave();
+    }, ms);
   }
+
+  function markDirty(form: FormInfo) {
+    const snapshot = capture(form, location);
+    if (!snapshot?.password && !snapshot?.newPassword) return;
+    dirty = { form, snapshot };
+    watchRequests();
+  }
+
+  /** What the page's own requests came back with. Read from the page's performance
+   *  timeline, here in the isolated world: nothing is patched and nothing runs in the
+   *  page. Cross-origin requests without CORS report status 0, and say nothing. */
+  function watchRequests() {
+    if (requests || typeof PerformanceObserver === "undefined") return;
+    try {
+      requests = new PerformanceObserver((list) => onRequests(list.getEntries() as PerformanceResourceTiming[]));
+      requests.observe({ type: "resource" });
+    } catch {
+      requests = null;
+    }
+  }
+
+  function onRequests(entries: PerformanceResourceTiming[]) {
+    for (const e of entries) {
+      if (e.initiatorType !== "fetch" && e.initiatorType !== "xmlhttprequest") continue;
+      const verdict = requestVerdict((e as unknown as { responseStatus?: number }).responseStatus ?? 0);
+      const afterSubmit = submittedAt > 0 && e.startTime >= submittedPerf - 20;
+      if (verdict === "failed" && afterSubmit) {
+        // The server said no. Nobody should be asked to save a typo.
+        if (lookAgain) clearTimeout(lookAgain);
+        lookAgain = null;
+        submittedAt = 0;
+        lastCapture = null;
+        send({ t: "submitFailed" });
+        return;
+      }
+      if (verdict !== "ok") continue;
+      requestOkAt = Date.now();
+      if (gone && Date.now() - gone.at < 2000) {
+        const { snapshot } = gone;
+        gone = null;
+        grab(undefined, snapshot);
+      } else if (afterSubmit && lastCapture) {
+        lookIn(400);
+      }
+    }
+  }
+
+  /** The form a person typed a password into has left the page, with no submit event we
+   *  could see. That's a submit only if a request just succeeded, and no other password
+   *  box took its place: closing a dialog or switching to a Register tab isn't one. */
+  function noticeFormGone() {
+    if (!dirty) return;
+    const box = dirty.form.fields.find((f) => isPassword(f.role));
+    if (box && box.el.isConnected && fieldIsFillable(box.el).ok) return;
+    if (forms.some((f) => f.fields.some((x) => isPassword(x.role) && fieldIsFillable(x.el).ok))) return;
+    const { snapshot } = dirty;
+    dirty = null;
+    if (requests) onRequests(requests.takeRecords() as PerformanceResourceTiming[]);
+    if (submittedAt && Date.now() - submittedAt < 8000) {
+      if (lastCapture) lookIn(150);
+      return;
+    }
+    if (Date.now() - requestOkAt < 6000) grab(undefined, snapshot);
+    else gone = { snapshot, at: Date.now() };
+  }
+
+  document.addEventListener(
+    "input",
+    (e) => {
+      if (!e.isTrusted) return;
+      const t = e.composedPath()[0] as Element;
+      if (!t || !["INPUT", "TEXTAREA"].includes(t.tagName)) return;
+      let form = forms.find((f) => f.fields.some((x) => x.el === t));
+      // Typing in a chat box or a document isn't a reason to read the whole page again.
+      if (!form && (t as HTMLInputElement).type === "password" && Date.now() - lastAnalysis > 300) {
+        analyze();
+        form = forms.find((f) => f.fields.some((x) => x.el === t));
+      }
+      if (dirty?.form.fields.some((x) => x.el === t)) markDirty(dirty.form);
+      else if (form?.fields.some((x) => x.el === t && isPassword(x.role))) markDirty(form);
+    },
+    true,
+  );
 
   function onClickCapture(e: Event) {
     if (!e.isTrusted) return;
@@ -273,18 +468,26 @@ function main() {
 
   let saveHost: HTMLElement | null = null;
 
-  function checkPendingSave() {
+  async function checkPendingSave() {
     if (window !== window.top) return;
     if (lastCapture && looksFailed(document, lastCapture, dom)) {
       send({ t: "submitFailed" });
       lastCapture = null;
       return;
     }
-    showSaveBar();
+    const r = (await send({ t: "hello", url: location.href })) as { r?: { pendingSave: boolean } } | null;
+    if (r?.r?.pendingSave) showSaveBar();
+  }
+
+  function hideSaveBar() {
+    saveHost?.remove();
+    saveHost = null;
   }
 
   function showSaveBar() {
     if (saveHost) return;
+    requests?.disconnect();
+    requests = null;
     saveHost = document.createElement("div");
     const shadow = saveHost.attachShadow({ mode: "closed" });
     const f = document.createElement("iframe");
@@ -299,6 +502,23 @@ function main() {
     } catch {
       /* it's still there at the top z-index */
     }
+  }
+
+  // ---- A short note on the page, with nothing a script could read ------------------------
+
+  function notice(text: string) {
+    if (window !== window.top) return;
+    const note = document.createElement("div");
+    const shadow = note.attachShadow({ mode: "closed" });
+    const p = document.createElement("p");
+    p.textContent = text;
+    p.setAttribute("style", "margin:0;background:#1A1A19;color:#fff;font:13px system-ui,sans-serif;padding:8px 12px;border-radius:8px");
+    shadow.appendChild(p);
+    note.setAttribute("style", "all:initial;position:fixed;right:12px;bottom:12px;z-index:2147483647;display:block;pointer-events:none");
+    // Not a popover and never after the menu, so it can't make the menu's own checks fail.
+    if (host && host.parentNode === document.documentElement) document.documentElement.insertBefore(note, host);
+    else document.documentElement.appendChild(note);
+    setTimeout(() => note.remove(), 3500);
   }
 
   // ---- Passkeys: the bridge from the page's world. Every decision is made on this side. --
@@ -328,6 +548,8 @@ function main() {
     }
     if (d?.__pk !== "req" || typeof d.id !== "number" || (d.op !== "get" && d.op !== "create") || typeof d.options !== "object") return;
     const reply = (r: Record<string, unknown>) => window.postMessage({ __pk: "res", id: d.id, ...r }, location.origin);
+    // Tells the page's wrapper someone's here. Without this it goes to the browser's own.
+    window.postMessage({ __pk: "ack", id: d.id }, location.origin);
     if (!policyAllows(d.op)) {
       // Fails closed here, before anything reaches the background.
       reply({ ok: false, name: "NotAllowedError", message: "The Permissions-Policy of this page doesn't allow it." });
@@ -404,12 +626,16 @@ function main() {
     if (sender.id !== ext.runtime.id) return false;
     switch (msg.t) {
       case "report":
-        if (Date.now() - lastAnalysis > 400) analyze();
+        // A page mid-step has just swapped its boxes, and what gets sent depends on this.
+        if (msg.fresh || Date.now() - lastAnalysis > 400) analyze();
         reply(report());
         return false;
       case "doFill":
         doFill(msg.values).then((filled) => reply({ filled }));
         return true;
+      case "hasMenu":
+        reply(!!host);
+        return false;
       case "menuCheck": {
         if (!host || !guard) {
           reply({ ok: false, reason: "no-menu" });
@@ -419,6 +645,7 @@ function main() {
           isTrusted: true, // Checked in the menu frame, where the page can't reach.
           tampered,
           shadowContains: (el) => el === host || el === frame || (closedRoot?.contains(el) ?? false),
+          visibleV2: visibilityV2(ioSupported(), ioReading),
         });
         reply(verdict);
         return false;
@@ -428,6 +655,7 @@ function main() {
         const boxes = (form?.fields ?? []).filter((f) => ["new-password", "confirm-password", "password"].includes(f.role));
         (async () => {
           for (const b of boxes) if (fieldIsFillable(b.el).ok) await fillField(b.el as FillableElement, msg.password);
+          if (form) markDirty(form);
           closeMenu();
           reply(true);
         })();
@@ -448,17 +676,23 @@ function main() {
       case "describeForm":
         reply(describeForm(document, location.hostname));
         return false;
-      case "copy":
-        navigator.clipboard.writeText(msg.text).then(
-          () => reply(true),
-          () => reply(false),
-        );
-        return true;
+      case "routeChanged":
+        schedule();
+        reply(true);
+        return false;
+      case "notice":
+        notice(msg.text);
+        reply(true);
+        return false;
       case "checkFailed":
         reply(lastCapture ? looksFailed(document, lastCapture, dom) : false);
         return false;
       case "showSave":
-        showSaveBar();
+        arrived(msg.kind);
+        reply(true);
+        return false;
+      case "hideSave":
+        hideSaveBar();
         reply(true);
         return false;
       default:
@@ -475,5 +709,4 @@ function main() {
     startObserving();
     hello();
   }
-  void hiddenByStyle;
 }

@@ -102,7 +102,10 @@ async function strike(field = "#user") {
 before(async () => {
   makeUsers(["root"], "admin");
   server = http.createServer((req, res) => {
-    const rel = new URL(req.url, "http://x").pathname.replace(/^\/ext\//, "").replace(/^\//, "");
+    const asked = new URL(req.url, "http://x");
+    // A stand-in for a site's login API: answers with the status it's asked for.
+    if (asked.pathname === "/api/login") return res.writeHead(Number(asked.searchParams.get("status") ?? 200), { "Content-Type": "application/json" }).end("{}");
+    const rel = asked.pathname.replace(/^\/ext\//, "").replace(/^\//, "");
     const file = path.join(SITE, rel);
     if (!file.startsWith(SITE) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return res.writeHead(404).end("no");
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
@@ -310,4 +313,252 @@ test("Firefox: saves a new login after a sign-in", async () => {
   const shown = await driver.executeScript(`return document.documentElement.lastElementChild.tagName === 'DIV'`);
   assert.ok(shown, "the save bar's host is there");
   await closeTabs();
+});
+
+// ---- Where Firefox's background differs from Chromium's -----------------------------------
+
+const hook = (op, args = {}) => extEval(`async (m) => { const r = await browser.runtime.sendMessage(m); if (!r?.ok) throw new Error(r?.error ?? "no answer"); return r.r; }`, { t: "test", op, ...args });
+
+async function openSettings() {
+  await driver.switchTo().window(extTab);
+  await driver.executeScript(`location.hash = "#/settings";`);
+  await see(driver, By.css('[data-testid="ext-settings"]'), 30000);
+}
+
+const settingsBox = (text) => By.xpath(`//*[@data-testid="ext-settings"]//label[contains(normalize-space(.), ${JSON.stringify(text)})]//input`);
+
+const setNumber = async (locator, value) => {
+  const el = await see(driver, locator);
+  await driver.executeScript(`arguments[0].scrollIntoView({ block: "center" });`, el);
+  // All at once: the box puts its default back the moment it's empty, so typing can't do it.
+  await driver.executeScript(`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(arguments[0], arguments[1]); arguments[0].dispatchEvent(new Event("input", { bubbles: true }));`, el, String(value));
+  await driver.sleep(300);
+};
+
+async function readClip() {
+  await driver.switchTo().window(extTab);
+  return driver.executeAsyncScript(`const done = arguments[arguments.length-1]; navigator.clipboard.readText().then(done, (e) => done("READ FAILED " + e));`);
+}
+
+const signedIn = async () => (await extEval(`(m) => browser.runtime.sendMessage(m)`, { t: "state" })).r.unlocked;
+
+test("Firefox: the on-click box walks the real permission path, and takes both scripts with it", async () => {
+  await openSettings();
+  const scripts = () => extEval(`async () => (await browser.scripting.getRegisteredContentScripts()).map((x) => x.id).sort()`);
+  assert.deepEqual(await scripts(), ["promptly-fields", "promptly-passkey"]);
+  const box = settingsBox("Only fill when I click");
+  await (await see(driver, box)).click();
+  await driver.sleep(500);
+  assert.deepEqual(await scripts(), []);
+  assert.equal(await (await see(driver, box)).isSelected(), true);
+
+  // No wrapper on a new page, so WebAuthn is the browser's. A wrapper left behind with no
+  // bridge hands over too, instead of hanging.
+  const pg = await page("webauthn.html");
+  await driver.executeScript(`navigator.credentials.create = () => Promise.resolve("reached the browser"); navigator.credentials.get = () => Promise.resolve("reached the browser");`);
+  const id = await tabId(await driver.getCurrentUrl());
+  await extEval(`(id) => browser.scripting.executeScript({ target: { tabId: id }, world: "MAIN", files: ["passkey-main.js"] })`, id);
+  await driver.switchTo().window(pg);
+  const out = await driver.executeAsyncScript(`
+    const done = arguments[arguments.length-1];
+    const started = Date.now();
+    navigator.credentials.create({ publicKey: { rp: { name: "x" }, user: { id: new Uint8Array(4), name: "u", displayName: "u" }, challenge: new Uint8Array(32), pubKeyCredParams: [{ type: "public-key", alg: -7 }] } }).then(
+      (r) => done({ r, ms: Date.now() - started, wrapped: !!window.__promptlyPk }),
+      (e) => done({ error: String(e) }),
+    );`);
+  assert.equal(out.r, "reached the browser", JSON.stringify(out));
+  assert.equal(out.wrapped, true);
+  assert.ok(out.ms < 5000, JSON.stringify(out));
+  await closeTabs();
+
+  await openSettings();
+  await (await see(driver, box)).click();
+  await driver.sleep(800);
+  assert.deepEqual(await scripts(), ["promptly-fields", "promptly-passkey"]);
+  assert.equal(await (await see(driver, box)).isSelected(), false);
+});
+
+test("Firefox: clipboard clears from the event page, and leaves something newer alone when allowed to look", async () => {
+  await openSettings();
+  await setNumber(By.css('input[type=number][min="5"]'), 5);
+  // Asking for clipboardRead is a real click on a real box. The test pref says yes to it.
+  const box = settingsBox("Don't clear the clipboard");
+  await (await see(driver, box)).click();
+  await driver.sleep(500);
+  assert.equal(await (await see(driver, box)).isSelected(), true);
+
+  const pg = await page("login.html");
+  const url = await driver.getCurrentUrl();
+  const copyFromPopup = async () => {
+    await popup(url);
+    await click(driver, button("Generator"));
+    const shown = await see(driver, By.css('[data-testid="generated"]'));
+    await driver.wait(async () => (await shown.getText()).length > 0, 10000);
+    const value = await shown.getText();
+    await click(driver, button("Copy"));
+    await see(driver, byText("Copied."));
+    await driver.close();
+    return value;
+  };
+
+  const value = await copyFromPopup();
+  assert.equal(await readClip(), value);
+  await driver.sleep(7000);
+  assert.equal(await readClip(), "");
+
+  await copyFromPopup();
+  await driver.switchTo().window(extTab);
+  await driver.executeAsyncScript(`const done = arguments[arguments.length-1]; navigator.clipboard.writeText("something of mine").then(done, done);`);
+  await driver.sleep(6500);
+  assert.equal(await readClip(), "something of mine");
+
+  await driver.switchTo().window(pg);
+  await closeTabs();
+  await openSettings();
+  await setNumber(By.css('input[type=number][min="5"]'), 30);
+});
+
+test("Firefox: the 2FA code is copied from the event page once the next page has no box", async () => {
+  const added = await addLogin("Firefox 2FA", "http://twofa.localhost:8111", "two@example.com", "Two-Pw-1");
+  await hook("patchItem", { id: added.r.id, patch: { totp: { secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1", digits: 6, period: 30 } } });
+  await driver.switchTo().window(extTab);
+  const pg = await newTab("http://twofa.localhost:8111/login.html");
+  const pop = await popup("http://twofa.localhost:8111/login.html");
+  const before = await readClip();
+  await driver.switchTo().window(pop);
+  await click(driver, button("Fill Firefox 2FA"));
+  await driver.sleep(1500);
+  assert.equal(await readClip(), before, "nothing copied at the fill");
+  await driver.switchTo().window(pg);
+  assert.equal((await state()).pass, "Two-Pw-1");
+  await driver.findElement(By.css("#go")).click();
+  await driver.wait(until.urlContains("welcome"), 10000);
+  await driver.sleep(2500);
+  assert.match(await readClip(), /^\d{6}$/);
+  await closeTabs();
+});
+
+test("Firefox: reading the page's requests from the isolated world", async () => {
+  const hostShown = () => driver.executeScript(`return document.documentElement.lastElementChild.tagName === 'DIV'`);
+  const typeAndGo = async (url) => {
+    await driver.switchTo().window(extTab);
+    await newTab(url);
+    await driver.sleep(300);
+    await driver.findElement(By.css("#user")).sendKeys("spa@example.com");
+    await driver.findElement(By.css("#pass")).sendKeys("Spa-Pw-1");
+    const r = await rectOf("#go");
+    await clickAt(r.x + r.w / 2, r.y + r.h / 2);
+  };
+
+  await typeAndGo("http://spaok.localhost:8111/spa-login.html?result=ok");
+  await driver.wait(hostShown, 8000);
+  await closeTabs();
+
+  await typeAndGo("http://spadenied.localhost:8111/spa-login.html?result=denied");
+  await driver.sleep(3000);
+  assert.equal(await hostShown(), false, "a 401 isn't a sign-in");
+  await closeTabs();
+
+  await typeAndGo("http://spaclose.localhost:8111/spa-login.html?result=no-request");
+  await driver.sleep(3000);
+  assert.equal(await hostShown(), false, "a form that goes with no request isn't one either");
+  await closeTabs();
+});
+
+test("Firefox: a failed login that reloads the page isn't offered, and a username survives a real navigation", async () => {
+  await driver.switchTo().window(extTab);
+  await newTab("http://reloadff.localhost:8111/reload-fail.html");
+  await driver.findElement(By.css("#user")).sendKeys("typo@example.com");
+  await driver.findElement(By.css("#pass")).sendKeys("wrong");
+  await driver.findElement(By.css("#go")).click();
+  await driver.wait(until.urlContains("tried"), 10000);
+  await driver.sleep(1500);
+  assert.equal(await driver.executeScript(`return document.documentElement.lastElementChild.tagName === 'DIV'`), false);
+  await closeTabs();
+
+  await driver.switchTo().window(extTab);
+  await newTab("http://twostepff.localhost:8111/step-user.html");
+  await driver.findElement(By.css("#user")).sendKeys("step-ff@example.com");
+  await driver.findElement(By.css("#next")).click();
+  await driver.wait(until.urlContains("step-pass"), 10000);
+  await driver.findElement(By.css("#pass")).sendKeys("Step-Ff-1");
+  await driver.findElement(By.css("#go")).click();
+  await driver.wait(until.urlContains("welcome"), 10000);
+  await driver.sleep(1500);
+  const pending = await extEval(`async () => (await browser.storage.session.get("pendingSave")).pendingSave`);
+  const offer = pending.find((p) => p.offer.host === "twostepff.localhost");
+  assert.equal(offer.offer.username, "step-ff@example.com");
+  await closeTabs();
+});
+
+test("Firefox: route changes reach the frame, by webNavigation and by hash", async () => {
+  for (const how of ["push", "hash"]) {
+    await driver.switchTo().window(extTab);
+    await newTab(siteA("spa-routes.html"));
+    await driver.sleep(500);
+    await driver.executeScript(`window.__toSignIn(arguments[0])`, how);
+    const url = await driver.getCurrentUrl();
+    const id = await tabId(url);
+    let roles = [];
+    for (let i = 0; i < 16 && !roles.includes("password"); i++) {
+      await driver.sleep(500);
+      roles = (await hook("reports", { tabId: id })).report?.roles ?? [];
+    }
+    assert.ok(roles.includes("password"), `${how}: ${JSON.stringify(roles)}`);
+    await closeTabs();
+  }
+});
+
+test("Firefox: a card in frames fills each frame's own box, after naming the other origin", async () => {
+  await hook("addCard", { title: "Fox Visa", cardNumber: "4111111111111111", cardCvv: "123" });
+  await driver.switchTo().window(extTab);
+  const url = `http://shopff.localhost:8111/card-frames.html?at=${encodeURIComponent("http://paymentsff.localhost:8111")}`;
+  const pg = await newTab(url);
+  await driver.sleep(800);
+  await popup(url);
+  await fill(driver, By.css('input[aria-label="Search your vault"]'), "Fox Visa");
+  await click(driver, button("Fill Fox Visa"));
+  await see(driver, byText("http://paymentsff.localhost:8111"));
+  await click(driver, button("Fill anyway"));
+  await driver.sleep(1000);
+  await driver.switchTo().window(pg);
+  const valueIn = async (id) => {
+    await driver.switchTo().frame(await driver.findElement(By.css(`#f-${id}`)));
+    const v = await driver.executeScript(`return window.__value()`);
+    await driver.switchTo().defaultContent();
+    return v;
+  };
+  assert.equal(await valueIn("number"), "4111111111111111");
+  assert.equal(await valueIn("cvc"), "123");
+  await closeTabs();
+});
+
+test("Firefox: auto-lock settings reach the background, and a long gap between alarms locks", async () => {
+  await openSettings();
+  await setNumber(By.xpath(`//label[.//span[normalize-space(.)="Lock after this many idle minutes"]]//input`), 37);
+  const at = await extEval(`async () => { await browser.runtime.sendMessage({ t: "activity" }); return (await browser.alarms.get("autolock")).scheduledTime; }`);
+  const minutes = (at - Date.now()) / 60000;
+  assert.ok(minutes > 36 && minutes <= 37.1, String(minutes));
+  await setNumber(By.xpath(`//label[.//span[normalize-space(.)="Lock after this many idle minutes"]]//input`), 15);
+
+  // Firefox doesn't report "locked" from the idle API, so this is how sleep shows up here.
+  assert.equal((await hook("sleepGap", { ms: 60 * 1000 })).unlocked, true);
+  assert.equal((await hook("sleepGap", { ms: 10 * 60 * 1000 })).unlocked, false);
+  assert.equal(await signedIn(), false);
+
+  // Windows Hello isn't offered with no desktop app.
+  await driver.switchTo().window(extTab);
+  await see(driver, byText("Your vault is locked"), 30000);
+  const before = await driver.getAllWindowHandles();
+  await extEval("(u) => browser.tabs.create({ url: u })", `${EXT}/popup.html`);
+  await driver.wait(async () => (await driver.getAllWindowHandles()).length > before.length, 15000);
+  await driver.switchTo().window((await driver.getAllWindowHandles()).find((x) => !before.includes(x)));
+  await see(driver, By.css('input[aria-label="Master password"]'));
+  await driver.sleep(500);
+  assert.equal((await driver.findElements(button("Use Windows Hello"))).length, 0);
+  await closeTabs();
+
+  await fill(driver, labelled("Master password"), MASTER);
+  await click(driver, button("Unlock"));
+  await see(driver, By.css('nav[aria-label="Passwords"]'), 60000);
 });

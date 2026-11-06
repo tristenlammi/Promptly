@@ -2,10 +2,10 @@
 // (@simplewebauthn/server) on the relying-party side, on a local test site.
 import crypto from "node:crypto";
 
-import { expect, test } from "@playwright/test";
+import { expect, type Page, test } from "@playwright/test";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 
-import { connect, launch, makeUsers, type Rig, siteA, startSite, unlockExt } from "./lib";
+import { bg, connect, launch, makeUsers, type Rig, siteA, startSite, tabIdOf, unlockExt } from "./lib";
 
 test.describe.configure({ mode: "serial" });
 
@@ -199,4 +199,92 @@ test("prototype tampering in the page doesn't change what the background decides
   }, credential.id);
   expect(r.error).toBe("SecurityError");
   await page.close();
+});
+
+// ---- Fallback to the browser must always work (plan 4) ------------------------------------
+
+/** A software authenticator in the browser, so a request that reaches it gets a real answer. */
+async function withBrowserAuthenticator(page: Page) {
+  const cdp = await rig.ctx.newCDPSession(page);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
+}
+
+const register = (page: Page) => page.evaluate((o) => (window as any).__register(o), { rpId: new URL(page.url()).hostname, userId: b64u(Buffer.from("browser-user")), userName: "browser@example.com", challenge: b64u(crypto.randomBytes(32)) });
+
+function watchForPrompt() {
+  let opened = false;
+  const listener = (p: { url: () => string }) => {
+    if (p.url().includes("passkey.html")) opened = true;
+  };
+  rig.ctx.on("page", listener);
+  return () => {
+    rig.ctx.off("page", listener);
+    return opened;
+  };
+}
+
+const setOnClick = (on: boolean) => bg(rig, `await chrome.runtime.sendMessage({ t: "setAccess", onClickOnly: arg });`, on);
+const registered = () => bg<string[]>(rig, `return (await chrome.scripting.getRegisteredContentScripts()).map((x) => x.id).sort();`);
+
+test("on-click mode takes the passkey wrapper away too, and WebAuthn goes to the browser", async () => {
+  await setOnClick(true);
+  expect(await registered()).toEqual([]);
+  const stop = watchForPrompt();
+  const page = await rig.ctx.newPage();
+  await page.goto("http://onclick.localhost:8111/webauthn.html");
+  await withBrowserAuthenticator(page);
+  const r = await register(page);
+  expect(r.error).toBeUndefined();
+  expect(r.isReal).toBe(true);
+  expect(stop()).toBe(false);
+  await page.close();
+  await setOnClick(false);
+  expect(await registered()).toEqual(["promptly-fields", "promptly-passkey"]);
+});
+
+test("a wrapper left on a page with no bridge can't hang: it hands over to the browser", async () => {
+  // A page that loaded before the mode changed, or after the extension was updated.
+  await setOnClick(true);
+  const stop = watchForPrompt();
+  const page = await rig.ctx.newPage();
+  await page.goto("http://orphan.localhost:8111/webauthn.html");
+  await withBrowserAuthenticator(page);
+  await bg(rig, `await chrome.scripting.executeScript({ target: { tabId: arg }, world: "MAIN", files: ["passkey-main.js"] });`, await tabIdOf(rig, page));
+  const started = Date.now();
+  const r = await register(page);
+  expect(r.error).toBeUndefined();
+  expect(r.isReal).toBe(true);
+  expect(Date.now() - started).toBeLessThan(10_000);
+  expect(stop()).toBe(false);
+
+  // And for a sign-in, which also gets the browser's real answer.
+  const signIn = await page.evaluate((o) => (window as any).__auth(o), { rpId: "orphan.localhost", challenge: b64u(crypto.randomBytes(32)), allow: [r.id] });
+  expect(signIn.error).toBeUndefined();
+  expect(signIn.id).toBe(r.id);
+  await page.close();
+  await setOnClick(false);
+});
+
+test("a bridge that answers and then goes quiet still ends at the browser", async () => {
+  await setOnClick(true);
+  const page = await rig.ctx.newPage();
+  await page.clock.install();
+  await page.goto("http://quiet.localhost:8111/webauthn.html");
+  await withBrowserAuthenticator(page);
+  await bg(rig, `await chrome.scripting.executeScript({ target: { tabId: arg }, world: "MAIN", files: ["passkey-main.js"] });`, await tabIdOf(rig, page));
+  // The page says "I'm here" for the bridge, and then says nothing.
+  await page.evaluate(() => {
+    window.addEventListener("message", (e) => {
+      if (e.data?.__pk === "req") window.postMessage({ __pk: "ack", id: e.data.id }, location.origin);
+    });
+  });
+  const run = page.evaluate((o) => (window as any).__register(o), { rpId: "quiet.localhost", userId: b64u(Buffer.from("quiet")), userName: "quiet@example.com", challenge: b64u(crypto.randomBytes(32)) });
+  await new Promise((r) => setTimeout(r, 300));
+  await page.clock.fastForward(6 * 60 * 1000 + 1000);
+  const r = await run;
+  expect(r.error).toBeUndefined();
+  expect(r.isReal).toBe(true);
+  await page.close();
+  await setOnClick(false);
 });

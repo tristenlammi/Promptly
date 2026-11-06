@@ -112,6 +112,82 @@ test("the page never gets mail codes, and they're not in the page's DOM", async 
   await page.close();
 });
 
+test("a code from a lookalike sender doesn't fill on one click, and only after a plain warning", async () => {
+  await addItem(rig, { title: "Netflix real", url: "https://netflix.com", username: "ana", password: "Pw-1!" });
+  seedMail("Your verification code", "no-reply@netfl1x.com", "Your code is 771204");
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("otp.html"));
+  const f = await openMenu(page, "#code");
+  const row = f.getByRole("button", { name: "Fill code from netfl1x.com", exact: true });
+  await expect(row).toBeVisible();
+  await page.waitForTimeout(500);
+  await row.click();
+  // One click gets a warning that names both, with the safe answer first, and nothing filled.
+  await expect(f.getByText(/netfl1x.com, which looks like netflix.com/)).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__state())).toEqual({ code: "" });
+  await expect(f.getByRole("button").first()).toHaveAccessibleName("Don't fill");
+  await f.getByRole("button", { name: "Don't fill" }).click();
+  await expect(f.getByRole("button", { name: "Fill code from netfl1x.com", exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__state())).toEqual({ code: "" });
+
+  // A double click on the row can't answer the warning that appears under it.
+  await f.getByRole("button", { name: "Fill code from netfl1x.com", exact: true }).click();
+  await f.getByRole("button", { name: "Fill code from netfl1x.com anyway" }).click();
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => (window as any).__state())).toEqual({ code: "" });
+
+  // Asked for and answered: now it fills.
+  await page.waitForTimeout(700);
+  await f.getByRole("button", { name: "Fill code from netfl1x.com anyway" }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).__state())).toEqual({ code: "771204" });
+  await page.close();
+});
+
+test("the background decides too: no confirmation, no fill, and a lookalike's link never opens", async () => {
+  seedMail("Sign in to your account", "no-reply@netfl1x.com", "Sign in here: https://netfl1x.com/magic?code=abc");
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("otp.html"));
+  const f = await openMenu(page, "#code");
+  await expect(f.getByRole("button", { name: "Fill code from netflix.com", exact: true }).first()).toBeVisible();
+  // There's no row for that link at all.
+  await expect(f.getByRole("button", { name: /Open sign-in link from netfl1x.com/ })).toHaveCount(0);
+
+  // The menu frame asking directly, past its own check.
+  const rows = await f.evaluate(async () => (await chrome.runtime.sendMessage({ t: "menuList" })).r.mail as { id: string; domain: string; code: string | null; hasLink: boolean; lookalike: string | null }[]);
+  const fake = rows.filter((r) => r.domain === "netfl1x.com");
+  expect(fake.every((r) => r.lookalike === "netflix.com")).toBe(true);
+  await page.waitForTimeout(500);
+  const withCode = fake.find((r) => r.code)!;
+  const code = await f.evaluate(async (id) => chrome.runtime.sendMessage({ t: "menuMailCode", id }), withCode.id);
+  expect(code.r.ok).toBe(false);
+  expect(code.r.reason).toBe("lookalike");
+  expect(await page.evaluate(() => (window as any).__state())).toEqual({ code: "" });
+
+  const before = page.url();
+  const withLink = fake.find((r) => r.hasLink);
+  expect(withLink, JSON.stringify(fake)).toBeTruthy();
+  const link = await f.evaluate(async (id) => chrome.runtime.sendMessage({ t: "menuMailLink", id }), withLink!.id);
+  expect(link.r.ok).toBe(false);
+  await page.waitForTimeout(300);
+  expect(page.url()).toBe(before);
+  await page.close();
+});
+
+test("a real sender's code on a page that looks like a saved site gets the warning too", async () => {
+  await addItem(rig, { title: "Lookalike home", url: "https://mybankingsite.localhost", username: "ana", password: "Pw-2!" });
+  const page = await rig.ctx.newPage();
+  await page.goto("http://mybank1ngsite.localhost:8111/otp.html");
+  const f = await openMenu(page, "#code");
+  const row = f.getByRole("button", { name: "Fill code from netflix.com", exact: true }).first();
+  await expect(row).toBeVisible();
+  await expect(f.getByRole("button", { name: /Open sign-in link/ })).toHaveCount(0);
+  await page.waitForTimeout(500);
+  await row.click();
+  await expect(f.getByText(/This page looks like mybankingsite.localhost/)).toBeVisible();
+  expect(await page.evaluate(() => (window as any).__state())).toEqual({ code: "" });
+  await page.close();
+});
+
 test("a pending new password fills the new boxes, and the old one the current box", async () => {
   await addItem(rig, { title: "Changer", url: "http://localhost:8111", username: "ana", password: "Old-Pass-1!" });
   const v = await vaultPage();

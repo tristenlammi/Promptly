@@ -2,7 +2,8 @@
 // The page can tamper with anything here, so this file decides nothing: every trust
 // decision (origin, RP ID, Permissions-Policy, who's asking) is taken in the isolated
 // world and the background. All this does is carry the request and shape the answer.
-// The native API stays available as the fallback.
+// The native API stays available as the fallback, and a request we can't carry always
+// ends up there rather than hanging.
 (() => {
   const w = window as unknown as { __promptlyPk?: boolean };
   if (w.__promptlyPk) return;
@@ -14,6 +15,11 @@
     get: navigator.credentials.get.bind(navigator.credentials),
   };
   const origPost = window.postMessage.bind(window);
+  // The bridge answers straight away if it's there. It may not be: on-click mode, a page
+  // that loaded before the mode changed, an extension that's been updated or removed.
+  const ACK_MS = 750;
+  // Longer than browsers keep their own WebAuthn prompts up.
+  const ANSWER_MS = 6 * 60 * 1000;
 
   const b64u = (b: ArrayBuffer | ArrayBufferView): string => {
     const u = b instanceof ArrayBuffer ? new Uint8Array(b) : new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
@@ -34,24 +40,39 @@
   window.addEventListener("message", (e) => {
     if (e.source !== window || e.origin !== location.origin) return;
     const d = e.data as { __pk?: string; id?: number };
-    if (d?.__pk !== "res" || typeof d.id !== "number") return;
-    const r = waiting.get(d.id);
-    if (r) {
-      waiting.delete(d.id);
-      r(d as Record<string, unknown>);
-    }
+    if ((d?.__pk !== "res" && d?.__pk !== "ack") || typeof d.id !== "number") return;
+    waiting.get(d.id)?.(d as Record<string, unknown>);
   });
 
   function ask(op: "get" | "create", options: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return new Promise((resolve, reject) => {
       const id = ++seq;
       if (signal?.aborted) return reject(new DOMException("Aborted", "AbortError"));
-      signal?.addEventListener("abort", () => {
+      let timer: ReturnType<typeof setTimeout>;
+      const finish = () => {
+        clearTimeout(timer);
         waiting.delete(id);
+      };
+      const goNative = () => {
+        finish();
+        origPost({ __pk: "cancel", id }, location.origin);
+        resolve({ ok: false, native: true });
+      };
+      signal?.addEventListener("abort", () => {
+        finish();
         origPost({ __pk: "cancel", id }, location.origin);
         reject(new DOMException("Aborted", "AbortError"));
       });
-      waiting.set(id, resolve);
+      timer = setTimeout(goNative, ACK_MS);
+      waiting.set(id, (m) => {
+        if (m.__pk === "ack") {
+          clearTimeout(timer);
+          timer = setTimeout(goNative, ANSWER_MS);
+          return;
+        }
+        finish();
+        resolve(m);
+      });
       origPost({ __pk: "req", id, op, options }, location.origin);
     });
   }

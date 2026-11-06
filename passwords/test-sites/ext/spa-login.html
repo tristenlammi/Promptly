@@ -1,0 +1,27 @@
+<!doctype html>
+<html>
+  <head><title>Sign in</title></head>
+  <body>
+    <h1 id="head">Sign in</h1>
+    <div id="app"></div>
+    <script>
+      // A single-page login with no form element, no submit event and no button: a div with
+      // a click handler, a fetch, and the form taken away if the server says yes.
+      // ?result=ok | denied | ok-keeps-form | no-request (closes like a dialog).
+      const result = new URLSearchParams(location.search).get("result") || "ok";
+      const app = document.getElementById("app");
+      app.innerHTML = '<label>Email <input id="user" name="email" autocomplete="username"></label><label>Password <input id="pass" type="password" autocomplete="current-password"></label><div id="go" style="display:inline-block;padding:8px;background:#ccc">Continue</div>';
+      document.getElementById("go").addEventListener("click", async () => {
+        if (result === "no-request") {
+          app.remove();
+          return;
+        }
+        const r = await fetch(`/api/login?status=${result === "denied" ? 401 : 200}`, { method: "POST" });
+        if (r.ok && result !== "ok-keeps-form") {
+          app.remove();
+          document.getElementById("head").textContent = "Welcome back";
+        }
+      });
+    </script>
+  </body>
+</html>

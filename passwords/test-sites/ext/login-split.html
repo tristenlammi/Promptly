@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head><title>Sign in to Split</title></head>
+  <body>
+    <h1>Sign in</h1>
+    <form onsubmit="return false">
+      <label>Email <input id="user" name="email" type="email" autocomplete="username" /></label>
+      <button>Sign in</button>
+    </form>
+    <!-- The password box lives in a frame of its own, from ?frame=. -->
+    <iframe id="pw" title="Password" style="width: 360px; height: 90px; border: 0"></iframe>
+    <script>
+      document.getElementById("pw").src = new URLSearchParams(location.search).get("frame");
+      window.__state = () => ({ user: document.getElementById("user").value });
+    </script>
+  </body>
+</html>

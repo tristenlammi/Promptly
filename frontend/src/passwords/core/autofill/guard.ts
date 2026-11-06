@@ -116,11 +116,12 @@ export type GuardState = {
 
 /** Everything checked at click time. Any failure means: don't fill from here, offer
  *  the toolbar popup instead. */
-export function checkAtClick(host: Element, state: GuardState, opts: { now?: number; shadowContains?: (el: Element) => boolean; isTrusted: boolean; tampered?: boolean } ): GuardVerdict {
+export function checkAtClick(host: Element, state: GuardState, opts: { now?: number; shadowContains?: (el: Element) => boolean; isTrusted: boolean; tampered?: boolean; visibleV2?: boolean } ): GuardVerdict {
   const now = opts.now ?? performance.now();
   if (!opts.isTrusted) return { ok: false, reason: "untrusted-event" };
   if (opts.tampered) return { ok: false, reason: "tampered" };
   if (now - state.shownAt < MIN_DWELL_MS) return { ok: false, reason: "too-fast" };
+  if (opts.visibleV2 === false) return { ok: false, reason: "not-visible" };
   if (!host.isConnected) return { ok: false, reason: "removed" };
   const r = host.getBoundingClientRect();
   if (Math.abs(r.left - state.rect.left) > 1 || Math.abs(r.top - state.rect.top) > 1 || Math.abs(r.width - state.rect.width) > 1 || Math.abs(r.height - state.rect.height) > 1) {
@@ -134,6 +135,15 @@ export function checkAtClick(host: Element, state: GuardState, opts: { now?: num
   if (cover) return { ok: false, reason: "covered" };
   if (!isLastInDom(host)) return { ok: false, reason: "not-last" };
   return { ok: true };
+}
+
+/** IntersectionObserver v2's answer, for browsers that have it (Chromium). It sees what
+ *  checks from inside a frame can't: a parent frame hiding that frame. Where the browser
+ *  doesn't have it this returns undefined and changes nothing. Where it does, no reading
+ *  yet counts as not visible. */
+export function visibilityV2(supported: boolean, reading: boolean | undefined): boolean | undefined {
+  if (!supported) return undefined;
+  return reading === true;
 }
 
 /** Before a fill puts a value in a field: only fields a person can see and that the

@@ -16,6 +16,8 @@ const MAX_RULES = 5000;
 function validRule(r: unknown): r is SiteRule {
   if (!r || typeof r !== "object") return false;
   const x = r as Record<string, unknown>;
+  // Data with known names and nothing else: a pack can't carry anything that runs.
+  if (Object.keys(x).some((k) => !["host", "username", "password", "submit", "otp", "never"].includes(k))) return false;
   if (typeof x.host !== "string" || !/^[a-z0-9.-]{1,253}$/.test(x.host)) return false;
   for (const k of ["username", "password", "submit", "otp"]) {
     if (x[k] !== undefined && (typeof x[k] !== "string" || (x[k] as string).length > 300)) return false;
