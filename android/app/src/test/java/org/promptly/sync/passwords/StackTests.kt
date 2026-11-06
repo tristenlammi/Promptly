@@ -1497,4 +1497,34 @@ class StackTests {
         assertTrue("Differences:\n" + problems.joinToString("\n"), problems.isEmpty())
         assertTrue("Compared $compared", compared > 60)
     }
+
+    // ---- Where the vault meets the rest of Promptly ----
+
+    private val plain = OkHttpClient.Builder().readTimeout(60, TimeUnit.SECONDS).build()
+    private fun bearerGet(u: StackUser, path: String): String =
+        plain.newCall(okhttp3.Request.Builder().url("$BASE$path").header("Authorization", "Bearer ${u.token}").build()).execute().use { it.body.string() }
+
+    @Test fun theActivityLogReadsTheRealServer() {
+        need()
+        val u = makeUser("activity")
+        val phone = device(u)
+        setupRetrying(phone)
+        val rows = phone.api.activity()
+        assertTrue("got ${rows.map { it.event }}", rows.any { it.event == "vault_created" })
+        assertTrue(rows.all { org.promptly.sync.passwords.core.parseInstant(it.at) != null })
+    }
+
+    /** The Today card comes from what's posted here, and goes when it's taken back. */
+    @Test fun todayCountsReachTheTodayCardAndGoAwayWhenTurnedOff() {
+        need()
+        val u = makeUser("today")
+        val phone = device(u)
+        setupRetrying(phone)
+        val card = "\"passwords\":{\"attention\":"
+        assertFalse(bearerGet(u, "/api/today").contains(card))
+        phone.api.putHealth(org.promptly.sync.passwords.core.CoarseCounts(2, 3, 1, 9))
+        assertTrue("Weak, reused and breached count, and old doesn't", bearerGet(u, "/api/today").contains(card + "6"))
+        phone.api.deleteHealth()
+        assertFalse(bearerGet(u, "/api/today").contains(card))
+    }
 }

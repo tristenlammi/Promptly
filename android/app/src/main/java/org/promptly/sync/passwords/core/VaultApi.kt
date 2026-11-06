@@ -239,9 +239,13 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
         }
     }
 
-    fun putHealth(weak: Int, reused: Int, breached: Int, old: Int) {
-        call("PUT", "/health", buildJsonObject { put("weak", weak); put("reused", reused); put("breached", breached); put("old", old) })
+    fun putHealth(c: CoarseCounts) {
+        call("PUT", "/health", buildJsonObject { put("weak", c.weak); put("reused", c.reused); put("breached", c.breached); put("old", c.old) })
     }
+
+    fun deleteHealth() { call("DELETE", "/health") }
+
+    fun activity(limit: Int = 100): List<ActivityOut> = ActivityLog.parse(call("GET", "/activity?limit=$limit"))
 
     fun noteExport() { call("POST", "/activity/export") }
 

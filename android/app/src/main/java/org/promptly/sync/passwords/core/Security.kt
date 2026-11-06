@@ -195,7 +195,12 @@ class HealthReport(
     val reusedCount: Int get() = reused.sumOf { it.size }
 }
 
+/** The only thing about a vault that goes to the Today card. Counts, never names. */
+data class CoarseCounts(val weak: Int, val reused: Int, val breached: Int, val old: Int)
+
 object Health {
+    fun coarseCounts(r: HealthReport) = CoarseCounts(r.weak.size, r.reused.sumOf { it.size }, r.breached.size, r.old.size)
+
     private const val OLD_MS = 365L * 24 * 3600 * 1000
     private val LOCAL_HTTP = Regex("^http://(localhost|127\\.|192\\.168\\.|10\\.|\\[?::1)")
 

@@ -27,6 +27,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: passkeys imported from Bitwarden now work: their ids are converted to the form sites use.
 
 ### Added
+- Passwords on Android: an Activity screen, and an opt-in to post coarse counts to your Today page.
 - Passwords: the extension offers your passkeys when a site asks quietly or with no click, from the toolbar panel and the on-page menu.
 - Passwords on Android: import from LastPass, 1Password (.1pux), Proton Pass, Dashlane, KeePass (XML and KDBX, with its password), Credential Exchange, Aegis, 2FAS and Google Authenticator links on the phone itself, with limits so a hostile file can't hang or exhaust it.
 - Passwords: the extension's toolbar button opens a full control panel: this site's logins, categories, live 2FA codes, a generator, bookmarks and shortcuts.

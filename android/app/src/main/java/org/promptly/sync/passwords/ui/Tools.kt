@@ -99,6 +99,7 @@ private sealed class Screen {
     data object Sends : Screen()
     data object Emergency : Screen()
     data object ExportNow : Screen()
+    data object Activity : Screen()
 }
 
 @Composable
@@ -193,6 +194,7 @@ fun MainScreen(activity: PasswordsActivity) {
                 Screen.Sends -> SendsScreen(client) { screen = Screen.Home }
                 Screen.Emergency -> EmergencyScreen(client) { screen = Screen.Home }
                 Screen.ExportNow -> ExportNowScreen(client) { screen = Screen.Home }
+                Screen.Activity -> ActivityScreen(client) { screen = Screen.Home }
             }
         }
         if (screen == Screen.Home) {
@@ -215,7 +217,7 @@ fun MainScreen(activity: PasswordsActivity) {
 private fun MoreScreen(client: VaultClient, go: (Screen) -> Unit, lock: () -> Unit) {
     val version by Pw.version.collectAsState()
     val invites = remember(version) { client.store.getVaults().count { !it.accepted && it.kind != "personal" } }
-    Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("More", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
         OutlinedButton(onClick = { go(Screen.Security) }, Modifier.fillMaxWidth().testTag("open-security")) { Text("Security check") }
         OutlinedButton(onClick = { go(Screen.Shared) }, Modifier.fillMaxWidth().testTag("open-shared")) { Text(if (invites > 0) "Shared vaults ($invites waiting)" else "Shared vaults") }
@@ -224,6 +226,7 @@ private fun MoreScreen(client: VaultClient, go: (Screen) -> Unit, lock: () -> Un
         OutlinedButton(onClick = { go(Screen.Transfer) }, Modifier.fillMaxWidth().testTag("open-transfer")) { Text("Import and export") }
         OutlinedButton(onClick = { go(Screen.Trash) }, Modifier.fillMaxWidth().testTag("open-trash")) { Text("Trash") }
         OutlinedButton(onClick = { go(Screen.Devices) }, Modifier.fillMaxWidth().testTag("open-devices")) { Text("Devices") }
+        OutlinedButton(onClick = { go(Screen.Activity) }, Modifier.fillMaxWidth().testTag("open-activity")) { Text("Activity") }
         OutlinedButton(onClick = { go(Screen.Settings) }, Modifier.fillMaxWidth().testTag("open-settings")) { Text("Settings") }
         Button(onClick = lock, Modifier.fillMaxWidth().testTag("lock-now")) { Text("Lock now") }
     }

@@ -75,7 +75,7 @@ import org.promptly.sync.passwords.core.VaultClient
 import org.promptly.sync.passwords.core.newBody
 
 @Composable
-private fun Header(title: String, onBack: () -> Unit) {
+internal fun Header(title: String, onBack: () -> Unit) {
     BackHandler(onBack = onBack)
     Row(verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onBack, Modifier.testTag("back")) { Text("Back") }
@@ -113,6 +113,8 @@ fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onExport:
     var progress by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var run by remember { mutableIntStateOf(0) }
+    var optIn by remember { mutableStateOf(Pw.prefs.healthOptIn) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(run) {
         progress = "Checking…"
         error = null
@@ -122,7 +124,10 @@ fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onExport:
                 Health.run(client.allItems(), { client.api.breachRange(it) }, dir.twofa, passkeys = dir.passkeys) { d, t -> progress = "Checking $d of $t" }
             }
         }
-        r.onSuccess { report = it }.onFailure { error = errorText(it) }
+        r.onSuccess {
+            report = it
+            if (Pw.prefs.healthOptIn) withContext(Dispatchers.IO) { runCatching { withSession(client) { client.api.putHealth(Health.coarseCounts(it)) } } }
+        }.onFailure { error = errorText(it) }
         progress = ""
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -130,6 +135,24 @@ fun SecurityCheckScreen(client: VaultClient, onOpen: (String) -> Unit, onExport:
         SurvivalPanel(client, onExport)
         DuplicatesPanel(client, onOpen)
         Text("All worked out on this phone. Only the first five characters of each password's SHA-1 leave it, through your server, to ask whether it's been in a breach.", style = MaterialTheme.typography.bodySmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("Show \"passwords need attention\" on my Today page")
+                Text("That sends your server the counts only, never any names. Whoever runs the server can then see how many of your passwords are weak, reused, breached or old, and not which ones.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("health-optin-why"))
+            }
+            androidx.compose.material3.Switch(optIn, { want ->
+                optIn = want
+                Pw.prefs.healthOptIn = want
+                val now = report
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            withSession(client) { if (!want) client.api.deleteHealth() else if (now != null) client.api.putHealth(Health.coarseCounts(now)) }
+                        }
+                    }
+                }
+            }, Modifier.testTag("health-optin"))
+        }
         if (progress.isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             CircularProgressIndicator()
             Text(progress, Modifier.testTag("health-progress"))

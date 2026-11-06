@@ -57,7 +57,7 @@ import kotlin.concurrent.thread
 
 /** A server on the phone, for answers the stack can't give on demand. It knows a few paths and says
  *  503 to the rest, which the client takes as the server being down. */
-private class TinyServer(private val answers: MutableMap<String, Pair<String, ByteArray>>) {
+internal class TinyServer(private val answers: MutableMap<String, Pair<String, ByteArray>>) {
     val calls = CopyOnWriteArrayList<String>()
     val bodies = CopyOnWriteArrayList<String>()
     private val socket = ServerSocket(PORT, 16, InetAddress.getByName("localhost"))

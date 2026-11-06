@@ -271,3 +271,69 @@ object EmergencyText {
 
     fun validWait(text: String): Int? = text.trim().toIntOrNull()?.takeIf { it in MIN_WAIT..MAX_WAIT }
 }
+
+// ---- Text someone else wrote ------------------------------------------------------------
+
+object UntrustedText {
+    /** One line of plain text, for a sender's name or a subject: no line breaks, control characters,
+     *  or the invisible ones that turn text around. Nothing here ever reads it as anything but text. */
+    fun clean(s: String?, max: Int): String {
+        if (s == null) return ""
+        val b = StringBuilder()
+        var i = 0
+        while (i < s.length && b.length < max) {
+            val cp = s.codePointAt(i)
+            i += Character.charCount(cp)
+            when (Character.getType(cp).toByte()) {
+                Character.CONTROL, Character.LINE_SEPARATOR, Character.PARAGRAPH_SEPARATOR -> b.append(' ')
+                Character.FORMAT, Character.PRIVATE_USE, Character.SURROGATE, Character.UNASSIGNED -> Unit
+                else -> if (b.length + Character.charCount(cp) <= max) b.appendCodePoint(cp) else i = s.length
+            }
+        }
+        return b.toString().replace(WHITESPACE, " ").trim()
+    }
+
+    private val WHITESPACE = Regex("\\s+")
+}
+
+// ---- Activity log ------------------------------------------------------------------------
+
+data class ActivityOut(val event: String, val at: String)
+
+object ActivityLog {
+    /** The web vault's words, and one it leaves as a bare event name. */
+    private val TEXT = mapOf(
+        "vault_created" to "Vault created",
+        "unlocked" to "Unlocked",
+        "unlock_locked_out" to "Too many wrong tries: unlock paused",
+        "master_password_changed" to "Master password changed",
+        "vault_reset" to "Vault reset",
+        "device_added" to "Device added",
+        "device_removed" to "Device removed",
+        "device_approved" to "New device approved",
+        "device_denied" to "New device refused",
+        "vault_shared_created" to "Shared vault created",
+        "vault_deleted" to "Shared vault deleted",
+        "vault_left" to "Left a shared vault",
+        "vault_member_added" to "Someone added to a shared vault",
+        "vault_member_removed" to "Someone removed from a shared vault",
+        "vault_invited" to "You were invited to a shared vault",
+        "vault_role_changed" to "A member's role changed",
+        "vault_key_rotated" to "Shared vault's key changed",
+        "vault_removed" to "Removed from a shared vault",
+        "exported" to "Vault exported",
+    )
+
+    fun text(event: String): String = TEXT[event] ?: UntrustedText.clean(event, 80)
+
+    /** A row with no event or no real time isn't shown. Rubbish in place of a list is an empty list. */
+    fun parse(text: String?): List<ActivityOut> {
+        val rows = runCatching { Json.parseToJsonElement(text ?: return emptyList()) as? JsonArray }.getOrNull() ?: return emptyList()
+        return rows.take(500).mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val event = o.str("event")?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+            val at = o.str("at")?.takeIf { parseInstant(it) != null } ?: return@mapNotNull null
+            ActivityOut(event, at)
+        }
+    }
+}

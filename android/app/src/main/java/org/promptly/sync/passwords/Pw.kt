@@ -309,6 +309,11 @@ class PwPrefs(context: Context) {
         get() = prefs.getLong("export_notified", 0)
         set(v) = prefs.edit().putLong("export_notified", v).apply()
 
+    /** Whether a Security check here posts its counts to the Today card. Off unless turned on. */
+    var healthOptIn: Boolean
+        get() = prefs.getBoolean("health_opt_in", false)
+        set(v) = prefs.edit().putBoolean("health_opt_in", v).apply()
+
     fun forgetDevice() {
         val keep = prefs.getString("server", null)
         val guide = setupGuideDone
