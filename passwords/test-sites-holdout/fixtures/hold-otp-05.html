@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Copperleaf Pay</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.5 Tahoma, sans-serif;color:#e8e6e3;background:#1b1d22}
+a{color:#e0a23a}
+.top{display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding:12px 24px;background:#111317;color:#e8e6e3}
+.top a{color:inherit;text-decoration:none}
+.top strong{font-size:1.15em;margin-right:12px}
+.top nav{display:flex;gap:14px;flex:1;flex-wrap:wrap}
+.top input{padding:5px 8px;border:1px solid #3b3f47;border-radius:8px;background:#fff;color:#222;min-width:180px;width:auto}
+main{max-width:980px;margin:32px auto;padding:0 20px}
+.card{background:#26292f;border:1px solid #3b3f47;border-radius:8px;padding:24px;max-width:440px;margin:0 auto}
+.wide{max-width:none;margin:0}
+h1{margin:0 0 8px;font-size:1.6em}h2{font-size:1.2em;margin:0 0 8px}
+p.lead{margin:0 0 18px;opacity:.82}
+.fld{display:block;margin:0 0 14px}
+.fld>span,.lbl{display:block;font-weight:600;margin-bottom:4px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #3b3f47;border-radius:8px;background:#fff;color:#222;width:100%}
+input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 18px;border:0;border-radius:8px;background:#e0a23a;color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:#e0a23a;border:1px solid #e0a23a}
+.foot{margin-top:48px;padding:24px;border-top:1px solid #3b3f47;font-size:.9em;display:flex;flex-wrap:wrap;gap:32px;justify-content:space-between}
+.foot ul{list-style:none;margin:0;padding:0}
+.foot form{display:flex;gap:6px;max-width:340px}
+.muted{opacity:.7;font-size:.9em}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.boxes{display:flex;gap:8px;align-items:center;margin-bottom:16px}
+.boxes input{width:42px;text-align:center;font-size:1.3em;padding:8px 0}
+[hidden]{display:none!important}
+
+</style>
+</head>
+<body>
+<header class="top"><strong>Copperleaf Pay</strong><nav><a href="#">Send</a><a href="#">Business</a><a href="#">Fees</a></nav></header>
+<main><div class="card"><h1>Confirm this device</h1><p class="lead">Confirmation code, format 000-000. We sent it by SMS.</p>
+<form action="#" onsubmit="return false"><input id="tok" type="text" maxlength="7" placeholder="123-456" class="fld" inputmode="numeric"><button type="submit">Confirm device</button></form></div></main><footer class="foot"><div><strong>Copperleaf Pay</strong><ul><li><a href="#">Status</a></li><li><a href="#">Fees</a></li><li><a href="#">Security</a></li></ul></div><div class="muted">&copy; 2026 Copperleaf Pay</div></footer>
+<script>window.__fixture={state:function(){return {otp:window.__code||''};}};</script>
+<script>
+window.__code='';var t=document.querySelector('#tok');t.addEventListener('input',function(){var d=t.value.replace(/[^0-9]/g,'').slice(0,6);window.__code=d;t.value=d.length>3?d.slice(0,3)+'-'+d.slice(3):d;});
+</script>
+</body>
+</html>

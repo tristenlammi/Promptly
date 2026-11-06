@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const dir = path.resolve(here, "../test-sites/fixtures");
+const dir = path.resolve(here, process.env.PW_SITES ?? "../test-sites", "fixtures");
 for (const id of process.argv.slice(2)) {
   const html = fs.readFileSync(path.join(dir, `${id}.html`), "utf8");
   console.log(`--- ${id}`);

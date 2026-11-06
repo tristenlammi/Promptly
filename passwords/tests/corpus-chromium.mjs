@@ -11,7 +11,7 @@ const { chromium, webkit } = require("@playwright/test");
 
 await import("./build-autofill-bundle.mjs");
 const { runCorpus } = await import("./corpus-core.mjs");
-const { start } = await import(pathToFileURL(path.resolve(here, "../test-sites/server.mjs")).href);
+const { start } = await import(pathToFileURL(path.resolve(here, process.env.PW_SITES ?? "../test-sites", "server.mjs")).href);
 
 const bundle = fs.readFileSync(path.join(here, ".cache", "autofill.js"), "utf8");
 const server = await start();
@@ -69,9 +69,9 @@ const driver = {
   },
 };
 
-const res = await runCorpus(driver, { filter: process.argv[2] });
+const res = await runCorpus(driver, { filter: process.argv[2], port: Number(process.env.PW_SITES_PORT ?? 8101) });
 await browser.close();
 await server.close();
 fs.mkdirSync(path.join(here, ".cache"), { recursive: true });
-fs.writeFileSync(path.join(here, ".cache", `corpus-${process.env.PW_BROWSER ?? "chromium"}.json`), JSON.stringify(res, null, 1));
+fs.writeFileSync(path.join(here, ".cache", `corpus-${process.env.PW_SITES ? "holdout-" : ""}${process.env.PW_BROWSER ?? "chromium"}.json`), JSON.stringify(res, null, 1));
 process.exitCode = res.percent >= 95 && res.falseFills === 0 ? 0 : 1;

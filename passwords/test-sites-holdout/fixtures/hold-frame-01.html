@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Greywater Bank | Business</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 "Segoe UI", Arial, sans-serif;color:#17212b;background:#eef2f6}
+a{color:#0f6cbd}
+.top{display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding:12px 24px;background:#10324f;color:#fff}
+.top a{color:inherit;text-decoration:none}
+.top strong{font-size:1.15em;margin-right:12px}
+.top nav{display:flex;gap:14px;flex:1;flex-wrap:wrap}
+.top input{padding:5px 8px;border:1px solid #c6d1dc;border-radius:2px;background:#fff;color:#222;min-width:180px;width:auto}
+main{max-width:980px;margin:32px auto;padding:0 20px}
+.card{background:#fff;border:1px solid #c6d1dc;border-radius:2px;padding:24px;max-width:440px;margin:0 auto}
+.wide{max-width:none;margin:0}
+h1{margin:0 0 8px;font-size:1.6em}h2{font-size:1.2em;margin:0 0 8px}
+p.lead{margin:0 0 18px;opacity:.82}
+.fld{display:block;margin:0 0 14px}
+.fld>span,.lbl{display:block;font-weight:600;margin-bottom:4px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #c6d1dc;border-radius:2px;background:#fff;color:#222;width:100%}
+input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 18px;border:0;border-radius:2px;background:#0f6cbd;color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:#0f6cbd;border:1px solid #0f6cbd}
+.foot{margin-top:48px;padding:24px;border-top:1px solid #c6d1dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:32px;justify-content:space-between}
+.foot ul{list-style:none;margin:0;padding:0}
+.foot form{display:flex;gap:6px;max-width:340px}
+.muted{opacity:.7;font-size:.9em}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.boxes{display:flex;gap:8px;align-items:center;margin-bottom:16px}
+.boxes input{width:42px;text-align:center;font-size:1.3em;padding:8px 0}
+[hidden]{display:none!important}
+iframe{border:1px solid #c6d1dc;width:100%;height:320px;background:#fff}.grid{display:grid;grid-template-columns:1fr 380px;gap:32px}
+</style>
+</head>
+<body>
+<header class="top"><strong>Greywater Bank</strong><nav><a href="#">Business</a><a href="#">Treasury</a><a href="#">Rates</a></nav><input id="rate-q" placeholder="Search rates"></header>
+<main class="grid"><section><h1>Banking for builders</h1><p class="lead">Sweep accounts and lien waivers in one view.</p></section><iframe id="auth" title="Business online" src="/fixtures/_frames/hold-frame-01.html"></iframe></main><footer class="foot"><div><strong>Greywater Bank</strong><ul><li><a href="#">About</a></li><li><a href="#">Help centre</a></li><li><a href="#">Privacy</a></li><li><a href="#">Terms</a></li></ul></div><div><p style="margin:0 0 6px">Quarterly rate sheet</p><form action="#" onsubmit="return false"><input id="gb-news" name="e" type="email" placeholder="cfo@company.example"><button type="button">Send</button></form></div><div class="muted">&copy; 2026 Greywater Bank</div></footer>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"username":r("input[name=\"i1\"]",["#auth"]),"password":r("input[name=\"i2\"]",["#auth"])};}};</script>
+</body>
+</html>

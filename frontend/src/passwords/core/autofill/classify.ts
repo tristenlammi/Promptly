@@ -257,6 +257,9 @@ type Signals = {
   readonlyFilled: boolean;
   months: boolean;
   years: boolean;
+  placeholderRaw: string;
+  labelRaw: string;
+  numeric: boolean;
 };
 
 function signalsOf(el: FillableElement): Signals {
@@ -272,6 +275,9 @@ function signalsOf(el: FillableElement): Signals {
     placeholder: tokens(attr("placeholder")),
     near: tokens(nearbyText(el)),
     rawOwn,
+    placeholderRaw: attr("placeholder"),
+    labelRaw: labelText(el),
+    numeric: attr("inputmode") === "numeric" || type === "number" || type === "tel",
     name: attr("name").toLowerCase(),
     readonlyFilled: "readOnly" in el && el.readOnly && !!el.value,
     months: el.tagName === "SELECT" && [...(el as HTMLSelectElement).options].filter((o) => /^(0?[1-9]|1[0-2])$/.test(o.value.trim()) || /^(jan|feb|mar)/i.test(o.text.trim())).length >= 3,
@@ -354,6 +360,15 @@ function scoreRoles(s: Signals): Map<FieldRole, number> {
   for (const [t, weight] of [[s.own, 2], [s.label, 2.5], [s.placeholder, 2]] as const) {
     if (t.joined === "name" || t.joined === "yourname" || s.name === "name") add("full-name", weight * 2);
   }
+  // What the example looks like says more than any word, in any language.
+  if (s.placeholderRaw.includes("@")) add("email", 6);
+  if (/^\s*(\d{4}[ -]){3}\d{1,4}\s*$/.test(s.placeholderRaw)) add("card-number", 7);
+  if (/^\s*\d{3}[ -]?\d{3}\s*$/.test(s.placeholderRaw)) add("otp", 3);
+  if (/^\s*mm\s*\/\s*(yy|aa|jj)(yy)?\s*$/i.test(s.placeholderRaw)) add("card-exp", 5);
+  if (/^\s*(cvc|cvv|\d{3,4})\s*$/i.test(s.placeholderRaw)) add("card-cvv", 2);
+  if (/\bmm\s*\/\s*(yy|aa|jj)(yy)?\b/i.test(s.labelRaw)) add("card-exp", 7);
+  // A number box that says "card" and isn't about the holder.
+  if (/\bcard\b/i.test(s.labelRaw) && !/name|holder|gift/i.test(s.labelRaw) && s.numeric) add("card-number", 5);
   // "Corporate ID", "Member ID": an identifier, wherever one's asked for.
   if (s.label.words.has("id") && s.type !== "password") add("username", 4);
   if (s.label.joined === "card") add("card-number", 5);
@@ -388,6 +403,8 @@ function isSearchField(s: Signals): boolean {
 }
 
 function notLoginField(s: Signals): boolean {
+  // "Client address" of type email, a box that says "Email address": still an email.
+  if (s.type === "email" || hits(s.placeholder, W.EMAIL) > 0 || hits(s.label, W.EMAIL) > 0) return false;
   return hits(s.own, W.NOT_LOGIN_FIELD) > 0 || hits(s.label, W.NOT_LOGIN_FIELD) > 1 || hits(s.placeholder, W.NOT_LOGIN_FIELD) > 1;
 }
 
@@ -505,11 +522,17 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
     return { ...none, kind: "search" };
   }
   const onlyEmailish = visible.length <= 2 && !passwords.length && visible.some((s) => (topRole(s.scores)?.[0] === "email"));
-  if (onlyEmailish && !phrase(text, W.LOGIN_INTENT.slice(0, 32)) && (phrase(allText, W.NEWSLETTER_INTENT) || hits(tokens(own), W.NEWSLETTER) > 0 || visible.some((s) => hits(s.signals.own, W.NEWSLETTER) > 0))) {
+  if (onlyEmailish && !phrase(text, W.LOGIN_STRONG) && (phrase(allText, W.NEWSLETTER_INTENT) || hits(tokens(own), W.NEWSLETTER) > 0 || visible.some((s) => hits(s.signals.own, W.NEWSLETTER) > 0))) {
     return { ...none, kind: "newsletter" };
   }
 
   // Card, first: its security code would read as a one-time code otherwise.
+  if (phrase(text, W.CARD_INTENT) || /\b(pay|buy|purchase)\b/i.test(text)) {
+    for (const s of visible) {
+      if (s.signals.numeric && s.signals.type !== "tel" && !hitsOtp(s) && (s.el as HTMLInputElement).maxLength !== 3 && (s.el as HTMLInputElement).maxLength !== 4 && /number|digits|\bno\b/i.test(s.signals.labelRaw) && !/gift|phone|mobile|order/i.test(s.signals.labelRaw)) s.scores.set("card-number", Math.max(s.scores.get("card-number") ?? 0, 5));
+      if (s.signals.numeric && (s.el as HTMLInputElement).maxLength >= 3 && (s.el as HTMLInputElement).maxLength <= 4 && /code|security|back|digits/i.test(s.signals.labelRaw)) s.scores.set("card-cvv", Math.max(s.scores.get("card-cvv") ?? 0, 6));
+    }
+  }
   const giftish = (s: Scored) => /gift|voucher|coupon|loyalty|member/i.test(`${s.signals.rawOwn} ${[...s.signals.label.words].join(" ")}`);
   const cardFields = visible.filter((s) => topScore(s, CARD_ROLES) && !hitsOtp(s) && !giftish(s));
   const hasCardNumber = cardFields.some((s) => bestOf(s, CARD_ROLES)?.[0] === "card-number");
@@ -518,13 +541,13 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
   const framed = doc(group).defaultView !== doc(group).defaultView?.top;
   const hostedHere = !passwords.length && cardFields.length > 0 && !!doc(group).querySelector("iframe");
   if (hasCardNumber || hostedHere || (framed && cardFields.length > 0 && strongCard) || (strongCard && cardFields.length >= 1 && !passwords.length)) {
-    const named = visible.filter((s) => !cardFields.includes(s) && !giftish(s) && (topRole(s.scores)?.[0] === "full-name" || (s.scores.get("card-name") ?? 0) > 0) && /card|holder|name/i.test(`${s.signals.rawOwn} ${[...s.signals.label.words].join(" ")}`));
+    const named = visible.filter((s) => !cardFields.includes(s) && !giftish(s) && (topRole(s.scores)?.[0] === "full-name" || (s.scores.get("card-name") ?? 0) > 0 || /\bname\b/i.test(s.signals.labelRaw)) && /card|holder|name/i.test(`${s.signals.rawOwn} ${[...s.signals.label.words].join(" ")}`));
     for (const s of named) s.scores.set("card-name", Math.max(s.scores.get("card-name") ?? 0, 5));
     const fields = assign([...cardFields, ...named], CARD_ROLES);
     return { kind: "card", fields, container: group, submit: submitOf(group, fields.map((f) => f.el), dom) };
   }
 
-  if (phrase(text, W.NOT_LOGIN_INTENT) && !passwords.length && !phrase(text, W.LOGIN_INTENT.slice(0, 16))) return none;
+  if (phrase(text, W.NOT_LOGIN_INTENT) && !passwords.length && !phrase(text, W.LOGIN_STRONG)) return none;
   const fieldText = visible.map((s) => `${s.signals.rawOwn} ${[...s.signals.label.words].join(" ")} ${[...s.signals.placeholder.words].join(" ")}`).join(" ");
   if ((phrase(fieldText, W.BACKUP_CODE_INTENT) || /backup|recovery|scratch/i.test(fieldText) || phrase(headingsOf(group), W.BACKUP_CODE_INTENT)) && !passwords.length) return none;
   if (visible.some((s) => s.el.tagName === "TEXTAREA") && !passwords.length && visible.every((s) => topRole(s.scores)?.[0] !== "address1")) return none;
@@ -536,7 +559,7 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
   if (passwords.length) return classifyPasswords(group, visible, passwords, textFields, text, dom);
 
   // Identity: enough person-and-address fields.
-  const idFields = visible.filter((s) => topScore(s, IDENTITY_ROLES) && !notLoginField(s.signals));
+  const idFields = visible.filter((s) => topScore(s, IDENTITY_ROLES) && !/coupon|promo|gift|voucher|comment|message|subject|captcha/i.test(`${s.signals.rawOwn} ${s.signals.labelRaw}`));
   const addressy = idFields.filter((s) => ["address1", "city", "postcode", "state", "country"].includes(bestOf(s, IDENTITY_ROLES)?.[0] ?? ""));
   const whoish = idFields.filter((s) => ["first-name", "last-name", "full-name", "phone", "email"].includes(bestOf(s, IDENTITY_ROLES)?.[0] ?? ""));
   // An address on its own could be anyone's: a delivery spot, a store search. It takes
@@ -558,7 +581,9 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
     const sigStrong = (s.scores.get("username") ?? 0) >= 4 || (s.scores.get("email") ?? 0) >= 4 || phoneLogin.includes(s);
     const submit = submitOf(group, [s.el], dom);
     const submitText = submit ? `${submit.textContent ?? ""} ${(submit as HTMLInputElement).value ?? ""}` : "";
-    const signinWords = phrase(`${text} ${pageText}`, W.LOGIN_INTENT.slice(0, 32)) || phrase(submitText, W.LOGIN_INTENT) || phoneLogin.includes(s);
+    // Its own heading or button has to say so. The page's title can't speak for a
+    // newsletter box in the corner of a sign-in page.
+    const signinWords = phrase(text, W.LOGIN_STRONG) || phrase(submitText, W.LOGIN_INTENT) || phoneLogin.includes(s);
     const hasContinue = !!submit && !/sign me up|subscribe|join|notify|keep me/i.test(submitText);
     if (sigStrong && signinWords && hasContinue) {
       const role: FieldRole = "username";
@@ -635,6 +660,15 @@ function detectOtp(visible: Scored[], text: string, pageText: string): Field[] |
   }
   if (anyPw) return null;
   // One box.
+  // One short number box and a confirm button, whatever it's called: a code.
+  const onlyOne = visible.filter((s) => s.el.tagName === "INPUT");
+  if (onlyOne.length === 1 && !notLoginField(onlyOne[0].signals) && !isSearchField(onlyOne[0].signals)) {
+    const s = onlyOne[0];
+    const el = s.el as HTMLInputElement;
+    const shortNumber = (s.signals.numeric && el.maxLength >= 4 && el.maxLength <= 10) || /^\s*\d{2,4}[ -]?\d{2,4}\s*$/.test(s.signals.placeholderRaw);
+    const looksElse = /coupon|promo|gift|discount|zip|postal|post ?code|tracking|voucher|redeem|invite|referral|order|member|look ?up|check|find|search/i.test(`${text} ${s.signals.rawOwn} ${s.signals.labelRaw} ${s.signals.placeholderRaw}`.replace(/quick check/i, ""));
+    if (shortNumber && !looksElse && (s.scores.get("username") ?? 0) === 0 && (s.scores.get("email") ?? 0) === 0) return [{ el: s.el, role: "otp", score: 4 }];
+  }
   const coded = visible.filter((s) => !notLoginField(s.signals) && (s.signals.autocomplete.includes("one-time-code") || otpScore(s) >= 4));
   if (coded.length === 1) {
     const s = coded[0];
@@ -680,12 +714,13 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
   const hasCurrent = passwords.some((p) => auto(p, "current-password") || says(p, W.CURRENT_PASSWORD));
   const changeWords = phrase(text, W.CHANGE_INTENT);
   const signupWords = phrase(text, W.SIGNUP_INTENT);
-  const loginWords = phrase(text, W.LOGIN_INTENT.slice(0, 32));
+  const loginWords = phrase(text, W.LOGIN_STRONG);
 
   const newish = (p: Scored) => auto(p, "new-password") || says(p, W.NEW_PASSWORD);
   const confirmish = (p: Scored) => says(p, W.CONFIRM);
 
   let kind: FormKind;
+  const personNamed = textFields.some((s) => topScore(s, ["first-name", "last-name", "full-name"]));
   if (passwords.length >= 3 || (passwords.length === 2 && hasCurrent) || (hasCurrent && (changeWords || hasNew))) {
     kind = "change-password";
   } else if (passwords.length === 2) {
@@ -695,7 +730,8 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
     kind = changeWords && !signupWords && ids.length === 0 && !identity ? "change-password" : ids.length || identity || signupWords ? "signup" : "change-password";
   } else if (hasNew && changeWords) {
     kind = "change-password";
-  } else if (hasNew || (signupWords && !loginWords)) {
+  } else if (hasNew || (signupWords && !loginWords) || (personNamed && textFields.filter(isIdentifier).length >= 1 && !loginWords)) {
+    // A name as well as a login: you're signing up, not in.
     kind = "signup";
   } else if (textFields.filter(isIdentifier).length === 0) {
     kind = changeWords ? "change-password" : "password-next";
@@ -708,7 +744,8 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
   if (kind === "change-password" || kind === "signup") {
     const order = [...passwords];
     if (kind === "change-password") {
-      const current = order.find((p) => (auto(p, "current-password") || says(p, W.CURRENT_PASSWORD)) && !confirmish(p));
+      // Three boxes in a row are current, new, confirm, whatever they're called.
+      const current = order.find((p) => (auto(p, "current-password") || says(p, W.CURRENT_PASSWORD)) && !confirmish(p)) ?? (order.length === 3 ? order[0] : undefined);
       const rest = order.filter((p) => p !== current);
       if (current) fields.push({ el: current.el, role: "current-password", score: 8 });
       const confirm = rest.find(confirmish) ?? (rest.length > 1 ? rest[rest.length - 1] : undefined);
@@ -736,6 +773,10 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
       const user = ids.find((s) => s !== email);
       if (email) fields.push({ el: email.el, role: user ? "email" : "username", score: 6 });
       if (user) fields.push({ el: user.el, role: "username", score: 6 });
+      if (!email && !user) {
+        const phone = textFields.find((s) => s.signals.type === "tel");
+        if (phone) fields.push({ el: phone.el, role: "username", score: 4 });
+      }
       for (const s of textFields) {
         if (ids.includes(s)) continue;
         const r = bestOf(s, ["first-name", "last-name", "full-name", "phone", "company"]);
@@ -749,7 +790,8 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
       if (pick) {
         fields.push({ el: pick.el, role: "username", score: 6 });
       } else {
-        const plainBefore = textFields.filter((s) => s.el.tagName === "INPUT" && before(s.el, firstPw) && !notLoginField(s.signals) && !isSearchField(s.signals));
+        // Any box right before the password, whatever it's called, unless it says it's a search.
+        const plainBefore = textFields.filter((s) => s.el.tagName === "INPUT" && before(s.el, firstPw) && !notLoginField(s.signals) && s.signals.type !== "search" && hits(s.signals.placeholder, W.SEARCH) === 0);
         const last = plainBefore[plainBefore.length - 1];
         if (last) fields.push({ el: last.el, role: "username", score: 2 });
       }
@@ -807,7 +849,7 @@ export function analyzePage(doc: Document, dom: DomAdapter = {}): PageInfo {
   }
   const lone = forms.filter((f) => f.kind === "email-first");
   if (lone.length > 1) {
-    const says = (f: FormInfo) => !!f.container && phrase(`${textOf(f.container)} ${headingsOf(f.container)}`, W.LOGIN_INTENT.slice(0, 32));
+    const says = (f: FormInfo) => !!f.container && phrase(`${textOf(f.container)} ${headingsOf(f.container)}`, W.LOGIN_STRONG);
     const keep = lone.find(says) ?? lone[0];
     forms = forms.filter((f) => f.kind !== "email-first" || f === keep);
   }

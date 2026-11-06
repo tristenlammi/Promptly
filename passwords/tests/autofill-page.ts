@@ -68,7 +68,7 @@ win.__af = {
     };
     const seen = new Set<Element>();
     const LOGIN = ["signin", "email-first", "password-next", "signup", "change-password", "otp"];
-    const allFields: Field[] = page.forms.filter((f) => LOGIN.includes(f.kind) || f === form).flatMap((f) => f.fields);
+    const allFields: Field[] = page.forms.filter((f) => (LOGIN.includes(f.kind) && (f.kind !== "signup" || form?.kind === "signup")) || f === form).flatMap((f) => f.fields);
     for (const e of expected) {
       const el = resolve(e.selector);
       if (!el) {
@@ -82,7 +82,9 @@ win.__af = {
     }
     if (expected.length) {
       for (const f of form?.fields ?? []) {
-        if (!seen.has(f.el)) out.extras.push(`${f.role}:${(f.el as HTMLInputElement).name || f.el.id || f.el.tagName}`);
+        // A name or a company on a sign-up form is what the form asked for. It isn't a mistake.
+        const neutral = form?.kind === "signup" && ["first-name", "last-name", "full-name", "company", "phone"].includes(f.role);
+        if (!seen.has(f.el) && !neutral) out.extras.push(`${f.role}:${(f.el as HTMLInputElement).name || f.el.id || f.el.tagName}`);
       }
     }
     for (const h of honeypots) {

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saltmarsh Tickets | Payment</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.45 "Segoe UI", Arial, sans-serif;color:#17212b;background:#eef2f6}
+a{color:#0f6cbd}
+.top{display:flex;flex-wrap:wrap;gap:16px;align-items:center;padding:12px 24px;background:#10324f;color:#fff}
+.top a{color:inherit;text-decoration:none}
+.top strong{font-size:1.15em;margin-right:12px}
+.top nav{display:flex;gap:14px;flex:1;flex-wrap:wrap}
+.top input{padding:5px 8px;border:1px solid #c6d1dc;border-radius:2px;background:#fff;color:#222;min-width:180px;width:auto}
+main{max-width:980px;margin:32px auto;padding:0 20px}
+.card{background:#fff;border:1px solid #c6d1dc;border-radius:2px;padding:24px;max-width:440px;margin:0 auto}
+.wide{max-width:none;margin:0}
+h1{margin:0 0 8px;font-size:1.6em}h2{font-size:1.2em;margin:0 0 8px}
+p.lead{margin:0 0 18px;opacity:.82}
+.fld{display:block;margin:0 0 14px}
+.fld>span,.lbl{display:block;font-weight:600;margin-bottom:4px}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid #c6d1dc;border-radius:2px;background:#fff;color:#222;width:100%}
+input[type=checkbox],input[type=radio]{width:auto}
+button{font:inherit;padding:9px 18px;border:0;border-radius:2px;background:#0f6cbd;color:#fff;cursor:pointer}
+button.ghost{background:transparent;color:#0f6cbd;border:1px solid #0f6cbd}
+.foot{margin-top:48px;padding:24px;border-top:1px solid #c6d1dc;font-size:.9em;display:flex;flex-wrap:wrap;gap:32px;justify-content:space-between}
+.foot ul{list-style:none;margin:0;padding:0}
+.foot form{display:flex;gap:6px;max-width:340px}
+.muted{opacity:.7;font-size:.9em}
+.vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.boxes{display:flex;gap:8px;align-items:center;margin-bottom:16px}
+.boxes input{width:42px;text-align:center;font-size:1.3em;padding:8px 0}
+[hidden]{display:none!important}
+.sel{display:flex;gap:8px;margin-bottom:14px}.gift{margin-top:20px;padding-top:16px;border-top:1px dashed #c6d1dc}
+</style>
+</head>
+<body>
+<header class="top"><strong>Saltmarsh Tickets</strong><nav><a href="#">Shows</a><a href="#">Season pass</a></nav></header>
+<main><div class="card"><h1>Payment</h1><form action="#" onsubmit="return false">
+<label class="fld"><span>Card digits</span><input id="cd" type="text" inputmode="numeric"></label>
+<label class="fld"><span>Cardholder</span><input id="ch" type="text"></label>
+<div class="lbl">Expires</div><div class="sel"><select id="mo" aria-label="Month"><option value="">MM</option><option>01</option><option>02</option><option>03</option><option>04</option><option>05</option><option>06</option><option>07</option><option>08</option><option>09</option><option>10</option><option>11</option><option>12</option></select>
+<select id="yr" aria-label="Year"><option value="">YY</option><option>27</option><option>28</option><option>29</option><option>30</option><option>31</option></select></div>
+<label class="fld"><span>Security code</span><input id="sc" type="text" maxlength="4" inputmode="numeric"></label>
+<button type="submit">Buy tickets</button>
+<div class="gift"><h2>Paying with a gift card?</h2><label class="fld"><span>Gift card number</span><input id="gc" type="text" inputmode="numeric"></label><label class="fld"><span>Gift card PIN</span><input id="gp" type="text" maxlength="4"></label><button class="ghost" type="button">Apply</button></div></form></div></main><footer class="foot"><div><strong>Saltmarsh Tickets</strong><ul><li><a href="#">About</a></li><li><a href="#">Help centre</a></li><li><a href="#">Privacy</a></li><li><a href="#">Terms</a></li></ul></div><div class="muted">&copy; 2026 Saltmarsh Tickets</div></footer>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"card-number":r("#cd",[]),"card-name":r("#ch",[]),"card-exp-month":r("#mo",[]),"card-exp-year":r("#yr",[]),"card-cvv":r("#sc",[])};}};</script>
+</body>
+</html>

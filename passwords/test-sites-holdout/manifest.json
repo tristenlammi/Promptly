@@ -1,0 +1,2102 @@
+[
+  {
+    "id": "hold-signin-01",
+    "category": "signin",
+    "description": "Generic f1/f2 names, label text in a separate grid column from the inputs, no label elements.",
+    "path": "/fixtures/hold-signin-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"f1\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"f2\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#trk",
+          "#rate-news"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-signin-02",
+    "category": "signin",
+    "description": "Random hash names and aria-label as the only naming, off-screen trap and branch finder as noise.",
+    "path": "/fixtures/hold-signin-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"a9f3c1e2\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"7be04d11\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#branch-zip",
+          "input[name=\"c0ffee11\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-signin-03",
+    "category": "signin",
+    "description": "No form element, placeholder-only inputs, script-driven button, a workspace slug box above the credentials.",
+    "path": "/fixtures/hold-signin-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#x7",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#x8",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#stay",
+          "#x6"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-signin-04",
+    "category": "signin",
+    "description": "Instructions column names the fields; inputs sit in another panel tied only by aria-describedby.",
+    "path": "/fixtures/hold-signin-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"b1\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"b2\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#noticeq"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-signin-05",
+    "category": "signin",
+    "description": "The secret field is type=text masked with text-security CSS, labelled in domain language.",
+    "path": "/fixtures/hold-signin-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#slip",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#gate",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#tide"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-signin-06",
+    "category": "signin",
+    "description": "Bracketed array names, aria-labelledby pointing at off-screen spans, glyph-only visible prefix.",
+    "path": "/fixtures/hold-signin-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"data[0][v]\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"data[1][v]\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#beans"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-signin-07",
+    "category": "signin",
+    "description": "One page-wide form holds a timetable search, a department filter and the staff sign-in together.",
+    "path": "/fixtures/hold-signin-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"n\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"k\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#classq",
+          "#dept-filter"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-signin-08",
+    "category": "signin",
+    "description": "Join and returning-member forms side by side, join form first, both with informal wording.",
+    "path": "/fixtures/hold-signin-08.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"e\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"s\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"e2\"]",
+          "input[name=\"s2\"]",
+          "input[name=\"s3\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-signin-09",
+    "category": "signin",
+    "description": "Misleading names q and c on the credentials, a description list for layout, plain site search alongside.",
+    "path": "/fixtures/hold-signin-09.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"q\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"c\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-q"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-signin-10",
+    "category": "signin",
+    "description": "Library-card-plus-PIN sign-in with small captions below each input instead of labels above.",
+    "path": "/fixtures/hold-signin-10.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"bc\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"p\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#cat-q",
+          "#events-list"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-multi-01",
+    "category": "multi-step",
+    "description": "\"What's your work email?\" first; the box is hidden, replaced by a chip, and the secret box appears.",
+    "path": "/fixtures/hold-multi-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#who",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#prod-up"
+        ],
+        "advance": {
+          "click": "#go"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#stage-b:not([hidden]) #phrase",
+        "expected": [
+          {
+            "selector": "#phrase",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#prod-up"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-multi-02",
+    "category": "multi-step",
+    "description": "Phone-or-email first step; the panel is rewritten by script, leaving a hidden carrier and an app model.",
+    "path": "/fixtures/hold-multi-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "input[name=\"principal\"]",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#cov"
+        ],
+        "advance": {
+          "click": "#nx"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "input[name=\"secret_v2\"]",
+        "expected": [
+          {
+            "selector": "input[name=\"secret_v2\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#cov",
+          "input[type=\"hidden\"][name=\"principal\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-multi-03",
+    "category": "multi-step",
+    "description": "Provider buttons first; \"Continue with email\" reveals the address box, then a separate step asks for the secret.",
+    "path": "/fixtures/hold-multi-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#muse"
+        ],
+        "advance": {
+          "click": "#with-mail"
+        }
+      },
+      {
+        "kind": "email-first",
+        "wait": "#a:not([hidden]) #addr",
+        "expected": [
+          {
+            "selector": "#addr",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#muse"
+        ],
+        "advance": {
+          "click": "#addr-next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#b:not([hidden]) #scrt",
+        "expected": [
+          {
+            "selector": "#scrt",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#muse"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-multi-04",
+    "category": "multi-step",
+    "description": "Sliding two-panel flow with informal headings; second panel pre-rendered off to the side, settled marker after the slide.",
+    "path": "/fixtures/hold-multi-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#p1 input",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#taxn"
+        ],
+        "advance": {
+          "click": "#fwd"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#p2[data-settled] input",
+        "expected": [
+          {
+            "selector": "#p2 input",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#taxn"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-multi-05",
+    "category": "multi-step",
+    "description": "Three screens with hash names: client ID, then passcode, then approval code.",
+    "path": "/fixtures/hold-multi-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "input[name=\"b7d21f\"]",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#n1"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#s2:not([hidden]) input",
+        "expected": [
+          {
+            "selector": "input[name=\"e19a4c\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#n2"
+        }
+      },
+      {
+        "kind": "otp",
+        "wait": "#s3:not([hidden]) input",
+        "expected": [
+          {
+            "selector": "input[name=\"c55c0ab\"]",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password",
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "hold-multi-06",
+    "category": "multi-step",
+    "description": "Real navigation between two pages; customer number kept in session storage and a hidden carrier on page two.",
+    "path": "/fixtures/hold-multi-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#cust",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#outage"
+        ],
+        "advance": {
+          "click": "#next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#pw",
+        "expected": [
+          {
+            "selector": "#pw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#outage",
+          "input[name=\"carried\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-otp-01",
+    "category": "otp",
+    "description": "\"Enter the 6-digit PIN we texted\" in a single box named c.",
+    "path": "/fixtures/hold-otp-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "input[name=\"c\"]",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#stn"
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "hold-otp-02",
+    "category": "otp",
+    "description": "Type=tel \"Approval code\" with a ticket number box next to it.",
+    "path": "/fixtures/hold-otp-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "input[name=\"ac\"]",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#ticket"
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "hold-otp-03",
+    "category": "otp",
+    "description": "Eight single-digit boxes with auto-advance and only a shared heading.",
+    "path": "/fixtures/hold-otp-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#b1",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#b2",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#b3",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#b4",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#b5",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#b6",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#b7",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#b8",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#flt",
+          "#fare-al"
+        ]
+      }
+    ],
+    "state": {
+      "otp-digit": "otp"
+    }
+  },
+  {
+    "id": "hold-otp-04",
+    "category": "otp",
+    "description": "Six boxes inside a fieldset whose legend carries the only name, array-style input names.",
+    "path": "/fixtures/hold-otp-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#sec input:nth-of-type(1)",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#sec input:nth-of-type(2)",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#sec input:nth-of-type(3)",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#sec input:nth-of-type(4)",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#sec input:nth-of-type(5)",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#sec input:nth-of-type(6)",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#dir-q"
+        ]
+      }
+    ],
+    "state": {
+      "otp-digit": "otp"
+    }
+  },
+  {
+    "id": "hold-otp-05",
+    "category": "otp",
+    "description": "Single masked box in 000-000 format, the app model keeps digits only.",
+    "path": "/fixtures/hold-otp-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#tok",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "hold-otp-06",
+    "category": "otp",
+    "description": "Six boxes split 3-3 by a hyphen glyph with a resend-to-another-number box below.",
+    "path": "/fixtures/hold-otp-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#tk input[data-p=\"1\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#tk input[data-p=\"2\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#tk input[data-p=\"3\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#tk input[data-p=\"4\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#tk input[data-p=\"5\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#tk input[data-p=\"6\"]",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#alt-number"
+        ]
+      }
+    ],
+    "state": {
+      "otp-digit": "otp"
+    }
+  },
+  {
+    "id": "hold-signup-01",
+    "category": "signup",
+    "description": "Handle plus separate inbox plus passphrase pair in conversational wording.",
+    "path": "/fixtures/hold-signup-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#hnd",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#ibx",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#s1",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#s2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#find"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "email": "email",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "hold-signup-02",
+    "category": "signup",
+    "description": "Free-trial sign-up: one work email, one passcode without confirmation, plus company questions.",
+    "path": "/fixtures/hold-signup-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "input[name=\"em\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#pc",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#rel-notes"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "hold-signup-03",
+    "category": "signup",
+    "description": "Placeholder-only fields f_a/f_b/f_c with a referral code box and a terms tick.",
+    "path": "/fixtures/hold-signup-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "input[name=\"f_a\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"f_b\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"f_c\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#prod",
+          "#refc"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "hold-signup-04",
+    "category": "signup",
+    "description": "Phone number as the sign-in identity with a made-up 4-digit PIN pair.",
+    "path": "/fixtures/hold-signup-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "input[name=\"mb\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"pa\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"pb\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hol-news"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "hold-signup-05",
+    "category": "signup",
+    "description": "Prefilled invitation code above the credentials, strength meter, off-screen trap.",
+    "path": "/fixtures/hold-signup-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#lg",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#np",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#np2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#inv",
+          "#trap-url"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "hold-change-01",
+    "category": "change-password",
+    "description": "\"Rotate your credentials\" with no standard words on the three inputs.",
+    "path": "/fixtures/hold-change-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#r1",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#r2",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#r3",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#sym"
+        ]
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "hold-change-02",
+    "category": "change-password",
+    "description": "aria-label only, names p0/p1/p2, an invisible text box carrying the account name.",
+    "path": "/fixtures/hold-change-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "input[name=\"p0\"]",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"p1\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"p2\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"u\"]"
+        ]
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "hold-change-03",
+    "category": "change-password",
+    "description": "Post-recovery-link screen with only new and repeat inputs and informal text.",
+    "path": "/fixtures/hold-change-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "input[name=\"v1\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"v2\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#fn-up"
+        ]
+      }
+    ],
+    "state": {
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "hold-change-04",
+    "category": "change-password",
+    "description": "Settings page with profile section above; security section uses Old / New / Verify column headers.",
+    "path": "/fixtures/hold-change-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#sec-a",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#sec-b",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#sec-c",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#cq",
+          "#pf-name",
+          "#pf-mail",
+          "#pf-phone"
+        ]
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "hold-change-05",
+    "category": "change-password",
+    "description": "New and repeat come first; the present password is requested last, below the rules.",
+    "path": "/fixtures/hold-change-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "input[name=\"k1\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"k2\"]",
+            "role": "confirm-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"k3\"]",
+            "role": "current-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "new-password": "new-password",
+      "confirm-password": "confirm-password",
+      "current-password": "current-password"
+    }
+  },
+  {
+    "id": "hold-modal-01",
+    "category": "modal",
+    "description": "Native dialog opened by a header button; newsletter and search behind it.",
+    "path": "/fixtures/hold-modal-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#lamp-q",
+          "#wk"
+        ],
+        "advance": {
+          "click": "#open-dlg"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "dialog[open] #mm",
+        "expected": [
+          {
+            "selector": "#mm",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#kk",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#lamp-q",
+          "#wk"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-modal-02",
+    "category": "modal",
+    "description": "Overlay sheet created by script on click with hash names, slide-in, app model for state.",
+    "path": "/fixtures/hold-modal-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#swell"
+        ],
+        "advance": {
+          "click": "#acct"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": ".sheet[data-settled] input[name=\"t_91ab\"]",
+        "expected": [
+          {
+            "selector": ".sheet input[name=\"t_91ab\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": ".sheet input[name=\"t_3fd0\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#swell"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-shadow-01",
+    "category": "shadow",
+    "description": "Custom element with an open shadow root holding its own labels and form.",
+    "path": "/fixtures/hold-shadow-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "acct-gate",
+        "expected": [
+          {
+            "selector": [
+              "acct-gate",
+              "#who"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "acct-gate",
+              "#sec"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#city-q",
+          "#ev-news"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-shadow-02",
+    "category": "shadow",
+    "description": "Three nested open roots; each input lives in its own field component named by a host attribute.",
+    "path": "/fixtures/hold-shadow-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "x-shell",
+        "expected": [
+          {
+            "selector": [
+              "x-shell",
+              "x-panel",
+              "x-field[data-k=\"a\"]",
+              "input"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "x-shell",
+              "x-panel",
+              "x-field[data-k=\"b\"]",
+              "input"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#doc-q"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-frame-01",
+    "category": "iframe",
+    "description": "Marketing page with a same-origin sign-in iframe and its own newsletter box.",
+    "path": "/fixtures/hold-frame-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#auth",
+        "expected": [
+          {
+            "selector": "input[name=\"i1\"]",
+            "role": "username",
+            "frame": [
+              "#auth"
+            ]
+          },
+          {
+            "selector": "input[name=\"i2\"]",
+            "role": "password",
+            "frame": [
+              "#auth"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#rate-q",
+          "#gb-news"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-frame-02",
+    "category": "iframe",
+    "description": "Two-level same-origin frame chain; inner document holds the sign-in form.",
+    "path": "/fixtures/hold-frame-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#shell",
+        "expected": [
+          {
+            "selector": "#bdg",
+            "role": "username",
+            "frame": [
+              "#shell",
+              "#inner"
+            ]
+          },
+          {
+            "selector": "#cpw",
+            "role": "password",
+            "frame": [
+              "#shell",
+              "#inner"
+            ]
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-frame-03",
+    "category": "iframe",
+    "description": "Identifier-first flow running inside a same-origin iframe; the Next button is in the frame.",
+    "path": "/fixtures/hold-frame-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "wait": "#embed",
+        "expected": [
+          {
+            "selector": "#tm",
+            "role": "username",
+            "frame": [
+              "#embed"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#show-q",
+          "#onsale"
+        ],
+        "advance": {
+          "click": "#nx",
+          "frame": [
+            "#embed"
+          ]
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#embed",
+        "expected": [
+          {
+            "selector": "#tp",
+            "role": "password",
+            "frame": [
+              "#embed"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#show-q",
+          "#onsale"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-lang-01",
+    "category": "language",
+    "description": "Swedish sign-in with short names and a footer newsletter in Swedish.",
+    "path": "/fixtures/hold-lang-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"f_a\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"f_b\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#sok",
+          "#nyhet"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-lang-02",
+    "category": "language",
+    "description": "Greek sign-in with hash names and Greek labels.",
+    "path": "/fixtures/hold-lang-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"d41f0a\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"9ac7e2\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#lim"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "hold-lang-03",
+    "category": "language",
+    "description": "Polish change-password form, no autocomplete.",
+    "path": "/fixtures/hold-lang-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#h0",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#h1",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#h2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "hold-lang-04",
+    "category": "language",
+    "description": "Turkish sign-up with separate username and email boxes, generic names.",
+    "path": "/fixtures/hold-lang-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "input[name=\"a1\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"a2\"]",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"a3\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"a4\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#ara",
+          "#bulten"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "email": "email",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "hold-lang-05",
+    "category": "language",
+    "description": "Hebrew right-to-left OTP screen with a single short-named box.",
+    "path": "/fixtures/hold-lang-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "input[name=\"kd\"]",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hip"
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "hold-card-01",
+    "category": "card",
+    "description": "Payment fields with short names and everyday wording, coupon and receipt boxes as noise.",
+    "path": "/fixtures/hold-card-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "input[name=\"n_41\"]",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"n_42\"]",
+            "role": "card-name",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"n_43\"]",
+            "role": "card-exp",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"n_44\"]",
+            "role": "card-cvv",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#promo",
+          "#receipt"
+        ]
+      }
+    ],
+    "state": {
+      "card-number": "card-number",
+      "card-name": "card-name",
+      "card-exp": "card-exp",
+      "card-cvv": "card-cvv"
+    }
+  },
+  {
+    "id": "hold-card-02",
+    "category": "card",
+    "description": "Month and year selects, a shared \"Expires\" caption, and a gift-card number and PIN section as a trap.",
+    "path": "/fixtures/hold-card-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "#cd",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "#ch",
+            "role": "card-name",
+            "frame": null
+          },
+          {
+            "selector": "#mo",
+            "role": "card-exp-month",
+            "frame": null
+          },
+          {
+            "selector": "#yr",
+            "role": "card-exp-year",
+            "frame": null
+          },
+          {
+            "selector": "#sc",
+            "role": "card-cvv",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#gc",
+          "#gp"
+        ]
+      }
+    ],
+    "state": {
+      "card-number": "card-number",
+      "card-name": "card-name",
+      "card-exp-month": "card-exp-month",
+      "card-exp-year": "card-exp-year",
+      "card-cvv": "card-cvv"
+    }
+  },
+  {
+    "id": "hold-identity-01",
+    "category": "identity",
+    "description": "UK-style delivery address with everyday wording and a gift message.",
+    "path": "/fixtures/hold-identity-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "identity",
+        "expected": [
+          {
+            "selector": "#d1",
+            "role": "full-name",
+            "frame": null
+          },
+          {
+            "selector": "#d2",
+            "role": "company",
+            "frame": null
+          },
+          {
+            "selector": "#d3",
+            "role": "address1",
+            "frame": null
+          },
+          {
+            "selector": "#d4",
+            "role": "address2",
+            "frame": null
+          },
+          {
+            "selector": "#d5",
+            "role": "city",
+            "frame": null
+          },
+          {
+            "selector": "#d6",
+            "role": "state",
+            "frame": null
+          },
+          {
+            "selector": "#d7",
+            "role": "postcode",
+            "frame": null
+          },
+          {
+            "selector": "#d8",
+            "role": "country",
+            "frame": null
+          },
+          {
+            "selector": "#d9",
+            "role": "phone",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#gift-msg"
+        ]
+      }
+    ],
+    "state": {
+      "full-name": "full-name",
+      "company": "company",
+      "address1": "address1",
+      "address2": "address2",
+      "city": "city",
+      "state": "state",
+      "postcode": "postcode",
+      "country": "country",
+      "phone": "phone"
+    }
+  },
+  {
+    "id": "hold-identity-02",
+    "category": "identity",
+    "description": "Sequential names v1..v8 with Australian-style wording and a promo code box.",
+    "path": "/fixtures/hold-identity-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "identity",
+        "expected": [
+          {
+            "selector": "input[name=\"v1\"]",
+            "role": "first-name",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"v2\"]",
+            "role": "last-name",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"v3\"]",
+            "role": "address1",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"v4\"]",
+            "role": "address2",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"v5\"]",
+            "role": "city",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"v6\"]",
+            "role": "state",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"v7\"]",
+            "role": "postcode",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"v8\"]",
+            "role": "phone",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#pcode",
+          "#access"
+        ]
+      }
+    ],
+    "state": {
+      "first-name": "first-name",
+      "last-name": "last-name",
+      "address1": "address1",
+      "address2": "address2",
+      "city": "city",
+      "state": "state",
+      "postcode": "postcode",
+      "phone": "phone"
+    }
+  },
+  {
+    "id": "hold-neg-01",
+    "category": "negative",
+    "description": "Closed-beta gate asking only for an invite code.",
+    "path": "/fixtures/hold-neg-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#code"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-02",
+    "category": "negative",
+    "description": "People search box whose placeholder looks like an email address.",
+    "path": "/fixtures/hold-neg-02.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "search",
+        "expected": [],
+        "honeypots": [
+          "#ppl"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-03",
+    "category": "negative",
+    "description": "Contact form with \"Your email\", name and message.",
+    "path": "/fixtures/hold-neg-03.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#cn",
+          "#ce",
+          "#cm"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-04",
+    "category": "negative",
+    "description": "Guest order status check: order number and email.",
+    "path": "/fixtures/hold-neg-04.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#ono",
+          "#oem",
+          "#spice-q"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-05",
+    "category": "negative",
+    "description": "Forgot-password screen with a single email box; nothing here should be filled.",
+    "path": "/fixtures/hold-neg-05.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#fpe"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-06",
+    "category": "negative",
+    "description": "Referral redemption form with a friend code and the friend email.",
+    "path": "/fixtures/hold-neg-06.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#rf",
+          "#rfe"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-07",
+    "category": "negative",
+    "description": "Gift card balance lookup: 16-digit number and short PIN in plain text boxes.",
+    "path": "/fixtures/hold-neg-07.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#gb",
+          "#gpn"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-08",
+    "category": "negative",
+    "description": "Newsletter landing page with odd wording and a single address box in the hero.",
+    "path": "/fixtures/hold-neg-08.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "newsletter",
+        "expected": [],
+        "honeypots": [
+          "#fl"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-09",
+    "category": "negative",
+    "description": "Wedding RSVP form: name, email, guest count, dietary notes.",
+    "path": "/fixtures/hold-neg-09.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#rn",
+          "#re",
+          "#rg",
+          "#rd"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-10",
+    "category": "negative",
+    "description": "Community poll with radios and an optional email for the results.",
+    "path": "/fixtures/hold-neg-10.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#pe"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-11",
+    "category": "negative",
+    "description": "Marketing page username availability checker with a domain prefix.",
+    "path": "/fixtures/hold-neg-11.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#un"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "hold-neg-12",
+    "category": "negative",
+    "description": "Manage-booking lookup: booking reference and last name.",
+    "path": "/fixtures/hold-neg-12.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#br",
+          "#bl",
+          "#dst",
+          "#bh-deals"
+        ]
+      }
+    ]
+  }
+]

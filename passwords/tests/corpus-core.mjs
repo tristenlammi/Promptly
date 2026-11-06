@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-export const SITES = path.resolve(here, "../test-sites");
+export const SITES = path.resolve(here, process.env.PW_SITES ?? "../test-sites");
 
 /** Throwaway values. They're typed into local fixture pages only. */
 export const VALUES = {

@@ -12,7 +12,7 @@ const firefox = require("selenium-webdriver/firefox");
 
 await import("./build-autofill-bundle.mjs");
 const { runCorpus } = await import("./corpus-core.mjs");
-const { start } = await import(pathToFileURL(path.resolve(here, "../test-sites/server.mjs")).href);
+const { start } = await import(pathToFileURL(path.resolve(here, process.env.PW_SITES ?? "../test-sites", "server.mjs")).href);
 
 const bundle = fs.readFileSync(path.join(here, ".cache", "autofill.js"), "utf8");
 const server = await start();
@@ -89,7 +89,7 @@ const driver = {
   },
 };
 
-const res = await runCorpus(driver, { filter: process.argv[2] });
+const res = await runCorpus(driver, { filter: process.argv[2], port: Number(process.env.PW_SITES_PORT ?? 8101) });
 await d.quit();
 await server.close();
 fs.writeFileSync(path.join(here, ".cache", "corpus-firefox.json"), JSON.stringify(res, null, 1));
