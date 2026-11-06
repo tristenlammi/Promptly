@@ -251,6 +251,13 @@ test("bookmarks: with sync on the section is never blank, and says what's wrong 
   });
   expect(items.length).toBeGreaterThan(0);
   await testHook(rig, "bookmarkRun");
+  // All of them gone at once stops and asks, in the panel too, and a yes goes ahead.
+  const held = await panel();
+  await held.getByRole("button", { name: "Bookmarks", exact: true }).click();
+  await expect(held.getByTestId("bookmarks-held")).toBeVisible();
+  await held.close();
+  await helper.evaluate(() => chrome.runtime.sendMessage({ t: "bookmarkAnswer", go: true }));
+  await testHook(rig, "bookmarkRun");
   const empty = await panel();
   await empty.getByRole("button", { name: "Bookmarks", exact: true }).click();
   await expect(empty.getByText("No bookmarks yet.")).toBeVisible({ timeout: 30_000 });

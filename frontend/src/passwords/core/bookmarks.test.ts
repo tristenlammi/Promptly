@@ -364,6 +364,30 @@ describe("bookmark sync", () => {
     expect(a.browser.raw.size).toBe(200);
   });
 
+  it("a few bookmarks all gone from one side still stops and asks: a server reset looks like this", async () => {
+    const vault = new FakeVault();
+    const a = new Device(new FakeBrowser("a"), vault);
+    for (const t of ["One", "Two", "Three"]) a.browser.add(OTHER, t, `https://${t.toLowerCase()}.example/`);
+    await a.run();
+
+    // The vault's items are simply gone, with no deletions behind them.
+    vault.items.clear();
+    const held = await a.run();
+    expect(held.status === "held" && held.fromVault).toBe(3);
+    expect(a.browser.raw.size).toBe(3);
+
+    // Starting over puts them back rather than losing them.
+    a.base = {};
+    await a.run();
+    expect(a.browser.raw.size).toBe(3);
+    expect(vault.items.size).toBe(3);
+
+    // And the other way, a browser's bookmarks gone.
+    for (const id of [...a.browser.raw.keys()]) await a.browser.remove(id);
+    expect((await a.run()).status).toBe("held");
+    expect(vault.items.size).toBe(3);
+  });
+
   it("a small delete doesn't ask", async () => {
     expect(massDeleteLimit(10)).toBe(25);
     expect(massDeleteLimit(1000)).toBe(200);

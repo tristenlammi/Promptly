@@ -14,6 +14,7 @@ The owner asked for this during the build (2026-11-07): the extension keeps book
 ## What keeps it from eating your bookmarks
 
 - The first run only adds. Turning it on, or off and on, starts a fresh merge with no deletions.
+- A run that would empty one side, from two bookmarks up, changes nothing and asks, however few there are: a server reset or a wiped profile looks like this.
 - A run that would delete more than 25 items, or 20% of the total if that's more, changes nothing and asks. "Keep them everywhere" starts the comparison again, which brings each side's bookmarks back to the other.
 - Deleted items are soft deletes on the server, as with any item.
 - "Save a copy of this browser's bookmarks" writes an ordinary bookmarks HTML file.

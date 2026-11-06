@@ -71,6 +71,7 @@ export function syncableUrl(url: string | undefined): boolean {
   }
 }
 
+const EMPTIED_FROM = 2;
 const MAX_TITLE = 2048;
 const MAX_URL = 16384;
 const MAX_DEPTH = 64;
@@ -271,7 +272,10 @@ export async function reconcile(browser: BrowserSide, vault: VaultSide, base: Ba
   }
 
   const total = Math.max(items.size, nodes.size);
-  if (browserDelete.size + vaultDelete.size > massDeleteLimit(total) && !opts.allowMassDelete) {
+  // One side suddenly empty says something happened to that side: a server reset or restored, a
+  // wiped profile, the wrong account. A few bookmarks are worth as much as many.
+  const sideEmptied = browserDelete.size + vaultDelete.size >= EMPTIED_FROM && (items.size === vaultDelete.size || nodes.size === browserDelete.size);
+  if ((browserDelete.size + vaultDelete.size > massDeleteLimit(total) || sideEmptied) && !opts.allowMassDelete) {
     return { status: "held", base, fromBrowser: vaultDelete.size, fromVault: browserDelete.size, total };
   }
   for (const id of vaultDelete) {
