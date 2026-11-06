@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#faf7f2;--fg:#26221c;--soft:#6f675b;--line:#dcd4c6;--accent:#b4532a;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Georgia, "Times New Roman", serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+
+</style>
+
+</head>
+<body>
+<header style="display:flex;gap:16px;padding:12px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center"><b>青禾书店</b><a href="#">首页</a><a href="#">新书</a><a href="#">帮助中心</a><span style="margin-inline-start:auto"><input id="sou" type="search" placeholder="搜索图书" aria-label="搜索"></span></header>
+<main class="wrap">
+<div class="narrow box"><h1>账号登录</h1><div class="zh-login"><div class="row"><input class="zh-a" type="text" placeholder="手机号/邮箱"></div><div class="row"><input class="zh-b" type="password" placeholder="密码"></div><button type="button">登录</button> <a href="#">忘记密码</a> <a href="#">立即注册</a></div></div>
+</main>
+<footer class="muted" style="padding:24px;text-align:center">© 2026 青禾书店 隐私政策</footer>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q(".zh-a"),"password":q(".zh-b")};}};</script>
+
+</body>
+</html>

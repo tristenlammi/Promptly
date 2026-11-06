@@ -1,0 +1,52 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #FAF9F7;
+  --surface: #FFFFFF;
+  --border: rgba(122, 105, 95, 0.16);
+  --text: #1A1A19;
+  --text-muted: #5F6672;
+  --accent: #D97757;
+  --accent-text: #A84B2A;
+  --accent-hover: #C2613E;
+  --surface-1: #F2F0EC;
+  --surface-2: #EBE8E3;
+  --danger: #B42318;
+  --warning: #B7791F;
+  --success: #1F7A4D;
+  --shadow-md: 0 4px 16px -2px rgba(0, 0, 0, 0.12);
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1C1917;
+    --surface: #27231E;
+    --border: rgba(255, 255, 255, 0.12);
+    --text: #F2F0EC;
+    --text-muted: #B8B2A8;
+    --accent-text: #E9A58A;
+    --surface-1: #322D27;
+    --surface-2: #3A352D;
+    --danger: #F87171;
+    --warning: #FBBF24;
+    --success: #34D399;
+  }
+}
+
+html, body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+.input { width: 100%; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); padding: 6px 8px; font-size: 13px; outline: none; }
+.input:focus { border-color: var(--accent); }
+.btn { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; background: var(--surface); color: var(--text); font-size: 13px; }
+.btn:hover { background: var(--surface-1); }
+.btn-primary { border: 1px solid var(--accent); border-radius: 8px; padding: 6px 10px; background: var(--accent); color: #fff; font-size: 13px; font-weight: 500; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:disabled { opacity: 0.5; }
+.link { color: var(--accent-text); font-size: 12px; text-decoration: underline; }
+.badge { background: rgba(183, 121, 31, 0.2); border-radius: 4px; padding: 1px 5px; font-size: 10px; font-weight: 500; }
+.err { color: var(--danger); font-size: 12px; }
+.muted { color: var(--text-muted); font-size: 12px; padding: 4px; }
+.section { color: var(--text-muted); font-size: 11px; font-weight: 600; padding: 2px 4px; }

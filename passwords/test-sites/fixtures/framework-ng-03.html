@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Velvetine admin</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#14171f;--fg:#e6e8ee;--soft:#9aa2b2;--line:#2c3240;--accent:#7c9cff;--card:#1c2029}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.navbar{display:flex;justify-content:space-between;padding:14px 28px;border-bottom:2px solid var(--line);flex-wrap:wrap;gap:10px}.navbar ul{list-style:none;display:flex;gap:18px;margin:0;padding:0;flex-wrap:wrap}.navbar .cta{background:var(--accent);color:#fff;padding:.3em .8em;border-radius:99px;text-decoration:none}
+.legal-line{text-align:center;padding:30px 12px;font-size:.8em;color:var(--soft)}
+
+</style>
+
+</head>
+<body>
+<nav class="navbar navbar-expand-lg">
+  <a class="navbar-brand" href="#"><strong>Velvetine Cloud</strong></a>
+  <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="#">Pricing</a></li><li class="nav-item"><a class="nav-link" href="#">Resources</a></li><li class="nav-item"><a class="nav-link" href="#">Support</a></li><li class="nav-item"><a class="nav-link" href="#signin">Sign in</a></li><li class="nav-item"><a class="cta" href="#signup">Get started</a></li></ul>
+</nav>
+<main class="wrap">
+<div class="narrow box"><h1>Admin</h1><form id="vf" novalidate class="ng-untouched ng-pristine ng-invalid" onsubmit="return false"><mat-form-field _ngcontent-ng-c1042 class="mat-mdc-form-field" style="display:block;margin-bottom:14px"><label for="mat-input-7" _ngcontent-ng-c1042 class="mdc-floating-label" style="display:block;font-weight:600">Email</label><input matinput _ngcontent-ng-c1042 id="mat-input-7" class="mat-mdc-input-element ng-untouched ng-pristine ng-invalid" formcontrolname="email" type="email" style="width:100%"></mat-form-field><mat-form-field _ngcontent-ng-c1042 class="mat-mdc-form-field" style="display:block;margin-bottom:14px"><label for="mat-input-8" _ngcontent-ng-c1042 class="mdc-floating-label" style="display:block;font-weight:600">Password</label><input matinput _ngcontent-ng-c1042 id="mat-input-8" class="mat-mdc-input-element ng-untouched ng-pristine ng-invalid" formcontrolname="password" type="password" style="width:100%"></mat-form-field><button id="vf-submit" disabled>Sign in</button></form></div>
+</main>
+<div class="legal-line">&copy; 2026 Velvetine Cloud, all rights reserved &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a> &middot; <a href="#">Accessibility</a></div>
+
+
+<script>
+function ngControl(el,opts){opts=opts||{};var c={value:'',dirty:false,touched:false,composing:false,el:el,valid:function(){return opts.valid?opts.valid(c.value):!!c.value;},sync:function(){el.classList.toggle('ng-pristine',!c.dirty);el.classList.toggle('ng-dirty',c.dirty);el.classList.toggle('ng-untouched',!c.touched);el.classList.toggle('ng-touched',c.touched);el.classList.toggle('ng-valid',c.valid());el.classList.toggle('ng-invalid',!c.valid());}};
+function commit(v){c.value=v;c.dirty=true;c.sync();if(opts.onChange)opts.onChange(c);}
+el.addEventListener('input',function(){if(!c.composing)commit(el.value);});
+el.addEventListener('compositionstart',function(){c.composing=true;});
+el.addEventListener('compositionend',function(){c.composing=false;commit(el.value);});
+el.addEventListener('blur',function(){c.touched=true;c.sync();if(opts.onBlur)opts.onBlur(c);});
+c.sync();return c;}var C={};function chk(){var ok=C.u&&C.p&&C.u.valid()&&C.p.valid();document.getElementById('vf-submit').disabled=!ok;var f=document.getElementById('vf');f.classList.toggle('ng-valid',!!ok);f.classList.toggle('ng-invalid',!ok);f.classList.remove('ng-pristine');f.classList.add('ng-dirty');}
+C.u=ngControl(document.getElementById('mat-input-7'),{valid:function(v){return /.+@.+/.test(v);},onChange:chk});C.p=ngControl(document.getElementById('mat-input-8'),{valid:function(v){return v.length>=6;},onChange:chk});window.__fixture={state:function(){return {username:C.u.value,password:C.p.value};}};
+</script>
+</body>
+</html>

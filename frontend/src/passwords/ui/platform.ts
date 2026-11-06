@@ -15,6 +15,15 @@ export type Platform = {
   /** Native extras, where the platform has them. */
   hello?: { available: () => Promise<boolean>; enable: (secret: Uint8Array) => Promise<void>; unlock: () => Promise<Uint8Array | null>; disable: () => Promise<void> };
   backup?: { save: (data: string, name: string) => Promise<string> };
+  /** The extension: another of its parts may already be unlocked. */
+  restore?: () => Promise<{ secret: Uint8Array; session: string | null } | null>;
+  /** The extension: unlock happens in the background, and pages restore from it. */
+  unlock?: (password: string) => Promise<unknown>;
+  lock?: () => Promise<unknown>;
+  /** The extension: pages and the background share one offline copy, so each tells
+   *  the other when it changed. */
+  notifyChanged?: () => void;
+  subscribeChanged?: (cb: () => void) => () => void;
 };
 
 type Token = { value: string; exp: number };

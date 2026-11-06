@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pellucid portal</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#fff8e8;--fg:#2e2410;--soft:#7a6a44;--line:#ecdcb4;--accent:#c97a06;--card:#fffdf7}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Trebuchet MS, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.topnav{display:flex;align-items:center;gap:20px;background:var(--accent);color:#fff;padding:10px 20px;flex-wrap:wrap}.topnav a{color:#fff;text-decoration:none}.topnav__brand{font-weight:700}.topnav__search{margin-left:auto}.topnav__input{border:0;width:220px;color:#222;background:#fff}
+.foot-cols{display:flex;flex-wrap:wrap;gap:40px;margin-top:40px;padding:28px 32px;border-top:1px solid var(--line);font-size:.9em}.foot-cols h4{margin:0 0 6px}.foot-cols ul{list-style:none;padding:0;margin:0}
+
+</style>
+
+</head>
+<body>
+<div class="topnav">
+  <a class="topnav__brand" href="#">Pellucid Freight</a>
+  <a class="topnav__link" href="#">Support</a>
+  <a class="topnav__link" href="#">Company</a>
+  <a class="topnav__link" href="#">Stories</a>
+  <a class="topnav__link" href="#">Docs</a>
+  <div class="topnav__search"><input id="hdr-query" class="topnav__input" type="text" placeholder="Search the help center" aria-label="Search"></div>
+</div>
+<main class="wrap">
+<div id="mount" class="narrow box"></div>
+</main>
+<footer class="foot-cols"><div><h4>Product</h4><ul><li><a href="#">Overview</a></li><li><a href="#">Security</a></li><li><a href="#">Changelog</a></li></ul></div><div><h4>Company</h4><ul><li><a href="#">About Pellucid Freight</a></li><li><a href="#">Press</a></li><li><a href="#">Careers</a></li></ul></div><div><h4>Legal</h4><ul><li><a href="#">Terms</a></li><li><a href="#">Privacy</a></li><li><a href="#">Cookies</a></li></ul></div></footer>
+<script src="/lib/react.production.min.js"></script>
+<script src="/lib/react-dom.production.min.js"></script>
+
+<script>
+var h=React.createElement,S={};function red(s,a){var n=Object.assign({},s);n[a.k]=a.v;n.dirty=true;return n;}
+function App(){var r=React.useReducer(red,{u:'',p:'',dirty:false});var st=r[0],d=r[1];S.username=st.u;S.password=st.p;var ok=st.u.indexOf('@')>0;return h('form',{onSubmit:function(e){e.preventDefault();},'data-dirty':String(st.dirty)},h('h1',null,'Customer portal'),h('div',{className:'row'},h('label',{htmlFor:'pf-u'},'Account email'),h('input',{id:'pf-u',name:'email',value:st.u,onChange:function(e){d({k:'u',v:e.target.value});}})),h('div',{className:'row'},h('label',{htmlFor:'pf-p'},'Password'),h('input',{key:ok?'pw-valid':'pw-pending',id:'pf-p',name:'password',type:'password',value:st.p,onChange:function(e){d({k:'p',v:e.target.value});}})),h('button',{disabled:!(st.dirty&&ok&&st.p)},'Log in'));}
+ReactDOM.createRoot(document.getElementById('mount')).render(h(App));window.__fixture={state:function(){return {username:S.username,password:S.password};}};
+</script>
+</body>
+</html>

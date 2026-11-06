@@ -9,7 +9,7 @@ import { type DeviceJoin, type VaultClient, WrongPasswordError } from "../core/v
 import { Button, Callout, errorText, inputClass, Label, Spinner } from "./kit";
 import { scanQrFromCamera } from "./qr";
 
-export function Unlock({ vault, preview, onOpen, hello }: { vault: VaultClient; preview: boolean; onOpen: () => void; hello?: () => Promise<void> }) {
+export function Unlock({ vault, preview, onOpen, hello, delegate }: { vault: VaultClient; preview: boolean; onOpen: () => void; hello?: () => Promise<void>; delegate?: (password: string) => Promise<void> }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -24,7 +24,8 @@ export function Unlock({ vault, preview, onOpen, hello }: { vault: VaultClient; 
     try {
       // Let the spinner paint: Argon2 blocks the page for a moment.
       await new Promise((r) => setTimeout(r, 30));
-      await vault.unlock(password);
+      if (delegate) await delegate(password);
+      else await vault.unlock(password);
       setPassword("");
       onOpen();
     } catch (err) {

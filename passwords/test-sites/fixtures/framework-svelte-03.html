@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hollowmere Mail</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f1f5ef;--fg:#1d2a1f;--soft:#58695b;--line:#cdd9cc;--accent:#2f7a4a;--card:#fcfefb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Verdana, Geneva, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.bare-logo{padding:28px 0 0;text-align:center;font-size:1.5em;font-weight:700;letter-spacing:.02em}
+.lang-foot{display:flex;justify-content:space-between;padding:16px 28px;font-size:.85em;color:var(--soft);flex-wrap:wrap;gap:10px}
+
+</style>
+
+</head>
+<body>
+<div class="bare-logo">Hollowmere Mail</div>
+<main class="wrap">
+<div class="narrow box"><h1>Open your mailbox</h1><div id="key-block"></div><button type="button">Log in</button></div>
+</main>
+<div class="lang-foot"><select aria-label="Language" name="hl"><option>English (United States)</option><option>English (United Kingdom)</option><option>Espa&ntilde;ol</option></select><span><a href="#">Help</a> &nbsp; <a href="#">Privacy</a> &nbsp; <a href="#">Terms</a> &nbsp; Hollowmere Mail</span></div>
+
+
+<script>
+var $s={a:'',b:''};var block=document.getElementById('key-block');var gen=0;var rendering=false;function make(){rendering=true;gen++;block.setAttribute('data-gen',String(gen));block.innerHTML='<div class="row"><label for="hm-a">Address</label><input id="hm-a" type="text"></div><div class="row"><label for="hm-b">Password</label><input id="hm-b" type="password"></div>';[['hm-a','a'],['hm-b','b']].forEach(function(p){var el=document.getElementById(p[0]);el.value=$s[p[1]];el.addEventListener('input',function(){$s[p[1]]=el.value;});el.addEventListener('blur',function(ev){if(rendering)return;var rt=ev.relatedTarget;setTimeout(function(){var want=rt&&rt.id;make();if(want&&document.getElementById(want))document.getElementById(want).focus();},0);});});rendering=false;}
+make();window.__fixture={state:function(){return {username:$s.a,password:$s.b};}};
+</script>
+</body>
+</html>

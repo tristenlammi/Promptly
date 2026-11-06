@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thistlegate status</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#ffffff;--fg:#222222;--soft:#666666;--line:#d8d8d8;--accent:#00587a;--card:#f7f9fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Arial, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.topnav{display:flex;align-items:center;gap:20px;background:var(--accent);color:#fff;padding:10px 20px;flex-wrap:wrap}.topnav a{color:#fff;text-decoration:none}.topnav__brand{font-weight:700}.topnav__search{margin-left:auto}.topnav__input{border:0;width:220px;color:#222;background:#fff}
+.legal-line{text-align:center;padding:30px 12px;font-size:.8em;color:var(--soft)}
+#lb{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
+</style>
+
+</head>
+<body>
+<div class="topnav">
+  <a class="topnav__brand" href="#">Thistlegate Hosting</a>
+  <a class="topnav__link" href="#">Support</a>
+  <a class="topnav__link" href="#">Company</a>
+  <a class="topnav__link" href="#">Stories</a>
+  <a class="topnav__link" href="#">Docs</a>
+  <div class="topnav__search"><input id="hdr-query" class="topnav__input" type="text" placeholder="Search the help center" aria-label="Search"></div>
+</div>
+<main class="wrap">
+<h1>Service status</h1><table border="1" cellpadding="6" style="border-collapse:collapse"><tr><td>Web</td><td>Operational</td></tr><tr><td>Mail</td><td>Operational</td></tr></table><p><button id="lb-open" type="button">Log in to manage services</button></p>
+</main>
+<div class="legal-line">&copy; 2026 Thistlegate Hosting, all rights reserved &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a> &middot; <a href="#">Accessibility</a></div>
+
+
+<script>
+(function(){var S={"username":"","password":""};
+window.addEventListener('message',function(e){if(e.data&&e.data.__fx){for(var k in e.data.__fx){S[k]=e.data.__fx[k];}if(parent!==window){parent.postMessage({__fx:S},'*');}}});
+window.__fixture={state:function(){return S;}};})();
+document.getElementById('lb-open').addEventListener('click',function(){var d=document.createElement('div');d.id='lb';d.innerHTML='<iframe id="lb-frame" title="Client login" src="/fixtures/_frames/iframe-08.html" style="border:0;width:400px;max-width:92vw;height:320px;background:#fff"></iframe>';document.body.appendChild(d);});
+</script>
+</body>
+</html>

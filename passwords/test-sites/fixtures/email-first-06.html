@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Subscriber log in - Marrowbone Press</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#faf7f2;--fg:#26221c;--soft:#6f675b;--line:#dcd4c6;--accent:#b4532a;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Georgia, "Times New Roman", serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.navbar{display:flex;justify-content:space-between;padding:14px 28px;border-bottom:2px solid var(--line);flex-wrap:wrap;gap:10px}.navbar ul{list-style:none;display:flex;gap:18px;margin:0;padding:0;flex-wrap:wrap}.navbar .cta{background:var(--accent);color:#fff;padding:.3em .8em;border-radius:99px;text-decoration:none}
+.foot{margin-top:40px;padding:28px 24px;background:var(--card);border-top:1px solid var(--line)}.foot .newsletter{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.foot .newsletter label{font-weight:600;width:100%}.foot .newsletter input{flex:1;min-width:160px;max-width:320px}
+[data-step="1"] .pw-area{opacity:0;height:0;overflow:hidden;pointer-events:none}
+</style>
+
+</head>
+<body>
+<nav class="navbar navbar-expand-lg">
+  <a class="navbar-brand" href="#"><strong>Marrowbone Press</strong></a>
+  <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="#">Pricing</a></li><li class="nav-item"><a class="nav-link" href="#">Resources</a></li><li class="nav-item"><a class="nav-link" href="#">Support</a></li><li class="nav-item"><a class="nav-link" href="#signin">Sign in</a></li><li class="nav-item"><a class="cta" href="#signup">Get started</a></li></ul>
+</nav>
+<main class="wrap">
+<div class="split"><article><h2>The long road to the perfect pencil</h2><p>A hundred and fifty years of graphite, cedar and stubbornness. Log in to keep reading this story, or subscribe from 3 a month.</p></article>
+  <form class="box" id="sub" data-step="1" onsubmit="return false"><h2>Subscriber log in</h2>
+  <div class="row"><label for="sub-e">Email</label><input id="sub-e" name="e" type="email"></div>
+  <div class="pw-area"><div class="row"><label for="sub-p">Password</label><input id="sub-p" name="p" type="password"></div><p><a href="#magic">Email me a sign-in link instead</a></p></div>
+  <button id="sub-next" type="button">Continue</button></form></div>
+</main>
+<footer class="foot"><form class="newsletter" action="#subscribe" onsubmit="return false">
+  <label for="nl-email">Get the Marrowbone Press newsletter</label>
+  <input type="email" id="nl-email" name="email" placeholder="you@example.test" autocomplete="email"><button type="submit">Subscribe</button>
+</form><p class="muted">&copy; 2026 Marrowbone Press. Unsubscribe at any time.</p></footer>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#sub-e"),"password":q("#sub-p")};}};</script>
+<script>
+document.getElementById('sub-next').addEventListener('click',function(){document.getElementById('sub').setAttribute('data-step','2');document.getElementById('sub-e').readOnly=true;});
+</script>
+</body>
+</html>

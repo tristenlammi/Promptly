@@ -1,0 +1,5501 @@
+[
+  {
+    "id": "signin-classic-01",
+    "category": "signin",
+    "description": "Textbook sign-in: labels by for, Remember me, Forgot password, header search and footer newsletter as noise.",
+    "path": "/fixtures/signin-classic-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-02",
+    "category": "signin",
+    "description": "Old table layout with bgcolor attributes, text labels in a sibling cell (no label element), names uid and pwd, no ids.",
+    "path": "/fixtures/signin-classic-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"uid\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"pwd\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "form[name=\"sf\"] input[name=\"s\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-03",
+    "category": "signin",
+    "description": "No form element at all: BEM divs, placeholder-only inputs, submit is a div with role=button handled in JS.",
+    "path": "/fixtures/signin-classic-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#identity",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#secret",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-04",
+    "category": "signin",
+    "description": "Framework-style generated ids (input-17, input-21) with floating labels tied by for; no name attributes; autocomplete=off.",
+    "path": "/fixtures/signin-classic-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#input-17",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#input-21",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-05",
+    "category": "signin",
+    "description": "Wrapping labels with the input inside them, email type, no ids; store page with product search and footer email capture.",
+    "path": "/fixtures/signin-classic-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "label.f-email input",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "label.f-pass input",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#shop-k",
+          "#footer-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-06",
+    "category": "signin",
+    "description": "aria-labelledby labels on spans, opaque names f8 and f9, banking wording: Member number and Passcode.",
+    "path": "/fixtures/signin-classic-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#f8",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#f9",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-07",
+    "category": "signin",
+    "description": "Placeholder-only inputs with no name, no id and no autocomplete; selected purely by position and type.",
+    "path": "/fixtures/signin-classic-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": ".login input[type=text]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": ".login input[type=password]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hdr-query"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-08",
+    "category": "signin",
+    "description": "Icon-only: inline SVG user and lock glyphs, no text label or placeholder at all; servlet-style names j_username and j_password.",
+    "path": "/fixtures/signin-classic-08.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"j_username\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"j_password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-09",
+    "category": "signin",
+    "description": "Show-password toggle swaps the input between password and text; footer asks for a phone number to text an app link.",
+    "path": "/fixtures/signin-classic-09.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#ol-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#ol-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#app-link-phone"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-10",
+    "category": "signin",
+    "description": "Password input is type=text with name secret until it gets focus, then the page script flips it to type=password.",
+    "path": "/fixtures/signin-classic-10.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#cl-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#cl-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hdr-query"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-11",
+    "category": "signin",
+    "description": "CSS-in-JS hashed classes, wrapper soup, data-testid attributes the only stable hook; autocomplete absent.",
+    "path": "/fixtures/signin-classic-11.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "[data-testid=\"username-input\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "[data-testid=\"password-input\"]",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-12",
+    "category": "signin",
+    "description": "WebForms pattern: one form wraps the whole page, so search, login and newsletter share it; ctl00-prefixed ids and names, __VIEWSTATE hidden.",
+    "path": "/fixtures/signin-classic-12.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#ctl00_MainContent_txtUserName",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#ctl00_MainContent_txtPassword",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#ctl00_txtSearch",
+          "#ctl00_txtNewsEmail"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-13",
+    "category": "signin",
+    "description": "Checkout crossroads: Returning customer login beside a Guest checkout form asking only for an email, which must not be filled.",
+    "path": "/fixtures/signin-classic-13.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#ret-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#ret-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#guest-email",
+          "#shop-k",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-14",
+    "category": "signin",
+    "description": "Definition list with fieldset and legend; Employee ID wording; bracketed names login[username] and login[password].",
+    "path": "/fixtures/signin-classic-14.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#login_username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#login_password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-15",
+    "category": "signin",
+    "description": "Bootstrap-like floating labels placed after the input, plus several Continue-with SSO buttons and a divider; session[email] style names.",
+    "path": "/fixtures/signin-classic-15.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#floatingInput",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#floatingPassword",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-16",
+    "category": "signin",
+    "description": "Forum-style inline login squeezed into the page header on a long discussion page; quick reply box and thread search as noise.",
+    "path": "/fixtures/signin-classic-16.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#navbar_username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#navbar_password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#thread-search",
+          "#quick-reply"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "signin-classic-17",
+    "category": "signin",
+    "description": "Phone number is the login: type=tel with a country code select next to it, then a password. Role is still username.",
+    "path": "/fixtures/signin-classic-17.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#msisdn",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#login-pw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "email-first-01",
+    "category": "email-first",
+    "description": "Email then Next; the password block starts with the hidden attribute, and the email turns read-only when it opens.",
+    "path": "/fixtures/email-first-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#ef-email",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#nl-email"
+        ],
+        "advance": {
+          "click": "#next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#pw-block:not([hidden])",
+        "expected": [
+          {
+            "selector": "#ef-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "email-first-02",
+    "category": "email-first",
+    "description": "Password row is display:none via a class at first; the email stays editable afterwards, so step 2 is a full sign-in form with both fields.",
+    "path": "/fixtures/email-first-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#k-mail",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ],
+        "advance": {
+          "click": "#k-continue"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#k-pass-row:not(.is-collapsed)",
+        "expected": [
+          {
+            "selector": "#k-mail",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#k-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "email-first-03",
+    "category": "email-first",
+    "description": "After Continue the email input is replaced by plain text with a Change link, and the password input is inserted by JS.",
+    "path": "/fixtures/email-first-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#partner-mail",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ],
+        "advance": {
+          "click": "#cont"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#partner-pass",
+        "expected": [
+          {
+            "selector": "#partner-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "email-first-04",
+    "category": "email-first",
+    "description": "No form element; the password area sits in a max-height:0 overflow:hidden collapse with aria-expanded, so it has no visible height at first.",
+    "path": "/fixtures/email-first-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#fh-id",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hdr-query",
+          "#footer-email"
+        ],
+        "advance": {
+          "click": "#fh-next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#fh-more[data-settled]",
+        "expected": [
+          {
+            "selector": "#fh-pw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hdr-query",
+          "#footer-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "email-first-05",
+    "category": "email-first",
+    "description": "Next performs a fake home-realm lookup (600 ms spinner) before the password field is created; a Use SSO link sits beside it.",
+    "path": "/fixtures/email-first-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#td-user",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ],
+        "advance": {
+          "click": "#td-next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#td-pass",
+        "expected": [
+          {
+            "selector": "#td-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "email-first-06",
+    "category": "email-first",
+    "description": "Subscriber login where the password starts opacity:0 height:0 under a data-step attribute; Email me a sign-in link appears next to it; magazine article teaser around it.",
+    "path": "/fixtures/email-first-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#sub-e",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#nl-email"
+        ],
+        "advance": {
+          "click": "#sub-next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#sub[data-step=\"2\"]",
+        "expected": [
+          {
+            "selector": "#sub-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "multi-step-01",
+    "category": "multi-step",
+    "description": "Big-tech style identifier view, removed from the DOM on Next; the password view is a fresh subtree showing the identifier as a chip, with a Forgot email link and Create account.",
+    "path": "/fixtures/multi-step-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "wait": "#ident",
+        "expected": [
+          {
+            "selector": "#ident",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#idNext"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#pwinput",
+        "expected": [
+          {
+            "selector": "#pwinput",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "multi-step-02",
+    "category": "multi-step",
+    "description": "Enterprise style: identifier panel hidden by display:none (still in DOM), password panel with an identity banner and a Not you? use another account link that goes back.",
+    "path": "/fixtures/multi-step-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#login_identity",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#idSubmit"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#p2:not(.panel--off)",
+        "expected": [
+          {
+            "selector": "#passwd",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "multi-step-03",
+    "category": "multi-step",
+    "description": "Real page navigation: identifier page, then a second document with a hidden username input carrying the value and a read-only text display.",
+    "path": "/fixtures/multi-step-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#acct",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ],
+        "advance": {
+          "goto": "/fixtures/_steps/multi-step-03-2.html"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#pw2",
+        "expected": [
+          {
+            "selector": "#pw2",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hidden-username",
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "multi-step-04",
+    "category": "multi-step",
+    "description": "Three real pages: user ID, password, then a 6-digit SMS code page. Bank wording with no account detail shown between steps.",
+    "path": "/fixtures/multi-step-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#userid",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ],
+        "advance": {
+          "goto": "/fixtures/_steps/multi-step-04-2.html"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#bw-pass",
+        "expected": [
+          {
+            "selector": "#bw-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ],
+        "advance": {
+          "goto": "/fixtures/_steps/multi-step-04-3.html"
+        }
+      },
+      {
+        "kind": "otp",
+        "wait": "#bw-code",
+        "expected": [
+          {
+            "selector": "#bw-code",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password",
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "multi-step-05",
+    "category": "multi-step",
+    "description": "Single-page app with three views swapped in one container: identifier, password, authenticator code. Each view replaces the previous one in the DOM.",
+    "path": "/fixtures/multi-step-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "wait": "#v-user",
+        "expected": [
+          {
+            "selector": "#v-user",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#v-next1"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#v-pass",
+        "expected": [
+          {
+            "selector": "#v-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#v-next2"
+        }
+      },
+      {
+        "kind": "otp",
+        "wait": "#v-totp",
+        "expected": [
+          {
+            "selector": "#v-totp",
+            "role": "otp",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password",
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "multi-step-06",
+    "category": "multi-step",
+    "description": "Second view shows the username in a visible read-only input and also a hidden input carrying it; only the password should be filled.",
+    "path": "/fixtures/multi-step-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#hm-user",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#hm-go"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#hm-pw",
+        "expected": [
+          {
+            "selector": "#hm-pw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hm-carry"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "multi-step-07",
+    "category": "multi-step",
+    "description": "Account chooser first: remembered profiles and Use another account, no inputs. Then identifier, then password, each replacing the last.",
+    "path": "/fixtures/multi-step-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "advance": {
+          "click": "#use-another"
+        }
+      },
+      {
+        "kind": "email-first",
+        "wait": "#ac-id",
+        "expected": [
+          {
+            "selector": "#ac-id",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#ac-next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#ac-pw",
+        "expected": [
+          {
+            "selector": "#ac-pw",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "multi-step-08",
+    "category": "multi-step",
+    "description": "Real navigation on another host; step 2 keeps the identifier in a visible read-only field with an Edit link beside it, plus a marketing panel.",
+    "path": "/fixtures/multi-step-08.html",
+    "host": "other.localhost",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#sd-user",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ],
+        "advance": {
+          "goto": "/fixtures/_steps/multi-step-08-2.html"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#sd-pass",
+        "expected": [
+          {
+            "selector": "#sd-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "multi-step-09",
+    "category": "multi-step",
+    "description": "Carousel: both slides stay in the DOM and the track slides sideways with overflow hidden, so the password is clipped off to the side on step 1 and the identifier on step 2. Inactive slide gets aria-hidden and inert.",
+    "path": "/fixtures/multi-step-09.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#pw-id",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#pw-next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#tr[data-settled=\"2\"]",
+        "expected": [
+          {
+            "selector": "#pw-sec",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "multi-step-10",
+    "category": "multi-step",
+    "description": "Passwordless: phone number first, then an SMS code on the next view. There is no password anywhere in this flow.",
+    "path": "/fixtures/multi-step-10.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#dm-phone",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#dm-send"
+        }
+      },
+      {
+        "kind": "otp",
+        "wait": "#dm-code",
+        "expected": [
+          {
+            "selector": "#dm-code",
+            "role": "otp",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "multi-step-11",
+    "category": "multi-step",
+    "description": "Three in-place steps ending in six split digit boxes; earlier panels stay in the DOM but hidden by the hidden attribute, so hidden fields keep their values.",
+    "path": "/fixtures/multi-step-11.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#if-u",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#if-1"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#a2:not([hidden])",
+        "expected": [
+          {
+            "selector": "#if-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#if-2"
+        }
+      },
+      {
+        "kind": "otp",
+        "wait": "#a3:not([hidden])",
+        "expected": [
+          {
+            "selector": "#if-d1",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#if-d2",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#if-d3",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#if-d4",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#if-d5",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#if-d6",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password",
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "multi-step-12",
+    "category": "multi-step",
+    "description": "Real navigation: identifier, password, then a Stay signed in? interstitial with only Yes and No buttons, which has nothing to fill.",
+    "path": "/fixtures/multi-step-12.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#c-login",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "goto": "/fixtures/_steps/multi-step-12-2.html"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#c-pass",
+        "expected": [
+          {
+            "selector": "#c-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#c-hidden"
+        ],
+        "advance": {
+          "goto": "/fixtures/_steps/multi-step-12-3.html"
+        }
+      },
+      {
+        "kind": "none",
+        "wait": "#c-yes",
+        "expected": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "modal-01",
+    "category": "modal",
+    "description": "Native dialog element opened with showModal by a Log in button; the form is in the DOM but not rendered until then.",
+    "path": "/fixtures/modal-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ],
+        "advance": {
+          "click": "#open-login"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "dialog[open]",
+        "expected": [
+          {
+            "selector": "#dlg-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#dlg-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "modal-02",
+    "category": "modal",
+    "description": "Paywall overlay auto-opens on a timer about a second after load and is appended to body at that moment; article text behind it.",
+    "path": "/fixtures/modal-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#pay-pass",
+        "expected": [
+          {
+            "selector": "#pay-user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#pay-pass",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "modal-03",
+    "category": "modal",
+    "description": "HTML popover attribute with popovertarget on the trigger; compact login in a popover anchored under the nav.",
+    "path": "/fixtures/modal-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#hdr-query"
+        ],
+        "advance": {
+          "click": "#pop-btn"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#signin-pop:popover-open",
+        "expected": [
+          {
+            "selector": "#pop-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#pop-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hdr-query"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "modal-04",
+    "category": "modal",
+    "description": "Modal with Sign in and Create account tabs, both panels in the DOM. Sign in is active; the hidden Create account inputs must not count and must not be filled.",
+    "path": "/fixtures/modal-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#up-name",
+          "#up-email",
+          "#up-pass",
+          "#shop-k",
+          "#footer-email"
+        ],
+        "advance": {
+          "click": "#account-btn"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#auth-modal.is-open",
+        "expected": [
+          {
+            "selector": "#in-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#in-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#up-name",
+          "#up-email",
+          "#up-pass",
+          "#shop-k",
+          "#footer-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "modal-05",
+    "category": "modal",
+    "description": "On-page tabs defaulting to Sign up, with the Sign in panel hidden by a class; clicking the Log in tab swaps them. Each step counts only the visible panel.",
+    "path": "/fixtures/modal-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#su-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#su-pw",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#li-email",
+          "#li-pw"
+        ],
+        "advance": {
+          "click": "#t-in"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#p-in.on",
+        "expected": [
+          {
+            "selector": "#li-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#li-pw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#su-email",
+          "#su-pw"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password",
+      "password": "password"
+    }
+  },
+  {
+    "id": "modal-06",
+    "category": "modal",
+    "description": "Off-canvas drawer parked with translateX(100%) off the right edge: its inputs are in the DOM and technically rendered but off-screen until the Account button slides it in.",
+    "path": "/fixtures/modal-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#trip-from",
+          "#trip-to",
+          "#trip-date",
+          "#site-search"
+        ],
+        "advance": {
+          "click": "#drawer-btn"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#acct-drawer[data-settled]",
+        "expected": [
+          {
+            "selector": "#dr-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#dr-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#trip-from",
+          "#trip-to",
+          "#trip-date",
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "modal-07",
+    "category": "modal",
+    "description": "Bootstrap-like dropdown in the navbar: a small login form inside a display:none dropdown-menu that toggles on click.",
+    "path": "/fixtures/modal-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "advance": {
+          "click": "#dd-toggle"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#dd-menu.show",
+        "expected": [
+          {
+            "selector": "#dd-user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#dd-pass",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "modal-08",
+    "category": "modal",
+    "description": "Modal markup does not exist until the button is clicked (portal appended to body), with a cookie banner still sitting on the page underneath.",
+    "path": "/fixtures/modal-08.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#hdr-query"
+        ],
+        "advance": {
+          "click": "#portal-open"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#pc-pass",
+        "expected": [
+          {
+            "selector": "#pc-acct",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#pc-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hdr-query"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "shadow-01",
+    "category": "shadow",
+    "description": "One open shadow root holding the whole login form with internal labels; the component tracks values in instance fields.",
+    "path": "/fixtures/shadow-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": [
+              "#login-host",
+              "#user"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "#login-host",
+              "#pass"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "shadow-02",
+    "category": "shadow",
+    "description": "Closed shadow root: element.shadowRoot is null. The root is exposed only at window.__closedRoots for the harness to verify.",
+    "path": "/fixtures/shadow-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": [
+              "#vault-login",
+              "#u"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "#vault-login",
+              "#p"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "shadow-03",
+    "category": "shadow",
+    "description": "Design-system nesting: app-shell > login-form > two text-field components, each with its own open root, so inputs sit three roots deep.",
+    "path": "/fixtures/shadow-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": [
+              "#app",
+              "#form",
+              "#email-field",
+              "#control"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "#app",
+              "#form",
+              "#password-field",
+              "#control"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "shadow-04",
+    "category": "shadow",
+    "description": "Closed shadow root nested inside an open one; the inner closed root is registered in __closedRoots under its host selector.",
+    "path": "/fixtures/shadow-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": [
+              "#shell",
+              "#creds",
+              "#addr"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "#shell",
+              "#creds",
+              "#sec"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "shadow-05",
+    "category": "shadow",
+    "description": "Slotted inputs: the input elements are light DOM children slotted into a component whose shadow root holds the label text, so label and input are in different trees.",
+    "path": "/fixtures/shadow-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#slot-user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#slot-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "shadow-06",
+    "category": "shadow",
+    "description": "Web components with internal labels configured by attributes (label, type, placeholder), exposing value as a property; the page reads the component property, not the input.",
+    "path": "/fixtures/shadow-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": [
+              "#tw-user",
+              "#native"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "#tw-pass",
+              "#native"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hdr-query",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "shadow-07",
+    "category": "shadow",
+    "description": "Form-associated custom elements using ElementInternals: the light-DOM form sees values through setFormValue, the real inputs are in shadow roots, state comes from FormData.",
+    "path": "/fixtures/shadow-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": [
+              "#fa-user",
+              "#i"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "#fa-pass",
+              "#i"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "shadow-08",
+    "category": "shadow",
+    "description": "Declarative Shadow DOM from the HTML parser (template shadowrootmode=open), no custom element class and no script needed to make the root.",
+    "path": "/fixtures/shadow-08.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": [
+              "#dsd-login",
+              "#dsd-u"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "#dsd-login",
+              "#dsd-p"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#footer-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "shadow-09",
+    "category": "shadow",
+    "description": "Mixed: username in an open component and password in a separate closed component, siblings in a plain div. The two inputs share no form and no root.",
+    "path": "/fixtures/shadow-09.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": [
+              "#ou",
+              "#x"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "#cp",
+              "#y"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-01",
+    "category": "iframe",
+    "description": "Same-origin login iframe embedded on a marketing page; the frame posts its state to the parent.",
+    "path": "/fixtures/iframe-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#user",
+            "role": "username",
+            "frame": [
+              "#login-frame"
+            ]
+          },
+          {
+            "selector": "#pass",
+            "role": "password",
+            "frame": [
+              "#login-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-02",
+    "category": "iframe",
+    "description": "Different host on the same port: page on a.localhost embeds the sign-in widget from b.localhost. Browsers report this as cross-site (Sec-Fetch-Site: cross-site) because each *.localhost name is its own registrable domain; iframe-11 is the truly same-site case.",
+    "path": "/fixtures/iframe-02.html",
+    "host": "a.localhost",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#id-frame",
+        "expected": [
+          {
+            "selector": "#kr-email",
+            "role": "username",
+            "frame": [
+              "#id-frame"
+            ]
+          },
+          {
+            "selector": "#kr-pass",
+            "role": "password",
+            "frame": [
+              "#id-frame"
+            ]
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-03",
+    "category": "iframe",
+    "description": "Cross-origin by port: online banking login served from the second server port, embedded in the public site on the first.",
+    "path": "/fixtures/iframe-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#member",
+            "role": "username",
+            "frame": [
+              "#ob-login"
+            ]
+          },
+          {
+            "selector": "#passcode",
+            "role": "password",
+            "frame": [
+              "#ob-login"
+            ]
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-04",
+    "category": "iframe",
+    "description": "Two same-origin frames deep: portal shell frame inside the page, login frame inside the shell.",
+    "path": "/fixtures/iframe-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#acct-no",
+            "role": "username",
+            "frame": [
+              "#outer",
+              "#inner"
+            ]
+          },
+          {
+            "selector": "#acct-pw",
+            "role": "password",
+            "frame": [
+              "#outer",
+              "#inner"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-05",
+    "category": "iframe",
+    "description": "Nested across origins: a.localhost embeds other.localhost on the second port, which embeds b.localhost holding the form.",
+    "path": "/fixtures/iframe-05.html",
+    "host": "a.localhost",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#idp-u",
+            "role": "username",
+            "frame": [
+              "#broker",
+              "#idp"
+            ]
+          },
+          {
+            "selector": "#idp-p",
+            "role": "password",
+            "frame": [
+              "#broker",
+              "#idp"
+            ]
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-06",
+    "category": "iframe",
+    "description": "Login widget iframe further down a page that opens with a newsletter form in the top document; the newsletter email must stay empty.",
+    "path": "/fixtures/iframe-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#s-email",
+            "role": "username",
+            "frame": [
+              "#sub-widget"
+            ]
+          },
+          {
+            "selector": "#s-pass",
+            "role": "password",
+            "frame": [
+              "#sub-widget"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#sunday-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-07",
+    "category": "iframe",
+    "description": "srcdoc iframe: no URL of its own, inherits the parent origin; the widget is embedded inline in the attribute.",
+    "path": "/fixtures/iframe-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#sd-u",
+            "role": "username",
+            "frame": [
+              "#sd-frame"
+            ]
+          },
+          {
+            "selector": "#sd-p",
+            "role": "password",
+            "frame": [
+              "#sd-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-08",
+    "category": "iframe",
+    "description": "Lightbox iframe created only when the Log in button is clicked; before that the page has no form fields of its own.",
+    "path": "/fixtures/iframe-08.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#hdr-query"
+        ],
+        "advance": {
+          "click": "#lb-open"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#lb-frame",
+        "expected": [
+          {
+            "selector": "#tg-u",
+            "role": "username",
+            "frame": [
+              "#lb-frame"
+            ]
+          },
+          {
+            "selector": "#tg-p",
+            "role": "password",
+            "frame": [
+              "#lb-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#hdr-query"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-09",
+    "category": "iframe",
+    "description": "Identifier-then-password running entirely inside a b.localhost iframe, in place; the frame swaps its own views between steps.",
+    "path": "/fixtures/iframe-09.html",
+    "host": "a.localhost",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#ng-id",
+            "role": "username",
+            "frame": [
+              "#acct-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ],
+        "advance": {
+          "click": "#ng-next",
+          "frame": [
+            "#acct-frame"
+          ]
+        }
+      },
+      {
+        "kind": "password-next",
+        "expected": [
+          {
+            "selector": "#ng-pw",
+            "role": "password",
+            "frame": [
+              "#acct-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-10",
+    "category": "iframe",
+    "description": "Frame plus shadow: cross-origin iframe holding a web component whose open shadow root contains the inputs.",
+    "path": "/fixtures/iframe-10.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": [
+              "#pwl",
+              "#e"
+            ],
+            "role": "username",
+            "frame": [
+              "#cf"
+            ]
+          },
+          {
+            "selector": [
+              "#pwl",
+              "#k"
+            ],
+            "role": "password",
+            "frame": [
+              "#cf"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#footer-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "iframe-11",
+    "category": "iframe",
+    "description": "Truly same-site, different host: a.localhost embeds login.a.localhost on the same port, so the browser sends Sec-Fetch-Site: same-site and the two origins still differ.",
+    "path": "/fixtures/iframe-11.html",
+    "host": "a.localhost",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#ss-user",
+            "role": "username",
+            "frame": [
+              "#sso-frame"
+            ]
+          },
+          {
+            "selector": "#ss-pass",
+            "role": "password",
+            "frame": [
+              "#sso-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-react-01",
+    "category": "framework",
+    "description": "Real React controlled inputs via useState. A value set without an input event never reaches state (React value tracker), and the submit button stays disabled until both fields are non-empty.",
+    "path": "/fixtures/framework-react-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#r-pass",
+        "expected": [
+          {
+            "selector": "#r-user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#r-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-react-02",
+    "category": "framework",
+    "description": "Real React with useId ids and data-testid. onBlur marks the field touched and re-renders, which writes state back to the DOM: a filled-looking box with no input event is wiped on blur. Shows inline validation errors once touched.",
+    "path": "/fixtures/framework-react-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "[data-testid=\"login-password\"]",
+        "expected": [
+          {
+            "selector": "[data-testid=\"login-email\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "[data-testid=\"login-password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-react-03",
+    "category": "framework",
+    "description": "Real React reducer-driven form that tracks dirty state and remounts the password input (new key) when the username first becomes valid, so a cached element reference goes stale. Submit is disabled until dirty and valid.",
+    "path": "/fixtures/framework-react-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#pf-p",
+        "expected": [
+          {
+            "selector": "#pf-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#pf-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hdr-query"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-vue-01",
+    "category": "framework",
+    "description": "Real Vue v-model with Vuetify-like generated ids input-17 and input-21 and floating labels. v-model listens to input, so a bare value set is ignored; login stays disabled until the computed canSubmit is true.",
+    "path": "/fixtures/framework-vue-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#input-21",
+        "expected": [
+          {
+            "selector": "#input-17",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#input-21",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-vue-02",
+    "category": "framework",
+    "description": "Real Vue v-model.lazy on both fields: the model updates only on the change event, so dispatching input alone leaves state empty. Username also has .trim, so spaces around it are dropped.",
+    "path": "/fixtures/framework-vue-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#sd-pass",
+        "expected": [
+          {
+            "selector": "#sd-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#sd-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]",
+          "#footer-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-vue-03",
+    "category": "framework",
+    "description": "Real Vue where blur re-renders the form: a :key bump on blur replaces both input elements with new ones bound to the model. Anything not in the model (value set with no event) vanishes on blur.",
+    "path": "/fixtures/framework-vue-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#fh-p",
+        "expected": [
+          {
+            "selector": "#fh-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#fh-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-ng-01",
+    "category": "framework",
+    "description": "Angular-style reactive form: mat-input-N ids, formcontrolname, ng-untouched ng-pristine classes; the model is a JS object updated by input and compositionend only, never by reading the DOM.",
+    "path": "/fixtures/framework-ng-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#mat-input-2",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#mat-input-3",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-ng-02",
+    "category": "framework",
+    "description": "Angular-style form whose blur handler rewrites the DOM value from the model, as a writeValue call would: without a real input event the box empties on blur.",
+    "path": "/fixtures/framework-ng-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#mat-input-0",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#mat-input-1",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-ng-03",
+    "category": "framework",
+    "description": "Angular-style form with a disabled submit until both controls are valid (email pattern check on the username). Dirty and touched classes update live; the form-level ng-valid class follows them.",
+    "path": "/fixtures/framework-ng-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#mat-input-7",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#mat-input-8",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-svelte-01",
+    "category": "framework",
+    "description": "Svelte-style bind:value: hashed svelte-xxxx classes and a store updated on the input event only. Change events and bare value sets do nothing.",
+    "path": "/fixtures/framework-svelte-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#sv-name",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#sv-word",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-svelte-02",
+    "category": "framework",
+    "description": "Svelte-style reactive statement: the button is disabled until the store is valid and flips only from input events; a status line shows how many characters the app believes it has.",
+    "path": "/fixtures/framework-svelte-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#kr-e",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#kr-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "framework-svelte-03",
+    "category": "framework",
+    "description": "Svelte-style {#key} block: on blur of either field the block is destroyed and recreated with new input nodes valued from the store, so element references go stale and values with no input event are lost.",
+    "path": "/fixtures/framework-svelte-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#hm-b",
+        "expected": [
+          {
+            "selector": "#hm-a",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#hm-b",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "otp-01",
+    "category": "otp",
+    "description": "Single box with autocomplete=one-time-code, the clean standards-following case; Resend link and a device-trust checkbox.",
+    "path": "/fixtures/otp-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#code1",
+            "role": "otp",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "otp-02",
+    "category": "otp",
+    "description": "Six split boxes with auto-advance on input, Backspace returning to the previous box and paste spreading across them. No names or labels; only a group label.",
+    "path": "/fixtures/otp-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#sx1",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#sx2",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#sx3",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#sx4",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#sx5",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#sx6",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "otp-03",
+    "category": "otp",
+    "description": "Four split boxes for an email verification code, named code[0] to code[3], tucked into a table layout.",
+    "path": "/fixtures/otp-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#fv0",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#fv1",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#fv2",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#fv3",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "otp-04",
+    "category": "otp",
+    "description": "Split boxes that accept paste only: beforeinput blocks typed input and the app model changes only in the paste handler. Setting box values or typing leaves app state empty.",
+    "path": "/fixtures/otp-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#po1",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#po2",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#po3",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#po4",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#po5",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#po6",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "otp-05",
+    "category": "otp",
+    "description": "maxlength=1 inputmode=numeric boxes in a div grid with aria-labels Digit N of 6, no auto-advance at all; the user or filler must move between them.",
+    "path": "/fixtures/otp-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#dg1",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#dg2",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#dg3",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#dg4",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#dg5",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#dg6",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "otp-06",
+    "category": "otp",
+    "description": "Single plain text box named code with no autocomplete and a generic label; only the heading says this is a sign-in code.",
+    "path": "/fixtures/otp-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#c",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "otp-07",
+    "category": "otp",
+    "description": "SMS code screen: name=sms_token, the masked phone number in the copy, Resend timer, and a Call me instead option.",
+    "path": "/fixtures/otp-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#sms",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "otp-08",
+    "category": "otp",
+    "description": "Authenticator-app prompt: name=totp, placeholder 123 456, aria-labelledby heading, Remember this browser checkbox and a link to use a backup code instead.",
+    "path": "/fixtures/otp-08.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#totp",
+            "role": "otp",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "otp-09",
+    "category": "otp",
+    "description": "Masked single input formatted as xxx-xxx by JS; the DOM shows the hyphen but the app model holds digits only, with the hyphen typed by the mask.",
+    "path": "/fixtures/otp-09.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#masked",
+            "role": "otp",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "otp-10",
+    "category": "otp",
+    "description": "Hardware-token prompt with a type=number input, name=token, spinner hidden by CSS, labelled Security code.",
+    "path": "/fixtures/otp-10.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#hw",
+            "role": "otp",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "otp-11",
+    "category": "otp",
+    "description": "Backup-code screen: one box asking for an 8-character recovery code. Must classify as none; a one-time authenticator code would burn or fail here.",
+    "path": "/fixtures/otp-11.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#bk"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "otp-12",
+    "category": "otp",
+    "description": "Account recovery with a long recovery key in a textarea and a recovery_code text box. Looks like 2FA but is a backup route; must classify as none.",
+    "path": "/fixtures/otp-12.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#rk",
+          "#rc"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "signup-01",
+    "category": "signup",
+    "description": "Email, password and confirm password with a nav bar Sign in link pointing away from the page; footer newsletter as a misleading email box.",
+    "path": "/fixtures/signup-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#s-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#s-pass",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#s-conf",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "signup-02",
+    "category": "signup",
+    "description": "Forum registration in a table: username, email and two password boxes with sibling-cell labels, a terms checkbox and a timezone select.",
+    "path": "/fixtures/signup-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#reg-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#reg-e",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#reg-p",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#reg-p2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "form[name=\"sf\"] input[name=\"s\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "email": "email",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "signup-03",
+    "category": "signup",
+    "description": "Store account creation with first and last name side by side, then email, then one password with a strength hint and a marketing opt-in checkbox.",
+    "path": "/fixtures/signup-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#fn",
+            "role": "first-name",
+            "frame": null
+          },
+          {
+            "selector": "#ln",
+            "role": "last-name",
+            "frame": null
+          },
+          {
+            "selector": "#em",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#pw",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#shop-k",
+          "#footer-email"
+        ]
+      }
+    ],
+    "state": {
+      "first-name": "first-name",
+      "last-name": "last-name",
+      "username": "username",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "signup-04",
+    "category": "signup",
+    "description": "B2B trial request that also creates a login: full name, work email, phone, company, password and confirm, in a two-column layout with placeholder-only inputs.",
+    "path": "/fixtures/signup-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#t-name",
+            "role": "full-name",
+            "frame": null
+          },
+          {
+            "selector": "#t-mail",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#t-tel",
+            "role": "phone",
+            "frame": null
+          },
+          {
+            "selector": "#t-co",
+            "role": "company",
+            "frame": null
+          },
+          {
+            "selector": "#t-p1",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#t-p2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "full-name": "full-name",
+      "username": "username",
+      "phone": "phone",
+      "company": "company",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "signup-05",
+    "category": "signup",
+    "description": "Single password with autocomplete=new-password, a live strength meter and a Show toggle, on a page whose nav and copy say Sign in repeatedly.",
+    "path": "/fixtures/signup-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#q-em",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#q-pw",
+            "role": "new-password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "signup-06",
+    "category": "signup",
+    "description": "No form element, BEM and data-testid hooks: username, email, password, repeat, then birth date selects that must stay untouched.",
+    "path": "/fixtures/signup-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "[data-testid=\"reg-username\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "[data-testid=\"reg-email\"]",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "[data-testid=\"reg-pass\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "[data-testid=\"reg-pass2\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "email": "email",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "signup-07",
+    "category": "signup",
+    "description": "Sign-up with a Sign-in form on the same page: a compact sign-in in the sidebar must be ignored while the main registration is the target; both have password inputs.",
+    "path": "/fixtures/signup-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#j-name",
+            "role": "full-name",
+            "frame": null
+          },
+          {
+            "selector": "#j-mail",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#j-p",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#j-p2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#a-card",
+          "#a-pin",
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "full-name": "full-name",
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "change-password-01",
+    "category": "change-password",
+    "description": "Settings page: current, new and confirm with explicit labels; a side nav of settings and the header search around it.",
+    "path": "/fixtures/change-password-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#cur",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#nw",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#cf",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "change-password-02",
+    "category": "change-password",
+    "description": "Expired-password interstitial with new and confirm only, no current field: You must change your password. Opaque names p1 and p2.",
+    "path": "/fixtures/change-password-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#p1",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#p2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "change-password-03",
+    "category": "change-password",
+    "description": "Reset-password page with an emailed code plus new and confirm: three boxes where the first is an OTP, not a current password.",
+    "path": "/fixtures/change-password-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#rc",
+            "role": "otp",
+            "frame": null
+          },
+          {
+            "selector": "#np",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#np2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "change-password-04",
+    "category": "change-password",
+    "description": "Long account page with a Profile form (name, email, phone) and a Password form below it; the profile boxes must not be filled when changing password.",
+    "path": "/fixtures/change-password-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#pw-now",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#pw-new",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#pw-rep",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#pf-name",
+          "#pf-mail",
+          "#pf-tel",
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "change-password-05",
+    "category": "change-password",
+    "description": "Old-style table form with vague names old, new1 and new2, sibling-cell labels, and no autocomplete hints.",
+    "path": "/fixtures/change-password-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "input[name=\"old\"]",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"new1\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"new2\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "form[name=\"sf\"] input[name=\"s\"]"
+        ]
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "change-password-06",
+    "category": "change-password",
+    "description": "Reset page reached from an emailed link: a read-only email shown as context plus a hidden username and token, then new and confirm.",
+    "path": "/fixtures/change-password-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#nx1",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#nx2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hint-user",
+          "#ro-mail"
+        ]
+      }
+    ],
+    "state": {
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "change-password-07",
+    "category": "change-password",
+    "description": "Current and new only, no confirm box, with a Show toggle on the new password and an Account Security heading; includes a delete-account danger zone below.",
+    "path": "/fixtures/change-password-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#c-cur",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#c-new",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#c-del"
+        ]
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "honeypot-01",
+    "category": "honeypot",
+    "description": "display:none and visibility:hidden decoys ahead of the real fields, named like the real thing (username, password); the real inputs have obscure names.",
+    "path": "/fixtures/honeypot-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#ap-a",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#ap-b",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hp-user",
+          "#hp-pass",
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "honeypot-02",
+    "category": "honeypot",
+    "description": "Off-screen decoys: position:absolute at left:-9999px with autocomplete=off and tabindex=-1, one of them a password; a classic bot trap on a store login.",
+    "path": "/fixtures/honeypot-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#w-e",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#w-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#w-email2",
+          "#w-pass2",
+          "#shop-k",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "honeypot-03",
+    "category": "honeypot",
+    "description": "Zero-size and opacity 0: inputs with width and height 0 and no border or padding, and an absolutely placed opacity:0 box that still occupies layout under the real field.",
+    "path": "/fixtures/honeypot-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#ff-n",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#ff-s",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hp-zero-u",
+          "#hp-zero-p",
+          "#hp-ghost",
+          "form[name=\"sf\"] input[name=\"s\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "honeypot-04",
+    "category": "honeypot",
+    "description": "tabindex=-1 with aria-hidden=true wrappers using innocent names (website, url, company_url), plus a Leave this field blank label and a size-1 clipped box.",
+    "path": "/fixtures/honeypot-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#qf-e",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#qf-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hp-site",
+          "#hp-url",
+          "#hp-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "honeypot-05",
+    "category": "honeypot",
+    "description": "Everything at once: the hidden attribute, display:none, off-screen transform, opacity 0, zero height with overflow hidden, and type=hidden. Decoys come both before and after the real pair and are revealed only by computed style.",
+    "path": "/fixtures/honeypot-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#th-a",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#th-b",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#d1",
+          "#d2",
+          "#d3",
+          "#d4",
+          "#d5",
+          "#d6",
+          "#footer-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "language-es",
+    "category": "language",
+    "description": "Spanish sign-in with name=usuario and name=contraseña (non-ASCII attribute), labels Usuario and Contraseña, Recordarme and ¿Olvidaste tu contraseña?.",
+    "path": "/fixtures/language-es.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"contraseña\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#buscar"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "language-fr",
+    "category": "language",
+    "description": "French sign-in with names identifiant and motdepasse, labels Adresse e-mail and Mot de passe, placed in a table.",
+    "path": "/fixtures/language-fr.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#identifiant",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#mdp",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "language-de",
+    "category": "language",
+    "description": "German utility portal with name=benutzername and name=kennwort, labels Benutzername and Kennwort, Anmelden button and Passwort vergessen link.",
+    "path": "/fixtures/language-de.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#bn",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#kw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#suche"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "language-pt",
+    "category": "language",
+    "description": "Brazilian Portuguese sign-in with name=cpf as login (national ID number used as username) and name=senha, inside wrapped labels.",
+    "path": "/fixtures/language-pt.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input.cpf",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input.senha",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "language-it",
+    "category": "language",
+    "description": "Italian sign-up with nome, cognome, email, parola d'ordine and conferma, a mix of id-only inputs and name attributes in Italian.",
+    "path": "/fixtures/language-it.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#nome",
+            "role": "first-name",
+            "frame": null
+          },
+          {
+            "selector": "#cognome",
+            "role": "last-name",
+            "frame": null
+          },
+          {
+            "selector": "#posta",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#pc1",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#pc2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "first-name": "first-name",
+      "last-name": "last-name",
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "language-nl",
+    "category": "language",
+    "description": "Dutch sign-in with names gebruikersnaam and wachtwoord, labels only via aria-label, and a Wachtwoord vergeten link.",
+    "path": "/fixtures/language-nl.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#gn",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#ww",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#zoek"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "language-ja",
+    "category": "language",
+    "description": "Japanese sign-in with labels メールアドレス and パスワード, the same words again as name attributes, and a ログイン submit.",
+    "path": "/fixtures/language-ja.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#j1",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#j2",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "language-zh",
+    "category": "language",
+    "description": "Simplified Chinese sign-in with no name attributes at all; placeholders 手机号/邮箱 and 密码, and a 忘记密码 link.",
+    "path": "/fixtures/language-zh.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": ".zh-a",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": ".zh-b",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#sou"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "language-ko",
+    "category": "language",
+    "description": "Korean sign-up: 아이디, 비밀번호 and 비밀번호 확인 plus 이름 and 이메일, with Korean name attributes and neutral ids.",
+    "path": "/fixtures/language-ko.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#k1",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#k2",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#k3",
+            "role": "confirm-password",
+            "frame": null
+          },
+          {
+            "selector": "#k4",
+            "role": "full-name",
+            "frame": null
+          },
+          {
+            "selector": "#k5",
+            "role": "email",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password",
+      "full-name": "full-name",
+      "email": "email"
+    }
+  },
+  {
+    "id": "language-ru",
+    "category": "language",
+    "description": "Russian sign-in with Cyrillic attribute names логин and пароль, labels Логин and Пароль, and a Забыли пароль link.",
+    "path": "/fixtures/language-ru.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"логин\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"пароль\"]",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "language-ar",
+    "category": "language",
+    "description": "Arabic sign-in with dir=rtl, label text only in Arabic, no name attributes, and an email input with dir=ltr inside the RTL page.",
+    "path": "/fixtures/language-ar.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#ar1",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#ar2",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#bahth"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "language-hi",
+    "category": "language",
+    "description": "Hindi sign-in: labels उपयोगकर्ता नाम and पासवर्ड, Devanagari-only text with transliterated names upyogkarta and kutshabd.",
+    "path": "/fixtures/language-hi.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#hu",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#hp",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "late-01",
+    "category": "late",
+    "description": "Skeleton placeholder for 1.5 s, then a setTimeout swaps in the real form. Nothing to classify until then.",
+    "path": "/fixtures/late-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#late-p",
+        "expected": [
+          {
+            "selector": "#late-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#late-p",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "late-02",
+    "category": "late",
+    "description": "Form described by JSON from a local fetch plus 700 ms latency, with the fields rendered from that schema; ids carry a numeric suffix from the response.",
+    "path": "/fixtures/late-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#fld-8842",
+        "expected": [
+          {
+            "selector": "#fld-8841",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#fld-8842",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "late-03",
+    "category": "late",
+    "description": "Anti-autofill trick: both inputs carry readonly until they get focus, then a focus handler removes it. A filler that skips readonly fields, or writes without focusing, gets nothing.",
+    "path": "/fixtures/late-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#ro-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#ro-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "late-04",
+    "category": "late",
+    "description": "Page blanks both fields 800 ms after load, resetting the app model, as a late hydration does; form gets data-hydrated when done. Anything filled before that is erased.",
+    "path": "/fixtures/late-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#ng[data-hydrated=\"true\"]",
+        "expected": [
+          {
+            "selector": "#bl-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#bl-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "late-05",
+    "category": "late",
+    "description": "SPA route change: starts on a marketing view; clicking Log in calls history.pushState and renders the login route without a page load.",
+    "path": "/fixtures/late-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "advance": {
+          "click": "#nav-login"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#rt-p",
+        "expected": [
+          {
+            "selector": "#rt-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#rt-p",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "late-06",
+    "category": "late",
+    "description": "Server-rendered inputs replaced after a second by client-rendered ones with the same ids; only the new elements are wired to the app. The body gets data-hydrated when finished.",
+    "path": "/fixtures/late-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "body[data-hydrated=\"true\"]",
+        "expected": [
+          {
+            "selector": "#hy-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#hy-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "late-07",
+    "category": "late",
+    "description": "Route guard redirect with no click: an auth check takes 900 ms, then pushState moves to the login route and the home view is swapped for the form.",
+    "path": "/fixtures/late-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#gd-p",
+        "expected": [
+          {
+            "selector": "#gd-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#gd-p",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "card-01",
+    "category": "card",
+    "description": "Clean checkout: autocomplete cc-* attributes, labels by for, combined expiry MM/YY and a promo box in the sidebar.",
+    "path": "/fixtures/card-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "#cc-name",
+            "role": "card-name",
+            "frame": null
+          },
+          {
+            "selector": "#cc-num",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "#cc-exp",
+            "role": "card-exp",
+            "frame": null
+          },
+          {
+            "selector": "#cc-cvc",
+            "role": "card-cvv",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#promo",
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "card-name": "card-name",
+      "card-number": "card-number",
+      "card-exp": "card-exp",
+      "card-cvv": "card-cvv"
+    }
+  },
+  {
+    "id": "card-02",
+    "category": "card",
+    "description": "Separate month and year selects, no autocomplete, a CVV input of type=password, plus an email for the receipt that is not a card field.",
+    "path": "/fixtures/card-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "#ch",
+            "role": "card-name",
+            "frame": null
+          },
+          {
+            "selector": "#pan",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "#exp-m",
+            "role": "card-exp-month",
+            "frame": null
+          },
+          {
+            "selector": "#exp-y",
+            "role": "card-exp-year",
+            "frame": null
+          },
+          {
+            "selector": "#cv",
+            "role": "card-cvv",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#rcpt",
+          "#shop-k",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "card-name": "card-name",
+      "card-number": "card-number",
+      "card-exp-month": "card-exp-month",
+      "card-exp-year": "card-exp-year",
+      "card-cvv": "card-cvv"
+    }
+  },
+  {
+    "id": "card-03",
+    "category": "card",
+    "description": "Masked card number grouped in fours and masked MM / YY, with the app model holding digits only; name is last, in a table layout.",
+    "path": "/fixtures/card-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "#m-num",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "#m-exp",
+            "role": "card-exp",
+            "frame": null
+          },
+          {
+            "selector": "#m-sec",
+            "role": "card-cvv",
+            "frame": null
+          },
+          {
+            "selector": "#m-name",
+            "role": "card-name",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "card-number": "card-number",
+      "card-exp": "card-exp",
+      "card-cvv": "card-cvv",
+      "card-name": "card-name"
+    }
+  },
+  {
+    "id": "card-04",
+    "category": "card",
+    "description": "Hosted fields: each card input lives in its own cross-origin iframe (different port), like payment-processor widgets; name stays in the top document.",
+    "path": "/fixtures/card-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "#hf-name",
+            "role": "card-name",
+            "frame": null
+          },
+          {
+            "selector": "#f",
+            "role": "card-number",
+            "frame": [
+              "#hf-number"
+            ]
+          },
+          {
+            "selector": "#f",
+            "role": "card-exp",
+            "frame": [
+              "#hf-exp"
+            ]
+          },
+          {
+            "selector": "#f",
+            "role": "card-cvv",
+            "frame": [
+              "#hf-cvc"
+            ]
+          }
+        ]
+      }
+    ],
+    "state": {
+      "card-name": "card-name",
+      "card-number": "card-number",
+      "card-exp": "card-exp",
+      "card-cvv": "card-cvv"
+    }
+  },
+  {
+    "id": "card-05",
+    "category": "card",
+    "description": "Real-world split: first and last name on card as one full-name box, no form element, data-testid hooks; expiry in two short text boxes MM and YY, with a gift code box alongside.",
+    "path": "/fixtures/card-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "[data-testid=\"card-input\"]",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "[data-testid=\"exp-m\"]",
+            "role": "card-exp-month",
+            "frame": null
+          },
+          {
+            "selector": "[data-testid=\"exp-y\"]",
+            "role": "card-exp-year",
+            "frame": null
+          },
+          {
+            "selector": "[data-testid=\"sec\"]",
+            "role": "card-cvv",
+            "frame": null
+          },
+          {
+            "selector": "[data-testid=\"holder\"]",
+            "role": "card-name",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#gift"
+        ]
+      }
+    ],
+    "state": {
+      "card-number": "card-number",
+      "card-exp-month": "card-exp-month",
+      "card-exp-year": "card-exp-year",
+      "card-cvv": "card-cvv",
+      "card-name": "card-name"
+    }
+  },
+  {
+    "id": "card-06",
+    "category": "card",
+    "description": "Bill payment on a retro bank-style form with non-English-looking names (kartennummer, gueltig) in an otherwise English page, and an account reference field to leave alone.",
+    "path": "/fixtures/card-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "#kn",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "#gu",
+            "role": "card-exp",
+            "frame": null
+          },
+          {
+            "selector": "#pz",
+            "role": "card-cvv",
+            "frame": null
+          },
+          {
+            "selector": "#ki",
+            "role": "card-name",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#ref",
+          "#amt",
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "card-number": "card-number",
+      "card-exp": "card-exp",
+      "card-cvv": "card-cvv",
+      "card-name": "card-name"
+    }
+  },
+  {
+    "id": "card-07",
+    "category": "card",
+    "description": "Payment step of a checkout with a saved-card radio set above a New card panel; the panel opens when its radio is selected.",
+    "path": "/fixtures/card-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#site-search",
+          "#footer-email"
+        ],
+        "advance": {
+          "click": "#pm-new"
+        }
+      },
+      {
+        "kind": "card",
+        "wait": "#new-card:not([hidden])",
+        "expected": [
+          {
+            "selector": "#nc-num",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "#nc-exp",
+            "role": "card-exp",
+            "frame": null
+          },
+          {
+            "selector": "#nc-cvv",
+            "role": "card-cvv",
+            "frame": null
+          },
+          {
+            "selector": "#nc-name",
+            "role": "card-name",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#footer-email"
+        ]
+      }
+    ],
+    "state": {
+      "card-number": "card-number",
+      "card-exp": "card-exp",
+      "card-cvv": "card-cvv",
+      "card-name": "card-name"
+    }
+  },
+  {
+    "id": "identity-01",
+    "category": "identity",
+    "description": "Shipping details with standard autocomplete tokens: first, last, address lines, city, state, postcode, country select and phone.",
+    "path": "/fixtures/identity-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "identity",
+        "expected": [
+          {
+            "selector": "#ship-fn",
+            "role": "first-name",
+            "frame": null
+          },
+          {
+            "selector": "#ship-ln",
+            "role": "last-name",
+            "frame": null
+          },
+          {
+            "selector": "#ship-a1",
+            "role": "address1",
+            "frame": null
+          },
+          {
+            "selector": "#ship-a2",
+            "role": "address2",
+            "frame": null
+          },
+          {
+            "selector": "#ship-city",
+            "role": "city",
+            "frame": null
+          },
+          {
+            "selector": "#ship-st",
+            "role": "state",
+            "frame": null
+          },
+          {
+            "selector": "#ship-pc",
+            "role": "postcode",
+            "frame": null
+          },
+          {
+            "selector": "#ship-co",
+            "role": "country",
+            "frame": null
+          },
+          {
+            "selector": "#ship-tel",
+            "role": "phone",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#shop-k",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "first-name": "first-name",
+      "last-name": "last-name",
+      "address1": "address1",
+      "address2": "address2",
+      "city": "city",
+      "state": "state",
+      "postcode": "postcode",
+      "country": "country",
+      "phone": "phone"
+    }
+  },
+  {
+    "id": "identity-02",
+    "category": "identity",
+    "description": "Employee onboarding with a single Full name box, company, placeholders only and opaque field_N names; some text is misleading (Mailing address, Suburb).",
+    "path": "/fixtures/identity-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "identity",
+        "expected": [
+          {
+            "selector": "#e1",
+            "role": "full-name",
+            "frame": null
+          },
+          {
+            "selector": "#e2",
+            "role": "company",
+            "frame": null
+          },
+          {
+            "selector": "#e3",
+            "role": "address1",
+            "frame": null
+          },
+          {
+            "selector": "#e4",
+            "role": "city",
+            "frame": null
+          },
+          {
+            "selector": "#e5",
+            "role": "postcode",
+            "frame": null
+          },
+          {
+            "selector": "#e6",
+            "role": "phone",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "full-name": "full-name",
+      "company": "company",
+      "address1": "address1",
+      "city": "city",
+      "postcode": "postcode",
+      "phone": "phone"
+    }
+  },
+  {
+    "id": "identity-03",
+    "category": "identity",
+    "description": "Government-style table: Given names, Family name, street address, State dropdown of short codes and phone, with an unrelated Reference number box.",
+    "path": "/fixtures/identity-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "identity",
+        "expected": [
+          {
+            "selector": "#gv",
+            "role": "first-name",
+            "frame": null
+          },
+          {
+            "selector": "#fam",
+            "role": "last-name",
+            "frame": null
+          },
+          {
+            "selector": "#str",
+            "role": "address1",
+            "frame": null
+          },
+          {
+            "selector": "#sub",
+            "role": "city",
+            "frame": null
+          },
+          {
+            "selector": "#regn",
+            "role": "state",
+            "frame": null
+          },
+          {
+            "selector": "#pc",
+            "role": "postcode",
+            "frame": null
+          },
+          {
+            "selector": "#dph",
+            "role": "phone",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#refno",
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ],
+    "state": {
+      "first-name": "first-name",
+      "last-name": "last-name",
+      "address1": "address1",
+      "city": "city",
+      "state": "state",
+      "postcode": "postcode",
+      "phone": "phone"
+    }
+  },
+  {
+    "id": "identity-04",
+    "category": "identity",
+    "description": "Lead traveller details with wrapped labels, no form element and React-ish BEM classes; includes a passport number box and special-requests textarea that are not identity-fill targets.",
+    "path": "/fixtures/identity-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "identity",
+        "expected": [
+          {
+            "selector": "#lt-name",
+            "role": "full-name",
+            "frame": null
+          },
+          {
+            "selector": "#lt-tel",
+            "role": "phone",
+            "frame": null
+          },
+          {
+            "selector": "#lt-addr",
+            "role": "address1",
+            "frame": null
+          },
+          {
+            "selector": "#lt-city",
+            "role": "city",
+            "frame": null
+          },
+          {
+            "selector": "#lt-zip",
+            "role": "postcode",
+            "frame": null
+          },
+          {
+            "selector": "#lt-country",
+            "role": "country",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#lt-pass",
+          "#lt-notes"
+        ]
+      }
+    ],
+    "state": {
+      "full-name": "full-name",
+      "phone": "phone",
+      "address1": "address1",
+      "city": "city",
+      "postcode": "postcode",
+      "country": "country"
+    }
+  },
+  {
+    "id": "negative-search-01",
+    "category": "negative",
+    "description": "Help-center hero search with name=q and type=search; the page has only search boxes.",
+    "path": "/fixtures/negative-search-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "search",
+        "expected": [],
+        "honeypots": [
+          "#big-search",
+          "#hdr-query"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-search-02",
+    "category": "negative",
+    "description": "Library catalogue search with no search word in any attribute: names term and author, labels Title and Author, button Find.",
+    "path": "/fixtures/negative-search-02.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "search",
+        "expected": [],
+        "honeypots": [
+          "#cat-input",
+          "#cat-author"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-search-03",
+    "category": "negative",
+    "description": "Store listing with a search header plus filter inputs: min and max price, size text. No account fields.",
+    "path": "/fixtures/negative-search-03.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "search",
+        "expected": [],
+        "honeypots": [
+          "#size-filter",
+          "#price-min",
+          "#price-max",
+          "#shop-k"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-newsletter-01",
+    "category": "negative",
+    "description": "Standalone newsletter signup with a type=email box and a Subscribe button, mentioning an account elsewhere.",
+    "path": "/fixtures/negative-newsletter-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "newsletter",
+        "expected": [],
+        "honeypots": [
+          "#letter-email"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-newsletter-02",
+    "category": "negative",
+    "description": "Coming-soon page: placeholder Enter your email with a Join the waitlist button, no form element, and name=username as a sloppy attribute.",
+    "path": "/fixtures/negative-newsletter-02.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "newsletter",
+        "expected": [],
+        "honeypots": [
+          "#waitlist"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-newsletter-03",
+    "category": "negative",
+    "description": "Promotional popup asking for first name and email for 10 percent off, wording says Create your discount and Sign up.",
+    "path": "/fixtures/negative-newsletter-03.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "newsletter",
+        "expected": [],
+        "honeypots": [
+          "#pop-fn",
+          "#pop-em"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-contact-01",
+    "category": "negative",
+    "description": "Contact form: name, email, subject and message textarea. The message text talks about forgetting a password.",
+    "path": "/fixtures/negative-contact-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#ct-name",
+          "#ct-mail",
+          "#ct-sub",
+          "#ct-msg",
+          "#site-search"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-comment-01",
+    "category": "negative",
+    "description": "Blog comment form: author, email, website, comment. Keywords look like a guest sign-up but nothing here is a login.",
+    "path": "/fixtures/negative-comment-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#c-author",
+          "#c-mail",
+          "#c-url",
+          "#c-body"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-coupon-01",
+    "category": "negative",
+    "description": "Cart page with a Promo code box named coupon and an Apply button, type=text, close to an order total.",
+    "path": "/fixtures/negative-coupon-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#coupon",
+          "#shop-k"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-giftcard-01",
+    "category": "negative",
+    "description": "Gift card balance check: card number and a PIN in a type=password input. Looks like a login but the card is not an account.",
+    "path": "/fixtures/negative-giftcard-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#gc-no",
+          "#gc-pin",
+          "#shop-k"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-address-01",
+    "category": "negative",
+    "description": "Checkout address step with street, unit, town and postcode only: no name, no phone, no card, nothing that amounts to an identity form.",
+    "path": "/fixtures/negative-address-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#adr1",
+          "#adr2",
+          "#adrc",
+          "#adrz",
+          "#site-search"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-calculator-01",
+    "category": "negative",
+    "description": "Loan calculator with three number inputs and a live monthly repayment; heading mentions Log in to apply.",
+    "path": "/fixtures/negative-calculator-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#amount",
+          "#rate",
+          "#term",
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-settings-01",
+    "category": "negative",
+    "description": "Table of admin settings, one input per row: session timeout, max login attempts, password minimum length, and token lifetime. Labels are full of credential words but they configure the system.",
+    "path": "/fixtures/negative-settings-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#rows-1",
+          "#rows-2",
+          "#rows-3",
+          "#rows-4",
+          "#site-search"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-captcha-01",
+    "category": "negative",
+    "description": "Text captcha alone on a page: inline SVG of letters and a text box Type the characters you see, name=captcha_code.",
+    "path": "/fixtures/negative-captcha-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#capt",
+          "form[name=\"sf\"] input[name=\"s\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-chat-01",
+    "category": "negative",
+    "description": "Support chat: a transcript where the agent says enter your password and code to help confuse text scoring; one input at the bottom.",
+    "path": "/fixtures/negative-chat-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#chat-box"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-share-01",
+    "category": "negative",
+    "description": "Share dialog: recipient email and an optional message; type=email with autocomplete=email in a Share this note panel.",
+    "path": "/fixtures/negative-share-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#share-to",
+          "#share-note",
+          "#site-search"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-zip-01",
+    "category": "negative",
+    "description": "Zip-code lookup alone: Check if we serve your area, one box named zip, autocomplete=postal-code.",
+    "path": "/fixtures/negative-zip-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#zip-only",
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-template-01",
+    "category": "negative",
+    "description": "A sign-in form inside a template element, never instantiated; the password input exists only in inert template content.",
+    "path": "/fixtures/negative-template-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": []
+      }
+    ]
+  },
+  {
+    "id": "negative-template-02",
+    "category": "negative",
+    "description": "Login markup rendered into a display:none block that nothing on the page ever opens: a leftover from an old page layout, permanently hidden.",
+    "path": "/fixtures/negative-template-02.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#never-u",
+          "#never-p",
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-delete-01",
+    "category": "negative",
+    "description": "Delete my account confirmation: type DELETE into a text box. Must never be filled with anything.",
+    "path": "/fixtures/negative-delete-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#type-delete"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-wifi-01",
+    "category": "negative",
+    "description": "Router settings: SSID and a Wi-Fi password in type=password, name=password, describing the home network rather than a site login.",
+    "path": "/fixtures/negative-wifi-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#ssid",
+          "#wifi-psk",
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-wifi-02",
+    "category": "negative",
+    "description": "Protect this download with a password: a type=password box that sets a password for someone else, along with an expiry date.",
+    "path": "/fixtures/negative-wifi-02.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#share-pass",
+          "#share-exp",
+          "#hdr-query"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-article-01",
+    "category": "negative",
+    "description": "Advice article How to pick a strong password, with lots of login vocabulary in prose and a header search and newsletter only.",
+    "path": "/fixtures/negative-article-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#site-search",
+          "#nl-email"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-poll-01",
+    "category": "negative",
+    "description": "Community survey: radio buttons, an Other text box and an age number. Lacks anything an autofill should touch.",
+    "path": "/fixtures/negative-poll-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#poll-other",
+          "#poll-age",
+          "input[name=\"keywords\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-booking-01",
+    "category": "negative",
+    "description": "Manage my booking: booking reference plus surname, a two-field pairing that looks like username and password but opens a single trip, next to a flight search.",
+    "path": "/fixtures/negative-booking-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#b-from",
+          "#b-to",
+          "#b-date",
+          "#b-ref",
+          "#b-last",
+          "#site-search"
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wrenfield Home</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#fff8e8;--fg:#2e2410;--soft:#7a6a44;--line:#ecdcb4;--accent:#c97a06;--card:#fffdf7}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Trebuchet MS, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.shopbar{display:flex;gap:16px;align-items:center;padding:12px 20px;background:var(--card);border-bottom:3px solid var(--accent);flex-wrap:wrap}.shopbar form{display:flex;flex:1;min-width:200px}.shopbar form input{flex:1;min-width:80px}.shopbar a{white-space:nowrap}
+.footer__signup{margin-top:48px;padding:24px;background:var(--fg);color:var(--bg)}.footer__signup input{color:#222;background:#fff;margin-right:6px}.footer__signup span{display:block;margin-bottom:8px}
+.mb{position:fixed;inset:0;background:rgba(0,0,0,.45);display:none;align-items:center;justify-content:center}.mb.is-open{display:flex}.mb__panel{background:var(--card);padding:24px;border-radius:8px;width:min(420px,94vw)}.tabs button{background:none;color:var(--fg);border-bottom:2px solid transparent;border-radius:0}.tabs button[aria-selected=true]{border-bottom-color:var(--accent)}[role=tabpanel][hidden]{display:none}
+</style>
+
+</head>
+<body>
+<div class="shopbar"><strong>Wrenfield Home</strong>
+  <form onsubmit="return false" class="shop-search"><select name="dept" aria-label="Department"><option>All</option><option>Outdoors</option><option>Kitchen</option></select><input type="text" name="k" id="shop-k" placeholder="Search products"><button aria-label="Search">Search</button></form>
+  <a href="#account">Account</a><a href="#orders">Orders</a><a href="#cart">Cart (0)</a></div>
+<main class="wrap">
+<h1>New in: linen for every room</h1><p>Stonewashed bedding and tableware, made in small runs.</p><button id="account-btn" type="button">My account</button>
+  <div class="mb" id="auth-modal" role="dialog" aria-modal="true" aria-label="Your account"><div class="mb__panel"><div class="tabs" role="tablist"><button role="tab" id="tab-in" aria-selected="true" type="button">Sign in</button><button role="tab" id="tab-up" aria-selected="false" type="button">Create account</button></div>
+  <form role="tabpanel" id="panel-in" onsubmit="return false"><div class="row"><label for="in-email">Email</label><input id="in-email" type="email" name="email"></div><div class="row"><label for="in-pass">Password</label><input id="in-pass" type="password" name="password"></div><button>Sign in</button></form>
+  <form role="tabpanel" id="panel-up" hidden onsubmit="return false"><div class="row"><label for="up-name">Your name</label><input id="up-name" name="name"></div><div class="row"><label for="up-email">Email</label><input id="up-email" type="email" name="email"></div><div class="row"><label for="up-pass">Choose a password</label><input id="up-pass" type="password" name="password" autocomplete="new-password"></div><button>Create account</button></form></div></div>
+</main>
+<div class="footer__signup"><span>Deals and updates from Wrenfield Home, straight to your inbox.</span><input id="footer-email" type="text" name="EMAIL" placeholder="Email address"><button type="button">Sign me up</button><p class="muted">No spam. Privacy policy applies.</p></div>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#in-email"),"password":q("#in-pass")};}};</script>
+<script>
+document.getElementById('account-btn').addEventListener('click',function(){document.getElementById('auth-modal').classList.add('is-open');});
+function tab(up){document.getElementById('panel-in').hidden=up;document.getElementById('panel-up').hidden=!up;document.getElementById('tab-in').setAttribute('aria-selected',String(!up));document.getElementById('tab-up').setAttribute('aria-selected',String(up));}
+document.getElementById('tab-in').addEventListener('click',function(){tab(false);});document.getElementById('tab-up').addEventListener('click',function(){tab(true);});
+</script>
+</body>
+</html>

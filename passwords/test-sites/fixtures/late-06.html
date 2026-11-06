@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kestrel Row</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#faf7f2;--fg:#26221c;--soft:#6f675b;--line:#dcd4c6;--accent:#b4532a;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Georgia, "Times New Roman", serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.site-header{display:flex;gap:18px;align-items:center;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}.site-header nav a{margin-right:14px;text-decoration:none}.site-header form{margin-left:auto;display:flex;gap:6px}.site-logo{font-weight:700;font-size:1.15em;text-decoration:none}
+.foot{margin-top:40px;padding:28px 24px;background:var(--card);border-top:1px solid var(--line)}.foot .newsletter{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.foot .newsletter label{font-weight:600;width:100%}.foot .newsletter input{flex:1;min-width:160px;max-width:320px}
+
+</style>
+
+</head>
+<body>
+<header class="site-header">
+  <a class="site-logo" href="#home">Kestrel Row</a>
+  <nav aria-label="Main"><a href="#products">Products</a><a href="#pricing">Pricing</a><a href="#resources">Resources</a><a href="#support">Support</a></nav>
+  <form role="search" action="#search" onsubmit="return false"><input type="search" name="q" id="site-search" placeholder="Search" aria-label="Search this site"><button type="submit">Go</button></form>
+</header>
+<main class="wrap">
+<div class="narrow box" id="ssr"><h1>Log in</h1><div class="row"><label for="hy-u">Email</label><input id="hy-u" name="email" type="email"></div><div class="row"><label for="hy-p">Password</label><input id="hy-p" name="password" type="password"></div><button type="button">Log in</button></div>
+</main>
+<footer class="foot"><form class="newsletter" action="#subscribe" onsubmit="return false">
+  <label for="nl-email">Get the Kestrel Row newsletter</label>
+  <input type="email" id="nl-email" name="email" placeholder="you@example.test" autocomplete="email"><button type="submit">Subscribe</button>
+</form><p class="muted">&copy; 2026 Kestrel Row. Unsubscribe at any time.</p></footer>
+
+
+<script>
+var S={username:'',password:''};window.__fixture={state:function(){return S;}};setTimeout(function(){['hy-u','hy-p'].forEach(function(id){var old=document.getElementById(id);var n=old.cloneNode(false);n.value='';n.addEventListener('input',function(){S[id==='hy-u'?'username':'password']=n.value;});old.replaceWith(n);});document.body.setAttribute('data-hydrated','true');},1000);
+</script>
+</body>
+</html>

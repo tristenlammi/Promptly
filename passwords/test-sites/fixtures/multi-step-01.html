@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in - Galdric Accounts</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#ffffff;--fg:#222222;--soft:#666666;--line:#d8d8d8;--accent:#00587a;--card:#f7f9fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Arial, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+.lang-foot{display:flex;justify-content:space-between;padding:16px 28px;font-size:.85em;color:var(--soft);flex-wrap:wrap;gap:10px}
+.gcard{max-width:440px;margin:60px auto;padding:36px;border:1px solid var(--line);border-radius:10px}.gcard .act{display:flex;justify-content:space-between;align-items:center;margin-top:24px}.chip{display:inline-block;border:1px solid var(--line);border-radius:99px;padding:2px 12px}
+</style>
+
+</head>
+<body>
+
+<main class="wrap">
+<div class="gcard" id="app"></div>
+</main>
+<div class="lang-foot"><select aria-label="Language" name="hl"><option>English (United States)</option><option>English (United Kingdom)</option><option>Espa&ntilde;ol</option></select><span><a href="#">Help</a> &nbsp; <a href="#">Privacy</a> &nbsp; <a href="#">Terms</a> &nbsp; Galdric</span></div>
+
+
+<script>
+var S={username:'',password:''};var app=document.getElementById('app');
+function ident(){app.innerHTML='<h1>Sign in</h1><p>Use your Galdric account</p><div class="row"><label for="ident">Email or phone</label><input id="ident" type="email" name="identifier" autocomplete="username"></div><a href="#">Forgot email?</a><p class="muted">Not your computer? Use a private window to sign in.</p><div class="act"><a href="#">Create account</a><button id="idNext" type="button">Next</button></div>';
+ var i=document.getElementById('ident');i.value=S.username;i.addEventListener('input',function(){S.username=i.value;});document.getElementById('idNext').addEventListener('click',pass);}
+function pass(){app.innerHTML='<h1>Welcome</h1><p class="chip" id="who"></p><div class="row" style="margin-top:16px"><label for="pwinput">Enter your password</label><input id="pwinput" type="password" name="Passwd" autocomplete="current-password"></div><label style="font-weight:400"><input type="checkbox" id="showpw"> Show password</label><div class="act"><a href="#">Forgot password?</a><button id="pwNext" type="button">Next</button></div>';
+ document.getElementById('who').textContent=S.username;var i=document.getElementById('pwinput');i.addEventListener('input',function(){S.password=i.value;});document.getElementById('showpw').addEventListener('change',function(){i.type=this.checked?'text':'password';});}
+ident();window.__fixture={state:function(){return S;}};
+</script>
+</body>
+</html>

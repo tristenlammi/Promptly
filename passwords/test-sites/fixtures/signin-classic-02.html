@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patron Login</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#e8e8e0;--fg:#000000;--soft:#444444;--line:#999999;--accent:#000080;--card:#f4f4ee}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Tahoma, Verdana, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.masthead{width:100%;background:var(--accent);color:#fff;border-collapse:collapse}.masthead td{padding:6px 12px}.masthead a{color:#fff}.masthead input[name=s]{color:#000;background:#fff;width:120px}
+.foot-table{width:100%;margin-top:30px;font-size:.8em;border-top:1px solid var(--line)}.foot-table td{padding:8px}
+.loginbox td{padding:4px 8px}.loginbox{margin:30px auto;border:2px outset #bbb;background:var(--card)}
+</style>
+
+</head>
+<body>
+<table class="masthead" width="100%" cellspacing="0" cellpadding="0"><tr>
+  <td><font size="+1"><b>Dunmarrow County Library</b></font></td>
+  <td align="center"><a href="#">Home</a> | <a href="#">Services</a> | <a href="#">Contact us</a></td>
+  <td align="right"><form name="sf" action="#find" onsubmit="return false"><input name="s" size="14"> <input type="submit" value="Find"></form></td>
+</tr></table>
+<main class="wrap">
+<center><h2>Patron Account Access</h2></center>
+<form name="frmLogin" method="post" action="#patron" onsubmit="return false">
+<table class="loginbox" border="0" cellpadding="2" cellspacing="0" align="center">
+  <tr bgcolor="#ccccdd"><td colspan="2"><b>Please log in</b></td></tr>
+  <tr><td align="right"><font size="2">Library card no:</font></td><td><input type="text" name="uid" size="20" maxlength="32"></td></tr>
+  <tr><td align="right"><font size="2">PIN / Password:</font></td><td><input type="password" name="pwd" size="20" maxlength="32"></td></tr>
+  <tr><td></td><td><input type="submit" value="Login"> <input type="reset" value="Clear"></td></tr>
+  <tr><td colspan="2"><font size="1"><a href="#help">Forgot your PIN?</a> Ask at the circulation desk.</font></td></tr>
+</table></form>
+<p align="center"><font size="2">Opening hours: Mon-Fri 9-6, Sat 10-2. The reading room is closed for repainting until May.</font></p>
+</main>
+<table class="foot-table"><tr><td>Dunmarrow County Library Holdings. Member of the Fictional Deposit Scheme.</td><td align="right"><a href="#">Site map</a> | <a href="#">Disclosures</a> | <a href="#">Contact</a></td></tr></table>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("input[name=\"uid\"]"),"password":q("input[name=\"pwd\"]")};}};</script>
+
+</body>
+</html>

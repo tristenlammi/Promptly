@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+  <head><title>Sign in</title></head>
+  <body>
+    <h1>Sign in</h1>
+    <div id="app"></div>
+    <script>
+      const app = document.getElementById("app");
+      const state = { user: "", pass: "", code: "" };
+      window.__state = () => state;
+      function step1() {
+        app.innerHTML = '<form id="s1"><label>Email or username <input id="user" name="identifier" autocomplete="username"></label><button id="next">Next</button></form>';
+        document.getElementById("user").addEventListener("input", (e) => (state.user = e.target.value));
+        document.getElementById("s1").addEventListener("submit", (e) => {
+          e.preventDefault();
+          step2();
+        });
+      }
+      function step2() {
+        app.innerHTML = '<p>Hi ' + state.user.replace(/</g, "&lt;") + '</p><form id="s2"><label>Password <input id="pass" type="password" autocomplete="current-password"></label><button id="next2">Next</button></form>';
+        document.getElementById("pass").addEventListener("input", (e) => (state.pass = e.target.value));
+        document.getElementById("s2").addEventListener("submit", (e) => {
+          e.preventDefault();
+          step3();
+        });
+      }
+      function step3() {
+        app.innerHTML = '<h2>Two-step verification</h2><form id="s3"><label>Enter the code from your authenticator <input id="code" inputmode="numeric" autocomplete="one-time-code"></label><button>Verify</button></form>';
+        document.getElementById("code").addEventListener("input", (e) => (state.code = e.target.value));
+      }
+      step1();
+    </script>
+  </body>
+</html>

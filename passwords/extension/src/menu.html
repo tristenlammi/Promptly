@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Promptly Passwords</title>
+    <style>
+      :root { color-scheme: light dark; font: 13px system-ui, sans-serif; }
+      html, body { margin: 0; background: transparent; }
+      #root { background: #fff; color: #1a1a19; border: 1px solid rgba(122,105,95,.3); border-radius: 10px; padding: 4px; max-height: 232px; overflow: auto; box-sizing: border-box; }
+      .row { display: flex; flex-direction: column; align-items: flex-start; width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+      .row:hover, .row:focus-visible { background: #f2f0ec; outline: none; }
+      .title { font-weight: 600; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .sub { color: #5f6672; font-size: 12px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .note { padding: 6px 8px; color: #5f6672; }
+      @media (prefers-color-scheme: dark) {
+        #root { background: #27231e; color: #f2f0ec; }
+        .row:hover, .row:focus-visible { background: #3a352d; }
+        .sub, .note { color: #b8b2a8; }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="menu.js"></script>
+  </body>
+</html>

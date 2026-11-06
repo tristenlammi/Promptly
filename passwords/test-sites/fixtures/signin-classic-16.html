@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ferncastle Forums - Bread baking</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#e8e8e0;--fg:#000000;--soft:#444444;--line:#999999;--accent:#000080;--card:#f4f4ee}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Tahoma, Verdana, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+.legal-line{text-align:center;padding:30px 12px;font-size:.8em;color:var(--soft)}
+
+</style>
+
+</head>
+<body>
+<div style="background:var(--accent);color:#fff;padding:6px 12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"><b style="margin-right:auto">Ferncastle Forums</b>
+  <form id="navbar_loginform" onsubmit="return false" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">
+    <span>User Name</span><input type="text" name="vb_login_username" id="navbar_username" size="10" style="color:#000;background:#fff">
+    <span>Password</span><input type="password" name="vb_login_password" id="navbar_password" size="10" style="color:#000;background:#fff">
+    <label><input type="checkbox" name="cookieuser"> Remember</label><input type="submit" value="Log in"></form></div>
+<main class="wrap">
+<h1>Thread: My sourdough will not rise</h1><p><input type="text" id="thread-search" name="threadq" placeholder="Search this thread"> <button type="button">Find</button></p>
+  <table border="1" cellpadding="6" style="border-collapse:collapse;width:100%"><tr><td width="130"><b>crumb_lord</b><br><small>Posts: 4,102</small></td><td>Have you tried feeding it twice a day for a week before baking? Mine perked right up.</td></tr><tr><td><b>mabel_k</b><br><small>Posts: 87</small></td><td>Water temperature made all the difference for me. Also keep it away from the draught.</td></tr></table>
+  <h3>Quick reply</h3><textarea name="message" id="quick-reply" rows="4" style="width:100%" placeholder="Log in to reply"></textarea>
+</main>
+<div class="legal-line">&copy; 2026 Ferncastle Forums, all rights reserved &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a> &middot; <a href="#">Accessibility</a></div>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#navbar_username"),"password":q("#navbar_password")};}};</script>
+
+</body>
+</html>

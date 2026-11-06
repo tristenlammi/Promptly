@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sable Notes - notes that stay put</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#eef1f5;--fg:#1b2430;--soft:#5a6778;--line:#cfd6df;--accent:#2c5fb3;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.topnav{display:flex;align-items:center;gap:20px;background:var(--accent);color:#fff;padding:10px 20px;flex-wrap:wrap}.topnav a{color:#fff;text-decoration:none}.topnav__brand{font-weight:700}.topnav__search{margin-left:auto}.topnav__input{border:0;width:220px;color:#222;background:#fff}
+.legal-line{text-align:center;padding:30px 12px;font-size:.8em;color:var(--soft)}
+.hero{padding:40px 0}.hero h1{font-size:2em}#signin-pop{border:1px solid var(--line);border-radius:8px;padding:18px;width:min(320px,90vw);background:var(--card);color:var(--fg)}
+</style>
+
+</head>
+<body>
+<div class="topnav">
+  <a class="topnav__brand" href="#">Sable Notes</a>
+  <a class="topnav__link" href="#">Support</a>
+  <a class="topnav__link" href="#">Company</a>
+  <a class="topnav__link" href="#">Stories</a>
+  <a class="topnav__link" href="#">Docs</a>
+  <div class="topnav__search"><input id="hdr-query" class="topnav__input" type="text" placeholder="Search the help center" aria-label="Search"></div>
+</div>
+<main class="wrap">
+<section class="hero"><h1>Notes that stay put</h1><p>Plain text, tags, and a search that actually finds things.</p><button id="pop-btn" type="button" popovertarget="signin-pop">Sign in</button></section>
+  <div id="signin-pop" popover><form onsubmit="return false"><label class="lbl" for="pop-u">Username</label><input id="pop-u" name="u" style="width:100%"><label class="lbl" for="pop-p" style="margin-top:8px">Password</label><input id="pop-p" name="p" type="password" style="width:100%"><p><button>Sign in</button></p></form></div>
+</main>
+<div class="legal-line">&copy; 2026 Sable Notes, all rights reserved &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a> &middot; <a href="#">Accessibility</a></div>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#pop-u"),"password":q("#pop-p")};}};</script>
+
+</body>
+</html>

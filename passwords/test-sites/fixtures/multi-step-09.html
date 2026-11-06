@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palewing sign-in</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f6f2fb;--fg:#241a33;--soft:#6a5c80;--line:#dcd2ea;--accent:#6b3fb5;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, Helvetica, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.navbar{display:flex;justify-content:space-between;padding:14px 28px;border-bottom:2px solid var(--line);flex-wrap:wrap;gap:10px}.navbar ul{list-style:none;display:flex;gap:18px;margin:0;padding:0;flex-wrap:wrap}.navbar .cta{background:var(--accent);color:#fff;padding:.3em .8em;border-radius:99px;text-decoration:none}
+.legal-line{text-align:center;padding:30px 12px;font-size:.8em;color:var(--soft)}
+.viewport{overflow:hidden;max-width:420px;margin:40px auto;background:var(--card);border-radius:12px;border:1px solid var(--line)}.track{display:flex;width:200%;transition:transform .15s}.track.at-2{transform:translateX(-50%)}.slide{width:50%;padding:28px}
+</style>
+
+</head>
+<body>
+<nav class="navbar navbar-expand-lg">
+  <a class="navbar-brand" href="#"><strong>Palewing</strong></a>
+  <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="#">Pricing</a></li><li class="nav-item"><a class="nav-link" href="#">Resources</a></li><li class="nav-item"><a class="nav-link" href="#">Support</a></li><li class="nav-item"><a class="nav-link" href="#signin">Sign in</a></li><li class="nav-item"><a class="cta" href="#signup">Get started</a></li></ul>
+</nav>
+<main class="wrap">
+<div class="viewport"><div class="track" id="tr"><section class="slide" id="sl1"><h2>Sign in</h2><div class="row"><label for="pw-id">Email address</label><input id="pw-id" name="email" type="email"></div><button type="button" id="pw-next">Continue</button></section><section class="slide" id="sl2" aria-hidden="true" inert><h2>Your password</h2><div class="row"><label for="pw-sec">Password</label><input id="pw-sec" name="password" type="password"></div><button type="button">Sign in</button><button type="button" id="pw-back" class="linkbtn" style="margin-left:10px">Back</button></section></div></div>
+</main>
+<div class="legal-line">&copy; 2026 Palewing, all rights reserved &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a> &middot; <a href="#">Accessibility</a></div>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#pw-id"),"password":q("#pw-sec")};}};</script>
+<script>
+document.getElementById('tr').addEventListener('transitionend',function(e){e.currentTarget.setAttribute('data-settled',e.currentTarget.classList.contains('at-2')?'2':'1');});
+function go(n){var t=document.getElementById('tr'),a=document.getElementById('sl1'),b=document.getElementById('sl2');t.classList.toggle('at-2',n===2);a.toggleAttribute('inert',n===2);b.toggleAttribute('inert',n===1);a.setAttribute('aria-hidden',String(n===2));b.setAttribute('aria-hidden',String(n===1));}document.getElementById('pw-next').addEventListener('click',function(){go(2);});document.getElementById('pw-back').addEventListener('click',function(){go(1);});
+</script>
+</body>
+</html>

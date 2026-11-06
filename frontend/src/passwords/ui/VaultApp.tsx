@@ -81,7 +81,13 @@ export function VaultApp({ platform }: { platform: Platform }) {
         }
         return setPhase("onboarding");
       }
-      setPhase((await vault.hasDeviceKit()) ? "locked" : "join");
+      if (!(await vault.hasDeviceKit())) return setPhase("join");
+      const open = await platform.restore?.();
+      if (open) {
+        await vault.restoreSession(open.secret, open.session);
+        return setPhase("open");
+      }
+      setPhase("locked");
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         if (platform.signIn) platform.signIn();
@@ -132,6 +138,15 @@ export function VaultApp({ platform }: { platform: Platform }) {
           <Unlock
             vault={vault}
             preview={preview}
+            delegate={
+              platform.unlock
+                ? async (password) => {
+                    await platform.unlock!(password);
+                    const open = await platform.restore?.();
+                    if (open) await vault.restoreSession(open.secret, open.session);
+                  }
+                : undefined
+            }
             onOpen={() => setPhase("open")}
             hello={
               platform.hello
@@ -247,8 +262,9 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
 
   const lock = useCallback(async () => {
     await vault.lock();
+    await platform.lock?.();
     onLock();
-  }, [vault, onLock]);
+  }, [vault, platform, onLock]);
 
   // Auto-lock: idle time and sleep. A timer that fires far later than asked means
   // the machine slept.
@@ -273,8 +289,20 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
     };
   }, [lock]);
 
+  useEffect(
+    () =>
+      platform.subscribeChanged?.(async () => {
+        await vault.reload();
+        bump();
+      }),
+    [platform, vault, bump],
+  );
+
   useEffect(() => {
-    vault.onChange = bump;
+    vault.onChange = () => {
+      bump();
+      platform.notifyChanged?.();
+    };
     let live = true;
     const tick = async () => {
       try {
@@ -299,7 +327,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
       window.removeEventListener("focus", focus);
       vault.onChange = undefined;
     };
-  }, [vault, bump, lock]);
+  }, [vault, platform, bump, lock]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

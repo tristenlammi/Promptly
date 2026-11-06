@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Update your contact details</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#ffffff;--fg:#222222;--soft:#666666;--line:#d8d8d8;--accent:#00587a;--card:#f7f9fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Arial, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.util-strip{background:var(--fg);color:var(--bg);font-size:.8em;padding:4px 24px;display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap}.util-strip a{color:inherit}.brandbar{display:flex;align-items:center;gap:22px;padding:14px 24px;flex-wrap:wrap}.brandbar b{font-size:1.3em}.brandbar input{flex:1;min-width:180px}
+.foot-table{width:100%;margin-top:30px;font-size:.8em;border-top:1px solid var(--line)}.foot-table td{padding:8px}
+.tb td{padding:5px 8px}
+</style>
+
+</head>
+<body>
+<div class="util-strip"><a href="#">Help</a><a href="#">Find a branch</a><a href="#">Careers</a><a href="#">Log in</a></div>
+<header class="brandbar"><b>Stonebarrow Council Services</b><input name="keywords" type="text" placeholder="What are you looking for?" aria-label="What are you looking for?"></header>
+<main class="wrap">
+<h1>Update your contact details</h1><p><label for="refno">Rates notice reference</label> <input id="refno" name="ref"></p><form onsubmit="return false"><table class="tb"><tr><td><label for="gv">Given names</label></td><td><input id="gv" name="givenNames"></td></tr><tr><td><label for="fam">Family name</label></td><td><input id="fam" name="familyName"></td></tr><tr><td><label for="str">Street address</label></td><td><input id="str" name="streetAddress"></td></tr><tr><td><label for="sub">Town</label></td><td><input id="sub" name="town"></td></tr><tr><td><label for="regn">State</label></td><td><select id="regn" name="regionCode"><option value="">-</option><option value="NSW">NSW</option><option value="VIC">VIC</option><option value="QLD">QLD</option><option value="WA">WA</option></select></td></tr><tr><td><label for="pc">Postcode</label></td><td><input id="pc" name="pcode" size="6"></td></tr><tr><td><label for="dph">Daytime phone</label></td><td><input id="dph" name="dayPhone"></td></tr></table><p><input type="submit" value="Submit changes"></p></form>
+</main>
+<table class="foot-table"><tr><td>Stonebarrow Council Services Holdings. Member of the Fictional Deposit Scheme.</td><td align="right"><a href="#">Site map</a> | <a href="#">Disclosures</a> | <a href="#">Contact</a></td></tr></table>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"first-name":q("#gv"),"last-name":q("#fam"),"address1":q("#str"),"city":q("#sub"),"state":q("#regn"),"postcode":q("#pc"),"phone":q("#dph")};}};</script>
+
+</body>
+</html>

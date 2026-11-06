@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign up - Quillfin</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f6f2fb;--fg:#241a33;--soft:#6a5c80;--line:#dcd2ea;--accent:#6b3fb5;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, Helvetica, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.navbar{display:flex;justify-content:space-between;padding:14px 28px;border-bottom:2px solid var(--line);flex-wrap:wrap;gap:10px}.navbar ul{list-style:none;display:flex;gap:18px;margin:0;padding:0;flex-wrap:wrap}.navbar .cta{background:var(--accent);color:#fff;padding:.3em .8em;border-radius:99px;text-decoration:none}
+.lang-foot{display:flex;justify-content:space-between;padding:16px 28px;font-size:.85em;color:var(--soft);flex-wrap:wrap;gap:10px}
+.meter{height:6px;background:var(--line);border-radius:3px;overflow:hidden}.meter i{display:block;height:100%;width:0;background:var(--accent)}
+</style>
+
+</head>
+<body>
+<nav class="navbar navbar-expand-lg">
+  <a class="navbar-brand" href="#"><strong>Quillfin</strong></a>
+  <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="#">Pricing</a></li><li class="nav-item"><a class="nav-link" href="#">Resources</a></li><li class="nav-item"><a class="nav-link" href="#">Support</a></li><li class="nav-item"><a class="nav-link" href="#signin">Sign in</a></li><li class="nav-item"><a class="cta" href="#signup">Get started</a></li></ul>
+</nav>
+<main class="wrap">
+<div class="narrow box"><h1>Join Quillfin</h1><p class="muted">Have an account? <a href="#">Sign in here</a>. Prefer SSO? <a href="#">Sign in with your company</a>.</p><form onsubmit="return false"><div class="row"><label for="q-em">Email</label><input id="q-em" name="user_email" type="email" autocomplete="email"></div><div class="row"><label for="q-pw">Password</label><input id="q-pw" name="user_password" type="password" autocomplete="new-password"><div class="meter"><i id="meter"></i></div></div><button type="button" class="linkbtn" id="q-show">Show password</button><p><button>Sign up</button></p></form></div>
+</main>
+<div class="lang-foot"><select aria-label="Language" name="hl"><option>English (United States)</option><option>English (United Kingdom)</option><option>Espa&ntilde;ol</option></select><span><a href="#">Help</a> &nbsp; <a href="#">Privacy</a> &nbsp; <a href="#">Terms</a> &nbsp; Quillfin</span></div>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#q-em"),"new-password":q("#q-pw")};}};</script>
+<script>
+var pw=document.getElementById('q-pw');pw.addEventListener('input',function(){document.getElementById('meter').style.width=Math.min(100,pw.value.length*8)+'%';});document.getElementById('q-show').addEventListener('click',function(){pw.type=pw.type==='password'?'text':'password';});
+</script>
+</body>
+</html>

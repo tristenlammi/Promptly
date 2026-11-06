@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Partner login</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#faf7f2;--fg:#26221c;--soft:#6f675b;--line:#dcd4c6;--accent:#b4532a;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Georgia, "Times New Roman", serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.bare-logo{padding:28px 0 0;text-align:center;font-size:1.5em;font-weight:700;letter-spacing:.02em}
+.lang-foot{display:flex;justify-content:space-between;padding:16px 28px;font-size:.85em;color:var(--soft);flex-wrap:wrap;gap:10px}
+.icn{display:flex;align-items:center;gap:8px;margin-bottom:12px}.icn svg{width:20px;height:20px;flex:none}.icn input{flex:1;min-width:0}
+</style>
+
+</head>
+<body>
+<div class="bare-logo">Larkspur & Vane</div>
+<main class="wrap">
+<div class="narrow box"><form action="#j_security_check" method="post" onsubmit="return false">
+    <div class="icn"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="6" r="4" fill="currentColor"/><path d="M2 19c1-5 15-5 16 0" fill="currentColor"/></svg><input type="text" name="j_username" class="ico-field"></div>
+    <div class="icn"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="9" width="14" height="10" rx="2" fill="currentColor"/><path d="M6 9V6a4 4 0 0 1 8 0v3" fill="none" stroke="currentColor" stroke-width="2"/></svg><input type="password" name="j_password" class="ico-field"></div>
+    <button type="submit" aria-label="Log in">&rarr;</button></form></div>
+</main>
+<div class="lang-foot"><select aria-label="Language" name="hl"><option>English (United States)</option><option>English (United Kingdom)</option><option>Espa&ntilde;ol</option></select><span><a href="#">Help</a> &nbsp; <a href="#">Privacy</a> &nbsp; <a href="#">Terms</a> &nbsp; Larkspur & Vane</span></div>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("input[name=\"j_username\"]"),"password":q("input[name=\"j_password\"]")};}};</script>
+
+</body>
+</html>

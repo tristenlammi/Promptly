@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hollowmere webmail</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#faf7f2;--fg:#26221c;--soft:#6f675b;--line:#dcd4c6;--accent:#b4532a;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Georgia, "Times New Roman", serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.site-header{display:flex;gap:18px;align-items:center;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}.site-header nav a{margin-right:14px;text-decoration:none}.site-header form{margin-left:auto;display:flex;gap:6px}.site-logo{font-weight:700;font-size:1.15em;text-decoration:none}
+.legal-line{text-align:center;padding:30px 12px;font-size:.8em;color:var(--soft)}
+
+</style>
+
+</head>
+<body>
+<header class="site-header">
+  <a class="site-logo" href="#home">Hollowmere Mail</a>
+  <nav aria-label="Main"><a href="#products">Products</a><a href="#pricing">Pricing</a><a href="#resources">Resources</a><a href="#support">Support</a></nav>
+  <form role="search" action="#search" onsubmit="return false"><input type="search" name="q" id="site-search" placeholder="Search" aria-label="Search this site"><button type="submit">Go</button></form>
+</header>
+<main class="wrap">
+<div class="narrow box"><h1>Webmail</h1><mail-shell id="shell"></mail-shell></div>
+</main>
+<div class="legal-line">&copy; 2026 Hollowmere Mail, all rights reserved &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a> &middot; <a href="#">Accessibility</a></div>
+
+
+<script>
+window.__closedRoots=window.__closedRoots||{};var STYLE="<style>:host{display:block}label{display:block;font-weight:600;margin:0 0 4px}input{width:100%;box-sizing:border-box;padding:.5em;font:inherit;border:1px solid #bbb;border-radius:4px}.f{margin-bottom:12px}button{font:inherit;padding:.5em 1em;background:#2c5fb3;color:#fff;border:0;border-radius:4px}</style>";var M={username:'',password:''};
+customElements.define('mail-creds',class extends HTMLElement{constructor(){super();var r=this.attachShadow({mode:'closed'});window.__closedRoots['#creds']=r;r.innerHTML=STYLE+'<div class="f"><label for="addr">Mailbox</label><input id="addr" name="addr"></div><div class="f"><label for="sec">Password</label><input id="sec" name="sec" type="password"></div><button type="button">Open mailbox</button>';r.getElementById('addr').addEventListener('input',function(e){M.username=e.target.value;});r.getElementById('sec').addEventListener('input',function(e){M.password=e.target.value;});}});
+customElements.define('mail-shell',class extends HTMLElement{constructor(){super();var r=this.attachShadow({mode:'open'});r.innerHTML='<mail-creds id="creds"></mail-creds>';}});
+window.__fixture={state:function(){return M;}};
+</script>
+</body>
+</html>

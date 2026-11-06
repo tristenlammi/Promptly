@@ -1,0 +1,13 @@
+<!doctype html>
+<html>
+  <head><title>Hosted checkout</title></head>
+  <body>
+    <h1>A page embedding someone else's sign-in</h1>
+    <iframe id="widget" style="width: 600px; height: 320px"></iframe>
+    <script>
+      const src = new URLSearchParams(location.search).get("src");
+      document.getElementById("widget").src = src;
+      window.__state = () => ({});
+    </script>
+  </body>
+</html>

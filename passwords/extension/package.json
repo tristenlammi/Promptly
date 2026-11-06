@@ -1,0 +1,19 @@
+{
+  "name": "promptly-passwords-extension",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build:chrome": "node build.mjs chrome",
+    "build:firefox": "node build.mjs firefox",
+    "build": "node build.mjs all",
+    "build:test": "node build.mjs all --test",
+    "lint:firefox": "web-ext lint --source-dir dist/firefox",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "0.1.40",
+    "web-ext": "10.8.0"
+  }
+}

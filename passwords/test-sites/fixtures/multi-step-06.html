@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hollowmere Mail</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#faf7f2;--fg:#26221c;--soft:#6f675b;--line:#dcd4c6;--accent:#b4532a;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Georgia, "Times New Roman", serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.navbar{display:flex;justify-content:space-between;padding:14px 28px;border-bottom:2px solid var(--line);flex-wrap:wrap;gap:10px}.navbar ul{list-style:none;display:flex;gap:18px;margin:0;padding:0;flex-wrap:wrap}.navbar .cta{background:var(--accent);color:#fff;padding:.3em .8em;border-radius:99px;text-decoration:none}
+.foot-cols{display:flex;flex-wrap:wrap;gap:40px;margin-top:40px;padding:28px 32px;border-top:1px solid var(--line);font-size:.9em}.foot-cols h4{margin:0 0 6px}.foot-cols ul{list-style:none;padding:0;margin:0}
+
+</style>
+
+</head>
+<body>
+<nav class="navbar navbar-expand-lg">
+  <a class="navbar-brand" href="#"><strong>Hollowmere Mail</strong></a>
+  <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="#">Pricing</a></li><li class="nav-item"><a class="nav-link" href="#">Resources</a></li><li class="nav-item"><a class="nav-link" href="#">Support</a></li><li class="nav-item"><a class="nav-link" href="#signin">Sign in</a></li><li class="nav-item"><a class="cta" href="#signup">Get started</a></li></ul>
+</nav>
+<main class="wrap">
+<div class="narrow box"><form id="hm" onsubmit="return false"><div id="s1"><h1>Log in to your mailbox</h1><div class="row"><label for="hm-user">Mailbox address</label><input id="hm-user" type="text" name="mailbox"></div><button type="button" id="hm-go">Next</button></div></form></div>
+</main>
+<footer class="foot-cols"><div><h4>Product</h4><ul><li><a href="#">Overview</a></li><li><a href="#">Security</a></li><li><a href="#">Changelog</a></li></ul></div><div><h4>Company</h4><ul><li><a href="#">About Hollowmere Mail</a></li><li><a href="#">Press</a></li><li><a href="#">Careers</a></li></ul></div><div><h4>Legal</h4><ul><li><a href="#">Terms</a></li><li><a href="#">Privacy</a></li><li><a href="#">Cookies</a></li></ul></div></footer>
+
+
+<script>
+var S={username:'',password:''};document.getElementById('hm-user').addEventListener('input',function(e){S.username=e.target.value;});window.__fixture={state:function(){return S;}};
+document.getElementById('hm-go').addEventListener('click',function(){var f=document.getElementById('hm');document.getElementById('s1').remove();var d=document.createElement('div');d.innerHTML='<h1>Enter password</h1><input type="hidden" name="mailbox" id="hm-carry"><div class="row"><label for="hm-ro">Mailbox address</label><input id="hm-ro" type="text" readonly></div><div class="row"><label for="hm-pw">Password</label><input id="hm-pw" name="mailpass" type="password"></div><p><a href="#" id="hm-other">Not you? Use another account</a></p><button>Log in</button>';f.appendChild(d);document.getElementById('hm-carry').value=S.username;document.getElementById('hm-ro').value=S.username;document.getElementById('hm-pw').addEventListener('input',function(e){S.password=e.target.value;});});
+</script>
+</body>
+</html>

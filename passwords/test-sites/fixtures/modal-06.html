@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ombrelle - book a trip</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#eef1f5;--fg:#1b2430;--soft:#5a6778;--line:#cfd6df;--accent:#2c5fb3;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.site-header{display:flex;gap:18px;align-items:center;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}.site-header nav a{margin-right:14px;text-decoration:none}.site-header form{margin-left:auto;display:flex;gap:6px}.site-logo{font-weight:700;font-size:1.15em;text-decoration:none}
+.foot-cols{display:flex;flex-wrap:wrap;gap:40px;margin-top:40px;padding:28px 32px;border-top:1px solid var(--line);font-size:.9em}.foot-cols h4{margin:0 0 6px}.foot-cols ul{list-style:none;padding:0;margin:0}
+body{overflow-x:hidden}.drawer{position:fixed;top:0;right:0;bottom:0;width:min(340px,90vw);background:var(--card);padding:24px;border-left:1px solid var(--line);transform:translateX(100%);transition:transform .12s;z-index:20}.drawer.drawer--open{transform:none}
+</style>
+
+</head>
+<body>
+<header class="site-header">
+  <a class="site-logo" href="#home">Ombrelle Travel</a>
+  <nav aria-label="Main"><a href="#products">Products</a><a href="#pricing">Pricing</a><a href="#resources">Resources</a><a href="#support">Support</a></nav>
+  <form role="search" action="#search" onsubmit="return false"><input type="search" name="q" id="site-search" placeholder="Search" aria-label="Search this site"><button type="submit">Go</button></form>
+</header>
+<main class="wrap">
+<h1>Where next?</h1><form onsubmit="return false" class="box" style="display:flex;gap:10px;flex-wrap:wrap"><input id="trip-from" placeholder="From" name="from"><input id="trip-to" placeholder="To" name="to"><input id="trip-date" type="date" name="depart"><button>Search trips</button></form><p><button id="drawer-btn" type="button">Account</button></p>
+  <aside class="drawer" id="acct-drawer" aria-label="Account"><h2>Log in</h2><form onsubmit="return false"><div class="row"><label for="dr-u">Email</label><input id="dr-u" name="email" type="email"></div><div class="row"><label for="dr-p">Password</label><input id="dr-p" name="password" type="password"></div><button>Log in</button></form></aside>
+</main>
+<footer class="foot-cols"><div><h4>Product</h4><ul><li><a href="#">Overview</a></li><li><a href="#">Security</a></li><li><a href="#">Changelog</a></li></ul></div><div><h4>Company</h4><ul><li><a href="#">About Ombrelle Travel</a></li><li><a href="#">Press</a></li><li><a href="#">Careers</a></li></ul></div><div><h4>Legal</h4><ul><li><a href="#">Terms</a></li><li><a href="#">Privacy</a></li><li><a href="#">Cookies</a></li></ul></div></footer>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#dr-u"),"password":q("#dr-p")};}};</script>
+<script>
+document.getElementById('drawer-btn').addEventListener('click',function(){var d=document.getElementById('acct-drawer');d.addEventListener('transitionend',function(){d.setAttribute('data-settled','true');},{once:true});d.classList.add('drawer--open');});
+</script>
+</body>
+</html>

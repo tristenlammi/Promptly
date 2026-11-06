@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Larkspur & Vane partners</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#faf7f2;--fg:#26221c;--soft:#6f675b;--line:#dcd4c6;--accent:#b4532a;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Georgia, "Times New Roman", serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.navbar{display:flex;justify-content:space-between;padding:14px 28px;border-bottom:2px solid var(--line);flex-wrap:wrap;gap:10px}.navbar ul{list-style:none;display:flex;gap:18px;margin:0;padding:0;flex-wrap:wrap}.navbar .cta{background:var(--accent);color:#fff;padding:.3em .8em;border-radius:99px;text-decoration:none}
+.footer__signup{margin-top:48px;padding:24px;background:var(--fg);color:var(--bg)}.footer__signup input{color:#222;background:#fff;margin-right:6px}.footer__signup span{display:block;margin-bottom:8px}
+
+</style>
+
+</head>
+<body>
+<nav class="navbar navbar-expand-lg">
+  <a class="navbar-brand" href="#"><strong>Larkspur & Vane</strong></a>
+  <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="#">Pricing</a></li><li class="nav-item"><a class="nav-link" href="#">Resources</a></li><li class="nav-item"><a class="nav-link" href="#">Support</a></li><li class="nav-item"><a class="nav-link" href="#signin">Sign in</a></li><li class="nav-item"><a class="cta" href="#signup">Get started</a></li></ul>
+</nav>
+<main class="wrap">
+<div class="narrow box"><h1>Partner area</h1>
+  <div id="dsd-login"><template shadowrootmode="open"><style>:host{display:block}label{display:block;font-weight:600;margin:0 0 4px}input{width:100%;box-sizing:border-box;padding:.5em;font:inherit;border:1px solid #bbb;border-radius:4px}.f{margin-bottom:12px}button{font:inherit;padding:.5em 1em;background:#2c5fb3;color:#fff;border:0;border-radius:4px}</style><form onsubmit="return false"><div class="f"><label for="dsd-u">Partner ID</label><input id="dsd-u" name="partner"></div><div class="f"><label for="dsd-p">Password</label><input id="dsd-p" name="pin" type="password"></div><button>Enter</button></form></template></div></div>
+</main>
+<div class="footer__signup"><span>Deals and updates from Larkspur & Vane, straight to your inbox.</span><input id="footer-email" type="text" name="EMAIL" placeholder="Email address"><button type="button">Sign me up</button><p class="muted">No spam. Privacy policy applies.</p></div>
+
+
+<script>
+window.__fixture={state:function(){var r=document.getElementById('dsd-login').shadowRoot;return {username:r.getElementById('dsd-u').value,password:r.getElementById('dsd-p').value};}};
+</script>
+</body>
+</html>

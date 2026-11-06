@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sundial Payroll</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#fff8e8;--fg:#2e2410;--soft:#7a6a44;--line:#ecdcb4;--accent:#c97a06;--card:#fffdf7}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Trebuchet MS, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.util-strip{background:var(--fg);color:var(--bg);font-size:.8em;padding:4px 24px;display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap}.util-strip a{color:inherit}.brandbar{display:flex;align-items:center;gap:22px;padding:14px 24px;flex-wrap:wrap}.brandbar b{font-size:1.3em}.brandbar input{flex:1;min-width:180px}
+.footer__signup{margin-top:48px;padding:24px;background:var(--fg);color:var(--bg)}.footer__signup input{color:#222;background:#fff;margin-right:6px}.footer__signup span{display:block;margin-bottom:8px}
+
+</style>
+
+</head>
+<body>
+<div class="util-strip"><a href="#">Help</a><a href="#">Find a branch</a><a href="#">Careers</a><a href="#">Log in</a></div>
+<header class="brandbar"><b>Sundial Payroll</b><input name="keywords" type="text" placeholder="What are you looking for?" aria-label="What are you looking for?"></header>
+<main class="wrap">
+<div id="sd" class="narrow box"></div>
+</main>
+<div class="footer__signup"><span>Deals and updates from Sundial Payroll, straight to your inbox.</span><input id="footer-email" type="text" name="EMAIL" placeholder="Email address"><button type="button">Sign me up</button><p class="muted">No spam. Privacy policy applies.</p></div>
+<script src="/lib/vue.global.prod.js"></script>
+
+<script>
+var vm=Vue.createApp({data:function(){return {email:'',pass:''};},template:'<div><h1>Payroll login</h1><div class="row"><label for="sd-email">Work email</label><input id="sd-email" name="work_email" type="email" v-model.lazy.trim="email"></div><div class="row"><label for="sd-pass">Password</label><input id="sd-pass" name="work_pass" type="password" v-model.lazy="pass"></div><button type="button">Continue</button></div>'}).mount('#sd');
+window.__fixture={state:function(){return {username:vm.email,password:vm.pass};}};
+</script>
+</body>
+</html>

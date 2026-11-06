@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+  <head><title>Sign in to Acme</title></head>
+  <body>
+    <h1>Sign in to Acme</h1>
+    <form id="f" action="/ext/welcome.html" method="get">
+      <label>Email <input id="user" name="email" type="email" autocomplete="username" /></label>
+      <label>Password <input id="pass" name="password" type="password" autocomplete="current-password" /></label>
+      <button id="go" type="submit">Sign in</button>
+    </form>
+    <script>
+      window.__state = () => ({ user: document.getElementById("user").value, pass: document.getElementById("pass").value });
+    </script>
+  </body>
+</html>

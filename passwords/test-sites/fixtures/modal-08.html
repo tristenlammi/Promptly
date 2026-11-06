@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pellucid Freight quotes</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#fff8e8;--fg:#2e2410;--soft:#7a6a44;--line:#ecdcb4;--accent:#c97a06;--card:#fffdf7}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Trebuchet MS, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.topnav{display:flex;align-items:center;gap:20px;background:var(--accent);color:#fff;padding:10px 20px;flex-wrap:wrap}.topnav a{color:#fff;text-decoration:none}.topnav__brand{font-weight:700}.topnav__search{margin-left:auto}.topnav__input{border:0;width:220px;color:#222;background:#fff}
+
+.portal-root{position:fixed;inset:0;display:grid;place-items:center;background:rgba(0,0,0,.5);z-index:100}.portal-card{background:var(--card);padding:26px;border-radius:6px;width:min(380px,92vw)}.cookie-bar{position:fixed;bottom:0;left:0;right:0;background:var(--fg);color:var(--bg);padding:10px 16px;z-index:10}
+</style>
+
+</head>
+<body>
+<div class="topnav">
+  <a class="topnav__brand" href="#">Pellucid Freight</a>
+  <a class="topnav__link" href="#">Support</a>
+  <a class="topnav__link" href="#">Company</a>
+  <a class="topnav__link" href="#">Stories</a>
+  <a class="topnav__link" href="#">Docs</a>
+  <div class="topnav__search"><input id="hdr-query" class="topnav__input" type="text" placeholder="Search the help center" aria-label="Search"></div>
+</div>
+<main class="wrap">
+<h1>Get a freight quote in minutes</h1><p>Pallets, part loads and full trucks across the region.</p><button id="portal-open" type="button">Customer login</button>
+</main>
+<div class="cookie-bar">This site uses cookies for session management. <button type="button">Accept</button></div>
+
+
+<script>
+var S={username:'',password:''};window.__fixture={state:function(){return S;}};
+document.getElementById('portal-open').addEventListener('click',function(){var r=document.createElement('div');r.className='portal-root';r.innerHTML='<div class="portal-card" role="dialog" aria-labelledby="pc-title"><h2 id="pc-title">Customer login</h2><div class="row"><label>Account code<input id="pc-acct" name="account_code" style="display:block;width:100%"></label></div><div class="row"><label>Password<input id="pc-pass" name="account_password" type="password" style="display:block;width:100%"></label></div><button type="button">Log in</button></div>';document.body.appendChild(r);document.getElementById('pc-acct').addEventListener('input',function(e){S.username=e.target.value;});document.getElementById('pc-pass').addEventListener('input',function(e){S.password=e.target.value;});});
+</script>
+</body>
+</html>

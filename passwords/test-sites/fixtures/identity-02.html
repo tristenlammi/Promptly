@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Employee details</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#fff8e8;--fg:#2e2410;--soft:#7a6a44;--line:#ecdcb4;--accent:#c97a06;--card:#fffdf7}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Trebuchet MS, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.util-strip{background:var(--fg);color:var(--bg);font-size:.8em;padding:4px 24px;display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap}.util-strip a{color:inherit}.brandbar{display:flex;align-items:center;gap:22px;padding:14px 24px;flex-wrap:wrap}.brandbar b{font-size:1.3em}.brandbar input{flex:1;min-width:180px}
+.foot-cols{display:flex;flex-wrap:wrap;gap:40px;margin-top:40px;padding:28px 32px;border-top:1px solid var(--line);font-size:.9em}.foot-cols h4{margin:0 0 6px}.foot-cols ul{list-style:none;padding:0;margin:0}
+
+</style>
+
+</head>
+<body>
+<div class="util-strip"><a href="#">Help</a><a href="#">Find a branch</a><a href="#">Careers</a><a href="#">Log in</a></div>
+<header class="brandbar"><b>Sundial Payroll</b><input name="keywords" type="text" placeholder="What are you looking for?" aria-label="What are you looking for?"></header>
+<main class="wrap">
+<form class="narrow box" onsubmit="return false"><h1>Your details</h1><div class="row"><input id="e1" name="field_1" placeholder="Full legal name"></div><div class="row"><input id="e2" name="field_2" placeholder="Employer / company"></div><div class="row"><input id="e3" name="field_3" placeholder="Mailing address"></div><div class="row"><input id="e4" name="field_4" placeholder="Suburb or town"></div><div class="row"><input id="e5" name="field_5" placeholder="Post code"></div><div class="row"><input id="e6" name="field_6" placeholder="Mobile phone" type="tel"></div><button>Save</button></form>
+</main>
+<footer class="foot-cols"><div><h4>Product</h4><ul><li><a href="#">Overview</a></li><li><a href="#">Security</a></li><li><a href="#">Changelog</a></li></ul></div><div><h4>Company</h4><ul><li><a href="#">About Sundial Payroll</a></li><li><a href="#">Press</a></li><li><a href="#">Careers</a></li></ul></div><div><h4>Legal</h4><ul><li><a href="#">Terms</a></li><li><a href="#">Privacy</a></li><li><a href="#">Cookies</a></li></ul></div></footer>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"full-name":q("#e1"),"company":q("#e2"),"address1":q("#e3"),"city":q("#e4"),"postcode":q("#e5"),"phone":q("#e6")};}};</script>
+
+</body>
+</html>

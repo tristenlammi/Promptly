@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>लॉगिन करें</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f1f5ef;--fg:#1d2a1f;--soft:#58695b;--line:#cdd9cc;--accent:#2f7a4a;--card:#fcfefb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Verdana, Geneva, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+
+</style>
+
+</head>
+<body>
+<header style="display:flex;gap:16px;padding:12px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center"><b>गंगा सेवा पोर्टल</b><a href="#">सेवाएँ</a><a href="#">सहायता</a><a href="#">संपर्क</a></header>
+<main class="wrap">
+<div class="narrow box"><h1>लॉगिन करें</h1><form onsubmit="return false"><div class="row"><label for="hu">उपयोगकर्ता नाम</label><input id="hu" name="upyogkarta"></div><div class="row"><label for="hp">पासवर्ड</label><input id="hp" name="kutshabd" type="password"></div><button>लॉगिन</button> <a href="#">पासवर्ड भूल गए?</a></form></div>
+</main>
+<footer class="muted" style="padding:24px;text-align:center">© 2026 गंगा सेवा पोर्टल। सर्वाधिकार सुरक्षित।</footer>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#hu"),"password":q("#hp")};}};</script>
+
+</body>
+</html>

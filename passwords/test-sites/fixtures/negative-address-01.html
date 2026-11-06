@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery address</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f1f5ef;--fg:#1d2a1f;--soft:#58695b;--line:#cdd9cc;--accent:#2f7a4a;--card:#fcfefb}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Verdana, Geneva, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.site-header{display:flex;gap:18px;align-items:center;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}.site-header nav a{margin-right:14px;text-decoration:none}.site-header form{margin-left:auto;display:flex;gap:6px}.site-logo{font-weight:700;font-size:1.15em;text-decoration:none}
+.foot-cols{display:flex;flex-wrap:wrap;gap:40px;margin-top:40px;padding:28px 32px;border-top:1px solid var(--line);font-size:.9em}.foot-cols h4{margin:0 0 6px}.foot-cols ul{list-style:none;padding:0;margin:0}
+
+</style>
+
+</head>
+<body>
+<header class="site-header">
+  <a class="site-logo" href="#home">Acme Harvest</a>
+  <nav aria-label="Main"><a href="#products">Products</a><a href="#pricing">Pricing</a><a href="#resources">Resources</a><a href="#support">Support</a></nav>
+  <form role="search" action="#search" onsubmit="return false"><input type="search" name="q" id="site-search" placeholder="Search" aria-label="Search this site"><button type="submit">Go</button></form>
+</header>
+<main class="wrap">
+<form class="narrow box" onsubmit="return false"><p class="muted">Step 1 of 3</p><h1>Where should the seeds go?</h1><div class="row"><label for="adr1">Street</label><input id="adr1" name="street"></div><div class="row"><label for="adr2">Unit</label><input id="adr2" name="unit"></div><div class="row"><label for="adrc">Town</label><input id="adrc" name="town"></div><div class="row"><label for="adrz">Postcode</label><input id="adrz" name="zip"></div><button>Continue</button></form>
+</main>
+<footer class="foot-cols"><div><h4>Product</h4><ul><li><a href="#">Overview</a></li><li><a href="#">Security</a></li><li><a href="#">Changelog</a></li></ul></div><div><h4>Company</h4><ul><li><a href="#">About Acme Harvest</a></li><li><a href="#">Press</a></li><li><a href="#">Careers</a></li></ul></div><div><h4>Legal</h4><ul><li><a href="#">Terms</a></li><li><a href="#">Privacy</a></li><li><a href="#">Cookies</a></li></ul></div></footer>
+
+<script>window.__fixture={state:function(){return {};}};</script>
+
+</body>
+</html>

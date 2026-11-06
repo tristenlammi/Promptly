@@ -1,0 +1,17 @@
+<!doctype html>
+<html>
+  <head><title>Checkout</title></head>
+  <body>
+    <h1>Payment</h1>
+    <form>
+      <label>Card number <input id="num" name="cardnumber" autocomplete="cc-number" /></label>
+      <label>Name on card <input id="name" name="ccname" autocomplete="cc-name" /></label>
+      <label>Expiry <input id="exp" name="exp" autocomplete="cc-exp" /></label>
+      <label>CVC <input id="cvc" name="cvc" autocomplete="cc-csc" /></label>
+      <button>Pay now</button>
+    </form>
+    <script>
+      window.__state = () => ({ num: document.getElementById("num").value, cvc: document.getElementById("cvc").value });
+    </script>
+  </body>
+</html>

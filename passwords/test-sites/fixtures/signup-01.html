@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create your Acme Roster account</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#eef1f5;--fg:#1b2430;--soft:#5a6778;--line:#cfd6df;--accent:#2c5fb3;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.navbar{display:flex;justify-content:space-between;padding:14px 28px;border-bottom:2px solid var(--line);flex-wrap:wrap;gap:10px}.navbar ul{list-style:none;display:flex;gap:18px;margin:0;padding:0;flex-wrap:wrap}.navbar .cta{background:var(--accent);color:#fff;padding:.3em .8em;border-radius:99px;text-decoration:none}
+.foot{margin-top:40px;padding:28px 24px;background:var(--card);border-top:1px solid var(--line)}.foot .newsletter{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.foot .newsletter label{font-weight:600;width:100%}.foot .newsletter input{flex:1;min-width:160px;max-width:320px}
+
+</style>
+
+</head>
+<body>
+<nav class="navbar navbar-expand-lg">
+  <a class="navbar-brand" href="#"><strong>Acme Roster</strong></a>
+  <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="#">Pricing</a></li><li class="nav-item"><a class="nav-link" href="#">Resources</a></li><li class="nav-item"><a class="nav-link" href="#">Support</a></li><li class="nav-item"><a class="nav-link" href="#signin">Sign in</a></li><li class="nav-item"><a class="cta" href="#signup">Get started</a></li></ul>
+</nav>
+<main class="wrap">
+<div class="split"><form class="box" onsubmit="return false"><h1>Start your free trial</h1><div class="row"><label for="s-email">Work email</label><input id="s-email" name="email" type="email"></div><div class="row"><label for="s-pass">Password</label><input id="s-pass" name="password" type="password" minlength="8"></div><div class="row"><label for="s-conf">Confirm password</label><input id="s-conf" name="password_confirmation" type="password"></div><button>Create account</button><p class="muted">Already have an account? <a href="#signin">Sign in</a></p></form><div><section class="promo"><h2>Why teams pick Acme Roster</h2><ul><li>Set up in an afternoon, no consultants needed.</li><li>Round-the-clock humans on the support desk.</li><li>Export everything you own, whenever you want.</li></ul></section></div></div>
+</main>
+<footer class="foot"><form class="newsletter" action="#subscribe" onsubmit="return false">
+  <label for="nl-email">Get the Acme Roster newsletter</label>
+  <input type="email" id="nl-email" name="email" placeholder="you@example.test" autocomplete="email"><button type="submit">Subscribe</button>
+</form><p class="muted">&copy; 2026 Acme Roster. Unsubscribe at any time.</p></footer>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#s-email"),"new-password":q("#s-pass"),"confirm-password":q("#s-conf")};}};</script>
+
+</body>
+</html>

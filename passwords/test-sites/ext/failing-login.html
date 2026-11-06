@@ -1,0 +1,21 @@
+<!doctype html>
+<html>
+  <head><title>Sign in</title></head>
+  <body>
+    <h1>Sign in</h1>
+    <form id="f">
+      <label>Email <input id="user" name="email" autocomplete="username" /></label>
+      <label>Password <input id="pass" name="password" type="password" autocomplete="current-password" /></label>
+      <button>Sign in</button>
+    </form>
+    <div id="err" role="alert"></div>
+    <script>
+      // Every try fails, without leaving the page.
+      document.getElementById("f").addEventListener("submit", (e) => {
+        e.preventDefault();
+        document.getElementById("err").textContent = "Incorrect password. Try again.";
+        document.getElementById("pass").value = "";
+      });
+    </script>
+  </body>
+</html>

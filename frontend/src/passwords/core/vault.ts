@@ -161,7 +161,7 @@ export class VaultClient {
 
   /** Unlock with the master password. Online, this also proves ``auth_key`` for a
    *  session; offline, the local copy opens with no server at all. */
-  async unlock(password: string, secretKeyOverride?: Uint8Array): Promise<{ offline: boolean }> {
+  async unlock(password: string, secretKeyOverride?: Uint8Array, opts: { keepSecret?: boolean } = {}): Promise<{ offline: boolean; secret?: Uint8Array }> {
     const secretKey = secretKeyOverride ?? (await this.loadSecretKey());
     if (!secretKey) throw new Error("This device doesn't have your Secret Key yet");
     let cached = await this.store.getAccount();
@@ -181,7 +181,9 @@ export class VaultClient {
       offline = true;
     }
     if (!kdf || !salt) throw new Error("This device has no offline copy, and the server can't be reached");
-    const { unlockKey, authKey } = await deriveRoot(password, secretKey, fromB64u(salt), kdf);
+    const raw = await deriveRootRaw(password, secretKey, fromB64u(salt), kdf);
+    const unlockKey = await aesKey(raw.unlock);
+    const authKey = raw.auth;
 
     if (!offline) {
       try {
@@ -215,7 +217,39 @@ export class VaultClient {
     };
     await this.loadLocal();
     if (!offline) await this.sync();
+    if (opts.keepSecret) {
+      const secret = new Uint8Array(64);
+      secret.set(raw.unlock, 0);
+      secret.set(raw.auth, 32);
+      return { offline, secret };
+    }
     return { offline };
+  }
+
+  /** Pick up where an unlocked session left off, with no KDF and no network: for an
+   *  extension's background being restarted, or another of its pages opening. */
+  async restoreSession(secret: Uint8Array, sessionToken: string | null): Promise<void> {
+    if (secret.length !== 64) throw new Error("bad unlock secret");
+    const cached = await this.store.getAccount();
+    if (!cached) throw new Error("This device has no offline copy");
+    const unlockKey = await aesKey(secret.slice(0, 32));
+    let keyset: Keyset;
+    try {
+      keyset = await unwrapKeyset(unlockKey, cached.accountId, fromB64u(cached.wrappedKeyset));
+    } catch {
+      throw new WrongPasswordError();
+    }
+    this.api.session = sessionToken;
+    this.state = { keyset, authKey: secret.slice(32), userId: cached.userId, accountId: cached.accountId, vaultKeys: new Map(), items: new Map(), search: new Map() };
+    await this.loadLocal();
+  }
+
+  /** The session ended while we still hold the keys: prove again without the password. */
+  async reprove(): Promise<void> {
+    const s = this.need();
+    const session = await this.api.createSession(b64u(s.authKey));
+    this.api.session = session.token;
+    await this.cacheAccount(session);
   }
 
   /** For "reprompt" items: is this the master password? Local, no server. */
@@ -445,6 +479,11 @@ export class VaultClient {
         }
       }
     }
+  }
+
+  /** Another client sharing this offline copy changed it (extension pages do). */
+  async reload(): Promise<void> {
+    if (this.state) await this.loadLocal();
   }
 
   undecryptable = new Set<string>();

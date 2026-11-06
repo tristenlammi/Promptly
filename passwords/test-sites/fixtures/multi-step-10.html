@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dappermint - log in with your phone</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f6f2fb;--fg:#241a33;--soft:#6a5c80;--line:#dcd2ea;--accent:#6b3fb5;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, Helvetica, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.bare-logo{padding:28px 0 0;text-align:center;font-size:1.5em;font-weight:700;letter-spacing:.02em}
+.legal-line{text-align:center;padding:30px 12px;font-size:.8em;color:var(--soft)}
+
+</style>
+
+</head>
+<body>
+<div class="bare-logo">Dappermint Pay</div>
+<main class="wrap">
+<div class="narrow box" id="dm"><h1>Enter your phone number</h1><form id="dm1" onsubmit="return false"><div class="row"><label for="dm-phone">Phone number</label><input id="dm-phone" name="phone_number" type="tel" autocomplete="tel"></div><button id="dm-send">Text me a code</button></form></div>
+</main>
+<div class="legal-line">&copy; 2026 Dappermint Pay, all rights reserved &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a> &middot; <a href="#">Accessibility</a></div>
+
+
+<script>
+var S={username:'',otp:''};document.getElementById('dm-phone').addEventListener('input',function(e){S.username=e.target.value;});window.__fixture={state:function(){return S;}};
+document.getElementById('dm-send').addEventListener('click',function(){var d=document.getElementById('dm');d.innerHTML='<h1>Check your messages</h1><p>We sent a text with a 6-digit code.</p><div class="row"><label for="dm-code">Code</label><input id="dm-code" name="sms_otp" inputmode="numeric" autocomplete="one-time-code"></div><button type="button">Verify</button> <a href="#">Resend</a>';document.getElementById('dm-code').addEventListener('input',function(e){S.otp=e.target.value;});});
+</script>
+</body>
+</html>

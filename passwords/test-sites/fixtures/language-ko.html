@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>회원가입</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f6f2fb;--fg:#241a33;--soft:#6a5c80;--line:#dcd2ea;--accent:#6b3fb5;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, Helvetica, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+
+</style>
+
+</head>
+<body>
+<header style="display:flex;gap:16px;padding:12px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center"><b>솔바람 쇼핑</b><a href="#">베스트</a><a href="#">이벤트</a><a href="#">고객센터</a><a href="#">로그인</a></header>
+<main class="wrap">
+<form class="narrow box" onsubmit="return false"><h1>회원가입</h1><div class="row"><label for="k1">아이디</label><input id="k1" name="아이디"></div><div class="row"><label for="k2">비밀번호</label><input id="k2" name="비밀번호" type="password"></div><div class="row"><label for="k3">비밀번호 확인</label><input id="k3" name="비밀번호확인" type="password"></div><div class="row"><label for="k4">이름</label><input id="k4" name="이름"></div><div class="row"><label for="k5">이메일</label><input id="k5" name="이메일" type="email"></div><button>가입하기</button></form>
+</main>
+<footer class="muted" style="padding:24px;text-align:center">© 2026 솔바람 쇼핑. 개인정보처리방침</footer>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#k1"),"new-password":q("#k2"),"confirm-password":q("#k3"),"full-name":q("#k4"),"email":q("#k5")};}};</script>
+
+</body>
+</html>

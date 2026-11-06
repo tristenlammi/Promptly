@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Palewing account</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f6f2fb;--fg:#241a33;--soft:#6a5c80;--line:#dcd2ea;--accent:#6b3fb5;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, Helvetica, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+
+</style>
+
+</head>
+<body>
+
+<pw-login id="pwl"></pw-login>
+
+
+
+<script>
+var S={username:'',password:''};function send(){parent.postMessage({__fx:S},'*');}window.__fixture={state:function(){return S;}};
+customElements.define('pw-login',class extends HTMLElement{constructor(){super();var r=this.attachShadow({mode:'open'});r.innerHTML='<style>:host{display:block;padding:16px;font:15px system-ui}label{display:block;margin:10px 0 3px}input{width:100%;box-sizing:border-box;padding:6px}</style><label for="e">Email</label><input id="e" name="email" type="email"><label for="k">Password</label><input id="k" name="key" type="password"><p><button>Sign in</button></p>';r.getElementById('e').addEventListener('input',function(ev){S.username=ev.target.value;send();});r.getElementById('k').addEventListener('input',function(ev){S.password=ev.target.value;send();});}});
+</script>
+</body>
+</html>

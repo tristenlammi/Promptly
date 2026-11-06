@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sable Notes</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#eef1f5;--fg:#1b2430;--soft:#5a6778;--line:#cfd6df;--accent:#2c5fb3;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.site-header{display:flex;gap:18px;align-items:center;padding:12px 24px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}.site-header nav a{margin-right:14px;text-decoration:none}.site-header form{margin-left:auto;display:flex;gap:6px}.site-logo{font-weight:700;font-size:1.15em;text-decoration:none}
+.foot-cols{display:flex;flex-wrap:wrap;gap:40px;margin-top:40px;padding:28px 32px;border-top:1px solid var(--line);font-size:.9em}.foot-cols h4{margin:0 0 6px}.foot-cols ul{list-style:none;padding:0;margin:0}
+
+</style>
+
+</head>
+<body>
+<header class="site-header">
+  <a class="site-logo" href="#home">Sable Notes</a>
+  <nav aria-label="Main"><a href="#products">Products</a><a href="#pricing">Pricing</a><a href="#resources">Resources</a><a href="#support">Support</a></nav>
+  <form role="search" action="#search" onsubmit="return false"><input type="search" name="q" id="site-search" placeholder="Search" aria-label="Search this site"><button type="submit">Go</button></form>
+</header>
+<main class="wrap">
+<h1>Team spaces</h1><p>Share a notebook with your team and keep the rest to yourself.</p><iframe id="sd-frame" title="Login" style="border:1px solid var(--line);border-radius:8px;width:100%;max-width:420px;height:320px;background:var(--card)" srcdoc="<!doctype html><meta charset=utf-8><style>body{font:15px system-ui;margin:12px}label{display:block;margin:8px 0 2px}input{width:100%;box-sizing:border-box;padding:6px}</style><form onsubmit='return false'><label for=sd-u>Login</label><input id=sd-u><label for=sd-p>Password</label><input id=sd-p type=password><p><button>Go</button></p></form><script>function s(){parent.postMessage({__fx:{username:document.getElementById('sd-u').value,password:document.getElementById('sd-p').value}},'*');}document.addEventListener('input',s,true);</script>"></iframe>
+</main>
+<footer class="foot-cols"><div><h4>Product</h4><ul><li><a href="#">Overview</a></li><li><a href="#">Security</a></li><li><a href="#">Changelog</a></li></ul></div><div><h4>Company</h4><ul><li><a href="#">About Sable Notes</a></li><li><a href="#">Press</a></li><li><a href="#">Careers</a></li></ul></div><div><h4>Legal</h4><ul><li><a href="#">Terms</a></li><li><a href="#">Privacy</a></li><li><a href="#">Cookies</a></li></ul></div></footer>
+
+
+<script>
+(function(){var S={"username":"","password":""};
+window.addEventListener('message',function(e){if(e.data&&e.data.__fx){for(var k in e.data.__fx){S[k]=e.data.__fx[k];}if(parent!==window){parent.postMessage({__fx:S},'*');}}});
+window.__fixture={state:function(){return S;}};})();
+</script>
+</body>
+</html>

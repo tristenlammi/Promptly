@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bellwether Business Online</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#eef1f5;--fg:#1b2430;--soft:#5a6778;--line:#cfd6df;--accent:#2c5fb3;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.util-strip{background:var(--fg);color:var(--bg);font-size:.8em;padding:4px 24px;display:flex;justify-content:flex-end;gap:14px;flex-wrap:wrap}.util-strip a{color:inherit}.brandbar{display:flex;align-items:center;gap:22px;padding:14px 24px;flex-wrap:wrap}.brandbar b{font-size:1.3em}.brandbar input{flex:1;min-width:180px}
+.foot-cols{display:flex;flex-wrap:wrap;gap:40px;margin-top:40px;padding:28px 32px;border-top:1px solid var(--line);font-size:.9em}.foot-cols h4{margin:0 0 6px}.foot-cols ul{list-style:none;padding:0;margin:0}
+
+</style>
+
+</head>
+<body>
+<div class="util-strip"><a href="#">Help</a><a href="#">Find a branch</a><a href="#">Careers</a><a href="#">Log in</a></div>
+<header class="brandbar"><b>Bellwether Trust</b><input name="keywords" type="text" placeholder="What are you looking for?" aria-label="What are you looking for?"></header>
+<main class="wrap">
+<div class="narrow box"><h1>Business online</h1><form onsubmit="return false" class="ng-untouched ng-pristine"><mat-form-field _ngcontent-ng-c1042 class="mat-mdc-form-field" style="display:block;margin-bottom:14px"><label for="mat-input-0" _ngcontent-ng-c1042 class="mdc-floating-label" style="display:block;font-weight:600">Company user ID</label><input matinput _ngcontent-ng-c1042 id="mat-input-0" class="mat-mdc-input-element ng-untouched ng-pristine ng-invalid" formcontrolname="userId" type="text" autocomplete="off" style="width:100%"></mat-form-field><mat-form-field _ngcontent-ng-c1042 class="mat-mdc-form-field" style="display:block;margin-bottom:14px"><label for="mat-input-1" _ngcontent-ng-c1042 class="mdc-floating-label" style="display:block;font-weight:600">Password</label><input matinput _ngcontent-ng-c1042 id="mat-input-1" class="mat-mdc-input-element ng-untouched ng-pristine ng-invalid" formcontrolname="pwd" type="password" autocomplete="off" style="width:100%"></mat-form-field><button type="submit">Log on</button></form></div>
+</main>
+<footer class="foot-cols"><div><h4>Product</h4><ul><li><a href="#">Overview</a></li><li><a href="#">Security</a></li><li><a href="#">Changelog</a></li></ul></div><div><h4>Company</h4><ul><li><a href="#">About Bellwether Trust</a></li><li><a href="#">Press</a></li><li><a href="#">Careers</a></li></ul></div><div><h4>Legal</h4><ul><li><a href="#">Terms</a></li><li><a href="#">Privacy</a></li><li><a href="#">Cookies</a></li></ul></div></footer>
+
+
+<script>
+function ngControl(el,opts){opts=opts||{};var c={value:'',dirty:false,touched:false,composing:false,el:el,valid:function(){return opts.valid?opts.valid(c.value):!!c.value;},sync:function(){el.classList.toggle('ng-pristine',!c.dirty);el.classList.toggle('ng-dirty',c.dirty);el.classList.toggle('ng-untouched',!c.touched);el.classList.toggle('ng-touched',c.touched);el.classList.toggle('ng-valid',c.valid());el.classList.toggle('ng-invalid',!c.valid());}};
+function commit(v){c.value=v;c.dirty=true;c.sync();if(opts.onChange)opts.onChange(c);}
+el.addEventListener('input',function(){if(!c.composing)commit(el.value);});
+el.addEventListener('compositionstart',function(){c.composing=true;});
+el.addEventListener('compositionend',function(){c.composing=false;commit(el.value);});
+el.addEventListener('blur',function(){c.touched=true;c.sync();if(opts.onBlur)opts.onBlur(c);});
+c.sync();return c;}var writeBack=function(c){c.el.value=c.value;};var C={u:ngControl(document.getElementById('mat-input-0'),{onBlur:writeBack}),p:ngControl(document.getElementById('mat-input-1'),{onBlur:writeBack})};window.__fixture={state:function(){return {username:C.u.value,password:C.p.value};}};
+</script>
+</body>
+</html>

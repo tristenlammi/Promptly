@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ログイン</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#ffffff;--fg:#222222;--soft:#666666;--line:#d8d8d8;--accent:#00587a;--card:#f7f9fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Arial, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+
+</style>
+
+</head>
+<body>
+<header style="display:flex;gap:16px;padding:12px 24px;border-bottom:1px solid var(--line);flex-wrap:wrap;align-items:center"><b>北斗ストア</b><a href="#">商品一覧</a><a href="#">お問い合わせ</a><a href="#">新規会員登録</a></header>
+<main class="wrap">
+<div class="narrow box"><h1>ログイン</h1><form onsubmit="return false"><div class="row"><label for="j1">メールアドレス</label><input id="j1" name="メールアドレス" type="email"></div><div class="row"><label for="j2">パスワード</label><input id="j2" name="パスワード" type="password"></div><label style="font-weight:400"><input type="checkbox"> ログイン状態を保持する</label><p><button>ログイン</button></p><p><a href="#">パスワードをお忘れの方</a></p></form></div>
+</main>
+<footer class="muted" style="padding:24px;text-align:center">© 2026 北斗ストア プライバシーポリシー</footer>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#j1"),"password":q("#j2")};}};</script>
+
+</body>
+</html>

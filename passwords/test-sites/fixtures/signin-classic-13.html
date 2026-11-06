@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout - Wrenfield Home</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#fff8e8;--fg:#2e2410;--soft:#7a6a44;--line:#ecdcb4;--accent:#c97a06;--card:#fffdf7}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Trebuchet MS, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.shopbar{display:flex;gap:16px;align-items:center;padding:12px 20px;background:var(--card);border-bottom:3px solid var(--accent);flex-wrap:wrap}.shopbar form{display:flex;flex:1;min-width:200px}.shopbar form input{flex:1;min-width:80px}.shopbar a{white-space:nowrap}
+.foot{margin-top:40px;padding:28px 24px;background:var(--card);border-top:1px solid var(--line)}.foot .newsletter{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.foot .newsletter label{font-weight:600;width:100%}.foot .newsletter input{flex:1;min-width:160px;max-width:320px}
+
+</style>
+
+</head>
+<body>
+<div class="shopbar"><strong>Wrenfield Home</strong>
+  <form onsubmit="return false" class="shop-search"><select name="dept" aria-label="Department"><option>All</option><option>Outdoors</option><option>Kitchen</option></select><input type="text" name="k" id="shop-k" placeholder="Search products"><button aria-label="Search">Search</button></form>
+  <a href="#account">Account</a><a href="#orders">Orders</a><a href="#cart">Cart (0)</a></div>
+<main class="wrap">
+<h1>Checkout</h1><div class="split">
+  <form class="box" id="returning" onsubmit="return false"><h2>Returning customers</h2>
+    <div class="row"><label for="ret-email">Email</label><input id="ret-email" name="customer[email]" type="email"></div>
+    <div class="row"><label for="ret-pass">Password</label><input id="ret-pass" name="customer[password]" type="password"></div>
+    <button>Sign in and check out</button></form>
+  <form class="box" id="guest" onsubmit="return false"><h2>New here?</h2><p>No account needed. We just need somewhere to send your receipt.</p>
+    <div class="row"><label for="guest-email">Email for your receipt</label><input id="guest-email" name="guest_email" type="email"></div>
+    <button>Continue as guest</button></form></div>
+  <p class="muted">Your cart: 1 &times; ceramic planter, 1 &times; linen throw. Subtotal 86.00.</p>
+</main>
+<footer class="foot"><form class="newsletter" action="#subscribe" onsubmit="return false">
+  <label for="nl-email">Get the Wrenfield Home newsletter</label>
+  <input type="email" id="nl-email" name="email" placeholder="you@example.test" autocomplete="email"><button type="submit">Subscribe</button>
+</form><p class="muted">&copy; 2026 Wrenfield Home. Unsubscribe at any time.</p></footer>
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#ret-email"),"password":q("#ret-pass")};}};</script>
+
+</body>
+</html>

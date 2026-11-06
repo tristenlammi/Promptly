@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Billing</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#14171f;--fg:#e6e8ee;--soft:#9aa2b2;--line:#2c3240;--accent:#7c9cff;--card:#1c2029}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.bare-logo{padding:28px 0 0;text-align:center;font-size:1.5em;font-weight:700;letter-spacing:.02em}
+.legal-line{text-align:center;padding:30px 12px;font-size:.8em;color:var(--soft)}
+.hf{height:44px;width:100%;border:1px solid var(--line);border-radius:4px;background:var(--card)}
+</style>
+
+</head>
+<body>
+<div class="bare-logo">Tarnhold Cloud</div>
+<main class="wrap">
+<div class="narrow box"><h1>Add a card</h1><div class="row"><label for="hf-name">Name on card</label><input id="hf-name" name="billing_name"></div><div class="row"><span class="lbl">Card number</span><iframe id="hf-number" class="hf" title="Secure card number" src="http://localhost:__OTHER_PORT__/fixtures/_frames/card-04-number.html"></iframe></div><div class="row"><span class="lbl">Expiration</span><iframe id="hf-exp" class="hf" title="Secure expiration" src="http://localhost:__OTHER_PORT__/fixtures/_frames/card-04-exp.html"></iframe></div><div class="row"><span class="lbl">Security code</span><iframe id="hf-cvc" class="hf" title="Secure CVC" src="http://localhost:__OTHER_PORT__/fixtures/_frames/card-04-cvc.html"></iframe></div><button type="button">Save card</button></div>
+</main>
+<div class="legal-line">&copy; 2026 Tarnhold Cloud, all rights reserved &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a> &middot; <a href="#">Accessibility</a></div>
+
+
+<script>
+(function(){var S={"card-name":"","card-number":"","card-exp":"","card-cvv":""};
+window.addEventListener('message',function(e){if(e.data&&e.data.__fx){for(var k in e.data.__fx){S[k]=e.data.__fx[k];}if(parent!==window){parent.postMessage({__fx:S},'*');}}});
+window.__fixture={state:function(){return S;}};})();
+(function(){var parentState=window.__fixture.state;var el=document.getElementById('hf-name');window.__fixture={state:function(){var s=parentState();s['card-name']=el.value;return s;}};})();
+</script>
+</body>
+</html>

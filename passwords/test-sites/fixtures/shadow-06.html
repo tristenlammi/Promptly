@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tidewrack admin</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#ffffff;--fg:#222222;--soft:#666666;--line:#d8d8d8;--accent:#00587a;--card:#f7f9fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Arial, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+.topnav{display:flex;align-items:center;gap:20px;background:var(--accent);color:#fff;padding:10px 20px;flex-wrap:wrap}.topnav a{color:#fff;text-decoration:none}.topnav__brand{font-weight:700}.topnav__search{margin-left:auto}.topnav__input{border:0;width:220px;color:#222;background:#fff}
+.foot{margin-top:40px;padding:28px 24px;background:var(--card);border-top:1px solid var(--line)}.foot .newsletter{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.foot .newsletter label{font-weight:600;width:100%}.foot .newsletter input{flex:1;min-width:160px;max-width:320px}
+
+</style>
+
+</head>
+<body>
+<div class="topnav">
+  <a class="topnav__brand" href="#">Tidewrack Systems</a>
+  <a class="topnav__link" href="#">Support</a>
+  <a class="topnav__link" href="#">Company</a>
+  <a class="topnav__link" href="#">Stories</a>
+  <a class="topnav__link" href="#">Docs</a>
+  <div class="topnav__search"><input id="hdr-query" class="topnav__input" type="text" placeholder="Search the help center" aria-label="Search"></div>
+</div>
+<main class="wrap">
+<div class="narrow box"><h1>Admin sign in</h1><tw-input id="tw-user" label="Admin email" type="email" placeholder="admin@company.example"></tw-input><tw-input id="tw-pass" label="Password" type="password"></tw-input><tw-button></tw-button></div>
+</main>
+<footer class="foot"><form class="newsletter" action="#subscribe" onsubmit="return false">
+  <label for="nl-email">Get the Tidewrack Systems newsletter</label>
+  <input type="email" id="nl-email" name="email" placeholder="you@example.test" autocomplete="email"><button type="submit">Subscribe</button>
+</form><p class="muted">&copy; 2026 Tidewrack Systems. Unsubscribe at any time.</p></footer>
+
+
+<script>
+var STYLE="<style>:host{display:block}label{display:block;font-weight:600;margin:0 0 4px}input{width:100%;box-sizing:border-box;padding:.5em;font:inherit;border:1px solid #bbb;border-radius:4px}.f{margin-bottom:12px}button{font:inherit;padding:.5em 1em;background:#2c5fb3;color:#fff;border:0;border-radius:4px}</style>";customElements.define('tw-input',class extends HTMLElement{constructor(){super();this._v='';}connectedCallback(){var r=this.attachShadow({mode:'open'});var self=this;r.innerHTML=STYLE+'<div class="f"><label part="label" for="native"></label><input part="input" id="native"></div>';r.querySelector('label').textContent=this.getAttribute('label');var i=r.querySelector('input');i.type=this.getAttribute('type')||'text';if(this.getAttribute('placeholder'))i.placeholder=this.getAttribute('placeholder');i.addEventListener('input',function(){self._v=i.value;self.dispatchEvent(new CustomEvent('tw-change',{bubbles:true,detail:i.value}));});}get value(){return this._v;}set value(x){this._v=x;}});
+customElements.define('tw-button',class extends HTMLElement{connectedCallback(){this.attachShadow({mode:'open'}).innerHTML=STYLE+'<button type="button"><slot>Sign in</slot></button>';}});
+window.__fixture={state:function(){return {username:document.getElementById('tw-user').value,password:document.getElementById('tw-pass').value};}};
+</script>
+</body>
+</html>
