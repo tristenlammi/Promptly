@@ -1391,6 +1391,15 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         return updated
     }
 
+    /** From Files into the vault, sealed here as it's read: `FromFiles`. The original stays. */
+    fun addFromFiles(itemId: String, file: DriveFile, onProgress: (Int, Int) -> Unit = { _, _ -> }): Item {
+        if (store.getItem(itemId)?.revision == 0 || store.getItem(itemId)?.dirty == true) sync()
+        return api.driveContent(file.id) { input, length ->
+            if (length >= 0 && length != file.sizeBytes) throw IllegalStateException("That file changed in Files. Try again.")
+            addAttachment(itemId, file.name, file.mime, file.sizeBytes, Attachments.streamReader(input, file.sizeBytes), onProgress)
+        }
+    }
+
     fun removeAttachment(itemId: String, ref: AttachmentRef): Item {
         val item = get(itemId) ?: throw IllegalStateException("Unknown item")
         // Gone from the server first; if that fails the record stays, and it can be retried.

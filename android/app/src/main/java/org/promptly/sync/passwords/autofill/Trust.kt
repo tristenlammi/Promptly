@@ -136,6 +136,21 @@ sealed class FillTarget {
     data class App(val pkg: String, val cert: String?, val claimedDomain: String?) : FillTarget()
 }
 
+/** Whether a fill offers mail at all. The row itself is a door: nothing's fetched until it's picked,
+ *  so nothing about the page goes anywhere, and what's behind it is worked out on the next screen. */
+object MailOffer {
+    enum class Row { CODE, LINK }
+
+    /** Not in a frame from another site, since a code's for the site it's from. Not in an app showing
+     *  a page, whose claim about whose page it is can't be checked. In an app, only with a login linked
+     *  to it, as that's the only way to know which sites it's for. */
+    fun row(on: Boolean, codeBox: Boolean, emailFirst: Boolean, frameDomain: String?, target: FillTarget, hits: Int): Row? {
+        if (!on || frameDomain != null) return null
+        if (target is FillTarget.App && (hits == 0 || !target.claimedDomain.isNullOrEmpty())) return null
+        return if (codeBox) Row.CODE else if (emailFirst) Row.LINK else null
+    }
+}
+
 /** An app's own WebView can show anyone's page. A login linked to the app isn't for that page
  *  unless it's saved for it, however much the app is trusted (AutoSpill). */
 fun spillsTo(target: FillTarget.App, urls: List<LoginUrl>): Boolean {

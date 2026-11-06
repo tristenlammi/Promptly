@@ -19,6 +19,23 @@ import com.google.android.gms.common.api.Status
 import org.promptly.sync.passwords.credentials.PromptlyCredentialProviderService
 import org.promptly.sync.passwords.ui.PasswordsActivity
 
+/** Opening a web address in the person's browser. Tests swap this out: Chrome on the emulator is
+ *  never opened, and that's the only way a test can see where a button would have gone. */
+object Links {
+    @Volatile
+    var opener: ((Context, String) -> Unit)? = null
+
+    fun open(context: Context, url: String) {
+        opener?.let {
+            it(context, url)
+            return
+        }
+        runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+}
+
 /** VERIFY_NOTES item 14: the documented setting, intent and content provider. Nothing here
  *  ever touches Chrome's first-run or changes a setting; it only reads, and opens the screen. */
 object ChromeSetup {

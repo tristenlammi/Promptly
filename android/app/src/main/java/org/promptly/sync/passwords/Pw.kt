@@ -309,6 +309,11 @@ class PwPrefs(context: Context) {
         get() = prefs.getLong("export_notified", 0)
         set(v) = prefs.edit().putLong("export_notified", v).apply()
 
+    /** Whether autofill offers codes and sign-in links from Mail. Off unless turned on. */
+    var mailCodes: Boolean
+        get() = prefs.getBoolean("mail_codes", false)
+        set(v) = prefs.edit().putBoolean("mail_codes", v).apply()
+
     /** Whether a Security check here posts its counts to the Today card. Off unless turned on. */
     var healthOptIn: Boolean
         get() = prefs.getBoolean("health_opt_in", false)
@@ -364,6 +369,7 @@ object Pw {
         fun asset(name: String) = ctx.assets.open("passwords/$name").use { it.readBytes().decodeToString() }
         Wordlist.loader = { asset("eff_large_wordlist.json") }
         Generator.rulesLoader = { asset("password-rules.json") }
+        org.promptly.sync.passwords.core.PasswordChange.urlsLoader = { asset("change-password-URLs.json") }
         runCatching { Match.loadSharedCredentials(asset("shared-credentials.json")) }
     }
 
@@ -452,6 +458,24 @@ object Pw {
         prefs.alertToken = token
         prefs.deviceId = deviceId
         appContext?.let { runCatching { AlertsCheck.schedule(it) } }
+        version.value = version.value + 1
+    }
+
+    /** A new device token in place of this one, with the vault left as it is: to add a scope, which
+     *  can't be done to a token that exists. The old one goes last, and if that can't be done right
+     *  now it stays on the Devices list, where it can be removed. */
+    fun replaceDevice(token: String, deviceId: String) {
+        val server = prefs.server ?: return
+        val oldToken = prefs.deviceToken
+        val oldId = prefs.deviceId
+        synchronized(this) {
+            prefs.deviceToken = token
+            prefs.alertToken = token
+            prefs.deviceId = deviceId
+        }
+        // A session belongs to the device it was made for, so this one's finished.
+        clientInstance?.let { c -> if (c.unlocked) runCatching { c.reprove() } }
+        if (oldToken != null && oldId != null && oldId != deviceId) runCatching { VaultApi(server, { oldToken }).revokeDevice(oldId) }
         version.value = version.value + 1
     }
 

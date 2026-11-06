@@ -22,6 +22,7 @@ object Fixtures {
     fun setup() {
         Wordlist.loader = { File(core, "eff_large_wordlist.json").readText() }
         Generator.rulesLoader = { File(core, "data/password-rules.json").readText() }
+        org.promptly.sync.passwords.core.PasswordChange.urlsLoader = { File(core, "data/change-password-URLs.json").readText() }
         Match.loadSharedCredentials(File(core, "data/shared-credentials.json").readText())
     }
 }

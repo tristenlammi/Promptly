@@ -101,7 +101,7 @@ internal class TinyServer(private val answers: MutableMap<String, Pair<String, B
         val answer = answers[key]
         val out = c.getOutputStream()
         val bytes = answer?.second ?: "{\"detail\":\"down\"}".toByteArray()
-        out.write("HTTP/1.1 ${if (answer == null) "503 Down" else "200 OK"}\r\nContent-Type: ${answer?.first ?: "application/json"}\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())
+        out.write("HTTP/1.1 ${if (key in refusing) "403 No" else if (answer == null) "503 Down" else "200 OK"}\r\nContent-Type: ${answer?.first ?: "application/json"}\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())
         out.write(bytes)
         out.flush()
     }
@@ -109,6 +109,11 @@ internal class TinyServer(private val answers: MutableMap<String, Pair<String, B
     fun json(path: String, text: String) { answers["GET /api/passwords$path"] = "application/json" to text.toByteArray() }
 
     fun answersFor(key: String, type: String, bytes: ByteArray) { answers[key] = type to bytes }
+
+    private val refusing = HashSet<String>()
+
+    /** Says 403 to this, as a server does to a device token without the scope. */
+    fun answersFor403(key: String) { refusing += key }
 
     fun close() = runCatching { socket.close() }
 

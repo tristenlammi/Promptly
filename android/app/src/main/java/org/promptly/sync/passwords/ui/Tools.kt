@@ -641,6 +641,7 @@ private fun SettingsScreen(activity: FragmentActivity, client: VaultClient, onBa
             copyTotp = it
             p.copyTotpAfterFill = it
         }
+        MailCodesSetting(client)
 
         if (Build.VERSION.SDK_INT >= 34) {
             Text("Passkeys", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)

@@ -27,6 +27,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: passkeys imported from Bitwarden now work: their ids are converted to the form sites use.
 
 ### Added
+- Passwords on Android: codes and sign-in links from Promptly Mail on the fill sheet, if you turn them on. Only the site's own sender gets a row, nothing fills until you tap it, and a phone connected earlier can add what it needs from Settings.
 - Passwords on Android: an Activity screen, and an opt-in to post coarse counts to your Today page.
 - Passwords: the extension offers your passkeys when a site asks quietly or with no click, from the toolbar panel and the on-page menu.
 - Passwords on Android: import from LastPass, 1Password (.1pux), Proton Pass, Dashlane, KeePass (XML and KDBX, with its password), Credential Exchange, Aegis, 2FAS and Google Authenticator links on the phone itself, with limits so a hostile file can't hang or exhaust it.

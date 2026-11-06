@@ -482,24 +482,7 @@ private fun AttachmentsPanel(client: VaultClient, item: Item, canEdit: Boolean) 
                     runCatching {
                         val size = ctx.contentResolver.openAssetFileDescriptor(uri, "r")!!.use { it.length }.takeIf { it >= 0 } ?: throw IllegalStateException("That file's size can't be read.")
                         ctx.contentResolver.openInputStream(uri)!!.use { input ->
-                            var at = 0L
-                            // Chunks are asked for in order, so one forward read serves them all.
-                            client.addAttachment(item.id, name, mime, size, { offset, length ->
-                                while (at < offset) {
-                                    val skipped = input.skip(offset - at)
-                                    if (skipped <= 0) throw java.io.IOException("That file got shorter.")
-                                    at += skipped
-                                }
-                                val part = ByteArray(length)
-                                var got = 0
-                                while (got < length) {
-                                    val n = input.read(part, got, length - got)
-                                    if (n < 0) throw java.io.IOException("That file got shorter.")
-                                    got += n
-                                }
-                                at += got
-                                part
-                            }) { d, t -> busy = "Uploading $name: $d of $t MB" }
+                            client.addAttachment(item.id, name, mime, size, Attachments.streamReader(input, size)) { d, t -> busy = "Uploading $name: $d of $t MB" }
                         }
                     }
                 }

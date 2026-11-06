@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
@@ -44,22 +46,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.promptly.sync.passwords.Clip
+import org.promptly.sync.passwords.Links
 import org.promptly.sync.passwords.Pw
+import org.promptly.sync.passwords.core.ApiError
 import org.promptly.sync.passwords.core.Item
 import org.promptly.sync.passwords.core.ItemBody
 import org.promptly.sync.passwords.core.LoginUrl
+import org.promptly.sync.passwords.core.MailCode
+import org.promptly.sync.passwords.core.MailCodes
 import org.promptly.sync.passwords.core.Match
+import org.promptly.sync.passwords.core.RankedCode
 import org.promptly.sync.passwords.core.Totp
 import org.promptly.sync.passwords.ui.ConfirmIdentityPane
 import org.promptly.sync.passwords.ui.ErrorCard
 import org.promptly.sync.passwords.ui.LookalikeWarning
 import org.promptly.sync.passwords.ui.PwTheme
+import org.promptly.sync.passwords.ui.SensitiveWhile
 import org.promptly.sync.passwords.ui.UnlockPane
+import org.promptly.sync.passwords.ui.errorText
 import org.promptly.sync.passwords.ui.hardenWindow
 import org.promptly.sync.passwords.ui.toast
+import org.promptly.sync.passwords.ui.withSession
 
 class AutofillAuthActivity : FragmentActivity() {
     private lateinit var mode: String
@@ -69,6 +80,7 @@ class AutofillAuthActivity : FragmentActivity() {
     private var frameDomain: String? = null
     private lateinit var usernames: ArrayList<AutofillId>
     private lateinit var passwords: ArrayList<AutofillId>
+    private lateinit var newPasswords: ArrayList<AutofillId>
     private lateinit var otps: ArrayList<AutofillId>
     private lateinit var cardIds: ArrayList<AutofillId>
     private lateinit var cardKeys: ArrayList<String>
@@ -93,6 +105,7 @@ class AutofillAuthActivity : FragmentActivity() {
         frameDomain = i.getStringExtra(EXTRA_FRAME)
         usernames = ids(i, EXTRA_USERNAMES)
         passwords = ids(i, EXTRA_PASSWORDS)
+        newPasswords = ids(i, EXTRA_NEW_PASSWORDS)
         otps = ids(i, EXTRA_OTPS)
         cardIds = ids(i, EXTRA_CARD_IDS)
         cardKeys = i.getStringArrayListExtra(EXTRA_CARD_KEYS) ?: ArrayList()
@@ -221,7 +234,7 @@ class AutofillAuthActivity : FragmentActivity() {
 
         when (val s = step) {
             Step.Unlock -> UnlockPane(this, "Unlock to fill", { step = Step.Pick }, { finish() })
-            Step.Pick -> if (itemId != null) Busy() else {
+            Step.Pick -> if (mode == MODE_MAIL_CODE || mode == MODE_MAIL_LINK) MailPane(lookalike(null)) else if (itemId != null) Busy() else {
                 // Nothing from the vault shows behind this.
                 val looks = remember(lookalikeCleared) { lookalike(null) }
                 if (looks != null) LookalikeWarning(pageName(), looks, emptyList(), "Choose a login anyway", { finish() }) { lookalikeCleared = true }
@@ -243,6 +256,106 @@ class AutofillAuthActivity : FragmentActivity() {
                 Button(onClick = { finish() }) { Text("Close") }
             }
         }
+    }
+
+    /** Text from someone's email, in rows a person reads and picks from. Nothing here fills or opens by
+     *  itself, however few rows there are, and a sender that isn't this site gets no row at all. */
+    @Composable
+    private fun MailPane(looksLike: String?) {
+        val c = Pw.client()!!
+        var codes by remember { mutableStateOf<List<MailCode>?>(null) }
+        var error by remember { mutableStateOf<String?>(null) }
+        var confirming by remember { mutableStateOf<RankedCode?>(null) }
+        if (looksLike != null) {
+            Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ErrorCard("${pageName()} looks like $looksLike, but it's a different site, so no codes are offered here.")
+                Button(onClick = { finish() }, Modifier.testTag("mail-close")) { Text("Close") }
+            }
+            return
+        }
+        LaunchedEffect(Unit) {
+            while (true) {
+                withContext(Dispatchers.IO) { runCatching { withSession(c) { c.api.mailCodes() } } }.onSuccess {
+                    codes = it
+                    error = null
+                }.onFailure { e ->
+                    error = if (e is ApiError && e.status == 403) "This phone isn't connected for email codes yet. Open Passwords, then Settings, Email codes." else errorText(e)
+                }
+                delay(5000)
+            }
+        }
+        val ranked = remember(codes) {
+            val list = codes ?: emptyList()
+            val saved = AutofillIndex.savedDomainsOf(c.allItems())
+            val now = System.currentTimeMillis() + c.serverTimeOffsetMs
+            when (val t = target) {
+                is FillTarget.Web -> MailCodes.rank(list, t.url, saved, now)
+                is FillTarget.App -> MailCodes.rankForSites(list, c.allItems().filter { it.body.kind == "login" && appLinked(it, t) }.flatMapTo(HashSet()) { Match.savedDomainsOf(it.body.urls) }, saved, now)
+            }.filter { MailCodes.fresh(it) }
+        }
+        val pick = confirming
+        if (pick != null) {
+            LinkConfirm(pick) { confirming = null }
+            return
+        }
+        val wantCodes = mode == MODE_MAIL_CODE && otps.isNotEmpty()
+        val here = ranked.filter { it.matches }
+        val codeRows = if (wantCodes) here.filter { it.mail.code != null } else emptyList()
+        val linkRows = here.filter { MailCodes.linkIsSafe(it.mail) }
+        val others = if (wantCodes) MailCodes.otherSenders(ranked) else emptyList()
+        SensitiveWhile(codeRows.isNotEmpty())
+        Column(Modifier.fillMaxSize().safeDrawingPadding().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(if (wantCodes) "Codes from your email" else "Sign-in links from your email", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text("Only mail from this site's own address shows here, and nothing happens until you pick it. A From line can be forged, so only use one you just asked for.", style = MaterialTheme.typography.bodySmall)
+            error?.let { ErrorCard(it) }
+            for (r in codeRows) {
+                Column(Modifier.fillMaxWidth().clickable { fillCode(r.mail.code!!) }.padding(vertical = 10.dp).testTag("mail-code-${r.mail.fromDomain}")) {
+                    Text("Code from ${r.mail.fromDomain}: ${r.mail.code}", fontWeight = FontWeight.Medium)
+                    Text(MailCodes.agoText(r.agoSeconds), style = MaterialTheme.typography.bodySmall)
+                }
+                HorizontalDivider()
+            }
+            for (r in linkRows) {
+                OutlinedButton(onClick = { confirming = r }, Modifier.fillMaxWidth().testTag("mail-link-${r.mail.fromDomain}")) { Text("Open sign-in link from ${r.mail.fromDomain}") }
+            }
+            if (codes != null && codeRows.isEmpty() && linkRows.isEmpty()) Text("Nothing from this site in the last ten minutes. This keeps looking while it's open.", Modifier.testTag("mail-none"))
+            if (codes == null && error == null) CircularProgressIndicator()
+            for (d in others) Text("$d has a code. It isn't from this site, so it isn't offered here.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("mail-other-$d"))
+            TextButton(onClick = { finish() }, Modifier.testTag("mail-close")) { Text("Close") }
+        }
+    }
+
+    /** A link goes somewhere at once, so it asks, with the safe choice first and the other held back
+     *  for a moment, by the same rule as the lookalike warning. */
+    @Composable
+    private fun LinkConfirm(r: RankedCode, onNo: () -> Unit) {
+        val host = remember(r) { MailCodes.linkHost(r.mail) }
+        var armed by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            delay(600)
+            armed = true
+        }
+        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp).testTag("mail-link-confirm"), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("Open this sign-in link?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text("An email from ${r.mail.fromDomain}, ${MailCodes.agoText(r.agoSeconds)}. It opens $host in your browser, and signs in whoever opens it.", Modifier.testTag("mail-link-where"))
+            Text("A From line can be forged. If you didn't just ask this site for a link, don't open it.", style = MaterialTheme.typography.bodyMedium)
+            Button(onClick = onNo, Modifier.fillMaxWidth().testTag("mail-link-no")) { Text("Don't open it") }
+            OutlinedButton(onClick = {
+                val link = r.mail.link
+                if (link != null && MailCodes.linkIsSafe(r.mail)) Links.open(this@AutofillAuthActivity, link)
+                finish()
+            }, enabled = armed && host != null, modifier = Modifier.fillMaxWidth().testTag("mail-link-yes")) { Text("Open it") }
+        }
+    }
+
+    /** Only ever from a tap on its row. */
+    private fun fillCode(code: String) {
+        val out = Dataset.Builder()
+        val boxes = MailCodes.forBoxes(code, otps.size)
+        if (boxes != null) otps.forEachIndexed { i, id -> out.setValue(id, AutofillValue.forText(boxes[i])) }
+        else out.setValue(otps.first(), AutofillValue.forText(MailCodes.forOneBox(code)))
+        setResult(RESULT_OK, Intent().putExtra(AutofillManager.EXTRA_AUTHENTICATION_RESULT, out.build()))
+        finish()
     }
 
     @Composable
@@ -407,6 +520,8 @@ class AutofillAuthActivity : FragmentActivity() {
                 val user = b.username ?: b.str("email")
                 usernames.forEach { put(it, user) }
                 passwords.forEach { put(it, b.password) }
+                // Changing it on the site: the new one was saved first, so this can't lose it.
+                newPasswords.forEach { put(it, b.str("pendingPassword")) }
             }
         }
         return if (any) out.build() else null
@@ -418,6 +533,8 @@ class AutofillAuthActivity : FragmentActivity() {
         const val MODE_CARD = "card"
         const val MODE_IDENTITY = "identity"
         const val MODE_PICK = "pick"
+        const val MODE_MAIL_CODE = "mail-code"
+        const val MODE_MAIL_LINK = "mail-link"
         private const val EXTRA_MODE = "pw.mode"
         private const val EXTRA_ITEM = "pw.item"
         private const val EXTRA_KIND = "pw.target.kind"
@@ -430,6 +547,7 @@ class AutofillAuthActivity : FragmentActivity() {
         private const val EXTRA_FRAME = "pw.frame"
         private const val EXTRA_USERNAMES = "pw.ids.usernames"
         private const val EXTRA_PASSWORDS = "pw.ids.passwords"
+        private const val EXTRA_NEW_PASSWORDS = "pw.ids.new-passwords"
         private const val EXTRA_OTPS = "pw.ids.otps"
         private const val EXTRA_CARD_IDS = "pw.ids.card"
         private const val EXTRA_CARD_KEYS = "pw.keys.card"
@@ -446,6 +564,7 @@ class AutofillAuthActivity : FragmentActivity() {
                 .putExtra(EXTRA_FRAME, form.frameDomain)
                 .putParcelableArrayListExtra(EXTRA_USERNAMES, ArrayList(form.usernames))
                 .putParcelableArrayListExtra(EXTRA_PASSWORDS, ArrayList(form.passwords))
+                .putParcelableArrayListExtra(EXTRA_NEW_PASSWORDS, ArrayList(form.newPasswords))
                 .putParcelableArrayListExtra(EXTRA_OTPS, ArrayList(form.otps))
                 .putParcelableArrayListExtra(EXTRA_CARD_IDS, ArrayList(form.cards.values))
                 .putStringArrayListExtra(EXTRA_CARD_KEYS, ArrayList(form.cards.keys))

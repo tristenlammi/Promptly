@@ -121,7 +121,8 @@ class PromptlyAutofillService : AutofillService() {
             val builder = Dataset.Builder()
             val views = remote(title, subtitle)
             val ids = when (mode) {
-                AutofillAuthActivity.MODE_OTP -> form.otps
+                AutofillAuthActivity.MODE_OTP, AutofillAuthActivity.MODE_MAIL_CODE -> form.otps
+                AutofillAuthActivity.MODE_MAIL_LINK -> form.usernames
                 AutofillAuthActivity.MODE_CARD -> form.cards.values.toList()
                 AutofillAuthActivity.MODE_IDENTITY -> form.identity.values.toList()
                 else -> form.allIds.filter { it in form.usernames || it in form.passwords || it in form.newPasswords }.ifEmpty { form.allIds }
@@ -153,6 +154,11 @@ class PromptlyAutofillService : AutofillService() {
             for (h in hits.filter { it.entry.hasTotp }.take(4)) {
                 addDataset(AutofillAuthActivity.MODE_OTP, h.entry.itemId, h.entry.title ?: "2FA code", "2FA code")
             }
+        }
+        when (MailOffer.row(Pw.prefs.mailCodes, form.otps.isNotEmpty(), form.usernames.isNotEmpty() && form.passwords.isEmpty() && form.newPasswords.isEmpty(), form.frameDomain, target, hits.size)) {
+            MailOffer.Row.CODE -> addDataset(AutofillAuthActivity.MODE_MAIL_CODE, null, "Code from email", "Opens to show what's arrived")
+            MailOffer.Row.LINK -> addDataset(AutofillAuthActivity.MODE_MAIL_LINK, null, "Sign-in link from email", "Opens to show what's arrived")
+            null -> Unit
         }
         if (form.hasCard) {
             for (e in entries.filter { it.kind == "card" }.take(4)) addDataset(AutofillAuthActivity.MODE_CARD, e.itemId, e.title ?: "A saved card", "Card, opens to confirm")

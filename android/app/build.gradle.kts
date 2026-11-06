@@ -106,6 +106,7 @@ val copyPasswordAssets = tasks.register<CopyPasswordAssets>("copyPasswordAssets"
         passwordCore.resolve("eff_large_wordlist.json"),
         passwordCore.resolve("data/password-rules.json"),
         passwordCore.resolve("data/shared-credentials.json"),
+        passwordCore.resolve("data/change-password-URLs.json"),
     )
     output.set(layout.buildDirectory.dir("generated/passwordAssets"))
 }

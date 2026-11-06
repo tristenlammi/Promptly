@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.time.Instant
 import java.time.OffsetDateTime
 
@@ -335,5 +336,201 @@ object ActivityLog {
             val at = o.str("at")?.takeIf { parseInstant(it) != null } ?: return@mapNotNull null
             ActivityOut(event, at)
         }
+    }
+}
+
+// ---- Mail codes (plan 5.1) ---------------------------------------------------------------
+
+data class MailCode(val id: String, val fromName: String, val fromDomain: String, val at: String, val code: String?, val link: String?)
+
+data class RankedCode(
+    val mail: MailCode,
+    /** The sender belongs to this site. Nothing else is ever offered as something to fill. */
+    val matches: Boolean,
+    /** The sender's domain looks like a site you have a login for, without being it. */
+    val lookalike: String?,
+    val agoSeconds: Long,
+)
+
+object MailCodes {
+    const val WINDOW_SECONDS = 600L
+
+    /** The shapes the server's extraction can make. Anything else came from somewhere else, and it's
+     *  about to go into a box on someone's page. */
+    private val CODE = Regex("^[A-Z0-9]{3,8}(?:[- ][A-Z0-9]{3,6})?$")
+
+    /** A sender's domain is the text after an @ in a From line, so it can hold anything at all. */
+    private val DOMAIN = Regex("^[\\p{L}\\p{N}](?:[\\p{L}\\p{N}.-]{0,251}[\\p{L}\\p{N}])?$")
+
+    /** Null for what doesn't look like a domain. OkHttp would read `netflix.com/x` as netflix.com. */
+    fun senderBase(domain: String): String? = domain.takeIf { DOMAIN.matches(it) }?.let { Match.baseDomain(it.lowercase()) }
+
+    fun related(a: String?, b: String?): Boolean {
+        if (a == null || b == null) return false
+        return a == b || b in Match.sharedWith(a)
+    }
+
+    /** Rubbish is dropped row by row. A row keeps only what it can be trusted with, and a row with
+     *  nothing to offer isn't a row. */
+    fun parse(text: String?): List<MailCode> {
+        val rows = runCatching { Json.parseToJsonElement(text ?: return emptyList()) as? JsonArray }.getOrNull() ?: return emptyList()
+        return rows.take(25).mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val id = o.str("id")?.takeIf { it.isNotEmpty() && it.length <= 64 } ?: return@mapNotNull null
+            val domain = o.str("from_domain")?.takeIf { it.length <= 253 } ?: return@mapNotNull null
+            val at = o.str("at")?.takeIf { parseInstant(it) != null } ?: return@mapNotNull null
+            val code = o.str("code")?.takeIf { CODE.matches(it) }
+            val link = o.str("link")?.takeIf { it.length <= 2048 }
+            if (code == null && link == null) return@mapNotNull null
+            MailCode(id, UntrustedText.clean(o.str("from_name"), 80), domain, at, code, link)
+        }
+    }
+
+    private fun ranked(codes: List<MailCode>, sites: Set<String>, saved: Iterable<String>, now: Long): List<RankedCode> {
+        val list = saved.toList()
+        return codes.map { c ->
+            val sender = senderBase(c.fromDomain)
+            val matches = sites.any { related(sender, it) }
+            RankedCode(c, matches, if (matches || sender == null) null else Match.lookalikeOf(c.fromDomain.lowercase(), list), maxOf(0L, (now - parseInstant(c.at)!!.toEpochMilli()) / 1000))
+        }.sortedWith(compareBy<RankedCode> { !it.matches }.thenBy { it.agoSeconds })
+    }
+
+    /** `rankMailCodes`: the sender against the page, on this phone. */
+    fun rank(codes: List<MailCode>, pageUrl: String, saved: Iterable<String>, now: Long = System.currentTimeMillis()): List<RankedCode> =
+        ranked(codes, setOfNotNull(Match.hostOf(pageUrl)?.let { Match.baseDomain(it) }), saved, now)
+
+    /** An app has no page. Its sites are the ones saved on the logins linked to it. */
+    fun rankForSites(codes: List<MailCode>, sites: Set<String>, saved: Iterable<String>, now: Long = System.currentTimeMillis()): List<RankedCode> =
+        ranked(codes, sites, saved, now)
+
+    /** The server's window is ten minutes. A row that's older, whatever it says, isn't a code now. */
+    fun fresh(r: RankedCode): Boolean = r.agoSeconds <= WINDOW_SECONDS + 120
+
+    /** Other senders with a code: only their names, for a warning, and never what they sent. */
+    fun otherSenders(list: List<RankedCode>): List<String> =
+        list.filter { !it.matches && it.mail.code != null && senderBase(it.mail.fromDomain) != null }.map { it.mail.fromDomain.lowercase() }.distinct()
+
+    /** `linkIsSafe`, and more: a browser and this parser can't be allowed to disagree about where a
+     *  link goes, so anything they might read differently is refused before they get to try. */
+    fun linkIsSafe(c: MailCode): Boolean = linkHost(c) != null
+
+    fun linkHost(c: MailCode): String? {
+        val link = c.link ?: return null
+        if (!link.startsWith("https://", true) || link.any { it == '\\' || it.code <= 0x20 || it.code == 0x7f }) return null
+        val u = link.toHttpUrlOrNull() ?: return null
+        if (u.scheme != "https" || u.username.isNotEmpty() || u.password.isNotEmpty()) return null
+        return u.host.takeIf { related(Match.baseDomain(it), senderBase(c.fromDomain)) }
+    }
+
+    fun agoText(seconds: Long): String = if (seconds < 60) "$seconds s ago" else "${Math.round(seconds / 60.0)} min ago"
+
+    /** What goes in a single box: digits with their spacing taken out, or a mixed code as sent. */
+    fun forOneBox(code: String): String = if (code.all { it.isDigit() || it == ' ' || it == '-' }) code.filter { it.isDigit() } else code
+
+    /** One character each, if there's a box for each. Null if not. */
+    fun forBoxes(code: String, boxes: Int): List<String>? {
+        val bare = code.filter { it != ' ' && it != '-' }
+        return if (boxes > 1 && boxes == bare.length) bare.map { it.toString() } else null
+    }
+}
+
+// ---- Security emails (plan 5.8) -----------------------------------------------------------
+
+data class SecurityEvent(val id: String, val kind: String, val fromName: String, val fromDomain: String, val subject: String, val at: String)
+
+class SecurityAlert(val event: SecurityEvent, val item: Item, val text: String)
+
+object SecurityEvents {
+    const val DISMISSED_META = "alerts_dismissed"
+
+    /** Only the two kinds this was built for. Names and subjects are a stranger's words. */
+    fun parse(text: String?): List<SecurityEvent> {
+        val rows = runCatching { Json.parseToJsonElement(text ?: return emptyList()) as? JsonArray }.getOrNull() ?: return emptyList()
+        return rows.take(50).mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val id = o.str("id")?.takeIf { it.isNotEmpty() && it.length <= 64 } ?: return@mapNotNull null
+            val kind = o.str("kind")?.takeIf { it == "password_changed" || it == "new_signin" } ?: return@mapNotNull null
+            val domain = o.str("from_domain")?.takeIf { MailCodes.senderBase(it) != null } ?: return@mapNotNull null
+            val at = o.str("at")?.takeIf { parseInstant(it) != null } ?: return@mapNotNull null
+            SecurityEvent(id, kind, UntrustedText.clean(o.str("from_name"), 60), domain.lowercase(), UntrustedText.clean(o.str("subject"), 200), at)
+        }
+    }
+
+    /** `securityAlerts`: the first login whose site the sender belongs to, matched here. */
+    fun alerts(events: List<SecurityEvent>, items: Collection<Item>): List<SecurityAlert> = events.mapNotNull { event ->
+        val sender = MailCodes.senderBase(event.fromDomain)
+        val item = items.firstOrNull { i -> i.body.kind == "login" && i.body.urls.any { u -> MailCodes.related(Match.hostOf(u.url)?.let { Match.baseDomain(it) }, sender) } } ?: return@mapNotNull null
+        val who = event.fromName.ifEmpty { event.fromDomain }
+        val what = if (event.kind == "password_changed") "your password changed" else "there was a new sign-in"
+        SecurityAlert(event, item, "$who says $what. Was that you?")
+    }
+}
+
+// ---- Change password (plan 5.10) ----------------------------------------------------------
+
+object PasswordChange {
+    @Volatile
+    var urlsLoader: (() -> String)? = null
+
+    private val urls: Map<String, String> by lazy {
+        val o = urlsLoader?.invoke()?.let { runCatching { Json.parseToJsonElement(it) as? JsonObject }.getOrNull() } ?: JsonObject(emptyMap())
+        o.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.takeIf { it.isString }?.content?.takeIf { it.startsWith("https://") }?.let { k to it } }.toMap()
+    }
+
+    private val WEB = Regex("^https?:", RegexOption.IGNORE_CASE)
+
+    /** `changePageUrl`: the site's own page as far as anyone's written it down, or the standard place. */
+    fun changePageUrl(body: ItemBody): String? {
+        for (u in body.urls) {
+            val host = Match.hostOf(u.url) ?: continue
+            if (!WEB.containsMatchIn(u.url)) continue
+            val known = urls[host] ?: Match.baseDomain(host)?.let { urls[it] }
+            return known ?: "https://$host/.well-known/change-password"
+        }
+        return null
+    }
+
+    /** Saved before the site's told, so a failed change can't lose the new one. */
+    fun withPending(body: ItemBody, password: String): ItemBody = body.with("pendingPassword" to JsonPrimitive(password))
+
+    /** It worked: the new one's the password, and `VaultClient.update` moves the old one to history. */
+    fun commit(body: ItemBody): ItemBody {
+        val pending = body.str("pendingPassword") ?: return body
+        return body.with("pendingPassword" to null, "password" to JsonPrimitive(pending))
+    }
+
+    fun drop(body: ItemBody): ItemBody = body.with("pendingPassword" to null)
+
+    /** Worst first, each once. */
+    fun toChange(r: HealthReport): List<Item> = (r.breached.map { it.first } + r.reused.flatten() + r.weak).distinctBy { it.id }
+}
+
+// ---- Documents from Files (plan 5.12) ------------------------------------------------------
+
+data class DriveFile(val id: String, val name: String, val sizeBytes: Long, val mime: String?)
+
+object DriveFiles {
+    const val MAX_BYTES = 100L * 1024 * 1024
+    private val ID = Regex("^[0-9a-fA-F-]{36}$")
+    private val MIME = Regex("^[A-Za-z0-9!#$&^_.+-]{1,64}/[A-Za-z0-9!#$&^_.+-]{1,64}(; ?[a-zA-Z0-9-]{1,32}=[A-Za-z0-9._-]{1,32})?$")
+    private val DAY = Regex("^\\d{4}-\\d{2}-\\d{2}$")
+
+    /** An id goes into a path, a name goes on an attachment, and neither is taken on trust. */
+    fun parse(text: String?): List<DriveFile> {
+        val rows = runCatching { Json.parseToJsonElement(text ?: return emptyList()) as? JsonArray }.getOrNull() ?: return emptyList()
+        return rows.take(50).mapNotNull { e ->
+            val o = e as? JsonObject ?: return@mapNotNull null
+            val id = o.str("id")?.takeIf { ID.matches(it) } ?: return@mapNotNull null
+            val size = (o["size_bytes"] as? JsonPrimitive)?.takeIf { !it.isString }?.content?.toLongOrNull()?.takeIf { it in 1..MAX_BYTES } ?: return@mapNotNull null
+            val name = UntrustedText.clean(o.str("name"), 255).replace('/', '_').replace('\\', '_').ifEmpty { "Document" }
+            DriveFile(id, name, size, o.str("mime_type")?.takeIf { MIME.matches(it) })
+        }
+    }
+
+    /** What a reminder takes: a real date, written the one way the server reads. */
+    fun validDay(text: String): String? {
+        val t = text.trim()
+        if (!DAY.matches(t)) return null
+        return runCatching { java.time.LocalDate.parse(t) }.getOrNull()?.takeIf { it.year in 2000..2199 }?.toString()
     }
 }

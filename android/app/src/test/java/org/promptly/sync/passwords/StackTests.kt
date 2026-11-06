@@ -17,6 +17,7 @@ import kotlinx.serialization.json.put
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -1499,6 +1500,251 @@ class StackTests {
     }
 
     // ---- Where the vault meets the rest of Promptly ----
+
+    /** A throwaway message in a throwaway user's Mail, with the real server reading it. From a bash-free
+     *  pipe into the container, as the users are. */
+    private fun python(script: String): String {
+        val p = ProcessBuilder("docker", "exec", "-i", "PromptlyPw-Backend", "python", "-").redirectErrorStream(false).start()
+        p.outputStream.use { it.write(script.toByteArray()) }
+        val out = p.inputStream.bufferedReader().readText()
+        val err = p.errorStream.bufferedReader().readText()
+        assertTrue("python timed out", p.waitFor(120, TimeUnit.SECONDS))
+        assertEquals("python failed: $err", 0, p.exitValue())
+        return out
+    }
+
+    private fun b64(s: String) = java.util.Base64.getEncoder().encodeToString(s.toByteArray())
+
+    private fun seedMail(u: StackUser, subject: String?, fromName: String = "", from: String = "", text: String = "", html: String = "", minutesAgo: Int = 0) {
+        val s = { v: String -> "base64.b64decode(\"${b64(v)}\").decode()" }
+        python("""
+import asyncio, base64, random, uuid
+from datetime import datetime, timedelta, timezone
+from sqlalchemy import select
+import app.db_models
+from app.database import SessionLocal
+from app.mail.models import MailAccount, MailFolder, MailMessage
+async def main():
+    async with SessionLocal() as db:
+        uid = uuid.UUID("${u.id}")
+        acc = await db.scalar(select(MailAccount).where(MailAccount.user_id == uid))
+        if acc is None:
+            acc = MailAccount(user_id=uid, email=f"{uuid.uuid4().hex[:8]}@example.com", imap_host="localhost", imap_port=993, imap_security="ssl", smtp_host="localhost", smtp_port=465, smtp_security="ssl", username="x", secret_encrypted="x")
+            db.add(acc)
+            await db.flush()
+            db.add(MailFolder(account_id=acc.id, path="INBOX", name="Inbox", role="inbox"))
+            await db.flush()
+        folder = await db.scalar(select(MailFolder).where(MailFolder.account_id == acc.id, MailFolder.role == "inbox"))
+        if ${if (subject != null) "True" else "False"}:
+            db.add(MailMessage(account_id=acc.id, folder_id=folder.id, uid=random.randint(1, 2000000000), thread_key=uuid.uuid4().hex, subject=${s(subject ?: "")}, from_name=${s(fromName)}, from_addr=${s(from)}, sent_at=datetime.now(timezone.utc) - timedelta(minutes=$minutesAgo), body_text=${s(text)}, body_html=${s(html)}))
+        await db.commit()
+asyncio.run(main())
+""")
+    }
+
+    /** A phone connected before email codes, as every one out there is: it asked only for `vault`. */
+    private fun phoneWithScopes(u: StackUser, scopes: List<String>): VaultClient {
+        val t = VaultApi(BASE, { null }, patient).registerDevice("Bearer ${u.token}", "Scopes test", scopes = scopes)
+        return VaultClient(VaultApi(BASE, { t.token }, patient), MemoryStore(), MemoryKeeper())
+    }
+
+    @Test fun aPhoneWithOnlyTheVaultScopeKeepsWorkingAndCantReadMail() {
+        need()
+        val u = makeUser("scope")
+        val old = phoneWithScopes(u, listOf("vault"))
+        val secret = setupRetrying(old)
+        old.saveNew(old.personalVaultId(), newBody("login", "Still fine").withText("password", "pw-Fine-1!"))
+        assertFalse(old.sync().offline)
+        assertEquals(listOf("vault"), old.api.devices().first { it.current }.scopes)
+        seedMail(u, "Your verification code", "Bank", "no-reply@promptlybank.com", "Your code is 482913")
+        assertEquals(403, assertThrows(ApiError::class.java) { old.api.mailCodes() }.status)
+        assertEquals(403, assertThrows(ApiError::class.java) { old.api.securityEvents() }.status)
+        assertEquals(403, assertThrows(ApiError::class.java) { old.api.plusRule("me+a@example.com") }.status)
+        // The default for a new connection, and it takes a vault session as well as the scope.
+        val fresh = VaultApi(BASE, { null }, patient).registerDevice("Bearer ${u.token}", "New phone")
+        val phone = VaultClient(VaultApi(BASE, { fresh.token }, patient), MemoryStore(), MemoryKeeper())
+        assertEquals("vault_locked", assertThrows(ApiError::class.java) { phone.api.mailCodes() }.detail)
+        phone.unlock(MASTER, secret)
+        assertEquals(listOf("mail_codes", "vault"), phone.api.devices().first { it.current }.scopes)
+        assertEquals("482913", phone.api.mailCodes().single().code)
+    }
+
+    /** The real extraction, real senders and what someone's email might try. */
+    @Test fun mailCodesFromTheRealServerMatchOnlyTheirOwnSite() {
+        need()
+        useSimpleBaseDomains()
+        val u = makeUser("mail")
+        val phone = device(u)
+        setupRetrying(phone)
+        assertTrue("No Mail account, nothing back", phone.api.mailCodes().isEmpty())
+        seedMail(u, "Your verification code", "Promptly Bank", "no-reply@promptlybank.com", "Your code is 482913")
+        // Text that does everything it can to pass as this site's code, and isn't from it.
+        seedMail(u, "promptlybank.com verification code", "Promptly Bank", "security@evil.example", "Your promptlybank.com code is 999111. Enter it on promptlybank.com.")
+        seedMail(u, "Your verification code", "Promptly Bank", "x@promptlybank.com.evil.example", "Your code is 777222")
+        // Nothing that's a code, a number in a footer, and mail too old to count.
+        seedMail(u, "Your order 123456 has shipped", "Shop", "orders@promptlybank.com", "Order 123456. Total $45.00.")
+        seedMail(u, "Your verification code", "Promptly Bank", "no-reply@promptlybank.com", "Your code is 555666", minutesAgo = 30)
+        // A link that goes where its sender is, and one that doesn't.
+        seedMail(u, "Sign in to Promptly Bank", "Promptly Bank", "login@promptlybank.com", "Use your magic link: https://promptlybank.com/magic/abcdefghijklmnopqrstuvwxyz")
+        seedMail(u, "Sign in to Promptly Bank", "Promptly Bank", "login@promptlybank.com", "Use your magic link: https://evil.example/magic/abcdefghijklmnopqrstuvwxyz")
+        val codes = phone.api.mailCodes()
+        assertTrue("The server's window: ${codes.map { it.code }}", codes.none { it.code == "555666" })
+        val ranked = org.promptly.sync.passwords.core.MailCodes.rank(codes, "https://www.promptlybank.com/verify", listOf("promptlybank.com"))
+        val here = ranked.filter { it.matches }
+        assertEquals(listOf("482913"), here.mapNotNull { it.mail.code })
+        assertFalse(ranked.filter { it.matches }.any { it.mail.code == "999111" || it.mail.code == "777222" })
+        assertEquals(setOf("evil.example", "promptlybank.com.evil.example"), org.promptly.sync.passwords.core.MailCodes.otherSenders(ranked).toSet())
+        val links = here.filter { org.promptly.sync.passwords.core.MailCodes.linkIsSafe(it.mail) }
+        assertEquals(listOf("promptlybank.com"), links.map { org.promptly.sync.passwords.core.MailCodes.linkHost(it.mail) })
+        // Another site gets none of it.
+        assertTrue(org.promptly.sync.passwords.core.MailCodes.rank(codes, "https://shop.example/", emptyList()).none { it.matches })
+    }
+
+    @Test fun securityEmailsFromTheRealServerMatchTheVaultHere() {
+        need()
+        useSimpleBaseDomains()
+        val u = makeUser("sec")
+        val phone = device(u)
+        setupRetrying(phone)
+        phone.saveNew(phone.personalVaultId(), newBody("login", "Instagram").withText("password", "pw-Sec-1!").withUrls(listOf(LoginUrl("https://www.instagram.com"))))
+        seedMail(u, "Your password was changed", "Instagram", "security@mail.instagram.com", "Hello")
+        seedMail(u, "New sign-in from a device", "Instagram", "x@instagram.com.evil.example", "Hello")
+        seedMail(u, "New sign-in to your account", "Elsewhere", "no-reply@elsewhere.example", "Hello")
+        seedMail(u, "Hello there", "Instagram", "x@mail.instagram.com", "Nothing about security")
+        val events = phone.api.securityEvents()
+        assertEquals(3, events.size)
+        val alerts = org.promptly.sync.passwords.core.SecurityEvents.alerts(events, phone.allItems())
+        assertEquals("Instagram says your password changed. Was that you?", alerts.single().text)
+        assertEquals("Instagram", alerts.single().item.body.title)
+    }
+
+    @Test fun aPlusRuleIsMadeOnTheServerOnlyForARealPlusAddress() {
+        need()
+        val u = makeUser("plus")
+        val phone = device(u)
+        setupRetrying(phone)
+        assertEquals("Set up Mail first.", assertThrows(ApiError::class.java) { phone.api.plusRule("me+shop@example.com") }.detail)
+        seedMail(u, null)
+        assertEquals("Plus addresses/shop", phone.api.plusRule("me+shop@example.com"))
+        assertEquals("Twice is the same rule", "Plus addresses/shop", phone.api.plusRule("me+shop@example.com"))
+        assertEquals(400, assertThrows(ApiError::class.java) { phone.api.plusRule("me@example.com") }.status)
+        val rows = python("""
+import asyncio, uuid
+from sqlalchemy import select
+import app.db_models
+from app.database import SessionLocal
+from app.mail.models import MailLabel, MailRule
+async def main():
+    async with SessionLocal() as db:
+        rows = (await db.execute(select(MailRule.kind, MailRule.value, MailLabel.name).join(MailLabel, MailLabel.id == MailRule.label_id).where(MailRule.user_id == uuid.UUID("${u.id}")))).all()
+        print("RULES", [tuple(r) for r in rows])
+asyncio.run(main())
+""")
+        assertTrue(rows, rows.contains("('to', 'me+shop@example.com', 'Plus addresses/shop')"))
+    }
+
+    /** A real file in Files: it's sealed into the vault, opens again, and the server's copy goes to Files' Trash. */
+    @Test fun aDocumentMovesFromFilesIntoTheVault() {
+        need()
+        val u = makeUser("docs")
+        val phone = device(u)
+        val secret = setupRetrying(phone)
+        val data = "A scan, written out in throwaway text. ".repeat(40_000).toByteArray()
+        val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM).addFormDataPart("file", "passport-scan.txt", data.toRequestBody("text/plain".toMediaType())).build()
+        plain.newCall(okhttp3.Request.Builder().url("$BASE/api/files/").header("Authorization", "Bearer ${u.token}").post(body).build()).execute().use { assertTrue(it.body.string(), it.isSuccessful) }
+
+        val doc = phone.saveNew(phone.personalVaultId(), newBody("document", "Passport").withText("expiresOn", "2031-05-01"))
+        phone.sync()
+        val file = phone.api.driveFiles("PASSPORT").single()
+        assertEquals("passport-scan.txt", file.name)
+        assertEquals(data.size.toLong(), file.sizeBytes)
+        assertTrue(phone.api.driveFiles("nothing like that").isEmpty())
+        val updated = phone.addFromFiles(doc.id, file)
+        val ref = updated.body.attachments.single()
+        assertEquals("passport-scan.txt", ref.name)
+        assertTrue(ref.mime, ref.mime!!.startsWith("text/plain"))
+
+        // Another device of the same person opens it, from what the server holds: ciphertext.
+        val other = device(u)
+        other.unlock(MASTER, secret)
+        val again = java.io.ByteArrayOutputStream()
+        org.promptly.sync.passwords.core.Attachments.download(other.api, doc.vaultId, doc.id, other.get(doc.id)!!.body.attachments.single(), { again.write(it) })
+        assertTrue(data.contentEquals(again.toByteArray()))
+
+        // It's still in Files until asked, and then it goes to the Trash there, and no further.
+        phone.api.driveTrash(file.id)
+        assertTrue(phone.api.driveFiles("passport").isEmpty())
+        assertEquals(404, assertThrows(ApiError::class.java) { phone.api.driveContent(file.id) { _, _ -> } }.status)
+        assertEquals("One you can't see isn't there", 404, assertThrows(ApiError::class.java) { phone.api.driveTrash("12345678-1234-1234-1234-123456789012") }.status)
+    }
+
+    /** What the server can read says nothing about what it's for. */
+    @Test fun aReminderSaysNothingAboutTheDocument() {
+        need()
+        val u = makeUser("remind")
+        val phone = device(u)
+        setupRetrying(phone)
+        phone.api.reminder("2031-05-01")
+        assertEquals(422, assertThrows(ApiError::class.java) { phone.api.reminder("not a day") }.status)
+        val events = python("""
+import asyncio, uuid
+from sqlalchemy import select
+import app.db_models
+from app.database import SessionLocal
+from app.calendars.models import CalEvent
+async def main():
+    async with SessionLocal() as db:
+        rows = (await db.execute(select(CalEvent.title, CalEvent.description, CalEvent.all_day, CalEvent.start_at).where(CalEvent.created_by == uuid.UUID("${u.id}")))).all()
+        print("EVENTS", [(r[0], r[1], r[2], r[3].date().isoformat()) for r in rows])
+asyncio.run(main())
+""")
+        assertTrue(events, events.contains("Document expires soon"))
+        assertTrue(events, events.contains("2031-05-01"))
+        assertFalse(events, events.contains("Passport"))
+    }
+
+    /** What's written while changing a password reads the same on the web, at each step. */
+    @Test fun aPasswordChangeCrossesWithTheTypeScriptClient() {
+        need()
+        val u = makeUser("change")
+        val phone = device(u)
+        val secret = setupRetrying(phone)
+        val item = phone.saveNew(phone.personalVaultId(), newBody("login", "Site").withText("username", "ana").withText("password", "old-One-1!").withUrls(listOf(LoginUrl("https://example.com"))))
+        phone.sync()
+        withState { file ->
+            fun check(password: String, pending: String?, history: List<String>) {
+                writeState(file, buildJsonObject {
+                    put("token", u.token)
+                    put("secretKey", b64u(secret))
+                    put("id", item.id)
+                    put("password", password)
+                    pending?.let { put("pending", it) }
+                    put("history", JsonArray(history.map { JsonPrimitive(it) }))
+                })
+                runTs("chg", file)
+            }
+            phone.update(item.id, org.promptly.sync.passwords.core.PasswordChange.withPending(phone.get(item.id)!!.body, "new-One-2!"))
+            phone.sync()
+            check("old-One-1!", "new-One-2!", emptyList())
+            // A no drops it, and the old one's still the one.
+            phone.update(item.id, org.promptly.sync.passwords.core.PasswordChange.drop(phone.get(item.id)!!.body))
+            phone.sync()
+            check("old-One-1!", null, emptyList())
+            // A yes swaps them, with the old one in its history.
+            phone.update(item.id, org.promptly.sync.passwords.core.PasswordChange.withPending(phone.get(item.id)!!.body, "new-One-2!"))
+            phone.update(item.id, org.promptly.sync.passwords.core.PasswordChange.commit(phone.get(item.id)!!.body))
+            phone.sync()
+            check("new-One-2!", null, listOf("old-One-1!"))
+        }
+    }
+
+    @Test fun connectionsVectorsReadTheSameInTheTypeScript() {
+        need()
+        withState { file ->
+            writeState(file, buildJsonObject { })
+            runTs("conn", file)
+        }
+    }
 
     private val plain = OkHttpClient.Builder().readTimeout(60, TimeUnit.SECONDS).build()
     private fun bearerGet(u: StackUser, path: String): String =

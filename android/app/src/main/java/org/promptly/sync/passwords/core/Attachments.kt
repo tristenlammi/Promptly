@@ -30,6 +30,29 @@ object Attachments {
         return plain.copyOfRange(4, 4 + n)
     }
 
+    /** Chunks are asked for in order, so one forward read of a stream serves them all. A stream
+     *  that ends early, or runs on past what it said it was, is refused. */
+    fun streamReader(input: java.io.InputStream, size: Long): (Long, Int) -> ByteArray {
+        var at = 0L
+        return { offset, length ->
+            while (at < offset) {
+                val skipped = input.skip(offset - at)
+                if (skipped <= 0) throw java.io.IOException("That file got shorter.")
+                at += skipped
+            }
+            val part = ByteArray(length)
+            var got = 0
+            while (got < length) {
+                val n = input.read(part, got, length - got)
+                if (n < 0) throw java.io.IOException("That file got shorter.")
+                got += n
+            }
+            at += got
+            if (at >= size && input.read() != -1) throw java.io.IOException("That file got longer.")
+            part
+        }
+    }
+
     /** `read(offset, length)` gives that part of the file. Resumes from what the server has
      *  when `resume` names an earlier try. */
     fun upload(

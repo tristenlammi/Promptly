@@ -10,6 +10,8 @@ import { ApiError, VaultApi } from "../../../../../frontend/src/passwords/core/a
 import { downloadAttachment, uploadAttachment } from "../../../../../frontend/src/passwords/core/attachments";
 import { decryptBitwardenExport } from "../../../../../frontend/src/passwords/core/bitwarden";
 import { encryptedExport, plainCsvExport, plainJsonExport, readEncryptedExport } from "../../../../../frontend/src/passwords/core/exporter";
+import { changePageUrl, commitPending, linkIsSafe, rankMailCodes, securityAlerts, withPending } from "../../../../../frontend/src/passwords/core/connections";
+import { plusAddress } from "../../../../../frontend/src/passwords/core/generator";
 import { coarseCounts, runHealth } from "../../../../../frontend/src/passwords/core/health";
 import { dedupe, fromBitwardenJson, fromGenericCsv, importFile } from "../../../../../frontend/src/passwords/core/importers";
 import { openSend, sendMeta } from "../../../../../frontend/src/passwords/core/send";
@@ -316,6 +318,53 @@ it(`step ${STEP}`, async () => {
       if (skeleton(c.a) !== skeleton(c.b)) wrong.push(`skeleton ${c.a}: ${skeleton(c.a)}, ${c.b}: ${skeleton(c.b)}`);
     }
     expect(wrong).toEqual([]);
+    return;
+  }
+
+  // connections.ts on the vectors ConnectionsTest.kt reads. Nothing here uses the server.
+  if (STEP === "conn") {
+    const v = JSON.parse(fs.readFileSync(new URL("./connections-vectors.json", import.meta.url), "utf8")) as any;
+    const now = new Date(v.now).getTime();
+    const wrong: string[] = [];
+    for (const c of v.rank) {
+      const got = rankMailCodes(c.codes.map((x: any) => ({ from_name: "", code: null, link: null, ...x })), c.page, v.saved, now).map((r) => ({ id: r.id, matches: r.matches, lookalike: r.lookalike, ago: r.agoSeconds }));
+      if (JSON.stringify(got) !== JSON.stringify(c.want)) wrong.push(`rank "${c.name}": ${JSON.stringify(got)}`);
+    }
+    for (const c of v.linkIsSafe) {
+      if (c.androidOnly) continue;
+      const got = linkIsSafe({ link: c.link, from_domain: c.from });
+      if (got !== c.want) wrong.push(`linkIsSafe ${c.link} from ${c.from}: ${got}`);
+    }
+    for (const c of v.securityAlerts) {
+      const items = c.logins.map((l: any, i: number) => ({ id: `i${i}`, vaultId: "v", body: newBody("login", l.title, { urls: l.urls.map((url: string) => ({ url })) }) }));
+      const got = securityAlerts(c.events, items).map((a) => ({ id: a.event.id, title: a.item.body.title, text: a.text }));
+      if (JSON.stringify(got) !== JSON.stringify(c.want)) wrong.push(`securityAlerts "${c.name}": ${JSON.stringify(got)}`);
+    }
+    for (const c of v.changePageUrl) {
+      const got = changePageUrl(newBody("login", "x", { urls: c.urls.map((url: string) => ({ url })) }));
+      if (got !== c.want) wrong.push(`changePageUrl ${c.urls}: ${got}`);
+    }
+    for (const c of v.plusAddress) {
+      const got = plusAddress(c.email, c.tag);
+      if (got !== c.want) wrong.push(`plusAddress ${c.email} ${c.tag}: ${got}`);
+    }
+    expect(wrong).toEqual([]);
+    return;
+  }
+
+  // What Android wrote while changing a password, as this client reads it, and it can finish the job.
+  if (STEP === "chg") {
+    const c = client(state.token);
+    await c.unlock(MASTER, fromB64u(state.secretKey));
+    const body = c.get(state.id)!.body;
+    expect(body.password).toBe(state.password);
+    expect(body.pendingPassword).toBe(state.pending ?? undefined);
+    expect((body.passwordHistory ?? []).map((h) => h.password)).toEqual(state.history);
+    if (state.pending) {
+      // The same shape web's own code makes and takes.
+      expect(withPending(newBody("login", "x", { password: state.password }), state.pending).pendingPassword).toBe(state.pending);
+      expect(commitPending(body).password).toBe(state.pending);
+    }
     return;
   }
 

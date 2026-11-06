@@ -87,6 +87,14 @@ object Generator {
         return "${list[randomInt(list.size)]}.${list[randomInt(list.size)]}${randomInt(100)}".replace("-", "")
     }
 
+    /** "me@x.com" + "shop" = "me+shop@x.com". Only works where the provider allows it. */
+    fun plusAddress(email: String, tag: String): String {
+        val at = email.indexOf('@')
+        if (at < 1) throw IllegalArgumentException("That isn't an email address")
+        val clean = tag.lowercase().replace(Regex("[^a-z0-9]+"), "").take(24).ifEmpty { username(true).take(6) }
+        return "${email.substring(0, at).split('+')[0]}+$clean${email.substring(at)}"
+    }
+
     // ---- Site rules ----
 
     data class SiteRules(val minLength: Int?, val maxLength: Int?, val required: List<String>, val allowed: String, val maxConsecutive: Int?)

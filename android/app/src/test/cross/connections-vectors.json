@@ -1,0 +1,99 @@
+{
+  "now": "2026-11-07T12:10:00Z",
+  "saved": ["promptlybank.com", "envato.com"],
+  "rank": [
+    {
+      "name": "the site's own mail comes first, and only it matches",
+      "page": "https://www.promptlybank.com/verify",
+      "codes": [
+        { "id": "other", "from_domain": "shop.example", "at": "2026-11-07T12:09:50Z", "code": "111111" },
+        { "id": "mine", "from_domain": "mail.promptlybank.com", "at": "2026-11-07T12:09:20Z", "code": "482913" }
+      ],
+      "want": [ { "id": "mine", "matches": true, "lookalike": null, "ago": 40 }, { "id": "other", "matches": false, "lookalike": null, "ago": 10 } ]
+    },
+    {
+      "name": "a sender dressed as the site",
+      "page": "https://promptlybank.com/",
+      "codes": [
+        { "id": "suffix", "from_domain": "promptlybank.com.evil.example", "at": "2026-11-07T12:09:00Z", "code": "222222" },
+        { "id": "near", "from_domain": "promptlybnk.com", "at": "2026-11-07T12:09:30Z", "code": "333333" },
+        { "id": "homoglyph", "from_domain": "xn--promptlybnk-g3f.com", "at": "2026-11-07T12:09:40Z", "code": "444444" }
+      ],
+      "want": [
+        { "id": "homoglyph", "matches": false, "lookalike": "promptlybank.com", "ago": 20 },
+        { "id": "near", "matches": false, "lookalike": "promptlybank.com", "ago": 30 },
+        { "id": "suffix", "matches": false, "lookalike": null, "ago": 60 }
+      ]
+    },
+    {
+      "name": "a page that looks like the sender isn't the sender",
+      "page": "https://promptlybnk.com/verify",
+      "codes": [ { "id": "real", "from_domain": "promptlybank.com", "at": "2026-11-07T12:09:50Z", "code": "555555" } ],
+      "want": [ { "id": "real", "matches": false, "lookalike": null, "ago": 10 } ]
+    },
+    {
+      "name": "sites that share logins count as one",
+      "page": "https://themeforest.net/verify",
+      "codes": [ { "id": "shared", "from_domain": "envato.com", "at": "2026-11-07T12:09:50Z", "code": "666666" } ],
+      "want": [ { "id": "shared", "matches": true, "lookalike": null, "ago": 10 } ]
+    },
+    {
+      "name": "a page with no base domain matches nothing",
+      "page": "http://192.168.1.10/",
+      "codes": [ { "id": "x", "from_domain": "192.168.1.10", "at": "2026-11-07T12:09:50Z", "code": "777777" } ],
+      "want": [ { "id": "x", "matches": false, "lookalike": null, "ago": 10 } ]
+    },
+    {
+      "name": "a time ahead of now is no time ago",
+      "page": "https://promptlybank.com/",
+      "codes": [ { "id": "ahead", "from_domain": "promptlybank.com", "at": "2026-11-07T12:20:00Z", "code": "888888" } ],
+      "want": [ { "id": "ahead", "matches": true, "lookalike": null, "ago": 0 } ]
+    }
+  ],
+  "linkIsSafe": [
+    { "link": "https://www.promptlybank.com/magic/abc", "from": "promptlybank.com", "want": true },
+    { "link": "https://promptlybank.com/magic/abc", "from": "mail.promptlybank.com", "want": true },
+    { "link": "https://themeforest.net/sign-in/abc", "from": "envato.com", "want": true },
+    { "link": "http://promptlybank.com/magic/abc", "from": "promptlybank.com", "want": false },
+    { "link": "https://evil.example/magic/abc", "from": "promptlybank.com", "want": false },
+    { "link": "https://promptlybank.com@evil.example/magic", "from": "promptlybank.com", "want": false },
+    { "link": "https://user:pw@promptlybank.com/magic", "from": "promptlybank.com", "want": false },
+    { "link": "https://promptlybank.com.evil.example/magic", "from": "promptlybank.com", "want": false },
+    { "link": "javascript:alert(1)", "from": "promptlybank.com", "want": false },
+    { "link": "not a link", "from": "promptlybank.com", "want": false },
+    { "link": null, "from": "promptlybank.com", "want": false },
+    { "link": "https://promptlybank.com\\@evil.example/magic", "from": "promptlybank.com", "want": false, "androidOnly": "The web reads this as promptlybank.com, as a browser does. Android refuses anything two parsers could read differently." },
+    { "link": "https://evil.example\\.promptlybank.com/magic", "from": "promptlybank.com", "want": false },
+    { "link": "https://promptlybank.com/a b", "from": "promptlybank.com", "want": false, "androidOnly": "A browser would escape the space. Android refuses it." }
+  ],
+  "securityAlerts": [
+    {
+      "name": "the sender's domain against saved logins",
+      "logins": [ { "title": "Bank", "urls": ["https://www.promptlybank.com/login"] }, { "title": "Themes", "urls": ["https://themeforest.net"] } ],
+      "events": [
+        { "id": "a", "kind": "password_changed", "from_name": "Promptly Bank", "from_domain": "mail.promptlybank.com", "subject": "x", "at": "2026-11-07T12:00:00Z" },
+        { "id": "b", "kind": "new_signin", "from_name": "", "from_domain": "envato.com", "subject": "x", "at": "2026-11-07T12:00:00Z" },
+        { "id": "c", "kind": "new_signin", "from_name": "Promptly Bank", "from_domain": "promptlybank.com.evil.example", "subject": "x", "at": "2026-11-07T12:00:00Z" },
+        { "id": "d", "kind": "password_changed", "from_name": "Promptly Bank", "from_domain": "promptlybnk.com", "subject": "x", "at": "2026-11-07T12:00:00Z" }
+      ],
+      "want": [
+        { "id": "a", "title": "Bank", "text": "Promptly Bank says your password changed. Was that you?" },
+        { "id": "b", "title": "Themes", "text": "envato.com says there was a new sign-in. Was that you?" }
+      ]
+    }
+  ],
+  "changePageUrl": [
+    { "urls": ["https://www.23andme.com/login"], "want": "https://you.23andme.com/user/edit/password/" },
+    { "urls": ["https://23andme.com/"], "want": "https://you.23andme.com/user/edit/password/" },
+    { "urls": ["https://nothing.example/a"], "want": "https://nothing.example/.well-known/change-password" },
+    { "urls": ["androidapp://com.example.app?cert=abc", "https://nothing.example/a"], "want": "https://nothing.example/.well-known/change-password" },
+    { "urls": ["http://plain.example/"], "want": "https://plain.example/.well-known/change-password" },
+    { "urls": ["nothing.example"], "want": null },
+    { "urls": [], "want": null }
+  ],
+  "plusAddress": [
+    { "email": "me@x.com", "tag": "shop", "want": "me+shop@x.com" },
+    { "email": "me+old@x.com", "tag": "Shop Now!", "want": "me+shopnow@x.com" },
+    { "email": "me@x.com", "tag": "a-very-long-tag-that-goes-on-and-on-and-on", "want": "me+averylongtagthatgoesonan@x.com" }
+  ]
+}

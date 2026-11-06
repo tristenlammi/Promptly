@@ -66,7 +66,7 @@ data class Conflict(val id: String, val reason: String, val revision: Int?, val 
 
 data class BatchOut(val revision: Int, val applied: List<String>, val conflicts: List<Conflict>)
 
-data class DeviceOut(val id: String, val name: String, val platform: String, val lastSeenAt: String?, val createdAt: String, val current: Boolean)
+data class DeviceOut(val id: String, val name: String, val platform: String, val lastSeenAt: String?, val createdAt: String, val current: Boolean, val scopes: List<String> = emptyList())
 
 data class DeviceRequestOut(val id: String, val name: String, val platform: String, val code: String, val devicePub: String, val approverPub: String?, val status: String, val createdAt: String, val expiresAt: String)
 
@@ -245,6 +245,44 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
 
     fun deleteHealth() { call("DELETE", "/health") }
 
+    /** Recent likely codes and sign-in links. The page isn't sent: matching happens on the phone. */
+    fun mailCodes(): List<MailCode> = MailCodes.parse(call("GET", "/mail/codes"))
+
+    fun securityEvents(): List<SecurityEvent> = SecurityEvents.parse(call("GET", "/mail/security-events"))
+
+    /** Mail to this address files itself under its own label. The label's name comes back. */
+    fun plusRule(address: String): String? {
+        val text = call("POST", "/mail/plus-rule", buildJsonObject { put("address", address) })
+        return runCatching { (Json.parseToJsonElement(text ?: "{}") as? JsonObject)?.str("label") }.getOrNull()?.let { UntrustedText.clean(it, 80) }
+    }
+
+    fun driveFiles(query: String): List<DriveFile> = DriveFiles.parse(call("GET", "/drive/files?q=${java.net.URLEncoder.encode(query, "UTF-8")}"))
+
+    /** Read as it comes, so a scan doesn't have to fit in memory. `block` gets the stream and how long
+     *  the server says it is, or -1. */
+    fun <T> driveContent(fileId: String, block: (java.io.InputStream, Long) -> T): T {
+        val b = Request.Builder().url("$baseUrl/api/passwords/drive/files/$fileId/content").cacheControl(noStore)
+        auth()?.let { b.header("Authorization", "Bearer $it") }
+        session?.let { b.header("X-Vault-Session", it) }
+        val res = try {
+            http.newCall(b.build()).execute()
+        } catch (e: IOException) {
+            throw OfflineError(e)
+        }
+        res.use { r ->
+            if (!r.isSuccessful) {
+                val detail = runCatching { ((Json.parseToJsonElement(r.body.string()) as JsonObject)["detail"] as? JsonPrimitive)?.content }.getOrNull() ?: r.message
+                throw ApiError(r.code, detail, r.header("Retry-After")?.toIntOrNull()?.takeIf { it > 0 })
+            }
+            return block(r.body.byteStream(), r.body.contentLength())
+        }
+    }
+
+    fun driveTrash(fileId: String) { call("POST", "/drive/files/$fileId/trash") }
+
+    /** Calendar can be read by the server, so the server writes the same words for everything. */
+    fun reminder(on: String) { call("POST", "/reminder", buildJsonObject { put("on", on) }) }
+
     fun activity(limit: Int = 100): List<ActivityOut> = ActivityLog.parse(call("GET", "/activity?limit=$limit"))
 
     fun noteExport() { call("POST", "/activity/export") }
@@ -338,27 +376,27 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
 
     fun devices(): List<DeviceOut> = arr(call("GET", "/devices")).map {
         val o = it as JsonObject
-        DeviceOut(o.str("id")!!, o.str("name") ?: "", o.str("platform") ?: "", o.str("last_seen_at"), o.str("created_at") ?: "", o.bool("current") ?: false)
+        DeviceOut(o.str("id")!!, o.str("name") ?: "", o.str("platform") ?: "", o.str("last_seen_at"), o.str("created_at") ?: "", o.bool("current") ?: false, (o["scopes"] as? JsonArray)?.mapNotNull { s -> (s as? JsonPrimitive)?.content } ?: emptyList())
     }
 
     fun revokeDevice(id: String) { call("DELETE", "/devices/$id") }
 
     /** With an app password (Basic), or a bearer JWT. */
-    fun registerDevice(authHeader: String, name: String, platform: String = "android"): DeviceToken {
+    fun registerDevice(authHeader: String, name: String, platform: String = "android", scopes: List<String> = DEVICE_SCOPES): DeviceToken {
         val body = buildJsonObject {
             put("name", name)
             put("platform", platform)
-            put("scopes", buildJsonArray { add(JsonPrimitive("vault")) })
+            put("scopes", buildJsonArray { scopes.forEach { add(JsonPrimitive(it)) } })
         }
         val o = obj(call("POST", "/devices/register", body, authHeader = authHeader))
         return DeviceToken(o.str("token")!!, o.str("device_id")!!, o.str("user_id")!!)
     }
 
-    fun connectStart(name: String, platform: String = "android"): Created {
+    fun connectStart(name: String, platform: String = "android", scopes: List<String> = DEVICE_SCOPES): Created {
         val body = buildJsonObject {
             put("name", name)
             put("platform", platform)
-            put("scopes", buildJsonArray { add(JsonPrimitive("vault")) })
+            put("scopes", buildJsonArray { scopes.forEach { add(JsonPrimitive(it)) } })
         }
         val o = obj(call("POST", "/connect/start", body, public = true))
         return Created(o.str("id")!!, o.str("code")!!, o.str("poll_secret")!!)
@@ -393,6 +431,9 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
     }
 
     companion object {
+        /** What a phone asks for, as the extension and the Windows app do. `mail_codes` still needs a
+         *  vault session, so a token alone reads nothing, and the app only uses it once you turn it on. */
+        val DEVICE_SCOPES = listOf("vault", "mail_codes")
         private val JSON = "application/json".toMediaType()
         private val OCTET = "application/octet-stream".toMediaType()
         fun basic(username: String, password: String) = Credentials.basic(username, password)
