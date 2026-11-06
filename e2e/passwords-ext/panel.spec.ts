@@ -190,6 +190,52 @@ test("bookmarks: the panel says how to turn it on, shows what's synced, and only
   await helper.close();
 });
 
+test("bookmarks: with sync on the section is never blank, and says what's wrong if it failed", async () => {
+  const helper = await rig.ctx.newPage();
+  await helper.goto(`chrome-extension://${rig.extId}/test.html`);
+  const pop = await panel();
+  await pop.getByRole("button", { name: "Bookmarks", exact: true }).click();
+  const status = pop.getByTestId("bookmarks-status");
+  await expect(status).toContainText("Sync is on");
+  await expect(status).toContainText("This browser has 1 bookmark");
+  await expect(status.getByRole("button", { name: "Sync settings" })).toBeVisible();
+
+  // A bookmark added here shows up with the button, without waiting for the alarm.
+  await helper.evaluate(() => chrome.bookmarks.create({ parentId: "2", title: "Added just now", url: "https://justnow.example/" }));
+  await status.getByRole("button", { name: "Sync now" }).click();
+  await expect(status).toContainText("This browser has 2 bookmarks");
+  await pop.getByLabel("Search bookmarks").fill("just now");
+  await expect(pop.getByRole("button", { name: "Open bookmark Added just now" })).toBeVisible();
+  await pop.close();
+
+  // A sync that fails says so, in the panel.
+  await testHook(rig, "bookmarkBreak", { error: "A made-up problem" });
+  const broken = await panel();
+  await broken.getByRole("button", { name: "Bookmarks", exact: true }).click();
+  await expect(broken.getByTestId("bookmarks-status")).toContainText("Bookmarks didn't sync: A made-up problem");
+  await testHook(rig, "bookmarkBreak", { error: null });
+  await broken.getByTestId("bookmarks-status").getByRole("button", { name: "Sync now" }).click();
+  await expect(broken.getByTestId("bookmarks-status")).toContainText("Last synced");
+  await expect(broken.getByTestId("bookmarks-status")).not.toContainText("didn't sync");
+  await broken.close();
+
+  // With no bookmarks anywhere, on: there's a sentence and a way forward, not a blank panel.
+  const items = await testHook<{ id: string; title: string; url?: string }[]>(rig, "bookmarkItems");
+  await helper.evaluate(async () => {
+    const [top] = await chrome.bookmarks.getTree();
+    for (const root of top.children ?? []) for (const c of root.children ?? []) await chrome.bookmarks.removeTree(c.id);
+  });
+  expect(items.length).toBeGreaterThan(0);
+  await testHook(rig, "bookmarkRun");
+  const empty = await panel();
+  await empty.getByRole("button", { name: "Bookmarks", exact: true }).click();
+  await expect(empty.getByText("No bookmarks yet.")).toBeVisible({ timeout: 30_000 });
+  await expect(empty.getByTestId("bookmarks-status")).toContainText("This browser has 0 bookmarks");
+  await shot(empty, "8-bookmarks-empty");
+  await empty.close();
+  await helper.close();
+});
+
 test("the web vault has the screen too, and says the extension's where it's turned on", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(`${BASE}/passwords`);
@@ -198,7 +244,6 @@ test("the web vault has the screen too, and says the extension's where it's turn
   await page.getByRole("button", { name: "Unlock", exact: true }).click();
   await page.getByRole("navigation", { name: "Passwords" }).getByText("Bookmarks", { exact: true }).click();
   await expect(page.getByTestId("bookmarks-get-extension")).toBeVisible();
-  await expect(page.getByRole("button", { name: /Bookmarks bar/ })).toBeVisible({ timeout: 30_000 });
-  await page.getByRole("button", { name: /Bookmarks bar/ }).click();
+  await expect(page.getByText("No bookmarks yet.")).toBeVisible();
   await page.close();
 });

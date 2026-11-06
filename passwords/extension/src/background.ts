@@ -178,7 +178,22 @@ type BookmarkState = { on: boolean; at?: string; total?: number; unsynced?: numb
 
 const bookmarkState = async () => ((await store.getMeta<BookmarkState>("bookmark_sync")) ?? { on: false }) as BookmarkState;
 
+/** What the screens need to say what's going on, including how many this browser has. */
+async function bookmarkStateForScreen() {
+  const state = await bookmarkState();
+  let inBrowser: number | undefined;
+  if (ext.bookmarks) {
+    try {
+      inBrowser = (await new BrowserBookmarks().read()).filter((n) => n.url !== undefined).length;
+    } catch {
+      /* the count's a nicety */
+    }
+  }
+  return { ...state, granted: !!ext.bookmarks, inBrowser };
+}
+
 let bookmarksRunning: Promise<void> | null = null;
+let bookmarkFailure: string | null = null;
 let bookmarksAgain = false;
 
 /** One at a time. Changes while it runs are picked up by one more run. */
@@ -202,8 +217,14 @@ async function runBookmarks(allowMassDelete = false): Promise<void> {
 async function bookmarkPass(allowMassDelete: boolean) {
   const state = await bookmarkState();
   // A held run waits for its answer. Locked, it catches up on the next run after unlocking.
-  if (!state.on || !client?.unlocked || !ext.bookmarks || (state.held && !allowMassDelete)) return;
+  if (!state.on || !client?.unlocked || (state.held && !allowMassDelete)) return;
+  if (!ext.bookmarks) {
+    // Taken away in the browser's own settings. Saying nothing would look like an empty list.
+    await store.setMeta("bookmark_sync", { ...state, error: "The browser isn't allowing access to bookmarks. Turn this off and on again." });
+    return;
+  }
   try {
+    if (__TEST_BUILD__ && bookmarkFailure) throw new Error(bookmarkFailure);
     const vaultId = await client.personalVaultId();
     // In travel mode this vault's items are off the device on purpose. That isn't a deletion.
     if ((await store.getVaults()).find((v) => v.id === vaultId)?.hidden) return;
@@ -1054,7 +1075,13 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       return { onClickOnly: await fillsOnClickOnly(), mailCodes: s.mailCodes, pin: !!pin, clipCheck: await canCheckClipboard() };
     }
     case "bookmarkState":
-      return { ...(await bookmarkState()), granted: !!ext.bookmarks };
+      return bookmarkStateForScreen();
+    case "bookmarkSyncNow":
+      if (c.unlocked) {
+        await safeSync();
+        await runBookmarks();
+      }
+      return bookmarkStateForScreen();
     case "setBookmarks": {
       if (!m.on) {
         // What's in the vault stays. Turning it on again is a fresh merge, which only adds.
@@ -1062,7 +1089,9 @@ async function handlePage(m: PageRequest): Promise<unknown> {
         await store.setMeta("bookmark_base", {});
         return { ok: true };
       }
-      if (!ext.bookmarks) return { ok: false };
+      // A permission just given can take a moment to reach a service worker.
+      for (let i = 0; i < 20 && !ext.bookmarks; i++) await new Promise((r) => setTimeout(r, 100));
+      if (!ext.bookmarks) return { ok: false, error: "The browser hasn't made bookmarks available yet. Try again in a moment." };
       listenToBookmarks();
       await store.setMeta("bookmark_sync", { on: true });
       await store.setMeta("bookmark_base", {});
@@ -1564,6 +1593,10 @@ async function handleTest(m: { op: string; [k: string]: unknown }): Promise<unkn
       await sync();
       return bookmarkState();
     }
+    case "bookmarkBreak":
+      // So a test can see what a failed sync looks like on screen.
+      bookmarkFailure = (m.error as string) ?? null;
+      return { ok: true };
     case "bookmarkPlant": {
       const vaultId = await client!.createSharedVault(`Planted ${Date.now()}`);
       await client!.saveNew(vaultId, newBody("bookmark", m.title as string, { bookmark: { parent: "root:bar", pos: 1, url: m.url as string } }));

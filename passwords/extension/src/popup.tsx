@@ -569,15 +569,32 @@ type BookmarkRow = { id: string; title: string; url?: string; parent: string; po
 const ROOT_NAMES: [string, string][] = [["root:bar", "Bookmarks bar"], ["root:other", "Other bookmarks"], ["root:menu", "Bookmarks menu"], ["root:mobile", "Mobile bookmarks"]];
 
 /** Works from the vault, so it shows the same list in any browser, whether or not this one syncs. */
+type BookmarkStatus = { on: boolean; granted: boolean; held?: unknown; at?: string; total?: number; failed?: number; error?: string; inBrowser?: number };
+
 function BookmarksTab({ query }: { query: string }) {
   const [rows, setRows] = useState<BookmarkRow[] | null>(null);
-  const [state, setState] = useState<{ on: boolean; held?: unknown; at?: string } | null>(null);
+  const [state, setState] = useState<BookmarkStatus | null>(null);
+  const [problem, setProblem] = useState("");
+  const [syncing, setSyncing] = useState(false);
   const [path, setPath] = useState<{ id: string; title: string }[]>([]);
-  useEffect(() => {
-    call<BookmarkRow[]>({ t: "bookmarkTree" }).then(setRows).catch(() => setRows([]));
-    call<{ on: boolean; held?: unknown; at?: string }>({ t: "bookmarkState" }).then(setState).catch(() => undefined);
+  const refresh = useCallback(async (sync: boolean) => {
+    try {
+      setSyncing(sync);
+      const status = await call<BookmarkStatus>({ t: sync ? "bookmarkSyncNow" : "bookmarkState" });
+      setState(status);
+      setRows(await call<BookmarkRow[]>({ t: "bookmarkTree" }));
+      setProblem("");
+    } catch (e) {
+      setProblem(e instanceof Error ? e.message : "Couldn't read your bookmarks");
+    } finally {
+      setSyncing(false);
+    }
   }, []);
-  if (!rows || !state) return null;
+  useEffect(() => {
+    void refresh(false).then(() => refresh(true));
+  }, [refresh]);
+  if (problem) return <p role="alert" className="err">{problem}</p>;
+  if (!rows || !state) return <p className="muted">Loading your bookmarks…</p>;
   const open = (b: BookmarkRow) => call({ t: "openBookmark", id: b.id }).then(() => window.close());
   const line = (b: BookmarkRow) => (
     <button key={b.id} className="row" aria-label={`Open bookmark ${b.title || b.url}`} title={b.url} onClick={() => open(b)}>
@@ -603,7 +620,19 @@ function BookmarksTab({ query }: { query: string }) {
     </div>
   ) : state.held ? (
     <button data-testid="bookmarks-held" className="btn-primary" onClick={() => openPage("bookmarks")}>Bookmark sync has stopped to check with you</button>
-  ) : null;
+  ) : (
+    <div data-testid="bookmarks-status" className="flex flex-col gap-2 rounded-lg bg-[var(--surface-1)] p-3 text-xs">
+      <p>
+        {state.error ? <span className="err">Bookmarks didn't sync: {state.error}</span> : syncing ? "Syncing your bookmarks…" : state.at ? `Sync is on. Last synced ${new Date(state.at).toLocaleTimeString()}.` : "Sync is on, and waiting for its first run."}
+        {state.inBrowser !== undefined && ` This browser has ${state.inBrowser} ${state.inBrowser === 1 ? "bookmark" : "bookmarks"}.`}
+        {state.failed ? ` ${state.failed} couldn't be changed, and will be tried again.` : ""}
+      </p>
+      <div className="flex gap-2">
+        <button className="btn flex-1" disabled={syncing} onClick={() => void refresh(true)}>Sync now</button>
+        <button className="btn flex-1" onClick={() => openPage("bookmarks")}>Sync settings</button>
+      </div>
+    </div>
+  );
 
   if (query) {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -628,7 +657,10 @@ function BookmarksTab({ query }: { query: string }) {
             {here.length === 0 && <p className="muted">This folder's empty.</p>}
           </>
         ) : (
-          ROOT_NAMES.filter(([id]) => rows.some((r) => r.parent === id)).map(([id, title]) => folder(id, title))
+          <>
+            {ROOT_NAMES.filter(([id]) => rows.some((r) => r.parent === id)).map(([id, title]) => folder(id, title))}
+            {rows.length === 0 && state.on && !syncing && <p className="muted">No bookmarks yet. Add one in this browser, and it'll sync in a few seconds.</p>}
+          </>
         )}
       </div>
     </div>

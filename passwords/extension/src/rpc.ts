@@ -54,6 +54,7 @@ export type PageRequest =
   | { t: "mailCodeFill"; tabId: number; id: string }
   | { t: "mailLinkOpen"; tabId: number; id: string; confirmed?: boolean }
   | { t: "bookmarkState" }
+  | { t: "bookmarkSyncNow" }
   | { t: "setBookmarks"; on: boolean }
   | { t: "bookmarkAnswer"; go: boolean }
   | { t: "bookmarkExport" }
