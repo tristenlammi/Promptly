@@ -1,6 +1,6 @@
 // Entry for the isolated /passwords page. Imports nothing from the main app's
 // stores or API client, only its stylesheet.
-import { StrictMode } from "react";
+import { lazy, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 
 import "../../index.css";
@@ -22,8 +22,18 @@ function applyTheme(): void {
 }
 applyTheme();
 
+// A Send opens for anyone with the link, with no account and nothing of the vault loaded.
+const SendView = lazy(() => import("./SendView").then((m) => ({ default: m.SendView })));
+const isSend = location.pathname.startsWith("/passwords/send/");
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <VaultApp platform={webPlatform()} />
+    {isSend ? (
+      <Suspense fallback={null}>
+        <SendView />
+      </Suspense>
+    ) : (
+      <VaultApp platform={webPlatform()} />
+    )}
   </StrictMode>,
 );

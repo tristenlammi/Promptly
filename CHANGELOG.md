@@ -20,6 +20,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 `frontend/package.json` version, so it always reflects the built release.
 
 ## [Unreleased]
+- Passwords: shared vaults with safety words, roles, and a new key when someone's removed, plus a list of the passwords they could read.
+- Passwords: Secure Send, a link with an expiry and a view limit for someone with no account. It can be posted in Rooms or sent by Mail.
+- Passwords: emergency access, where a trusted contact can ask for your vault and it opens after a wait unless you refuse.
 
 ### Added
 - Passwords (preview): the end-to-end encrypted core. Your vault is locked by your master password plus a Secret Key only your devices hold, so a stolen database or backup can't be guessed open.

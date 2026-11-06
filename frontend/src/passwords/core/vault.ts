@@ -559,6 +559,8 @@ export class VaultClient {
           s.vaultKeys.delete(v.id);
         }
       }
+      // Keep what an emergency contact holds up to date, and finish setting one up.
+      await this.refreshEmergency().catch(() => undefined);
       this.lastSyncAt = Date.now();
     } catch (e) {
       if (e instanceof OfflineError || (e instanceof ApiError && e.status >= 500)) out.offline = true;
@@ -928,6 +930,67 @@ export class VaultClient {
     return toChange;
   }
 
+  // ---- Emergency access -----------------------------------------------------
+
+  emergencyList(): Promise<EmergencyOut[]> {
+    return this.api.request<EmergencyOut[]>("GET", "/emergency");
+  }
+
+  async emergencyInvite(granteeId: string, waitDays: number): Promise<void> {
+    await this.api.request("POST", "/emergency", { grantee_id: granteeId, wait_days: waitDays });
+  }
+
+  emergencyAct(id: string, action: "accept" | "request" | "refuse"): Promise<EmergencyOut> {
+    return this.api.request<EmergencyOut>("POST", `/emergency/${id}/${action}`);
+  }
+
+  async emergencyOpen(id: string): Promise<void> {
+    await this.api.request("POST", `/emergency/${id}/open`);
+    await this.sync();
+  }
+
+  /** End it. If it was opened, what they could read gets a new key first. */
+  async emergencyEnd(row: EmergencyOut): Promise<void> {
+    const s = this.need();
+    if (row.grantor_id === s.userId && row.state === "opened") {
+      for (const vaultId of row.opened_vaults) await this.removeMembers(vaultId, [row.grantee_id]);
+    }
+    await this.api.request("DELETE", `/emergency/${row.id}`);
+    await this.sync();
+  }
+
+  /** Seal our vault keys to each accepted contact, signed, and again whenever a vault
+   *  has been added or re-keyed since. Keys stay on the server until the wait runs out,
+   *  and only the contact can unseal them. A contact whose keys changed is left as it
+   *  is, because sealing to an unchecked key is how a hostile server would get in. */
+  async refreshEmergency(): Promise<void> {
+    const s = this.need();
+    const rows = await this.emergencyList();
+    const mine = (await this.store.getVaults()).filter((v) => v.role === "manage" && v.accepted);
+    for (const row of rows) {
+      if (row.grantor_id !== s.userId || row.state === "invited" || row.state === "opened") continue;
+      const current = row.wrapped;
+      const stale = mine.length !== Object.keys(current).length || mine.some((v) => current[v.id] !== v.generation);
+      if (!stale) continue;
+      const keys = await this.api.userKeys(row.grantee_id);
+      const trust = await this.trustEntries();
+      const known = trust[row.grantee_id];
+      if (known && (known.ed25519 !== keys.ed25519_pub || known.x25519 !== keys.x25519_pub)) continue;
+      if (!known) {
+        trust[row.grantee_id] = { x25519: keys.x25519_pub, ed25519: keys.ed25519_pub, firstSeen: new Date().toISOString(), username: keys.username };
+        await this.store.setMeta("trust", trust);
+      }
+      const grants = [];
+      for (const v of mine) {
+        const raw = await this.rawVaultKey(v);
+        const g = await grantVaultKey({ userId: s.userId, keyset: s.keyset }, v.id, { userId: row.grantee_id, x25519: fromB64u(keys.x25519_pub) }, v.generation, raw);
+        raw.fill(0);
+        grants.push({ vault_id: v.id, generation: v.generation, wrapped_key: b64u(g.wrapped), signature: b64u(g.signature) });
+      }
+      await this.api.request("PUT", `/emergency/${row.id}/wrap`, { grants });
+    }
+  }
+
   // ---- New devices (CRYPTO_SPEC.md section 8) -------------------------------
 
   /** On the unlocked device: answer a request. Returns the words to compare. */
@@ -973,6 +1036,20 @@ export class VaultClient {
 
   newItemBody = newBody;
 }
+
+export type EmergencyOut = {
+  id: string;
+  grantor_id: string;
+  grantor: string;
+  grantee_id: string;
+  grantee: string;
+  wait_days: number;
+  state: "invited" | "accepted" | "ready" | "requested" | "refused" | "opened";
+  requested_at: string | null;
+  opens_at: string | null;
+  wrapped: Record<string, number>;
+  opened_vaults: string[];
+};
 
 export class KeyChangedError extends Error {
   constructor(

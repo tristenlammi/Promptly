@@ -163,14 +163,19 @@ Chunks are 1 MiB of plaintext, with the last one padded to 1 MiB. `total` in the
 
 ## 10. Secure Send
 
-A random 32-byte `send_key` in the URL fragment, never sent to the server.
+A random 32-byte `send_key` in the URL fragment, which browsers don't send to servers. Posting the link through Rooms or Mail does pass it through the server; the screen warns about this, and a password keeps it closed anyway.
 
 ```
-enc_key  = HKDF(send_key, empty, "promptly-pw/v1/send", 32)
-blob     = symmetric(enc_key, pad(json(payload)), aad(send_id, "", "send"))
+# Without a password, mix is empty. With one:
+stretched = Argon2id(NFKC(password), salt)     # salt: random 16 bytes; 64 MiB, t=3, p=1
+proof     = HKDF(stretched, salt, "promptly-pw/v1/send-auth", 32)
+mix       = HKDF(stretched, salt, "promptly-pw/v1/send-mix", 32)
+
+enc_key   = HKDF(send_key, mix, "promptly-pw/v1/send", 32)
+blob      = symmetric(enc_key, pad(json(payload)), aad(send_id, "", "send"))
 ```
 
-An optional password is checked by the server through `HMAC-SHA256(salt, Argon2id(password, salt))`. Its output also mixes into `send_key` by HKDF, so a stolen database alone can't open a password-protected Send and neither can the link alone.
+The server stores `HMAC-SHA256(salt, proof)` and checks it before handing over the blob. `proof` and `mix` are separate HKDF outputs, so what the server sees can't open anything: a stolen database alone can't open a password-protected Send, and neither can the link alone.
 
 ## 11. Encrypted export
 

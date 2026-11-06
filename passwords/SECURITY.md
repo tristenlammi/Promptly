@@ -22,6 +22,8 @@ Not on the server: titles, URLs, usernames, passwords, notes, folders, tags, ite
 | Prompt injection in Chat | **Holds** | The vault has no chat tools that read or write secrets. A test asserts this. |
 | Lost phone or laptop, locked | **Holds** | Encrypted local cache. OS-backed key wrapping. Auto-lock. Remote device removal stops future sync, not what's already on the device, which stays encrypted. |
 | Removed member of a shared vault | **Partly** | Vault key and item keys are rotated. What they already saw can't be unseen, so the app lists the passwords to change. |
+| Trusted contact, with the server on their side | **Does not hold** | Emergency keys are sealed to them in advance, and the wait is kept by the server, so someone who runs the server and is your contact could skip the wait. Pick someone you'd trust with it all. |
+| Secure Send link posted through Rooms or Mail | **Partly** | The link holds the key and passes through the server this way. The screen warns about it, and a Send with a password stays closed. Copying the link elsewhere avoids this. |
 | Compromised server shipping malicious web JS | **Does not hold for the web vault** | Inherent to any web client: the next page load could steal the master password. **Holds for the extension, Android and Windows clients**, which never load code from the server. A cautious user should unlock only in those clients. |
 | Malware on an unlocked device | **Out of scope** | It can read memory and watch the keyboard. |
 

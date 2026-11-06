@@ -5,6 +5,7 @@ the access log records method, path and status only, and a test holds that.
 """
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 from datetime import timedelta
@@ -48,6 +49,7 @@ from app.passwords.models import (
     PwConnect,
     PwDevice,
     PwDeviceRequest,
+    PwEmergency,
     PwHealth,
     PwItem,
     PwItemVersion,
@@ -75,6 +77,8 @@ class _QuietRoute(APIRoute):
 
         return wrapped
 
+
+logger = logging.getLogger("promptly.passwords")
 
 router = APIRouter(route_class=_QuietRoute, dependencies=[Depends(require_enabled)])
 admin_router = APIRouter(route_class=_QuietRoute)
@@ -351,7 +355,7 @@ async def reset_vault(
         await db.execute(
             select(PwVault.id)
             .join(PwVaultMember, PwVaultMember.vault_id == PwVault.id)
-            .where(PwVaultMember.user_id == user.id, PwVault.kind == "personal")
+            .where(PwVaultMember.user_id == user.id, PwVault.kind == "personal", PwVault.created_by == user.id)
         )
     ).scalars().all()
     for vault_id in personal:
@@ -647,7 +651,9 @@ async def device_request_poll(
 async def _vault_out(db: AsyncSession, vault: PwVault, member: PwVaultMember) -> s.VaultOut:
     return s.VaultOut(
         id=vault.id,
-        kind=vault.kind,
+        # Someone else's personal vault, open through emergency access, is just a vault
+        # shared with this person. To them, "personal" means their own.
+        kind="shared" if vault.kind == "personal" and vault.created_by != member.user_id else vault.kind,
         revision=vault.revision,
         generation=vault.generation,
         name=vault.encrypted_name,
@@ -746,7 +752,7 @@ async def accept_vault(vault_id: str, session: VaultSession = Depends(require_se
 @router.post("/vaults/{vault_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
 async def leave_vault(vault_id: str, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> Response:
     vault, member = await _member(db, vault_id, session.user)
-    if vault.kind == "personal":
+    if vault.kind == "personal" and vault.created_by == session.user.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "You can't leave your personal vault.")
     managers = await db.scalar(
         select(func.count()).select_from(PwVaultMember).where(PwVaultMember.vault_id == vault.id, PwVaultMember.role == "manage")
@@ -898,6 +904,13 @@ async def add_member(vault_id: str, body: s.MemberAdd, session: VaultSession = D
         url="/passwords#/shared",
         tag=f"pw-share-{vault.id}",
     )
+    # A card in their DMs as well. It carries no vault name, because Rooms can read it.
+    try:
+        from app.passwords.share import post_to_dm
+
+        await post_to_dm(db, session.user, target.id, "I've shared a password vault with you. Open Passwords, then Shared vaults, to accept it.")
+    except Exception:  # noqa: BLE001 — the push went, and the invitation itself is in
+        logger.warning("Couldn't post a vault invitation to Rooms")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -934,7 +947,12 @@ async def rotate_vault(vault_id: str, body: s.Rotate, session: VaultSession = De
     _require(member, ("manage",))
     vault = await service.bump_revision(db, vid)
     if vault.kind == "personal" and body.remove_user_ids:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "A personal vault has no other members.")
+        # The one way someone else is in a personal vault: emergency access was opened.
+        allowed = set(
+            (await db.execute(select(PwEmergency.grantee_id).where(PwEmergency.grantor_id == session.user.id, PwEmergency.state == "opened"))).scalars().all()
+        )
+        if not set(body.remove_user_ids) <= allowed:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "A personal vault has no other members.")
     if body.from_generation != vault.generation:
         raise HTTPException(status.HTTP_409_CONFLICT, "Someone rotated this vault first. Reload and try again.")
     if session.user.id in body.remove_user_ids:

@@ -50,9 +50,10 @@ export type ItemKind =
   | "folder"
   | "site_rule"
   | "trust"
-  | "prefs";
+  | "prefs"
+  | "send";
 
-export const SYSTEM_KINDS: readonly ItemKind[] = ["folder", "site_rule", "trust", "prefs"];
+export const SYSTEM_KINDS: readonly ItemKind[] = ["folder", "site_rule", "trust", "prefs", "send"];
 
 export type ItemBody = {
   v: 1;
@@ -63,6 +64,8 @@ export type ItemBody = {
   folderId?: string | null;
   tags?: string[];
   notes?: string;
+  /** A record of a Secure Send made from here; its link is in notes. */
+  sendId?: string;
   fields?: CustomField[];
   reprompt?: boolean;
   /** Use a favicon proxied through this server for this item. Off unless chosen. */
