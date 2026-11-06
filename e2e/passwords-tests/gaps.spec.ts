@@ -223,7 +223,10 @@ test("2FA codes ask first for a re-prompt item, and fill-only members see no sec
 
 test("an interrupted attachment upload resumes, and nothing's sent twice", async ({ browser }) => {
   const [u] = makeUsers(["resume"]);
-  const { page } = await person(browser, u);
+  // On WebKit a service worker's requests never reach page.route, so nothing could be interrupted.
+  const ctx = await signedIn(browser, u, { serviceWorkers: "block" });
+  const page = await ctx.newPage();
+  await onboard(page);
   await addLogin(page, { title: "With a file", username: "ana" });
   const view = page.getByRole("article", { name: "With a file" });
   const sent: number[] = [];

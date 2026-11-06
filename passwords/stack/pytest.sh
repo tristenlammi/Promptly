@@ -17,7 +17,6 @@ exec docker run --rm --name "$name" --network promptly-pw \
   -e "REDIS_URL=redis://redis:6379/1" \
   -e "PROMPTLY_REQUIRE_DB_TESTS=1" \
   -e "PYTHONDONTWRITEBYTECODE=1" \
-  -e "COOKIE_SECURE=false" \
   -v "$root/backend/app:/app/app" \
   -v "$root/backend/alembic:/app/alembic" \
   -v "$root/backend/tests:/app/tests" \

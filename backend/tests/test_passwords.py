@@ -249,20 +249,24 @@ async def test_account_locks_after_too_many_wrong_keys(client, db):
     assert "Retry-After" in r.headers
 
 
-async def test_ip_rate_limit_counts_only_wrong_proofs(db):
+async def test_ip_rate_limit_counts_only_wrong_proofs(db, monkeypatch):
+    from limits.aio.storage import MemoryStorage
+    from limits.aio.strategies import FixedWindowRateLimiter
+
     from app import rate_limit
     from app.main import app
     from app.passwords import router as pw_router
 
+    # Its own counters: the shared Redis connection belongs to an earlier test's event loop,
+    # and using it from this one hung the whole suite.
+    monkeypatch.setattr(rate_limit, "_limiter", FixedWindowRateLimiter(MemoryStorage()))
     u = await make_user(db)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
         rate_limit._settings.RATE_LIMIT_ENABLED = False
         v = await setup_vault(c, u)
         rate_limit._settings.RATE_LIMIT_ENABLED = True
         try:
-            # A fresh IP so other tests' counters don't matter.
             headers = {**bearer(u), "CF-Connecting-IP": "203.0.113.77", "X-Real-IP": "203.0.113.77"}
-            await rate_limit._limiter.storage.reset() if hasattr(rate_limit._limiter.storage, "reset") else None
             for _ in range(pw_router._PROOF_LIMIT.amount + 3):
                 ok = await c.post("/api/passwords/session", headers=headers, json={"auth_key": b64(v.auth_key)})
                 assert ok.status_code == 200

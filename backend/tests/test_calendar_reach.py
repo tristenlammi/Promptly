@@ -101,7 +101,8 @@ async def test_photos_from_an_event_are_yours_and_in_its_window(client, db, peop
     got = (await client.get(f"/api/calendar/events/{eid}/photos", headers=H(bob))).json()
     assert [p["id"] for p in got["items"]] == [bobs]
     # Not started yet: nothing to show.
-    later = await add(client, ann, title="Later", start=(datetime.now(UTC) + timedelta(days=2)).isoformat())
+    soon = datetime.now(UTC) + timedelta(days=2)
+    later = await add(client, ann, title="Later", start=soon.isoformat(), end=(soon + timedelta(hours=1)).isoformat())
     got = (await client.get(f"/api/calendar/events/{later['event_id']}/photos", headers=H(ann))).json()
     assert got["started"] is False and got["items"] == []
     # Free/busy only: no photos (no event at all).
