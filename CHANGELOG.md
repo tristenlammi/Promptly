@@ -22,6 +22,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ## [Unreleased]
 
 ### Fixed
+- Passwords: importing a large KeePass file no longer gets passwords wrong after the first few KiB of protected values.
+- Passwords: a LastPass row with only a name no longer turns the next login into a note.
 - Passwords: passkeys imported from Bitwarden now work: their ids are converted to the form sites use.
 
 ### Added

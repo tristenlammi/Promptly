@@ -115,6 +115,12 @@ describe("JSON formats", () => {
     expect(r.warnings.join()).toContain("Future");
   });
 
+  it("LastPass: a row that makes no item doesn't turn the next login into a note", () => {
+    const r = fromLastPassCsv("url,username,password,totp,extra,name,grouping,fav\n,,,,,Only a name,,0\nhttp://sn,,,,text,A note,,0\nhttps://a.example,u,keep-this,,,Real login,,0\n");
+    expect(r.items.map((i) => [i.body.kind, i.body.title])).toEqual([["note", "A note"], ["login", "Real login"]]);
+    expect(r.items[1].body.password).toBe("keep-this");
+  });
+
   it("turns Bitwarden's passkey ids into what sites use", () => {
     const pk = { keyValue: "a2V5", rpId: "example.com", userHandle: "dQ", userName: "ana", counter: "0", discoverable: "true" };
     const r = fromBitwardenJson({ items: [{ type: 1, name: "Site", login: { fido2Credentials: [{ ...pk, credentialId: "b0cf2f0b-1a2b-4c3d-8e9f-0a1b2c3d4e5f" }, { ...pk, credentialId: "b64.AQIDBAUG" }] } }] });

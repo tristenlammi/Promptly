@@ -2,7 +2,7 @@
 // fixture in tests was written by pykeepass, an independent implementation. KDBX 3
 // files get a message asking to export XML or re-save as 4.
 import { chacha20 } from "@noble/ciphers/chacha.js";
-import { strFromU8, gunzipSync } from "fflate";
+import { Gunzip, strFromU8 } from "fflate";
 import { argon2d, argon2id } from "hash-wasm";
 
 import { buf, concat, equalBytes, utf8 } from "./bytes";
@@ -13,6 +13,26 @@ const AES_KDF = "c9d9f39a628a4460bf740d08c18a4fea";
 const ARGON2D = "ef636ddf8c29444b91f7a9a403e30a0c";
 const ARGON2ID = "9e298b1956db4773b23dfc3ec6f0a1e6";
 const CIPHER_AES = "31c1f2e6bf714350be5805216afc5aff";
+/** A small file can expand to fill all of memory, so this counts as it goes. */
+const MAX_INFLATED = 64 * 1024 * 1024;
+export function gunzipLimited(data: Uint8Array, limit = MAX_INFLATED): Uint8Array {
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  const g = new Gunzip((chunk) => {
+    total += chunk.length;
+    if (total > limit) throw new Error("That KeePass file is too large once it's unpacked");
+    parts.push(chunk);
+  });
+  g.push(data, true);
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+}
+
 const CIPHER_CHACHA = "d6038a2b8b6f4cb5a524339a31dbb59a";
 
 const hexOf = (b: Uint8Array) => [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
@@ -160,7 +180,7 @@ export async function fromKdbx(file: Uint8Array, password: string): Promise<Impo
   } else {
     throw new Error("That file uses a cipher we don't know");
   }
-  if (compression === 1) plain = gunzipSync(plain);
+  if (compression === 1) plain = gunzipLimited(plain);
 
   // Inner header: the inner stream's key.
   let p = 0;
@@ -188,8 +208,10 @@ export async function fromKdbx(file: Uint8Array, password: string): Promise<Impo
   const takeKeystream = (n: number): Uint8Array => {
     // The inner stream runs continuously over every protected value in document order.
     while (stream.buffer.length < n) {
-      const more = chacha20(stream.key, stream.nonce, new Uint8Array(4096 + n), undefined, stream.used);
-      stream.used += Math.ceil(more.length / 64);
+      // Whole blocks only: the counter moves in blocks, so a part block would lose the rest of it.
+      const blocks = Math.ceil((4096 + n) / 64);
+      const more = chacha20(stream.key, stream.nonce, new Uint8Array(blocks * 64), undefined, stream.used);
+      stream.used += blocks;
       stream.buffer = concat(stream.buffer, more);
     }
     const out = stream.buffer.subarray(0, n);

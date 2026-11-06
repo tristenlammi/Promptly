@@ -168,7 +168,7 @@ object Passkeys {
             update(hash)
             sign()
         }
-        return AssertResult(p.credentialId, b64u(clientBytes), b64u(auth), b64u(sig), p.userHandle)
+        return AssertResult(siteCredentialId(p.credentialId), b64u(clientBytes), b64u(auth), b64u(sig), p.userHandle)
     }
 
     data class Usable(val itemId: String, val passkey: Passkey, val title: String)
@@ -178,7 +178,7 @@ object Passkeys {
 
     /** Right RP, and on the allow list if given. With no list, only discoverable ones. */
     fun usable(all: List<Usable>, rpId: String, allow: List<String>): List<Usable> =
-        all.filter { it.passkey.rpId == rpId && (if (allow.isEmpty()) it.passkey.discoverable else fromB64uSafe(it.passkey.credentialId) in allow.map(::fromB64uSafe)) }
+        all.filter { it.passkey.rpId == rpId && (if (allow.isEmpty()) it.passkey.discoverable else fromB64uSafe(siteCredentialId(it.passkey.credentialId)) in allow.map(::fromB64uSafe)) }
 
     private fun fromB64uSafe(s: String) = runCatching { b64u(fromB64u(s)) }.getOrDefault(s)
 

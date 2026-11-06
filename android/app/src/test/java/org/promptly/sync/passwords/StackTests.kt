@@ -1401,8 +1401,6 @@ class StackTests {
         // Where the two are known to differ, and why. See "Differences from importers.ts and kdbx.ts"
         // in ANDROID_NOTES.md. Each is tested for what Kotlin should do in ImportersTest.
         val known = mapOf(
-            "large.kdbx" to "kdbx.ts loses its place in the inner stream after about 4 KiB",
-            "lastpass-name-only.csv" to "fromLastPassCsv counts rows, so a row that makes no item shifts which one becomes a note",
             "doctype-only.xml" to "only a DOCTYPE with an entity is refused on the web",
             "android-url.csv" to "Android keeps an app's id as androidapp://, and the web as it came",
         )

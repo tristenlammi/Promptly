@@ -120,10 +120,10 @@ Found while porting. Not changed, since `frontend/` isn't mine to edit:
 
 Found while porting. Not changed, since `frontend/` isn't mine to edit:
 
-1. **`mergeDuplicates` breaks attachments.** It moves a dropped item's attachment reference to the kept item, but a chunk's additional data includes the item it was uploaded on (`chunkAad` in `attachments.ts`), so `downloadAttachment` under the kept item's id fails. The dropped item's purge after 30 days then deletes the chunks on the server (`service.py`). Until then it can be got back by restoring the item from Trash. Found by reading the code and the test above; I didn't run the merge on the web client. Android seals it again (A37).
-2. **The web's merge doesn't carry `reprompt`.** A guarded password can move to an unguarded item's history.
-3. **`kdbx.ts` silently imports wrong passwords from a KeePass file with more than about 4 KiB of protected values.** `takeKeystream` asks for `4096 + n` bytes, which is rarely a whole number of 64-byte blocks, then moves its counter on by a rounded-up number of blocks, so the unused end of the last block is skipped and everything after it decrypts to rubbish, with no error. Seen, not just read: on `large.kdbx` (300 entries, written by pykeepass) the TypeScript gets 194 items different from Android's, and Android's match what pykeepass wrote. Fix: generate whole blocks.
-4. **`fromLastPassCsv` can turn a login into a note and lose its password.** It lines items up with rows by counting, but a row with only a name makes no item, so everything after that row is off by one. Seen in the cross-check with `lastpass-name-only.csv`.
+1. **Fixed since (DECISIONS D63).** `mergeDuplicates` broke attachments. It moves a dropped item's attachment reference to the kept item, but a chunk's additional data includes the item it was uploaded on (`chunkAad` in `attachments.ts`), so `downloadAttachment` under the kept item's id fails. The dropped item's purge after 30 days then deletes the chunks on the server (`service.py`). Until then it can be got back by restoring the item from Trash. Found by reading the code and the test above; I didn't run the merge on the web client. Android seals it again (A37).
+2. **Fixed since (DECISIONS D63).** The web's merge didn't carry `reprompt`. A guarded password can move to an unguarded item's history.
+3. **Fixed since, now covered by the cross-check.** `kdbx.ts` silently imported wrong passwords from a KeePass file with more than about 4 KiB of protected values.** `takeKeystream` asks for `4096 + n` bytes, which is rarely a whole number of 64-byte blocks, then moves its counter on by a rounded-up number of blocks, so the unused end of the last block is skipped and everything after it decrypts to rubbish, with no error. Seen, not just read: on `large.kdbx` (300 entries, written by pykeepass) the TypeScript gets 194 items different from Android's, and Android's match what pykeepass wrote. Fix: generate whole blocks.
+4. **Fixed since, now covered by the cross-check.** `fromLastPassCsv` could turn a login into a note and lose its password. It lines items up with rows by counting, but a row with only a name makes no item, so everything after that row is off by one. Seen in the cross-check with `lastpass-name-only.csv`.
 5. **`kdbx.ts` has no limit on what its gunzip expands to,** and `safeUnzip` trusts the sizes a zip declares and has no limit on entries. A44 has what Android does.
 
 ## Differences from `vault.ts`
@@ -136,8 +136,6 @@ Found while porting. Not changed, since `frontend/` isn't mine to edit:
 
 Android reads the same formats, with detection in the same order, and `sanitizeImport`'s rules. `StackTests.importersReadTheSameFilesIntoTheSameItemsAsTheTypeScript` compares every body. These are what's left, and the first four are named in that test:
 
-- **`large.kdbx`:** the web's inner-stream bug above. Android's right.
-- **A LastPass row with only a name:** the web's row-counting bug above. Android's right.
 - **A DOCTYPE with no entity in it:** the web reads the file and Android refuses it (A42).
 - **An app's address in a CSV (`android://HASH@com.acme.app/`):** Android keeps it as `androidapp://com.acme.app` with `match: "never"` (A6), the web as it came. Older than this work.
 - **Bigger or costlier files:** Android refuses what's past the limits in A43 and A44, including any file from 64 MiB to the web's 256 MiB.

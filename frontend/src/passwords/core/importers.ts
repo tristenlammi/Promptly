@@ -20,6 +20,7 @@ export class NeedsPasswordError extends Error {
 
 const MAX_BYTES = 256 * 1024 * 1024;
 const MAX_ITEMS = 200_000;
+const MAX_ZIP_ENTRIES = 20_000;
 
 // ---- CSV ---------------------------------------------------------------------
 
@@ -125,7 +126,8 @@ function otpFrom(text: string | undefined, warnings: string[], name: string): To
   return null;
 }
 
-export function fromGenericCsv(text: string, format = "CSV"): ImportResult {
+/** `lines`, if given, gets the row each item came from: a row with nothing in it makes no item. */
+export function fromGenericCsv(text: string, format = "CSV", lines?: number[]): ImportResult {
   const rows = parseCsv(text);
   if (rows.length < 1) return { format, items: [], warnings: ["That file is empty."] };
   const idx = columnsOf(rows[0]);
@@ -163,27 +165,21 @@ export function fromGenericCsv(text: string, format = "CSV"): ImportResult {
       fields: fields.length ? fields : undefined,
     });
     items.push({ body: prune(body), folder: get("folder") || undefined });
+    lines?.push(line);
   });
   return { format, items, warnings };
 }
 
 /** LastPass marks secure notes with url http://sn and a "NoteType:" body. */
 export function fromLastPassCsv(text: string): ImportResult {
-  const result = fromGenericCsv(text, "LastPass");
-  const rows = parseCsv(text);
-  const idx = columnsOf(rows[0]);
-  const noted = new Set<number>();
-  rows.slice(1).forEach((r, i) => {
-    if ((r[idx.url] ?? "").trim() === "http://sn") noted.add(i);
-  });
-  let at = 0;
-  rows.slice(1).forEach((r, i) => {
-    if (r.every((c) => !c.trim())) return;
-    if (noted.has(i) && result.items[at]) {
-      const b = result.items[at].body;
-      result.items[at].body = prune(newBody("note", b.title, { notes: b.notes, tags: b.tags, fields: b.fields }));
-    }
-    at++;
+  const lines: number[] = [];
+  const result = fromGenericCsv(text, "LastPass", lines);
+  const rows = parseCsv(text).slice(1);
+  const idx = columnsOf(parseCsv(text)[0]);
+  result.items.forEach((item, at) => {
+    if ((rows[lines[at]][idx.url] ?? "").trim() !== "http://sn") return;
+    const b = item.body;
+    item.body = prune(newBody("note", b.title, { notes: b.notes, tags: b.tags, fields: b.fields }));
   });
   return result;
 }
@@ -377,8 +373,10 @@ export function from1pux(zip: Uint8Array): ImportResult {
 
 function safeUnzip(zip: Uint8Array): Record<string, Uint8Array> {
   let total = 0;
+  let entries = 0;
   return unzipSync(zip, {
     filter: (f) => {
+      if (++entries > MAX_ZIP_ENTRIES) throw new Error("That archive has too many files");
       total += f.originalSize;
       if (total > MAX_BYTES) throw new Error("That archive is too large");
       return !f.name.startsWith("files/");

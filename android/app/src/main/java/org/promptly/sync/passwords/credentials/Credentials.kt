@@ -464,7 +464,7 @@ class CredentialActivity : FragmentActivity() {
                         }
                     }
                     prepared.onSuccess { (parsed, origin) ->
-                        val existing = Passkeys.allPasskeys(client.allItems()).filter { it.passkey.rpId == parsed.rpId }.map { it.passkey.credentialId }
+                        val existing = Passkeys.allPasskeys(client.allItems()).filter { it.passkey.rpId == parsed.rpId }.map { Passkeys.siteCredentialId(it.passkey.credentialId) }
                         if (parsed.excludeCredentials.any { it in existing }) {
                             failCreate(CreatePublicKeyCredentialDomException(InvalidStateError(), "A passkey for this account already exists here."))
                             return@onSuccess

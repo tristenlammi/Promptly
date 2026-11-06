@@ -7,7 +7,8 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 
 import { fromKeepassXml, importFile, NeedsPasswordError } from "./importers";
-import { fromKdbx } from "./kdbx";
+import { fromKdbx, gunzipLimited } from "./kdbx";
+import { gzipSync } from "fflate";
 
 const fixture = new Uint8Array(fs.readFileSync(path.join(__dirname, "testing", "fixture.kdbx")));
 
@@ -83,5 +84,27 @@ describe("KeePass XML", () => {
   it("script in a value stays a string", () => {
     const r = fromKeepassXml(`<KeePassFile><Root><Group><Entry><String><Key>Title</Key><Value>&lt;script&gt;alert(1)&lt;/script&gt;</Value></String></Entry></Group></Root></KeePassFile>`);
     expect(r.items[0].body.title).toBe("<script>alert(1)</script>");
+  });
+});
+
+describe("a file with more protected values than one run of the stream", () => {
+  // Written by pykeepass, an independent KDBX writer: android/app/src/test/cross/make-kdbx-fixtures.py
+  const large = new Uint8Array(fs.readFileSync(path.join(__dirname, "../../../../android/app/src/test/cross/import-fixtures/large.kdbx")));
+
+  it("reads every password as it was written", async () => {
+    const r = await fromKdbx(large, "kdbx test password");
+    expect(r.items).toHaveLength(300);
+    for (const item of r.items) {
+      const n = item.body.title.replace("Entry ", "");
+      expect(item.body.password, item.body.title).toBe(`bulk-test-password-${n}-with-some-length`);
+    }
+  }, 120_000);
+});
+
+describe("unpacking", () => {
+  it("stops at the limit rather than filling memory", () => {
+    const packed = gzipSync(new Uint8Array(4096));
+    expect(gunzipLimited(packed).length).toBe(4096);
+    expect(() => gunzipLimited(packed, 1024)).toThrow(/too large/);
   });
 });

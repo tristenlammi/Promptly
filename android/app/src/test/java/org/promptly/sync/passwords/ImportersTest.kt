@@ -818,4 +818,18 @@ class ImportersTest {
         assertTrue(fresh.isEmpty())
         assertEquals(r.items.size, dups)
     }
+
+    @Test
+    fun aPasskeyAlreadyStoredWithBitwardensIdStillMatchesAndAnswersWithTheSitesId() {
+        val guid = "b0cf2f0b-1a2b-4c3d-8e9f-0a1b2c3d4e5f"
+        val site = org.promptly.sync.passwords.core.Passkeys.siteCredentialId(guid)
+        val pair = java.security.KeyPairGenerator.getInstance("EC").apply { initialize(java.security.spec.ECGenParameterSpec("secp256r1")) }.generateKeyPair()
+        val key = java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(pair.private.encoded)
+        val stored = org.promptly.sync.passwords.core.Passkey(guid, "example.com", null, "dQ", "ana", null, key, 0, "2026-01-01T00:00:00Z", null, true)
+        val all = listOf(org.promptly.sync.passwords.core.Passkeys.Usable("item", stored, "Site"))
+        assertEquals(1, org.promptly.sync.passwords.core.Passkeys.usable(all, "example.com", listOf(site)).size)
+        assertEquals(0, org.promptly.sync.passwords.core.Passkeys.usable(all, "example.com", listOf(guid + "x")).size)
+        val answer = org.promptly.sync.passwords.core.Passkeys.getAssertion(stored, "AAAA", "https://example.com", false)
+        assertEquals(site, answer.credentialId)
+    }
 }
