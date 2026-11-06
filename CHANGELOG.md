@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Passwords (preview): the end-to-end encrypted core. Your vault is locked by your master password plus a Secret Key only your devices hold, so a stolen database or backup can't be guessed open.
+
 ## [0.28.0] - 2026-11-06
 
 ### Fixed
