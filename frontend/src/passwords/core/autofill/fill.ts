@@ -172,7 +172,7 @@ export async function fillSplit(boxes: FillableElement[], code: string): Promise
 /** Fill a form's fields. Only the ones classified, only when the caller said to.
  *  ``relocate`` finds a role's element again, for pages that re-render a field as soon
  *  as another one's filled and leave our reference pointing at nothing. */
-export async function fillFields(fields: Field[], values: FillValues, relocate?: (role: FieldRole) => FillableElement | null): Promise<FillResult[]> {
+export async function fillFields(fields: Field[], values: FillValues, relocate?: (role: FieldRole) => FillableElement | null, allow?: (el: FillableElement) => boolean): Promise<FillResult[]> {
   const out: FillResult[] = [];
   const digits = fields.filter((f) => f.role === "otp-digit");
   for (const f of fields) {
@@ -180,9 +180,18 @@ export async function fillFields(fields: Field[], values: FillValues, relocate?:
     const value = values[f.role] ?? (f.role === "email" ? values.username : f.role === "username" ? values.email : undefined);
     if (value === undefined || value === "") continue;
     const el = f.el.isConnected ? f.el : relocate?.(f.role) ?? f.el;
+    // Asked again for every box, right before its value goes in, and for a box the page
+    // swapped in since the caller last looked.
+    if (allow && !allow(el)) {
+      out.push({ el, ok: false, method: "skipped" });
+      continue;
+    }
     out.push(await fillField(el, value));
     await pause(0);
   }
-  if (digits.length && values.otp) out.push(...(await fillSplit(digits.map((d) => d.el), values.otp)));
+  if (digits.length && values.otp) {
+    const boxes = digits.map((d) => d.el);
+    if (!allow || boxes.every((b) => allow(b))) out.push(...(await fillSplit(boxes, values.otp)));
+  }
   return out;
 }

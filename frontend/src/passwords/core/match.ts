@@ -50,12 +50,26 @@ export type MatchKind = "exact" | "host" | "base" | "shared" | "regex" | "prefix
 
 const SAFE_REGEX_LEN = 200;
 
-/** A user's own regex, kept away from catastrophic patterns by shape and size. */
-function regexMatches(pattern: string, url: string): boolean {
+/** A user's own regex, kept away from catastrophic patterns by shape and size. It has to
+ *  match from the start of the address and take in the whole origin, so "example.com" can't
+ *  match example.com.evil.test or evil.test/?example.com. */
+function regexMatches(pattern: string, page: URL): boolean {
   if (pattern.length > SAFE_REGEX_LEN) return false;
   if (/(\([^)]*[+*][^)]*\))[+*{]/.test(pattern)) return false;
   try {
-    return new RegExp(pattern).test(url);
+    const m = new RegExp(pattern).exec(page.href);
+    return !!m && m.index === 0 && m[0].length >= page.origin.length;
+  } catch {
+    return false;
+  }
+}
+
+/** Same origin first: a plain string prefix lets https://bank.example match
+ *  https://bank.example.evil.test. */
+function prefixMatches(saved: string, page: URL): boolean {
+  try {
+    const s = new URL(saved.includes("://") ? saved : `https://${saved}`);
+    return s.origin === page.origin && page.href.startsWith(s.href);
   } catch {
     return false;
   }
@@ -73,9 +87,9 @@ export function matchUrl(saved: LoginUrl, pageUrl: string): MatchKind | null {
   if (page.username || page.password) return null;
   const mode: UrlMatch = saved.match ?? "base";
   if (mode === "never") return null;
-  if (mode === "regex") return regexMatches(saved.url, pageUrl) ? "regex" : null;
+  if (mode === "regex") return regexMatches(saved.url, page) ? "regex" : null;
   if (mode === "exact") return normalize(saved.url) === normalize(pageUrl) ? "exact" : null;
-  if (mode === "prefix") return pageUrl.startsWith(saved.url) ? "prefix" : null;
+  if (mode === "prefix") return prefixMatches(saved.url, page) ? "prefix" : null;
 
   const savedHost = hostOf(saved.url);
   const pageHost = page.hostname.toLowerCase();
@@ -83,7 +97,8 @@ export function matchUrl(saved: LoginUrl, pageUrl: string): MatchKind | null {
   // IP addresses and single-label hosts only ever match exactly.
   const savedBase = baseDomain(savedHost);
   const pageBase = baseDomain(pageHost);
-  if (savedHost === pageHost) return portsMatch(saved.url, page) ? "host" : null;
+  if (!portsMatch(saved.url, page)) return null;
+  if (savedHost === pageHost) return "host";
   if (mode === "host") return null;
   if (!savedBase || !pageBase) return null;
   if (savedBase === pageBase) return "base";
@@ -94,8 +109,9 @@ export function matchUrl(saved: LoginUrl, pageUrl: string): MatchKind | null {
 function portsMatch(savedUrl: string, page: URL): boolean {
   try {
     const u = new URL(savedUrl.includes("://") ? savedUrl : `https://${savedUrl}`);
-    // A saved port must match. No saved port means any standard one.
-    return !u.port || u.port === page.port;
+    // The same port, and no saved port means the scheme's default: another port on the
+    // same host is often a different program.
+    return u.port === page.port;
   } catch {
     return true;
   }

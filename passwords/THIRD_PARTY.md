@@ -28,3 +28,18 @@ No third-party source was copied. A licence scan of all 333 cargo packages found
 - Rust: tauri 2.12.5 and tauri-build, its global-shortcut, single-instance and updater plugins (Apache-2.0 OR MIT); reqwest, tokio, serde, windows, zeroize (MIT or Apache-2.0); RustCrypto aes-gcm, argon2, hkdf, hmac, sha1, sha2 (MIT or Apache-2.0); x25519-dalek, ed25519-dalek (BSD-3-Clause); unicode-normalization (MIT or Apache-2.0).
 - Transitive, unmodified, MPL-2.0: cssparser, cssparser-macros, dtoa-short, selectors, option-ext.
 - JS: `@tauri-apps/api` 2.12.4 (Apache-2.0 OR MIT). Dev only: selenium-webdriver (Apache-2.0).
+
+## Android
+
+- ZXing core 3.5.3 (Apache-2.0), for QR codes. argon2kt (MIT) and BouncyCastle (MIT), for key stretching. See `android/app/build.gradle.kts` for exact versions.
+- `android/app/src/main/assets/apps.json`: Google's list of browsers for Credential Manager (Apache-2.0, from the Credential Manager samples). Check its terms before a Play release.
+
+## Web, core and extension
+
+- Apple `password-manager-resources` rules and change-password URLs (MIT), at the commit in `frontend/src/passwords/core/data/APPLE-COMMIT.txt`.
+- `@noble/ciphers`, `@noble/hashes`, `@noble/curves` (MIT).
+- EFF large wordlist (CC BY 4.0 per EFF's site notice; EFF's page says CC BY 3.0 US on older copies, so credit is given either way).
+- 2FA Directory data by 2factorauth (MIT for code, CC BY 4.0 for data, shown with credit in Security check), and Passkeys Directory.
+- `jsqr` (Apache-2.0), `qrcode` (MIT).
+
+Dev only: `@simplewebauthn/server` (MIT), `selenium-webdriver` (Apache-2.0), `web-ext` (MPL-2.0), `pykeepass` for a test fixture (GPL-3.0: used only to make a file in tests, not linked or shipped).

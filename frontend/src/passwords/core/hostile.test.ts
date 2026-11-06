@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError, VaultApi } from "./api";
 import { b64u, fromB64u, randomBytes } from "./bytes";
 import { aad, openSealed, sealTo } from "./format";
-import { decryptItem, deriveRootRaw, grantInput, sealField } from "./keys";
+import { decryptItem, deriveRootRaw, encryptItem, grantInput, sealField } from "./keys";
 import { newBody } from "./model";
 import { aesKey, ed25519Public, ed25519Sign, KDF_FLOOR, x25519Public } from "./primitives";
 import { MemoryStore } from "./store";
@@ -370,6 +370,64 @@ describe("a hostile server", () => {
     expect(list.map((i) => i.body.title)).toEqual(["Real"]);
     expect(s.rotations).toHaveLength(1);
     expect(s.rotations[0].items.map((i: any) => i.id)).not.toContain("11111111-aaaa-4aaa-8aaa-111111111111");
+  });
+});
+
+describe("a member of a shared vault, with the server", () => {
+  it("can't plant a trust book there, naming themselves a contact", async () => {
+    const { s, c } = await fresh();
+    const me = (await c.store.getAccount())!;
+    const inviter = persona("dana");
+    const did = "77777777-7777-4777-8777-777777777777";
+    s.userKeys.set(did, inviter.keys);
+    const vid = "88888888-8888-4888-8888-888888888888";
+    const K = randomBytes(32);
+    const wrapped = await sealTo(fromB64u(me.x25519Pub), K, aad(vid, "", `vault_key:${ALICE}`));
+    s.vaults.set(vid, { id: vid, kind: "shared", revision: 1, generation: 1, name: await sealField(await aesKey(K), vid, "name", "Shared"), role: "view", wrapped_key: b64u(wrapped), signature: b64u(ed25519Sign(inviter.e, grantInput(vid, ALICE, 1, wrapped))), granted_by: did, member_generation: 1, accepted: true, member_count: 2 });
+    (c.api as any).acceptVault = async () => undefined;
+    await c.acceptVault(vid);
+
+    const itemId = "99999999-aaaa-4aaa-8aaa-999999999999";
+    const planted = newBody("trust", "trust-book", { trustBook: { people: {}, accepted: [], contacts: [did], generations: {} } });
+    const blob = await encryptItem(await aesKey(K), vid, itemId, planted);
+    s.items.set(itemId, { id: itemId, vaultId: vid, revision: 1, blob: b64u(blob), deleted: false, purged: false, updated_at: new Date().toISOString() });
+    await c.sync();
+    await c.lock();
+    await c.unlock(MASTER);
+    s.emergency = [{ id: "e2", grantor_id: ALICE, grantor: "alice", grantee_id: did, grantee: "dana", wait_days: 1, state: "accepted", requested_at: null, opens_at: null, wrapped: {}, opened_vaults: [] }];
+    await c.refreshEmergency();
+    expect(s.wrapped).toEqual([]);
+  });
+
+  it("a forged new key can't lock a vault for good", async () => {
+    const { s, c } = await fresh();
+    const vid = await c.createSharedVault("Mine");
+    await c.saveNew(vid, newBody("login", "Kept", { password: "kept" }));
+    await c.sync();
+    const v = s.vaults.get(vid);
+    const good = { wrapped_key: v.wrapped_key, signature: v.signature, member_generation: v.member_generation, generation: v.generation };
+    Object.assign(v, { wrapped_key: b64u(randomBytes(94)), signature: b64u(randomBytes(64)), member_generation: 999, generation: 999 });
+    const r = await c.sync();
+    expect(r.rollback).toContain(vid);
+    expect(c.allItems().map((i) => i.body.password)).toContain("kept");
+    Object.assign(v, good);
+    await c.sync();
+    await c.lock();
+    await c.unlock(MASTER);
+    expect(c.allItems().map((i) => i.body.password)).toContain("kept");
+  });
+
+  it("leaving your own vault off the list doesn't delete it here", async () => {
+    const { s, c } = await fresh();
+    const vid = await c.personalVaultId();
+    await c.saveNew(vid, newBody("login", "Mine", { password: "mine" }));
+    await c.sync();
+    const row = s.vaults.get(vid);
+    s.vaults.delete(vid);
+    const r = await c.sync();
+    expect(r.rollback).toContain(vid);
+    expect(c.allItems().map((i) => i.body.password)).toContain("mine");
+    s.vaults.set(vid, row);
   });
 });
 

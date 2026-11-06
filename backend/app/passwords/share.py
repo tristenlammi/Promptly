@@ -70,7 +70,7 @@ async def people(session: VaultSession = Depends(require_session), db: AsyncSess
             .outerjoin(PwAccount, PwAccount.user_id == User.id)
             .where(User.disabled.is_(False), User.id != session.user.id)
             .order_by(User.username)
-            .limit(500)
+            .limit(2000)
         )
     ).all()
     return [PersonOut(id=r[0], username=r[1], has_vault=r[2] is not None) for r in rows]

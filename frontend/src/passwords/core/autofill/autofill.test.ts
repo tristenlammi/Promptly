@@ -504,3 +504,44 @@ describe("rules pack contents", () => {
     if (!release) expect(pack.rules).toEqual([]);
   });
 });
+
+describe("offers from a subdomain", () => {
+  const at = { kind: "signin" as const, host: "evil.bank.test", url: "https://evil.bank.test/login", at: 1, username: "ana", password: "typed-here" };
+
+  it("can't change what's saved for the parent: a new login at most", () => {
+    const offer = decideOffer(at, [], [], [{ id: "bank", username: "ana", password: "real-one" }]);
+    expect(offer?.kind).toBe("save");
+    expect(offer?.itemId).toBeUndefined();
+  });
+
+  it("isn't asked about a password the parent's login already has", () => {
+    expect(decideOffer({ ...at, password: "real-one" }, [], [], [{ id: "bank", username: "ana", password: "real-one" }])).toBeNull();
+  });
+
+  it("an exact host still updates", () => {
+    expect(decideOffer(at, [{ id: "own", username: "ana", password: "old" }], [])).toMatchObject({ kind: "update", itemId: "own" });
+  });
+});
+
+describe("fill asks before every box", () => {
+  it("skips a box it's told not to fill, and one the page swapped in", async () => {
+    set(`<form><input id="u" name="user"><input id="p" type="password" name="pw"><button>Log in</button></form>`);
+    const { best } = analyzePage(document, DOM);
+    const results = await fillFields(best!.fields, { username: "ana", password: "secret" }, undefined, (el) => el.id !== "p");
+    expect((document.getElementById("u") as HTMLInputElement).value).toBe("ana");
+    expect((document.getElementById("p") as HTMLInputElement).value).toBe("");
+    expect(results.find((r) => r.el.id === "p")?.method).toBe("skipped");
+  });
+
+  it("a relocated box goes through the same check", async () => {
+    set(`<form><input id="u" name="user"><input id="p" type="password" name="pw"><button>Log in</button></form>`);
+    const { best } = analyzePage(document, DOM);
+    const pw = best!.fields.find((f) => f.role === "password")!;
+    pw.el.remove();
+    const swapped = document.createElement("input");
+    swapped.id = "swapped";
+    document.body.appendChild(swapped);
+    await fillFields(best!.fields, { username: "ana", password: "secret" }, () => swapped, (el) => el.id !== "swapped");
+    expect(swapped.value).toBe("");
+  });
+});

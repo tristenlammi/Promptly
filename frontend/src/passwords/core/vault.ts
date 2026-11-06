@@ -514,16 +514,33 @@ export class VaultClient {
     return this.isOwnVault(v) || !v.grantedBy || v.grantedBy === s.userId || this.book.accepted.includes(v.id);
   }
 
-  private trustItem(): Item | undefined {
+  /** Your own vault's only. A member of a shared vault could plant one there, naming themselves
+   *  a contact, so anywhere else doesn't count. Two devices can each make one while offline. */
+  private trustItems(): Item[] {
     const s = this.need();
-    for (const item of s.items.values()) if (item.body.kind === "trust" && item.body.trustBook) return item;
-    return undefined;
+    const own = this.ownVaultIds;
+    return [...s.items.values()].filter((i) => i.body.kind === "trust" && i.body.trustBook && own.has(i.vaultId));
   }
+
+  private trustItem(): Item | undefined {
+    return this.trustItems()[0];
+  }
+
+  private ownVaultIds = new Set<string>();
 
   /** Bring in what other devices decided. Union, and never a key change without a prompt. */
   private async mergeTrustBook(): Promise<void> {
     const local = (await this.store.getMeta<Record<string, TrustEntry>>("trust")) ?? {};
-    const remote = this.trustItem()?.body.trustBook;
+    this.ownVaultIds = new Set((await this.store.getVaults()).filter((v) => this.isOwnVault(v)).map((v) => v.id));
+    const books = this.trustItems().map((i) => i.body.trustBook!);
+    const remote: TrustBook = {
+      people: Object.assign({}, ...books.map((b) => b.people)),
+      accepted: books.flatMap((b) => b.accepted ?? []),
+      contacts: books.flatMap((b) => b.contacts ?? []),
+      generations: {},
+      personalVaultId: books.find((b) => b.personalVaultId)?.personalVaultId,
+    };
+    for (const b of books) for (const [k, n] of Object.entries(b.generations ?? {})) remote.generations[k] = Math.max(remote.generations[k] ?? 0, n);
     const accepted = (await this.store.getMeta<string[]>("trust_accepted")) ?? [];
     const contacts = (await this.store.getMeta<string[]>("trust_contacts")) ?? [];
     const generations = (await this.store.getMeta<Record<string, number>>("trust_generations")) ?? {};
@@ -766,6 +783,20 @@ export class VaultClient {
           if (prev && rv.member_generation >= highest) await this.store.putVault({ ...next, revision: prev.revision, highWater: prev.highWater });
           continue;
         }
+        if (prev && prev.memberGeneration !== rv.member_generation && this.mayOpen({ id: next.id, kind: next.kind, grantedBy: next.grantedBy })) {
+          // A new key has to prove itself before it replaces the one that works, or a forged
+          // generation 999 would lock this vault for good.
+          try {
+            (await this.rawVaultKey(next)).fill(0);
+          } catch (e) {
+            if (e instanceof KeyChangedError) this.keyChanges.set(next.id, e);
+            else {
+              out.rollback.push(rv.id);
+              this.rollbackWarnings.push(rv.id);
+            }
+            continue;
+          }
+        }
         if (prev && prev.memberGeneration !== rv.member_generation) {
           await this.rekeyDirty(prev, next);
           s.vaultKeys.delete(rv.id);
@@ -786,8 +817,15 @@ export class VaultClient {
           await this.pullVault(next, out);
         }
       }
+      // Only your own vault: what other devices decided still has to be read before saving over it.
+      if (!trustFresh) await this.mergeTrustBook();
       if (generationsMoved) await this.saveTrustBook();
       for (const v of known.values()) {
+        if (!seen.has(v.id) && this.isOwnVault(v)) {
+          out.rollback.push(v.id);
+          this.rollbackWarnings.push(v.id);
+          continue;
+        }
         if (!seen.has(v.id)) {
           // Removed from this vault: drop the local copy and keys.
           for (const c of await this.store.getItems(v.id)) this.unindex(c.id);

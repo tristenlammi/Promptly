@@ -62,8 +62,11 @@ export type SaveOffer = {
  *  hasn't accepted yet, ``pendingPassword`` a generated change it hasn't accepted yet. */
 export type KnownLogin = { id: string; username?: string; password?: string; pendingPassword?: string; unconfirmed?: boolean };
 
-/** What to ask, knowing what's already saved for this site. Same password: nothing. */
-export function decideOffer(c: Captured, existing: KnownLogin[], neverHosts: string[]): SaveOffer | null {
+/** What to ask. ``existing`` is what's saved for exactly this host, the only logins an
+ *  offer from this page may change: a subdomain doesn't get to rewrite its parent's login.
+ *  ``looser`` is what matched more loosely, which only stops a save of what's already
+ *  there. Same password: nothing. */
+export function decideOffer(c: Captured, existing: KnownLogin[], neverHosts: string[], looser: KnownLogin[] = []): SaveOffer | null {
   const password = c.newPassword ?? c.password;
   if (!password) return null;
   // A password we made for this site went through: finish that item, don't make another.
@@ -82,6 +85,7 @@ export function decideOffer(c: Captured, existing: KnownLogin[], neverHosts: str
     if (existing[0].password === password) return null;
     return { kind: "update", itemId: existing[0].id, username: existing[0].username, password, host: c.host, url: c.url };
   }
+  if (looser.some((e) => (e.username ?? "") === (c.username ?? "") && e.password === password)) return null;
   // A known password with a username we've no record of, on a sign-in, is still new.
   return { kind: "save", username: c.username, password, host: c.host, url: c.url };
 }

@@ -228,7 +228,7 @@ export function mergeBodies(base: ItemBody | null, local: ItemBody, server: Item
   if (base) {
     const keys = new Set([...Object.keys(base), ...Object.keys(local), ...Object.keys(server)]);
     for (const key of keys) {
-      if (key === "updatedAt" || key === "conflicts") continue;
+      if (key === "updatedAt" || key === "conflicts" || key === "seq") continue;
       const b = base[key];
       const l = local[key];
       const s = server[key];
@@ -254,7 +254,7 @@ export function mergeBodies(base: ItemBody | null, local: ItemBody, server: Item
 }
 
 function strip(b: ItemBody): Record<string, unknown> {
-  const { updatedAt: _u, conflicts: _c, ...rest } = b;
+  const { updatedAt: _u, conflicts: _c, seq: _s, ...rest } = b;
   return rest;
 }
 

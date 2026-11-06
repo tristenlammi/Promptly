@@ -8,6 +8,17 @@
 export type GuardVerdict = { ok: boolean; reason?: string };
 export const MIN_DWELL_MS = 400;
 const MIN_OPACITY = 0.99;
+/** Smaller than this isn't a box anyone's meant to see. Hidden card fields use 2 px. */
+export const MIN_FIELD_PX = 10;
+
+/** Has a colour you can see, for a computed colour string. */
+function painted(color: string): boolean {
+  if (!color) return false;
+  const m = /rgba?\(([^)]+)\)/.exec(color);
+  if (!m) return color !== "transparent";
+  const parts = m[1].split(/[\s,/]+/).filter(Boolean);
+  return parts.length < 4 || parseFloat(parts[3]) > 0.05;
+}
 
 function parentOf(el: Element): Element | null {
   if (el.parentElement) return el.parentElement;
@@ -25,7 +36,7 @@ export function hiddenByStyle(host: Element): string | null {
     opacity *= Number(s.opacity);
     if (s.display === "none") return "display";
     if (s.visibility === "hidden" || s.visibility === "collapse") return "visibility";
-    if (s.filter && s.filter !== "none" && /opacity|brightness\(0|contrast\(0|blur/.test(s.filter)) return "filter";
+    if (s.filter && s.filter !== "none" && /opacity|brightness\(0|contrast\(0|blur|url\(/.test(s.filter)) return "filter";
     if (s.backdropFilter && s.backdropFilter !== "none" && n !== host) return "backdrop-filter";
     if (s.clipPath && s.clipPath !== "none") return "clip-path";
     if (s.clip && s.clip !== "auto" && s.position !== "static") return "clip";
@@ -33,6 +44,12 @@ export function hiddenByStyle(host: Element): string | null {
     if (mask && mask !== "none") return "mask";
     if (s.mixBlendMode && s.mixBlendMode !== "normal") return "blend-mode";
     if (s.transform && s.transform !== "none" && /matrix\(0|scale\(0/.test(s.transform)) return "transform";
+    const scale = s.getPropertyValue("scale");
+    if (scale && scale !== "none" && scale.split(/\s+/).some((x) => Math.abs(parseFloat(x)) < 0.05)) return "scale";
+    const zoom = parseFloat(s.getPropertyValue("zoom"));
+    if (!Number.isNaN(zoom) && zoom < 0.2) return "zoom";
+    // Flipped away from the viewer. Plain translateZ(0) with this set is a common CSS habit.
+    if (s.getPropertyValue("backface-visibility") === "hidden" && /^matrix(3d)?\(\s*-/.test(s.transform)) return "backface";
     if (s.contentVisibility === "hidden") return "content-visibility";
   }
   if (opacity < MIN_OPACITY) return "opacity";
@@ -155,9 +172,68 @@ export function fieldIsFillable(el: Element): GuardVerdict {
   const hidden = hiddenByStyle(el);
   if (hidden) return { ok: false, reason: `hidden:${hidden}` };
   const r = el.getBoundingClientRect();
-  if (r.width < 2 || r.height < 2) return { ok: false, reason: "size" };
+  if (r.width < MIN_FIELD_PX || r.height < MIN_FIELD_PX) return { ok: false, reason: "size" };
   const bottom = r.bottom + win.scrollY;
   const right = r.right + win.scrollX;
   if (bottom < 0 || right < 0) return { ok: false, reason: "off-screen" };
+  const s = win.getComputedStyle(el);
+  if (!painted(s.color) && !painted(s.getPropertyValue("-webkit-text-fill-color")) && !painted(s.backgroundColor)) return { ok: false, reason: "see-through" };
+  if (parseFloat(s.fontSize) < 1) return { ok: false, reason: "no-text" };
+  return { ok: true };
+}
+
+export function inViewport(el: Element): boolean {
+  const win = el.ownerDocument.defaultView;
+  if (!win) return false;
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  return x >= 0 && y >= 0 && x <= win.innerWidth && y <= win.innerHeight;
+}
+
+/** Everything at a point, topmost first, going down into shadow roots. */
+function stackAt(doc: Document, x: number, y: number, shadowOf?: (el: Element) => ShadowRoot | null): Element[] {
+  const out: Element[] = [];
+  for (const el of doc.elementsFromPoint(x, y)) {
+    const root = shadowOf?.(el);
+    if (root) for (const inner of root.elementsFromPoint(x, y)) if (inner !== el && !out.includes(inner)) out.push(inner);
+    if (!out.includes(el)) out.push(el);
+  }
+  return out;
+}
+
+/** Is this box really what's on screen at its centre? It has to be there at all, which a
+ *  box clipped away by a parent isn't, and nothing painted can be above it. Text and icons
+ *  over a box are normal (floating labels, a show-password eye), so only a painted
+ *  background counts as covering it. Only meaningful for a box inside the viewport. */
+export function fieldIsClear(el: Element, shadowOf?: (el: Element) => ShadowRoot | null): GuardVerdict {
+  const doc = el.ownerDocument;
+  const win = doc.defaultView;
+  if (!win) return { ok: false, reason: "no-window" };
+  const r = el.getBoundingClientRect();
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  const stack = stackAt(doc, x, y, shadowOf);
+  const at = stack.indexOf(el);
+  if (at < 0) return { ok: false, reason: "clipped" };
+  for (const above of stack.slice(0, at)) {
+    if (above.contains(el)) continue;
+    const labels = (el as HTMLInputElement).labels;
+    if (labels && [...labels].some((l) => l === above || l.contains(above))) continue;
+    const s = win.getComputedStyle(above);
+    if (Number(s.opacity) > 0.1 && (painted(s.backgroundColor) || s.backgroundImage !== "none")) return { ok: false, reason: "covered" };
+  }
+  // A cover that ignores the pointer doesn't show up in that list.
+  let looked = 0;
+  for (const other of doc.querySelectorAll("body *, html > *")) {
+    if (++looked > 4000) break;
+    if (other === el || other.contains(el) || el.contains(other)) continue;
+    const s = win.getComputedStyle(other);
+    if (s.pointerEvents !== "none" || (s.position !== "fixed" && s.position !== "absolute")) continue;
+    if (s.visibility === "hidden" || s.display === "none" || Number(s.opacity) < 0.1) continue;
+    if (!painted(s.backgroundColor) && s.backgroundImage === "none") continue;
+    const o = other.getBoundingClientRect();
+    if (x >= o.left && x <= o.right && y >= o.top && y <= o.bottom && (zOf(other, win) >= zOf(el, win) || other.matches(":popover-open"))) return { ok: false, reason: "covered" };
+  }
   return { ok: true };
 }

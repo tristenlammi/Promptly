@@ -61,6 +61,32 @@ describe("matchUrl", () => {
     expect(matchUrl({ url: "https://nas.example.com:5001" }, "https://nas.example.com:5001/x")).toBe("host");
   });
 
+  it("no saved port means the scheme's default, and only that", () => {
+    expect(matchUrl({ url: "https://bank.example" }, "https://bank.example/")).toBe("host");
+    expect(matchUrl({ url: "https://bank.example:443" }, "https://bank.example/")).toBe("host");
+    expect(matchUrl({ url: "bank.example" }, "https://bank.example/")).toBe("host");
+    expect(matchUrl({ url: "https://bank.example" }, "https://bank.example:8443/")).toBeNull();
+    expect(matchUrl({ url: "https://bank.example" }, "http://bank.example:8080/")).toBeNull();
+    expect(matchUrl({ url: "https://bank.example" }, "https://app.bank.example:8443/")).toBeNull();
+    expect(matchUrl({ url: "https://bank.example" }, "https://app.bank.example/")).toBe("base");
+    expect(matchUrl({ url: "https://bank.example:8443" }, "https://app.bank.example:8443/")).toBe("base");
+  });
+
+  it("prefix mode compares origins first", () => {
+    expect(matchUrl({ url: "https://bank.example", match: "prefix" }, "https://bank.example/login")).toBe("prefix");
+    expect(matchUrl({ url: "https://bank.example", match: "prefix" }, "https://bank.example.evil.test/login")).toBeNull();
+    expect(matchUrl({ url: "https://bank.example", match: "prefix" }, "https://bank.example@evil.test/login")).toBeNull();
+    expect(matchUrl({ url: "https://bank.example/app", match: "prefix" }, "https://bank.example/other")).toBeNull();
+    expect(matchUrl({ url: "https://bank.example", match: "prefix" }, "http://bank.example/login")).toBeNull();
+  });
+
+  it("regex mode starts at the start, and takes in the whole origin", () => {
+    expect(matchUrl({ url: "^https://bank\\.example/", match: "regex" }, "https://bank.example/login")).toBe("regex");
+    expect(matchUrl({ url: "https://bank\\.example", match: "regex" }, "https://bank.example/login")).toBe("regex");
+    expect(matchUrl({ url: "bank\\.example", match: "regex" }, "https://evil.test/?bank.example")).toBeNull();
+    expect(matchUrl({ url: "https://bank\\.example", match: "regex" }, "https://bank.example.evil.test/")).toBeNull();
+  });
+
   it("shared-credential groups match both ways", () => {
     const some = [...sharedWith("themeforest.net")];
     expect(some).toContain("envato.com");
