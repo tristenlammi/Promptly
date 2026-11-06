@@ -324,6 +324,28 @@ describe("a hostile server", () => {
     void deriveRootRaw;
   });
 
+  it("can't switch the local check off by leaving a field out", async () => {
+    const { s, api, secretKey } = await fresh();
+    const d = new VaultClient(api, new MemoryStore());
+    const real = api.prelogin;
+    api.prelogin = async () => ({ ...(await real()), wrapped_keyset: null });
+    const before = s.authKeys.length;
+    await expect(d.unlock(MASTER, secretKey)).rejects.toThrow(/didn't send/);
+    expect(s.authKeys.length).toBe(before);
+    api.prelogin = real;
+  });
+
+  it("can't lower key settings through a session answer", async () => {
+    const { s, c } = await fresh();
+    await c.upgradeKdf(MASTER, { alg: "argon2id", m: 131072, t: 3, p: 1 });
+    await c.lock();
+    const real = c.api.createSession;
+    c.api.createSession = async (a: string) => ({ ...(await real(a)), kdf: { alg: "argon2id", m: 65536, t: 3, p: 1 } });
+    await expect(c.unlock(MASTER)).rejects.toThrow(/weaker/);
+    c.api.createSession = real;
+    void s;
+  });
+
   it("can't get weaker key settings accepted", async () => {
     const { s, c, secretKey } = await fresh();
     await c.upgradeKdf(MASTER, { alg: "argon2id", m: 131072, t: 3, p: 1 });

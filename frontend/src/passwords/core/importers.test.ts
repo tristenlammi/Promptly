@@ -9,7 +9,7 @@ import { buf, concat, utf8 } from "./bytes";
 import { decryptBitwardenExport } from "./bitwarden";
 import { encryptedExport, plainCsvExport, plainJsonExport, readEncryptedExport } from "./exporter";
 import { breachCount, coarseCounts, runHealth, sha1Hex } from "./health";
-import { dedupe, from2fasJson, fromAegisJson, fromBitwardenJson, fromCxf, fromGenericCsv, fromLastPassCsv, fromProtonJson, importFile, NeedsPasswordError, parseCsv } from "./importers";
+import { dedupe, from2fasJson, fromAegisJson, fromBitwardenJson, fromCxf, fromGenericCsv, fromLastPassCsv, fromProtonJson, importFile, NeedsPasswordError, parseCsv, sanitizeImport } from "./importers";
 import { type ItemBody, newBody } from "./model";
 
 const asFile = (s: string) => utf8(s);
@@ -442,5 +442,26 @@ describe("fuzz: hostile files never crash or hang", () => {
   it("deep JSON doesn't blow the stack", async () => {
     const deep = "[".repeat(100000);
     await expect(importFile("d.json", utf8(deep))).rejects.toBeInstanceOf(Error);
+  });
+});
+
+describe("what a file can't bring in", () => {
+  it("drops internal kinds and fields, and an app id gets no website match", () => {
+    const body = (kind: string, extra = {}) => ({ v: 1, kind, title: "t", createdAt: "2026-01-01", updatedAt: "2026-01-01", ...extra });
+    const r = sanitizeImport({
+      format: "x",
+      items: [
+        { body: body("trust", { trustBook: { people: {}, accepted: ["a"], contacts: ["mallory"], generations: {} } }) },
+        { body: body("site_rule") },
+        { body: body("login", { password: "p", trustBook: { contacts: ["mallory"] }, seq: 99, pendingPassword: "x", sendId: "s", urls: [{ url: "https://a.example/" }, { url: "android://H==@com.acme.app/" }] }) },
+      ],
+    } as never);
+    expect(r.items).toHaveLength(1);
+    const b = r.items[0].body as Record<string, unknown> & { urls: { url: string; match?: string }[] };
+    expect(b.trustBook).toBeUndefined();
+    expect(b.seq).toBeUndefined();
+    expect(b.pendingPassword).toBeUndefined();
+    expect(b.urls[0].match).toBeUndefined();
+    expect(b.urls[1].match).toBe("never");
   });
 });

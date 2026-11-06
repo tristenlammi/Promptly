@@ -5,7 +5,7 @@
 import { strFromU8, unzipSync } from "fflate";
 
 import { fromB64u, fromUtf8 } from "./bytes";
-import { type CustomField, type ItemBody, type LoginUrl, newBody, type Passkey, type TotpConfig } from "./model";
+import { SYSTEM_KINDS, type CustomField, type ItemBody, type LoginUrl, newBody, type Passkey, type TotpConfig } from "./model";
 import { parseMigrationUri, parseOtpauth } from "./totp";
 
 export type Imported = { body: ItemBody; folder?: string };
@@ -700,6 +700,23 @@ export function fromMigrationLinks(text: string): ImportResult {
 /** Work out what a file is and read it. Password-protected ones raise
  *  NeedsPasswordError so the UI can ask, then pass ``password`` on the next try. */
 export async function importFile(name: string, bytes: Uint8Array, password?: string): Promise<ImportResult> {
+  return sanitizeImport(await readFile(name, bytes, password));
+}
+
+/** A file can say anything. Internal kinds never come in from one, or it could plant a trust
+ *  book naming someone an emergency contact, and an app's id gets no website match. */
+export function sanitizeImport(r: ImportResult): ImportResult {
+  const items = [];
+  for (const it of r.items) {
+    if (SYSTEM_KINDS.includes(it.body.kind)) continue;
+    const { trustBook: _t, conflicts: _c, seq: _s, pendingPassword: _p, sendId: _d, ...rest } = it.body;
+    const urls = rest.urls?.map((u) => (/^(https?:\/\/|[^:/]+(\.|$|:\d|\/))/i.test(u.url) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(u.url.replace(/^https?:\/\//i, "")) ? u : { ...u, match: "never" as const }));
+    items.push({ ...it, body: { ...rest, ...(urls ? { urls } : {}) } as ItemBody });
+  }
+  return { ...r, items };
+}
+
+async function readFile(name: string, bytes: Uint8Array, password?: string): Promise<ImportResult> {
   if (bytes.length > MAX_BYTES) throw new Error("That file is too large");
   const lower = name.toLowerCase();
 

@@ -166,7 +166,14 @@ function ExportPanel() {
   const [busy, setBusy] = useState(false);
   const [plainOpen, setPlainOpen] = useState(false);
   const [typed, setTyped] = useState("");
+  const [master, setMaster] = useState("");
   const stamp = () => new Date().toISOString().slice(0, 10);
+  /** Someone at an unlocked device shouldn't be able to walk off with everything. */
+  const confirmMaster = async () => {
+    if (await vault.checkPassword(master)) return true;
+    setError("That master password isn't right.");
+    return false;
+  };
 
   const encrypted = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -176,6 +183,7 @@ function ExportPanel() {
     setBusy(true);
     await new Promise((r) => setTimeout(r, 20));
     try {
+      if (!(await confirmMaster())) return;
       downloadBlob(await encryptedExport(vault.exportable(), pw), `promptly-vault-${stamp()}.json`, "application/json");
       platform.api.noteExport().catch(() => undefined);
       setPw("");
@@ -187,7 +195,8 @@ function ExportPanel() {
     }
   };
 
-  const plain = (kind: "csv" | "json") => {
+  const plain = async (kind: "csv" | "json") => {
+    if (!(await confirmMaster())) return;
     const items = vault.exportable();
     if (kind === "csv") downloadBlob(plainCsvExport(items), `promptly-vault-${stamp()}.csv`, "text/csv");
     else downloadBlob(plainJsonExport(items), `promptly-vault-${stamp()}.json`, "application/json");
@@ -199,6 +208,9 @@ function ExportPanel() {
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-sm font-semibold text-[var(--text)]">Export</h2>
+      <Label text="Your master password" hint="Needed for either kind of export.">
+        <input className={inputClass} type="password" autoComplete="current-password" value={master} onChange={(e) => setMaster(e.target.value)} />
+      </Label>
       <form onSubmit={encrypted} className="flex flex-col gap-2">
         <p className="text-sm text-[var(--text-muted)]">An encrypted file with its own password. Keep it somewhere safe as a backup. Even if your server's gone, it opens here.</p>
         <Label text="Password for this file"><input className={inputClass} type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Label>
@@ -211,6 +223,7 @@ function ExportPanel() {
         <Modal title="Export without encryption?" onClose={() => setPlainOpen(false)}>
           <div className="flex flex-col gap-3 text-sm text-[var(--text)]">
             <Callout kind="danger">This makes a file with all your passwords in plain text. Anyone who gets it can read them. Delete it as soon as you're done, and empty your trash.</Callout>
+            {error && <Callout kind="danger">{error}</Callout>}
             <Label text="Type EXPORT to go on"><input className={inputClass} value={typed} onChange={(e) => setTyped(e.target.value)} /></Label>
             <div className="flex gap-2">
               <Button kind="danger" disabled={typed !== "EXPORT"} onClick={() => plain("csv")}>Logins as CSV</Button>

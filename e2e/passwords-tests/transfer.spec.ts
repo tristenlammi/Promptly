@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 
 import { expect, test } from "@playwright/test";
 
-import { addLogin, BACKEND, makeUsers, onboard, signedIn } from "./helpers";
+import { addLogin, BACKEND, makeUsers, onboard, signedIn, MASTER } from "./helpers";
 
 const nav = (page: import("@playwright/test").Page, name: string) => page.getByRole("navigation", { name: "Passwords" }).getByRole("button", { name, exact: true });
 
@@ -30,6 +30,7 @@ test("import a browser CSV with preview and dedupe, export encrypted, re-import 
   await expect(page.getByText("We can't read that file")).toBeVisible();
 
   // Encrypted export.
+  await page.getByLabel("Your master password").fill(MASTER);
   await page.getByLabel("Password for this file").fill("export-file-password");
   await page.getByLabel("Type it again").fill("export-file-password");
   const dl = page.waitForEvent("download");

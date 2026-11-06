@@ -150,12 +150,18 @@ export class VaultClient {
    *  device's trust and unsynced edits. It only counts if the new keyset really opens. */
   private async cacheAccount(s: SessionOut, opts: { unlockKey?: CryptoKey; setup?: boolean } = {}): Promise<void> {
     const prev = await this.store.getAccount();
-    if (prev && prev.accountId !== s.account_id && !opts.setup) {
-      if (!opts.unlockKey) throw new Error("The server says this is a different account. Lock and unlock again to check.");
-      try {
-        await unwrapKeyset(opts.unlockKey, s.account_id, fromB64u(s.wrapped_keyset));
-      } catch {
-        throw new WrongPasswordError();
+    if (prev && !opts.setup) {
+      if (prev.accountId !== s.account_id && !opts.unlockKey) throw new Error("The server says this is a different account. Lock and unlock again to check.");
+      if (s.kdf.m < prev.kdf.m || s.kdf.t < prev.kdf.t) throw new Error("The server sent weaker key settings than this device has seen, so they weren't accepted.");
+      if (opts.unlockKey) {
+        try {
+          await unwrapKeyset(opts.unlockKey, s.account_id, fromB64u(s.wrapped_keyset));
+        } catch {
+          throw new WrongPasswordError();
+        }
+      } else if (s.wrapped_keyset !== prev.wrappedKeyset) {
+        // Re-proving a session has no password to check a new keyset with. Keep what's here.
+        s = { ...s, wrapped_keyset: prev.wrappedKeyset, salt: prev.salt, kdf: prev.kdf };
       }
     }
     const account: CachedAccount = {
@@ -200,6 +206,8 @@ export class VaultClient {
         preAccount = pre.account_id ?? null;
       }
       if (!pre.exists) throw new Error("There's no vault on this account yet");
+      // Leaving this out would switch off the check below.
+      if (!preWrapped || !preAccount) throw new Error("The server didn't send what's needed to check your keys, so nothing was sent to it.");
     } catch (e) {
       if (!(e instanceof OfflineError) && !(e instanceof ApiError && e.status >= 500)) throw e;
       offline = true;
@@ -212,9 +220,9 @@ export class VaultClient {
     // Open the keyset here before anything derived from the password goes anywhere. If a
     // server handed this device a Secret Key of its own choosing, what it would get back is
     // something it could guess the master password from, so nothing goes unless this works.
-    if (!offline && preWrapped && preAccount) {
+    if (!offline) {
       try {
-        await unwrapKeyset(unlockKey, preAccount, fromB64u(preWrapped));
+        await unwrapKeyset(unlockKey, preAccount!, fromB64u(preWrapped!));
       } catch {
         throw new WrongPasswordError();
       }

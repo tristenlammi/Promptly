@@ -157,3 +157,13 @@ describe("lookalikes", () => {
     expect(baseDomain("a.b.example.co.uk")).toBe("example.co.uk");
   });
 });
+
+describe("an app's id isn't a website", () => {
+  it("has no host, and so matches nothing", () => {
+    expect(hostOf("android://HASH==@com.acme.app/")).toBeNull();
+    expect(hostOf("androidapp://com.acme.app")).toBeNull();
+    expect(matchUrl({ url: "android://HASH==@com.acme.app/" }, "https://acme.app/")).toBeNull();
+    expect(hostOf("https://acme.app/x")).toBe("acme.app");
+    expect(hostOf("acme.app")).toBe("acme.app");
+  });
+});
