@@ -10,6 +10,8 @@ export function hostOf(url: string): string | null {
   if (!url) return null;
   try {
     const u = new URL(url.includes("://") ? url : `https://${url}`);
+    // An app's id isn't a website: android://com.acme.app must not match acme.app.
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
     return u.hostname.toLowerCase() || null;
   } catch {
     return getHostname(url)?.toLowerCase() ?? null;

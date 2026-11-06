@@ -9,6 +9,7 @@ import { ext } from "./rpc";
 
 type Req = {
   id: string;
+  tabId?: number;
   op: "get" | "create";
   origin: string;
   topOrigin?: string;
@@ -44,6 +45,16 @@ ext.windows?.onRemoved?.addListener((windowId) => {
   }
 });
 
+ext.tabs?.onRemoved?.addListener((tabId) => {
+  for (const r of pending.values()) {
+    if (r.tabId === tabId) {
+      pending.delete(r.id);
+      r.resolve(fail("NotAllowedError", "The request wasn't allowed."));
+      if (r.windowId !== undefined) ext.windows.remove(r.windowId).catch(() => undefined);
+    }
+  }
+});
+
 function loginFor(client: VaultClient, rpId: string, userName: string): Item | undefined {
   return client.allItems().find((i) => i.body.kind === "login" && (i.body.urls ?? []).some((u) => {
     try {
@@ -59,6 +70,7 @@ export async function handlePasskey(
   msg: { t: string; [k: string]: unknown },
   sender: chrome.runtime.MessageSender,
   client: () => VaultClient | null,
+  isThePerson: (c: VaultClient, typed: string) => Promise<boolean>,
 ): Promise<unknown> {
   const isPrompt = !!sender.url && sender.url.startsWith(ext.runtime.getURL("passkey.html"));
 
@@ -67,7 +79,9 @@ export async function handlePasskey(
     // of the sender, not from anything the message says.
     if (isPrompt || !sender.tab || !sender.url) return fail("NotAllowedError", "Not allowed.");
     const u = new URL(sender.url);
-    const origin = u.origin;
+    const origin = (sender as { origin?: string }).origin ?? u.origin;
+    // Nothing to offer a document with an opaque origin. The browser refuses it too.
+    if (origin === "null") return { ok: false, native: true };
     const op = msg.op as "get" | "create";
     const options = msg.options as Record<string, unknown>;
     const rp = op === "create" ? ((options.rp as { id?: string }).id ?? u.hostname) : ((options.rpId as string) ?? u.hostname);
@@ -78,20 +92,18 @@ export async function handlePasskey(
       const algs = options.algs as number[];
       if (!algs.includes(-7)) return { ok: false, native: true };
       if (options.attachment === "cross-platform") return { ok: false, native: true };
-      if (c?.unlocked) {
-        const exclude = (options.exclude as { id: string }[]).map((x) => x.id);
-        if (allPasskeys(c).some((p) => p.passkey.rpId === rp && exclude.includes(p.passkey.credentialId))) {
-          return fail("InvalidStateError", "That passkey is already saved here.");
-        }
-      }
+      // A known excluded id is only answered after the prompt, as a person answered it. An
+      // instant error would tell a page, silently, which passkeys this vault holds.
     } else if (c?.unlocked) {
       // Nothing of ours to offer: go straight to the browser's own.
       const usable = usablePasskeys(allPasskeys(c), rp, (options.allow as { id: string }[]).map((x) => x.id));
       if (!usable.length) return { ok: false, native: true };
     }
+    // One at a time from a tab: a page mustn't be able to bury someone in windows.
+    if ([...pending.values()].some((r) => r.tabId === sender.tab!.id)) return fail("NotAllowedError", "Another request from this tab is waiting.");
     const id = b64u(crypto.getRandomValues(new Uint8Array(16)));
     return new Promise((resolve) => {
-      const req: Req = { id, op, origin, crossOrigin, topOrigin: crossOrigin ? (msg.topOrigin as string | undefined) : undefined, options: { ...options, _rp: rp }, resolve };
+      const req: Req = { id, tabId: sender.tab!.id, op, origin, crossOrigin, topOrigin: crossOrigin ? (msg.topOrigin as string | undefined) : undefined, options: { ...options, _rp: rp }, resolve };
       pending.set(id, req);
       openPrompt(id).then((windowId) => {
         req.windowId = windowId;
@@ -106,13 +118,15 @@ export async function handlePasskey(
 
   if (msg.t === "pkPrompt") {
     const rp = req.options._rp as string;
-    const base = { op: req.op, origin: req.origin, rpId: rp, rpName: (req.options.rp as { name?: string } | undefined)?.name, unlocked: !!c?.unlocked, user: req.options.user };
+    const base = { op: req.op, origin: req.origin, rpId: rp, unlocked: !!c?.unlocked, user: req.options.user, mustVerify: req.options.userVerification === "required" };
     if (!c?.unlocked) return { ...base, candidates: [] };
     if (req.op === "get") {
       const usable = usablePasskeys(allPasskeys(c), rp, (req.options.allow as { id: string }[]).map((x) => x.id));
       return { ...base, candidates: usable.map((u) => ({ itemId: u.itemId, credentialId: u.passkey.credentialId, title: u.title, userName: u.passkey.userName })) };
     }
-    return { ...base, candidates: [], existing: loginFor(c, rp, (req.options.user as { name: string }).name)?.body.title };
+    const exclude = (req.options.exclude as { id: string }[]).map((x) => x.id);
+    const alreadySaved = allPasskeys(c).some((p) => p.passkey.rpId === rp && exclude.includes(p.passkey.credentialId));
+    return { ...base, candidates: [], alreadySaved, existing: loginFor(c, rp, (req.options.user as { name: string }).name)?.body.title };
   }
 
   if (msg.t !== "pkAnswer") return null;
@@ -127,12 +141,22 @@ export async function handlePasskey(
   if (action === "native") return finish({ ok: false, native: true });
   if (!c?.unlocked) return { error: "locked" };
 
-  const uv = true; // The vault's unlocked, and this person just confirmed it here.
+  // User verification tells a site this person proved who they are. An unlocked vault and a
+  // click don't. It's true only if they just proved it, here, in this window.
+  const typed = typeof msg.verify === "string" ? msg.verify : "";
+  const uv = !!typed && (await isThePerson(c, typed));
+  if (typed && !uv) return { error: "wrong" };
+  const mustVerify = req.options.userVerification === "required";
+  if (mustVerify && !uv) return { error: "verify" };
+
   if (req.op === "create") {
-    const o = req.options as { rp: { name?: string }; user: { id: string; name: string; displayName?: string }; challenge: string; residentKey: string; _rp: string };
+    const o = req.options as { user: { id: string; name: string; displayName?: string }; challenge: string; residentKey: string; _rp: string; exclude: { id: string }[] };
+    const excluded = o.exclude.map((x) => x.id);
+    if (allPasskeys(c).some((p) => p.passkey.rpId === o._rp && excluded.includes(p.passkey.credentialId))) return finish(fail("InvalidStateError", "That passkey is already saved here."));
     const made = await makeCredential({
       rpId: o._rp,
-      rpName: o.rp.name,
+      // A site's own name for itself is whatever it likes. The RP ID has been checked.
+      rpName: o._rp,
       userHandle: o.user.id,
       userName: o.user.name,
       userDisplayName: o.user.displayName,
@@ -147,7 +171,7 @@ export async function handlePasskey(
     if (existing) {
       await c.update(existing.id, { ...existing.body, passkeys: [...(existing.body.passkeys ?? []), made.passkey] });
     } else {
-      await c.saveNew(await c.personalVaultId(), newBody("passkey", o.rp.name || o._rp, { username: o.user.name, urls: [{ url: `https://${o._rp}` }], passkeys: [made.passkey] }));
+      await c.saveNew(await c.personalVaultId(), newBody("passkey", o._rp, { username: o.user.name, urls: [{ url: `https://${o._rp}` }], passkeys: [made.passkey] }));
     }
     c.sync().catch(() => undefined);
     const { passkey: _p, ...result } = made;
@@ -159,7 +183,7 @@ export async function handlePasskey(
   const chosen = usable.find((u) => u.passkey.credentialId === msg.credentialId);
   if (!chosen) return finish(fail("NotAllowedError", "The request wasn't allowed."));
   const item = c.get(chosen.itemId);
-  if (item?.body.reprompt && !msg.reprompted) return { error: "reprompt" };
+  if (item?.body.reprompt && !uv) return { error: "verify" };
   const result = await getAssertion({ passkey: chosen.passkey, challenge: o.challenge, origin: req.origin, crossOrigin: req.crossOrigin, topOrigin: req.topOrigin, uv });
   if (item) {
     const passkeys = (item.body.passkeys ?? []).map((p) => (p.credentialId === chosen.passkey.credentialId ? { ...p, lastUsedAt: new Date().toISOString() } : p));

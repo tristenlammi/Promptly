@@ -36,6 +36,9 @@ test.afterAll(async () => {
   site?.close();
 });
 
+/** A press only counts once the menu or bar has been showing for half a second. */
+const LOOK_MS = 800;
+
 type ItemOut = { id: string; title: string; username?: string; password?: string; pendingPassword?: string; tags: string[]; urls: { url: string }[]; history: number };
 
 const items = () => testHook<ItemOut[]>(rig, "items");
@@ -53,7 +56,7 @@ async function openMenu(page: Page, selector: string) {
   await expect.poll(() => !!menuFrame(page), { timeout: 10_000 }).toBe(true);
   const f = menuFrame(page)!;
   await f.waitForLoadState();
-  await page.waitForTimeout(450);
+  await page.waitForTimeout(LOOK_MS);
   return f;
 }
 
@@ -342,6 +345,7 @@ test("a generated sign-up is one login: the save offer finishes it, and the tag 
   await expect.poll(() => !!saveFrame(page), { timeout: 15_000 }).toBe(true);
   const save = saveFrame(page)!;
   await expect(save.getByText("new-person@example.com")).toBeVisible();
+  await page.waitForTimeout(LOOK_MS);
   await save.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(async () => (await forHost("signup.localhost"))[0].username).toBe("new-person@example.com");
   mine = await forHost("signup.localhost");
@@ -403,6 +407,7 @@ test("on a change form, a generated password waits on the existing login, and an
   await expect.poll(() => !!saveFrame(page), { timeout: 15_000 }).toBe(true);
   const save = saveFrame(page)!;
   await expect(save.getByText("Update your password for change.localhost?")).toBeVisible();
+  await page.waitForTimeout(LOOK_MS);
   await save.getByRole("button", { name: "Update" }).click();
   await expect.poll(async () => (await forHost("change.localhost"))[0].password).toBe(s.next);
   mine = await forHost("change.localhost");
@@ -675,6 +680,7 @@ test("username on one page and password on the next survives the navigation", as
   await expect.poll(() => !!saveFrame(page), { timeout: 15_000 }).toBe(true);
   const save = saveFrame(page)!;
   await expect(save.getByText("split@example.com")).toBeVisible();
+  await page.waitForTimeout(LOOK_MS);
   await save.getByRole("button", { name: "Save", exact: true }).click();
   await expect.poll(async () => (await forHost("twostep.localhost"))[0]?.username).toBe("split@example.com");
   await page.close();
@@ -851,7 +857,7 @@ test("a parent frame hiding a whole frame: style checks can't see it, and Inters
     await expect.poll(() => !!menuFrame(page), { timeout: 10_000 }).toBe(true);
     const m = menuFrame(page)!;
     await m.waitForLoadState();
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(LOOK_MS);
     await m.getByRole("button", { name: "Fill Framed" }).click({ force: true });
     await page.waitForTimeout(600);
     return { pass: await inner(page).evaluate(() => (document.getElementById("pass") as HTMLInputElement).value), menu: m };
@@ -872,7 +878,7 @@ test("a parent frame hiding a whole frame: style checks can't see it, and Inters
   });
   const r = await strike(hidden);
   expect(r.pass).toBe("");
-  await expect(r.menu.getByText("fill this one from the toolbar")).toBeVisible();
+  await expect(r.menu.getByText("that click didn't count")).toBeVisible();
   await hidden.close();
 });
 
@@ -969,7 +975,8 @@ test("a login split across frames: the password goes to a frame on the item's ex
     await pop.getByRole("button", { name: "Fill Split" }).click();
     await expect.poll(() => page.evaluate(() => (window as any).__state().user)).toBe("split@example.com");
     await pop.close().catch(() => undefined);
-    await page.waitForTimeout(300);
+    // The frame goes second, after its own check that it can be seen.
+    await page.waitForTimeout(1500);
     const frame = page.frames().find((f) => f !== page.mainFrame() && f.url().includes("password-frame.html"))!;
     const value = await frame.evaluate(() => (window as any).__value());
     await page.close();
@@ -988,7 +995,7 @@ test("an inline pick fills the frame its menu is in, and no other", async () => 
   const f = await openMenu(page, "#user");
   await f.getByRole("button", { name: "Fill Split" }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__state().user)).toBe("split@example.com");
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(1500);
   const frame = page.frames().find((x) => x !== page.mainFrame() && x.url().includes("password-frame.html"))!;
   expect(await frame.evaluate(() => (window as any).__value())).toBe("");
   await page.close();

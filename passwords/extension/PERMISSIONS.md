@@ -33,9 +33,9 @@ For store review, and for anyone who wants to know. Nothing is collected or sent
 |---|---|---|
 | `background.js` | Extension | Yes, while unlocked. |
 | `popup.html`, `vault.html`, `passkey.html` | Extension pages | Yes, only for what they show. |
-| `menu.html`, `save.html` | Extension frames in a page, which the page can't read | No: titles and usernames for this tab. |
+| `menu.html`, `save.html` | Extension frames in a page, which the page can't read | `menu.html` has titles and usernames for its own frame, and a mail code when Mail codes are on and the sender matches that frame's site. `save.html` has the site and the username. Neither ever has a password. |
 | `content.js` | Isolated world in pages | Only values being filled, at fill time. Never stored. |
-| `passkey-main.js` | The page's own world | No. It carries requests and shapes answers. It makes no trust decisions. Not installed in "on click" mode. |
+| `passkey-main.js` | The page's own world | No. It carries requests and shapes answers. It makes no trust decisions, and sets no flag on the page. Not installed in "on click" mode. |
 | `offscreen.html` (Chrome family) | Extension page, for a moment | Only what's being copied. |
 
 The content script reads what the page's own requests came back with from the page's Resource Timing entries. It patches nothing in the page, and asks for no `webRequest` permission. It only looks after a person has typed in a password box.
@@ -46,4 +46,8 @@ No remote code, ever. The rules pack (`rules/pack.json`) ships inside the extens
 
 ## Web accessible resources
 
-`menu.html` and `save.html`, with `use_dynamic_url` on the Chrome family so a page can't probe for the extension. Firefox's per-install UUID does the same job.
+`menu.html` and `save.html`, with `use_dynamic_url` on the Chrome family, so a page can't frame them or tell from them that the extension is installed. Firefox's per-install UUID does the same job for as long as a page doesn't know it. A frame of either that a page made itself holds no token, so the background won't deal with it.
+
+## What a page can still tell
+
+Where the passkey wrapper runs, a page can see that this extension is installed. `navigator.credentials.get.toString()` isn't native code, and an error raised while the wrapper reads the page's options has the wrapper in its stack. On Chromium that stack line includes the extension's id. On Firefox it reads `<anonymous code>`, so the per-install UUID stays out of it as far as we've tested. Being able to tell isn't the same as being able to do anything with it, but nobody should count on the extension being invisible to pages. In "on click" mode nothing is there to find until the toolbar button is used.

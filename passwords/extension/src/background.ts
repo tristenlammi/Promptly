@@ -287,22 +287,47 @@ function savedDomains(): string[] {
   return out;
 }
 
-async function frames(tabId: number): Promise<{ frameId: number; url: string; parentFrameId: number }[]> {
+type FrameRow = { frameId: number; url: string; parentFrameId: number; documentId?: string };
+
+async function frames(tabId: number): Promise<FrameRow[]> {
   try {
     const list = await ext.webNavigation.getAllFrames({ tabId });
-    return (list ?? []).map((f) => ({ frameId: f.frameId, url: f.url, parentFrameId: f.parentFrameId }));
+    return (list ?? []).map((f) => ({ frameId: f.frameId, url: f.url, parentFrameId: f.parentFrameId, documentId: (f as unknown as { documentId?: string }).documentId }));
   } catch {
     return [{ frameId: 0, url: (await ext.tabs.get(tabId)).url ?? "", parentFrameId: -1 }];
   }
 }
 
-async function send<T>(tabId: number, frameId: number, msg: ToContent): Promise<T | undefined> {
+/** To one frame. With a documentId (Chromium), to the document that was checked and no
+ *  other: navigate the frame and this fails instead of reaching whatever's there now. */
+async function send<T>(tabId: number, frameId: number, msg: ToContent, documentId?: string): Promise<T | undefined> {
+  const pinned = documentId && __ENGINE__ !== "firefox" && !(__TEST_BUILD__ && testFlags.noDocumentId);
   try {
-    return (await ext.tabs.sendMessage(tabId, msg, { frameId })) as T;
+    return (await ext.tabs.sendMessage(tabId, msg, pinned ? ({ documentId } as chrome.tabs.MessageSendOptions) : { frameId })) as T;
   } catch {
     return undefined;
   }
 }
+
+/** A frame that won't answer soon gets left out. A page mustn't be able to hold a check
+ *  open by keeping one of its frames busy, with the window that gives it to swap another. */
+function inTime<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(undefined), ms);
+    work.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(undefined);
+      },
+    );
+  });
+}
+
+const REPORT_MS = 800;
 
 /** The last report from a frame, or a fresh one: a restarted worker has none. */
 async function reportOf(tabId: number, frameId: number): Promise<PageReport | undefined> {
@@ -394,7 +419,40 @@ type FillOptions = {
   onlyFrame?: number;
 };
 
-type FrameFill = { frameId: number; url: string; roles: string[] };
+type FrameFill = { frameId: number; url: string; origin: string; documentId?: string; roles: string[] };
+
+const ROLE_NAMES: Record<string, string> = {
+  username: "username",
+  email: "email",
+  password: "password",
+  "current-password": "password",
+  "new-password": "new password",
+  "confirm-password": "new password",
+  otp: "2FA code",
+  "otp-digit": "2FA code",
+  "card-number": "card number",
+  "card-name": "name on card",
+  "card-exp": "card expiry",
+  "card-exp-month": "card expiry",
+  "card-exp-year": "card expiry",
+  "card-cvv": "security code",
+  "first-name": "name",
+  "last-name": "name",
+  "full-name": "name",
+  address1: "address",
+  address2: "address",
+  city: "city",
+  state: "state",
+  postcode: "postcode",
+  country: "country",
+  phone: "phone",
+  company: "company",
+};
+
+/** What a confirmation should say will go in, in words, once each. */
+function namesOf(values: Record<string, string>, roles: string[]): string[] {
+  return [...new Set(roles.filter((r) => hasValueFor(values, [r])).map((r) => ROLE_NAMES[r] ?? r))];
+}
 
 async function fill(tabId: number, itemId: string, opts: FillOptions): Promise<FillOutcome> {
   if (!client?.unlocked) return { ok: false, reason: "locked" };
@@ -404,10 +462,12 @@ async function fill(tabId: number, itemId: string, opts: FillOptions): Promise<F
   await ensureContent(tabId);
 
   const list = await frames(tabId);
-  const asked = await Promise.all(list.map(async (f) => ({ f, report: await send<PageReport>(tabId, f.frameId, { t: "report", fresh: true }) })));
+  const asked = await Promise.all(list.map(async (f) => ({ f, report: await inTime(send<PageReport>(tabId, f.frameId, { t: "report", fresh: true }, f.documentId), REPORT_MS) })));
   const reports = asked
     .filter(({ f, report }) => report && report.fieldCount > 0 && (opts.onlyFrame === undefined || f.frameId === opts.onlyFrame))
-    .map(({ f, report }) => ({ frameId: f.frameId, url: report!.url || f.url, report: report! }));
+    .map(({ f, report }) => ({ frameId: f.frameId, documentId: f.documentId, url: report!.url || f.url, report: report! }))
+    // An opaque origin is nobody's, whatever the address says.
+    .filter((r) => r.report.origin !== "null" && r.report.origin === originOf(r.url));
   const topUrl = list.find((f) => f.frameId === 0)?.url ?? "";
   if (!reports.length) return { ok: false, reason: "no-fields" };
 
@@ -423,8 +483,8 @@ async function fill(tabId: number, itemId: string, opts: FillOptions): Promise<F
     const usable = reports.filter((r) => hasValueFor(values, r.report.roles));
     if (!usable.length) return { ok: false, reason: "no-fields" };
     const others = [...new Set(usable.map((r) => originOf(r.url)).filter((o) => o !== originOf(topUrl)))];
-    if (!opts.confirmCard || others.some((o) => !opts.confirmFrames?.includes(o))) return { ok: false, reason: "confirm-card", frames: others };
-    targets = usable.map((r) => ({ frameId: r.frameId, url: r.url, roles: r.report.roles }));
+    if (!opts.confirmCard || others.some((o) => !opts.confirmFrames?.includes(o))) return { ok: false, reason: "confirm-card", frames: others, fills: namesOf(values, usable.flatMap((r) => r.report.roles)) };
+    targets = usable.map((r) => ({ frameId: r.frameId, documentId: r.documentId, origin: r.report.origin, url: r.url, roles: r.report.roles }));
     host = hostOf(topUrl) ?? "";
   } else {
     // Which frame? Prefer one whose origin matches the item. A frame on a different
@@ -441,43 +501,45 @@ async function fill(tabId: number, itemId: string, opts: FillOptions): Promise<F
     if (!chosen) {
       // No saved URL matches anywhere here: the person chose it by hand from the popup.
       chosen = reports.find((r) => r.frameId === 0) ?? reports[0];
-      if (opts.confirmOrigin !== originOf(chosen.url)) return { ok: false, reason: "confirm-origin", origin: originOf(chosen.url) };
+      if (opts.confirmOrigin !== originOf(chosen.url)) return { ok: false, reason: "confirm-origin", origin: originOf(chosen.url), fills: namesOf(values, chosen.report.roles) };
     } else if (!frameIsPlain(chosen) && opts.confirmOrigin !== originOf(chosen.url)) {
-      return { ok: false, reason: "confirm-origin", origin: originOf(chosen.url) };
+      return { ok: false, reason: "confirm-origin", origin: originOf(chosen.url), fills: namesOf(values, chosen.report.roles) };
     }
 
     host = hostOf(chosen.url) ?? "";
     // Saved over https, page on http.
     const scheme = originOf(chosen.url).split(":")[0];
     if (scheme === "http" && urls.some((u) => u.url.startsWith("https://") || !u.url.includes("://")) && !opts.confirmDowngrade) {
-      return { ok: false, reason: "confirm-downgrade", origin: originOf(chosen.url) };
+      return { ok: false, reason: "confirm-downgrade", origin: originOf(chosen.url), fills: namesOf(values, chosen.report.roles) };
     }
     if (!matching.length && !opts.confirmLookalike) {
       const looks = lookalikeOf(host, savedDomains());
-      if (looks) return { ok: false, reason: "confirm-lookalike", origin: originOf(chosen.url), lookalike: looks };
+      if (looks) return { ok: false, reason: "confirm-lookalike", origin: originOf(chosen.url), lookalike: looks, fills: namesOf(values, chosen.report.roles) };
     }
 
     // A login split across frames: the rest of it, only from frames that pass with no
     // prompt, and only the boxes the first frame doesn't have.
     const chosenFrame = chosen;
-    targets = [{ frameId: chosen.frameId, url: chosen.url, roles: chosen.report.roles }];
+    targets = [{ frameId: chosen.frameId, documentId: chosen.documentId, origin: chosen.report.origin, url: chosen.url, roles: chosen.report.roles }];
     for (const r of matching) {
       if (r.frameId === chosenFrame.frameId || !frameIsPlain(r)) continue;
       const missing = r.report.roles.filter((role) => !chosenFrame.report.roles.includes(role));
-      if (hasValueFor(values, missing)) targets.push({ frameId: r.frameId, url: r.url, roles: missing });
+      if (hasValueFor(values, missing)) targets.push({ frameId: r.frameId, documentId: r.documentId, origin: r.report.origin, url: r.url, roles: missing });
     }
   }
 
+  if (__TEST_BUILD__ && testFlags.fillDelayMs) await new Promise((r) => setTimeout(r, testFlags.fillDelayMs));
   // One frame at a time: filling moves focus, and frames at once fight over it.
-  const answers: ({ filled: string[] } | undefined)[] = [];
+  const answers: ({ filled: string[]; left?: string[] } | undefined)[] = [];
   for (const t of targets) {
-    const answer = await send<{ filled: string[] }>(tabId, t.frameId, { t: "doFill", values: valuesForRoles(values, t.roles) });
+    const answer = await inTime(send<{ filled: string[]; left?: string[] }>(tabId, t.frameId, { t: "doFill", values: valuesForRoles(values, t.roles), origin: t.origin }, t.documentId), 5000);
     answers.push(answer);
     if (__TEST_BUILD__) testLog.doFills.push({ tabId, url: t.url, keys: Object.keys(valuesForRoles(values, t.roles)), filled: answer?.filled });
   }
   if (answers.every((a) => !a)) return { ok: false, reason: "no-frame" };
   const filled = [...new Set(answers.flatMap((a) => a?.filled ?? []))];
   if (!filled.length) return { ok: false, reason: "no-fields" };
+  const left = namesOf(values, answers.flatMap((a) => a?.left ?? []));
 
   recents[itemId] = Date.now();
   await store.setMeta("recents", recents);
@@ -485,7 +547,7 @@ async function fill(tabId: number, itemId: string, opts: FillOptions): Promise<F
   flows[String(tabId)] = afterFill(flows[String(tabId)], itemId, host, filled, sameSite);
   await session.set({ flows });
   await touchLockTimer();
-  return { ok: true, filled };
+  return { ok: true, filled, left };
 }
 
 async function getFlows(): Promise<Record<string, TabFlow>> {
@@ -520,7 +582,7 @@ async function runCodeStep(tabId: number) {
   const hasTotp = !!item?.body.totp?.secret && canReveal(item);
   if (!hasTotp) return;
   const list = await frames(tabId);
-  const reports = await Promise.all(list.map((f) => send<PageReport>(tabId, f.frameId, { t: "report", fresh: true })));
+  const reports = await Promise.all(list.map((f) => inTime(send<PageReport>(tabId, f.frameId, { t: "report", fresh: true }, f.documentId), REPORT_MS)));
   if (!reports[list.findIndex((f) => f.frameId === 0)]) return; // A page we can't read tells us nothing.
   const roles = reports.flatMap((r) => r?.roles ?? []);
   const step = codeStep(flow, hasTotp, {
@@ -569,12 +631,21 @@ ext.tabs.onUpdated.addListener((tabId, info, tab) => {
 });
 ext.tabs.onRemoved.addListener(async (tabId) => {
   for (const k of frameReports.keys()) if (k.startsWith(`${tabId}:`)) frameReports.delete(k);
+  // Each only written if this tab's in it: any tab closing shouldn't rewrite what other
+  // tabs are in the middle of changing.
   const flows = await getFlows();
-  delete flows[String(tabId)];
-  await session.set({ flows });
+  if (flows[String(tabId)]) {
+    delete flows[String(tabId)];
+    await session.set({ flows });
+  }
   const typed = await typedUsers();
-  delete typed[String(tabId)];
-  await session.set({ typedUsers: typed });
+  if (typed[String(tabId)]) {
+    delete typed[String(tabId)];
+    await session.set({ typedUsers: typed });
+  }
+  // A password offered for saving doesn't outlast the page it was for.
+  const waiting = ((await session.get("pendingSave")).pendingSave as PendingSave[]) ?? [];
+  if (waiting.some((x) => x.tabId === tabId)) await session.set({ pendingSave: waiting.filter((x) => x.tabId !== tabId) });
 });
 
 // Single-page apps change route with no load. Tell that frame to look again, within its
@@ -585,19 +656,36 @@ ext.webNavigation.onHistoryStateUpdated.addListener(({ tabId, frameId }) => {
 
 // ---- Saving what someone typed --------------------------------------------------------
 
-type PendingSave = { tabId: number; offer: SaveOffer; submittedKind: string; at: number };
+type PendingSave = { tabId: number; frameId: number; offer: SaveOffer; submittedKind: string; at: number };
 type TypedUser = { username: string; host: string; at: number };
 
+/** The newest live offer for a tab. Offers are kept per frame, so one frame can't replace
+ *  or clear another's. */
 async function pendingSave(tabId: number): Promise<PendingSave | null> {
   const list = ((await session.get("pendingSave")).pendingSave as PendingSave[]) ?? [];
-  const p = list.find((x) => x.tabId === tabId);
-  return p && Date.now() - p.at < 5 * 60 * 1000 ? p : null;
+  const live = list.filter((x) => x.tabId === tabId && Date.now() - x.at < 5 * 60 * 1000);
+  return live.sort((a, b) => b.at - a.at)[0] ?? null;
 }
 
-async function setPending(tabId: number, offer: SaveOffer | null, submittedKind = "signin") {
-  const list = (((await session.get("pendingSave")).pendingSave as PendingSave[]) ?? []).filter((x) => x.tabId !== tabId);
-  if (offer) list.push({ tabId, offer, submittedKind, at: Date.now() });
+async function setPending(tabId: number, frameId: number | null, offer: SaveOffer | null, submittedKind = "signin") {
+  const list = (((await session.get("pendingSave")).pendingSave as PendingSave[]) ?? []).filter((x) => x.tabId !== tabId || (frameId !== null && x.frameId !== frameId));
+  if (offer && frameId !== null) list.push({ tabId, frameId, offer, submittedKind, at: Date.now() });
   await session.set({ pendingSave: list });
+}
+
+/** Whose offers count: the top page, and frames on the top page's own origin. A frame from
+ *  anywhere else has no business putting a question on someone else's page. */
+async function mayOffer(sender: chrome.runtime.MessageSender): Promise<boolean> {
+  const tabId = sender.tab?.id;
+  const origin = senderOrigin(sender);
+  if (tabId === undefined || !origin || origin === "null") return false;
+  if ((sender.frameId ?? 0) === 0) return true;
+  const top = (await frames(tabId)).find((f) => f.frameId === 0);
+  return !!top && originOf(top.url) === origin;
+}
+
+function senderOrigin(sender: chrome.runtime.MessageSender): string {
+  return (sender as { origin?: string }).origin ?? originOf(sender.url ?? "");
 }
 
 async function typedUsers(): Promise<Record<string, TypedUser>> {
@@ -612,24 +700,30 @@ async function rememberTyped(tabId: number, username: string, url: string | unde
   await session.set({ typedUsers: typed });
 }
 
-async function onCaptured(tabId: number, c: Extract<ContentRequest, { t: "captured" }>["capture"], senderUrl: string | undefined) {
-  if (!client?.unlocked) return;
+async function onCaptured(tabId: number, sender: chrome.runtime.MessageSender, c: Extract<ContentRequest, { t: "captured" }>["capture"]) {
+  if (!client?.unlocked || !(await mayOffer(sender))) return;
   const s = await extSettings();
-  const url = c.url;
+  // Where it came from is the browser's word, not the message's.
+  const url = sender.url ?? c.url;
+  c.url = url;
+  c.host = hostOf(url) ?? c.host;
   if (!c.username) {
     const typed = (await typedUsers())[String(tabId)];
-    const host = hostOf(senderUrl ?? url) ?? "";
+    const host = hostOf(url) ?? "";
     if (typed && Date.now() - typed.at < TYPED_USER_MS && (typed.host === host || sameSite(typed.host, host))) c.username = typed.username;
   }
-  const existing = matchItems(loginItems(), url).map(({ item }) => ({
+  const known = matchItems(loginItems(), url).map(({ item, kind }) => ({
+    kind,
     id: item.id,
     username: item.body.username,
     password: item.body.password,
     pendingPassword: item.body.pendingPassword,
     unconfirmed: item.body.tags?.includes(UNCONFIRMED_TAG),
   }));
-  const offer = decideOffer(c as Parameters<typeof decideOffer>[0], existing, s.neverHosts);
-  await setPending(tabId, offer, c.kind);
+  const exact = known.filter((k) => k.kind === "host" || k.kind === "exact");
+  const looser = known.filter((k) => k.kind !== "host" && k.kind !== "exact");
+  const offer = decideOffer(c as Parameters<typeof decideOffer>[0], exact, s.neverHosts, looser);
+  await setPending(tabId, sender.frameId ?? 0, offer, c.kind);
   if (!offer) return;
   // If the page has moved on already, its "hello" came too soon to know about this.
   const tab = await ext.tabs.get(tabId).catch(() => null);
@@ -638,7 +732,7 @@ async function onCaptured(tabId: number, c: Extract<ContentRequest, { t: "captur
 
 async function answerSave(tabId: number, answer: "save" | "update" | "never" | "dismiss") {
   const p = await pendingSave(tabId);
-  await setPending(tabId, null);
+  await setPending(tabId, null, null);
   await send(tabId, 0, { t: "hideSave" });
   if (!p || !client?.unlocked) return;
   if (answer === "dismiss") return;
@@ -656,7 +750,7 @@ async function answerSave(tabId: number, answer: "save" | "update" | "never" | "
   } else if (p.offer.kind === "update" && it) {
     await client.update(it.id, { ...it.body, password: p.offer.password, username: p.offer.username ?? it.body.username });
   } else {
-    await client.saveNew(await client.personalVaultId(), newBody("login", p.offer.host.replace(/^www\./, ""), { username: p.offer.username, password: p.offer.password, urls: [{ url: `https://${p.offer.host}` }] }));
+    await client.saveNew(await client.personalVaultId(), newBody("login", p.offer.host.replace(/^www\./, ""), { username: p.offer.username, password: p.offer.password, urls: [{ url: originOf(p.offer.url) }] }));
   }
   const typed = await typedUsers();
   delete typed[String(tabId)];
@@ -671,7 +765,7 @@ async function answerSave(tabId: number, answer: "save" | "update" | "never" | "
 /** Saved before it goes on the page, so a failed submit can't lose it. On a change form
  *  it's waiting on an existing login. Otherwise it's a new login, tagged until the site
  *  takes it, and trying again reuses that one rather than leaving a trail of them. */
-async function generateInto(tabId: number, frameId: number, url: string, chosen?: string): Promise<void> {
+async function generateInto(tabId: number, frameId: number, url: string, chosen?: string): Promise<boolean> {
   const c = client!;
   const host = hostOf(url);
   const password = generateForSite(host);
@@ -681,6 +775,8 @@ async function generateInto(tabId: number, frameId: number, url: string, chosen?
     const list = await orderedCandidates(tabId, url);
     const id = chosen && list.some((x) => x.id === chosen) ? chosen : list[0]?.id;
     target = id ? c.get(id) : undefined;
+    // An item that asks for the master password isn't changed without it.
+    if (target?.body.reprompt) return false;
   }
   // Someone who can't edit a shared login can't change it. They get a login of their own.
   const role = target ? (await c.vaults()).find((v) => v.id === target.vaultId)?.role : undefined;
@@ -693,7 +789,8 @@ async function generateInto(tabId: number, frameId: number, url: string, chosen?
     else await c.saveNew(await c.personalVaultId(), newBody("login", host?.replace(/^www\./, "") ?? "New login", { password, urls: url ? [{ url: origin }] : [], tags: [UNCONFIRMED_TAG] }));
   }
   await safeSync();
-  await send(tabId, frameId, { t: "fillGenerated", password });
+  await send(tabId, frameId, { t: "fillGenerated", password, origin: originOf(url) });
+  return true;
 }
 
 // ---- Messages --------------------------------------------------------------------------
@@ -704,12 +801,20 @@ function isExtensionPage(sender: chrome.runtime.MessageSender): boolean {
   return !!sender.url && sender.url.startsWith(base);
 }
 
+/** By path: a web accessible page's address has a different id under use_dynamic_url. */
+function isOurPage(sender: chrome.runtime.MessageSender, path: string): boolean {
+  if (!isExtensionPage(sender)) return false;
+  try {
+    return new URL(sender.url!).pathname === path;
+  } catch {
+    return false;
+  }
+}
+
 /** Popup, full page and side panel: no tab, or a tab showing our own page. Our web
  *  accessible frames live in other pages' tabs, and only get MenuRequest. */
 function isTrustedPage(sender: chrome.runtime.MessageSender): boolean {
-  if (!isExtensionPage(sender)) return false;
-  const url = sender.url ?? "";
-  return !url.includes("/menu.html") && !url.includes("/save.html");
+  return isExtensionPage(sender) && !isOurPage(sender, "/menu.html") && !isOurPage(sender, "/save.html");
 }
 
 /** Asks the server once a session, so opening the popup doesn't wait on the network. */
@@ -883,7 +988,11 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       if (m.itemId) {
         const item = c.get(m.itemId);
         if (!item) throw new Error("Unknown item");
-        await c.update(m.itemId, { ...item.body, totp });
+        const before = item.body.totp;
+        // A QR on a page shouldn't quietly take the place of the code someone relies on.
+        if (before?.secret && before.secret !== totp.secret && !m.replace) return { ok: false, replaces: item.body.title };
+        const kept = before?.secret && before.secret !== totp.secret ? [{ name: `Earlier 2FA secret (replaced ${new Date().toISOString().slice(0, 10)})`, value: before.secret, type: "hidden" as const }] : [];
+        await c.update(m.itemId, { ...item.body, totp, fields: [...(item.body.fields ?? []), ...kept] });
       } else {
         await c.saveNew(await c.personalVaultId(), newBody("totp", m.title, { totp, urls: m.url ? [{ url: m.url }] : [] }));
       }
@@ -928,6 +1037,13 @@ async function handlePage(m: PageRequest): Promise<unknown> {
     case "clipClear":
       await clearClipboardIfOurs();
       return { ok: true };
+    case "saveOfferFor": {
+      const p = await pendingSave(m.tabId);
+      return p ? { kind: p.offer.kind, username: p.offer.username ?? "", host: p.offer.host } : null;
+    }
+    case "saveAnswerFor":
+      await answerSave(m.tabId, m.answer);
+      return { ok: true };
   }
 }
 
@@ -952,23 +1068,23 @@ async function handleContent(m: ContentRequest, sender: chrome.runtime.MessageSe
     case "pageReport":
       frameReports.set(`${tabId}:${sender.frameId ?? 0}`, m.report);
       if (__TEST_BUILD__) testLog.reportCount[tabId] = (testLog.reportCount[tabId] ?? 0) + 1;
-      await maybeAutofillOnLoad(tabId, sender.frameId ?? 0, m.report.kinds ?? [], sender.url);
+      if (senderOrigin(sender) !== "null") await maybeAutofillOnLoad(tabId, sender.frameId ?? 0, m.report.kinds ?? [], sender.url);
       if ((await getFlows())[String(tabId)]) scheduleCodeStep(tabId);
       return null;
     case "hello": {
       const host = hostOf(m.url) ?? "";
       const rule = await findRule(host);
       const pending = await pendingSave(tabId);
-      return { rule, pendingSave: !!pending && (sender.frameId ?? 0) === 0, submittedKind: pending?.submittedKind, unlocked: !!client?.unlocked };
+      return { rule, pendingSave: !!pending && (sender.frameId ?? 0) === 0, submittedKind: pending?.submittedKind, unlocked: !!client?.unlocked, inlineMenu: !(await fillsOnClickOnly()) };
     }
     case "captured":
-      await onCaptured(tabId, m.capture, sender.url);
+      await onCaptured(tabId, sender, m.capture);
       return null;
     case "capturedUser":
-      await rememberTyped(tabId, m.username, sender.url);
+      if (await mayOffer(sender)) await rememberTyped(tabId, m.username, sender.url);
       return null;
     case "submitFailed":
-      await setPending(tabId, null);
+      await setPending(tabId, sender.frameId ?? 0, null);
       return null;
     case "teachResult":
       if (client?.unlocked) {
@@ -1023,6 +1139,28 @@ async function findRule(host: string): Promise<SiteRule | null> {
 const PIN_TRIES = 5;
 type PinRecord = { salt: string; wrapped: string; tries: number };
 
+/** Is this the person? For a passkey prompt that has to say so to a site. Five wrong PINs
+ *  wipe it, as they do at the unlock screen, and a master password has no such limit. */
+async function isThePerson(c: VaultClient, typed: string): Promise<boolean> {
+  if (await c.checkPassword(typed)) return true;
+  const pin = (await session.get("pin")).pin as PinRecord | undefined;
+  if (!pin || !/^\d{4,12}$/.test(typed)) return false;
+  const salt = fromB64u(pin.salt);
+  const stretched = await argon2(utf8(typed), salt, KDF_FLOOR);
+  try {
+    await unwrapUnlockSecret(stretched, salt, pin.wrapped, "pin-unlock");
+    await session.set({ pin: { ...pin, tries: 0 } });
+    return true;
+  } catch {
+    const tries = pin.tries + 1;
+    if (tries >= PIN_TRIES) await session.remove("pin");
+    else await session.set({ pin: { ...pin, tries } });
+    return false;
+  } finally {
+    stretched.fill(0);
+  }
+}
+
 async function fetchMailCodes(): Promise<MailCode[]> {
   try {
     return await client!.api.request<MailCode[]>("GET", "/mail/codes");
@@ -1031,31 +1169,34 @@ async function fetchMailCodes(): Promise<MailCode[]> {
   }
 }
 
-/** The sender looks like a saved site and isn't, or this page does. Either way a click
- *  alone doesn't do it. */
-function mailLookalike(found: MailCode, url: string): string | null {
+/** Does this mail belong to this page? A code from anyone else, on any page, stays out of
+ *  the menu altogether: one click would hand another site's code to whoever asked. */
+function mailBelongsHere(found: MailCode, url: string): boolean {
   const [ranked] = rankMailCodes([found], url, savedDomainsOf(client!.allItems()));
-  const pageIsLike = lookalikeOf(hostOf(url) ?? "", savedDomains());
-  return ranked.lookalike ?? pageIsLike;
+  return ranked.matches;
 }
 
-/** Opt-in. The server's told nothing about this page: the matching happens here. */
-async function mailRows(kinds: string[], url: string | undefined) {
-  if (!client?.unlocked || !url || !(await extSettings()).mailCodes) return [];
-  if (!kinds.some((k) => k === "otp" || k === "email-first" || k === "signin")) return [];
+const linkHostOf = (link: string | null) => hostOf(link ?? "");
+
+/** Opt-in. The server's told nothing about this page: the matching happens here. Only the
+ *  domain is shown, because the sender's name is whatever the email says. The domain is
+ *  only what the From line says as well, with no DKIM or SPF behind it (SECURITY). */
+async function mailRows(kinds: string[], url: string | undefined): Promise<{ mail: unknown[]; otherMail: string[] }> {
+  if (!client?.unlocked || !url || !(await extSettings()).mailCodes) return { mail: [], otherMail: [] };
+  if (!kinds.some((k) => k === "otp" || k === "email-first" || k === "signin")) return { mail: [], otherMail: [] };
   const ranked = rankMailCodes(await fetchMailCodes(), url, savedDomainsOf(client.allItems()));
-  const pageIsLike = lookalikeOf(hostOf(url) ?? "", savedDomains());
-  return ranked.map((r) => ({
-    id: r.id,
-    from: r.from_name || r.from_domain,
-    domain: r.from_domain,
-    ago: agoText(r.agoSeconds),
-    matches: r.matches,
-    lookalike: r.lookalike,
-    pageLookalike: pageIsLike,
-    code: kinds.includes("otp") ? r.code : null,
-    hasLink: linkIsSafe(r),
-  }));
+  const here = ranked.filter((r) => r.matches);
+  const otherMail = kinds.includes("otp") ? [...new Set(ranked.filter((r) => !r.matches && r.code).map((r) => r.from_domain))] : [];
+  return {
+    otherMail,
+    mail: here.map((r) => ({
+      id: r.id,
+      domain: r.from_domain,
+      ago: agoText(r.agoSeconds),
+      code: kinds.includes("otp") ? r.code : null,
+      linkHost: linkIsSafe(r) ? linkHostOf(r.link) : null,
+    })),
+  };
 }
 
 /** Off unless an item asks for it, and then only in the clearest case (plan 6.6). */
@@ -1075,9 +1216,17 @@ async function maybeAutofillOnLoad(tabId: number, frameId: number, kinds: string
   await fill(tabId, matches[0].item.id, { onlyFrame: 0 });
 }
 
-async function frameShowingMenu(tabId: number, frameIds: number[]): Promise<number | undefined> {
-  const answers = await Promise.all(frameIds.map((frameId) => send<boolean>(tabId, frameId, { t: "hasMenu" })));
-  return frameIds[answers.findIndex((a) => a === true)];
+/** The frame holding this token, and only that one: a page can open a second menu of its
+ *  own in another frame, and "the first frame with a menu" would be the wrong one. */
+async function tokenOwner(tabId: number, kind: "ownsMenu" | "ownsSave", token: unknown): Promise<(FrameRow & { origin: string }) | null> {
+  if (typeof token !== "string" || !/^[0-9a-f]{32}$/.test(token)) return null;
+  const list = await frames(tabId);
+  const answers = await Promise.all(list.map((f) => inTime(send<{ origin: string; url: string } | false>(tabId, f.frameId, { t: kind, token }, f.documentId), REPORT_MS)));
+  const owners = list.flatMap((f, i) => {
+    const a = answers[i];
+    return a ? [{ ...f, url: a.url, origin: a.origin }] : [];
+  });
+  return owners.length === 1 && owners[0].origin !== "null" ? owners[0] : null;
 }
 
 async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
@@ -1085,24 +1234,27 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
   await reloading;
   const tabId = sender.tab?.id;
   if (tabId === undefined) return null;
-  const parentFrame = (sender as { frameId?: number; parentFrameId?: number }).frameId;
-  const frames_ = await frames(tabId);
-  const me = frames_.find((f) => f.frameId === parentFrame);
-  // Chromium leaves our frame out of that list, and only the frame showing a menu knows.
-  const hostFrame = me ? me.parentFrameId : (await frameShowingMenu(tabId, frames_.map((f) => f.frameId))) ?? 0;
-  const url = frames_.find((f) => f.frameId === hostFrame)?.url ?? "";
+  // Firefox has no way to tell this menu is really showing (press.ts), and "on click" means
+  // no inline menu at all. The menu says so, and this holds whatever it says.
+  if (__ENGINE__ === "firefox" || (await fillsOnClickOnly())) return { ok: false, reason: "popup", locked: false, candidates: [] };
+  const owner = await tokenOwner(tabId, "ownsMenu", m.token);
+  if (!owner) return { ok: false, reason: "popup", locked: false, candidates: [] };
+  const hostFrame = owner.frameId;
+  const url = owner.url;
+  const inFrame = <T>(msg: ToContent) => send<T>(tabId, hostFrame, msg, owner.documentId);
+  const checked = async (itemId: string) => (await inFrame<{ ok: boolean; reason?: string }>({ t: "menuCheck", itemId, token: m.token })) ?? { ok: false };
   switch (m.t) {
     case "menuList": {
       if (!client?.unlocked) return { locked: true, candidates: [] };
       const list = await orderedCandidates(tabId, url);
-      const report = await reportOf(tabId, hostFrame);
+      const report = await inFrame<PageReport>({ t: "report" });
       const kinds = report?.kinds ?? [];
-      return { locked: false, candidates: list, kinds, url, mail: await mailRows(kinds, url) };
+      return { locked: false, candidates: list, kinds, url, ...(await mailRows(kinds, url)) };
     }
     case "menuPick": {
       if (!client?.unlocked) return { ok: false, reason: "locked" };
       // The frame that hosts the menu re-checks that the menu's really visible.
-      const check = await send<{ ok: boolean; reason?: string }>(tabId, hostFrame, { t: "menuCheck", itemId: m.itemId });
+      const check = await checked(m.itemId);
       if (!check?.ok) return { ok: false, reason: "popup", detail: check?.reason };
       const item = client.get(m.itemId);
       if (!item || item.body.kind === "card" || item.body.kind === "identity" || item.body.reprompt) return { ok: false, reason: "popup" };
@@ -1113,30 +1265,29 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
     case "menuMailLink": {
       if (!client?.unlocked) return { ok: false };
       // The same check as filling a login: the menu has to be really visible.
-      const check = await send<{ ok: boolean; reason?: string }>(tabId, hostFrame, { t: "menuCheck", itemId: "mail" });
+      const check = await checked("mail");
       if (!check?.ok) return { ok: false, reason: "popup" };
       const found = (await fetchMailCodes()).find((x) => x.id === m.id);
       if (!found) return { ok: false, reason: "gone" };
-      const lookalike = mailLookalike(found, url);
+      // Decided here as well as in the menu.
+      if (!mailBelongsHere(found, url)) return { ok: false, reason: "other-sender" };
       if (m.t === "menuMailCode") {
         if (!found.code) return { ok: false };
-        // Decided here as well as in the menu.
-        if (lookalike && !m.confirmLookalike) return { ok: false, reason: "lookalike", lookalike };
-        await send(tabId, hostFrame, { t: "doFill", values: { otp: found.code } });
-        return { ok: true };
+        const out = await inFrame<{ filled: string[] }>({ t: "doFill", values: { otp: found.code }, origin: owner.origin });
+        return { ok: !!out?.filled.length };
       }
-      // A link goes somewhere at once and can't be taken back, so it's refused outright.
-      if (lookalike || !linkIsSafe(found)) return { ok: false, reason: "lookalike", lookalike };
+      if (!m.confirmed || !linkIsSafe(found)) return { ok: false, reason: "not-confirmed" };
       await ext.tabs.update(tabId, { url: found.link! });
       return { ok: true };
     }
     case "menuGenerate": {
       if (!client?.unlocked) return { ok: false };
-      await generateInto(tabId, hostFrame, url, m.itemId);
-      return { ok: true };
+      const check = await checked("generate");
+      if (!check?.ok) return { ok: false, reason: "popup", detail: check?.reason };
+      return { ok: await generateInto(tabId, hostFrame, url, m.itemId) };
     }
     case "menuClose":
-      await send(tabId, hostFrame, { t: "report" });
+      await inFrame({ t: "report" });
       return null;
     case "menuOpenPopup":
       try {
@@ -1152,16 +1303,24 @@ async function handleSave(m: SaveRequest, sender: chrome.runtime.MessageSender):
   await boot();
   const tabId = sender.tab?.id;
   if (tabId === undefined) return null;
+  // Only the bar the top page opened, which holds this token. A page that frames our page
+  // itself, having learned its address, doesn't have one.
+  const owner = await tokenOwner(tabId, "ownsSave", m.token);
+  if (!owner || owner.frameId !== 0) return null;
   if (m.t === "saveOffer") {
     const p = await pendingSave(tabId);
     // Only what's needed to ask: never the password back.
     return p ? { kind: p.offer.kind, username: p.offer.username ?? "", host: p.offer.host } : null;
   }
+  // Firefox can't judge a press on the bar (press.ts): saving goes through the popup there.
+  if (__ENGINE__ === "firefox" && m.answer !== "dismiss") return null;
   await answerSave(tabId, m.answer);
   return null;
 }
 
 // ---- Test builds only: esbuild drops all of this from a release ------------------------------
+
+const testFlags = { noDocumentId: false, fillDelayMs: 0 };
 
 const testLog = {
   doFills: [] as { tabId: number; url: string; keys: string[]; filled?: string[] }[],
@@ -1208,6 +1367,11 @@ async function handleTest(m: { op: string; [k: string]: unknown }): Promise<unkn
     }
     case "settings":
       return vaultSettings();
+    case "flags":
+      Object.assign(testFlags, m.flags);
+      return testFlags;
+    case "pending":
+      return ((await session.get("pendingSave")).pendingSave as PendingSave[]) ?? [];
     case "addCard":
       await client!.saveNew(await client!.personalVaultId(), newBody("card", m.title as string, { cardNumber: m.cardNumber as string, cardCvv: m.cardCvv as string }));
       return { ok: true };
@@ -1234,12 +1398,12 @@ ext.runtime.onMessage.addListener((msg: { t: string }, sender, reply) => {
   if (t === "vaultChanged" || t === "locked" || t === "offscreenClip") return false;
   let p: Promise<unknown>;
   if (t.startsWith("pk")) {
-    p = boot().then(() => handlePasskey(msg as never, sender, () => client));
+    p = boot().then(() => handlePasskey(msg as never, sender, () => client, isThePerson));
   } else if (t === "menuList" || t === "menuPick" || t === "menuMailCode" || t === "menuMailLink" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup") {
-    if (!isExtensionPage(sender) || !(sender.url ?? "").includes("/menu.html")) return false;
+    if (!isOurPage(sender, "/menu.html")) return false;
     p = handleMenu(msg as MenuRequest, sender);
   } else if (t === "saveOffer" || t === "saveAnswer") {
-    if (!isExtensionPage(sender) || !(sender.url ?? "").includes("/save.html")) return false;
+    if (!isOurPage(sender, "/save.html")) return false;
     p = handleSave(msg as SaveRequest, sender);
   } else if (t === "pageReport" || t === "hello" || t === "captured" || t === "capturedUser" || t === "submitFailed" || t === "teachResult") {
     p = handleContent(msg as ContentRequest, sender);

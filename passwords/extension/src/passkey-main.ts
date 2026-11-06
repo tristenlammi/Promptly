@@ -5,9 +5,6 @@
 // The native API stays available as the fallback, and a request we can't carry always
 // ends up there rather than hanging.
 (() => {
-  const w = window as unknown as { __promptlyPk?: boolean };
-  if (w.__promptlyPk) return;
-  w.__promptlyPk = true;
   if (!navigator.credentials || typeof PublicKeyCredential === "undefined") return;
 
   const native = {

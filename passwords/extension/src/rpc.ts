@@ -2,7 +2,7 @@
 // to a content script at fill time, and to trusted extension pages when asked.
 export const ext: typeof chrome = (globalThis as unknown as { browser?: typeof chrome }).browser ?? chrome;
 
-export type PageReport = { url: string; kinds: string[]; roles: string[]; fieldCount: number; top: boolean };
+export type PageReport = { url: string; origin: string; kinds: string[]; roles: string[]; fieldCount: number; top: boolean };
 
 export type Candidate = { id: string; title: string; username: string; hasTotp: boolean; kind: string; downgrade: boolean; reprompt: boolean };
 
@@ -38,7 +38,9 @@ export type PageRequest =
   | { t: "setPin"; pin: string | null }
   | { t: "pinUnlock"; pin: string }
   | { t: "scanTabQr"; windowId?: number }
-  | { t: "addTotp"; itemId: string | null; uri: string; title: string; url: string }
+  | { t: "addTotp"; itemId: string | null; uri: string; title: string; url: string; replace?: boolean }
+  | { t: "saveOfferFor"; tabId: number }
+  | { t: "saveAnswerFor"; tabId: number; answer: "save" | "update" | "never" | "dismiss" }
   | { t: "teach"; tabId: number }
   | { t: "reportForm"; tabId: number }
   | { t: "connected"; serverUrl: string; token: string; deviceId: string; userId: string }
@@ -50,12 +52,12 @@ export type PageRequest =
   | { t: "clipClear" };
 
 export type FillOutcome =
-  | { ok: true; filled: string[] }
+  | { ok: true; filled: string[]; left?: string[] }
   | { ok: false; reason: "locked" | "no-fields" | "no-frame" | "reprompt" }
-  | { ok: false; reason: "confirm-origin"; origin: string }
-  | { ok: false; reason: "confirm-downgrade"; origin: string }
-  | { ok: false; reason: "confirm-lookalike"; origin: string; lookalike: string }
-  | { ok: false; reason: "confirm-card"; frames: string[] };
+  | { ok: false; reason: "confirm-origin"; origin: string; fills?: string[] }
+  | { ok: false; reason: "confirm-downgrade"; origin: string; fills?: string[] }
+  | { ok: false; reason: "confirm-lookalike"; origin: string; lookalike: string; fills?: string[] }
+  | { ok: false; reason: "confirm-card"; frames: string[]; fills?: string[] };
 
 /** What a content script may ask. Never a secret back, only titles for its own tab. */
 export type ContentRequest =
@@ -67,28 +69,30 @@ export type ContentRequest =
   | { t: "teachResult"; rule: { host: string; username?: string; password?: string; submit?: string; otp?: string } };
 
 /** What the inline menu frame may ask. */
-export type MenuRequest =
+export type MenuRequest = { token: string } & (
   | { t: "menuList" }
   | { t: "menuPick"; itemId: string }
-  | { t: "menuMailCode"; id: string; confirmLookalike?: boolean }
-  | { t: "menuMailLink"; id: string }
+  | { t: "menuMailCode"; id: string }
+  | { t: "menuMailLink"; id: string; confirmed?: boolean }
   | { t: "menuGenerate"; itemId?: string }
   | { t: "menuClose" }
-  | { t: "menuOpenPopup" };
+  | { t: "menuOpenPopup" }
+);
 
-export type SaveRequest = { t: "saveAnswer"; answer: "save" | "update" | "never" | "dismiss" } | { t: "saveOffer" };
+export type SaveRequest = { token: string } & ({ t: "saveAnswer"; answer: "save" | "update" | "never" | "dismiss" } | { t: "saveOffer" });
 
 /** From the background to a frame's content script. */
 export type ToContent =
   | { t: "report"; fresh?: boolean }
-  | { t: "doFill"; values: Record<string, string>; only?: string[] }
-  | { t: "menuCheck"; itemId: string }
-  | { t: "hasMenu" }
+  | { t: "doFill"; values: Record<string, string>; origin: string }
+  | { t: "menuCheck"; itemId: string; token: string }
+  | { t: "ownsMenu"; token: string }
+  | { t: "ownsSave"; token: string }
   | { t: "showSave"; kind: string }
   | { t: "hideSave" }
   | { t: "checkFailed" }
   | { t: "openMenu" }
-  | { t: "fillGenerated"; password: string }
+  | { t: "fillGenerated"; password: string; origin: string }
   | { t: "teachStart" }
   | { t: "describeForm" }
   | { t: "routeChanged" }

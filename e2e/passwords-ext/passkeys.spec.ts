@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 
-import { bg, connect, launch, makeUsers, type Rig, siteA, startSite, tabIdOf, unlockExt } from "./lib";
+import { bg, connect, launch, makeUsers, MASTER, type Rig, siteA, startSite, tabIdOf, unlockExt } from "./lib";
 
 test.describe.configure({ mode: "serial" });
 
@@ -51,8 +51,9 @@ test("creates a passkey, in a window of its own, and a real server library accep
   expect(r.error).toBeUndefined();
   expect(r.isReal).toBe(true);
   expect(r.authenticatorAttachment).toBe("platform");
-  const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: true });
+  const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: false });
   expect(v.verified).toBe(true);
+  expect(v.registrationInfo?.userVerified, "a click on a button doesn't verify anyone").toBe(false);
   expect(v.registrationInfo?.credentialDeviceType).toBe("multiDevice");
   expect(v.registrationInfo?.credentialBackedUp).toBe(true);
   credential = { id: v.registrationInfo!.credential.id, publicKey: v.registrationInfo!.credential.publicKey, counter: v.registrationInfo!.credential.counter };
@@ -75,9 +76,10 @@ test("signs in with it, and the library verifies the signature", async () => {
     expectedOrigin: ORIGIN,
     expectedRPID: RP,
     credential: { id: credential.id, publicKey: credential.publicKey as Uint8Array<ArrayBuffer>, counter: credential.counter },
-    requireUserVerification: true,
+    requireUserVerification: false,
   });
   expect(v.verified).toBe(true);
+  expect(v.authenticationInfo.userVerified).toBe(false);
   expect(Buffer.from(r.response.userHandle, "base64url").toString()).toBe("user-1");
   await page.close();
 });
@@ -93,11 +95,36 @@ test("discoverable sign-in with no allow list finds it too", async () => {
   await page.close();
 });
 
-test("excludeCredentials stops a duplicate", async () => {
+test("excludeCredentials stops a duplicate, and says so only after the prompt", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(siteA("webauthn.html"));
-  const r = await page.evaluate((o) => (window as any).__register(o), { rpId: RP, userId: b64u(Buffer.from("user-1")), userName: "ana@example.com", challenge: b64u(crypto.randomBytes(32)), exclude: [credential.id] });
-  expect(r.error).toBe("InvalidStateError");
+  const run = page.evaluate((o) => (window as any).__register(o), { rpId: RP, userId: b64u(Buffer.from("user-1")), userName: "ana@example.com", challenge: b64u(crypto.randomBytes(32)), exclude: [credential.id] });
+  const prompt = await promptWindow();
+  await expect(prompt.getByText("You already have a passkey")).toBeVisible();
+  await prompt.getByRole("button", { name: "Tell the site" }).click();
+  expect((await run).error).toBe("InvalidStateError");
+  await page.close();
+});
+
+test("a site that requires user verification gets it only after the master password, in the prompt", async () => {
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("webauthn.html"));
+  const challenge = b64u(crypto.randomBytes(32));
+  const run = page.evaluate((o) => (window as any).__register(o), { rpId: RP, userId: b64u(Buffer.from("user-uv")), userName: "uv@example.com", challenge, uv: "required" });
+  const prompt = await promptWindow();
+  await expect(prompt.getByText("prove it's you")).toBeVisible();
+  await prompt.getByRole("button", { name: "Save as a new item" }).click();
+  await expect(prompt.getByLabel("Master password or PIN")).toBeVisible();
+  await prompt.getByLabel("Master password or PIN").fill("not the password");
+  await prompt.getByRole("button", { name: "Continue" }).click();
+  await expect(prompt.getByText("That isn't right.")).toBeVisible({ timeout: 30_000 });
+  await prompt.getByLabel("Master password or PIN").fill(MASTER);
+  await prompt.getByRole("button", { name: "Continue" }).click();
+  const r = await run;
+  expect(r.error).toBeUndefined();
+  const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: true });
+  expect(v.verified).toBe(true);
+  expect(v.registrationInfo?.userVerified).toBe(true);
   await page.close();
 });
 
@@ -179,9 +206,10 @@ test("closing the prompt refuses the request", async () => {
 test("the passkey is in the vault, syncs, and shows in the vault page", async () => {
   const vault = await rig.ctx.newPage();
   await vault.goto(`chrome-extension://${rig.extId}/vault.html`);
-  await expect(vault.getByRole("list", { name: "Items" }).getByRole("button", { name: /Test RP/ })).toBeVisible({ timeout: 20_000 });
-  await vault.getByRole("list", { name: "Items" }).getByRole("button", { name: /Test RP/ }).click();
-  await expect(vault.getByText(/Test RP · ana@example.com/)).toBeVisible();
+  // Named for its RP ID. What the site calls itself isn't trusted with the vault's list.
+  await expect(vault.getByRole("list", { name: "Items" }).getByRole("button", { name: /localhost/ }).first()).toBeVisible({ timeout: 20_000 });
+  await vault.getByRole("list", { name: "Items" }).getByRole("button", { name: /localhost/ }).first().click();
+  await expect(vault.getByText(/localhost · ana@example.com/)).toBeVisible();
   await vault.close();
 });
 

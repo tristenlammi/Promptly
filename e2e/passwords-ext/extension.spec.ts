@@ -31,6 +31,9 @@ async function openMenuOn(page: Page, selector = "#user") {
   return f;
 }
 
+/** A press only counts once the menu or bar has been showing for half a second. */
+const LOOK_MS = 800;
+
 test("popup finds this site's login, and fills it into the page", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(siteA("login.html"));
@@ -60,7 +63,7 @@ test("inline menu: nothing in the page's DOM says what it is, and a click fills"
   });
   expect(seen).toEqual({ tag: "DIV", id: "", cls: "", data: 0, shadow: false, iframes: 0 });
   await expect(frame.getByRole("button", { name: "Fill Acme" })).toBeVisible();
-  await page.waitForTimeout(450);
+  await page.waitForTimeout(LOOK_MS);
   await frame.getByRole("button", { name: "Fill Acme" }).click();
   await expect.poll(() => page.evaluate(() => (window as any).__state())).toEqual({ user: "ana@example.com", pass: "acme-Pass-1" });
   await page.close();
@@ -77,7 +80,7 @@ test("an inline click within the dwell time is refused", async () => {
     // Slow machine: the click happened after the dwell. Nothing to conclude.
     test.info().annotations.push({ type: "note", description: "click landed after dwell" });
   } else {
-    await expect(frame.getByText("fill this one from the toolbar")).toBeVisible();
+    await expect(frame.getByText("that click didn't count")).toBeVisible();
   }
   await page.close();
 });
@@ -125,6 +128,7 @@ test("saves a new login after a successful sign-in, updates a changed one, and n
   const save = page.frames().find((f) => f.url().includes("/save.html"))!;
   await expect(save.getByText("Save this login for localhost?")).toBeVisible();
   await expect(save.getByText("new@example.com")).toBeVisible();
+  await page.waitForTimeout(LOOK_MS);
   // It's never told the password.
   expect(await save.content()).not.toContain("new-Pass-1");
   await save.getByRole("button", { name: "Save" }).click();
@@ -138,6 +142,7 @@ test("saves a new login after a successful sign-in, updates a changed one, and n
   await expect.poll(() => !!page.frames().find((f) => f.url().includes("/save.html")), { timeout: 15_000 }).toBe(true);
   const upd = page.frames().find((f) => f.url().includes("/save.html"))!;
   await expect(upd.getByText("Update your password for localhost?")).toBeVisible();
+  await page.waitForTimeout(LOOK_MS);
   await upd.getByRole("button", { name: "Update" }).click();
   await page.waitForTimeout(500);
 

@@ -6,19 +6,26 @@
     <p id="label">Find something</p>
     <!-- The same boxes all along. A route change only rewrites attributes the extension
          doesn't watch, so nothing but the route change itself can say to look again. -->
+    <form onsubmit="return false">
     <input id="a" aria-labelledby="label" placeholder="Search" name="q" />
-    <input id="b" style="display: inline-block" placeholder="" name="filter" />
+    <input id="b" type="password" autocomplete="off" inputmode="numeric" maxlength="4" placeholder="PIN" name="pin" />
+    <button id="s">Search</button>
+    </form>
     <script>
       const a = document.getElementById("a");
       const b = document.getElementById("b");
       window.__toSignIn = (how) => {
         document.getElementById("head").textContent = "Sign in";
+        document.getElementById("label").textContent = "Email";
+        document.getElementById("s").textContent = "Sign in";
         a.name = "email";
         a.placeholder = "Email";
         a.autocomplete = "username";
         b.name = "password";
         b.placeholder = "Password";
         b.autocomplete = "current-password";
+        b.removeAttribute("inputmode");
+        b.removeAttribute("maxlength");
         if (how === "push") history.pushState({}, "", "/spa-routes.html/sign-in");
         if (how === "hash") location.hash = "#/sign-in";
       };

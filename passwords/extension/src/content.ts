@@ -5,13 +5,15 @@
 import { capture, type Captured, looksFailed, requestVerdict } from "../../../frontend/src/passwords/core/autofill/capture";
 import { analyzePage, type DomAdapter, type FillableElement, type FormInfo } from "../../../frontend/src/passwords/core/autofill/classify";
 import { fillField, fillFields, type FillValues } from "../../../frontend/src/passwords/core/autofill/fill";
-import { checkAtClick, fieldIsFillable, type GuardState, visibilityV2 } from "../../../frontend/src/passwords/core/autofill/guard";
+import { checkAtClick, fieldIsClear, fieldIsFillable, type GuardState, inViewport, visibilityV2 } from "../../../frontend/src/passwords/core/autofill/guard";
 import { applyRule, describeForm, selectorFor } from "../../../frontend/src/passwords/core/autofill/rules";
 import type { SiteRule } from "../../../frontend/src/passwords/core/model";
 import { ext, type PageReport, type ToContent } from "./rpc";
 
 const w = window as unknown as { __promptlyContent?: boolean };
-if (!w.__promptlyContent) {
+// A document with an opaque origin (a site's sandboxed uploads, say) isn't the site its
+// address says, whatever location.href claims. It doesn't get this script's attention.
+if (!w.__promptlyContent && self.origin !== "null") {
   w.__promptlyContent = true;
   main();
 }
@@ -89,7 +91,16 @@ function main() {
   let requestOkAt = 0;
   let requests: PerformanceObserver | null = null;
 
+  // What a person typed in a box, or we put there. A capture only trusts a password box
+  // still holding exactly that: a page can set a value and submit with no one involved.
+  const vouched = new WeakMap<Element, string>();
+  // "On click" mode has no inline menu. Off until the background says otherwise.
+  let inlineMenu = false;
+
   const roleOf = (el: EventTarget | null) => forms.flatMap((f) => f.fields).find((f) => f.el === el);
+
+  /** The boxes that could get a value right now. Off-screen ones may yet be scrolled to. */
+  const showing = (f: FormInfo["fields"][number]) => fieldIsFillable(f.el).ok && (!inViewport(f.el) || fieldIsClear(f.el, dom.shadowRoot).ok);
 
   function analyze() {
     const page = analyzePage(document, dom);
@@ -110,12 +121,16 @@ function main() {
     noticeFormGone();
   }
 
-  function report(): PageReport {
+  /** ``strict`` is for a fill: only boxes that can be seen count, so a hidden one isn't
+   *  even sent a value. It takes layout, so ordinary reports don't. */
+  function report(strict = false): PageReport {
+    const fields = strict ? (best?.fields ?? []).filter(showing) : best?.fields ?? [];
     return {
       url: location.href,
+      origin: self.origin,
       kinds: forms.filter((f) => f.fields.length).map((f) => f.kind),
-      roles: (best?.fields ?? []).map((f) => f.role),
-      fieldCount: best?.fields.length ?? 0,
+      roles: fields.map((f) => f.role),
+      fieldCount: fields.length,
       top: window === window.top,
     };
   }
@@ -177,8 +192,9 @@ function main() {
   window.addEventListener("popstate", schedule);
 
   async function hello() {
-    const r = (await send({ t: "hello", url: location.href })) as { r?: { rule: SiteRule | null; pendingSave: boolean; submittedKind?: string; unlocked: boolean } } | null;
+    const r = (await send({ t: "hello", url: location.href })) as { r?: { rule: SiteRule | null; pendingSave: boolean; submittedKind?: string; unlocked: boolean; inlineMenu: boolean } } | null;
     rule = r?.r?.rule ?? null;
+    inlineMenu = !!r?.r?.inlineMenu;
     analyze();
     publish();
     if (r?.r?.pendingSave) arrived(r.r.submittedKind ?? "signin");
@@ -208,6 +224,13 @@ function main() {
   let closedRoot: ShadowRoot | null = null;
   let io: IntersectionObserver | null = null;
   let ioReading: boolean | undefined;
+  // Names this menu. Only the frame holding it speaks for the menu the click landed on.
+  let menuToken: string | null = null;
+
+  const newToken = () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
 
   function closeMenu() {
     hostObserver?.disconnect();
@@ -221,6 +244,7 @@ function main() {
     guard = null;
     menuField = null;
     closedRoot = null;
+    menuToken = null;
   }
 
   function openMenu(field: Element) {
@@ -232,7 +256,8 @@ function main() {
     const shadow = host.attachShadow({ mode: "closed" });
     closedRoot = shadow;
     frame = document.createElement("iframe");
-    frame.src = ext.runtime.getURL("menu.html");
+    menuToken = newToken();
+    frame.src = `${ext.runtime.getURL("menu.html")}#${menuToken}`;
     frame.setAttribute("allow", "");
     frame.setAttribute("style", "all:initial;display:block;width:320px;height:240px;border:0;background:transparent;color-scheme:normal");
     shadow.appendChild(frame);
@@ -275,6 +300,8 @@ function main() {
   }
 
   function onFocus(e: Event) {
+    // A page can dispatch a focus event any time it likes.
+    if (!e.isTrusted || !inlineMenu) return;
     const target = (e.composedPath()[0] ?? e.target) as Element;
     if (!target || !["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
     if (Date.now() - lastAnalysis > 1500) analyze();
@@ -308,36 +335,77 @@ function main() {
 
   // ---- Filling ----------------------------------------------------------------------
 
-  async function doFill(values: FillValues): Promise<string[]> {
+  /** The check for each box, right before its value goes in. A box off screen is scrolled
+   *  to and looked at again, but only if it's near the box before it: a form's boxes sit
+   *  together, and one 5000 px away from the rest isn't meant to be seen. */
+  function readyToFill(): (el: Element) => boolean {
+    let last: { x: number; y: number } | null = null;
+    return (el) => {
+      if (!fieldIsFillable(el).ok) return false;
+      if (!inViewport(el)) {
+        const r = el.getBoundingClientRect();
+        const at = { x: r.left + window.scrollX, y: r.top + window.scrollY };
+        if (last && (Math.abs(at.x - last.x) > window.innerWidth || Math.abs(at.y - last.y) > window.innerHeight)) return false;
+        el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        if (!inViewport(el)) return false;
+      }
+      if (!fieldIsClear(el, dom.shadowRoot).ok) return false;
+      const r = el.getBoundingClientRect();
+      last = { x: r.left + window.scrollX, y: r.top + window.scrollY };
+      return true;
+    };
+  }
+
+  async function doFill(values: FillValues, origin: string): Promise<{ filled: string[]; left: string[] }> {
+    // The frame may not hold what the background checked by now. Secrets stop here.
+    if (self.origin !== origin || self.origin === "null") return { filled: [], left: [] };
     // First, since our own menu covers boxes below the one it opened on.
     closeMenu();
     analyze();
     const form = best;
-    if (!form) return [];
-    // The guard applies whatever the classifier said: no hidden or off-screen fields.
-    let visible = form.fields.filter((f) => fieldIsFillable(f.el).ok);
+    if (!form) return { filled: [], left: [] };
     // From inside a frame, a parent hiding the whole frame can't be seen by style. Where
     // the browser can say, it decides. A background tab can't, and then this adds nothing.
-    if (window !== window.top) {
-      const seen = await Promise.all(visible.map((f) => readVisibility(f.el)));
-      visible = visible.filter((_, i) => seen[i] !== false);
-    }
-    const results = await fillFields(visible, values, (role) => {
+    if (window !== window.top && (await readVisibility(document.documentElement)) === false) return { filled: [], left: form.fields.map((f) => f.role) };
+    // Only the boxes these values are for, and the page gets no box it can hide.
+    const wanted = form.fields.filter((f) => values[f.role] !== undefined || (f.role === "otp-digit" && values.otp !== undefined) || (f.role === "email" && values.username !== undefined) || (f.role === "username" && values.email !== undefined));
+    const results = await fillFields(wanted, values, (role) => {
       analyze();
       return (best?.fields.find((f) => f.role === role)?.el as FillableElement | undefined) ?? null;
-    });
-    const filled = visible.filter((f) => results.some((r) => r.el === f.el && r.ok)).map((f) => f.role);
+    }, readyToFill());
+    for (const r of results) if (r.ok) vouched.set(r.el, r.el.value);
+    const filled = wanted.filter((f) => results.some((r) => r.el === f.el && r.ok)).map((f) => f.role);
+    const left = wanted.filter((f) => results.some((r) => r.el === f.el && r.method === "skipped")).map((f) => f.role);
     if (filled.some(isPassword)) markDirty(form);
-    return filled;
+    return { filled, left };
   }
 
   // ---- Noticing a submit --------------------------------------------------------------
+
+  /** What a person put in these boxes, or we did. A password box holding anything else
+   *  says nothing: the page may have written it. */
+  function provenCapture(form: FormInfo): Captured | null {
+    const c = capture(form, location);
+    if (!c) return null;
+    const proven = (f: FormInfo["fields"][number]) => vouched.get(f.el) === (f.el as HTMLInputElement).value;
+    const boxes = form.fields.filter((f) => isPassword(f.role) && (f.el as HTMLInputElement).value);
+    if (boxes.some((f) => !proven(f))) {
+      c.password = undefined;
+      c.newPassword = undefined;
+    }
+    if (!c.password && !c.newPassword) {
+      // The username step, for the next page: only if someone really typed it.
+      const box = form.fields.find((f) => (f.role === "username" || f.role === "email") && (f.el as HTMLInputElement).value);
+      if (!box || !proven(box)) return null;
+    }
+    return c;
+  }
 
   function grab(form0?: FormInfo, snapshot?: Captured) {
     if (!form0 && !snapshot && !best) analyze();
     const form = form0 ?? forms.find((f) => f.fields.some((x) => isPassword(x.role))) ?? best;
     if (!form && !snapshot) return;
-    const c = snapshot ?? capture(form!, location);
+    const c = snapshot ?? provenCapture(form!);
     if (!c || (!c.password && !c.newPassword)) {
       // Username on one page, password on the next. It may be a full navigation, so the
       // background keeps it for this tab. It never comes back here.
@@ -366,7 +434,7 @@ function main() {
   }
 
   function markDirty(form: FormInfo) {
-    const snapshot = capture(form, location);
+    const snapshot = provenCapture(form);
     if (!snapshot?.password && !snapshot?.newPassword) return;
     dirty = { form, snapshot };
     watchRequests();
@@ -436,6 +504,7 @@ function main() {
       if (!e.isTrusted) return;
       const t = e.composedPath()[0] as Element;
       if (!t || !["INPUT", "TEXTAREA"].includes(t.tagName)) return;
+      vouched.set(t, (t as HTMLInputElement).value);
       let form = forms.find((f) => f.fields.some((x) => x.el === t));
       // Typing in a chat box or a document isn't a reason to read the whole page again.
       if (!form && (t as HTMLInputElement).type === "password" && Date.now() - lastAnalysis > 300) {
@@ -467,6 +536,7 @@ function main() {
   );
 
   let saveHost: HTMLElement | null = null;
+  let saveToken: string | null = null;
 
   async function checkPendingSave() {
     if (window !== window.top) return;
@@ -482,6 +552,7 @@ function main() {
   function hideSaveBar() {
     saveHost?.remove();
     saveHost = null;
+    saveToken = null;
   }
 
   function showSaveBar() {
@@ -491,10 +562,15 @@ function main() {
     saveHost = document.createElement("div");
     const shadow = saveHost.attachShadow({ mode: "closed" });
     const f = document.createElement("iframe");
-    f.src = ext.runtime.getURL("save.html");
+    saveToken = newToken();
+    f.src = `${ext.runtime.getURL("save.html")}#${saveToken}`;
     f.setAttribute("style", "all:initial;display:block;width:360px;height:150px;border:0;color-scheme:normal");
     shadow.appendChild(f);
-    saveHost.setAttribute("style", "all:initial;position:fixed;top:12px;right:12px;width:360px;height:150px;z-index:2147483647;display:block");
+    saveHost.setAttribute("style", "all:initial;position:fixed;top:12px;right:12px;width:360px;height:150px;z-index:2147483647;display:block;inset:12px 12px auto auto;border:0;padding:0;margin:0;overflow:hidden;background:transparent");
+    // As for the menu: a page's stylesheet can't reach past these.
+    for (const [k, v] of [["opacity", "1"], ["visibility", "visible"], ["display", "block"], ["filter", "none"], ["clip-path", "none"], ["mask-image", "none"], ["transform", "none"], ["mix-blend-mode", "normal"], ["position", "fixed"], ["pointer-events", "auto"], ["top", "12px"], ["right", "12px"]]) {
+      saveHost.style.setProperty(k, v, "important");
+    }
     saveHost.setAttribute("popover", "manual");
     document.documentElement.appendChild(saveHost);
     try {
@@ -539,6 +615,28 @@ function main() {
     }
   }
 
+  /** Cross-origin means any ancestor differs, not just the top: A inside B inside A is. */
+  function ancestry(): { crossOrigin: boolean; topOrigin?: string } {
+    if (window === window.top) return { crossOrigin: false };
+    let crossOrigin = false;
+    for (let at: Window = window; at !== at.parent; at = at.parent) {
+      try {
+        if (at.parent.location.origin !== location.origin) crossOrigin = true;
+      } catch {
+        crossOrigin = true;
+      }
+    }
+    const listed = location.ancestorOrigins;
+    if (listed && [...listed].some((o) => o !== location.origin)) crossOrigin = true;
+    let topOrigin: string | undefined;
+    try {
+      topOrigin = window.top!.location.origin;
+    } catch {
+      topOrigin = listed?.[listed.length - 1];
+    }
+    return { crossOrigin, topOrigin };
+  }
+
   window.addEventListener("message", async (e) => {
     if (e.source !== window || e.origin !== location.origin) return;
     const d = e.data as { __pk?: string; id?: number; op?: "get" | "create"; options?: unknown };
@@ -555,18 +653,14 @@ function main() {
       reply({ ok: false, name: "NotAllowedError", message: "The Permissions-Policy of this page doesn't allow it." });
       return;
     }
-    pkWaiting.set(d.id, true);
-    let crossOrigin = false;
-    let topOrigin: string | undefined;
-    if (window !== window.top) {
-      crossOrigin = true;
-      try {
-        topOrigin = window.top!.location.origin;
-        crossOrigin = topOrigin !== location.origin;
-      } catch {
-        topOrigin = location.ancestorOrigins?.[location.ancestorOrigins.length - 1];
-      }
+    // No person, no window of ours: a page could open as many as it liked. The browser
+    // answers such a request by its own rules.
+    if (!(navigator as unknown as { userActivation?: { isActive: boolean } }).userActivation?.isActive) {
+      reply({ ok: false, native: true });
+      return;
     }
+    pkWaiting.set(d.id, true);
+    const { crossOrigin, topOrigin } = ancestry();
     const r = (await send({ t: "pkRequest", op: d.op, options: d.options, crossOrigin, topOrigin })) as { ok: boolean; r?: Record<string, unknown> } | null;
     if (!pkWaiting.get(d.id)) return;
     pkWaiting.delete(d.id);
@@ -628,16 +722,19 @@ function main() {
       case "report":
         // A page mid-step has just swapped its boxes, and what gets sent depends on this.
         if (msg.fresh || Date.now() - lastAnalysis > 400) analyze();
-        reply(report());
+        reply(report(!!msg.fresh));
         return false;
       case "doFill":
-        doFill(msg.values).then((filled) => reply({ filled }));
+        doFill(msg.values, msg.origin).then(reply);
         return true;
-      case "hasMenu":
-        reply(!!host);
+      case "ownsMenu":
+        reply(host && menuToken && msg.token === menuToken ? { origin: self.origin, url: location.href } : false);
+        return false;
+      case "ownsSave":
+        reply(saveHost && saveToken && msg.token === saveToken ? { origin: self.origin, url: location.href } : false);
         return false;
       case "menuCheck": {
-        if (!host || !guard) {
+        if (!host || !guard || msg.token !== menuToken) {
           reply({ ok: false, reason: "no-menu" });
           return false;
         }
@@ -654,14 +751,24 @@ function main() {
         const form = forms.find((f) => f.fields.some((x) => x.role === "new-password")) ?? forms.find((f) => f.fields.some((x) => x.role === "password")) ?? best;
         const boxes = (form?.fields ?? []).filter((f) => ["new-password", "confirm-password", "password"].includes(f.role));
         (async () => {
-          for (const b of boxes) if (fieldIsFillable(b.el).ok) await fillField(b.el as FillableElement, msg.password);
-          if (form) markDirty(form);
+          if (self.origin !== msg.origin) return reply(false);
           closeMenu();
+          const ready = readyToFill();
+          for (const b of boxes) {
+            if (!ready(b.el)) continue;
+            const r = await fillField(b.el as FillableElement, msg.password);
+            if (r.ok) vouched.set(r.el, r.el.value);
+          }
+          if (form) markDirty(form);
           reply(true);
         })();
         return true;
       }
       case "openMenu": {
+        if (!inlineMenu) {
+          reply(false);
+          return false;
+        }
         const active = document.activeElement;
         analyze();
         const f = roleOf(active) ?? best?.fields[0];

@@ -63,7 +63,7 @@ for (const timing of ["after", "before"]) {
       await page.goto(siteA(`hostile.html?attack=${attack}&timing=${timing}`));
       // An overlay may be in the way of a click; focus is how the menu opens either way.
       await page.click("#user", { timeout: 1500 }).catch(() => page.focus("#user"));
-      await page.waitForTimeout(600);
+      await page.waitForTimeout(900);
       // Was what's on screen really our menu, plainly visible, when the click landed?
       const plain = await page.evaluate(() => {
         const m = document.documentElement.lastElementChild as HTMLElement;
@@ -92,6 +92,17 @@ for (const timing of ["after", "before"]) {
     });
   }
 }
+
+test("control: with no attack, the same click at the same place does fill", async () => {
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("hostile.html"));
+  await page.click("#user");
+  await page.waitForTimeout(900);
+  const r = await page.locator("#user").boundingBox();
+  await page.mouse.click(Math.max(4, Math.min(r!.x, 1280 - 328)) + 80, r!.y + r!.height + 4 + 20);
+  await expect.poll(() => page.evaluate(() => (window as any).__state().pass)).toBe("victim-Pass-1");
+  await page.close();
+});
 
 test("body opacity leaves our UI visibly on top, so a click there is a person's real choice", async () => {
   // Our host is outside <body>, so hiding body can't hide the menu; the person sees it.
@@ -212,7 +223,7 @@ test("the http downgrade asks first", async () => {
   const vault = await rig.ctx.newPage();
   await vault.goto(`chrome-extension://${rig.extId}/popup.html`);
   await vault.evaluate(async () => {
-    await chrome.runtime.sendMessage({ t: "addLogin", title: "Secured", url: "https://secure.localhost", username: "s", password: "secured-pw" });
+    await chrome.runtime.sendMessage({ t: "addLogin", title: "Secured", url: "https://secure.localhost:8111", username: "s", password: "secured-pw" });
   });
   await vault.close();
   const page = await rig.ctx.newPage();

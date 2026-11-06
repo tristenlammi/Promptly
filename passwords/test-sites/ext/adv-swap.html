@@ -1,0 +1,2 @@
+<!doctype html><title>Embed</title><h1>Sign in with Bank</h1><iframe id="a" style="width:500px;height:200px"></iframe>
+<script>const q=new URLSearchParams(location.search);document.getElementById('a').src=q.get('bank');window.__got=[];addEventListener('message',e=>{if(e.data&&e.data.pw)__got.push({from:e.origin,pw:e.data.pw});});window.__state=()=>({got:__got});window.__swap=()=>{document.getElementById('a').src=q.get('grab');};</script>

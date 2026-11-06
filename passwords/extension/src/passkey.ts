@@ -18,39 +18,38 @@ const el = (tag: string, text?: string, cls?: string) => {
   return e;
 };
 
+/** A window that opens under someone's cursor shouldn't take the click already on its way,
+ *  so buttons wake up a moment after they appear. */
+const WAKE_MS = 600;
+
 function button(text: string, onClick: () => void, primary = false) {
   const b = el("button", text, primary ? "primary" : "") as HTMLButtonElement;
   b.type = "button";
+  b.disabled = true;
+  setTimeout(() => {
+    b.disabled = false;
+  }, WAKE_MS);
   b.addEventListener("click", (e) => e.isTrusted && onClick());
   return b;
 }
 
 async function answer(a: Record<string, unknown>) {
   const r = await call({ t: "pkAnswer", ...a });
-  if (r?.error === "locked") render();
-  else if (r?.error === "reprompt") repromptFor(a);
+  if (r?.error === "locked") void render();
+  else if (r?.error === "verify") verifyFor(a, "");
+  else if (r?.error === "wrong") verifyFor(a, "That isn't right.");
   else window.close();
 }
 
-function repromptFor(a: Record<string, unknown>) {
-  root.replaceChildren(el("p", "This item asks for your master password."));
+/** Only this tells the site that the person proved who they are. */
+function verifyFor(a: Record<string, unknown>, problem: string) {
+  root.replaceChildren(el("p", "This asks you to prove it's you. Enter your master password, or your PIN if you've set one."));
   const input = el("input") as HTMLInputElement;
   input.type = "password";
-  input.setAttribute("aria-label", "Master password");
+  input.setAttribute("aria-label", "Master password or PIN");
   root.append(input);
-  const err = el("p", "", "err");
-  root.append(
-    button(
-      "Continue",
-      async () => {
-        const r = (await ext.runtime.sendMessage({ t: "check", password: input.value })) as { ok: boolean; r?: boolean };
-        if (r.r) answer({ ...a, reprompted: true });
-        else err.textContent = "That isn't your master password.";
-      },
-      true,
-    ),
-    err,
-  );
+  const err = el("p", problem, "err");
+  root.append(button("Continue", () => void answer({ ...a, verify: input.value }), true), button("Cancel", () => void answer({ action: "cancel" })), err);
   input.focus();
 }
 
@@ -66,7 +65,7 @@ function unlockForm() {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const r = (await ext.runtime.sendMessage({ t: "unlock", password: input.value })) as { ok: boolean; error?: string };
-    if (r.ok) render();
+    if (r.ok) void render();
     else err.textContent = r.error ?? "Couldn't unlock";
   });
   return form;
@@ -85,6 +84,7 @@ async function render() {
     root.append(button("Use another device or security key", () => answer({ action: "native" })), button("Cancel", () => answer({ action: "cancel" })));
     return;
   }
+  if (p.mustVerify) root.append(el("p", "This site asks you to prove it's you, so you'll be asked for your master password or PIN."));
   if (p.op === "get") {
     for (const c of p.candidates as { itemId: string; credentialId: string; title: string; userName: string }[]) {
       root.append(button(`${c.title}: ${c.userName}`, () => answer({ action: "use", credentialId: c.credentialId }), true));
@@ -92,10 +92,15 @@ async function render() {
   } else {
     const user = p.user as { name: string };
     root.append(el("p", `For ${user.name} on ${p.rpId}`));
-    if (p.existing) root.append(button(`Add it to "${p.existing}"`, () => answer({ action: "create", attach: true }), true));
-    root.append(button("Save as a new item", () => answer({ action: "create" }), !p.existing));
+    if (p.alreadySaved) {
+      root.append(el("p", "You already have a passkey for this account here."));
+      root.append(button("Tell the site", () => answer({ action: "create" }), true));
+    } else {
+      if (p.existing) root.append(button(`Add it to "${p.existing}"`, () => answer({ action: "create", attach: true }), true));
+      root.append(button("Save as a new item", () => answer({ action: "create" }), !p.existing));
+    }
   }
   root.append(button("Use another device or security key", () => answer({ action: "native" })), button("Cancel", () => answer({ action: "cancel" })));
 }
 
-render();
+void render();

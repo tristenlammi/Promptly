@@ -60,6 +60,8 @@ async function extEval(fn, ...args) {
   return out;
 }
 
+const hook = (op, args = {}) => extEval(`async (m) => { const r = await browser.runtime.sendMessage(m); if (!r?.ok) throw new Error(r?.error ?? "no answer"); return r.r; }`, { t: "test", op, ...args });
+
 const addLogin = (title, url, username, password) => extEval(`(m) => browser.runtime.sendMessage(m)`, { t: "addLogin", title, url, username, password });
 
 async function tabId(url) {
@@ -89,16 +91,6 @@ async function state() {
   return driver.executeScript("return window.__state()");
 }
 
-/** Focus a field like a person, wait out the dwell, click the menu's first row. */
-async function strike(field = "#user") {
-  const r = await rectOf(field);
-  await clickAt(r.x + r.w / 2, r.y + r.h / 2);
-  await driver.sleep(700);
-  const vw = await driver.executeScript("return window.innerWidth");
-  await clickAt(Math.max(4, Math.min(r.x, vw - 328)) + 80, r.y + r.h + 4 + 20);
-  await driver.sleep(600);
-}
-
 before(async () => {
   makeUsers(["root"], "admin");
   server = http.createServer((req, res) => {
@@ -108,7 +100,7 @@ before(async () => {
     const rel = asked.pathname.replace(/^\/ext\//, "").replace(/^\//, "");
     const file = path.join(SITE, rel);
     if (!file.startsWith(SITE) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return res.writeHead(404).end("no");
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", ...(rel.includes("sandboxed") ? { "Content-Security-Policy": "sandbox allow-scripts" } : {}) });
     fs.createReadStream(file).pipe(res);
   });
   await new Promise((r) => server.listen(PORT, "127.0.0.1", r));
@@ -195,32 +187,131 @@ test("Firefox: popup fills the page", async () => {
   await closeTabs();
 });
 
-test("Firefox: inline menu fills on a real click, and its host says nothing", async () => {
+test("Firefox: the inline menu never fills, since nothing here can tell it's really showing", async () => {
   await page("login.html");
   const r = await rectOf("#user");
   await clickAt(r.x + 10, r.y + 5);
-  await driver.sleep(700);
+  await driver.sleep(1200);
   const seen = await driver.executeScript(`const el=document.documentElement.lastElementChild;return {tag:el.tagName,id:el.id,cls:el.className,shadow:!!el.shadowRoot,frames:document.querySelectorAll('iframe').length}`);
   assert.deepEqual(seen, { tag: "DIV", id: "", cls: "", shadow: false, frames: 0 });
+  // Where the first row would be, looked at for as long as anyone likes.
   await clickAt(r.x + 80, r.y + r.h + 24);
   await driver.sleep(700);
-  assert.equal((await state()).pass, "acme-Pass-1");
+  assert.equal((await state()).pass, "");
   await closeTabs();
 });
 
-const VARIANTS = ["root-opacity", "root-opacity-tiny", "html-opacity", "html-opacity-tiny", "overlay-full-pointer-none", "overlay-popover-pointer-none", "overlay-partial", "position-fixed-lure", "filter", "root-filter", "clip", "mask", "transform-scale", "visibility-root", "after-host", "dialog-over"];
-
-for (const attack of VARIANTS) {
-  test(`Firefox: ${attack} after the menu shows gets nothing`, async () => {
-    await page(`hostile.html?attack=${attack}&timing=after`);
-    await strike();
-    const s = await state();
-    assert.equal(s.pass, "");
-    assert.equal(s.user, "");
-    assert.deepEqual(s.stolen, []);
+test("Firefox: the review's covers make no difference, and the popup still fills the same page", async () => {
+  for (const name of ["adv-hide.html?drop=1&how=focus", "adv-hide.html?drop=0&how=focus", "adv-shadow-cover.html?how=focus", "adv-hide.html?drop=1"]) {
+    await driver.switchTo().window(extTab);
+    await newTab(`http://evil.acme.localhost:${PORT}/${name}`);
+    await driver.sleep(1800);
+    await clickAt(180, 150);
+    await driver.sleep(800);
+    assert.equal((await state()).pass, "", name);
     await closeTabs();
-  });
-}
+  }
+});
+
+test("Firefox: a page that knows our address and frames our menu gets nothing", async () => {
+  await driver.switchTo().window(extTab);
+  // Firefox's stack traces hide the address today. If a page ever had it anyway, this is what happens.
+  await newTab(`http://evil.acme.localhost:${PORT}/adv-war.html?uuid=${UUID}`);
+  await driver.sleep(1800);
+  await clickAt(180, 130);
+  await driver.sleep(800);
+  assert.equal((await state()).pass, "");
+  await closeTabs();
+
+  await driver.switchTo().window(extTab);
+  await newTab(`http://evil.acme.localhost:${PORT}/adv-war.html?page=save.html&uuid=${UUID}`);
+  await driver.sleep(1800);
+  await clickAt(180, 130);
+  await driver.sleep(500);
+  assert.equal((await hook("pending")).filter((p) => p.offer.host.startsWith("evil.acme")).length, 0);
+  await closeTabs();
+});
+
+test("Firefox: a page that sets values and submits gets no offer, and neither does a sandboxed one get a fill", async () => {
+  await addLogin("Fox save", `http://foxsave.localhost:${PORT}`, "victim@example.com", "Fox-Real-1");
+  await driver.switchTo().window(extTab);
+  await newTab(`http://foxsave.localhost:${PORT}/adv-sv.html`);
+  await driver.sleep(2800);
+  const waiting = await hook("pending");
+  assert.ok(!JSON.stringify(waiting).includes("attacker-chosen-1"), JSON.stringify(waiting));
+  await closeTabs();
+
+  const added = await addLogin("Fox sandbox", `http://foxbox.localhost:${PORT}`, "victim@example.com", "Fox-Box-1");
+  await hook("patchItem", { id: added.r.id, patch: { autofillOnLoad: true } });
+  await driver.switchTo().window(extTab);
+  await newTab(`http://foxbox.localhost:${PORT}/adv-sandboxed.html`);
+  await driver.sleep(1500);
+  assert.equal((await state()).pass, "", "not on load");
+  assert.equal((await state()).origin, "null");
+  const id = await tabId(await driver.getCurrentUrl());
+  const r = await extEval(`(m) => browser.runtime.sendMessage(m)`, { t: "fill", tabId: id, itemId: added.r.id });
+  assert.equal(r.r.ok, false, JSON.stringify(r));
+  await driver.sleep(300);
+  assert.equal((await state()).pass, "", "not from the popup");
+  await hook("patchItem", { id: added.r.id, patch: { autofillOnLoad: false } });
+  await closeTabs();
+});
+
+test("Firefox: boxes that can't be seen stay empty", async () => {
+  const added = await addLogin("Fox hidden", `http://foxhid.localhost:${PORT}`, "victim@example.com", "Fox-Hid-1");
+  for (const v of ["two", "cover", "pecover", "clip", "right", "below", "transp"]) {
+    await driver.switchTo().window(extTab);
+    await newTab(`http://foxhid.localhost:${PORT}/adv-hidden.html?v=${v}`);
+    await driver.sleep(500);
+    const id = await tabId(await driver.getCurrentUrl());
+    await extEval(`(m) => browser.runtime.sendMessage(m)`, { t: "fill", tabId: id, itemId: added.r.id });
+    await driver.sleep(300);
+    const s = await state();
+    assert.equal(s.pass, "", v);
+    assert.equal(s.user, "victim@example.com", v);
+    await closeTabs();
+  }
+});
+
+test("Firefox: a frame swapped after the origin check gets nothing, by the content script's own check", async () => {
+  const added = await addLogin("Fox swap", `http://foxbank.localhost:${PORT}`, "victim@example.com", "Fox-Swap-1");
+  await hook("flags", { flags: { fillDelayMs: 1200 } });
+  try {
+    await driver.switchTo().window(extTab);
+    const url = `http://foxevil.localhost:${PORT}/adv-swap.html?bank=${encodeURIComponent(`http://foxbank.localhost:${PORT}/login.html`)}&grab=${encodeURIComponent(`http://foxevil.localhost:${PORT}/adv-grab.html`)}`;
+    const pg = await newTab(url);
+    await driver.sleep(800);
+    const id = await tabId(url);
+    await driver.switchTo().window(extTab);
+    await driver.executeScript(`window.__fillRun = browser.runtime.sendMessage(arguments[0]);`, { t: "fill", tabId: id, itemId: added.r.id, confirmOrigin: `http://foxbank.localhost:${PORT}` });
+    await driver.switchTo().window(pg);
+    await driver.sleep(500);
+    await driver.executeScript("window.__swap()");
+    await driver.sleep(1800);
+    assert.deepEqual((await state()).got, []);
+    await closeTabs();
+  } finally {
+    await hook("flags", { flags: { fillDelayMs: 0 } });
+  }
+});
+
+test("Firefox: the toolbar popup is where a save gets answered", async () => {
+  await driver.switchTo().window(extTab);
+  const url = `http://foxoffer.localhost:${PORT}/adv-typed.html`;
+  const pg = await newTab(url);
+  await driver.findElement(By.css("#user")).sendKeys("offer@example.com");
+  await driver.findElement(By.css("#pass")).sendKeys("Fox-Offer-1");
+  await driver.findElement(By.css("#go")).click();
+  await driver.sleep(2500);
+  await popup(url);
+  await see(driver, By.css('[data-testid="save-offer"]'));
+  await click(driver, By.xpath('//*[@data-testid="save-offer"]//button[normalize-space(.)="Save"]'));
+  await driver.sleep(800);
+  const items = await hook("items");
+  assert.ok(items.some((i) => i.username === "offer@example.com" && i.password === "Fox-Offer-1"), JSON.stringify(items.map((i) => i.title)));
+  await driver.switchTo().window(pg);
+  await closeTabs();
+});
 
 test("Firefox: closed shadow root fields are found through the real API", async () => {
   await page("login.html");
@@ -281,22 +372,26 @@ test("Firefox: a passkey made and used here satisfies an independent WebAuthn li
 
   const challenge = b64u(crypto.randomBytes(32));
   let handles = await driver.getAllWindowHandles();
+  // Our window only opens for a real gesture.
+  await clickAt(300, 300);
   await driver.executeScript(`window.__res = null; window.__register(arguments[0]).then((r) => (window.__res = r));`, { rpId: "localhost", userId: b64u("user-ff"), userName: "ff@example.com", challenge });
   await finishPrompt(button("Save as a new item"), handles);
   await driver.wait(async () => driver.executeScript("return window.__res !== null"), 15000);
   const reg = await driver.executeScript("return window.__res");
   assert.equal(reg.error, undefined);
-  const v = await verifyRegistrationResponse({ response: reg, expectedChallenge: challenge, expectedOrigin: `http://localhost:${PORT}`, expectedRPID: "localhost", requireUserVerification: true });
+  const v = await verifyRegistrationResponse({ response: reg, expectedChallenge: challenge, expectedOrigin: `http://localhost:${PORT}`, expectedRPID: "localhost", requireUserVerification: false });
   assert.ok(v.verified);
+  assert.equal(v.registrationInfo.userVerified, false, "a click doesn't verify anyone");
 
   const c2 = b64u(crypto.randomBytes(32));
   handles = await driver.getAllWindowHandles();
+  await clickAt(300, 300);
   await driver.executeScript(`window.__res = null; window.__auth(arguments[0]).then((r) => (window.__res = r));`, { rpId: "localhost", challenge: c2, allow: [v.registrationInfo.credential.id] });
   await finishPrompt(By.xpath('//button[contains(., "ff@example.com")]'), handles);
   await driver.wait(async () => driver.executeScript("return window.__res !== null"), 15000);
   const auth = await driver.executeScript("return window.__res");
   assert.equal(auth.error, undefined);
-  const a = await verifyAuthenticationResponse({ response: auth, expectedChallenge: c2, expectedOrigin: `http://localhost:${PORT}`, expectedRPID: "localhost", credential: { id: v.registrationInfo.credential.id, publicKey: v.registrationInfo.credential.publicKey, counter: 0 }, requireUserVerification: true });
+  const a = await verifyAuthenticationResponse({ response: auth, expectedChallenge: c2, expectedOrigin: `http://localhost:${PORT}`, expectedRPID: "localhost", credential: { id: v.registrationInfo.credential.id, publicKey: v.registrationInfo.credential.publicKey, counter: 0 }, requireUserVerification: false });
   assert.ok(a.verified);
   await closeTabs();
 });
@@ -316,8 +411,6 @@ test("Firefox: saves a new login after a sign-in", async () => {
 });
 
 // ---- Where Firefox's background differs from Chromium's -----------------------------------
-
-const hook = (op, args = {}) => extEval(`async (m) => { const r = await browser.runtime.sendMessage(m); if (!r?.ok) throw new Error(r?.error ?? "no answer"); return r.r; }`, { t: "test", op, ...args });
 
 async function openSettings() {
   await driver.switchTo().window(extTab);
@@ -363,11 +456,11 @@ test("Firefox: the on-click box walks the real permission path, and takes both s
     const done = arguments[arguments.length-1];
     const started = Date.now();
     navigator.credentials.create({ publicKey: { rp: { name: "x" }, user: { id: new Uint8Array(4), name: "u", displayName: "u" }, challenge: new Uint8Array(32), pubKeyCredParams: [{ type: "public-key", alg: -7 }] } }).then(
-      (r) => done({ r, ms: Date.now() - started, wrapped: !!window.__promptlyPk }),
+      (r) => done({ r, ms: Date.now() - started }),
       (e) => done({ error: String(e) }),
     );`);
   assert.equal(out.r, "reached the browser", JSON.stringify(out));
-  assert.equal(out.wrapped, true);
+  assert.equal(await driver.executeScript(`return "__promptlyPk" in window`), false);
   assert.ok(out.ms < 5000, JSON.stringify(out));
   await closeTabs();
 

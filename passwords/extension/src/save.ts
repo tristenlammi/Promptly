@@ -1,19 +1,39 @@
-// "Save this password?": in an extension frame, with a real click needed. It's told
-// only the site and the username, and never holds the password.
+// "Save this password?": in an extension frame, with a real press needed. It's told only
+// the site and the username, and never holds the password. An answer that changes the
+// vault counts only on a press this frame judged good (press.ts). A browser that can't
+// judge one sends the person to the toolbar popup, which a page can't cover.
+import { inlineCanAct, pressGuard } from "./press";
 import { ext } from "./rpc";
 
 const root = document.getElementById("root")!;
-const call = async (m: unknown) => {
-  const r = (await ext.runtime.sendMessage(m)) as { ok: boolean; r?: unknown } | undefined;
+const token = location.hash.slice(1);
+const guard = pressGuard(root);
+
+const call = async (m: Record<string, unknown>) => {
+  const r = (await ext.runtime.sendMessage({ ...m, token })) as { ok: boolean; r?: unknown } | undefined;
   return r?.ok ? r.r : null;
 };
 
-function button(text: string, onClick: () => void, primary = false) {
+function refused() {
+  document.getElementById("refused")?.remove();
+  const d = document.createElement("div");
+  d.id = "refused";
+  d.className = "sub";
+  d.textContent = "To be safe, that click didn't count. Look at this first, then click again.";
+  root.appendChild(d);
+  guard.rendered();
+}
+
+function button(text: string, onClick: () => void, primary = false, gated = true) {
   const b = document.createElement("button");
   b.type = "button";
   b.textContent = text;
   if (primary) b.className = "primary";
-  b.addEventListener("click", (e) => e.isTrusted && onClick());
+  b.addEventListener("click", (e) => {
+    if (!e.isTrusted) return;
+    if (!gated || guard.take(e)) onClick();
+    else refused();
+  });
   return b;
 }
 
@@ -33,9 +53,18 @@ async function init() {
   const row = document.createElement("div");
   row.className = "buttons";
   const close = () => root.replaceChildren();
-  row.appendChild(button(offer.kind === "update" ? "Update" : "Save", () => call({ t: "saveAnswer", answer: offer.kind }).then(close), true));
-  row.appendChild(button("Not now", () => call({ t: "saveAnswer", answer: "dismiss" }).then(close)));
-  row.appendChild(button("Never for this site", () => call({ t: "saveAnswer", answer: "never" }).then(close)));
+  if (inlineCanAct()) {
+    row.appendChild(button(offer.kind === "update" ? "Update" : "Save", () => call({ t: "saveAnswer", answer: offer.kind }).then(close), true));
+    row.appendChild(button("Never for this site", () => call({ t: "saveAnswer", answer: "never" }).then(close)));
+  } else {
+    const how = document.createElement("div");
+    how.className = "sub";
+    how.textContent = "To save it, click the Promptly Passwords button in your toolbar.";
+    root.appendChild(how);
+  }
+  // Doing nothing can't hurt, so this one needs no such care.
+  row.appendChild(button("Not now", () => call({ t: "saveAnswer", answer: "dismiss" }).then(close), false, false));
   root.appendChild(row);
+  guard.rendered();
 }
-init();
+void init();

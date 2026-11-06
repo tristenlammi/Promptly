@@ -1,16 +1,17 @@
-// The inline menu, in an extension iframe the page can't read or restyle. It has only
-// titles and usernames for this tab, never a secret, and ignores window messages
-// entirely: a page can't talk to it, only a real click inside it counts.
+// The inline menu, in an extension iframe the page can't read or restyle. It has titles
+// and usernames for this frame, and a mail code when the sender matches the site. It
+// ignores window messages entirely: a page can't talk to it, and only a press it judged
+// good counts (press.ts). The fragment of its address is its name: the frame that opened
+// it holds the same random token, and the background only ever deals with that frame.
+import { inlineCanAct, type PressGuard, pressGuard } from "./press";
 import { ext, type Candidate } from "./rpc";
 
 const root = document.getElementById("root")!;
+const token = location.hash.slice(1);
+const guard: PressGuard = pressGuard(root);
 
-/** A warning's button won't take a click sooner than this after it appears, so a double
- *  click on the row underneath can't answer it by accident. */
-const WARNING_DWELL_MS = 600;
-
-const call = async (m: unknown) => {
-  const r = (await ext.runtime.sendMessage(m)) as { ok: boolean; r?: unknown } | undefined;
+const call = async (m: Record<string, unknown>) => {
+  const r = (await ext.runtime.sendMessage({ ...m, token })) as { ok: boolean; r?: unknown } | undefined;
   return r?.ok ? r.r : null;
 };
 
@@ -30,10 +31,21 @@ function row(text: string, sub: string, onClick: () => void, name?: string): HTM
     b.appendChild(s);
   }
   b.addEventListener("click", (e) => {
-    if (!e.isTrusted) return;
-    onClick();
+    if (guard.take(e)) onClick();
+    else refused();
   });
   return b;
+}
+
+/** It didn't count. Doesn't take the rows away: the person's looking now, and can press again. */
+function refused() {
+  document.getElementById("refused")?.remove();
+  const d = document.createElement("div");
+  d.id = "refused";
+  d.className = "note";
+  d.textContent = "To be safe, that click didn't count. Look at this menu first, then click again, or use the toolbar button.";
+  root.prepend(d);
+  guard.rendered();
 }
 
 function note(text: string) {
@@ -43,82 +55,91 @@ function note(text: string) {
   root.appendChild(d);
 }
 
-type MailRow = { id: string; from: string; domain: string; ago: string; matches: boolean; lookalike: string | null; pageLookalike: string | null; code: string | null; hasLink: boolean };
-
-/** Asks before anything from a sender, or onto a page, that looks like a saved site and
- *  isn't. The warning replaces the list, and the safe way out comes first. */
-function warnThenFill(m: MailRow, warning: string) {
+function toToolbar() {
   root.textContent = "";
-  note(warning);
-  root.appendChild(row("Don't fill", "", () => void render(), "Don't fill"));
-  const shownAt = performance.now();
+  note("To be safe, fill this one from the toolbar button.");
+  root.appendChild(row("Open Promptly Passwords", "", () => call({ t: "menuOpenPopup" })));
+  guard.rendered();
+}
+
+type MailRow = { id: string; domain: string; ago: string; code: string | null; linkHost: string | null };
+
+/** A link goes somewhere at once and can't be taken back, and an email's sender is only
+ *  what the email says it is. So it's never one click. */
+function askBeforeLink(m: MailRow) {
+  root.textContent = "";
+  note(`An email says it's from ${m.domain}, and has a sign-in link to ${m.linkHost}. Email senders can be forged. Only open it if you just asked for it.`);
+  root.appendChild(row("Don't open it", "", () => void render()));
   root.appendChild(
-    row(`Fill ${m.code} anyway`, "Only if you're sure you know who sent it", async () => {
-      if (performance.now() - shownAt < WARNING_DWELL_MS) return;
-      const out = (await call({ t: "menuMailCode", id: m.id, confirmLookalike: true })) as { ok: boolean } | null;
-      if (!out?.ok) {
-        root.textContent = "";
-        note("To be safe, type this one in yourself.");
-      }
-    }, `Fill code from ${m.domain} anyway`),
+    row(`Open ${m.linkHost}`, "", async () => {
+      const out = (await call({ t: "menuMailLink", id: m.id, confirmed: true })) as { ok: boolean } | null;
+      if (!out?.ok) toToolbar();
+    }, `Open sign-in link to ${m.linkHost}`),
   );
+  guard.rendered();
 }
 
 async function render() {
   root.textContent = "";
-  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; kinds?: string[]; mail?: MailRow[] } | null;
+  guard.rendered();
+  // Nothing here can tell a person from a hidden cover, so it doesn't pretend to.
+  if (!inlineCanAct()) {
+    note("To fill here, click the Promptly Passwords button in your toolbar. This browser can't confirm this menu is really showing, so it can't fill from here.");
+    return;
+  }
+  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; kinds?: string[]; mail?: MailRow[]; otherMail?: string[] } | null;
   if (!r) return note("Can't reach Promptly Passwords.");
   if (r.locked) {
     note("Your vault is locked.");
     root.appendChild(row("Open Promptly Passwords", "", () => call({ t: "menuOpenPopup" })));
+    guard.rendered();
     return;
   }
   // Shown as text and filled only on a click: what's in an email is untrusted.
   for (const m of r.mail ?? []) {
-    const warn = m.lookalike ? ` Looks like ${m.lookalike}, but it isn't.` : m.pageLookalike ? ` This page looks like ${m.pageLookalike}, but it isn't.` : m.matches ? "" : " Not from this site.";
     if (m.code) {
       root.appendChild(
-        row(`Code from email: ${m.code}`, `from ${m.from}, ${m.ago}.${warn}`, async () => {
-          if (m.lookalike || m.pageLookalike) {
-            const who = m.lookalike ? `This email is from ${m.domain}, which looks like ${m.lookalike} but isn't.` : `This page looks like ${m.pageLookalike} but isn't.`;
-            return warnThenFill(m, `${who} This could be phishing.`);
-          }
+        row(`Code from email: ${m.code}`, `from ${m.domain}, ${m.ago}`, async () => {
           const out = (await call({ t: "menuMailCode", id: m.id })) as { ok: boolean } | null;
           if (!out?.ok) note("To be safe, type this one in yourself.");
         }, `Fill code from ${m.domain}`),
       );
     }
-    // A link opens at once and can't be taken back, so a lookalike gets no row at all.
-    if (m.hasLink && !m.lookalike && !m.pageLookalike) {
-      root.appendChild(row(`Open sign-in link from ${m.from}`, `${m.ago}.${warn}`, () => call({ t: "menuMailLink", id: m.id }), `Open sign-in link from ${m.domain}`));
+    if (m.linkHost) {
+      root.appendChild(row(`Sign-in link from ${m.domain}?`, `${m.ago}. Says it's from there. Senders can be forged.`, () => askBeforeLink(m), `Sign-in link from ${m.domain}`));
     }
+  }
+  for (const domain of r.otherMail ?? []) {
+    note(`An email from ${domain} has a code. It isn't from this site, so it's not offered here.`);
   }
   for (const c of r.candidates.slice(0, 6)) {
     root.appendChild(
       row(c.title, c.username, async () => {
         const out = (await call({ t: "menuPick", itemId: c.id })) as { ok: boolean; reason?: string } | null;
-        if (!out?.ok) {
-          root.textContent = "";
-          note("To be safe, fill this one from the toolbar button.");
-          root.appendChild(row("Open Promptly Passwords", "", () => call({ t: "menuOpenPopup" })));
-        }
+        if (!out?.ok) toToolbar();
       }, `Fill ${c.title}`),
     );
   }
   if (!r.candidates.length) note("No saved logins for this site.");
   const kinds = r.kinds ?? [];
-  if (kinds.includes("change-password") && r.candidates.length > 1) {
+  const generate = async (itemId?: string) => {
+    const out = (await call({ t: "menuGenerate", itemId })) as { ok: boolean } | null;
+    if (!out?.ok) toToolbar();
+  };
+  const changeable = r.candidates.filter((c) => !c.reprompt);
+  if (kinds.includes("change-password") && changeable.length > 1) {
     // A new password belongs to one account, and which one isn't ours to guess.
-    for (const c of r.candidates.slice(0, 3)) {
-      root.appendChild(row(`New password for ${c.username || c.title}`, "Kept until the site accepts it", () => call({ t: "menuGenerate", itemId: c.id })));
+    for (const c of changeable.slice(0, 3)) {
+      root.appendChild(row(`New password for ${c.username || c.title}`, "Kept until the site accepts it", () => void generate(c.id)));
     }
   } else if (kinds.includes("signup") || kinds.includes("change-password")) {
-    root.appendChild(row("Generate a password", "", () => call({ t: "menuGenerate" })));
+    root.appendChild(row("Generate a password", "", () => void generate()));
   }
   if (kinds.includes("card") || kinds.includes("identity")) {
     root.appendChild(row("Open Promptly Passwords to fill this", "Cards and addresses always ask first", () => call({ t: "menuOpenPopup" })));
   }
+  guard.rendered();
 }
 
 window.addEventListener("message", (e) => e.stopImmediatePropagation(), true);
-render();
+void render();

@@ -35,7 +35,7 @@ export function startSite(): Promise<{ close: () => void }> {
         res.writeHead(404).end("not found");
         return;
       }
-      res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] ?? "text/plain", "Cache-Control": "no-store" });
+      res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] ?? "text/plain", "Cache-Control": "no-store", ...(rel.includes("sandboxed") ? { "Content-Security-Policy": "sandbox allow-scripts" } : {}) });
       fs.createReadStream(file).pipe(res);
     }).listen(port, "127.0.0.1"),
   );
@@ -44,7 +44,7 @@ export function startSite(): Promise<{ close: () => void }> {
 
 export type Rig = { ctx: BrowserContext; extId: string; dir: string; close: () => Promise<void> };
 
-export async function launch(): Promise<Rig> {
+export async function launch(dist: string = EXT): Promise<Rig> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pw-ext-"));
   // Playwright's own full Chromium won't start on this machine (a Windows side-by-side
   // error, logged in DECISIONS.md), and branded Chrome ignores --load-extension. It does
@@ -61,7 +61,7 @@ export async function launch(): Promise<Rig> {
   const browser = ctx.browser();
   if (!browser) throw new Error("No browser object for the persistent context");
   const cdp = await browser.newBrowserCDPSession();
-  const loaded = (await cdp.send("Extensions.loadUnpacked" as never, { path: EXT } as never)) as unknown as { id: string };
+  const loaded = (await cdp.send("Extensions.loadUnpacked" as never, { path: dist } as never)) as unknown as { id: string };
   const extId = loaded.id;
   return {
     ctx,

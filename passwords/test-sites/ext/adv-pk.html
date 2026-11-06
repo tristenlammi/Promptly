@@ -1,0 +1,12 @@
+<!doctype html><title>pk</title><button id="go" style="position:fixed;left:50px;top:50px;width:200px;height:60px">Go</button><script>window.__r=[];
+const b=(n)=>{const a=new Uint8Array(n);crypto.getRandomValues(a);return a;};
+const unb=(s)=>Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+const q=new URLSearchParams(location.search);
+window.__state=()=>({r:__r});
+const mk=(ex)=>navigator.credentials.create({publicKey:{rp:{id:location.hostname,name:'Totally Google'},user:{id:b(8),name:'x@y',displayName:'x'},challenge:b(32),pubKeyCredParams:[{type:'public-key',alg:-7}],excludeCredentials:(ex||[]).map(i=>({type:'public-key',id:unb(i)}))}}).then(c=>({id:c.id}),e=>({err:e.name,msg:e.message}));
+const burst=()=>{const n=Number(q.get('burst')||0);for(let i=0;i<n;i++)mk().then(x=>__r.push(x));};
+const ex=q.get('ex');
+window.__asked=null;if(q.get('auto')==='1')addEventListener('load',()=>setTimeout(()=>{window.__asked=navigator.userActivation.isActive;burst();},Number(q.get('delay')||300)));
+document.getElementById('go').addEventListener('click',()=>{if(ex){const t=performance.now();mk([ex]).then(x=>__r.push({...x,ms:Math.round(performance.now()-t)}));}else burst();});
+window.__conditional=()=>{window.__cond=navigator.credentials.get({mediation:'conditional',publicKey:{challenge:b(32),rpId:location.hostname}}).then(()=>'got',e=>e.name);return true;};
+</script>

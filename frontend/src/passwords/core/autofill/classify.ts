@@ -773,7 +773,9 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
     kind = "signup";
   } else if (textFields.filter(isIdentifier).length === 0) {
     // A password box with nothing to send it, like a strength tester, isn't a sign-in.
-    if (!changeWords && !submitOf(group, passwords.map((p) => p.el), dom)) return { kind: "none", fields: [], container: group, submit: null };
+    // A hosted password box in a frame gets its button from the page around it.
+    const inFrame = doc(group).defaultView !== doc(group).defaultView?.top;
+    if (!changeWords && !inFrame && !submitOf(group, passwords.map((p) => p.el), dom)) return { kind: "none", fields: [], container: group, submit: null };
     kind = changeWords ? "change-password" : "password-next";
   } else {
     // Both words about: a tab page or a "no account? sign up" link. Field count decides.

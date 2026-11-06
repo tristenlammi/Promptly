@@ -17,8 +17,8 @@ Not on the server: titles, URLs, usernames, passwords, notes, folders, tags, ite
 | Stolen database dump, backup or off-site restic copy | **Holds** | Ciphertext only. Guessing the master password also needs the 128-bit Secret Key, which was never on the server, so even a weak master password can't be brute-forced from the database alone. |
 | Stolen Promptly session (cookie, XSS in another part of the app) | **Holds unless the vault is unlocked in that browser** | Vault endpoints need a vault session, issued only after proving `auth_key`. The vault runs on its own page with its own CSP, and the main bundle never imports vault crypto. See "Web vault" below for what remains. |
 | Curious server admin | **Holds** | End-to-end encryption. Admin can't read, can't reset into a vault, can only destroy it. |
-| Malicious website | **Holds** | Origin rules, gesture rules, anti-clickjacking checks, extension UI in an isolated iframe, no secret in the page before a fill, and only into visible fields the user chose. |
-| Malicious mail content | **Holds** | Mail codes are shown as text and only filled on an explicit click. AI has no path to the vault. |
+| Malicious website | **Partly** | Origin and gesture rules, and an isolated extension frame. On Chromium an inline click counts only if the browser reported the frame visible for 500 ms before the press. On Firefox the inline menu doesn't fill or save at all, and you use the toolbar. Values go only into boxes at least 10x10 that are on screen and on top at their centre. An independent review broke the first version of these. They raise the bar and aren't a proof. |
+| Malicious mail content | **Mostly** | Codes are shown as text, offered only when the sender's domain matches the page, and fill on a click. AI has no path to the vault. A sender's domain is only the From header, with no DKIM or SPF check, so a forged From on a real site's domain can offer a sign-in link to that site, which could sign someone into an attacker's account. A link always asks first. |
 | Prompt injection in Chat | **Holds** | The vault has no chat tools that read or write secrets. A test asserts this. |
 | Lost phone or laptop, locked | **Holds** | Encrypted local cache. OS-backed key wrapping. Auto-lock. Remote device removal stops future sync, not what's already on the device, which stays encrypted. |
 | Removed member of a shared vault | **Partly** | Vault key and item keys are rotated. What they already saw can't be unseen, so the app lists the passwords to change. |
@@ -78,7 +78,7 @@ Limits we accept and state plainly:
 - Unlocked keys live in the background context's memory or in `storage.session`, whose default access level is trusted contexts only in both Chrome and Firefox. Content scripts can't read it; a test checks this. `storage.local` is readable by content scripts in Firefox with no way to restrict it, so it never holds keys, only ciphertext.
 - No remote code. The extension never loads code from the server.
 - A content script runs in a page's process. Treat it as less trusted than the background. Secrets reach it only at fill time and only for fields it has checked.
-- Inline UI runs in an extension iframe the page can't read. Each published DOM-clickjacking variant has a test. These checks raise the bar; they're not a proof. As the researcher says, there's no simple complete protection. The safest setting is to fill only from the toolbar popup, offered as "on click" mode.
+- Inline UI runs in an extension iframe the page can't read. Each published DOM-clickjacking variant has a test. These checks raise the bar; they're not a proof. As the researcher says, there's no simple complete protection. The safest setting is to fill only from the toolbar popup, offered as "on click" mode. Each click is judged inside our frame by IntersectionObserver v2, which only Chromium has, so Firefox fills from the toolbar popup only.
 - Passkey wrapper: runs in the page's MAIN world because that's the only way to intercept `navigator.credentials`. The page can tamper with anything there, so all trust decisions happen in the isolated world.
 
 ## Android
@@ -124,3 +124,14 @@ If you lose both the master password and the recovery kit, the vault is gone. No
 - A Calendar reminder for a document says "Document expires soon", because Calendar isn't end-to-end encrypted.
 - A short PIN is weaker than the master password. It only exists until the app or browser closes, and five wrong tries wipe it.
 - Travel mode takes a vault off the device. It's still on your server, and your master password brings it back, so it only helps if you don't do that in front of whoever's asking.
+
+## Android
+
+- The autofill index, sealed with a Keystore key, holds titles and usernames so a locked phone can offer logins and ask for a fingerprint. No passwords are in it, and a setting drops the names. While the vault's open, some of this sits in plain memory.
+- A removed device stops syncing, and can still open what it already has with the master password.
+- Decrypted strings can't be wiped from Java memory until they're collected.
+- What the browser or app reports about a form is all the service has. Fields it can't see as hidden can't be refused.
+
+## Passkeys in the extension
+
+A page can detect the wrapper: `navigator.credentials.get.toString()` isn't native, and on Chromium a stack trace shows the extension id. Without a gesture the extension opens no window, and the browser's own UI handles it. User verification is reported only after a master password or PIN in the prompt, so a site that requires it asks every time.

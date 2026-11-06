@@ -142,6 +142,7 @@ function PinLine({ onDone, onError }: { onDone: () => void; onError: (e: string)
 function PageTools({ tab, matches, setMessage }: { tab: chrome.tabs.Tab | null; matches: Candidate[]; setMessage: (m: string) => void }) {
   const [report, setReport] = useState("");
   const [uri, setUri] = useState<string | null>(null);
+  const [replacing, setReplacing] = useState(false);
   if (tab?.id === undefined) return null;
   const tabId = tab.id;
   return (
@@ -157,11 +158,17 @@ function PageTools({ tab, matches, setMessage }: { tab: chrome.tabs.Tab | null; 
           <>
             {matches[0] && <button className="btn-primary" onClick={async () => {
               try {
-                await call({ t: "addTotp", itemId: matches[0].id, uri, title: matches[0].title, url: tab.url ?? "" });
+                const r = await call<{ ok: boolean; replaces?: string }>({ t: "addTotp", itemId: matches[0].id, uri, title: matches[0].title, url: tab.url ?? "", replace: replacing });
+                if (r.replaces) {
+                  setReplacing(true);
+                  setMessage(`${r.replaces} already has a 2FA code. Click again only if you meant to replace it. The old secret is kept in that item's custom fields.`);
+                  return;
+                }
                 setMessage(`Added 2FA to ${matches[0].title}.`);
                 setUri(null);
+                setReplacing(false);
               } catch (e) { setMessage(e instanceof Error ? e.message : "Couldn't add it"); }
-            }}>Add to {matches[0].title}</button>}
+            }}>{replacing ? "Replace the code on" : "Add to"} {matches[0].title}</button>}
             <button className="btn" onClick={async () => {
               try {
                 const title = pageHost(tab.url ?? "")?.replace(/^www\./, "") ?? "2FA code";
@@ -226,6 +233,11 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
     setMessage("");
     const r = await call<FillOutcome>({ t: "fill", tabId: tab.id, itemId, ...extra });
     if (r.ok) {
+      if (r.left?.length) {
+        // The person should know, and nothing's been closed on them.
+        setMessage(`Filled, but left out ${r.left.join(", ")}: that box can't be seen on the page.`);
+        return;
+      }
       setMessage("Filled.");
       setTimeout(() => window.close(), 700);
       return;
@@ -266,6 +278,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
       {state.preview && <p className="text-xs"><span className="badge">Preview</span> Try it on low-value accounts first.</p>}
       {lookalike && <p className="err">This site looks like {lookalike}, but it isn't. Be careful.</p>}
       {message && <p role="status" className="text-xs font-medium">{message}</p>}
+      {tab?.id !== undefined && <SaveOffer tabId={tab.id} />}
       <PageTools tab={tab} matches={matches} setMessage={setMessage} />
       {confirm && <ConfirmBox outcome={confirm.outcome} onYes={answer} onNo={() => setConfirm(null)} />}
       {reprompt && (
@@ -296,6 +309,30 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
       <div className="flex items-center justify-between gap-2 border-t pt-2">
         <button className="link" onClick={OPEN_VAULT}>Open vault</button>
         <button className="link" onClick={async () => { await call({ t: "lock" }); onLock(); }}>Lock</button>
+      </div>
+    </div>
+  );
+}
+
+/** The same question as the bar on the page, here where a page can't cover it. */
+function SaveOffer({ tabId }: { tabId: number }) {
+  const [offer, setOffer] = useState<{ kind: "save" | "update"; username: string; host: string } | null>(null);
+  useEffect(() => {
+    call<typeof offer>({ t: "saveOfferFor", tabId }).then(setOffer).catch(() => undefined);
+  }, [tabId]);
+  if (!offer) return null;
+  const answer = async (a: string) => {
+    await call({ t: "saveAnswerFor", tabId, answer: a });
+    setOffer(null);
+  };
+  return (
+    <div data-testid="save-offer" className="flex flex-col gap-1 rounded border p-2 text-xs">
+      <p className="font-medium">{offer.kind === "update" ? `Update your password for ${offer.host}?` : `Save this login for ${offer.host}?`}</p>
+      {offer.username && <p>{offer.username}</p>}
+      <div className="flex gap-2">
+        <button className="btn-primary" onClick={() => answer(offer.kind)}>{offer.kind === "update" ? "Update" : "Save"}</button>
+        <button className="btn" onClick={() => answer("dismiss")}>Not now</button>
+        <button className="btn" onClick={() => answer("never")}>Never for this site</button>
       </div>
     </div>
   );
@@ -355,7 +392,7 @@ function ItemRow({ row, onFill, onReprompt, setMessage }: { row: Row | Candidate
 }
 
 function ConfirmBox({ outcome, onYes, onNo }: { outcome: FillOutcome; onYes: () => void; onNo: () => void }) {
-  const o = outcome as { reason: string; origin?: string; lookalike?: string; frames?: string[] };
+  const o = outcome as { reason: string; origin?: string; lookalike?: string; frames?: string[]; fills?: string[] };
   const text = useMemo(() => {
     switch (o.reason) {
       case "confirm-origin":
@@ -375,6 +412,7 @@ function ConfirmBox({ outcome, onYes, onNo }: { outcome: FillOutcome; onYes: () 
   return (
     <div role="alertdialog" className="flex flex-col gap-2 rounded border p-2">
       <p className="err">{text}</p>
+      {!!o.fills?.length && <p data-testid="will-fill" className="text-xs">It will fill: {o.fills.join(", ")}.</p>}
       <div className="flex gap-2">
         <button className="btn-primary" onClick={onNo}>Don't fill</button>
         <button className="btn" onClick={onYes}>Fill anyway</button>

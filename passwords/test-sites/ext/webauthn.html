@@ -17,7 +17,7 @@
               challenge: unb64u(o.challenge),
               pubKeyCredParams: [{ type: "public-key", alg: -7 }],
               excludeCredentials: (o.exclude ?? []).map((id) => ({ type: "public-key", id: unb64u(id) })),
-              authenticatorSelection: { residentKey: "required", userVerification: "preferred" },
+              authenticatorSelection: { residentKey: "required", userVerification: o.uv ?? "preferred" },
               attestation: "none",
             },
           });
