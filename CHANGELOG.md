@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-11-06
+
+### Fixed
+- P Maps no longer sits on "Finding your location" forever: a rough position gets the route going while GPS searches, a phone that can't give a location says why with Try again, and the Android app (1.4.4) now hands the map its location itself.
+
 ## [0.27.0] - 2026-11-06
 
 ### Added

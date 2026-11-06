@@ -25,4 +25,5 @@ android {
 
 dependencies {
     api("com.google.androidbrowserhelper:androidbrowserhelper:2.7.4")
+    api("com.google.androidbrowserhelper:locationdelegation:1.1.2")
 }

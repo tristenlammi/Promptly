@@ -186,9 +186,10 @@ def shortcut_xml(note: str, items: list[tuple[str, str, str, str]]) -> str:
         <activity android:name=".ManageData" android:exported="false" />
         <activity android:name="com.google.androidbrowserhelper.trusted.ManageDataLauncherActivity" android:exported="false" />
 
-        <!-- Web push from the site shows as this app's notifications. -->
+        <!-- Web push from the site shows as this app's notifications, and pages get
+             their location through this app. -->
         <service
-            android:name="com.google.androidbrowserhelper.trusted.DelegationService"
+            android:name=".Delegation"
             android:enabled="true"
             android:exported="true">
             <intent-filter>

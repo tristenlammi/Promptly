@@ -49,6 +49,13 @@ const NO_PLACES: SavedPlace[] = [];
 let stopKey = 0;
 const asStop = (s: Spot): StopRow => ({ lat: s.lat, lon: s.lon, name: s.name, address: s.address, key: String(++stopKey) });
 
+/** What to tell someone whose phone hasn't given a location, with the phone's own
+ *  words, so a problem report says what actually happened. */
+function locationProblemText(e: GeolocationPositionError): string {
+  const why = e.code === e.TIMEOUT ? "Can't find your location yet. Check Location is on, or move near a window." : "Your phone isn't giving a location. Check Location is on in its settings.";
+  return e.message ? `${why} (${e.message})` : why;
+}
+
 export function MapsApp({ embedded = false }: { embedded?: boolean }) {
   const qc = useQueryClient();
   const isMobile = useIsMobile();
@@ -76,22 +83,47 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
   const [you, setYou] = useState<{ lat: number; lon: number; accuracy: number } | null>(null);
   const centredOnYou = useRef(false);
   const [locationBlocked, setLocationBlocked] = useState(false);
+  // Why the phone hasn't given a location, once it has said. The watch carries on.
+  const [locationProblem, setLocationProblem] = useState<string | null>(null);
   const [watching, setWatching] = useState(0);
   useEffect(() => {
     if (!navigator.geolocation) return;
+    let exact = false;
+    const show = (p: GeolocationPosition) => {
+      const here = { lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy };
+      setYou(here);
+      setLocationBlocked(false);
+      setLocationProblem(null);
+      if (!centredOnYou.current) {
+        centredOnYou.current = true;
+        map.current?.flyTo(here.lat, here.lon, 13);
+      }
+    };
     const id = navigator.geolocation.watchPosition(
       (p) => {
-        const here = { lat: p.coords.latitude, lon: p.coords.longitude, accuracy: p.coords.accuracy };
-        setYou(here);
-        if (!centredOnYou.current) {
-          centredOnYou.current = true;
-          map.current?.flyTo(here.lat, here.lon, 13);
-        }
+        exact = true;
+        show(p);
       },
-      (e) => setLocationBlocked(e.code === e.PERMISSION_DENIED),
-      { enableHighAccuracy: true, maximumAge: 2000 },
+      (e) => {
+        setLocationBlocked(e.code === e.PERMISSION_DENIED);
+        setLocationProblem(e.code === e.PERMISSION_DENIED ? null : locationProblemText(e));
+      },
+      { enableHighAccuracy: true, maximumAge: 2000, timeout: 20_000 },
     );
-    return () => navigator.geolocation.clearWatch(id);
+    // GPS can take minutes to answer indoors or in a car, or not answer at all. A rough
+    // position from Wi-Fi or the phone's last fix gets a route going until it does.
+    let live = true;
+    navigator.geolocation.getCurrentPosition(
+      (p) => {
+        if (live && !exact) show(p);
+      },
+      () => undefined,
+      { enableHighAccuracy: false, maximumAge: 300_000, timeout: 10_000 },
+    );
+    return () => {
+      live = false;
+      navigator.geolocation.clearWatch(id);
+    };
   }, [watching]);
   // Phones can quietly end a watch while the app's in the background, such as during
   // a drive in the navigation screen. Coming back starts a fresh one.
@@ -102,7 +134,8 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
     document.addEventListener("visibilitychange", back);
     return () => document.removeEventListener("visibilitychange", back);
   }, []);
-  const noLocationYet = () => (locationBlocked ? "Promptly isn't allowed to use your location. Turn it on in your phone's settings." : "Waiting for your location.");
+  const noLocationYet = () =>
+    locationBlocked ? "Promptly isn't allowed to use your location. Turn it on in your phone's settings." : locationProblem ?? "Waiting for your location.";
 
   // The day you're looking at on your timeline.
   const [dayOnMap, setDayOnMap] = useState<{ lines: [number, number][][]; stays: { lat: number; lon: number; name: string }[] } | null>(null);
@@ -572,6 +605,11 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
           adding={addingStop}
           setAdding={setAddingStop}
           findingYou={findingYou}
+          locationProblem={locationProblem}
+          onRetryLocation={() => {
+            setLocationProblem(null);
+            setWatching((n) => n + 1);
+          }}
           onChooseStart={() => {
             setFindingYou(false);
             setAddingStop(true);
@@ -1273,6 +1311,8 @@ function RoutePanel(p: {
   adding: boolean;
   setAdding: (v: boolean) => void;
   findingYou: boolean;
+  locationProblem: string | null;
+  onRetryLocation: () => void;
   onChooseStart: () => void;
   results?: SearchResult[];
   query: string;
@@ -1337,8 +1377,11 @@ function RoutePanel(p: {
 
       <div className="px-4 pt-2">
         {p.findingYou && (
-          <div role="status" className="flex items-center gap-2 py-1 text-sm text-[var(--text-muted)]">
-            <span className="flex-1">Finding your location…</span>
+          <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 py-1 text-sm text-[var(--text-muted)]">
+            <span className="min-w-0 flex-1 basis-40">{p.locationProblem ?? "Finding your location…"}</span>
+            {p.locationProblem && (
+              <button type="button" onClick={p.onRetryLocation} className="text-xs font-medium text-[var(--accent-text)]">Try again</button>
+            )}
             <button type="button" onClick={p.onChooseStart} className="text-xs font-medium text-[var(--accent-text)]">Start somewhere else</button>
           </div>
         )}

@@ -7,7 +7,15 @@ import { expect, test } from "../fixtures";
 
 async function heldBackLocation(page: Page) {
   await page.addInitScript(() => {
-    const w = window as unknown as { __fix: () => void; __deny: () => void };
+    const w = window as unknown as {
+      __fix: () => void;
+      __deny: () => void;
+      __rough: () => void;
+      __fail: (code: number, message: string) => void;
+      __watches: number;
+    };
+    w.__watches = 0;
+    const rough: PositionCallback[] = [];
     const ok: PositionCallback[] = [];
     const bad: PositionErrorCallback[] = [];
     Object.defineProperty(navigator, "geolocation", {
@@ -15,16 +23,23 @@ async function heldBackLocation(page: Page) {
         watchPosition: (yes: PositionCallback, no: PositionErrorCallback) => {
           ok.push(yes);
           bad.push(no);
+          w.__watches++;
           return ok.length;
         },
         clearWatch: () => undefined,
-        getCurrentPosition: () => undefined,
+        getCurrentPosition: (yes: PositionCallback) => rough.push(yes),
       },
     });
     w.__fix = () =>
       ok.forEach((f) =>
         f({ coords: { latitude: -33.87, longitude: 151.21, accuracy: 10 }, timestamp: Date.now() } as unknown as GeolocationPosition),
       );
+    w.__rough = () =>
+      rough.forEach((f) =>
+        f({ coords: { latitude: -33.9, longitude: 151.1, accuracy: 900 }, timestamp: Date.now() } as unknown as GeolocationPosition),
+      );
+    w.__fail = (code, message) =>
+      bad.forEach((f) => f({ code, PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3, message } as unknown as GeolocationPositionError));
     w.__deny = () =>
       bad.forEach((f) => f({ code: 1, PERMISSION_DENIED: 1, message: "no" } as unknown as GeolocationPositionError));
   });
@@ -75,4 +90,41 @@ test("with location turned off, it asks where from", async ({ alice: page }) => 
   await directionsToTestPlace(page);
   await page.evaluate(() => (window as unknown as { __deny: () => void }).__deny());
   await expect(page.getByPlaceholder("Start from where?")).toBeVisible();
+});
+
+test("while GPS searches, a rough location gets the route going", async ({ alice: page }) => {
+  await heldBackLocation(page);
+  await directionsToTestPlace(page);
+  await expect(page.getByText("Finding your location…")).toBeVisible();
+
+  const asked = page.waitForRequest((r) => r.method() === "POST" && r.url().includes("/api/maps/route"));
+  await page.evaluate(() => (window as unknown as { __rough: () => void }).__rough());
+  const body = (await asked).postDataJSON();
+  expect(body.stops[0].name).toBe("Your location");
+  expect(body.stops[0].lat).toBeCloseTo(-33.9);
+  await expect(page.getByText("Finding your location…")).toHaveCount(0);
+});
+
+test("a phone that can't give a location says why, and can try again", async ({ alice: page }) => {
+  await heldBackLocation(page);
+  await directionsToTestPlace(page);
+  const w = () => page.evaluate(() => (window as unknown as { __watches: number }).__watches);
+  const before = await w();
+
+  await page.evaluate(() => (window as unknown as { __fail: (c: number, m: string) => void }).__fail(2, "Failed to request location updates"));
+  await expect(page.getByText(/Your phone isn't giving a location.*Failed to request location updates/)).toBeVisible();
+  await expect(page.getByPlaceholder("Start from where?")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Try again" }).click();
+  await expect(page.getByText("Finding your location…")).toBeVisible();
+  expect(await w()).toBe(before + 1);
+
+  await page.evaluate(() => (window as unknown as { __fail: (c: number, m: string) => void }).__fail(3, "Timeout expired"));
+  await expect(page.getByText(/Can't find your location yet/)).toBeVisible();
+
+  // It carries on listening: a fix still gets the route.
+  const asked = page.waitForRequest((r) => r.method() === "POST" && r.url().includes("/api/maps/route"));
+  await page.evaluate(() => (window as unknown as { __fix: () => void }).__fix());
+  expect((await asked).postDataJSON().stops[0].name).toBe("Your location");
+  await expect(page.getByRole("button", { name: "Try again" })).toHaveCount(0);
 });
