@@ -574,6 +574,17 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
     except Exception:  # noqa: BLE001
         logger.exception("today mail section failed")
     try:
+        from app.passwords.models import PwHealth
+
+        h = await db.get(PwHealth, user.id)
+        if h is not None:
+            total = sum(int(v) for k, v in (h.counts or {}).items() if k in ("weak", "reused", "breached"))
+            # Only counts the person chose to post from their vault page. Never names.
+            if total:
+                sec["passwords"] = {"attention": total, "updated_at": h.updated_at.isoformat() if h.updated_at else None}
+    except Exception:  # noqa: BLE001
+        logger.exception("today passwords section failed")
+    try:
         a = await automations_section(db, user, now)
         if a:
             sec["automations"] = a

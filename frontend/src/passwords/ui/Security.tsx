@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { coarseCounts, type HealthReport, runHealth, type TwoFaDirectory } from "../core/health";
+import { ChangePassword, DuplicatesPanel, MailAlerts, RotationQueue, SurvivalPanel } from "./Connections";
 import type { Item } from "../core/model";
 import { Button, Callout, errorText, Spinner, useVault } from "./kit";
 
@@ -26,8 +27,23 @@ function Group({ title, why, children, count }: { title: string; why: string; ch
   );
 }
 
+/** Worst first, each once. */
+function toChange(r: HealthReport): Item[] {
+  const seen = new Set<string>();
+  const out: Item[] = [];
+  for (const item of [...r.breached.map((b) => b.item), ...r.reused.flatMap((g) => g.items), ...r.weak]) {
+    if (!seen.has(item.id)) {
+      seen.add(item.id);
+      out.push(item);
+    }
+  }
+  return out;
+}
+
 export function SecurityScreen() {
   const { vault, platform, settings, setSettings, version } = useVault();
+  const [changing, setChanging] = useState<Item | null>(null);
+  const [queue, setQueue] = useState<Item[] | null>(null);
   const [report, setReport] = useState<HealthReport | null>(null);
   const [progress, setProgress] = useState("");
   const [error, setError] = useState("");
@@ -69,6 +85,9 @@ export function SecurityScreen() {
   return (
     <section className="flex max-w-2xl flex-col gap-3">
       <h1 className="text-lg font-semibold text-[var(--text)]">Security check</h1>
+      <SurvivalPanel />
+      <MailAlerts onChange={setChanging} />
+      <DuplicatesPanel />
       <p className="text-sm text-[var(--text-muted)]">Worked out on this device. For breaches, only the first five characters of each password's hash go out, through your server.</p>
       <label className="flex items-center gap-2 text-sm text-[var(--text)]">
         <input type="checkbox" checked={breach} onChange={(e) => setBreach(e.target.checked)} />
@@ -91,6 +110,9 @@ export function SecurityScreen() {
       {report && (
         <div className="flex flex-col gap-3">
           <p className="text-sm text-[var(--text)]">Checked {report.checked} logins.</p>
+          {toChange(report).length > 0 && (
+            <Button className="w-fit" onClick={() => setQueue(toChange(report))}>Change these one by one ({toChange(report).length})</Button>
+          )}
           <Group title="Breached" why="These passwords have appeared in known data breaches. Change them first." count={report.breached.length}>
             {report.breached.map(({ item, count }) => <Row key={item.id} item={item} detail={`seen ${count.toLocaleString()} times`} />)}
           </Group>
@@ -115,6 +137,8 @@ export function SecurityScreen() {
           <p className="text-xs text-[var(--text-muted)]">Data sourced from 2FA Directory by 2factorauth (2fa.directory) and Passkeys Directory by 2factorauth (passkeys.2fa.directory). Breach data from Have I Been Pwned.</p>
         </div>
       )}
+      {changing && <ChangePassword item={changing} onDone={() => setChanging(null)} />}
+      {queue && <RotationQueue items={queue} onDone={() => setQueue(null)} />}
     </section>
   );
 }

@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { VaultApi } from "./api";
 import { b64u, fromB64u, randomBytes } from "./bytes";
 import { type ItemBody, newBody } from "./model";
+import { createSend, openSend, parseSendLink, sendMeta } from "./send";
 import { MemoryStore } from "./store";
 import { BACKEND, BASE_URL, dockerText, makeUsers, stackEnabled, type TestUser } from "./testing/stack";
 import { KeyChangedError, VaultClient, WrongPasswordError } from "./vault";
@@ -35,6 +36,90 @@ describe.skipIf(!stackEnabled)("vault client against the stack", () => {
   let bob: TestUser;
   beforeAll(() => {
     [alice, bob] = makeUsers("alice", "bob");
+  });
+
+  it("travel mode takes a vault off the device, and brings it back with the master password", async () => {
+    const [u] = makeUsers("travel");
+    const store = new MemoryStore();
+    const c = client(u, store);
+    await c.setup(MASTER);
+    const vaultId = await c.createSharedVault("Trip");
+    await c.saveNew(vaultId, newBody("login", "Secret stuff", { password: "travel-pw" }));
+    const keep = await c.saveNew(await c.personalVaultId(), newBody("login", "Everyday", { password: "x" }));
+    await c.sync();
+
+    await c.setTravelHidden([vaultId]);
+    expect(c.allItems().map((i) => i.body.title)).toEqual(["Everyday"]);
+    // It's gone from the local copy too, and stays gone through a sync.
+    expect(await store.getItems(vaultId)).toEqual([]);
+    await c.sync();
+    expect(await store.getItems(vaultId)).toEqual([]);
+    expect(c.get(keep.id)?.body.title).toBe("Everyday");
+    expect(JSON.stringify([...store.items.values()])).not.toContain("travel-pw");
+
+    await expect(c.endTravel("not the password")).rejects.toThrow(WrongPasswordError);
+    expect(c.allItems()).toHaveLength(1);
+    await c.endTravel(MASTER);
+    expect(c.allItems().map((i) => i.body.title).sort()).toEqual(["Everyday", "Secret stuff"]);
+  });
+
+  it("emergency grants open only for the contact, and rotate away", async () => {
+    const [g, h] = makeUsers("grantor", "grantee");
+    const { c: grantor } = await ready(g);
+    const { c: grantee } = await ready(h);
+    await grantor.saveNew(await grantor.personalVaultId(), newBody("login", "Rainy day", { password: "rainy-pw" }));
+    await grantor.sync();
+    await grantor.emergencyInvite(h.id, 1);
+    const [row] = await grantee.emergencyList();
+    expect(row.state).toBe("invited");
+    await grantee.emergencyAct(row.id, "accept");
+    await grantor.refreshEmergency();
+    expect((await grantee.emergencyList())[0].state).toBe("ready");
+    await grantee.emergencyAct(row.id, "request");
+    dockerText(["exec", "-i", BACKEND, "python"], `
+import asyncio, uuid
+from datetime import timedelta
+import app.db_models
+from app.database import SessionLocal
+from app.passwords.models import PwEmergency
+async def main():
+    async with SessionLocal() as db:
+        r = await db.get(PwEmergency, uuid.UUID("${row.id}"))
+        r.requested_at = r.requested_at - timedelta(days=2)
+        await db.commit()
+asyncio.run(main())
+`);
+    await grantee.emergencyOpen(row.id);
+    expect(grantee.allItems().map((i) => i.body.password)).toContain("rainy-pw");
+    // Their own vault's still their own.
+    const theirs = await grantee.personalVaultId();
+    expect((await grantee.vaults()).find((v) => v.id === theirs)?.role).toBe("manage");
+
+    const [opened] = await grantor.emergencyList();
+    await grantor.emergencyEnd(opened);
+    await grantee.sync();
+    expect(grantee.allItems().map((i) => i.body.password)).not.toContain("rainy-pw");
+    // And the grantor's vault still opens, under its new key.
+    await grantor.sync();
+    expect(grantor.allItems().map((i) => i.body.password)).toContain("rainy-pw");
+  });
+
+  it("a Send opens with its key, and with its password, and the server's proof can't open it", async () => {
+    const [u] = makeUsers("sendcore");
+    const { c } = await ready(u);
+    const payload = { kind: "text", title: "t", text: "send-secret" } as const;
+    const { id, link } = await createSend(c.api, BASE_URL, payload, { days: 1, views: 3, password: "swordfish" });
+    const parsed = parseSendLink(new URL(link).pathname, new URL(link).hash)!;
+    expect(parsed.id).toBe(id);
+    const anon = new VaultApi(BASE_URL, () => null);
+    const meta = await sendMeta(anon, id);
+    expect(meta.has_password).toBe(true);
+    await expect(openSend(anon, id, parsed.key, meta, "wrong")).rejects.toThrow();
+    const opened = await openSend(anon, id, parsed.key, meta, "swordfish");
+    expect(opened.payload).toEqual(payload);
+    expect(opened.viewsLeft).toBe(2);
+    // The right password without the key opens nothing.
+    await expect(openSend(anon, id, b64u(randomBytes(32)), meta, "swordfish")).rejects.toThrow();
   });
 
   it("sets up, syncs to a second device, and unlocks", async () => {

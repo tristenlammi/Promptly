@@ -9,6 +9,7 @@ import { DEFAULT_PASSWORD, DEFAULT_PASSPHRASE, generatePassphrase, generatePassw
 import { Button, Callout, CopyButton, errorText, inputClass, Label, Modal, useVault } from "./kit";
 import { StrengthMeter } from "./Onboarding";
 import { TotpRow } from "./ItemView";
+import { ClockWarning, PasskeyUnlockPanel, PinPanel, TravelPanel } from "./Connections";
 
 export function GeneratorScreen() {
   const { copy } = useVault();
@@ -96,6 +97,7 @@ export function GeneratorScreen() {
           <p className="text-xs text-[var(--text-muted)]">A one-site address that lands in your inbox, so you can see who leaked or sold it. Your email provider has to support plus-addressing.</p>
           <Label text="Your email"><input className={inputClass} type="email" value={email} onChange={(e) => setEmail(e.target.value)} /></Label>
           <Label text="This site"><input className={inputClass} value={tag} onChange={(e) => setTag(e.target.value)} /></Label>
+          {email && tag && <PlusRule address={plusAddress(email, tag)} />}
         </div>
       )}
     </section>
@@ -112,6 +114,7 @@ export function CodesScreen() {
   return (
     <section className="flex max-w-xl flex-col gap-3">
       <h1 className="text-lg font-semibold text-[var(--text)]">2FA codes</h1>
+      <ClockWarning />
       <input className={inputClass} placeholder="Search" aria-label="Search codes" value={q} onChange={(e) => setQ(e.target.value)} />
       {items.length === 0 && <p className="text-sm text-[var(--text-muted)]">No 2FA codes yet. Add one to a login, or scan a QR from a new 2FA code item.</p>}
       <div className="flex flex-col gap-2">
@@ -315,6 +318,7 @@ export function SettingsScreen() {
   const [words, setWords] = useState<string[]>([]);
   const [helloOn, setHelloOn] = useState(false);
   const [helloAvailable, setHelloAvailable] = useState(false);
+  const [helloPassword, setHelloPassword] = useState("");
   useEffect(() => {
     vault.myIdentityWords().then(setWords);
     platform.hello?.available().then(setHelloAvailable);
@@ -355,6 +359,10 @@ export function SettingsScreen() {
         <Label text="Clear copied secrets after this many seconds">
           <input className={inputClass} type="number" min={5} max={600} value={settings.clipboardSeconds} onChange={(e) => setSettings({ ...settings, clipboardSeconds: Math.max(5, Number(e.target.value) || 30) })} />
         </Label>
+        {platform.settingsExtras}
+        {platform.pin && <PinPanel />}
+        <PasskeyUnlockPanel />
+        <TravelPanel />
         {helloAvailable && (
           <label className="flex items-center gap-2 text-sm text-[var(--text)]">
             <input
@@ -364,7 +372,7 @@ export function SettingsScreen() {
                 const on = e.target.checked;
                 try {
                   if (on) {
-                    const raw = await vault.exportUnlockSecret(current);
+                    const raw = await vault.exportUnlockSecret(helloPassword);
                     await platform.hello!.enable(raw);
                   } else {
                     await platform.hello!.disable();
@@ -378,6 +386,11 @@ export function SettingsScreen() {
             />
             Unlock with Windows Hello
           </label>
+        )}
+        {helloAvailable && !helloOn && (
+          <Label text="Master password, to turn on Windows Hello">
+            <input className={inputClass} type="password" autoComplete="current-password" value={helloPassword} onChange={(e) => setHelloPassword(e.target.value)} />
+          </Label>
         )}
       </div>
       <div className="flex flex-col gap-3">
@@ -488,3 +501,24 @@ export function ConnectScreen({ api, code }: { api: VaultApi; code: string }) {
 }
 
 export const _unused = buf;
+
+/** Mail sent to this address files itself under its own label, as it arrives. */
+function PlusRule({ address }: { address: string }) {
+  const { vault, toast } = useVault();
+  return (
+    <Button
+      small
+      className="w-fit"
+      onClick={async () => {
+        try {
+          const r = await vault.api.request<{ label: string }>("POST", "/mail/plus-rule", { address });
+          toast(`Mail to this address will be labelled ${r.label}`);
+        } catch (e) {
+          toast(errorText(e), "err");
+        }
+      }}
+    >
+      Label its mail in Promptly Mail
+    </Button>
+  );
+}

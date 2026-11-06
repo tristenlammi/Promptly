@@ -5,13 +5,14 @@ import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import { VaultApi } from "../../../frontend/src/passwords/core/api";
-import { fromB64u } from "../../../frontend/src/passwords/core/bytes";
+import { b64u, fromB64u } from "../../../frontend/src/passwords/core/bytes";
 import { IdbStore } from "../../../frontend/src/passwords/core/store";
 import { VaultClient } from "../../../frontend/src/passwords/core/vault";
 import { Button, Callout, errorText, inputClass, Label, Spinner } from "../../../frontend/src/passwords/ui/kit";
 import type { Platform } from "../../../frontend/src/passwords/ui/platform";
 import { JoinDevice } from "../../../frontend/src/passwords/ui/Unlock";
 import { VaultApp } from "../../../frontend/src/passwords/ui/VaultApp";
+import { nativeHello } from "./native";
 import { ext, type StateOut } from "./rpc";
 
 declare const __ENGINE__: string;
@@ -61,7 +62,7 @@ function Connect({ onDone }: { onDone: () => void }) {
     if (!granted) return setError("The browser needs permission to talk to that server.");
     try {
       const api = new VaultApi(origin, () => null);
-      const started = await api.connectStart(deviceName(), engine);
+      const started = await api.connectStart(deviceName(), engine, ["vault", "mail_codes"]);
       setCode(started.code);
       setWaiting(true);
       await ext.tabs.create({ url: `${origin}/passwords/connect?code=${started.code}` });
@@ -132,6 +133,80 @@ function Access({ onDone }: { onDone: () => void }) {
   );
 }
 
+/** What only the extension has. Mail codes are opt-in even though the device may read them. */
+function ExtensionSettings() {
+  const [s, setS] = useState<{ onClickOnly: boolean; mailCodes: boolean; pin: boolean } | null>(null);
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const load = () => call<{ onClickOnly: boolean; mailCodes: boolean; pin: boolean }>({ t: "extSettings" }).then(setS);
+  useEffect(() => {
+    void load();
+  }, []);
+  if (!s) return null;
+  return (
+    <div data-testid="ext-settings" className="flex flex-col gap-2 text-sm text-[var(--text)]">
+      <h2 className="text-sm font-semibold">This browser</h2>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={s.mailCodes}
+          onChange={async (e) => {
+            await call({ t: "setMailCodes", on: e.target.checked });
+            await load();
+          }}
+        />
+        Offer codes and sign-in links from Promptly Mail on sign-in pages
+      </label>
+      <p className="text-xs text-[var(--text-muted)]">The extension asks your server for recent codes from your mail, and works out here which belong to the page you're on. The page's address isn't sent.</p>
+      <label className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          checked={s.onClickOnly}
+          onChange={async (e) => {
+            await call({ t: "setAccess", onClickOnly: e.target.checked });
+            await load();
+          }}
+        />
+        Only fill when I click the toolbar button
+      </label>
+      {s.pin ? (
+        <Button
+          small
+          onClick={async () => {
+            await call({ t: "setPin", pin: null });
+            await load();
+          }}
+        >
+          Remove my PIN
+        </Button>
+      ) : (
+        <div className="flex flex-wrap items-end gap-2">
+          <Label text="A short PIN for this browser" hint="Unlocks again until you close the browser. Five wrong tries and it's gone. Off unless you set one, and weaker than your master password.">
+            <input className={inputClass} inputMode="numeric" type="password" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value)} />
+          </Label>
+          <Button
+            small
+            disabled={!pin}
+            onClick={async () => {
+              setError("");
+              try {
+                await call({ t: "setPin", pin });
+                setPin("");
+                await load();
+              } catch (err) {
+                setError(errorText(err));
+              }
+            }}
+          >
+            Set PIN
+          </Button>
+        </div>
+      )}
+      {error && <Callout kind="danger">{error}</Callout>}
+    </div>
+  );
+}
+
 function Root() {
   const [state, setState] = useState<StateOut | null>(null);
   const [step, setStep] = useState<"load" | "connect" | "noaccount" | "join" | "access" | "vault">("load");
@@ -167,11 +242,23 @@ function Root() {
   const platform = useMemo<Platform | null>(() => {
     if (!connected) return null;
     const api = new VaultApi(connected.server, () => connected.token);
+    const bridge = nativeHello();
     return {
       kind: engine,
       baseUrl: connected.server,
       api,
       store,
+      settingsExtras: <ExtensionSettings />,
+      // Through the desktop app's host, where it's installed and has registered this
+      // extension. Otherwise it reports it's not available, and nothing's offered.
+      hello: {
+        ...bridge,
+        unlock: async () => {
+          const secret = await bridge.unlock();
+          if (secret) await call({ t: "unlockWithSecret", secret: b64u(secret) });
+          return secret;
+        },
+      },
       copy: (text) => navigator.clipboard.writeText(text),
       clearClipboard: () => navigator.clipboard.writeText(""),
       restore: async () => {

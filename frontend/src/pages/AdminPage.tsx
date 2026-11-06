@@ -10,13 +10,13 @@ import {
   Settings2,
   Terminal,
   Users,
-  Users2,
-} from "lucide-react";
+  Users2, KeyRound } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { BackupsPanel } from "@/components/admin/BackupsPanel";
+import { PasswordsPanel } from "@/components/admin/PasswordsPanel";
 import { StoragePanel } from "@/components/admin/StoragePanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
 import { GroupsPanel } from "@/components/admin/GroupsPanel";
@@ -35,6 +35,7 @@ type TabId =
   | "audit"
   | "settings"
   | "backups"
+  | "passwords"
   | "storage"
   | "models"
   | "connectors";
@@ -97,6 +98,12 @@ const TABS: TabDef[] = [
     label: "Backups",
     icon: <DatabaseBackup className="h-3.5 w-3.5" />,
     subtitle: "Database backups taken before every update and every night.",
+  },
+  {
+    id: "passwords",
+    label: "Passwords",
+    icon: <KeyRound className="h-3.5 w-3.5" />,
+    subtitle: "Policy for Passwords. No one here can read a vault.",
   },
   {
     id: "storage",
@@ -175,6 +182,7 @@ export function AdminPage() {
             {tab === "console" && <ConsolePanel />}
             {tab === "audit" && <AuditLogPanel />}
             {tab === "backups" && <BackupsPanel />}
+            {tab === "passwords" && <PasswordsPanel />}
             {tab === "storage" && <StoragePanel />}
             {tab === "settings" && <AppSettingsPanel />}
           </div>

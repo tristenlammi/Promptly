@@ -23,6 +23,13 @@ export type PageRequest =
   | { t: "check"; password: string }
   | { t: "sync" }
   | { t: "setAccess"; onClickOnly: boolean }
+  | { t: "extSettings" }
+  | { t: "unlockWithSecret"; secret: string }
+  | { t: "setMailCodes"; on: boolean }
+  | { t: "setPin"; pin: string | null }
+  | { t: "pinUnlock"; pin: string }
+  | { t: "scanTabQr"; windowId?: number }
+  | { t: "addTotp"; itemId: string | null; uri: string; title: string; url: string }
   | { t: "teach"; tabId: number }
   | { t: "reportForm"; tabId: number }
   | { t: "connected"; serverUrl: string; token: string; deviceId: string; userId: string };
@@ -47,6 +54,8 @@ export type ContentRequest =
 export type MenuRequest =
   | { t: "menuList" }
   | { t: "menuPick"; itemId: string }
+  | { t: "menuMailCode"; id: string }
+  | { t: "menuMailLink"; id: string }
   | { t: "menuGenerate" }
   | { t: "menuClose" }
   | { t: "menuOpenPopup" };

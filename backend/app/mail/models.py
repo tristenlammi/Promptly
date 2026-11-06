@@ -133,7 +133,7 @@ class MailRule(UUIDPKMixin, CreatedAtMixin, Base):
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     label_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("mail_labels.id", ondelete="CASCADE"), nullable=False)
-    kind: Mapped[str] = mapped_column(String(8), nullable=False)  # from | domain | subject
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)  # from | domain | subject | to
     value: Mapped[str] = mapped_column(String(320), nullable=False)
 
 

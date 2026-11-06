@@ -87,3 +87,19 @@ If you lose both the master password and the recovery kit, the vault is gone. No
 - A plaintext vault field in the database, backups, chat context, memory extraction, search index or Drive index.
 - A chat tool or AI feature that reads or changes vault data.
 - `encrypt_secret` used for vault content (the server could decrypt it).
+
+## Windows app
+
+- Windows Hello is a gate, not a crypto boundary. The unlock secret is wrapped with DPAPI, which any program running as you can ask to unwrap; Hello just asks for you first.
+- The same goes for the device token and the backup password, both DPAPI-wrapped.
+- The browser's native host checks the caller's extension id and that a browser started it. That raises the bar for other programs running as you. It doesn't stop them.
+- Auto-type checks the window's title before each key, and refuses its own windows and elevated ones. It can't tell a look-alike window with a matching title.
+
+## Connections to the rest of Promptly
+
+- Mail codes and security emails are read from what the server already has. The vault's sites never go to the server, because the client does the matching.
+- What's in an email is untrusted. Codes are shown as text and fill on a click. A sign-in link is offered only if it's https and goes to the sender's own domain, and not at all from a look-alike of a site you have.
+- Mail codes in an extension are off until you turn them on.
+- A Calendar reminder for a document says "Document expires soon", because Calendar isn't end-to-end encrypted.
+- A short PIN is weaker than the master password. It only exists until the app or browser closes, and five wrong tries wipe it.
+- Travel mode takes a vault off the device. It's still on your server, and your master password brings it back, so it only helps if you don't do that in front of whoever's asking.

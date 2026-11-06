@@ -39,14 +39,31 @@ function note(text: string) {
   root.appendChild(d);
 }
 
+type MailRow = { id: string; from: string; domain: string; ago: string; matches: boolean; lookalike: string | null; code: string | null; hasLink: boolean };
+
 async function render() {
   root.textContent = "";
-  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; kinds?: string[] } | null;
+  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; kinds?: string[]; mail?: MailRow[] } | null;
   if (!r) return note("Can't reach Promptly Passwords.");
   if (r.locked) {
     note("Your vault is locked.");
     root.appendChild(row("Open Promptly Passwords", "", () => call({ t: "menuOpenPopup" })));
     return;
+  }
+  // Shown as text and filled only on a click: what's in an email is untrusted.
+  for (const m of r.mail ?? []) {
+    const warn = m.lookalike ? ` Looks like ${m.lookalike}, but it isn't.` : m.matches ? "" : " Not from this site.";
+    if (m.code) {
+      root.appendChild(
+        row(`Code from email: ${m.code}`, `from ${m.from}, ${m.ago}.${warn}`, async () => {
+          const out = (await call({ t: "menuMailCode", id: m.id })) as { ok: boolean } | null;
+          if (!out?.ok) note("To be safe, type this one in yourself.");
+        }, `Fill code from ${m.domain}`),
+      );
+    }
+    if (m.hasLink && !m.lookalike) {
+      root.appendChild(row(`Open sign-in link from ${m.from}`, `${m.ago}.${warn}`, () => call({ t: "menuMailLink", id: m.id }), `Open sign-in link from ${m.domain}`));
+    }
   }
   for (const c of r.candidates.slice(0, 6)) {
     root.appendChild(

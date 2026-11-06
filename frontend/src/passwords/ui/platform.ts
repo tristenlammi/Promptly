@@ -1,6 +1,9 @@
 // What differs between the web page, the extension's full page and the desktop app.
 // The screens only talk to this, so the same UI runs everywhere.
+import type { ReactNode } from "react";
+
 import { VaultApi } from "../core/api";
+import type { memoryPin } from "../core/connections";
 import { IdbStore, type LocalStore } from "../core/store";
 
 export type Platform = {
@@ -24,6 +27,12 @@ export type Platform = {
    *  the other when it changed. */
   notifyChanged?: () => void;
   subscribeChanged?: (cb: () => void) => () => void;
+  /** Desktop: its background client has to open as well when the PIN unlocks. */
+  adoptSecret?: (secret: Uint8Array) => Promise<void>;
+  /** A short PIN for this run of the app. Off unless set. */
+  pin?: ReturnType<typeof memoryPin>;
+  /** Settings only this platform has. */
+  settingsExtras?: ReactNode;
 };
 
 type Token = { value: string; exp: number };

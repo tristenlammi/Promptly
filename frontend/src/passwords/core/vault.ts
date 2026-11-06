@@ -469,6 +469,7 @@ export class VaultClient {
         if (e instanceof KeyChangedError) throw e;
         continue;
       }
+      if (v.hidden) continue;
       for (const c of await this.store.getItems(v.id)) {
         try {
           const item = await this.decode(c, v);
@@ -517,6 +518,7 @@ export class VaultClient {
       memberGeneration: v.member_generation,
       accepted: v.accepted,
       memberCount: v.member_count,
+      hidden: prev?.hidden,
     };
   }
 
@@ -546,6 +548,7 @@ export class VaultClient {
           next.revision = 0;
         }
         await this.store.putVault(next);
+        if (next.hidden) continue;
         if (next.accepted || rv.kind === "personal") {
           await this.pushVault(next, out);
           await this.pullVault(next, out);
@@ -561,6 +564,8 @@ export class VaultClient {
       }
       // Keep what an emergency contact holds up to date, and finish setting one up.
       await this.refreshEmergency().catch(() => undefined);
+      this.lastSyncAt = Date.now();
+      await this.store.setMeta("last_sync", this.lastSyncAt);
       this.lastSyncAt = Date.now();
     } catch (e) {
       if (e instanceof OfflineError || (e instanceof ApiError && e.status >= 500)) out.offline = true;
@@ -928,6 +933,38 @@ export class VaultClient {
     s.vaultKeys.delete(vaultId);
     await this.sync();
     return toChange;
+  }
+
+  // ---- Travel mode ----------------------------------------------------------
+
+  /** Take these vaults off this device: their items go from the local copy and memory,
+   *  and they aren't synced here until travel mode's turned off. It keeps a border guard
+   *  from finding them on the device, as long as you don't unlock them while they watch.
+   *  They're still on your server, and your master password brings them back. */
+  async setTravelHidden(vaultIds: string[]): Promise<void> {
+    await this.sync();
+    for (const v of await this.store.getVaults()) {
+      const hide = vaultIds.includes(v.id);
+      if (hide && (await this.store.getItems(v.id)).some((c) => c.dirty)) throw new Error("Something in that vault hasn't synced yet. Get back online first.");
+      await this.store.putVault({ ...v, hidden: hide || undefined });
+      if (hide) {
+        for (const c of await this.store.getItems(v.id)) {
+          this.unindex(c.id);
+          await this.store.deleteItem(c.id);
+        }
+        // Start over when it comes back.
+        await this.store.putVault({ ...v, hidden: true, revision: 0, highWater: 0 });
+      }
+    }
+    await this.loadLocal();
+  }
+
+  /** Back from the trip. Needs the master password, as a second look before it all returns. */
+  async endTravel(password: string): Promise<void> {
+    if (!(await this.checkPassword(password))) throw new WrongPasswordError();
+    for (const v of await this.store.getVaults()) await this.store.putVault({ ...v, hidden: undefined });
+    await this.sync();
+    await this.loadLocal();
   }
 
   // ---- Emergency access -----------------------------------------------------

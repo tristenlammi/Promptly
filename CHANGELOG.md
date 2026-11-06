@@ -20,6 +20,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 `frontend/package.json` version, so it always reflects the built release.
 
 ## [Unreleased]
+- Passwords: a Windows app with quick search, auto-type, Windows Hello, scheduled encrypted backups and an optional SSH agent.
+- Passwords: codes and sign-in links from Promptly Mail in the fill menu, if you turn them on. The server isn't told which page you're on.
+- Passwords: Security check now raises security emails against your logins, warns about what could lose your vault, merges duplicates, and walks you through changing passwords one at a time.
+- Passwords: move a document from Files into the vault, with a Calendar reminder that says nothing about it; plus-address labels in Mail; a coarse count on Today if you opt in; vault devices in Account; admin policy in Admin.
+- Passwords: travel mode, a short PIN on the extension and Windows app, unlock with a passkey on the web, fill on page load for logins that ask, and scanning a 2FA QR code off the current tab.
 - Passwords: shared vaults with safety words, roles, and a new key when someone's removed, plus a list of the passwords they could read.
 - Passwords: Secure Send, a link with an expiry and a view limit for someone with no account. It can be posted in Rooms or sent by Mail.
 - Passwords: emergency access, where a trusted contact can ask for your vault and it opens after a wait unless you refuse.

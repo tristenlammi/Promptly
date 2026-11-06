@@ -27,6 +27,7 @@ import { ProfilePanel } from "@/components/account/ProfilePanel";
 import { SavedPromptsPanel } from "@/components/account/SavedPromptsPanel";
 import { SignOutEverywherePanel } from "@/components/account/SignOutEverywherePanel";
 import { DevicesPanel } from "@/components/account/DevicesPanel";
+import { PasswordDevices } from "@/components/account/PasswordDevices";
 import { UsagePanel } from "@/components/account/UsagePanel";
 import { VoicePanel } from "@/components/account/VoicePanel";
 import { MfaSettingsPanel } from "@/components/mfa/MfaSettingsPanel";
@@ -78,7 +79,7 @@ export function AccountSecurityPage() {
     { id: "usage", label: "Usage & cost", icon: BarChart3, node: <UsagePanel /> },
     { id: "prompts", label: "Saved prompts", icon: Bookmark, node: <SavedPromptsPanel /> },
     { id: "notifications", label: "Notifications", icon: Bell, node: <NotificationsPanel /> },
-    { id: "devices", label: "Devices", icon: Smartphone, node: <DevicesPanel /> },
+    { id: "devices", label: "Devices", icon: Smartphone, node: <><DevicesPanel /><PasswordDevices /></> },
     {
       id: "security",
       label: "Security & MFA",

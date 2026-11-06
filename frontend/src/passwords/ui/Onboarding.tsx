@@ -7,6 +7,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { buf } from "../core/bytes";
 import { buildKitPdf } from "../core/kit";
 import { encodeSecretKey, lastGroup } from "../core/keys";
+import { newBody } from "../core/model";
 import { KDF_FLOOR, type KdfParams } from "../core/primitives";
 import { type Strength, strengthOf } from "../core/strength";
 import type { VaultClient } from "../core/vault";
@@ -195,9 +196,44 @@ export function Onboarding({ vault, username, preview, serverUrl, onDone }: Prop
             <li>Install the browser extension so filling just works: see Devices.</li>
             <li>Turn on Passwords in Promptly for Android.</li>
           </ul>
+          <SavePromptly vault={vault} />
           <Button kind="primary" onClick={onDone}>Open my vault</Button>
         </div>
       )}
     </main>
+  );
+}
+
+/** Your Promptly login is the one you'd most hate to lose, and a good first thing to save. */
+function SavePromptly({ vault }: { vault: VaultClient }) {
+  const [saved, setSaved] = useState(false);
+  const [password, setPassword] = useState("");
+  const [username, setUsername] = useState("");
+  const [error, setError] = useState("");
+  if (saved) return <Callout>Saved your Promptly login. Your master password is the one thing it can't hold for you.</Callout>;
+  return (
+    <details className="rounded-lg border border-[var(--border)] p-2">
+      <summary className="cursor-pointer font-medium">Save your Promptly login here</summary>
+      <div className="mt-2 flex flex-col gap-2">
+        <Label text="Username or email"><input className={inputClass} autoComplete="off" value={username} onChange={(e) => setUsername(e.target.value)} /></Label>
+        <Label text="Promptly password"><input className={inputClass} type="password" autoComplete="off" value={password} onChange={(e) => setPassword(e.target.value)} /></Label>
+        {error && <Callout kind="danger">{error}</Callout>}
+        <Button
+          disabled={!username || !password}
+          onClick={async () => {
+            try {
+              await vault.saveNew(await vault.personalVaultId(), newBody("login", "Promptly", { username, password, urls: [{ url: location.origin }] }));
+              await vault.sync();
+              setPassword("");
+              setSaved(true);
+            } catch (e) {
+              setError(errorText(e));
+            }
+          }}
+        >
+          Save it
+        </Button>
+      </div>
+    </details>
   );
 }

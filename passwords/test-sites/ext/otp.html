@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Enter your code</title></head>
+<body>
+<h1>Enter your verification code</h1>
+<form onsubmit="return false">
+  <label for="code">Verification code</label>
+  <input id="code" name="otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6">
+  <button type="submit">Verify</button>
+</form>
+<script>window.__state = () => ({ code: document.getElementById("code").value });</script>
+</body>
+</html>

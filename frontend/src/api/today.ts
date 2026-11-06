@@ -121,6 +121,7 @@ export interface TodayComing {
 }
 
 export interface TodayHub {
+  passwords?: { attention: number; updated_at: string | null };
   mail?: {
     url: string;
     unread: number;

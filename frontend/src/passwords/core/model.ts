@@ -64,6 +64,8 @@ export type ItemBody = {
   folderId?: string | null;
   tags?: string[];
   notes?: string;
+  /** A new password waiting on the site saying yes, so a failed change can't lose it. */
+  pendingPassword?: string;
   /** A record of a Secure Send made from here; its link is in notes. */
   sendId?: string;
   fields?: CustomField[];

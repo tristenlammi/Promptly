@@ -60,8 +60,94 @@ function UnlockView({ onDone, preview }: { onDone: () => void; preview: boolean 
       <p className="font-semibold">Unlock your vault {preview && <span className="badge">Preview</span>}</p>
       <input className="input" type="password" aria-label="Master password" placeholder="Master password" autoFocus autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
       {error && <p className="err">{error}</p>}
+      <PinLine onDone={onDone} onError={setError} />
       <button className="btn-primary" type="submit" disabled={busy || !pw}>{busy ? "Unlocking…" : "Unlock"}</button>
     </form>
+  );
+}
+
+/** Only shows if a PIN was set in this browser session. */
+function PinLine({ onDone, onError }: { onDone: () => void; onError: (e: string) => void }) {
+  const [has, setHas] = useState(false);
+  const [pin, setPin] = useState("");
+  useEffect(() => {
+    call<{ pin: boolean }>({ t: "extSettings" }).then((s) => setHas(s.pin)).catch(() => undefined);
+  }, []);
+  if (!has) return null;
+  return (
+    <div className="flex gap-2">
+      <input className="input" type="password" inputMode="numeric" aria-label="PIN" placeholder="PIN" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value)} />
+      <button
+        type="button"
+        className="btn"
+        disabled={!pin}
+        onClick={async () => {
+          try {
+            await call({ t: "pinUnlock", pin });
+            onDone();
+          } catch (err) {
+            setPin("");
+            onError(err instanceof Error ? err.message : "Couldn't unlock");
+            call<{ pin: boolean }>({ t: "extSettings" }).then((s) => setHas(s.pin)).catch(() => undefined);
+          }
+        }}
+      >
+        Use PIN
+      </button>
+    </div>
+  );
+}
+
+/** Less common things, out of the way of the list. */
+function PageTools({ tab, matches, setMessage }: { tab: chrome.tabs.Tab | null; matches: Candidate[]; setMessage: (m: string) => void }) {
+  const [report, setReport] = useState("");
+  const [uri, setUri] = useState<string | null>(null);
+  if (tab?.id === undefined) return null;
+  const tabId = tab.id;
+  return (
+    <details className="text-xs">
+      <summary className="cursor-pointer">This page</summary>
+      <div className="mt-1 flex flex-col gap-1">
+        <button className="btn" onClick={async () => {
+          const r = await call<{ uri: string | null }>({ t: "scanTabQr", windowId: tab.windowId });
+          if (r.uri) setUri(r.uri);
+          else setMessage("No QR code showing on this page.");
+        }}>Scan a 2FA QR code on this page</button>
+        {uri && (
+          <>
+            {matches[0] && <button className="btn-primary" onClick={async () => {
+              try {
+                await call({ t: "addTotp", itemId: matches[0].id, uri, title: matches[0].title, url: tab.url ?? "" });
+                setMessage(`Added 2FA to ${matches[0].title}.`);
+                setUri(null);
+              } catch (e) { setMessage(e instanceof Error ? e.message : "Couldn't add it"); }
+            }}>Add to {matches[0].title}</button>}
+            <button className="btn" onClick={async () => {
+              try {
+                const title = hostOf(tab.url ?? "")?.replace(/^www\./, "") ?? "2FA code";
+                await call({ t: "addTotp", itemId: null, uri, title, url: tab.url ?? "" });
+                setMessage("Saved as a new 2FA code.");
+                setUri(null);
+              } catch (e) { setMessage(e instanceof Error ? e.message : "Couldn't add it"); }
+            }}>Save as a new 2FA code</button>
+          </>
+        )}
+        <button className="btn" onClick={async () => {
+          await call({ t: "teach", tabId });
+          window.close();
+        }}>Show me which boxes to fill here</button>
+        <button className="btn" onClick={async () => {
+          const r = await call<string>({ t: "reportForm", tabId });
+          setReport(r ?? "");
+        }}>Describe this form for a bug report</button>
+        {report && (
+          <>
+            <p>The structure only, with no values or text you typed. Check it before sending it to anyone.</p>
+            <textarea className="input" rows={6} readOnly value={report} aria-label="Form description" />
+          </>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -132,6 +218,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
       {state.preview && <p className="text-xs"><span className="badge">Preview</span> Try it on low-value accounts first.</p>}
       {lookalike && <p className="err">This site looks like {lookalike}, but it isn't. Be careful.</p>}
       {message && <p role="status" className="text-xs font-medium">{message}</p>}
+      <PageTools tab={tab} matches={matches} setMessage={setMessage} />
       {confirm && <ConfirmBox outcome={confirm.outcome} onYes={answer} onNo={() => setConfirm(null)} />}
       {reprompt && (
         <RepromptBox

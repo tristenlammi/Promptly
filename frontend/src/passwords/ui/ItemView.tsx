@@ -1,4 +1,5 @@
 // One item, read-only, with copy buttons. Secrets stay as dots until asked for.
+import { ChangePassword, FromFiles } from "./Connections";
 import { ArchiveRestore, Archive, Download, ExternalLink, History, Pencil, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -10,6 +11,7 @@ import { ItemEditor, KIND_LABEL } from "./ItemEditor";
 import { Button, Callout, CopyButton, errorText, IconButton, inputClass, Label, Modal, PlainRow, safeHref, SecretRow, useVault } from "./kit";
 import { QrImage } from "./qr";
 
+
 export function TotpRow({ cfg, label = "2FA code" }: { cfg: NonNullable<ItemBody["totp"]>; label?: string }) {
   const { copy, vault } = useVault();
   const [code, setCode] = useState("");
@@ -18,7 +20,7 @@ export function TotpRow({ cfg, label = "2FA code" }: { cfg: NonNullable<ItemBody
   useEffect(() => {
     let live = true;
     const tick = async () => {
-      const now = Date.now() + vault.serverTimeOffsetMs * 0;
+      const now = Date.now();
       try {
         const c = await totpCode(cfg, now);
         if (live) {
@@ -37,6 +39,7 @@ export function TotpRow({ cfg, label = "2FA code" }: { cfg: NonNullable<ItemBody
     };
   }, [cfg, vault]);
   if (error) return <PlainRow label={label} value={error} copyable={false} />;
+  // (clock drift is shown once, at the top of the 2FA codes screen and on the item.)
   const pretty = code.length === 6 ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
   return (
     <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] py-2 last:border-0">
@@ -160,6 +163,7 @@ function Attachments({ item, canEdit }: { item: Item; canEdit: boolean }) {
   const { vault, platform, bump, toast } = useVault();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [picking, setPicking] = useState(false);
   const list = item.body.attachments ?? [];
 
   const add = async (file: File | undefined) => {
@@ -216,6 +220,8 @@ function Attachments({ item, canEdit }: { item: Item; canEdit: boolean }) {
           {canEdit && <IconButton label={`Remove ${a.name}`} onClick={() => remove(a)}><Trash2 className="h-4 w-4" /></IconButton>}
         </div>
       ))}
+      {canEdit && <Button small className="w-fit" onClick={() => setPicking(true)}>Add from Files</Button>}
+      {picking && <FromFiles item={item} onClose={() => setPicking(false)} />}
       {canEdit && (
         <label className="w-fit cursor-pointer rounded-lg border border-[var(--border)] px-2 py-1 text-xs font-medium text-[var(--text)] hover:bg-[var(--surface-1)]">
           Attach a file
@@ -242,6 +248,7 @@ export function ItemView({ item, onClosed }: { item: Item; onClosed: () => void 
   }, [vault, item.vaultId]);
   const canEdit = role === "manage" || role === "edit";
   const fillOnly = role === "fill";
+  const [changing, setChanging] = useState(false);
 
   const save = async (next: ItemBody) => {
     await vault.update(item.id, next);
@@ -316,6 +323,8 @@ export function ItemView({ item, onClosed }: { item: Item; onClosed: () => void 
           <IconButton label={b.archived ? "Take out of archive" : "Archive"} disabled={!canEdit} onClick={() => save({ ...b, archived: !b.archived })}>
             {b.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
           </IconButton>
+          {canEdit && !fillOnly && b.kind === "login" && b.password && <Button small onClick={() => setChanging(true)}>{b.pendingPassword ? "Finish changing password" : "Change password"}</Button>}
+          {changing && <ChangePassword item={item} onDone={() => setChanging(false)} />}
           <IconButton label="Edit" disabled={!canEdit} onClick={() => setEditing(true)}><Pencil className="h-4 w-4" /></IconButton>
           <IconButton label="Move to Trash" disabled={!canEdit} onClick={remove}><Trash2 className="h-4 w-4" /></IconButton>
         </div>

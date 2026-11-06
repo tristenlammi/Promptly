@@ -9,11 +9,12 @@ import { type DeviceJoin, type VaultClient, WrongPasswordError } from "../core/v
 import { Button, Callout, errorText, inputClass, Label, Spinner } from "./kit";
 import { scanQrFromCamera } from "./qr";
 
-export function Unlock({ vault, preview, onOpen, hello, delegate }: { vault: VaultClient; preview: boolean; onOpen: () => void; hello?: () => Promise<void>; delegate?: (password: string) => Promise<void> }) {
+export function Unlock({ vault, preview, onOpen, hello, delegate, passkey, pin }: { passkey?: () => Promise<void>; pin?: (pin: string) => Promise<void>; vault: VaultClient; preview: boolean; onOpen: () => void; hello?: () => Promise<void>; delegate?: (password: string) => Promise<void> }) {
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const input = useRef<HTMLInputElement>(null);
+  const [pinText, setPinText] = useState("");
 
   useEffect(() => input.current?.focus(), []);
 
@@ -49,6 +50,26 @@ export function Unlock({ vault, preview, onOpen, hello, delegate }: { vault: Vau
         </Label>
         {error && <Callout kind="danger">{error}</Callout>}
         {busy ? <Spinner label="Unlocking…" /> : <Button kind="primary" type="submit" disabled={!password}>Unlock</Button>}
+        {pin && (
+          <div className="flex gap-2">
+            <input className={inputClass} type="password" inputMode="numeric" aria-label="PIN" placeholder="PIN" autoComplete="off" value={pinText} onChange={(e) => setPinText(e.target.value)} />
+            <Button
+              disabled={!pinText}
+              onClick={() => {
+                setError("");
+                pin(pinText)
+                  .then(onOpen)
+                  .catch((e) => {
+                    setPinText("");
+                    setError(errorText(e));
+                  });
+              }}
+            >
+              Use PIN
+            </Button>
+          </div>
+        )}
+        {passkey && <Button onClick={() => { setError(""); passkey().then(onOpen).catch((e) => setError(errorText(e))); }}>Unlock with a passkey</Button>}
         {hello && <Button onClick={() => hello().then(onOpen).catch((e) => setError(errorText(e)))}>Unlock with Windows Hello</Button>}
       </form>
     </main>

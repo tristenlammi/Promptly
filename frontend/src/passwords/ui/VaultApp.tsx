@@ -1,4 +1,5 @@
 // The vault's shell: what state are we in, and the main layout once unlocked.
+import { openPasskeyUnlock, type PasskeyUnlock } from "../core/connections";
 import {
   Activity,
   Archive,
@@ -35,7 +36,7 @@ import { MemoryStore } from "../core/store";
 import { VaultClient } from "../core/vault";
 import { CREATABLE, ItemEditor, KIND_LABEL } from "./ItemEditor";
 import { ItemView } from "./ItemView";
-import { Button, Callout, type Ctx, DEFAULT_SETTINGS, IconButton, inputClass, Modal, type Settings, Spinner, VaultContext } from "./kit";
+import { Button, Callout, type Ctx, DEFAULT_SETTINGS, IconButton, inputClass, Modal, type Settings, Spinner, useVault, VaultContext } from "./kit";
 import { Onboarding } from "./Onboarding";
 import type { Platform } from "./platform";
 import { QrCameraHost } from "./qr";
@@ -63,6 +64,19 @@ export function VaultApp({ platform }: { platform: Platform }) {
   const [username, setUsername] = useState("");
   const [preview, setPreview] = useState(true);
   const [notice, setNotice] = useState("");
+  const [passkeyUnlock, setPasskeyUnlock] = useState<PasskeyUnlock | null>(null);
+  // Only offered once it's been turned on here, and the host can still do it.
+  const [helloOn, setHelloOn] = useState(false);
+  useEffect(() => {
+    if (phase !== "locked" || !platform.hello) return;
+    void (async () => {
+      const enabled = await platform.store.getMeta<boolean>("hello_enabled");
+      setHelloOn(!!enabled && (await platform.hello!.available().catch(() => false)));
+    })();
+  }, [phase, platform]);
+  useEffect(() => {
+    if (phase === "locked" && platform.kind === "web") void platform.store.getMeta<PasskeyUnlock>("passkey_unlock").then((v) => setPasskeyUnlock(v ?? null));
+  }, [phase, platform]);
 
   const connectCode = useMemo(() => (location.pathname.startsWith("/passwords/connect") ? new URLSearchParams(location.search).get("code") : null), []);
 
@@ -148,8 +162,27 @@ export function VaultApp({ platform }: { platform: Platform }) {
                 : undefined
             }
             onOpen={() => setPhase("open")}
+            pin={
+              platform.pin?.has()
+                ? async (p) => {
+                    const secret = await platform.pin!.open(p);
+                    await platform.adoptSecret?.(secret);
+                    await vault.unlockWithSecret(secret);
+                    secret.fill(0);
+                  }
+                : undefined
+            }
+            passkey={
+              passkeyUnlock
+                ? async () => {
+                    const secret = await openPasskeyUnlock(passkeyUnlock);
+                    await vault.unlockWithSecret(secret);
+                    secret.fill(0);
+                  }
+                : undefined
+            }
             hello={
-              platform.hello
+              platform.hello && helloOn
                 ? async () => {
                     const secret = await platform.hello!.unlock();
                     if (!secret) throw new Error("Windows Hello didn't confirm it's you");
@@ -261,9 +294,10 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
   );
 
   const lock = useCallback(async () => {
+    // Leave these screens first: they throw if they draw again on a locked vault.
+    onLock();
     await vault.lock();
     await platform.lock?.();
-    onLock();
   }, [vault, platform, onLock]);
 
   // Auto-lock: idle time and sleep. A timer that fires far later than asked means
@@ -610,7 +644,10 @@ function ItemsScreen({ title, filter, other, initialId }: { title: string; filte
                 }}
                 className={`flex w-full flex-col rounded-lg px-2 py-2 text-left ${selected === i.id ? "bg-[var(--surface-2)]" : "hover:bg-[var(--surface-1)]"}`}
               >
-                <span className="truncate text-sm font-medium text-[var(--text)]">{i.body.favorite ? "★ " : ""}{i.body.title || "(no name)"}</span>
+                <span className="flex min-w-0 items-center gap-1.5 truncate text-sm font-medium text-[var(--text)]">
+                  {i.body.icon && <SiteIcon url={i.body.urls?.[0]?.url} />}
+                  {i.body.favorite ? "★ " : ""}{i.body.title || "(no name)"}
+                </span>
                 <span className="truncate text-xs text-[var(--text-muted)]">{subtitle(i)}</span>
               </button>
             </li>
@@ -678,3 +715,28 @@ function Palette({ onClose }: { onClose: () => void }) {
 }
 
 export { MemoryStore };
+
+/** Only for items that asked. Goes through your server, so the site sees the server and
+ *  not you; the server sees the domain at that moment and keeps nothing. */
+const iconCache = new Map<string, string | null>();
+function SiteIcon({ url }: { url?: string }) {
+  const { platform } = useVault();
+  const host = url ? hostOf(url) : null;
+  const [src, setSrc] = useState<string | null>(host ? iconCache.get(host) ?? null : null);
+  useEffect(() => {
+    if (!host || iconCache.has(host)) return;
+    let live = true;
+    platform.api
+      .icon(host)
+      .then((raw: ArrayBuffer) => {
+        const made = URL.createObjectURL(new Blob([raw]));
+        iconCache.set(host, made);
+        if (live) setSrc(made);
+      })
+      .catch(() => iconCache.set(host, null));
+    return () => {
+      live = false;
+    };
+  }, [host, platform]);
+  return src ? <img src={src} alt="" className="h-4 w-4 shrink-0 rounded-sm" /> : null;
+}

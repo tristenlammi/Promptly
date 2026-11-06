@@ -30,6 +30,8 @@ export type CachedVault = {
   memberGeneration: number;
   accepted: boolean;
   memberCount: number;
+  /** Travel mode: this vault's copy is off this device until it's turned off. */
+  hidden?: boolean;
 };
 
 export type CachedItem = {

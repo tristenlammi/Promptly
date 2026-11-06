@@ -30,11 +30,15 @@ def normalise(kind: str, value: str) -> str | None:
         return v if "." in v.strip(".") and "@" not in v and " " not in v else None
     if kind == "subject":
         return v if 3 <= len(v) <= 200 else None
+    if kind == "to":
+        return v if "@" in v.strip("@") and " " not in v else None
     return None
 
 
-def matches(rule: MailRule, from_addr: str, subject: str) -> bool:
+def matches(rule: MailRule, from_addr: str, subject: str, to_addrs: list[dict[str, str]] | None = None) -> bool:
     addr = from_addr.lower()
+    if rule.kind == "to":
+        return any((p.get("addr") or "").lower() == rule.value for p in to_addrs or [])
     if rule.kind == "from":
         return addr == rule.value
     if rule.kind == "domain":
@@ -45,6 +49,8 @@ def matches(rule: MailRule, from_addr: str, subject: str) -> bool:
 def condition(kind: str, value: str):
     """The same test as ``matches``, for mail that's already here."""
     addr = func.lower(MailMessage.from_addr)
+    if kind == "to":
+        return MailMessage.to_addrs.contains([{"addr": value}])
     if kind == "from":
         return addr == value
     if kind == "domain":
@@ -166,7 +172,7 @@ async def apply_to_new(db: AsyncSession, account_id: uuid.UUID, folder: MailFold
         if m.thread_key in placed:
             leaving.append((m, placed[m.thread_key]))
             continue
-        rule = next((r for r in found if matches(r, m.from_addr, m.subject) and m.sent_at >= r.created_at), None)
+        rule = next((r for r in found if matches(r, m.from_addr, m.subject, m.to_addrs) and m.sent_at >= r.created_at), None)
         if rule is not None:
             await add_label(db, rule.label_id, account_id, m.thread_key)
             placed[m.thread_key] = rule.label_id

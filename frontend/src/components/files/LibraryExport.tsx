@@ -40,6 +40,10 @@ export function LibraryExport() {
         <PackageOpen className="h-4 w-4" /> Export my library
       </h2>
       <p className="mt-1 text-xs text-[var(--text-muted)]">
+        Your passwords aren't part of this: the server can't read them. Save an encrypted copy from{" "}
+        <a className="underline" href="/passwords#/transfer">Passwords, Import and export</a>.
+      </p>
+      <p className="mt-1 text-xs text-[var(--text-muted)]">
         Everything you own as an ordinary folder tree: your files in their folders with their names and dates, documents
         as Word files, spreadsheets as Excel, and beside each photo its date, place, description and albums (as .json and
         .xmp, which other photo apps read). Unzip every part into one place. Another Promptly can import it as “A folder of

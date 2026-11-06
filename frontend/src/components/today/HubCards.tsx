@@ -884,6 +884,20 @@ export function ComingCard({ coming, today }: { coming: TodayComing[]; today: st
   );
 }
 
+// -------------------------------------------------------------- passwords
+
+/** Counts the person chose to post from their vault. Today has no keys, and never names. */
+export function PasswordsCard({ p }: { p: NonNullable<Sections["passwords"]> }) {
+  return (
+    <a href="/passwords#/security" className="block">
+      <p className="text-sm font-medium text-[var(--text-primary)]">
+        {p.attention} password{p.attention === 1 ? "" : "s"} need{p.attention === 1 ? "s" : ""} attention
+      </p>
+      <p className="mt-1 text-xs text-[var(--text-secondary)]">Open the Security check in Passwords to see which.</p>
+    </a>
+  );
+}
+
 // -------------------------------------------------------------- automations
 
 export function AutomationsCard({ a }: { a: NonNullable<Sections["automations"]> }) {

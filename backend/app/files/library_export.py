@@ -353,7 +353,9 @@ def readme(state: dict[str, Any]) -> bytes:
         "                           darktable and similar.\n"
         "albums.json  your albums and the photos in each.\n\n"
         "To bring it into another Promptly: Files -> Import -> A folder of photos, and add\n"
-        "the parts. Dates, places, favourites and albums come with it.\n"
+        "the parts. Dates, places, favourites and albums come with it.\n\n"
+        "Your passwords aren't here. This server can't read them, so it can't export them.\n"
+        "Open Passwords, then Import and export, to save an encrypted copy from your device.\n"
     ).encode("utf-8")
 
 

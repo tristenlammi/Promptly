@@ -2,8 +2,13 @@
 // Firefox runs it as an event page, so nothing here depends on staying alive: the
 // unlock secret sits in storage.session (memory only, trusted contexts only, the
 // default in both engines), and top-level listeners re-register on every start.
+import jsQR from "jsqr";
+
+import { agoText, linkIsSafe, type MailCode, rankMailCodes, savedDomainsOf, unwrapUnlockSecret, wrapUnlockSecret } from "../../../frontend/src/passwords/core/connections";
+import { parseOtpauth } from "../../../frontend/src/passwords/core/totp";
+import { argon2, KDF_FLOOR } from "../../../frontend/src/passwords/core/primitives";
 import { ApiError, OfflineError, VaultApi } from "../../../frontend/src/passwords/core/api";
-import { fromB64u, b64u } from "../../../frontend/src/passwords/core/bytes";
+import { fromB64u, b64u, randomBytes, utf8 } from "../../../frontend/src/passwords/core/bytes";
 import { decideOffer, type SaveOffer } from "../../../frontend/src/passwords/core/autofill/capture";
 import { advance, flowFor, type TabFlow } from "../../../frontend/src/passwords/core/autofill/flow";
 import { generateForSite } from "../../../frontend/src/passwords/core/generator";
@@ -69,8 +74,8 @@ function startKeepAlive() {
   ext.alarms.create(SYNC_ALARM, { periodInMinutes: 1 });
 }
 
-async function settings(): Promise<{ autoLockMinutes: number; onClickOnly: boolean; neverHosts: string[] }> {
-  return { autoLockMinutes: 15, onClickOnly: false, neverHosts: [], ...((await store.getMeta<object>("ext_settings")) ?? {}) };
+async function settings(): Promise<{ autoLockMinutes: number; onClickOnly: boolean; neverHosts: string[]; mailCodes: boolean }> {
+  return { autoLockMinutes: 15, onClickOnly: false, neverHosts: [], mailCodes: false, ...((await store.getMeta<object>("ext_settings")) ?? {}) };
 }
 
 async function touchLockTimer() {
@@ -240,6 +245,9 @@ async function valuesFor(body: ItemBody): Promise<Record<string, string>> {
   put("email", body.username?.includes("@") ? body.username : body.email);
   put("password", body.password);
   put("current-password", body.password);
+  // Changing it on the site: the new one was saved first, so this can't lose it.
+  put("new-password", body.pendingPassword);
+  put("confirm-password", body.pendingPassword);
   if (body.totp?.secret) v.otp = await totpCode(body.totp);
   put("card-number", body.cardNumber);
   put("card-name", body.cardholder);
@@ -501,6 +509,88 @@ async function handlePage(m: PageRequest): Promise<unknown> {
     case "setAccess":
       await setSiteAccess(m.onClickOnly);
       return { ok: true };
+    case "unlockWithSecret": {
+      const secret = fromB64u(m.secret);
+      const r = await c.unlockWithSecret(secret);
+      await saveSecret(secret, c.api.session);
+      startKeepAlive();
+      await touchLockTimer();
+      updateBadgeAll();
+      return { offline: r.offline };
+    }
+    case "extSettings": {
+      const s = await settings();
+      const pin = (await session.get("pin")).pin as PinRecord | undefined;
+      return { onClickOnly: s.onClickOnly, mailCodes: s.mailCodes, pin: !!pin };
+    }
+    case "setMailCodes":
+      await store.setMeta("ext_settings", { ...(await store.getMeta<object>("ext_settings")), mailCodes: m.on });
+      return { ok: true };
+    case "setPin": {
+      if (m.pin === null) {
+        await session.remove("pin");
+        return { ok: true };
+      }
+      const { unlock } = await session.get("unlock");
+      if (!unlock) throw new Error("Unlock first");
+      if (!/^\d{4,12}$/.test(m.pin)) throw new Error("Use 4 to 12 digits.");
+      const salt = randomBytes(16);
+      const stretched = await argon2(utf8(m.pin), salt, KDF_FLOOR);
+      const wrapped = await wrapUnlockSecret(stretched, salt, fromB64u(unlock as string), "pin-unlock");
+      stretched.fill(0);
+      await session.set({ pin: { salt: b64u(salt), wrapped, tries: 0 } satisfies PinRecord });
+      return { ok: true };
+    }
+    case "pinUnlock": {
+      const pin = (await session.get("pin")).pin as PinRecord | undefined;
+      if (!pin) throw new Error("There's no PIN on this browser. Use your master password.");
+      const salt = fromB64u(pin.salt);
+      const stretched = await argon2(utf8(m.pin), salt, KDF_FLOOR);
+      let secret: Uint8Array;
+      try {
+        secret = await unwrapUnlockSecret(stretched, salt, pin.wrapped, "pin-unlock");
+      } catch {
+        const tries = pin.tries + 1;
+        if (tries >= PIN_TRIES) {
+          await session.remove("pin");
+          throw new Error("That was the last try. Use your master password.");
+        }
+        await session.set({ pin: { ...pin, tries } });
+        throw new Error(`That PIN isn't right. ${PIN_TRIES - tries} tries left.`);
+      } finally {
+        stretched.fill(0);
+      }
+      await c.unlockWithSecret(secret);
+      await saveSecret(secret, c.api.session);
+      await session.set({ pin: { ...pin, tries: 0 } });
+      startKeepAlive();
+      await touchLockTimer();
+      updateBadgeAll();
+      return { ok: true };
+    }
+    case "scanTabQr": {
+      // Only of what's showing, only when asked, and it goes nowhere.
+      const shot = await ext.tabs.captureVisibleTab(m.windowId ?? (undefined as unknown as number), { format: "png" });
+      const bitmap = await createImageBitmap(await (await fetch(shot)).blob());
+      const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+      const g = canvas.getContext("2d", { willReadFrequently: true })!;
+      g.drawImage(bitmap, 0, 0);
+      const img = g.getImageData(0, 0, bitmap.width, bitmap.height);
+      return { uri: jsQR(img.data, img.width, img.height)?.data ?? null };
+    }
+    case "addTotp": {
+      const totp = parseOtpauth(m.uri);
+      if (!totp) throw new Error("That QR code isn't a 2FA setup code.");
+      if (m.itemId) {
+        const item = c.get(m.itemId);
+        if (!item) throw new Error("Unknown item");
+        await c.update(m.itemId, { ...item.body, totp });
+      } else {
+        await c.saveNew(await c.personalVaultId(), newBody("totp", m.title, { totp, urls: m.url ? [{ url: m.url }] : [] }));
+      }
+      await safeSync();
+      return { ok: true };
+    }
     case "teach":
       await ensureContent(m.tabId);
       await send(m.tabId, 0, { t: "teachStart" });
@@ -527,6 +617,7 @@ async function handleContent(m: ContentRequest, sender: chrome.runtime.MessageSe
   switch (m.t) {
     case "pageReport":
       frameReports.set(`${tabId}:${sender.frameId ?? 0}`, m.report);
+      await maybeAutofillOnLoad(tabId, sender.frameId ?? 0, m.report.kinds ?? [], sender.url);
       return null;
     case "hello": {
       const host = hostOf(m.url) ?? "";
@@ -557,6 +648,49 @@ function findRule(host: string): SiteRule | null {
   return best;
 }
 
+const PIN_TRIES = 5;
+type PinRecord = { salt: string; wrapped: string; tries: number };
+
+async function fetchMailCodes(): Promise<MailCode[]> {
+  try {
+    return await client!.api.request<MailCode[]>("GET", "/mail/codes");
+  } catch {
+    return [];
+  }
+}
+
+/** Opt-in. The server's told nothing about this page: the matching happens here. */
+async function mailRows(kinds: string[], url: string | undefined) {
+  if (!client?.unlocked || !url || !(await settings()).mailCodes) return [];
+  if (!kinds.some((k) => k === "otp" || k === "email-first" || k === "signin")) return [];
+  const ranked = rankMailCodes(await fetchMailCodes(), url, savedDomainsOf(client.allItems()));
+  return ranked.map((r) => ({
+    id: r.id,
+    from: r.from_name || r.from_domain,
+    domain: r.from_domain,
+    ago: agoText(r.agoSeconds),
+    matches: r.matches,
+    lookalike: r.lookalike,
+    code: kinds.includes("otp") ? r.code : null,
+    hasLink: linkIsSafe(r),
+  }));
+}
+
+/** Off unless an item asks for it, and then only in the clearest case: the top page,
+ *  over https, exactly one matching login, and one that doesn't ask for a re-prompt. */
+const autofilled = new Map<number, string>();
+async function maybeAutofillOnLoad(tabId: number, frameId: number, kinds: string[], url: string | undefined) {
+  if (frameId !== 0 || !url || !client?.unlocked || !kinds.includes("signin")) return;
+  if (!url.startsWith("https://") && !(__TEST_BUILD__ && url.startsWith("http://localhost"))) return;
+  if (autofilled.get(tabId) === url) return;
+  const list = candidatesFor(url);
+  if (list.length !== 1) return;
+  const item = client.get(list[0].id);
+  if (!item?.body.autofillOnLoad || item.body.reprompt) return;
+  autofilled.set(tabId, url);
+  await fill(tabId, item.id, { viaMenu: true });
+}
+
 async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
   await boot();
   const tabId = sender.tab?.id;
@@ -575,7 +709,8 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
       // Mid-flow, the item already chosen goes first.
       if (flow) list.sort((a, b) => (a.id === flow.itemId ? -1 : b.id === flow.itemId ? 1 : 0));
       const report = frameReports.get(`${tabId}:${hostFrame}`);
-      return { locked: false, candidates: list, kinds: report?.kinds ?? [], url };
+      const kinds = report?.kinds ?? [];
+      return { locked: false, candidates: list, kinds, url, mail: await mailRows(kinds, url) };
     }
     case "menuPick": {
       if (!client?.unlocked) return { ok: false, reason: "locked" };
@@ -591,6 +726,23 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
         if (flow) await setFlow(tabId, advance(flow, r.filled));
       }
       return r.ok ? r : { ok: false, reason: "popup", detail: r.reason };
+    }
+    case "menuMailCode":
+    case "menuMailLink": {
+      if (!client?.unlocked) return { ok: false };
+      // The same check as filling a login: the menu has to be really visible.
+      const check = await send<{ ok: boolean; reason?: string }>(tabId, hostFrame, { t: "menuCheck", itemId: "mail" });
+      if (!check?.ok) return { ok: false, reason: "popup" };
+      const found = (await fetchMailCodes()).find((x) => x.id === m.id);
+      if (!found) return { ok: false, reason: "gone" };
+      if (m.t === "menuMailCode") {
+        if (!found.code) return { ok: false };
+        await send(tabId, hostFrame, { t: "doFill", values: { otp: found.code } });
+        return { ok: true };
+      }
+      if (!linkIsSafe(found)) return { ok: false };
+      await ext.tabs.update(tabId, { url: found.link! });
+      return { ok: true };
     }
     case "menuGenerate": {
       if (!client?.unlocked) return { ok: false };
@@ -635,7 +787,7 @@ ext.runtime.onMessage.addListener((msg: { t: string }, sender, reply) => {
   let p: Promise<unknown>;
   if (t.startsWith("pk")) {
     p = boot().then(() => handlePasskey(msg as never, sender, () => client));
-  } else if (t === "menuList" || t === "menuPick" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup") {
+  } else if (t === "menuList" || t === "menuPick" || t === "menuMailCode" || t === "menuMailLink" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup") {
     if (!isExtensionPage(sender) || !(sender.url ?? "").includes("/menu.html")) return false;
     p = handleMenu(msg as MenuRequest, sender);
   } else if (t === "saveOffer" || t === "saveAnswer") {
