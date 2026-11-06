@@ -29,6 +29,133 @@ data class Imported(val body: ItemBody, val folder: String? = null)
 
 class ImportResult(val format: String, val items: List<Imported>, val warnings: List<String>)
 
+/** JSON as JSON.parse reads it. kotlinx's reader lets bare words, numbers like 01 and raw line
+ *  ends in strings through as values, so a damaged file would read as something. The text is
+ *  checked first, with no recursion, then parsed. */
+internal object StrictJson {
+    fun parse(text: String): JsonElement {
+        check(text)
+        return Json.parseToJsonElement(text)
+    }
+
+    private fun bad(): Nothing = throw IllegalArgumentException("Not JSON")
+
+    private fun check(s: String) {
+        val inObject = java.util.BitSet()
+        var depth = 0
+        var i = 0
+        fun space() {
+            while (i < s.length && (s[i] == ' ' || s[i] == '\n' || s[i] == '\r' || s[i] == '\t')) i++
+        }
+        fun expect(c: Char) {
+            if (i >= s.length || s[i] != c) bad()
+            i++
+        }
+        fun string() {
+            expect('"')
+            while (true) {
+                if (i >= s.length) bad()
+                val c = s[i++]
+                if (c == '"') return
+                if (c < ' ') bad()
+                if (c != '\\') continue
+                if (i >= s.length) bad()
+                when (s[i++]) {
+                    '"', '\\', '/', 'b', 'f', 'n', 'r', 't' -> {}
+                    'u' -> repeat(4) {
+                        if (i >= s.length || s[i].code > 127 || Character.digit(s[i], 16) < 0) bad()
+                        i++
+                    }
+                    else -> bad()
+                }
+            }
+        }
+        fun digits() {
+            val start = i
+            while (i < s.length && s[i] in '0'..'9') i++
+            if (i == start) bad()
+        }
+        fun number() {
+            if (s[i] == '-') i++
+            if (i < s.length && s[i] == '0') i++ else digits()
+            if (i < s.length && s[i] == '.') {
+                i++
+                digits()
+            }
+            if (i < s.length && (s[i] == 'e' || s[i] == 'E')) {
+                i++
+                if (i < s.length && (s[i] == '+' || s[i] == '-')) i++
+                digits()
+            }
+        }
+        fun word(w: String) {
+            if (!s.startsWith(w, i)) bad()
+            i += w.length
+        }
+        fun key() {
+            space()
+            string()
+            space()
+            expect(':')
+        }
+        while (true) {
+            // A value starts here, unless it's the end of an empty container.
+            space()
+            if (i >= s.length) bad()
+            var finished = true
+            when (s[i]) {
+                '{' -> {
+                    i++
+                    space()
+                    if (i < s.length && s[i] == '}') {
+                        i++
+                    } else {
+                        inObject.set(depth++, true)
+                        key()
+                        finished = false
+                    }
+                }
+                '[' -> {
+                    i++
+                    space()
+                    if (i < s.length && s[i] == ']') {
+                        i++
+                    } else {
+                        inObject.set(depth++, false)
+                        finished = false
+                    }
+                }
+                '"' -> string()
+                't' -> word("true")
+                'f' -> word("false")
+                'n' -> word("null")
+                else -> {
+                    if (s[i] != '-' && s[i] !in '0'..'9') bad()
+                    number()
+                }
+            }
+            if (!finished) continue
+            // A value's finished: close what it finishes, until a comma asks for another.
+            while (true) {
+                space()
+                if (depth == 0) {
+                    if (i != s.length) bad()
+                    return
+                }
+                if (i >= s.length) bad()
+                val c = s[i++]
+                val obj = inObject[depth - 1]
+                if (c == ',') {
+                    if (obj) key()
+                    break
+                }
+                if (c != (if (obj) '}' else ']')) bad()
+                depth--
+            }
+        }
+    }
+}
+
 object Importers {
     const val MAX_BYTES = 64 * 1024 * 1024
     private const val MAX_ITEMS = 200_000
@@ -120,9 +247,11 @@ object Importers {
         return LoginUrl("${Match.APP_SCHEME}$pkg", "never")
     }
 
-    private val WEB_SHAPED = Regex("^(https?://|[^:/]+(\\.|\\z|:\\d|/))", RegexOption.IGNORE_CASE)
-    private val ANY_SCHEME = Regex("^[a-z][a-z0-9+.-]*://", RegexOption.IGNORE_CASE)
-    private val HTTP_PREFIX = Regex("^https?://", RegexOption.IGNORE_CASE)
+    // ASCII only, as JavaScript's /i is here. Kotlin's IGNORE_CASE is Unicode-aware, which would
+    // let U+017F pass as the s of https.
+    private val WEB_SHAPED = Regex("^([hH][tT][tT][pP][sS]?://|[^:/]+(\\.|\\z|:\\d|/))")
+    private val ANY_SCHEME = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*://")
+    private val HTTP_PREFIX = Regex("^[hH][tT][tT][pP][sS]?://")
 
     /** sanitizeImport's rule: what isn't a website gets match "never", so an app's id, or
      *  `javascript:` and the like, can't match or be offered on a page. */
@@ -417,9 +546,11 @@ object Importers {
      *  is an IllegalArgumentException, with a message fit to show. */
     fun importFile(name: String, bytes: ByteArray, password: String? = null): ImportResult = try {
         sanitize(readFile(name, bytes, password))
+    } catch (e: NeedsPasswordError) {
+        throw e
     } catch (e: IllegalArgumentException) {
         throw e
-    } catch (_: RuntimeException) {
+    } catch (_: Exception) {
         throw IllegalArgumentException("We can't read that file. Is it a password export?")
     } catch (_: OutOfMemoryError) {
         throw IllegalArgumentException("That file is too large for this phone.")
@@ -442,7 +573,7 @@ object Importers {
         if (trimmed.startsWith("otpauth-migration://")) return ImportFormats.fromMigrationLinks(trimmed)
         if (trimmed.startsWith("<")) return ImportFormats.fromKeepassXml(trimmed)
         if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-            val data = runCatching { Json.parseToJsonElement(trimmed) }.getOrElse { throw IllegalArgumentException("That JSON file is damaged") } as? JsonObject
+            val data = runCatching { StrictJson.parse(trimmed) }.getOrElse { throw IllegalArgumentException("That JSON file is damaged") } as? JsonObject
                 ?: throw IllegalArgumentException("We don't recognise that JSON file.")
             val format = data["format"].any()
             if (format == "promptly-pw-export") return Exporter.readEncrypted(data, password ?: throw NeedsPasswordError("Promptly"))

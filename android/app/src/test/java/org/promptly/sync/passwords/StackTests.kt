@@ -1428,6 +1428,12 @@ class StackTests {
             "other.xml" to "<html></html>",
             "deep.xml" to "<KeePassFile><Root>" + "<Group><Name>x</Name>".repeat(100) + "</Group>".repeat(100) + "</Root></KeePassFile>",
             "columns.csv" to "colour,size\nred,big\n",
+            "bare-word.json" to "{\"services\":[{\"secret\":AAAA}]}",
+            "leading-zero.json" to "{\"services\":[{\"otp\":{\"digits\":06}}]}",
+            "trailing-comma.json" to "{\"services\":[],}",
+            "trailing-text.json" to "{\"services\":[]} x",
+            "raw-line-end.json" to "{\"services\":[{\"secret\":\"a\nb\"}]}",
+            "single-quotes.json" to "{'services':[]}",
             "not-migration.txt" to "otpauth-migration://offline",
         )
         for ((n, text) in refused) files[n] = utf8(text) to null

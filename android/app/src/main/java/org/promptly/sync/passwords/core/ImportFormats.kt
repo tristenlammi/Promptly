@@ -4,7 +4,6 @@
 // TypeScript. No code from those projects: their public documentation and observed files. Pure JVM.
 package org.promptly.sync.passwords.core
 
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -103,7 +102,7 @@ private fun isoFromSeconds(e: JsonElement?): String {
     return isoNow(Instant.ofEpochMilli(ms.toLong()))
 }
 
-private fun jsonOf(bytes: ByteArray): JsonElement? = runCatching { Json.parseToJsonElement(decode(bytes)) }.getOrNull()
+private fun jsonOf(bytes: ByteArray): JsonElement? = runCatching { StrictJson.parse(decode(bytes)) }.getOrNull()
 
 /** fflate's strFromU8: bad UTF-8 becomes U+FFFD, and a leading BOM goes. */
 private fun decode(b: ByteArray) = String(b, Charsets.UTF_8).removePrefix("﻿")

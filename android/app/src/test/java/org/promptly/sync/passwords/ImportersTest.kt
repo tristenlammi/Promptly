@@ -628,6 +628,32 @@ class ImportersTest {
 
     // ---- Malformed JSON ----
 
+    private val NOT_JSON = listOf(
+        "{\"services\":[{\"secret\":AAAA}]}",
+        "{\"services\":[{\"secret\":tru}]}",
+        "{\"services\":[{\"secret\":nul}]}",
+        "{\"services\":[{\"secret\":NaN}]}",
+        "{\"services\":[{\"otp\":{\"digits\":06}}]}",
+        "{\"services\":[{\"otp\":{\"digits\":+6}}]}",
+        "{\"services\":[{\"otp\":{\"digits\":6.}}]}",
+        "{\"services\":[{\"otp\":{\"digits\":.5}}]}",
+        "{\"services\":[{\"otp\":{\"digits\":1e}}]}",
+        "{\"services\":[{\"otp\":{\"digits\":0x10}}]}",
+        "{\"services\":[],}",
+        "{\"services\":[1,]}",
+        "{\"services\":[,1]}",
+        "{'services':[]}",
+        "{services:[]}",
+        "{\"services\":[{\"secret\":'AAAA'}]}",
+        "{\"services\":[]} trailing",
+        "{\"services\":[]}{}",
+        "{\"services\":[{\"secret\":\"a\nb\"}]}",
+        "{\"services\":[{\"secret\":\"a\tb\"}]}",
+        "{\"services\":[{\"secret\":\"a\\qb\"}]}",
+        "{\"services\":[{\"secret\":\"a\\u12\"}]}",
+        "{\"services\":[{\"secret\":\"a}]}",
+    )
+
     @Test fun malformedJson() {
         for (bad in listOf(
             "{", "[", "{\"a\":", "{\"vaults\":", "{\"items\":[}", "[1,2", "{\"db\":{},\"header\":", "{\"services\":[", "{\"accounts\":[],\"exporterRpId\"",
@@ -635,8 +661,14 @@ class ImportersTest {
         )) {
             refusedSaying("damaged") { readText("x.json", bad) }
         }
+        // What JSON.parse refuses and a lenient reader lets through as if it meant something.
+        for (bad in NOT_JSON) refusedSaying("damaged") { readText("x.json", bad) }
         refusedSaying("recognise") { readText("x.json", "{}") }
         refusedSaying("recognise") { readText("x.json", "[1,2]") }
+        // Everything JSON allows, including where the reader above could get it wrong.
+        val fine = " {\"services\" : [ {\"name\":\"a\\u00e9\\n\\\"\\\\\\/\", \"secret\":\"AA\", \"otp\":{\"digits\":-0.5e+1, \"period\":0, \"x\":[], \"y\":{}, \"z\":[[null,true,false,1E3,{\"a\":[]}]]}} ] }\r\n\t"
+        assertEquals("a\u00e9\n\"\\/", readText("x.json", fine).items.single().body.title)
+        refusedSaying("damaged") { Importers.importFile("x.1pux", ImportFixtures.zip("export.data" to utf8("{\"accounts\":[{\"vaults\":bare}]}"))) }
         refusedSaying("recognise") { readText("x.json", "{\"vaults\":1}") }
     }
 
@@ -748,7 +780,7 @@ class ImportersTest {
             assertEquals(fine, url(fine).url)
         }
         assertEquals("host", url("https://a.example", "host").match)
-        for (not in listOf("javascript:alert(1)", "ftp://a.example", "file:///etc/passwd", "data:text/html,x", "chrome://settings", "https://x://y", "about:blank", "", ":", "ssh://me@h")) {
+        for (not in listOf("javascript:alert(1)", "ftp://a.example", "file:///etc/passwd", "data:text/html,x", "chrome://settings", "https://x://y", "about:blank", "", ":", "ssh://me@h", "http\u017F://a.example")) {
             assertEquals(not, "never", url(not).match)
         }
         // Android's own rule goes further than the web's for an app: the app's id is kept, as an app.

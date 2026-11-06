@@ -607,6 +607,7 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
                 duplicates = d
                 needsPassword = null
                 filePassword = ""
+                pending = null
             }.onFailure { e ->
                 if (e is NeedsPasswordError) needsPassword = e.format else error = e.message ?: "That file can't be read."
             }
@@ -663,10 +664,11 @@ fun TransferScreen(client: VaultClient, onBack: () -> Unit) {
         }
         Text("Import", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         Text("Files are read on this phone and never uploaded. Browser CSVs (Chrome, Edge, Firefox, Google, Apple), LastPass CSV, Bitwarden JSON, 1Password .1pux, Proton Pass JSON, Dashlane zip, KeePass XML and KDBX, Credential Exchange (CXF) JSON, Aegis and 2FAS JSON without a password, Google Authenticator migration links in a text file, and Promptly's own exports.", style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, Modifier.testTag("import-pick")) { Text("Choose a file") }
+        // One file at a time: a second KeePass file opening would ask for its memory on top of the first's.
+        OutlinedButton(onClick = { picker.launch(arrayOf("*/*")) }, Modifier.testTag("import-pick"), enabled = busy == null) { Text("Choose a file") }
         needsPassword?.let { format ->
             SecretField(filePassword, { filePassword = it }, "Password for this $format file", "import-password")
-            Button(onClick = { pending?.let { (n, b) -> read(n, b, filePassword) } }, enabled = filePassword.isNotEmpty(), modifier = Modifier.testTag("import-open")) { Text("Open it") }
+            Button(onClick = { pending?.let { (n, b) -> read(n, b, filePassword) } }, enabled = filePassword.isNotEmpty() && busy == null, modifier = Modifier.testTag("import-open")) { Text("Open it") }
         }
         preview?.let { res ->
             Card(Modifier.fillMaxWidth().testTag("import-preview")) {

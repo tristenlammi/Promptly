@@ -67,6 +67,8 @@ Written during the build. Decisions, what was checked and how, and the limits. C
 | A45 | **Zips are read from memory through the central directory, by `SafeZip`,** as fflate does. | `ZipInputStream` reads forwards, so a truncated file would be a partial import, and it trusts local headers. `ZipFile` needs a file on disk, and a decrypted export shouldn't be put there. |
 | A46 | **Argon2d is added for KeePass only:** argon2kt with the same load-and-agree check as A1, BouncyCastle otherwise. The vault itself still only uses Argon2id. | Argon2d is what KeePass files usually choose. |
 | A47 | **Where the web has a bug, Android reads the file correctly rather than matching it.** See "Differences from `importers.ts` and `kdbx.ts`". The cross-check names each of those files, and prints how many items differ, so fixing the web side turns it quiet without failing a test. | The goal is the same items on every client, and copying a bug that silently corrupts passwords doesn't get closer to it. |
+| A48 | **A JSON file is checked against JSON's grammar before it's parsed, by `StrictJson`,** with no recursion. Then `kotlinx.serialization` parses it. The web's `JSON.parse` is already this strict. | `parseToJsonElement` lets a bare word or a number like `06` through as a value, and a raw line end in a string, so `{"services":[{"secret":AAAA}]}` imported on Android and was refused on the web. |
+| A49 | **One file at a time on the import screen.** "Choose a file" and "Open it" are off while one's being read, and the file's bytes are let go once it's read. | Each tap on "Open it" would otherwise start another KDF, each asking for its memory on top of the last. |
 
 ## Security notes, for `SECURITY.md`
 
@@ -142,6 +144,9 @@ Android reads the same formats, with detection in the same order, and `sanitizeI
 - **The wording of a refusal** isn't always the same, as in `That zip file is damaged` against fflate's `invalid zip data`. Both refuse.
 - **A `<parsererror>` element in otherwise good XML** makes the web refuse, because that's how a browser reports its own failure. Android reads the file.
 - **A kind of item from a Promptly plain file that isn't known:** the web only drops the system kinds, and Android keeps a list of what a person can make, and warns about the rest. Older than this work.
+- **A URL that isn't a string, in a Proton Pass or CXF file:** Android leaves that one out, and the web throws in `sanitizeImport` and refuses the file.
+- **`.1pux` attachments and the size limit:** the web adds up the declared size of `files/` entries too, and Android doesn't count what it isn't going to read. The 64 MiB limit on the file itself still applies.
+- **`Number([5])`:** a number in a one-element array is 5 in JavaScript and not a number here. No export writes one.
 
 The same on both, so not differences: KDBX 3 and files needing a key file aren't read, attachments in a `.1pux` or KDBX aren't imported, and Aegis or 2FAS exports with a password are refused with a message.
 

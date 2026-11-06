@@ -14,6 +14,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +46,10 @@ class ImportDeviceTest {
         Pw.init(ctx)
         Pw.prefs.lockOnScreenOff = false
         Pw.prefs.setupGuideDone = true
+    }
+
+    @After fun removeFiles() {
+        ctx.contentResolver.delete(MediaStore.Downloads.EXTERNAL_CONTENT_URI, "${MediaStore.Downloads.DISPLAY_NAME} LIKE ?", arrayOf("pwtest-import-%"))
     }
 
     private fun fixtureKdbx() = InstrumentationRegistry.getInstrumentation().context.assets.open("passwords/fixture.kdbx").use { it.readBytes() }
@@ -141,6 +146,46 @@ class ImportDeviceTest {
         tap("import-pick")
         pickFromSystem(name)
         assertTrue(waitFor(By.res("error"), 20_000).text.contains("entities"))
+    }
+
+    /** Past the text check that refuses `<!ENTITY`: a DOCTYPE with no entity in it has to stop at the reader itself. */
+    @Test fun aDoctypeReachesNothingOnThisRuntime() {
+        java.net.ServerSocket(0).use { server ->
+            server.soTimeout = 1500
+            val url = "http://127.0.0.1:${server.localPort}/evil.dtd"
+            for (xml in listOf("<!DOCTYPE KeePassFile SYSTEM \"$url\"><KeePassFile><Root/></KeePassFile>", "<!DOCTYPE KeePassFile SYSTEM \"file:///etc/hosts\"><KeePassFile><Root/></KeePassFile>")) {
+                assertTrue(assertThrows(IllegalArgumentException::class.java) { Importers.importFile("x.xml", xml.toByteArray()) }.message!!.contains("DOCTYPE"))
+            }
+            assertThrows("Something connected", java.net.SocketTimeoutException::class.java) { server.accept() }
+        }
+    }
+
+    /** What the KDF ceilings come to on this device, for ANDROID_NOTES. Shows the numbers, and checks nothing about speed. */
+    @Test fun whatTheCeilingsCost() {
+        fun millis(block: () -> Unit): Long {
+            val start = System.nanoTime()
+            block()
+            return (System.nanoTime() - start) / 1_000_000
+        }
+        val megabytes = 256
+        val passes = 4
+        val argon = millis { Primitives.argon2dEngine.hash(ByteArray(32) { 1 }, ByteArray(32) { 2 }, megabytes * 1024, passes, 2, 32) }
+        val rounds = 2_000_000
+        val aes = org.bouncycastle.crypto.engines.AESEngine.newInstance()
+        aes.init(true, org.bouncycastle.crypto.params.KeyParameter(ByteArray(32) { 3 }))
+        val block = ByteArray(32)
+        val roundsTook = millis {
+            repeat(rounds) {
+                aes.processBlock(block, 0, block, 0)
+                aes.processBlock(block, 16, block, 16)
+            }
+        }
+        val gib = 1024.0 * 1024 * 1024
+        val workGib = (megabytes * passes) / 1024.0
+        val report = "argon2d native $megabytes MiB x $passes passes, 2 lanes: $argon ms, so MAX_WORK (${(Kdbx.MAX_WORK / gib).toInt()} GiB) is about ${(argon / workGib * (Kdbx.MAX_WORK / gib) / 1000).toInt()} s. " +
+            "AES $rounds rounds: $roundsTook ms, so MAX_ROUNDS (${Kdbx.MAX_ROUNDS}) is about ${(roundsTook.toDouble() / rounds * Kdbx.MAX_ROUNDS / 1000).toInt()} s."
+        android.util.Log.i("PwImportCost", report)
+        InstrumentationRegistry.getInstrumentation().sendStatus(0, android.os.Bundle().apply { putString("ceilings", report) })
     }
 
     @Test fun theNativeArgon2OpensAKeePassFile() {
