@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Register - Gullwing Tickets</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.5 Arial,sans-serif;background:#eef1f5;color:#222}.d-none{display:none}.card{max-width:440px;margin:56px auto;background:#fff;border:1px solid #d7dce2;border-radius:6px}.nav-tabs{display:flex;border-bottom:1px solid #d7dce2}.nav-link{flex:1;padding:12px;background:#f5f6f8;border:0;font:inherit;cursor:pointer}.nav-link.active{background:#fff;font-weight:700;border-bottom:2px solid #c2185b}.card-body{padding:24px}.mb-3{margin-bottom:14px}.form-label{display:block;margin-bottom:3px}.form-control{width:100%;padding:8px;border:1px solid #bbb;border-radius:4px;font:inherit}.btn{width:100%;padding:10px;background:#c2185b;color:#fff;border:0;border-radius:4px;font:inherit;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="card"><ul class="nav nav-tabs" role="tablist" style="list-style:none;margin:0;padding:0"><li class="nav-item" style="flex:1;display:flex"><button id="tab-li" class="nav-link" role="tab" type="button">Log in</button></li><li class="nav-item" style="flex:1;display:flex"><button id="tab-reg" class="nav-link active" role="tab" type="button">Register</button></li></ul><div class="card-body"><div id="pane-li" class="tab-pane d-none"><form onsubmit="return false"><div class="mb-3"><label class="form-label" for="li-email">Email</label><input class="form-control" id="li-email" type="email"></div><div class="mb-3"><label class="form-label" for="li-pass">Password</label><input class="form-control" id="li-pass" type="password"></div><button class="btn" type="submit">Log in</button></form></div><div id="pane-reg" class="tab-pane active"><form onsubmit="return false"><div class="mb-3"><label class="form-label" for="reg-name">Full name</label><input class="form-control" id="reg-name" type="text"></div><div class="mb-3"><label class="form-label" for="reg-email">Email</label><input class="form-control" id="reg-email" type="email"></div><div class="mb-3"><label class="form-label" for="reg-pass">Choose a password</label><input class="form-control" id="reg-pass" type="password"><div class="form-text" style="font-size:12px;color:#666">At least 10 characters.</div></div><button class="btn" type="submit">Register</button></form></div></div></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"full-name":r("#reg-name",[]),"email":r("#reg-email",[]),"new-password":r("#reg-pass",[])};}};</script>
+<script>function sw(reg){document.getElementById('pane-li').classList.toggle('d-none',reg);document.getElementById('pane-reg').classList.toggle('d-none',!reg);document.getElementById('tab-li').classList.toggle('active',!reg);document.getElementById('tab-reg').classList.toggle('active',reg);}document.getElementById('tab-li').onclick=function(){sw(false)};document.getElementById('tab-reg').onclick=function(){sw(true)};</script>
+</body>
+</html>

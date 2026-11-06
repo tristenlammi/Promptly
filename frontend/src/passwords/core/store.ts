@@ -30,6 +30,8 @@ export type CachedVault = {
   memberGeneration: number;
   accepted: boolean;
   memberCount: number;
+  /** Someone who could read it has gone, and a manager should change the key. */
+  rotateNeeded?: boolean;
   /** Travel mode: this vault's copy is off this device until it's turned off. */
   hidden?: boolean;
 };

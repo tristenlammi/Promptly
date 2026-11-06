@@ -84,6 +84,12 @@ Needs the extension wired to `native.ts` first.
 - [ ] `ssh somehost`: a box names `ssh.exe` and the key. No is the default button. No fails. Yes logs in. It asks every time.
 - [ ] A passphrase-protected or RSA key isn't offered.
 
+## A new device asking to join
+
+- [ ] With the app unlocked and hidden in the tray, start joining from another device. Within about 20 s, hovering the tray icon names the device. It's easy to miss, so judge whether it's enough.
+- [ ] With the window open: a notice appears at the bottom right, and the taskbar button flashes if the window isn't in front. Review goes to Devices. Not now hides it.
+- [ ] Approve or refuse there: the tooltip goes back to normal within about 20 s.
+
 ## Odds and ends
 
 - [ ] Import and export: "Export encrypted file" and the plain export save where WebView2's download UI says, and open.

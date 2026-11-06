@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confirm access - Ostlund Ledger</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:14px/1.5 system-ui,sans-serif;background:#f6f8fa;color:#1f2328;display:flex;min-height:100vh}aside{width:220px;background:#fff;border-right:1px solid #d1d9e0;padding:16px}aside input{width:100%;padding:5px 8px;border:1px solid #d1d9e0;border-radius:6px;font:inherit}aside ul{list-style:none;padding:0}.Box{max-width:340px;margin:64px auto;background:#fff;border:1px solid #d1d9e0;border-radius:6px;padding:20px}.Box input{width:100%;padding:6px 10px;border:1px solid #d1d9e0;border-radius:6px;font:inherit}.Box label{display:block;font-weight:600;margin-bottom:4px}.btn-primary{width:100%;margin-top:12px;padding:6px;background:#1f883d;color:#fff;border:0;border-radius:6px;cursor:pointer;font:inherit}main{flex:1}
+</style>
+</head>
+<body>
+<aside><b>Ostlund Ledger</b><p><input id="app-search" type="text" placeholder="Jump to..." aria-label="Jump to"></p><ul><li><a href="#">Invoices</a></li><li><a href="#">Reports</a></li><li><a href="#">Billing settings</a></li></ul></aside><main><div class="Box"><h2>Confirm access</h2><p>Signed in as <strong>dana@fenwick.example</strong>. Billing settings need your password again.</p><form method="post" action="#" onsubmit="return false"><label for="sudo_password">Password</label><input type="password" name="sudo[password]" id="sudo_password" autofocus><button class="btn-primary" type="submit">Confirm</button></form><p style="margin-top:12px"><a href="#">Back to invoices</a></p></div></main>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"password":r("#sudo_password",[])};}};</script>
+</body>
+</html>

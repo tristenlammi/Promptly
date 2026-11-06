@@ -44,6 +44,7 @@ fn main() {
             commands::native_host_set,
             commands::updater_status,
             commands::main_show,
+            commands::device_notice,
             commands::overlay_search,
             commands::overlay_act,
             commands::overlay_close,
@@ -69,6 +70,8 @@ fn main() {
             commands::e2e_ssh_approve,
             #[cfg(feature = "e2e")]
             commands::e2e_emit,
+            #[cfg(feature = "e2e")]
+            commands::e2e_device_notice,
         ])
         .setup(move |app| {
             windows_ui::create_windows(app.handle(), hidden)?;

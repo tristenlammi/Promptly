@@ -90,25 +90,27 @@ CONNECT_TTL = timedelta(minutes=10)
 REQUEST_TTL = timedelta(minutes=15)
 
 _LIMIT_WRITE_ACCOUNT = rate_limit(parse("20/minute"), bucket="pw_account")
+_RESET_LIMIT = parse("10/hour")
 _PROOF_LIMIT = parse(get_settings().RATE_LIMIT_LOGIN)
 _LIMIT_CONNECT = rate_limit(parse("20/minute"), bucket="pw_connect")
 _LIMIT_POLL = rate_limit(parse("120/minute"), bucket="pw_poll")
 
 
-async def _proof_blocked(request: Request) -> None:
-    """Per address, wrong proofs only: unlocking all day isn't throttled, guessing is.
-    The account's own counter (below) catches guessing from many addresses."""
+async def _proof_blocked(request: Request, user: User | None = None) -> None:
+    """Per person and address, wrong proofs only: unlocking all day isn't throttled, guessing
+    is, and someone else on the same network isn't caught by it. The account's own counter
+    (below) catches guessing from many addresses."""
     from app import rate_limit as rl
 
-    if rl._settings.RATE_LIMIT_ENABLED and not await rl._limiter.test(_PROOF_LIMIT, "pw_proof", rl._client_ip(request)):
+    if rl._settings.RATE_LIMIT_ENABLED and not await rl._limiter.test(_PROOF_LIMIT, "pw_proof", rl._client_ip(request), str(user.id) if user else ""):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many wrong tries. Wait a minute and try again.", headers={"Retry-After": "60"})
 
 
-async def _proof_failed(request: Request) -> None:
+async def _proof_failed(request: Request, user: User | None = None) -> None:
     from app import rate_limit as rl
 
     if rl._settings.RATE_LIMIT_ENABLED:
-        await rl._limiter.hit(_PROOF_LIMIT, "pw_proof", rl._client_ip(request))
+        await rl._limiter.hit(_PROOF_LIMIT, "pw_proof", rl._client_ip(request), str(user.id) if user else "")
 
 
 def _check_kdf(kdf: s.Kdf, row) -> None:
@@ -172,6 +174,7 @@ async def prelogin(identity: VaultIdentity = Depends(get_vault_user), db: AsyncS
         account_id=account.id if account else None,
         kdf=_kdf_out(account) if account else None,
         salt=account.salt if account else None,
+        wrapped_keyset=account.wrapped_keyset if account else None,
         min_kdf=s.Kdf(alg="argon2id", m=row.min_kdf_m, t=row.min_kdf_t, p=1),
         preview=row.preview_badge,
         enabled=row.enabled,
@@ -222,6 +225,8 @@ async def create_account(
     token, row = await _session_for(db, user, identity.device)
     await service.activity(db, user.id, "vault_created", identity.device.id if identity.device else None)
     await db.commit()
+    # So someone with a stolen sign-in can't quietly set up a vault in this person's name.
+    await notify_user(user_id=user.id, category="passwords", title="A password vault was set up", body="A vault was just set up on your account. If that wasn't you, change your Promptly password and reset the vault.", url="/passwords", tag="pw-created")
     return _session_out(token, row, account, user)
 
 
@@ -245,13 +250,17 @@ async def create_session(
             headers={"Retry-After": str(int((account.locked_until - current).total_seconds()) + 1)},
         )
     if not service.verify(account.auth_salt, account.auth_hash, body.auth_key):
+        locked = False
         account.failed_attempts += 1
         if account.failed_attempts >= service.FAILED_LIMIT:
             account.locked_until = current + timedelta(minutes=service.LOCK_MINUTES)
             account.failed_attempts = 0
             await service.activity(db, user.id, "unlock_locked_out", identity.device.id if identity.device else None)
+            locked = True
         await db.commit()
-        await _proof_failed(request)
+        await _proof_failed(request, user)
+        if locked:
+            await notify_user(user_id=user.id, category="passwords", title="Vault unlock paused", body="Too many wrong tries to unlock your vault, so it's paused for a while. If that wasn't you, change your Promptly password.", url="/passwords", tag="pw-locked")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "wrong_key")
     account.failed_attempts = 0
     account.locked_until = None
@@ -277,10 +286,10 @@ async def rekey(
 ) -> Response:
     """Master password change, Secret Key rotation or a KDF upgrade: the keyset
     is re-wrapped, nothing else moves. Other sessions end."""
-    await _proof_blocked(request)
+    await _proof_blocked(request, session.user)
     account = await db.scalar(select(PwAccount).where(PwAccount.user_id == session.user.id).with_for_update())
     if account is None or not service.verify(account.auth_salt, account.auth_hash, body.auth_key):
-        await _proof_failed(request)
+        await _proof_failed(request, session.user)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "wrong_key")
     _check_kdf(body.new_kdf, await policy(db))
     salt = secrets.token_bytes(16)
@@ -347,10 +356,27 @@ async def reset_vault(
     Bearer session only, never a device token, and nothing here recovers data."""
     if body.confirm != "DELETE MY VAULT":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Type the confirmation exactly.")
-    await _check_step_up(db, user, body)
+    # First, so this can't be used to test a password for an account with no vault. Tries are
+    # counted per account as well as per address, since a right guess here destroys things.
     account = await db.scalar(select(PwAccount).where(PwAccount.user_id == user.id))
     if account is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No vault yet.")
+    from app import rate_limit as rl
+
+    if rl._settings.RATE_LIMIT_ENABLED and not await rl._limiter.test(_RESET_LIMIT, "pw_reset", str(user.id)):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many tries. Try again later.")
+    try:
+        await _check_step_up(db, user, body)
+    except HTTPException:
+        if rl._settings.RATE_LIMIT_ENABLED:
+            await rl._limiter.hit(_RESET_LIMIT, "pw_reset", str(user.id))
+        raise
+    # Shared vaults this person is the last manager of get a new one, or nobody could ever run them.
+    theirs = (await db.execute(select(PwVaultMember).where(PwVaultMember.user_id == user.id, PwVaultMember.role == "manage"))).scalars().all()
+    for m in theirs:
+        others = (await db.execute(select(PwVaultMember).where(PwVaultMember.vault_id == m.vault_id, PwVaultMember.user_id != user.id).order_by(PwVaultMember.created_at))).scalars().all()
+        if others and not any(o.role == "manage" for o in others):
+            others[0].role = "manage"
     personal = (
         await db.execute(
             select(PwVault.id)
@@ -366,6 +392,7 @@ async def reset_vault(
     await db.delete(account)
     await service.activity(db, user.id, "vault_reset")
     await db.commit()
+    await notify_user(user_id=user.id, category="passwords", title="Your password vault was reset", body="Your vault was destroyed and reset. If that wasn't you, change your Promptly password straight away.", url="/passwords", tag="pw-reset")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -449,6 +476,9 @@ async def revoke_device(device_id: str, identity: VaultIdentity = Depends(get_va
     row = await db.get(PwDevice, parse_uuid(device_id))
     if row is None or row.user_id != identity.user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    # A device can drop itself. A stolen device token can't cut off all the others.
+    if identity.device is not None and identity.device.id != row.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Remove other devices from a signed-in browser.")
     row.revoked_at = now()
     await db.execute(delete(PwSession).where(PwSession.device_id == row.id))
     await service.activity(db, identity.user.id, "device_removed", identity.device.id if identity.device else None)
@@ -499,6 +529,7 @@ async def connect_approve(code: str, user: User = Depends(get_current_user), db:
         raise HTTPException(status.HTTP_409_CONFLICT, "That code was already used.")
     row.status = "approved"
     row.user_id = user.id
+    row.token_version = user.token_version
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -523,13 +554,20 @@ async def connect_poll(body: s.ConnectPoll, db: AsyncSession = Depends(get_db), 
     user = await db.get(User, row.user_id)
     if user is None or user.disabled:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if row.token_version != user.token_version:
+        # They signed out everywhere after approving this. It doesn't outlive that.
+        await db.delete(row)
+        await db.commit()
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     token = new_device_token()
     device = PwDevice(user_id=user.id, name=row.name, platform=row.platform, token_hash=hash_token(token), scopes=row.scopes, token_version=user.token_version)
     db.add(device)
     await db.flush()
     await service.activity(db, user.id, "device_added", device.id)
+    device_name = row.name
     await db.delete(row)
     await db.commit()
+    await notify_user(user_id=user.id, category="passwords", title="New device connected", body=f"{device_name[:60]} can now ask to join your vault. If that wasn't you, remove it in Passwords, Devices.", url="/passwords#/devices", tag=f"pw-dev-{device.id}")
     return s.ConnectResult(status="approved", token=token, device_id=device.id, user_id=user.id)
 
 
@@ -656,6 +694,7 @@ async def _vault_out(db: AsyncSession, vault: PwVault, member: PwVaultMember) ->
         # Someone else's personal vault, open through emergency access, is just a vault
         # shared with this person. To them, "personal" means their own.
         kind="shared" if vault.kind == "personal" and vault.created_by != member.user_id else vault.kind,
+        rotate_needed=vault.rotate_needed if member.role == "manage" else False,
         revision=vault.revision,
         generation=vault.generation,
         name=vault.encrypted_name,
@@ -754,6 +793,7 @@ async def accept_vault(vault_id: str, session: VaultSession = Depends(require_se
 @router.post("/vaults/{vault_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
 async def leave_vault(vault_id: str, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> Response:
     vault, member = await _member(db, vault_id, session.user)
+    await db.get(PwVault, vault.id, with_for_update=True)
     if vault.kind == "personal" and vault.created_by == session.user.id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "You can't leave your personal vault.")
     managers = await db.scalar(
@@ -762,6 +802,8 @@ async def leave_vault(vault_id: str, session: VaultSession = Depends(require_ses
     if member.role == "manage" and int(managers or 0) <= 1 and await service.member_count(db, vault.id) > 1:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Make someone else a manager first.")
     await db.delete(member)
+    # They still hold the old key, so whoever manages it should change it.
+    vault.rotate_needed = True
     await service.activity(db, session.user.id, "vault_left", session.device.id if session.device else None)
     await db.commit()
     if await service.member_count(db, vault.id) == 0:
@@ -818,6 +860,13 @@ async def changes(
 async def write_items(vault_id: str, body: s.ItemBatch, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> s.BatchOut:
     vault, member = await _member(db, vault_id, session.user)
     _require(member, service.WRITE_ROLES)
+    if len({e.id for e in body.items}) != len(body.items):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "An item appears twice in that batch.")
+    if body.generation is not None and body.generation != vault.generation:
+        raise HTTPException(status.HTTP_409_CONFLICT, "This vault has a new key. Sync and try again.")
+    total = await db.scalar(select(func.count()).select_from(PwItem).where(PwItem.vault_id == vault.id))
+    if int(total or 0) + len(body.items) > service.MAX_ITEMS_PER_VAULT:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "This vault is full.")
     for e in body.items:
         if not e.purge and e.blob is None and not await db.get(PwItem, e.id):
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "A new item needs a blob.")
@@ -887,6 +936,7 @@ async def list_members(vault_id: str, session: VaultSession = Depends(require_se
 async def add_member(vault_id: str, body: s.MemberAdd, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> Response:
     vault, member = await _member(db, vault_id, session.user)
     _require(member, ("manage",))
+    await db.get(PwVault, vault.id, with_for_update=True)
     if vault.kind == "personal":
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Make a shared vault to share with others.")
     if body.role not in service.ROLES:
@@ -932,6 +982,7 @@ async def add_member(vault_id: str, body: s.MemberAdd, session: VaultSession = D
 async def set_member_role(vault_id: str, user_id: str, body: s.MemberRole, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> Response:
     vault, member = await _member(db, vault_id, session.user)
     _require(member, ("manage",))
+    await db.get(PwVault, vault.id, with_for_update=True)
     if body.role not in service.ROLES:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown role.")
     target = await service.member_of(db, vault.id, parse_uuid(user_id))
@@ -945,6 +996,31 @@ async def set_member_role(vault_id: str, user_id: str, body: s.MemberRole, sessi
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "A vault needs at least one manager.")
     target.role = body.role
     await service.activity(db, session.user.id, "vault_role_changed", session.device.id if session.device else None)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/vaults/{vault_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_member(vault_id: str, user_id: str, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> Response:
+    """Cuts someone off now, whatever else happens. The new key is a separate step, since it
+    has to re-encrypt everything and can fail; the vault's flagged until that's done."""
+    vault, member = await _member(db, vault_id, session.user)
+    _require(member, ("manage",))
+    locked = await service.bump_revision(db, vault.id)
+    uid = parse_uuid(user_id)
+    if uid == session.user.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Use Leave to remove yourself.")
+    target = await service.member_of(db, vault.id, uid)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+    if vault.kind == "personal":
+        opened = await db.scalar(select(PwEmergency.id).where(PwEmergency.grantor_id == session.user.id, PwEmergency.grantee_id == uid))
+        if opened is None and vault.created_by == session.user.id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "A personal vault has no other members.")
+    await db.delete(target)
+    locked.rotate_needed = True
+    await service.activity(db, session.user.id, "vault_member_removed", session.device.id if session.device else None)
+    await service.activity(db, uid, "vault_removed")
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -969,10 +1045,17 @@ async def rotate_vault(vault_id: str, body: s.Rotate, session: VaultSession = De
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "A personal vault has no other members.")
     if body.from_generation != vault.generation:
         raise HTTPException(status.HTTP_409_CONFLICT, "Someone rotated this vault first. Reload and try again.")
+    # bump_revision above moved it on by one. Anything else means a write since the client read.
+    if body.from_revision is not None and vault.revision - 1 != body.from_revision:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Something changed in this vault. Try again.")
+    if len(set(body.remove_user_ids)) != len(body.remove_user_ids):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Someone's listed twice.")
     if session.user.id in body.remove_user_ids:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Use Leave to remove yourself.")
 
     rows = (await db.execute(select(PwVaultMember).where(PwVaultMember.vault_id == vid))).scalars().all()
+    if not set(body.remove_user_ids) <= {m.user_id for m in rows}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "That person isn't a member.")
     remaining = {m.user_id: m for m in rows if m.user_id not in body.remove_user_ids}
     if {m.user_id for m in body.members} != set(remaining):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "A new key is needed for every remaining member.")
@@ -982,6 +1065,7 @@ async def rotate_vault(vault_id: str, body: s.Rotate, session: VaultSession = De
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Every item must be re-encrypted. Sync and try again.")
 
     vault.generation += 1
+    vault.rotate_needed = False
     vault.encrypted_name = body.name
     rev = vault.revision
     for m in rows:

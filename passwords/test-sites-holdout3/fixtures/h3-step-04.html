@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verdant Payroll</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.5 "Helvetica Neue",Arial,sans-serif;background:#fff;color:#202124}.card{max-width:420px;margin:72px auto;border:1px solid #dadce0;border-radius:8px;padding:36px}.chip{display:inline-block;padding:3px 12px;border:1px solid #dadce0;border-radius:16px;margin-bottom:16px;font-size:13px}.field{position:relative;margin-bottom:16px}.field input{width:100%;padding:14px 12px;border:1px solid #80868b;border-radius:4px;font:inherit;background:#fff}.field label{display:block;font-size:13px;margin-bottom:4px;color:#5f6368}.next{padding:9px 24px;background:#1a73e8;color:#fff;border:0;border-radius:4px;font:inherit;cursor:pointer}.stash{position:absolute;height:0;overflow:hidden;opacity:0;width:1px}.gone{display:none}#spin{font-size:13px;color:#5f6368}
+</style>
+</head>
+<body>
+<div class="card"><h1>Verdant Payroll</h1><form onsubmit="return false"><div class="field" id="who-wrap"><label for="loginId">Work email</label><input id="loginId" name="loginId" type="email" autocomplete="username"></div><div class="field stash" id="pw-wrap" aria-hidden="true"><label for="loginSecret">Password</label><input id="loginSecret" name="loginSecret" type="password" tabindex="-1" autocomplete="current-password"></div><p id="spin" hidden>Checking your organisation...</p><button class="next" id="next" type="button">Next</button></form></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"email":r("#loginId",[]),"password":r("#loginSecret",[])};}};</script>
+<script>document.getElementById('next').onclick=function(){var b=this;document.getElementById('spin').hidden=false;setTimeout(function(){document.getElementById('spin').hidden=true;document.getElementById('who-wrap').classList.add('gone');var w=document.getElementById('pw-wrap');w.classList.remove('stash');w.removeAttribute('aria-hidden');document.getElementById('loginSecret').removeAttribute('tabindex');b.textContent='Sign in';b.id='signin';},900);};</script>
+</body>
+</html>

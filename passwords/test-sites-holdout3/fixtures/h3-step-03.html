@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in - Driftwood Hosting</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:14px/1.5 ui-sans-serif,system-ui;background:#0f172a;color:#e2e8f0}.mx-auto{max-width:360px;margin:96px auto;background:#1e293b;padding:28px;border-radius:12px}input[type=text],input[type=password]{width:100%;padding:8px 10px;background:#0f172a;color:#fff;border:1px solid #475569;border-radius:8px;font:inherit;margin:6px 0 16px}button{width:100%;padding:9px;background:#38bdf8;color:#082f49;border:0;border-radius:8px;font:inherit;font-weight:600;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="mx-auto w-full max-w-sm rounded-xl bg-slate-800 p-7"><h1 class="text-xl font-semibold">Driftwood Hosting</h1><form class="mt-6" action="#" onsubmit="return false"><label class="text-sm text-slate-300" for="u">Username</label><input class="mt-1 block w-full rounded-lg" id="u" name="username" type="text" autocomplete="username"><button class="mt-4 w-full rounded-lg" id="go" type="button">Continue</button></form></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"username":r("#u",[]),"password":r("#p",[])};}};</script>
+<script>var u=document.getElementById('u');function keep(){try{sessionStorage.setItem('h3u',u.value)}catch(e){}}u.addEventListener('input',keep);document.getElementById('go').onclick=function(){keep();location.href='h3-step-03-b.html';};</script>
+</body>
+</html>

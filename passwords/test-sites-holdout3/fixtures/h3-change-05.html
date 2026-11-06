@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Password expired - Halcyra</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:14px/1.5715 "Segoe UI",sans-serif;background:#f0f2f5;color:rgba(0,0,0,.85)}.ant-card{max-width:420px;margin:64px auto;background:#fff;border-radius:8px;padding:24px;box-shadow:0 1px 2px rgba(0,0,0,.1)}.ant-alert{background:#fffbe6;border:1px solid #ffe58f;padding:8px 12px;border-radius:6px;margin-bottom:16px}.ant-form-item{margin-bottom:16px}.ant-input-affix-wrapper{display:flex;padding:4px 11px;border:1px solid #d9d9d9;border-radius:6px;background:#fff}.ant-input{width:100%;border:0;outline:0;font:inherit;padding:4px 0;background:transparent}.ant-btn{width:100%;padding:6px 15px;background:#1677ff;color:#fff;border:0;border-radius:6px;cursor:pointer;font:inherit}.help{position:fixed;left:16px;bottom:16px;width:240px;background:#fff;border:1px solid #ddd;padding:10px;border-radius:8px}.help input{width:100%;padding:4px 8px;border:1px solid #ddd;border-radius:4px;font:inherit}
+</style>
+</head>
+<body>
+<div class="ant-card"><h2 class="ant-card-head-title">Your password has expired</h2><div class="ant-alert ant-alert-warning" role="alert">Account <b>jo.ferris</b> needs a new password before you can continue. <span id="left">Session ends in 300s.</span></div><form class="ant-form ant-form-vertical" onsubmit="return false"><div class="ant-form-item"><span class="ant-input-affix-wrapper ant-input-password"><input class="ant-input" id="f_a" placeholder="Current password" type="password"></span></div><div class="ant-form-item"><span class="ant-input-affix-wrapper ant-input-password"><input class="ant-input" id="f_b" placeholder="New password" type="password"></span></div><div class="ant-form-item"><span class="ant-input-affix-wrapper ant-input-password"><input class="ant-input" id="f_c" placeholder="Confirm new password" type="password"></span></div><button type="submit" class="ant-btn ant-btn-primary ant-btn-block"><span>Set password</span></button></form></div><div class="help"><div>IT help desk</div><input id="help-q" type="text" placeholder="Type your question"></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"current-password":r("#f_a",[]),"new-password":r("#f_b",[]),"confirm-password":r("#f_c",[])};}};</script>
+<script>function __ctrl(els,tick){var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');var st=els.map(function(){return ''});var tr=els.map(function(){return ''});function render(){els.forEach(function(el,i){if(d.get.call(el)!==st[i]){d.set.call(el,st[i]);tr[i]=st[i];}});}els.forEach(function(el,i){Object.defineProperty(el,'value',{configurable:true,get:function(){return d.get.call(this)},set:function(v){tr[i]=''+v;d.set.call(this,v)}});function onch(){var c=d.get.call(el);if(c===tr[i])return;tr[i]=c;st[i]=c;render();}el.addEventListener('input',onch);el.addEventListener('change',onch);});if(tick)setInterval(render,tick);return render;}__ctrl(['f_a','f_b','f_c'].map(function(i){return document.getElementById(i)}),1000);var n=300;setInterval(function(){n=n>0?n-1:300;document.getElementById('left').textContent='Session ends in '+n+'s.';},1000);</script>
+</body>
+</html>

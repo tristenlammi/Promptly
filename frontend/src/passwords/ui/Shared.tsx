@@ -118,18 +118,22 @@ function Invitation({ v, onDone }: { v: VaultInfo; onDone: () => Promise<void> }
   const { vault, toast } = useVault();
   const [words, setWords] = useState<string[]>([]);
   const [from, setFrom] = useState("");
+  const [odd, setOdd] = useState(false);
   useEffect(() => {
     if (!v.grantedBy) return;
     vault
-      .identityWordsFor(v.grantedBy)
-      .then(setWords)
-      .then(() => vault.trustEntries())
-      .then((t) => setFrom(t[v.grantedBy!]?.username ?? ""))
+      .inviterInfo(v.grantedBy)
+      .then((i) => {
+        setWords(i.words);
+        setFrom(i.username);
+        setOdd(i.twin || i.changed);
+      })
       .catch(() => undefined);
   }, [vault, v.grantedBy]);
   return (
     <div data-testid="invitation" className="flex flex-col gap-2 rounded-lg border border-[var(--accent)] p-3">
       <p className="text-sm font-medium text-[var(--text)]">{from || "Someone"} shared a vault with you</p>
+      {odd && <Callout kind="danger">You already know someone by this name, with different keys. This might not be who it says. Check with them directly before accepting.</Callout>}
       {words.length > 0 && <p className="text-xs text-[var(--text-muted)]">Their safety words should be <span className="font-mono text-[var(--text)]">{words.join(" ")}</span>. If you can, check with them before accepting.</p>}
       <div className="flex gap-2">
         <Button
@@ -137,8 +141,8 @@ function Invitation({ v, onDone }: { v: VaultInfo; onDone: () => Promise<void> }
           kind="primary"
           onClick={async () => {
             try {
-              await vault.api.acceptVault(v.id);
-              await vault.sync();
+              if (odd && v.grantedBy) await vault.acceptChangedKey(v.grantedBy);
+              await vault.acceptVault(v.id);
               toast("Vault added");
               await onDone();
             } catch (e) {
@@ -174,6 +178,9 @@ function VaultCard({ v, people, onChange }: { v: VaultInfo; people: Person[]; on
   const [role, setRole] = useState("view");
   const [wordsFor, setWordsFor] = useState<MemberOut | null>(null);
   const [removing, setRemoving] = useState<MemberOut | null>(null);
+  // Who the new key goes to, shown before it goes. null removing and a plan means "just change the key".
+  const [rotating, setRotating] = useState(false);
+  const [plan, setPlan] = useState<Awaited<ReturnType<typeof vault.rotationPlan>>>([]);
   const [toChange, setToChange] = useState<Item[] | null>(null);
   const [changedKey, setChangedKey] = useState<KeyChangedError | null>(null);
   const [error, setError] = useState("");
@@ -277,7 +284,17 @@ function VaultCard({ v, people, onChange }: { v: VaultInfo; people: Person[]; on
               <span className="text-xs text-[var(--text-muted)]">{ROLE_TEXT[m.role] ?? m.role}</span>
             )}
             <Button small onClick={() => setWordsFor(m)}>Safety words</Button>
-            {manager && <Button small onClick={() => setRemoving(m)}>Remove</Button>}
+            {manager && (
+              <Button
+                small
+                onClick={async () => {
+                  setPlan(await vault.rotationPlan(v.id, [m.user_id]));
+                  setRemoving(m);
+                }}
+              >
+                Remove
+              </Button>
+            )}
           </li>
         ))}
       </ul>
@@ -302,6 +319,45 @@ function VaultCard({ v, people, onChange }: { v: VaultInfo; people: Person[]; on
       {manager && role === "fill" && <p className="text-xs text-[var(--text-muted)]">Fill only is a convenience, not a lock: their browser holds the password to fill it, so someone determined could still get at it.</p>}
       {error && <Callout kind="danger">{error}</Callout>}
 
+      {manager && v.rotateNeeded && (
+        <Callout kind="warn">
+          <p className="mb-2">Someone who could read this vault has gone, and it still has the key they knew. Change it, so nothing new can be read with that key.</p>
+          <Button
+            small
+            onClick={async () => {
+              setPlan(await vault.rotationPlan(v.id, []));
+              setRotating(true);
+            }}
+          >
+            Change the key
+          </Button>
+        </Callout>
+      )}
+      {rotating && (
+        <Modal title="Change this vault's key" onClose={() => setRotating(false)}>
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-[var(--text)]">Everything in it gets encrypted again, on this device.</p>
+            <Recipients plan={plan} />
+            <Button
+              kind="primary"
+              onClick={async () => {
+                try {
+                  const list = await vault.removeMembers(v.id, [], plan.filter((p) => !p.known).map((p) => p.userId));
+                  setRotating(false);
+                  setToChange(list);
+                  await loadMembers();
+                  await onChange();
+                } catch (e) {
+                  setRotating(false);
+                  setError(errorText(e));
+                }
+              }}
+            >
+              Change the key
+            </Button>
+          </div>
+        </Modal>
+      )}
       {wordsFor && <SafetyWords member={wordsFor} onClose={() => setWordsFor(null)} />}
       {changedKey && (
         <Modal title="Their keys have changed" onClose={() => setChangedKey(null)}>
@@ -324,11 +380,12 @@ function VaultCard({ v, people, onChange }: { v: VaultInfo; people: Person[]; on
           <div className="flex flex-col gap-3">
             <p className="text-sm text-[var(--text)]">The vault gets a new key and everything in it is encrypted again, on this device. This can take a moment.</p>
             <Callout kind="warn">They may have copied what they could see, and no key change undoes that. You'll get a list of passwords to change.</Callout>
+            <Recipients plan={plan} />
             <Button
               kind="primary"
               onClick={async () => {
                 try {
-                  const list = await vault.removeMembers(v.id, [removing.user_id]);
+                  const list = await vault.removeMembers(v.id, [removing.user_id], plan.filter((p) => !p.known).map((p) => p.userId));
                   setRemoving(null);
                   setToChange(list);
                   await loadMembers();
@@ -362,6 +419,25 @@ function VaultCard({ v, people, onChange }: { v: VaultInfo; people: Person[]; on
         </Modal>
       )}
     </article>
+  );
+}
+
+/** Before a new key goes anywhere: who gets it. A server can add names, so these are shown. */
+function Recipients({ plan }: { plan: { userId: string; username: string; known: boolean; changed: boolean }[] }) {
+  if (!plan.length) return <p data-testid="recipients" className="text-sm text-[var(--text)]">Only you will have the new key.</p>;
+  return (
+    <div data-testid="recipients" className="text-sm text-[var(--text)]">
+      <p className="mb-1 font-medium">The new key goes to you and:</p>
+      <ul className="list-disc pl-5">
+        {plan.map((p) => (
+          <li key={p.userId}>
+            {p.username}
+            {p.changed && <span className="text-[var(--danger)]"> (their keys have changed, so this will stop until you've checked)</span>}
+            {!p.known && <span className="text-[var(--text-muted)]"> (you haven't dealt with them before. Check you expect them here)</span>}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -450,7 +526,7 @@ function EmergencyPanel({ people, onChange }: { people: Person[]; onChange: () =
               {r.grantee} · {r.wait_days} day wait · <span data-testid="em-state">{stateText(r, "grantor")}</span>
             </span>
             {r.state === "requested" && <Button small kind="primary" onClick={() => act(() => vault.emergencyAct(r.id, "refuse"), "Refused")}>Refuse</Button>}
-            <Button small onClick={() => act(() => vault.emergencyEnd(r), "Ended")}>{r.state === "opened" ? "End and change the keys" : "End"}</Button>
+            <Button small onClick={() => act(() => vault.emergencyEnd(r), "Ended")}>{r.state === "opened" || r.state === "ended" ? "End and change the keys" : "End"}</Button>
           </li>
         ))}
         {received.map((r) => (
@@ -505,6 +581,8 @@ function stateText(r: EmergencyOut, side: "grantor" | "grantee"): string {
       return "refused";
     case "opened":
       return side === "grantor" ? "they can read your vault" : "open";
+    case "ended":
+      return side === "grantor" ? "they've stopped, but they saw your vault. Change the keys" : "ended";
     default:
       return r.state;
   }

@@ -64,6 +64,12 @@ export type ItemBody = {
   folderId?: string | null;
   tags?: string[];
   notes?: string;
+  /** Goes up with every edit, inside the encryption. A server serving an older copy shows up
+   *  as a lower number, even if it lies about the revision. */
+  seq?: number;
+  /** System item: who this person trusts, in the personal vault so it syncs and can't be
+   *  changed or wiped by a server. */
+  trustBook?: TrustBook;
   /** A new password waiting on the site saying yes, so a failed change can't lose it. */
   pendingPassword?: string;
   /** A record of a Secure Send made from here; its link is in notes. */
@@ -157,6 +163,18 @@ export type SiteRule = {
 
 export type TrustEntry = { x25519: string; ed25519: string; firstSeen: string; verified?: boolean; username?: string };
 
+/** Decisions only this person's clients can make. Nothing here comes from the server. */
+export type TrustBook = {
+  people: Record<string, TrustEntry>;
+  /** Vaults someone else gave a key to, which this person chose to open. */
+  accepted: string[];
+  /** Who they chose as an emergency contact. Keys are sealed to nobody else. */
+  contacts: string[];
+  /** The highest key generation seen per vault, so an old key can't be brought back. */
+  generations: Record<string, number>;
+  personalVaultId?: string;
+};
+
 export type Item = { id: string; vaultId: string; revision: number; deleted: boolean; updatedAt: string; body: ItemBody };
 
 export function isSystem(body: ItemBody): boolean {
@@ -171,7 +189,7 @@ export function newBody(kind: ItemKind, title: string, extra: Partial<ItemBody> 
 /** On save: note an old password in the history, and when it changed. */
 export function touch(prev: ItemBody | null, next: ItemBody): ItemBody {
   const at = new Date().toISOString();
-  const out: ItemBody = { ...next, updatedAt: at };
+  const out: ItemBody = { ...next, updatedAt: at, seq: Math.max(prev?.seq ?? 0, next.seq ?? 0) + 1 };
   if (prev && prev.password && prev.password !== next.password) {
     out.passwordHistory = [{ password: prev.password, at }, ...(prev.passwordHistory ?? [])].slice(0, 20);
     out.passwordChangedAt = at;

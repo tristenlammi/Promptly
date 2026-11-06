@@ -5,7 +5,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 
-import type { VaultApi } from "../../../frontend/src/passwords/core/api";
+import type { DeviceRequestOut, VaultApi } from "../../../frontend/src/passwords/core/api";
 import { encryptedExport } from "../../../frontend/src/passwords/core/exporter";
 import { hostOf } from "../../../frontend/src/passwords/core/match";
 import type { Item } from "../../../frontend/src/passwords/core/model";
@@ -17,6 +17,7 @@ import { native } from "./native";
 import { fromB64u, toB64u, usableIdentity } from "./ssh";
 
 const BACKUP_CHECK_MS = 15 * 60 * 1000;
+const DEVICE_CHECK_MS = 20 * 1000;
 
 function touchIdleTimer() {
   // The vault's idle lock counts key presses. Using quick search counts as using the vault.
@@ -49,6 +50,10 @@ export class Shell {
   private session: string | null = null;
   private changed: ReturnType<typeof setTimeout> | null = null;
   private backupTimer: ReturnType<typeof setInterval> | null = null;
+  private deviceTimer: ReturnType<typeof setInterval> | null = null;
+  private knownRequests = new Set<string>();
+  /** New devices waiting to join. The main window shows these. */
+  onDeviceRequests?: (requests: DeviceRequestOut[]) => void;
 
   constructor(
     public api: VaultApi,
@@ -92,8 +97,8 @@ export class Shell {
   }
 
   async lock(): Promise<void> {
-    if (this.backupTimer) clearInterval(this.backupTimer);
-    this.backupTimer = null;
+    this.stopTimers();
+    this.showDeviceRequests([]);
     this.secret = null;
     await this.vault.lock();
   }
@@ -105,9 +110,41 @@ export class Shell {
     location.reload();
   }
 
+  private stopTimers() {
+    if (this.backupTimer) clearInterval(this.backupTimer);
+    if (this.deviceTimer) clearInterval(this.deviceTimer);
+    this.backupTimer = null;
+    this.deviceTimer = null;
+  }
+
   private afterUnlock() {
+    this.stopTimers();
     this.backupTimer = setInterval(() => this.runBackup(false).catch(() => undefined), BACKUP_CHECK_MS);
     setTimeout(() => this.runBackup(false).catch(() => undefined), 30_000);
+    this.deviceTimer = setInterval(() => this.checkDevices(), DEVICE_CHECK_MS);
+    // A moment later: after Hello or a PIN, the screens' client is what gets the session.
+    setTimeout(() => this.checkDevices(), 3000);
+  }
+
+  // ---- New devices asking to join (PLAN 3.4) ----
+
+  private async checkDevices() {
+    if (!this.vault.unlocked) return;
+    try {
+      const requests = await this.api.deviceRequests();
+      // It may have locked while that was on its way.
+      if (this.vault.unlocked) this.showDeviceRequests(requests);
+    } catch {
+      /* offline, or the session's being renewed: the next check will do */
+    }
+  }
+
+  private showDeviceRequests(requests: DeviceRequestOut[]) {
+    const isNew = requests.some((r) => !this.knownRequests.has(r.id));
+    const changed = isNew || requests.length !== this.knownRequests.size;
+    this.knownRequests = new Set(requests.map((r) => r.id));
+    this.onDeviceRequests?.(requests);
+    if (changed) native.deviceNotice(requests.length, requests[0]?.name ?? null, isNew).catch(() => undefined);
   }
 
   /** The screens changed the local copy: read it again, once a burst has settled. */
@@ -128,7 +165,9 @@ export class Shell {
     if (!force && !status.due) return null;
     const password = await native.backupPasswordGet();
     if (!password) throw new Error("Set a backup password first.");
-    const data = await encryptedExport(this.vault.exportable(), password);
+    // A fill-only vault's items stay out: this file's password is one the person knows.
+    const items = this.vault.exportable().filter((i) => this.vault.canReveal(i.vaultId));
+    const data = await encryptedExport(items, password);
     const path = await native.backupSave(data, stamp());
     this.api.noteExport().catch(() => undefined);
     return path;
@@ -208,6 +247,9 @@ export class Shell {
       return this.feedback("This item asks for your master password, so open it in the app.");
     }
     if (a.action === "copy" || a.action === "totp") {
+      // A fill-only role can use a login but not see it. Typing it is the fill path; a copy
+      // would hand over the secret itself.
+      if (!this.vault.canReveal(item.vaultId)) return this.feedback("You can fill from this shared vault, but not copy. Press Ctrl+Enter to type it.");
       const value = a.action === "totp" ? (b.totp ? await totpCode(b.totp) : undefined) : mainSecret(item);
       if (!value) return this.feedback(a.action === "totp" ? "This item has no 2FA code." : "This item has nothing to copy.");
       await native.copy(value, true, await clipboardSeconds(this.store));

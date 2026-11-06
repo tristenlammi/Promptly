@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How strong is it? - Stronghold Tools</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.55 system-ui,sans-serif;background:#fafaf8;color:#23252a}a{color:#2456b3}header{display:flex;align-items:center;gap:14px;padding:10px 22px;background:#fff;border-bottom:1px solid #e3e3df}header input{margin-left:auto;width:260px}main{max-width:820px;margin:28px auto;padding:0 18px}input,select,textarea{font:inherit;padding:6px 9px;border:1px solid #c8c8c2;border-radius:5px;background:#fff}textarea{width:100%}button{font:inherit;padding:7px 14px;border:0;border-radius:5px;background:#2456b3;color:#fff;cursor:pointer}label{display:block;font-size:13px;margin:10px 0 3px}footer{max-width:820px;margin:0 auto;padding:16px 18px;font-size:13px;display:flex;gap:10px;align-items:center}table{width:100%;border-collapse:collapse;background:#fff}td,th{padding:7px 9px;border-bottom:1px solid #eee;text-align:left;font-size:14px}.t{max-width:480px}.t input{width:100%}#verdict{font-size:18px;margin-top:10px}
+</style>
+</head>
+<body>
+<main class="t"><h1>Password strength tester</h1><p>A free tool. There are no accounts on this site. Type any made-up phrase to see how long it might take to guess; please don't try a password you actually use.</p><form onsubmit="return false"><label for="strength-input">Phrase to test</label><input id="strength-input" type="password" autocomplete="off"></form><div id="verdict">Waiting for input</div></main>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {};}};</script>
+<script>document.getElementById('strength-input').addEventListener('input',function(){var n=this.value.length;document.getElementById('verdict').textContent=n<8?'Weak':n<14?'Fair':'Strong';});</script>
+</body>
+</html>

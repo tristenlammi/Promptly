@@ -13,6 +13,8 @@ No tools: it can't reach anyone's files, photos, memories or other rooms.
 """
 from __future__ import annotations
 
+from app.net.send_links import strip_send_keys
+
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -103,7 +105,7 @@ async def build(db, room: Room, ask: RoomMessage, asker) -> tuple[str, list[dict
     lines: list[str] = []
     for r in rows:
         who = "Promptly" if r.kind == "promptly" else names.get(r.author_id, "someone")
-        lines.append(f"{who}: {r.body}")
+        lines.append(f"{who}: {strip_send_keys(r.body)}")
     transcript = "\n".join(lines)[-MAX_CHARS:]
     now = datetime.now(timezone.utc).astimezone(zone_for(asker))
     seen = (

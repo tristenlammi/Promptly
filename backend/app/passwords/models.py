@@ -85,7 +85,9 @@ class PwConnect(UUIDPKMixin, CreatedAtMixin, Base):
     platform: Mapped[str] = mapped_column(String(16), nullable=False)
     scopes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="pending", server_default="pending")
-    # Who approved it. The token is minted when the client collects it.
+    # Who approved it, and from which sign-in. The token is minted when the client collects
+    # it, and not at all if they've signed out everywhere since.
+    token_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
@@ -116,6 +118,8 @@ class PwVault(CreatedAtMixin, Base):
     revision: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     encrypted_name: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    # Someone who could read it has gone, and a manager hasn't changed the key yet.
+    rotate_needed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

@@ -60,7 +60,7 @@ export function tokens(text: string): { words: Set<string>; joined: string } {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .toLowerCase()
     .normalize("NFC");
-  const words = spaced.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const words = spaced.split(/[^\p{L}\p{M}\p{N}]+/u).filter(Boolean);
   return { words: new Set(words), joined: words.join("") };
 }
 
@@ -368,6 +368,9 @@ function scoreRoles(s: Signals): Map<FieldRole, number> {
     if (t.joined === "name" || t.joined === "yourname" || s.name === "name") add("full-name", weight * 2);
   }
   if (s.autocomplete.startsWith("tel") && hits(s.own, W.EMAIL) > 0) add("email", 9);
+  if (s.label.words.has("full") && s.label.words.has("name")) add("full-name", 8);
+  // A number or an ID that's yours, on a site that calls you a customer or member.
+  if (["customer", "client", "member", "membership", "account"].some((w) => s.label.words.has(w)) && ["number", "no", "id"].some((w) => s.label.words.has(w)) && s.type !== "password") add("username", 4);
   // An "email address" or a type=email box isn't a street address.
   if (s.type === "email" || hits(s.placeholder, W.EMAIL) > 0 || hits(s.label, W.EMAIL) > 0) scores.delete("address1");
   // What the example looks like says more than any word, in any language.
@@ -517,13 +520,14 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
   const allText = `${text} ${group.textContent?.slice(0, 600) ?? ""}`;
 
   const passwords = visible.filter((s) => {
-    if (s.signals.type === "password") return true;
+    // A PIN beside a username is the login. A PIN alone is something else: see detectOtp.
+    if (s.signals.type === "password") return !s.el.getAttribute("value") && (!looksLikePin(s) || visible.some((x) => x.signals.type !== "password" && isIdentifier(x)));
     // Some password boxes start as text until focused. Those say so more than once,
     // and hold nothing yet: "password_min" with 12 in it is a setting, and a label
     // with "passport" is a passport.
     if (s.el.tagName !== "INPUT" || (s.el as HTMLInputElement).value) return false;
     const top = topRole(s.scores);
-    return top?.[0] === "password" && top[1] >= 6 && !isOtpBox(s.el) && !hitsOtp(s) && hits(s.signals.idOwn, ["passport", "min", "max", "minlength", "maxlength", "length", "policy", "expiry", "expires", "expiration"]) === 0;
+    return top?.[0] === "password" && top[1] >= 6 && !isOtpBox(s.el) && !hitsOtp(s) && hits(s.signals.idOwn, ["passport", "min", "max", "minlength", "maxlength", "length", "policy", "expiry", "expires", "expiration"]) === 0 && !looksLikePin(s);
   });
   const textFields = visible.filter((s) => !passwords.includes(s));
 
@@ -537,10 +541,14 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
   }
 
   // Card, first: its security code would read as a one-time code otherwise.
-  if (phrase(text, W.CARD_INTENT) || /\b(pay|buy|purchase)\b/i.test(text)) {
+  if (phrase(text, W.CARD_INTENT) || /\b(pay|buy|purchase|payment|checkout)\b/i.test(text)) {
     for (const s of visible) {
-      if (s.signals.numeric && s.signals.type !== "tel" && !hitsOtp(s) && (s.el as HTMLInputElement).maxLength !== 3 && (s.el as HTMLInputElement).maxLength !== 4 && /number|digits|\bno\b/i.test(s.signals.labelRaw) && !/gift|phone|mobile|order/i.test(s.signals.labelRaw)) s.scores.set("card-number", Math.max(s.scores.get("card-number") ?? 0, 5));
-      if (s.signals.numeric && (s.el as HTMLInputElement).maxLength >= 3 && (s.el as HTMLInputElement).maxLength <= 4 && /code|security|back|digits/i.test(s.signals.labelRaw)) s.scores.set("card-cvv", Math.max(s.scores.get("card-cvv") ?? 0, 6));
+      if (s.signals.numeric && s.signals.type !== "tel" && !hitsOtp(s) && (s.el as HTMLInputElement).maxLength !== 3 && (s.el as HTMLInputElement).maxLength !== 4 && (/number|digits|\bno\b/i.test(s.signals.labelRaw) || (!s.signals.labelRaw && !(s.el as HTMLInputElement).placeholder && (s.el as HTMLInputElement).inputMode === "numeric" && visible.length >= 3)) && !/gift|phone|mobile|order/i.test(s.signals.labelRaw)) s.scores.set("card-number", Math.max(s.scores.get("card-number") ?? 0, 5));
+      if (s.signals.numeric && (s.el as HTMLInputElement).maxLength >= 3 && (s.el as HTMLInputElement).maxLength <= 4 && (/code|security|back|digits|cvv|cvc/i.test(s.signals.labelRaw) || !s.signals.labelRaw)) {
+        s.scores.set("card-cvv", Math.max(s.scores.get("card-cvv") ?? 0, 6));
+        // Masked or not, it isn't a password here.
+        s.scores.delete("password");
+      }
     }
   }
   const giftish = (s: Scored) => /gift|voucher|coupon|loyalty|member/i.test(`${s.signals.rawId} ${[...s.signals.label.words].join(" ")}`);
@@ -550,7 +558,8 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
   // Hosted payment fields: each input in a frame of its own, so a frame may hold just one.
   const framed = doc(group).defaultView !== doc(group).defaultView?.top;
   const hostedHere = !passwords.length && cardFields.length > 0 && !!doc(group).querySelector("iframe");
-  if (hasCardNumber || hostedHere || (framed && cardFields.length > 0 && strongCard) || (strongCard && cardFields.length >= 1 && !passwords.length)) {
+  const onlyGift = cardFields.length === 1 && /gift|voucher|prepaid|balance/i.test(headingsOf(group));
+  if (!onlyGift && (hasCardNumber || hostedHere || (framed && cardFields.length > 0) || (strongCard && cardFields.length >= 1 && !passwords.length))) {
     const named = visible.filter((s) => !cardFields.includes(s) && !giftish(s) && (topRole(s.scores)?.[0] === "full-name" || (s.scores.get("card-name") ?? 0) > 0 || /\bname\b/i.test(s.signals.labelRaw)) && /card|holder|name/i.test(`${s.signals.rawId} ${[...s.signals.label.words].join(" ")}`));
     for (const s of named) s.scores.set("card-name", Math.max(s.scores.get("card-name") ?? 0, 5));
     const fields = assign([...cardFields, ...named], CARD_ROLES);
@@ -663,7 +672,9 @@ function detectOtp(visible: Scored[], text: string, pageText: string): Field[] |
   const anyPw = visible.some((s) => s.signals.type === "password" && !isOtpLike(s));
   // Split boxes: several short neighbours in a row.
   const boxes = visible.filter((s) => s.el.tagName === "INPUT" && isShortBox(s.el as HTMLInputElement));
-  if (boxes.length >= 3 && boxes.length <= 12 && !anyPw) {
+  // Digit boxes beside a box for something else are a game code, say, and not a sign-in.
+  const besides = visible.filter((s) => !boxes.includes(s) && s.el.tagName === "INPUT");
+  if (boxes.length >= 3 && boxes.length <= 12 && !anyPw && !besides.length) {
     const intent = phrase(`${text} ${pageText}`, W.OTP_INTENT) || boxes.some((s) => hitsOtp(s) || s.signals.autocomplete.includes("one-time-code"));
     const singles = boxes.every((s) => (s.el as HTMLInputElement).maxLength === 1 || (s.el as HTMLInputElement).inputMode === "numeric" || (s.el as HTMLInputElement).size === 1);
     if (intent || singles) return boxes.map((s) => ({ el: s.el, role: "otp-digit", score: 5 }));
@@ -675,9 +686,10 @@ function detectOtp(visible: Scored[], text: string, pageText: string): Field[] |
   if (onlyOne.length === 1 && !notLoginField(onlyOne[0].signals) && !isSearchField(onlyOne[0].signals)) {
     const s = onlyOne[0];
     const el = s.el as HTMLInputElement;
-    const shortNumber = (s.signals.numeric && el.maxLength >= 4 && el.maxLength <= 10) || /^\s*\d{2,4}[ -]?\d{2,4}\s*$/.test(s.signals.placeholderRaw);
-    const looksElse = /coupon|promo|gift|discount|zip|postal|post ?code|tracking|voucher|redeem|invite|referral|order|member|look ?up|check|find|search/i.test(`${text} ${s.signals.rawId} ${s.signals.labelRaw} ${s.signals.placeholderRaw}`.replace(/quick check/i, ""));
-    if (shortNumber && !looksElse && (s.scores.get("username") ?? 0) === 0 && (s.scores.get("email") ?? 0) === 0) return [{ el: s.el, role: "otp", score: 4 }];
+    const framedHere = doc(s.el).defaultView !== doc(s.el).defaultView?.top;
+    const shortNumber = !framedHere && ((s.signals.numeric && el.maxLength >= 4 && el.maxLength <= 10) || (s.signals.numeric && s.signals.type !== "tel" && el.maxLength < 0 && phrase(`${text} ${pageText}`, W.OTP_INTENT)) || /^\s*\d{2,4}[ -]?\d{2,4}\s*$/.test(s.signals.placeholderRaw));
+    const looksElse = /\b(coupon|promo|gift|discount|zip|postal|post ?code|tracking|voucher|redeem|invite|referral|order|member|look ?up|find|search|quantity|qty|amount|age|year)\b/i.test(`${s.signals.rawId} ${s.signals.labelRaw} ${s.signals.placeholderRaw}`) || /coupon|promo|gift|discount|voucher|redeem|tracking|postcode|zip code/i.test(text);
+    if (shortNumber && !looksElse && (s.scores.get("username") ?? 0) <= 2 && (s.scores.get("email") ?? 0) <= 2 && (s.scores.get("phone") ?? 0) <= 2) return [{ el: s.el, role: "otp", score: 4 }];
   }
   const coded = visible.filter((s) => !notLoginField(s.signals) && (s.signals.autocomplete.includes("one-time-code") || otpScore(s) >= 4));
   if (coded.length === 1) {
@@ -698,6 +710,12 @@ function otpScore(s: Scored): number {
   return n;
 }
 
+/** A short numeric box, masked or not: a PIN or a code, not a site's password. */
+function looksLikePin(s: Scored): boolean {
+  const el = s.el as HTMLInputElement;
+  return s.signals.numeric && el.maxLength > 0 && el.maxLength <= 8 && hits(s.signals.label, W.PASSWORD_ONLY) === 0;
+}
+
 function isOtpLike(s: Scored): boolean {
   return hitsOtp(s) || (s.signals.type === "password" && (s.el as HTMLInputElement).maxLength > 0 && (s.el as HTMLInputElement).maxLength <= 8);
 }
@@ -706,6 +724,7 @@ function isShortBox(el: HTMLInputElement): boolean {
   if (el.type !== "text" && el.type !== "tel" && el.type !== "number" && el.type !== "password") return false;
   if (el.maxLength === 1 || el.size === 1) return true;
   const r = el.getBoundingClientRect();
+  if (el.type === "number" && r.width > 0 && r.width < 90) return true;
   return el.maxLength > 0 && el.maxLength <= 2 && r.width < 80;
 }
 
@@ -721,7 +740,9 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
 
   const fields: Field[] = [];
   const hasNew = passwords.some((p) => auto(p, "new-password"));
-  const hasCurrent = passwords.some((p) => auto(p, "current-password") || says(p, W.CURRENT_PASSWORD));
+  // Sites get autocomplete wrong often enough that what the labels say wins.
+  const saidConfirm = passwords.some((p) => says(p, W.CONFIRM) && !says(p, W.CURRENT_PASSWORD));
+  const hasCurrent = passwords.some((p) => says(p, W.CURRENT_PASSWORD) || (auto(p, "current-password") && !saidConfirm));
   const changeWords = phrase(text, W.CHANGE_INTENT);
   const signupWords = phrase(text, W.SIGNUP_INTENT);
   const loginWords = phrase(text, W.LOGIN_STRONG);
@@ -740,7 +761,7 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
     kind = changeWords && !signupWords && ids.length === 0 && !identity ? "change-password" : ids.length || identity || signupWords ? "signup" : "change-password";
   } else if (hasNew && changeWords) {
     kind = "change-password";
-  } else if (hasNew || (signupWords && !loginWords) || (personNamed && textFields.filter(isIdentifier).length >= 1 && !loginWords)) {
+  } else if ((hasNew && (signupWords || personNamed || !textFields.some(isIdentifier))) || (signupWords && !loginWords) || (personNamed && textFields.filter(isIdentifier).length >= 1 && !loginWords)) {
     // A name as well as a login: you're signing up, not in.
     kind = "signup";
   } else if (textFields.filter(isIdentifier).length === 0) {
@@ -755,7 +776,8 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
     const order = [...passwords];
     if (kind === "change-password") {
       // Three boxes in a row are current, new, confirm, whatever they're called.
-      const current = order.find((p) => (auto(p, "current-password") || says(p, W.CURRENT_PASSWORD)) && !confirmish(p)) ?? (order.length === 3 ? order[0] : undefined);
+      const anyLabel = order.some((p) => says(p, W.CURRENT_PASSWORD) || says(p, W.NEW_PASSWORD) || confirmish(p));
+      const current = order.find((p) => says(p, W.CURRENT_PASSWORD)) ?? (order.length === 3 && !anyLabel ? order[0] : order.find((p) => auto(p, "current-password") && !confirmish(p))) ?? (order.length === 3 ? order[0] : undefined);
       const rest = order.filter((p) => p !== current);
       if (current) fields.push({ el: current.el, role: "current-password", score: 8 });
       const confirm = rest.find(confirmish) ?? (rest.length > 1 ? rest[rest.length - 1] : undefined);

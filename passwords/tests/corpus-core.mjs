@@ -83,6 +83,9 @@ export async function runCorpus(driver, { filter, port = 8101, log = console.log
 
         const roleVals = {};
         for (const e of step.expected) roleVals[e.role === "otp-digit" ? "otp" : e.role] = VALUES[e.role === "otp-digit" ? "otp" : e.role];
+        // The real client fills an identifier under either name.
+        if (roleVals.email && !roleVals.username) roleVals.username = roleVals.email;
+        if (roleVals.username && !roleVals.email) roleVals.email = roleVals.username;
         await driver.fill(target, roleVals);
         // The other frames of a spread-out form.
         for (const [k, list] of byFrame) {

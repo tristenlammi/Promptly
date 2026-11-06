@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Jumbleberry - Make a profile</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:14px/1.4 Arial,Helvetica,sans-serif;background:#f0ecf7;color:#1c1e21}.pg{max-width:432px;margin:40px auto;background:#fff;border-radius:8px;padding:16px;box-shadow:0 2px 4px rgba(0,0,0,.1)}.two{display:flex;gap:10px}input[type=text],input[type=password]{width:100%;padding:10px;background:#f5f6f7;border:1px solid #ccd0d5;border-radius:5px;font:inherit;margin-bottom:10px}select{padding:7px;border:1px solid #ccd0d5;border-radius:4px;font:inherit;flex:1}.bd{display:flex;gap:8px;margin:2px 0 12px}small{color:#606770}.go{display:block;margin:0 auto;padding:7px 32px;background:#6b3fa0;color:#fff;border:0;border-radius:5px;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="pg"><h1 style="margin:0">Make a profile</h1><small>It only takes a minute.</small><hr><form onsubmit="return false"><div class="two"><input type="text" name="fname" placeholder="First name"><input type="text" name="lname" placeholder="Surname"></div><input type="text" name="contact" placeholder="Email address"><input type="password" name="pw" placeholder="New password"><small>Birthday</small><div class="bd"><select name="dob_d" aria-label="Day"><option value="1">1</option><option value="2">2</option><option value="3">3</option></select><select name="dob_m" aria-label="Month"><option value="1">Jan</option><option value="2">Feb</option><option value="3">Mar</option></select><select name="dob_y" aria-label="Year"><option value="2001">2001</option><option value="2000">2000</option><option value="1999">1999</option></select></div><button class="go" type="submit">Sign up</button></form></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"first-name":r("input[name=\"fname\"]",[]),"last-name":r("input[name=\"lname\"]",[]),"email":r("input[name=\"contact\"]",[]),"new-password":r("input[name=\"pw\"]",[])};}};</script>
+</body>
+</html>

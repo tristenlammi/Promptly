@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seawall Community Radio</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:16px/1.6 Georgia,serif;background:#fdfaf3;color:#222}nav{display:flex;justify-content:space-between;align-items:center;padding:12px 24px;background:#00695c;color:#fff}nav input{padding:4px 8px;border:0;border-radius:4px;font:inherit}.wrap{max-width:860px;margin:32px auto;display:flex;gap:32px;padding:0 16px}.wrap article{flex:1}.wrap iframe{width:320px;height:310px;border:1px solid #ccc;border-radius:8px;background:#fff}footer{max-width:860px;margin:0 auto;padding:16px;display:flex;gap:8px;align-items:center}footer input{padding:6px;border:1px solid #bbb;border-radius:4px;font:inherit}
+</style>
+</head>
+<body>
+<nav><b>Seawall Community Radio</b><input id="q" type="search" placeholder="Search programmes"></nav><div class="wrap"><article><h1>Members' lounge</h1><p>Listen to the archive and vote on next season's schedule.</p></article><iframe id="auth-frame" title="Member sign-in" src="h3-frame-01-login.html"></iframe></div><footer><span>Programme guide by email</span><input id="nl" type="email" placeholder="Your email"></footer>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"username":r("#login-user",["#auth-frame"]),"password":r("#login-pass",["#auth-frame"])};}};</script>
+</body>
+</html>

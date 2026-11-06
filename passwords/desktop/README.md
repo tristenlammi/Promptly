@@ -20,6 +20,8 @@ npm install
 cargo tauri build            # target/release/bundle/nsis/*-setup.exe
 ```
 
+To put it on the server's install page, build the extension too (`node build.mjs all` in `passwords/extension`), then `node publish-downloads.mjs`. That copies the installer and both extension zips to `frontend/public/downloads`, with `PromptlyPasswords.json` and `PromptlyPasswordsExtension.json` for the page to read. Do it again after any change to the shared UI or core, because those are built into all three.
+
 Needs rustc 1.90+, MSVC build tools, Windows SDK, Node. The bundler downloads NSIS itself on first run. `cargo install tauri-cli --version 2.12.4 --locked`.
 
 ## Test
@@ -59,6 +61,10 @@ The `e2e` Cargo feature exists only for that last one, and a release build has n
 
 **Quick search.** The shortcut handler in Rust records the window in front and makes a single-use gesture token that expires after 60 s. The overlay shows titles and usernames only, and says which item and what to do. The main page then hands the secret to Rust. Auto-type needs that token, and the overlay can't call anything but its own four commands.
 
+**Limits on an item hold in quick search too.** A fill-only vault's password and 2FA code can't be copied (typing is the fill path, so it stays), and its items stay out of the scheduled backup, whose password the person knows. An item that asks for the master password can't be copied or typed, and the app comes forward instead. The username of either can still be copied.
+
+**A new device asking to join (plan 3.4).** While unlocked, the page checks `deviceRequests()` every 20 s. A request shows in a notice in the window, with Review going to the Devices screen, which has the safety words, and in the tray icon's tooltip, and flashes the taskbar if the window's open. Tauri has no notifications without a plugin, so while the window's hidden the tooltip is all there is.
+
 **Auto-type rules** (`native/src/autotype.rs`). Types username, Tab, password, and never Enter. Refuses our own windows, and elevated windows, where Windows would drop the keys silently. The window's title must contain the item's title as whole words, or a custom field named `Window title`. A mismatch shows both titles and needs a second key press. Focus is checked before every key, and typing stops if it moved.
 
 **Clipboard.** A secret goes on with `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0 and `CanUploadToCloudClipboard`=0 in one clipboard open. It's cleared after the vault's clipboard setting (30 s by default) only if the sequence number shows nothing's been copied since. Quit clears it too.
@@ -69,7 +75,7 @@ The `e2e` Cargo feature exists only for that last one, and a release build has n
 
 **Backup.** `core/exporter.ts` encrypts in the page, on the schedule, while the vault's unlocked. Rust refuses to write anything that isn't an encrypted export, and prunes only its own files. The backup password is separate from the master password and DPAPI-wrapped so it can run unattended. It covers item bodies, not attachments.
 
-**SSH agent.** Off by default. Opens `\\.\pipe\openssh-ssh-agent` with `first_pipe_instance`, so if Windows's OpenSSH agent has it, Windows refuses, we say so and leave it alone. Rejects remote clients, and the DACL admits only this user. Offers Ed25519 keys with no passphrase. RSA, ECDSA and passphrase-protected keys aren't offered. Every signature gets a native Yes/No box with No as the default, naming the program and the key.
+**SSH agent.** Off by default. Opens `\\.\pipe\openssh-ssh-agent` with `first_pipe_instance`, so if Windows's OpenSSH agent has it, Windows refuses, we say so and leave it alone. Rejects remote clients, and the DACL admits only this user. Offers Ed25519 keys with no passphrase. RSA, ECDSA and passphrase-protected keys aren't offered. Every signature gets a native Yes/No box with No as the default, naming the program and the key. Items that ask for the master password aren't offered, since that box doesn't ask for it. A fill-only vault's key can sign, because signing never shows the key.
 
 ## A hidden window keeps running
 

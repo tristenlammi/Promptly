@@ -2,13 +2,14 @@
 // Unit tests for the pieces that don't need layout. The real corpus runs in browsers.
 import { describe, expect, it, beforeEach } from "vitest";
 
-import { b64u, utf8 } from "../bytes";
+import { b64u, fromB64u, utf8 } from "../bytes";
 import { signingInput } from "../format";
 import { ed25519Public, ed25519Sign } from "../primitives";
 import { analyzePage, tokens } from "./classify";
-import { capture, decideOffer, looksFailed } from "./capture";
+import { capture, decideOffer, looksFailed, requestVerdict } from "./capture";
 import { fillField, fillFields, fillSplit } from "./fill";
-import { advance, flowFor, nextFor } from "./flow";
+import { advance, afterFill, codeStep, flowFor, mayFillOnLoad, nextFor } from "./flow";
+import { checkAtClick, visibilityV2 } from "./guard";
 import { applyRule, describeForm, openSignedPack, ruleForHost, selectorFor } from "./rules";
 
 const DOM = { noLayout: true };
@@ -305,5 +306,201 @@ describe("rules", () => {
     expect(report).toContain('"has_value": true');
     expect(report).not.toContain("ana-private");
     expect(report).not.toContain("hunter2");
+  });
+});
+
+describe("generated passwords and save offers", () => {
+  const at = { kind: "signup" as const, host: "site.test", url: "https://site.test/join", at: 1 };
+
+  it("a sign-up with the password we generated finishes that item, even on a never site", () => {
+    const offer = decideOffer({ ...at, username: "ana@site.test", newPassword: "made-here" }, [{ id: "a", password: "made-here", unconfirmed: true }], ["site.test"]);
+    expect(offer).toMatchObject({ kind: "save", itemId: "a", username: "ana@site.test", generated: "signup" });
+  });
+
+  it("a different password on the same site is a separate login, and respects never", () => {
+    const known = [{ id: "a", password: "made-here", unconfirmed: true }];
+    expect(decideOffer({ ...at, username: "ana@site.test", newPassword: "typed" }, known, [])?.generated).toBeUndefined();
+    expect(decideOffer({ ...at, username: "ana@site.test", newPassword: "typed" }, known, ["site.test"])).toBeNull();
+  });
+
+  it("a settled login with the same password isn't a sign-up", () => {
+    expect(decideOffer({ ...at, username: "ana", password: "same" }, [{ id: "a", username: "ana", password: "same" }], [])).toBeNull();
+  });
+
+  it("a change with the waiting password commits it, keeping the saved username", () => {
+    const offer = decideOffer({ ...at, kind: "change-password", password: "old", newPassword: "new" }, [{ id: "a", username: "ana", password: "old", pendingPassword: "new" }], []);
+    expect(offer).toMatchObject({ kind: "update", itemId: "a", username: "ana", generated: "change" });
+  });
+
+  it("a change to some other password isn't that commit", () => {
+    const offer = decideOffer({ ...at, kind: "change-password", username: "ana", newPassword: "other" }, [{ id: "a", username: "ana", password: "old", pendingPassword: "new" }], []);
+    expect(offer?.generated).toBeUndefined();
+    expect(offer?.kind).toBe("update");
+  });
+
+  it("what a page's requests say", () => {
+    expect(requestVerdict(200)).toBe("ok");
+    expect(requestVerdict(302)).toBe("ok");
+    expect(requestVerdict(401)).toBe("failed");
+    expect(requestVerdict(422)).toBe("failed");
+    expect(requestVerdict(0)).toBe("unknown");
+    expect(requestVerdict(500)).toBe("unknown");
+    expect(requestVerdict(404)).toBe("unknown");
+  });
+
+  it("looksFailed needs only the kind of form that was submitted", () => {
+    set(`<form><input name="user"><input type="password" name="pw"><button>Log in</button></form>`);
+    expect(looksFailed(document, { kind: "signin" }, DOM)).toBe(true);
+    expect(looksFailed(document, { kind: "signup" }, DOM)).toBe(false);
+  });
+});
+
+describe("flows across pages", () => {
+  const same = (a: string, b: string) => a === b;
+  const flow = { itemId: "a", host: "site.test", filled: ["username"], at: 1000 };
+
+  it("a different pick replaces the flow, and never restores the earlier item", () => {
+    expect(afterFill(flow, "b", "site.test", ["password"], same, 2000)).toEqual({ itemId: "b", host: "site.test", filled: ["password"], at: 2000 });
+  });
+
+  it("the same item adds to what's filled", () => {
+    expect(afterFill(flow, "a", "site.test", ["password"], same, 2000).filled).toEqual(["username", "password"]);
+  });
+
+  it("another site, or too much time, starts again", () => {
+    expect(afterFill(flow, "a", "other.test", ["password"], same, 2000).filled).toEqual(["password"]);
+    expect(afterFill(flow, "a", "site.test", ["password"], same, 1000 + 6 * 60_000).filled).toEqual(["password"]);
+  });
+
+  const page = (code: boolean, pw: boolean) => ({ hasCodeField: code, hasPasswordField: pw });
+
+  it("the 2FA code waits for the password, and for the page to move on", () => {
+    expect(codeStep(flow, true, page(false, false)), "email step only").toBe("none");
+    const past = { ...flow, filled: ["username", "password"] };
+    expect(codeStep(past, true, page(false, true)), "still on the form").toBe("wait");
+    expect(codeStep(past, true, page(true, false)), "a box for it").toBe("wait");
+    expect(codeStep(past, true, page(false, false)), "next page, no box").toBe("copy");
+  });
+
+  it("the 2FA code is copied once, and not when it was filled or there isn't one", () => {
+    const past = { ...flow, filled: ["username", "password"] };
+    expect(codeStep({ ...past, otpDone: true }, true, page(false, false))).toBe("none");
+    expect(codeStep({ ...past, filled: ["password", "otp"] }, true, page(false, false))).toBe("none");
+    expect(codeStep(past, false, page(false, false))).toBe("none");
+    expect(codeStep(null, true, page(false, false))).toBe("none");
+  });
+});
+
+describe("fill on load (plan 6.6)", () => {
+  const signin = { url: "https://site.test/login", frameId: 0, kinds: ["signin"] };
+  const ok = { kind: "host", optedIn: true, reprompt: false, downgrade: false };
+
+  it("exact host, top frame, https, opted in", () => {
+    expect(mayFillOnLoad(signin, [ok])).toBe(true);
+    expect(mayFillOnLoad(signin, [{ ...ok, kind: "exact" }])).toBe(true);
+  });
+
+  it("never for a looser match", () => {
+    for (const kind of ["base", "shared", "regex", "prefix"]) expect(mayFillOnLoad(signin, [{ ...ok, kind }]), kind).toBe(false);
+  });
+
+  it("never in a frame, over http, without a sign-in form, or for a page that isn't a URL", () => {
+    expect(mayFillOnLoad({ ...signin, frameId: 4 }, [ok])).toBe(false);
+    expect(mayFillOnLoad({ ...signin, url: "http://site.test/login" }, [ok])).toBe(false);
+    expect(mayFillOnLoad({ ...signin, kinds: ["signup"] }, [ok])).toBe(false);
+    expect(mayFillOnLoad({ ...signin, url: "nonsense" }, [ok])).toBe(false);
+  });
+
+  it("only if opted in, with no reprompt, no downgrade, and only one match", () => {
+    expect(mayFillOnLoad(signin, [{ ...ok, optedIn: false }])).toBe(false);
+    expect(mayFillOnLoad(signin, [{ ...ok, reprompt: true }])).toBe(false);
+    expect(mayFillOnLoad(signin, [{ ...ok, downgrade: true }])).toBe(false);
+    expect(mayFillOnLoad(signin, [ok, ok])).toBe(false);
+    expect(mayFillOnLoad(signin, [])).toBe(false);
+  });
+
+  it("plain http only where the caller allows, and hostile look-alikes of localhost don't pass", () => {
+    const local = (u: URL) => u.hostname === "localhost" || u.hostname.endsWith(".localhost");
+    expect(mayFillOnLoad({ ...signin, url: "http://localhost:8111/login" }, [ok], local)).toBe(true);
+    expect(mayFillOnLoad({ ...signin, url: "http://localhost.evil.test/login" }, [ok], local)).toBe(false);
+    expect(mayFillOnLoad({ ...signin, url: "http://localhost@evil.test/login" }, [ok], local)).toBe(false);
+  });
+});
+
+describe("IntersectionObserver v2 as an extra check", () => {
+  const box = () => {
+    set(`<div id="m"></div>`);
+    return document.getElementById("m")!;
+  };
+  const state = { shownAt: 0, rect: { left: 0, top: 0, width: 0, height: 0 } };
+
+  it("has no effect where the browser doesn't have it", () => {
+    expect(visibilityV2(false, undefined)).toBeUndefined();
+    expect(visibilityV2(false, false)).toBeUndefined();
+  });
+
+  it("where it does, no reading yet counts as not visible", () => {
+    expect(visibilityV2(true, undefined)).toBe(false);
+    expect(visibilityV2(true, false)).toBe(false);
+    expect(visibilityV2(true, true)).toBe(true);
+  });
+
+  it("not visible stops a click that every other check would pass", () => {
+    expect(checkAtClick(box(), state, { now: 1000, isTrusted: true, visibleV2: false })).toEqual({ ok: false, reason: "not-visible" });
+  });
+
+  it("the dwell still comes first", () => {
+    expect(checkAtClick(box(), state, { now: 10, isTrusted: true, visibleV2: false })).toEqual({ ok: false, reason: "too-fast" });
+  });
+});
+
+describe("rules pack contents", () => {
+  const seed = new Uint8Array(32).fill(7);
+  const pub = ed25519Public(seed);
+  const sign = (pack: unknown) => {
+    const bytes = utf8(JSON.stringify(pack));
+    return { pack: b64u(bytes), signature: b64u(ed25519Sign(seed, signingInput("rules_pack", [bytes]))) };
+  };
+
+  it("takes the known fields, and refuses anything else", () => {
+    expect(openSignedPack(sign({ version: 1, rules: [{ host: "a.example", username: "#u", password: "#p", submit: "#s", otp: "#o", never: false }] }), pub).rules).toHaveLength(1);
+    for (const extra of [{ script: "alert(1)" }, { eval: "x" }, { onload: "y" }, { __proto__x: 1 }]) {
+      expect(() => openSignedPack(sign({ version: 1, rules: [{ host: "a.example", ...extra }] }), pub), JSON.stringify(extra)).toThrow(/malformed/);
+    }
+  });
+
+  it("sign-pack.mjs signs what openSignedPack checks, with a key from a file", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pw-sign-pack-"));
+    const script = path.resolve(process.cwd(), "../passwords/extension/rules/sign-pack.mjs");
+    const key = path.join(dir, "key.jwk.json");
+    const made = execFileSync(process.execPath, [script, "--new-key", key], { encoding: "utf8" });
+    const publicKey = made.trim().split(/\r?\n/).at(-1)!;
+    const packFile = path.join(dir, "pack.json");
+    const sigFile = path.join(dir, "pack.sig");
+    fs.writeFileSync(packFile, JSON.stringify({ version: 3, rules: [{ host: "a.example", username: "#u" }] }));
+    execFileSync(process.execPath, [script, "--key", key, "--in", packFile, "--out", sigFile], { encoding: "utf8" });
+    const signed = { pack: b64u(new Uint8Array(fs.readFileSync(packFile))), signature: fs.readFileSync(sigFile, "utf8") };
+    expect(openSignedPack(signed, fromB64u(publicKey)).version).toBe(3);
+    // Not with another key, and it won't overwrite a key that exists.
+    expect(() => openSignedPack(signed, pub)).toThrow(/signed/);
+    expect(() => execFileSync(process.execPath, [script, "--new-key", key], { encoding: "utf8", stdio: "pipe" })).toThrow();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("the pack in the repo is signed by the key that's pinned for it", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const dir = path.resolve(process.cwd(), "../passwords/extension");
+    const keySource = fs.readFileSync(path.join(dir, "src/rules-key.ts"), "utf8");
+    // The owner's key once there is one, and until then the test key on an empty pack.
+    const release = /RELEASE_PUBLIC_KEY: string \| null = "([^"]+)"/.exec(keySource)?.[1];
+    const key = release ?? /__TEST_BUILD__ \? "([^"]+)"/.exec(keySource)![1];
+    const signed = { pack: b64u(new Uint8Array(fs.readFileSync(path.join(dir, "rules/pack.json")))), signature: fs.readFileSync(path.join(dir, "rules/pack.sig"), "utf8").trim() };
+    const pack = openSignedPack(signed, fromB64u(key));
+    if (!release) expect(pack.rules).toEqual([]);
   });
 });

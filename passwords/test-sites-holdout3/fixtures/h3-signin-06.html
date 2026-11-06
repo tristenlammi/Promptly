@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account - Nimbara</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:14px/1.5715 "Segoe UI",sans-serif;background:#f0f2f5;color:rgba(0,0,0,.85)}.ant-layout{max-width:368px;margin:64px auto}.ant-tabs-nav{display:flex;gap:24px;border-bottom:1px solid #eee;margin-bottom:16px}.ant-tabs-tab{padding:12px 0;cursor:pointer;background:none;border:0;font:inherit}.ant-tabs-tab-active{color:#1677ff;border-bottom:2px solid #1677ff}.ant-form-item{margin-bottom:24px}.ant-input-affix-wrapper{display:flex;padding:4px 11px;border:1px solid #d9d9d9;border-radius:6px;background:#fff}.ant-input{width:100%;border:0;outline:0;font:inherit;padding:4px 0;background:transparent}.ant-btn{width:100%;padding:6px 15px;background:#1677ff;color:#fff;border:0;border-radius:6px;cursor:pointer;font:inherit}.ant-input-prefix{margin-right:6px;color:#bbb}.ant-form-item-label{display:block;margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="ant-layout"><h2>Nimbara</h2><div class="ant-tabs ant-tabs-top"><div class="ant-tabs-nav" role="tablist"><button type="button" class="ant-tabs-tab ant-tabs-tab-active" role="tab" id="t1" aria-selected="true">Sign in</button><button type="button" class="ant-tabs-tab" role="tab" id="t2" aria-selected="false">Register</button></div>
+<div class="ant-tabs-content"><div class="ant-tabs-tabpane ant-tabs-tabpane-active" role="tabpanel" id="p1"><form id="login" class="ant-form ant-form-vertical" onsubmit="return false"><div class="ant-form-item"><span class="ant-input-affix-wrapper"><span class="ant-input-prefix">@</span><input id="login_username" class="ant-input" placeholder="Username" type="text" aria-required="true"></span></div><div class="ant-form-item"><span class="ant-input-affix-wrapper ant-input-password"><span class="ant-input-prefix">*</span><input id="login_password" class="ant-input" placeholder="Password" type="password" aria-required="true"></span></div><button type="submit" class="ant-btn ant-btn-primary ant-btn-block"><span>Sign in</span></button></form></div>
+<div class="ant-tabs-tabpane" role="tabpanel" id="p2" style="display:none" aria-hidden="true"><form id="register" class="ant-form ant-form-vertical" onsubmit="return false"><div class="ant-form-item"><span class="ant-input-affix-wrapper"><input id="register_email" class="ant-input" placeholder="Email" type="text"></span></div><div class="ant-form-item"><span class="ant-input-affix-wrapper"><input id="register_password" class="ant-input" placeholder="Create password" type="password"></span></div><div class="ant-form-item"><span class="ant-input-affix-wrapper"><input id="register_confirm" class="ant-input" placeholder="Confirm password" type="password"></span></div><button type="submit" class="ant-btn ant-btn-primary ant-btn-block"><span>Create account</span></button></form></div></div></div></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"username":r("#login_username",[]),"password":r("#login_password",[])};}};</script>
+<script>function sw(a){document.getElementById('p1').style.display=a?'':'none';document.getElementById('p2').style.display=a?'none':'';document.getElementById('t1').classList.toggle('ant-tabs-tab-active',a);document.getElementById('t2').classList.toggle('ant-tabs-tab-active',!a);}document.getElementById('t1').onclick=function(){sw(true)};document.getElementById('t2').onclick=function(){sw(false)};</script>
+</body>
+</html>

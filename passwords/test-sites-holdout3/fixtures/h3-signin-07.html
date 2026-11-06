@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fernhollow Grocers</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.5 Helvetica,Arial,sans-serif;background:#fffdf7;color:#2c2a26}.css-1q2w3e4{background:#3f6b3a;color:#fff;padding:12px 24px;display:flex;justify-content:space-between}.css-9o8i7u{max-width:380px;margin:40px auto}.css-sk1n{height:44px;border-radius:6px;background:#eee;margin:12px 0}.css-5t6y7u{margin-bottom:14px}.css-5t6y7u label{display:block;font-weight:700;font-size:13px}input{width:100%;padding:10px;border:1px solid #bdb7a8;border-radius:6px;font:inherit}.css-b7n8m9{width:100%;padding:11px;border:0;border-radius:6px;background:#3f6b3a;color:#fff;font:inherit;cursor:pointer}.css-h3lp{position:fixed;right:16px;bottom:16px;width:230px;padding:10px;background:#fff;border:1px solid #ccc;border-radius:10px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="css-1q2w3e4"><b>Fernhollow Grocers</b><span id="cd">Weekly specials end in 54s</span></div><div id="root" class="css-9o8i7u"><div class="css-sk1n"></div><div class="css-sk1n"></div><div class="css-sk1n"></div></div>
+<template id="tpl"><h1 class="css-a1s2d3">Your rewards account</h1><form class="css-q9w8e7" onsubmit="return false"><div class="css-5t6y7u"><label for="customerId">Customer ID</label><input id="customerId" name="customerId" type="text" class="css-1x2c3v" value=""></div><div class="css-5t6y7u"><label for="customerPw">Password</label><input id="customerPw" name="customerPw" type="password" class="css-1x2c3v" value=""></div><button type="submit" class="css-b7n8m9">View my rewards</button></form><div class="css-h3lp"><div>Need a hand?</div><input id="helper-input" type="text" placeholder="Ask our helper"></div></template>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"username":r("#customerId",[]),"password":r("#customerPw",[])};}};</script>
+<script>function __ctrl(els,tick){var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');var st=els.map(function(){return ''});var tr=els.map(function(){return ''});function render(){els.forEach(function(el,i){if(d.get.call(el)!==st[i]){d.set.call(el,st[i]);tr[i]=st[i];}});}els.forEach(function(el,i){Object.defineProperty(el,'value',{configurable:true,get:function(){return d.get.call(this)},set:function(v){tr[i]=''+v;d.set.call(this,v)}});function onch(){var c=d.get.call(el);if(c===tr[i])return;tr[i]=c;st[i]=c;render();}el.addEventListener('input',onch);el.addEventListener('change',onch);});if(tick)setInterval(render,tick);return render;}setTimeout(function(){var root=document.getElementById('root');root.innerHTML='';root.appendChild(document.getElementById('tpl').content.cloneNode(true));__ctrl([document.getElementById('customerId'),document.getElementById('customerPw')],1000);},1600);var n=54;setInterval(function(){n=n>0?n-1:54;document.getElementById('cd').textContent='Weekly specials end in '+n+'s';},1000);</script>
+</body>
+</html>

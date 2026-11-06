@@ -96,7 +96,7 @@ async def test_send_posts_only_a_link(client, db):
 
     from app.rooms.models import RoomMessage
 
-    good = f"https://x.example/passwords/send/{body['id']}#{key}"
+    good = f"http://test/passwords/send/{body['id']}#{key}"
     assert (await client.post(url, headers=a.h, json={"link": good, "user_id": str(other.id)})).status_code == 204
     posted = (await db.execute(select(RoomMessage.body))).scalars().all()
     assert any(good in (m or "") for m in posted)

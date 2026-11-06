@@ -236,6 +236,32 @@ pub fn watch_for_sleep(app: AppHandle) {
     });
 }
 
+/// What the tray icon says while a device waits. A tooltip has room for about 127 characters
+/// on Windows, and the name comes from whoever made the request.
+pub fn device_notice_text(count: u32, name: Option<&str>) -> Option<String> {
+    if count == 0 {
+        return None;
+    }
+    let name: String = name.unwrap_or("A new device").chars().filter(|c| !c.is_control()).take(50).collect();
+    let more = if count > 1 { format!(", and {} more,", count - 1) } else { String::new() };
+    Some(format!("Promptly Passwords: {name}{more} wants to join your vault"))
+}
+
+/// Tauri has no notifications without a plugin, so: the tray's tooltip, and a flash on the
+/// taskbar if the window's open. The window itself shows a notice too.
+pub fn show_device_notice(app: &AppHandle, count: u32, name: Option<&str>, is_new: bool) {
+    let text = device_notice_text(count, name);
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(text.as_deref().unwrap_or("Promptly Passwords")));
+    }
+    if is_new {
+        if let Some(w) = app.get_webview_window("main") {
+            let _ = w.request_user_attention(Some(tauri::UserAttentionType::Informational));
+        }
+    }
+    *app.state::<App>().device_notice.lock().unwrap() = text;
+}
+
 pub fn open_in_browser(url: &str) -> Result<(), String> {
     promptly_native::dialog::open_url(url)
 }
@@ -246,6 +272,17 @@ mod tests {
 
     fn url(s: &str) -> tauri::Url {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn device_notice_fits_a_tooltip_and_goes_away() {
+        assert_eq!(device_notice_text(0, Some("Laptop")), None);
+        assert_eq!(device_notice_text(1, Some("Laptop")).unwrap(), "Promptly Passwords: Laptop wants to join your vault");
+        assert_eq!(device_notice_text(3, Some("Laptop")).unwrap(), "Promptly Passwords: Laptop, and 2 more, wants to join your vault");
+        assert!(device_notice_text(1, None).unwrap().contains("A new device"));
+        let long = device_notice_text(999, Some(&"x".repeat(500))).unwrap();
+        assert!(long.chars().count() <= 127, "{}", long.chars().count());
+        assert!(!device_notice_text(1, Some("a\nb\u{7}")).unwrap().contains(['\n', '\u{7}']));
     }
 
     #[test]

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Saltmarsh Cloud</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.5 system-ui,sans-serif;background:#f4f5f7;color:#172b4d}.box{max-width:400px;margin:64px auto;background:#fff;padding:32px;box-shadow:0 1px 4px rgba(9,30,66,.25);border-radius:3px}.form-control{width:100%;padding:8px;border:2px solid #dfe1e6;border-radius:3px;font:inherit;margin:4px 0 12px}label{font-size:12px;font-weight:600;color:#6b778c}.btn{width:100%;padding:9px;background:#0052cc;color:#fff;border:0;border-radius:3px;font:inherit;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="box"><h2>Log in to Saltmarsh</h2><form onsubmit="return false"><label for="user-email">Email</label><input class="form-control" id="user-email" name="user" type="text" placeholder="name@company.example"><div id="pw-block" hidden><label for="pw">Password</label><input class="form-control" id="pw" name="pw" type="password"></div><button class="btn" id="cont" type="button">Continue</button></form></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"email":r("#user-email",[]),"password":r("#pw",[])};}};</script>
+<script>document.getElementById('cont').onclick=function(){document.getElementById('pw-block').hidden=false;this.textContent='Log in';};</script>
+</body>
+</html>

@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 const ID: &str = "abcdefghijklmnopabcdefghijklmnop";
 
 fn run(args: &[&str], ids_on_file: &[&str]) -> (i32, String, Vec<u8>) {
-    let dir = std::env::temp_dir().join(format!("promptly-host-test-{}-{}", std::process::id(), ids_on_file.len()));
+    let dir = std::env::temp_dir().join(format!("promptly-host-test-{}", promptly_native::random_token()));
     let data = dir.join(promptly_native::settings::APP_DIR);
     std::fs::create_dir_all(&data).unwrap();
     let settings = promptly_native::settings::Settings { extension_ids: ids_on_file.iter().map(|s| s.to_string()).collect(), ..Default::default() };

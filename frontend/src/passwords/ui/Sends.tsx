@@ -122,6 +122,7 @@ function NewSend({ onClose, onMade }: { onClose: () => void; onMade: () => Promi
         if (file.size > MAX_SEND_FILE) throw new Error("A file can be up to 7 MB.");
         payload = { kind: "file", title, name: file.name, mime: file.type || undefined, data: b64u(new Uint8Array(await file.arrayBuffer())) };
       }
+      if (password && password.length < 8) throw new Error("Use at least 8 characters for the password, or leave it empty.");
       const limit = views.trim() ? Number(views) : null;
       if (limit !== null && (!Number.isInteger(limit) || limit < 1)) throw new Error("Views must be a whole number, or empty for no limit.");
       const { id, link } = await createSend(vault.api, platform.baseUrl, payload, { days, views: limit, password: password || undefined });

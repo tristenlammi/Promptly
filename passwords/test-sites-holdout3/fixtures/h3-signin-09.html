@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Halcyra Dispatch Portal</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:14px/1.5 Tahoma,sans-serif;background:#23303d;color:#1e2933}[data-v-7ba5bd90].panel{max-width:440px;margin:72px auto;background:#f4f6f8;padding:28px;border-top:4px solid #e0a030}label[data-v-7ba5bd90]{display:block;margin-bottom:14px}label[data-v-7ba5bd90]>span{display:block;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:3px}input,select{width:100%;padding:8px;border:1px solid #9aa7b3;font:inherit;background:#fff}button{padding:9px 18px;background:#e0a030;border:0;font:inherit;font-weight:700;cursor:pointer}
+</style>
+</head>
+<body>
+<div id="app" data-v-app=""><section class="panel" data-v-7ba5bd90=""><h1 data-v-7ba5bd90="">Halcyra Dispatch</h1><form data-v-7ba5bd90="" onsubmit="return false"><label data-v-7ba5bd90=""><span data-v-7ba5bd90="">Organisation code</span><input data-v-7ba5bd90="" id="org" name="org" type="text" maxlength="8"></label><label data-v-7ba5bd90=""><span data-v-7ba5bd90="">Operator ID</span><input data-v-7ba5bd90="" id="uid" name="uid" type="text"></label><label data-v-7ba5bd90=""><span data-v-7ba5bd90="">Secret word</span><input data-v-7ba5bd90="" id="sw" name="sw" type="password"></label><label data-v-7ba5bd90=""><span data-v-7ba5bd90="">Environment</span><select data-v-7ba5bd90="" id="env" name="env"><option value="live">Live</option><option value="train">Training</option></select></label><button data-v-7ba5bd90="" type="submit">Enter portal</button></form></section></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"username":r("#uid",[]),"password":r("#sw",[])};}};</script>
+</body>
+</html>

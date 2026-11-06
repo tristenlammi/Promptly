@@ -363,6 +363,14 @@ pub fn main_show(window: WebviewWindow, app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// A new device is waiting, or no longer is. Nothing secret: a name the device gave itself.
+#[tauri::command]
+pub fn device_notice(window: WebviewWindow, app: AppHandle, count: u32, name: Option<String>, is_new: bool) -> Result<(), String> {
+    main_only(&window)?;
+    windows_ui::show_device_notice(&app, count, name.as_deref(), is_new);
+    Ok(())
+}
+
 // ---- Quick search ----
 //
 // Overlay -> Rust -> main page and back. A secret only moves main page -> Rust. The gesture
@@ -540,6 +548,13 @@ pub fn e2e_hello_answer(window: WebviewWindow, app: State<'_, App>, approve: boo
     use promptly_native::hello::Verdict;
     *app.hello.gate.answer.lock().unwrap() = if approve { Verdict::Approved } else { Verdict::Cancelled };
     Ok(())
+}
+
+#[cfg(feature = "e2e")]
+#[tauri::command]
+pub fn e2e_device_notice(window: WebviewWindow, app: State<'_, App>) -> Result<Option<String>, String> {
+    main_only(&window)?;
+    Ok(app.device_notice.lock().unwrap().clone())
 }
 
 #[cfg(feature = "e2e")]

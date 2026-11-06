@@ -23,24 +23,45 @@ Not on the server: titles, URLs, usernames, passwords, notes, folders, tags, ite
 | Lost phone or laptop, locked | **Holds** | Encrypted local cache. OS-backed key wrapping. Auto-lock. Remote device removal stops future sync, not what's already on the device, which stays encrypted. |
 | Removed member of a shared vault | **Partly** | Vault key and item keys are rotated. What they already saw can't be unseen, so the app lists the passwords to change. |
 | Trusted contact, with the server on their side | **Does not hold** | Emergency keys are sealed to them in advance, and the wait is kept by the server, so someone who runs the server and is your contact could skip the wait. Pick someone you'd trust with it all. |
-| Secure Send link posted through Rooms or Mail | **Partly** | The link holds the key and passes through the server this way. The screen warns about it, and a Send with a password stays closed. Copying the link elsewhere avoids this. |
+| Secure Send link posted through Rooms or Mail | **Partly** | The link holds the key and passes through the server this way, and the screen warns about it. With a password, the server can still try guessing it offline, at the cost of the key stretching. Without one, it can just open it. Copying the link somewhere end-to-end encrypted avoids this. Chat tools and @promptly never see the key part of a link. |
 | Compromised server shipping malicious web JS | **Does not hold for the web vault** | Inherent to any web client: the next page load could steal the master password. **Holds for the extension, Android and Windows clients**, which never load code from the server. A cautious user should unlock only in those clients. |
 | Malware on an unlocked device | **Out of scope** | It can read memory and watch the keyboard. |
 
 ## A hostile server against a good client
 
-Beyond reading data, a malicious server could try to:
+A review that ran the real client against a hostile server found that the first version trusted the server about who your contacts were, who'd signed a key, who the members were, and which key generation was current. Those are fixed: `frontend/src/passwords/core/hostile.test.ts` holds each attack, and they must fail. The rule now is that decisions about trust are made by you on your own devices, and kept encrypted in your personal vault where the server can't change them.
 
 | Trick | Defence |
 |---|---|
-| Send weak KDF parameters to make a captured `auth_key` easier to attack | Clients refuse anything below the floor. |
+| Send weak KDF parameters to make a captured `auth_key` easier to attack | Clients refuse anything below the floor, or below what they've already seen. |
 | Send huge KDF parameters to hang a client | Clients refuse anything above the ceiling. |
 | Swap blobs between items or vaults | AAD binds each blob to vault, item and field. |
-| Replace a vault key with one it knows | Grants are signed by a member's identity key, verified against the client's trust store. |
-| Replace someone's public key when sharing | Trust on first use, with safety words to compare, and a warning on change. **A first contact can be intercepted unless people compare words.** |
-| Swap device approval keys in the middle | Both sides show words derived from both public keys. |
-| Roll back a vault to an old state | Clients remember the highest revision they've seen, and warn on a lower one. **A server can still withhold new changes from a device** without detection, and a brand-new device has nothing to compare against. |
-| Forge activity or hide members | Not defended. The member list and activity log are server-reported, though a member the server adds gets no key without a signed grant. |
+| List a made-up emergency contact | Keys are only ever sealed to a contact you named on one of your own devices, on the keys you saw then. |
+| Offer a vault key it knows, as a vault of yours or a shared one | Your own vault's grant must be signed by you. A vault from anyone else stays shut until you accept it, and what the server says about acceptance doesn't count. A signer you've never dealt with gets a prompt, not silent trust. |
+| Replace someone's public key when sharing | Trust on first use, with safety words to compare, and a warning on change or when a known name turns up under other keys. **A first contact can be intercepted unless people compare words.** |
+| Change the member list so a new vault key goes to someone else | Every recipient goes through the same check. A changed key stops it, and anyone you haven't dealt with is shown to you first. |
+| Bring back an old vault key after someone's removed | Clients remember the highest key generation seen per vault, including across your devices, and refuse a lower one. |
+| Serve an old copy of an item | Each item carries a counter inside the encryption, and a lower one is refused. |
+| Hand a new device a Secret Key of its own, to learn something about the master password | The client opens the keyset locally before anything derived from the password is sent. |
+| Claim a different account, to wipe a device's trust and unsynced edits | Nothing's wiped unless the new keyset really opens. |
+| Swap device approval keys in the middle | Both sides show words derived from both public keys, and the QR route binds the new device's key out of band. |
+| Roll back a vault to an old state | Clients remember the highest revision they've seen, and warn on a lower one. |
+
+What it can still do, stated plainly:
+
+- **Withhold or destroy.** It can hide new changes from a device, or delete or tombstone anything. Encryption can't stop that, which is why exports and more than one device matter. A forged delete can remove an item from a device's copy.
+- **A member working with the server.** Grants aren't checked against a signed member list, so someone you've already accepted keys from, if they also control the server, could give you a vault key they know for a vault they're in. Items have no author signature either, so a view-only member working with the server can forge items in that vault.
+- **Safety words are a finite comparison.** Device approval words are about 2^64 of search, which is a lot in the 15 minutes a request lasts, but not a proof. The QR route doesn't have this limit.
+- **Your identity keys don't rotate.** A new Secret Key or master password re-wraps them. Someone with your old kit, your old password and an old copy of your wrapped keyset still has the same private keys. If those keys may have leaked, make a new vault and move across.
+- **A fresh device starts from what the server gives it** until it has synced your personal vault, though that vault's grant must be signed by you.
+- **Forged history.** The member list and activity log are server-reported.
+- **What leaves through the server.** A breach check sends the first 20 bits of each password's SHA-1 hash through your server to the breach service; a hostile server could log those. An icon fetch tells it the site's name at that moment. Neither goes to the logs, but neither is hidden from a server that's looking.
+
+## Stolen sign-in
+
+- A stolen Promptly session or device token can read the wrapped keyset, which needs the master password and the Secret Key together to be any use. It can't get a vault session, and can't download items.
+- It could set up a vault if the account has none. You get a push when one's set up, and when one's reset.
+- A stolen device token can only remove itself.
 
 ## Web vault
 
@@ -49,7 +70,7 @@ The vault page is a separate full-page navigation with a stricter CSP than the r
 Limits we accept and state plainly:
 
 - It's still the same origin as the main app. Script running in a main-app tab could `window.open('/passwords')`. COOP (`same-origin`) severs the opener link in supporting browsers, so it can't reach into the opened page, but it could navigate a tab, or draw a convincing fake unlock page of its own. **A fake unlock page on the same origin can phish the master password.** It still wouldn't have the Secret Key unless it can also read the IndexedDB copy, which is same-origin. Serving the vault from its own hostname closes this; see the README section on that.
-- Same-origin scripts can read and delete the IndexedDB store. It holds only ciphertext and the device's wrapped Secret Key, which needs the master password or platform-held key to be useful.
+- Same-origin scripts can read and delete the IndexedDB store. It holds ciphertext and the Secret Key under a browser-held device key. That key can't be exported by script, but as far as we know browsers keep its bytes in the profile files, and same-origin script can simply use it. So on the web and in extensions, a copied browser profile should be assumed to give up the Secret Key, leaving the master password as the protection. Android and Windows use OS-backed wrapping.
 - Browser extensions with access to the page can read anything on it.
 
 ## Extension

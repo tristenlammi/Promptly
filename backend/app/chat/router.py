@@ -4301,8 +4301,10 @@ async def _dispatch_tools(
                 if isinstance(tool_cost, (int, float)) and tool_cost > 0:
                     on_cost(float(tool_cost))
 
+            from app.net.send_links import strip_send_keys
+
             content = _cap_tool_content(
-                getattr(tool, "max_content_chars", None), result.content
+                getattr(tool, "max_content_chars", None), strip_send_keys(result.content) if isinstance(result.content, str) else result.content
             )
 
             # Cache the model-facing content so an identical call on a

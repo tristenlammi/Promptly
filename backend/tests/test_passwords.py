@@ -127,7 +127,9 @@ async def test_setup_unlock_and_prelogin(client, db):
     assert body["exists"] is True
     assert body["kdf"] == KDF
     # Prelogin gives no ciphertext: that needs a session.
-    assert "wrapped_keyset" not in body
+    # It's there so a client can check its Secret Key before sending anything derived from it.
+    # Useless without the master password and the Secret Key together.
+    assert body["wrapped_keyset"]
 
     r = await client.post("/api/passwords/session", headers=bearer(u), json={"auth_key": b64(v.auth_key)})
     assert r.status_code == 200

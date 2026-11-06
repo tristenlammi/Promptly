@@ -475,6 +475,129 @@ test("SSH agent: lists a key from the vault, signs when approved, and not when r
   await invoke("e2e_ssh_approve", { approve: true });
 });
 
+// ---- Quick search on items with limits ----
+
+async function openOverlay() {
+  assert.equal((await invoke("e2e_open_overlay")).ok, true);
+  const main = await driver.getWindowHandle();
+  await driver.wait(async () => {
+    for (const h of await driver.getAllWindowHandles()) {
+      await driver.switchTo().window(h);
+      if ((await driver.getTitle()) === "Promptly quick search") return true;
+    }
+    return false;
+  }, 15000, "the overlay's webview");
+  return main;
+}
+
+async function overlaySays(text) {
+  await driver.wait(async () => (await driver.findElement(By.css("#feedback")).getText()).includes(text), 15000, `the overlay saying: ${text}`);
+}
+
+async function syncInApp(title) {
+  await click(xp(`//nav[@aria-label="Passwords"]//button[contains(normalize-space(),"All items")]`));
+  await click(xp(`//button[contains(normalize-space(),"Sync now")]`));
+  await see(title);
+  // The quick search client re-reads the local copy once the sync has settled.
+  await new Promise((r) => setTimeout(r, 1500));
+}
+
+const altEnter = async () => {
+  const { Key } = await import("selenium-webdriver");
+  return Key.chord(Key.ALT, Key.ENTER);
+};
+
+test("fill-only vault: quick search won't copy the password or 2FA code, and can still type", async () => {
+  const FILL = { title: "Fill Only Login", username: "fill@example.com", password: "fill-only-Pw-" + Date.now(), totpSecret: "JBSWY3DPEHPK3PXP" };
+  const sharerUser = makeUser();
+  const sharer = await seed.createVault(BASE, sharerUser.token, "the sharer's master password 9!");
+  await seed.shareFillOnly(sharer.vault, other.vault, FILL);
+  await syncInApp(FILL.title);
+
+  await invoke("clipboard_copy", { text: "baseline", sensitive: false });
+  const main = await openOverlay();
+  const q = await el(By.css("#q"));
+  await q.sendKeys(FILL.title);
+  await see(FILL.title);
+
+  await q.sendKeys("\uE007");
+  await overlaySays("not copy");
+  await q.sendKeys(await altEnter());
+  await overlaySays("not copy");
+  // Auto-type gets past the role check, and stops at having no target window.
+  await q.sendKeys(await ctrlEnter());
+  await overlaySays("no window");
+  await invoke("overlay_close");
+  await driver.switchTo().window(main);
+  assert.equal((await invoke("e2e_clipboard")).v.text, "baseline", "neither the password nor the code was copied");
+
+  // The scheduled backup leaves them out too: its password is one the person knows.
+  await invoke("e2e_open_settings");
+  fs.rmSync(backupDir, { recursive: true, force: true });
+  await click(byText("button", "Back up now"));
+  await driver.wait(async () => fs.existsSync(backupDir) && fs.readdirSync(backupDir).length > 0, 15000, "a backup file");
+  const newest = fs.readdirSync(backupDir).sort().at(-1);
+  const opened = await seed.openBackup(fs.readFileSync(path.join(backupDir, newest), "utf8"), BACKUP_PASSWORD);
+  assert.ok(opened.items.some((i) => i.body.title === ITEM.title), "own items are in it");
+  assert.ok(!opened.items.some((i) => i.body.title === FILL.title), "the fill-only item isn't");
+  await driver.actions().sendKeys("\uE00C").perform();
+});
+
+test("reprompt items: quick search won't copy or type them, and the SSH agent doesn't offer them", async () => {
+  const LOGIN = { title: "Reprompt Login", username: "ask@example.com", password: "reprompt-Pw-" + Date.now(), reprompt: true };
+  await seed.addLogin(other.vault, LOGIN);
+  const keyFile = path.join(work, "id_reprompt");
+  execFileSync(path.join(OPENSSH, "ssh-keygen.exe"), ["-q", "-t", "ed25519", "-N", "", "-C", "e2e-reprompt", "-f", keyFile]);
+  const pub = fs.readFileSync(`${keyFile}.pub`, "utf8").trim();
+  await seed.addRepromptSshItem(other.vault, "Reprompt SSH key", pub, fs.readFileSync(keyFile, "utf8"));
+  await syncInApp(LOGIN.title);
+
+  await invoke("clipboard_copy", { text: "baseline-2", sensitive: false });
+  const main = await openOverlay();
+  const q = await el(By.css("#q"));
+  await q.sendKeys(LOGIN.title);
+  await see(LOGIN.title);
+  await q.sendKeys("\uE007");
+  await overlaySays("master password");
+  await q.sendKeys(await altEnter());
+  await overlaySays("master password");
+  await driver.executeScript('document.getElementById("feedback").textContent = ""');
+  await q.sendKeys(await ctrlEnter());
+  await overlaySays("master password");
+  await invoke("overlay_close");
+  await driver.switchTo().window(main);
+  assert.equal((await invoke("e2e_clipboard")).v.text, "baseline-2");
+
+  // The agent still has the ordinary key from the test before, and not this one.
+  const listed = await sshTool("ssh-add.exe", ["-L"]);
+  assert.ok(listed.out.includes("ssh-ed25519"), listed.out);
+  assert.ok(!listed.out.includes(pub.split(" ")[1]), "not offered");
+  const msg = path.join(work, "reprompt.txt");
+  fs.writeFileSync(msg, "should not get signed");
+  const signed = await sshTool("ssh-keygen.exe", ["-Y", "sign", "-n", "file", "-U", "-f", `${keyFile}.pub`, msg]);
+  assert.notEqual(signed.code, 0, "approval is switched on, and it still can't sign");
+  assert.ok(!fs.existsSync(`${msg}.sig`));
+});
+
+test("a new device's request shows up in the window and on the tray", async () => {
+  await click(xp(`//nav[@aria-label="Passwords"]//button[contains(normalize-space(),"All items")]`));
+  const name = "Someone's New Phone";
+  const request = await seed.newDeviceRequest(other.vault, name);
+  const notice = await el(By.css('[data-testid="device-request"]'), 40000);
+  assert.match(await notice.getText(), /Someone's New Phone wants to join your vault/);
+  assert.match((await invoke("e2e_device_notice")).v, /Someone's New Phone wants to join your vault/);
+
+  await click(By.xpath(`//*[@data-testid="device-request"]//button[normalize-space()="Review"]`));
+  await see("Devices");
+  await see("wants to join your vault");
+  assert.equal((await driver.findElements(By.css('[data-testid="device-request"]'))).length, 0, "the Devices screen lists it itself");
+
+  await other.vault.api.deviceRequestDeny(request.id);
+  await driver.wait(async () => (await invoke("e2e_device_notice")).v === null, 40000, "the tray notice clears once it's answered");
+  await click(xp(`//nav[@aria-label="Passwords"]//button[contains(normalize-space(),"All items")]`));
+  assert.equal((await driver.findElements(By.css('[data-testid="device-request"]'))).length, 0);
+});
+
 test("lock from the app", async () => {
   await click(xp(`//nav[@aria-label="Passwords"]//button[contains(normalize-space(),"Lock")]`));
   await see("Your vault is locked");

@@ -16,6 +16,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import FileResponse
 from pydantic import Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,7 +69,9 @@ _LINK_NOT = re.compile(r"(unsubscribe|privacy|terms|help|support|preferences|tra
 
 def plain_text(body_text: str, body_html: str) -> str:
     if body_text.strip():
-        return body_text
+        return body_text[:200_000]
+    # Bounded: a code's near the top of a message, and these patterns slow down on huge input.
+    body_html = body_html[:200_000]
     return html_lib.unescape(_TAG.sub(" ", re.sub(r"(?i)<(br|/p|/div|/tr|/h\d)\b[^>]*>", "\n", body_html)))
 
 
@@ -243,6 +246,7 @@ async def plus_rule(body: PlusRule, session: VaultSession = Depends(require_sess
     from app.mail.models import MailLabel, MailRule
     from app.mail.router import _my_account_ids
 
+    _check_mail_scope(session)
     if not await _my_account_ids(db, session.user):
         raise HTTPException(status.HTTP_409_CONFLICT, "Set up Mail first.")
     address = rules.normalise("to", body.address)
@@ -299,12 +303,12 @@ async def drive_content(file_id: str, session: VaultSession = Depends(require_se
     from app.files import storage
 
     row = await _my_file(db, file_id, session.user)
+    if row.size_bytes > MAX_DOCUMENT_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "That file's too big to move into the vault.")
     path = storage.UPLOAD_ROOT / row.storage_path
-    try:
-        data = path.read_bytes()
-    except OSError:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "That file has no contents here.") from None
-    return Response(content=data, media_type="application/octet-stream", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
+    if not path.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "That file has no contents here.")
+    return FileResponse(path, media_type="application/octet-stream", headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
 
 
 @router.post("/drive/files/{file_id}/trash", status_code=status.HTTP_204_NO_CONTENT)

@@ -86,6 +86,8 @@ body_blob        = symmetric(item_key,  pad(json(body)), aad(vault_id, item_id, 
 
 Named values (a vault's name, folder lists) are `symmetric(key, pad(json(value)), aad(scope, "", field))`, base64url-encoded.
 
+Every edit sets `seq = max(prev.seq, next.seq) + 1` in the body, and a merge takes the larger plus one. A client refuses a body with a lower `seq` than its own copy: the revision is the server's word, and this isn't.
+
 ## 5. Key hierarchy
 
 ```
@@ -129,9 +131,34 @@ signature = Ed25519(grantor, signing_input("vault_key", [vault_id, member_user_i
 signing_input(purpose, fields) = "promptly-pw/v1/sig" || 0x00 || lp(purpose) || lp(field)...
 ```
 
-Clients verify `signature` using the grantor's identity key from their local trust store, before opening the sealed box. A hostile server knows every public key and can seal anything to anyone, but it can't sign. A personal vault is self-signed.
+Clients verify `signature` using the grantor's identity key from their own trust book, before opening the sealed box. A hostile server knows every public key and can seal anything to anyone, but it can't sign as someone you've chosen to trust. A personal vault's grant must be signed by its owner. A signer who isn't in the trust book means the vault stays shut, with a prompt.
 
 Identity keys are trust-on-first-use, with safety words to compare (section 7). A changed key shows a warning and is not silently accepted.
+
+### Trust book
+
+A system item of kind `trust` in the personal vault, in the same format as any item, so it syncs and the server can't read or alter it:
+
+```
+trustBook = {
+  people:      { user_id: { x25519, ed25519, firstSeen, verified?, username? } },
+  accepted:    [ vault_id ],   // shared vaults this person chose to open
+  contacts:    [ user_id ],    // emergency contacts this person named
+  generations: { vault_id: n } // highest vault key generation seen
+}
+```
+
+Rules every client follows:
+
+- A person's keys are remembered only when they act: accepting an invitation, adding a member, naming a contact, marking safety words as checked. Never from a background sync.
+- A vault opens only if it's self-granted or in `accepted`. The server's own flag doesn't count.
+- Emergency keys are sealed only to someone in `contacts`, and only while their live keys match what's remembered.
+- Every recipient of a rotation goes through the same check, and your own key comes from your keyset, not the list.
+- A lower `member_generation` than the highest seen is refused and warned about.
+
+### Removing someone
+
+`DELETE /vaults/{id}/members/{user}` first, which cuts access at once and flags the vault as needing a new key. Then the rotation below, with `remove_user_ids` empty. Items nobody can read are purged, so junk from a member can't block it.
 
 Removing a member creates a new generation: new vault key, new item keys, every item and retained version re-encrypted by a remaining manager, then uploaded as one batch. See `SECURITY.md` for what that can't undo.
 
@@ -146,10 +173,10 @@ Words come from the EFF large wordlist (7776 words, index order from the file). 
 
 1. The new device generates an ephemeral X25519 key `D` and posts `D_pub` with a short code.
 2. An unlocked device fetches the request and generates an ephemeral key `A`. Both sides compute the words from `(D_pub, A_pub)`. The approver posts `A_pub` first; the new device then shows the same words.
-3. Once the person confirms the words match, the approver posts `sealed_to(D_pub, payload, aad(request_id, "", "device_payload"))`. The payload is JSON with the Secret Key and account id, plus `A_pub` so the receiver can check it.
-4. The new device opens it, and asks for the master password as usual. The server only ever saw public keys and an opaque blob.
+3. Once the person confirms the words match, the approver posts `sealed_to(D_pub, payload, aad(request_id, "", "device_payload"))`. The payload is JSON with the Secret Key and account id. Sealed boxes are anonymous, so this payload proves nothing by itself; see the next step.
+4. The new device opens it, and asks for the master password as usual. Before anything derived from that password is sent, it unwraps `wrapped_keyset` (from prelogin) locally. A Secret Key a server made up can't open it, so a forged payload gets nothing. The server only ever saw public keys and an opaque blob.
 
-A QR carries the same exchange with no server hop for `D_pub`. The recovery kit path types or scans the Secret Key directly.
+A QR on the new device's screen carries `pwdev:<request id>:<D_pub>`, which the approver compares with the server's copy, so `D_pub` is bound out of band. The recovery kit path types or scans the Secret Key directly.
 
 ## 9. Attachments
 
@@ -159,7 +186,7 @@ A random `attachment_key` per attachment, recorded inside the item's body.
 chunk_i = symmetric(attachment_key, plain_chunk_i, aad(vault_id, item_id, "att:" || attachment_id || ":" || i || ":" || total))
 ```
 
-Chunks are 1 MiB of plaintext, with the last one padded to 1 MiB. `total` in the AAD stops truncation; a chunk can't move position.
+Each plain chunk is a 4-byte big-endian length, then up to 1 MiB of plaintext, with the last one padded to the full size. `total` in the AAD stops truncation; a chunk can't move position.
 
 ## 10. Secure Send
 

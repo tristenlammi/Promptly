@@ -180,6 +180,8 @@ test("2FA codes ask first for a re-prompt item, and fill-only members see no sec
   await alice.getByText("Ask for my master password before showing or filling this").click();
   await alice.getByRole("button", { name: "Save", exact: true }).click();
   await alice.waitForTimeout(800);
+  // It asks for the master password straight away, which is the point of it.
+  await alice.keyboard.press("Escape");
   await nav(alice, "2FA codes");
   await expect(alice.getByText("Guarded")).toBeVisible();
   await expect(alice.getByText(/^\d{3} ?\d{3}$/)).toHaveCount(0);
@@ -244,7 +246,7 @@ test("an interrupted attachment upload resumes, and nothing's sent twice", async
   await page.waitForTimeout(800);
   await view.getByLabel("Attach a file").setInputFiles([]);
   await view.getByLabel("Attach a file").setInputFiles(file);
-  await expect(view.getByText("big.bin")).toBeVisible({ timeout: 60_000 });
+  await expect(view.getByRole("button", { name: "Download big.bin" })).toBeVisible({ timeout: 60_000 });
   expect([...sent].sort()).toEqual([0, 1, 2]);
 });
 

@@ -8,6 +8,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer
 
+service_max_item = 2 * 1024 * 1024
+
 
 def _decode(v):
     if isinstance(v, (bytes, bytearray, memoryview)):
@@ -60,6 +62,9 @@ class AccountCreate(_Base):
 
 
 class Prelogin(_Base):
+    # So a client can tell it has the right Secret Key before it sends anything derived from
+    # it. Useless without the master password and the Secret Key together.
+    wrapped_keyset: B64 | None = None
     user_id: uuid.UUID
     exists: bool
     account_id: uuid.UUID | None = None
@@ -128,6 +133,7 @@ class VaultOut(_Base):
     accepted: bool
     member_count: int
     trash_count: int = 0
+    rotate_needed: bool = False
 
 
 class VaultRename(_Base):
@@ -137,13 +143,16 @@ class VaultRename(_Base):
 class ItemWrite(_Base):
     id: uuid.UUID
     base_revision: int = 0
-    blob: B64 | None = Field(default=None, max_length=8 * 1024 * 1024)
+    blob: B64 | None = Field(default=None, max_length=service_max_item)
     deleted: bool = False
     purge: bool = False
 
 
 class ItemBatch(_Base):
     items: list[ItemWrite] = Field(max_length=500)
+    # The vault key generation these were encrypted under. A client that hasn't seen a
+    # rotation gets a 409, rather than saving items under the key of someone who's gone.
+    generation: int | None = None
 
 
 class ItemOut(_Base):
@@ -217,16 +226,18 @@ class RotateMember(_Base):
 
 class RotateItem(_Base):
     id: uuid.UUID
-    blob: B64 = Field(max_length=8 * 1024 * 1024)
+    blob: B64 = Field(max_length=service_max_item)
     versions: list["RotateVersion"] = Field(default_factory=list, max_length=40)
 
 
 class RotateVersion(_Base):
     revision: int
-    blob: B64 = Field(max_length=8 * 1024 * 1024)
+    blob: B64 = Field(max_length=service_max_item)
 
 
 class Rotate(_Base):
+    # The vault's revision when these were encrypted. Anything written since means starting over.
+    from_revision: int | None = None
     from_generation: int
     name: B64 = Field(max_length=4096)
     remove_user_ids: list[uuid.UUID] = Field(default_factory=list, max_length=200)

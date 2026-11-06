@@ -20,7 +20,7 @@ import {
   unwrapKeyset,
   wrapKeyset,
 } from "./keys";
-import { isSystem, type Item, type ItemBody, mergeBodies, newBody, searchText, touch, type TrustEntry } from "./model";
+import { isSystem, type Item, type ItemBody, mergeBodies, newBody, searchText, touch, type TrustBook, type TrustEntry } from "./model";
 import { aesKey, KDF_FLOOR, type KdfParams, x25519Public } from "./primitives";
 import { deviceSafetyWords, identityWords } from "./safety";
 import type { CachedAccount, CachedItem, CachedVault, LocalStore } from "./store";
@@ -139,14 +139,25 @@ export class VaultClient {
     });
     this.api.session = session.token;
     await this.saveSecretKey(secretKey);
-    await this.cacheAccount(session);
+    await this.cacheAccount(session, { setup: true });
     this.state = { keyset, authKey, userId, accountId, vaultKeys: new Map(), items: new Map(), search: new Map() };
+    await this.store.setMeta("personal_vault", vaultId);
     await this.sync();
     return { secretKey };
   }
 
-  private async cacheAccount(s: SessionOut): Promise<void> {
+  /** A different account here means someone else signed in, or a server trying to wipe this
+   *  device's trust and unsynced edits. It only counts if the new keyset really opens. */
+  private async cacheAccount(s: SessionOut, opts: { unlockKey?: CryptoKey; setup?: boolean } = {}): Promise<void> {
     const prev = await this.store.getAccount();
+    if (prev && prev.accountId !== s.account_id && !opts.setup) {
+      if (!opts.unlockKey) throw new Error("The server says this is a different account. Lock and unlock again to check.");
+      try {
+        await unwrapKeyset(opts.unlockKey, s.account_id, fromB64u(s.wrapped_keyset));
+      } catch {
+        throw new WrongPasswordError();
+      }
+    }
     const account: CachedAccount = {
       accountId: s.account_id,
       userId: s.user_id,
@@ -174,13 +185,19 @@ export class VaultClient {
     let kdf = cached?.kdf;
     let salt = cached?.salt;
     let offline = false;
+    let preWrapped: string | null = null;
+    let preAccount: string | null = null;
     try {
       const pre = await this.api.prelogin();
       this.serverTimeOffsetMs = new Date(pre.server_time).getTime() - Date.now();
       this.minKdf = pre.min_kdf;
       if (pre.exists && pre.kdf && pre.salt) {
+        // Settings can only ever go up. A server asking for weaker ones wants easier guessing.
+        if (cached && (pre.kdf.m < cached.kdf.m || pre.kdf.t < cached.kdf.t)) throw new Error("The server is asking for weaker key settings than this device has seen, so this device won't unlock with them.");
         kdf = pre.kdf;
         salt = pre.salt;
+        preWrapped = pre.wrapped_keyset ?? null;
+        preAccount = pre.account_id ?? null;
       }
       if (!pre.exists) throw new Error("There's no vault on this account yet");
     } catch (e) {
@@ -192,11 +209,22 @@ export class VaultClient {
     const unlockKey = await aesKey(raw.unlock);
     const authKey = raw.auth;
 
+    // Open the keyset here before anything derived from the password goes anywhere. If a
+    // server handed this device a Secret Key of its own choosing, what it would get back is
+    // something it could guess the master password from, so nothing goes unless this works.
+    if (!offline && preWrapped && preAccount) {
+      try {
+        await unwrapKeyset(unlockKey, preAccount, fromB64u(preWrapped));
+      } catch {
+        throw new WrongPasswordError();
+      }
+    }
+
     if (!offline) {
       try {
         const session = await this.api.createSession(b64u(authKey));
         this.api.session = session.token;
-        await this.cacheAccount(session);
+        await this.cacheAccount(session, { unlockKey });
         cached = await this.store.getAccount();
       } catch (e) {
         if (e instanceof ApiError && e.status === 401) throw new WrongPasswordError();
@@ -300,7 +328,7 @@ export class VaultClient {
     try {
       const session = await this.api.createSession(b64u(authKey));
       this.api.session = session.token;
-      await this.cacheAccount(session);
+      await this.cacheAccount(session, { unlockKey });
       cached = await this.store.getAccount();
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) throw new WrongPasswordError();
@@ -323,6 +351,7 @@ export class VaultClient {
 
   /** Forget every key. The offline copy stays, encrypted. */
   async lock(): Promise<void> {
+    this.book = { people: {}, accepted: [], contacts: [], generations: {} };
     if (this.state) {
       this.state.keyset.x25519.fill(0);
       this.state.keyset.ed25519.fill(0);
@@ -351,7 +380,7 @@ export class VaultClient {
     // (never below the floor, whatever's asked)
     const a = wanted ?? current;
     const min = this.minKdf;
-    return min ? { alg: "argon2id", m: Math.max(a.m, min.m), t: Math.max(a.t, min.t), p: a.p } : a;
+    return { alg: "argon2id", m: Math.max(a.m, current.m, min?.m ?? 0), t: Math.max(a.t, current.t, min?.t ?? 0), p: a.p };
   }
 
   /** The server's clock and minimum settings, when unlocking didn't already fetch them. */
@@ -463,10 +492,70 @@ export class VaultClient {
       }
       return fromB64u(known.ed25519);
     }
-    const live = await this.api.userKeys(grantedBy);
-    trust[grantedBy] = { x25519: live.x25519_pub, ed25519: live.ed25519_pub, firstSeen: new Date().toISOString(), username: live.username };
-    await this.store.setMeta("trust", trust);
-    return fromB64u(live.ed25519_pub);
+    // Nobody we've chosen to trust. The server names who signed a grant, so it could name
+    // anyone, with keys of its own. A vault from a stranger stays shut until the person looks.
+    const live = await this.api.userKeys(grantedBy).catch(() => null);
+    throw new KeyChangedError(grantedBy, live?.username ?? "");
+  }
+
+  // ---- What this person decided, kept where a server can't touch it ---------
+
+  private book: TrustBook = { people: {}, accepted: [], contacts: [], generations: {} };
+
+  private isOwnVault(v: { kind: string; grantedBy: string | null }): boolean {
+    const s = this.need();
+    return v.kind === "personal" && (!v.grantedBy || v.grantedBy === s.userId);
+  }
+
+  /** A vault opens if it's your own, or you chose to accept it. What the server says about
+   *  who accepted what doesn't come into it. */
+  private mayOpen(v: { id: string; kind: string; grantedBy: string | null }): boolean {
+    const s = this.need();
+    return this.isOwnVault(v) || !v.grantedBy || v.grantedBy === s.userId || this.book.accepted.includes(v.id);
+  }
+
+  private trustItem(): Item | undefined {
+    const s = this.need();
+    for (const item of s.items.values()) if (item.body.kind === "trust" && item.body.trustBook) return item;
+    return undefined;
+  }
+
+  /** Bring in what other devices decided. Union, and never a key change without a prompt. */
+  private async mergeTrustBook(): Promise<void> {
+    const local = (await this.store.getMeta<Record<string, TrustEntry>>("trust")) ?? {};
+    const remote = this.trustItem()?.body.trustBook;
+    const accepted = (await this.store.getMeta<string[]>("trust_accepted")) ?? [];
+    const contacts = (await this.store.getMeta<string[]>("trust_contacts")) ?? [];
+    const generations = (await this.store.getMeta<Record<string, number>>("trust_generations")) ?? {};
+    const people = { ...(remote?.people ?? {}), ...local };
+    for (const [id, e] of Object.entries(remote?.people ?? {})) {
+      if (people[id] && e.verified) people[id] = { ...people[id], verified: people[id].ed25519 === e.ed25519 ? true : people[id].verified };
+    }
+    this.book = {
+      people,
+      accepted: [...new Set([...(remote?.accepted ?? []), ...accepted])],
+      contacts: [...new Set([...(remote?.contacts ?? []), ...contacts])],
+      generations: { ...(remote?.generations ?? {}), ...generations },
+      personalVaultId: remote?.personalVaultId,
+    };
+    for (const [k, n] of Object.entries(remote?.generations ?? {})) this.book.generations[k] = Math.max(this.book.generations[k] ?? 0, n);
+    await this.store.setMeta("trust", people);
+  }
+
+  /** Saved locally now, and to the personal vault so other devices know too. */
+  private async saveTrustBook(): Promise<void> {
+    await this.store.setMeta("trust", this.book.people);
+    await this.store.setMeta("trust_accepted", this.book.accepted);
+    await this.store.setMeta("trust_contacts", this.book.contacts);
+    await this.store.setMeta("trust_generations", this.book.generations);
+    if (!this.state) return;
+    const item = this.trustItem();
+    const body = { ...(item?.body ?? newBody("trust", "trust-book")), trustBook: this.book };
+    if (item) await this.update(item.id, body);
+    else {
+      const personal = (await this.store.getVaults()).find((v) => this.isOwnVault(v));
+      if (personal) await this.saveNew(personal.id, body);
+    }
   }
 
   async trustEntries(): Promise<Record<string, TrustEntry>> {
@@ -477,10 +566,49 @@ export class VaultClient {
     const trust = await this.trustEntries();
     const e = trust[userId];
     if (e) return identityWords(userId, fromB64u(e.x25519), fromB64u(e.ed25519));
+    // Looking isn't trusting: nothing's remembered until the person acts on it.
     const live = await this.api.userKeys(userId);
-    trust[userId] = { x25519: live.x25519_pub, ed25519: live.ed25519_pub, firstSeen: new Date().toISOString(), username: live.username };
-    await this.store.setMeta("trust", trust);
     return identityWords(userId, fromB64u(live.x25519_pub), fromB64u(live.ed25519_pub));
+  }
+
+  /** Remember this person's keys, because the person just chose to deal with them. Warns if
+   *  someone with that name is already known under other keys, since a server picks the
+   *  ids as well as the names. */
+  private async pin(userId: string): Promise<TrustEntry> {
+    const live = await this.api.userKeys(userId);
+    const trust = await this.trustEntries();
+    const known = trust[userId];
+    if (known) {
+      if (known.ed25519 !== live.ed25519_pub || known.x25519 !== live.x25519_pub) throw new KeyChangedError(userId, live.username);
+      return known;
+    }
+    const twin = Object.entries(trust).find(([id, e]) => id !== userId && e.username && e.username === live.username);
+    if (twin) throw new KeyChangedError(userId, live.username);
+    const entry: TrustEntry = { x25519: live.x25519_pub, ed25519: live.ed25519_pub, firstSeen: new Date().toISOString(), username: live.username };
+    this.book.people[userId] = entry;
+    await this.saveTrustBook();
+    return entry;
+  }
+
+  /** Accept a vault someone shared. Only this opens it, whatever the server says. */
+  async acceptVault(vaultId: string): Promise<void> {
+    if (!(await this.store.getVaults()).some((x) => x.id === vaultId)) await this.sync();
+    const v = await this.cachedVault(vaultId);
+    if (v.grantedBy && v.grantedBy !== this.need().userId) await this.pin(v.grantedBy);
+    if (!this.book.accepted.includes(vaultId)) this.book.accepted.push(vaultId);
+    await this.saveTrustBook();
+    await this.api.acceptVault(vaultId);
+    await this.sync();
+  }
+
+  /** Who an invitation is from, without trusting them yet. */
+  async inviterInfo(userId: string): Promise<{ username: string; words: string[]; twin: boolean; changed: boolean }> {
+    const live = await this.api.userKeys(userId);
+    const trust = await this.trustEntries();
+    const known = trust[userId];
+    const changed = !!known && (known.ed25519 !== live.ed25519_pub || known.x25519 !== live.x25519_pub);
+    const twin = !known && Object.entries(trust).some(([id, e]) => id !== userId && e.username === live.username);
+    return { username: live.username, words: await identityWords(userId, fromB64u(live.x25519_pub), fromB64u(live.ed25519_pub)), twin, changed };
   }
 
   async myIdentityWords(): Promise<string[]> {
@@ -490,18 +618,18 @@ export class VaultClient {
   }
 
   async markVerified(userId: string): Promise<void> {
-    const trust = await this.trustEntries();
-    if (trust[userId]) {
-      trust[userId].verified = true;
-      await this.store.setMeta("trust", trust);
-    }
+    if (!this.book.people[userId]) await this.pin(userId);
+    this.book.people[userId].verified = true;
+    await this.saveTrustBook();
   }
 
+  /** The person's looked into it: use these keys from now on. */
   async acceptChangedKey(userId: string): Promise<void> {
-    const trust = await this.trustEntries();
-    delete trust[userId];
-    await this.store.setMeta("trust", trust);
-    await this.grantorKey(userId);
+    const live = await this.api.userKeys(userId);
+    this.book.people[userId] = { x25519: live.x25519_pub, ed25519: live.ed25519_pub, firstSeen: new Date().toISOString(), username: live.username };
+    await this.saveTrustBook();
+    this.need().vaultKeys.clear();
+    await this.loadLocal();
   }
 
   private async decode(c: CachedItem, v: CachedVault): Promise<Item | null> {
@@ -518,8 +646,18 @@ export class VaultClient {
     s.search.clear();
     this.keyChanges.clear();
     this.roles.clear();
-    for (const v of await this.store.getVaults()) {
+    const all = await this.store.getVaults();
+    const ownFirst = [...all.filter((v) => this.isOwnVault(v)), ...all.filter((v) => !this.isOwnVault(v))];
+    // Their own vault has their decisions in it, so it opens before anything else is judged.
+    await this.mergeTrustBook();
+    let merged = false;
+    for (const v of ownFirst) {
+      if (!merged && !this.isOwnVault(v)) {
+        merged = true;
+        await this.mergeTrustBook();
+      }
       this.roles.set(v.id, v.role);
+      if (!this.mayOpen(v)) continue;
       try {
         await this.vaultKey(v);
       } catch (e) {
@@ -578,6 +716,7 @@ export class VaultClient {
       accepted: v.accepted,
       memberCount: v.member_count,
       hidden: prev?.hidden,
+      rotateNeeded: v.rotate_needed,
     };
   }
 
@@ -586,34 +725,60 @@ export class VaultClient {
   async sync(): Promise<SyncResult> {
     const s = this.need();
     const out: SyncResult = { pulled: 0, pushed: 0, conflicts: 0, offline: false, rollback: [] };
+    let generationsMoved = false;
     try {
       const remote = await this.api.vaults();
       const known = new Map((await this.store.getVaults()).map((v) => [v.id, v]));
       const seen = new Set<string>();
-      for (const rv of remote) {
+      // Their own vault first: it holds what they've decided about the others. A "personal"
+      // vault not signed by them is somebody else's, whatever the server calls it.
+      const ordered = [...remote].map((rv) => (rv.kind === "personal" && rv.granted_by && rv.granted_by !== s.userId ? { ...rv, kind: "shared" as const } : rv));
+      ordered.sort((a, b) => Number(b.kind === "personal") - Number(a.kind === "personal"));
+      let trustFresh = false;
+      for (const rv of ordered) {
+        if (!trustFresh && rv.kind !== "personal") {
+          trustFresh = true;
+          await this.mergeTrustBook();
+        }
         seen.add(rv.id);
         const prev = known.get(rv.id);
         const next = this.cacheVault(rv, prev);
-        if (prev && rv.revision < prev.highWater) {
-          // A hostile or restored server is showing an older state.
+        // Your own vault's key is signed by you. Being told otherwise isn't a reason to believe it.
+        if (prev && this.isOwnVault(prev) && rv.granted_by && rv.granted_by !== s.userId) {
           out.rollback.push(rv.id);
           this.rollbackWarnings.push(rv.id);
-          await this.store.putVault({ ...next, revision: prev.revision, highWater: prev.highWater });
+          continue;
+        }
+        const highest = Math.max(prev?.memberGeneration ?? 0, this.book.generations[rv.id] ?? 0);
+        // An older key brought back, or an older state: an old grant still has a good signature,
+        // so this is the only thing that can catch it. Stay on what we have.
+        if ((prev && rv.revision < prev.highWater) || rv.member_generation < highest) {
+          out.rollback.push(rv.id);
+          this.rollbackWarnings.push(rv.id);
+          if (prev && rv.member_generation >= highest) await this.store.putVault({ ...next, revision: prev.revision, highWater: prev.highWater });
           continue;
         }
         if (prev && prev.memberGeneration !== rv.member_generation) {
+          await this.rekeyDirty(prev, next);
           s.vaultKeys.delete(rv.id);
           // Everything was re-encrypted: start this vault over.
           next.revision = 0;
         }
+        // Worth remembering once a key has actually changed: an old one can't be replayed before that.
+        if (rv.member_generation > 1 && rv.member_generation > (this.book.generations[rv.id] ?? 0) && this.mayOpen({ id: rv.id, kind: rv.kind, grantedBy: rv.granted_by })) {
+          this.book.generations[rv.id] = rv.member_generation;
+          generationsMoved = true;
+        }
         await this.store.putVault(next);
         this.roles.set(next.id, next.role);
         if (next.hidden) continue;
-        if (next.accepted || rv.kind === "personal") {
+        // Only what they've chosen to open. An invitation just sits here until then.
+        if (this.mayOpen({ id: next.id, kind: next.kind, grantedBy: next.grantedBy })) {
           await this.pushVault(next, out);
           await this.pullVault(next, out);
         }
       }
+      if (generationsMoved) await this.saveTrustBook();
       for (const v of known.values()) {
         if (!seen.has(v.id)) {
           // Removed from this vault: drop the local copy and keys.
@@ -633,6 +798,31 @@ export class VaultClient {
     }
     this.onChange?.();
     return out;
+  }
+
+  /** A new vault key arrived while this device had unsynced edits: move them under it, so
+   *  they don't go up under the key of someone who's been removed. */
+  private async rekeyDirty(prev: CachedVault, next: CachedVault): Promise<void> {
+    const dirty = (await this.store.getItems(prev.id)).filter((i) => i.dirty && i.blob);
+    if (!dirty.length) return;
+    let oldKey: CryptoKey;
+    try {
+      oldKey = await this.vaultKey(prev);
+    } catch {
+      return;
+    }
+    this.need().vaultKeys.delete(prev.id);
+    const newKey = await this.vaultKey(next);
+    const writes: CachedItem[] = [];
+    for (const c of dirty) {
+      try {
+        const body = await decryptItem<ItemBody>(oldKey, prev.id, c.id, fromB64u(c.blob!));
+        writes.push({ ...c, blob: b64u(await encryptItem(newKey, prev.id, c.id, body)), baseBlob: null });
+      } catch {
+        this.undecryptable.add(c.id);
+      }
+    }
+    await this.store.putItems(writes);
   }
 
   private async pullVault(v: CachedVault, out: SyncResult): Promise<void> {
@@ -662,6 +852,14 @@ export class VaultClient {
         } else {
           try {
             const item = await this.decode(c, v);
+            const known = this.need().items.get(r.id);
+            // The revision's the server's word. The number inside the encryption isn't.
+            if (item && known && (item.body.seq ?? 0) < (known.body.seq ?? 0)) {
+              writes.pop();
+              out.rollback.push(v.id);
+              this.rollbackWarnings.push(v.id);
+              continue;
+            }
             if (item) this.index(item);
             this.undecryptable.delete(r.id);
           } catch {
@@ -682,16 +880,24 @@ export class VaultClient {
     const key = await this.vaultKey(v);
     for (let i = 0; i < dirty.length; i += 200) {
       const chunk = dirty.slice(i, i + 200);
-      const res = await this.api.writeItems(
-        v.id,
-        chunk.map((c) => ({
-          id: c.id,
-          base_revision: c.revision,
-          blob: c.purgeRequested ? undefined : c.blob,
-          deleted: c.deleted,
-          purge: c.purgeRequested ?? false,
-        })),
-      );
+      let res;
+      try {
+        res = await this.api.writeItems(
+          v.id,
+          chunk.map((c) => ({
+            id: c.id,
+            base_revision: c.revision,
+            blob: c.purgeRequested ? undefined : c.blob,
+            deleted: c.deleted,
+            purge: c.purgeRequested ?? false,
+          })),
+          v.generation,
+        );
+      } catch (e) {
+        // A new key we haven't seen yet. The next sync re-encrypts these and tries again.
+        if (e instanceof ApiError && e.status === 409) return;
+        throw e;
+      }
       const byId = new Map(chunk.map((c) => [c.id, c]));
       const writes: CachedItem[] = [];
       for (const id of res.applied) {
@@ -706,7 +912,12 @@ export class VaultClient {
         const c = byId.get(conflict.id);
         if (!c || conflict.reason !== "changed") continue;
         out.conflicts++;
-        await this.resolveConflict(v, key, c, conflict.blob ?? null, conflict.revision ?? 0, conflict.deleted ?? false);
+        try {
+          await this.resolveConflict(v, key, c, conflict.blob ?? null, conflict.revision ?? 0, conflict.deleted ?? false);
+        } catch {
+          // Junk from someone else in the vault can't stop everyone's sync. It's listed.
+          this.undecryptable.add(c.id);
+        }
       }
       // The merges left items dirty on top of the server's revision; send them too.
       const merged = res.conflicts.filter((x) => x.reason === "changed").map((x) => x.id);
@@ -716,6 +927,7 @@ export class VaultClient {
           const second = await this.api.writeItems(
             v.id,
             again.map((c) => ({ id: c.id, base_revision: c.revision, blob: c.blob, deleted: c.deleted })),
+            v.generation,
           );
           const writes2: CachedItem[] = [];
           for (const id of second.applied) {
@@ -749,6 +961,7 @@ export class VaultClient {
     const localBody = local.blob ? await decryptItem<ItemBody>(key, v.id, local.id, fromB64u(local.blob)) : server;
     const base = local.baseBlob ? await decryptItem<ItemBody>(key, v.id, local.id, fromB64u(local.baseBlob)) : null;
     const { body } = mergeBodies(base, localBody, server);
+    body.seq = Math.max(localBody.seq ?? 0, server.seq ?? 0) + 1;
     const blob = b64u(await encryptItem(key, v.id, local.id, body));
     const merged: CachedItem = {
       ...local,
@@ -820,8 +1033,11 @@ export class VaultClient {
   }
 
   async personalVaultId(): Promise<string> {
-    const v = (await this.store.getVaults()).find((x) => x.kind === "personal");
+    const vaults = await this.store.getVaults();
+    const pinned = (await this.store.getMeta<string>("personal_vault")) ?? this.book.personalVaultId;
+    const v = (pinned && vaults.find((x) => x.id === pinned && this.isOwnVault(x))) || vaults.find((x) => this.isOwnVault(x));
     if (!v) throw new Error("No personal vault");
+    if (!pinned) await this.store.setMeta("personal_vault", v.id);
     return v.id;
   }
 
@@ -928,47 +1144,102 @@ export class VaultClient {
   async addMember(vaultId: string, userId: string, role: string): Promise<void> {
     const s = this.need();
     const v = await this.cachedVault(vaultId);
-    const keys = await this.api.userKeys(userId);
-    const trust = await this.trustEntries();
-    const known = trust[userId];
-    if (known && (known.ed25519 !== keys.ed25519_pub || known.x25519 !== keys.x25519_pub)) {
-      throw new KeyChangedError(userId, keys.username);
-    }
-    if (!known) {
-      trust[userId] = { x25519: keys.x25519_pub, ed25519: keys.ed25519_pub, firstSeen: new Date().toISOString(), username: keys.username };
-      await this.store.setMeta("trust", trust);
-    }
+    // Picking someone is the person's own act, and this is when their keys get remembered.
+    const keys = await this.pin(userId);
     const raw = await this.rawVaultKey(v);
-    const grant = await grantVaultKey({ userId: s.userId, keyset: s.keyset }, vaultId, { userId, x25519: fromB64u(keys.x25519_pub) }, v.generation, raw);
+    const grant = await grantVaultKey({ userId: s.userId, keyset: s.keyset }, vaultId, { userId, x25519: fromB64u(keys.x25519) }, v.generation, raw);
     raw.fill(0);
     await this.api.addMember(vaultId, { user_id: userId, role, grant: { wrapped_key: b64u(grant.wrapped), signature: b64u(grant.signature) } });
   }
 
-  /** Remove people: a new vault key, new item keys, every item and retained
-   *  version re-encrypted here and swapped in one batch on the server. Returns
-   *  the logins they could read, whose passwords should now change. */
-  async removeMembers(vaultId: string, userIds: string[]): Promise<Item[]> {
+  /** Who'd get the new key if these people were removed. A server can add names to a list, so
+   *  anyone not already trusted needs the person to look before a key is sealed to them. */
+  async rotationPlan(vaultId: string, removing: string[]): Promise<{ userId: string; username: string; known: boolean; changed: boolean }[]> {
+    const s = this.need();
+    const trust = await this.trustEntries();
+    return (await this.api.members(vaultId))
+      .filter((m) => !removing.includes(m.user_id) && m.user_id !== s.userId)
+      .map((m) => {
+        const k = trust[m.user_id];
+        return { userId: m.user_id, username: m.username, known: !!k, changed: !!k && (k.ed25519 !== m.ed25519_pub || k.x25519 !== m.x25519_pub) };
+      });
+  }
+
+  /** Remove people: cut off now, then a new vault key, new item keys, every item and retained
+   *  version re-encrypted here and swapped in one batch on the server. Returns the logins they
+   *  could read, whose passwords should now change. If the re-encrypting fails they're still
+   *  out, and the vault says it needs a new key. With nobody to remove, it just changes the key. */
+  async removeMembers(vaultId: string, userIds: string[], confirmed: string[] = []): Promise<Item[]> {
+    const s = this.need();
+    const plan = await this.rotationPlan(vaultId, userIds);
+    const changed = plan.find((p) => p.changed);
+    if (changed) throw new KeyChangedError(changed.userId, changed.username);
+    const unknown = plan.filter((p) => !p.known && !confirmed.includes(p.userId));
+    if (unknown.length) throw new Error(`Check who gets the new key first: ${unknown.map((u) => u.username).join(", ")}`);
+    for (const id of userIds) {
+      try {
+        await this.api.removeMember(vaultId, id);
+      } catch (e) {
+        if (!(e instanceof ApiError && e.status === 404)) throw e;
+      }
+    }
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.rotateOnce(vaultId, confirmed);
+      } catch (e) {
+        // Someone wrote something meanwhile. Pick it up and go again.
+        if (e instanceof ApiError && (e.status === 409 || e.status === 400) && attempt < 3) continue;
+        throw e;
+      }
+    }
+    void s;
+  }
+
+  private async rotateOnce(vaultId: string, confirmed: string[]): Promise<Item[]> {
     const s = this.need();
     await this.sync();
     const v = await this.cachedVault(vaultId);
     const oldKey = await this.vaultKey(v);
     const raw = randomBytes(32);
     const newKey = await aesKey(raw);
-    const members = (await this.api.members(vaultId)).filter((m) => !userIds.includes(m.user_id));
+    const members = await this.api.members(vaultId);
     const generation = v.generation + 1;
+    const trust = await this.trustEntries();
 
     const grants = [];
     for (const m of members) {
-      if (!m.x25519_pub) throw new Error(`${m.username} has no keys on this server`);
-      const g = await grantVaultKey({ userId: s.userId, keyset: s.keyset }, vaultId, { userId: m.user_id, x25519: fromB64u(m.x25519_pub) }, generation, raw);
+      let x25519: Uint8Array;
+      if (m.user_id === s.userId) {
+        // Our own key's the one we hold, not whatever a list says it is.
+        x25519 = publicKeysOf(s.keyset).x25519;
+      } else {
+        const known = trust[m.user_id];
+        if (known && (known.x25519 !== m.x25519_pub || known.ed25519 !== m.ed25519_pub)) throw new KeyChangedError(m.user_id, m.username);
+        if (!known && !confirmed.includes(m.user_id)) throw new Error(`Check who gets the new key first: ${m.username}`);
+        if (!m.x25519_pub || !m.ed25519_pub) throw new Error(`${m.username} has no keys on this server`);
+        if (!known) {
+          this.book.people[m.user_id] = { x25519: m.x25519_pub, ed25519: m.ed25519_pub, firstSeen: new Date().toISOString(), username: m.username };
+        }
+        x25519 = fromB64u(m.x25519_pub);
+      }
+      const g = await grantVaultKey({ userId: s.userId, keyset: s.keyset }, vaultId, { userId: m.user_id, x25519 }, generation, raw);
       grants.push({ user_id: m.user_id, grant: { wrapped_key: b64u(g.wrapped), signature: b64u(g.signature) } });
     }
 
     const toChange: Item[] = [];
     const items = [];
+    const junk = [];
     for (const c of await this.store.getItems(vaultId)) {
       if (!c.blob || c.purged) continue;
-      const body = await decryptItem<ItemBody>(oldKey, vaultId, c.id, fromB64u(c.blob));
+      let body: ItemBody;
+      try {
+        body = await decryptItem<ItemBody>(oldKey, vaultId, c.id, fromB64u(c.blob));
+      } catch {
+        // Nobody can read it, so it can't be moved to the new key. It goes, or a member could
+        // stop themselves being rotated out by writing rubbish.
+        junk.push({ id: c.id, base_revision: c.revision, purge: true, deleted: true });
+        continue;
+      }
       if (body.password && !c.deleted) toChange.push({ id: c.id, vaultId, revision: c.revision, deleted: c.deleted, updatedAt: c.updatedAt, body });
       const versions = [];
       for (const row of await this.api.versions(vaultId, c.id)) {
@@ -981,16 +1252,25 @@ export class VaultClient {
       }
       items.push({ id: c.id, blob: b64u(await encryptItem(newKey, vaultId, c.id, body)), versions });
     }
+    if (junk.length) {
+      await this.api.writeItems(vaultId, junk, v.generation);
+      for (const j of junk) await this.store.deleteItem(j.id);
+      await this.sync();
+    }
+    const fresh = await this.cachedVault(vaultId);
     const name = await openField<string>(oldKey, vaultId, "name", v.name);
     await this.api.rotate(vaultId, {
       from_generation: v.generation,
+      from_revision: fresh.revision,
       name: await sealField(newKey, vaultId, "name", name),
-      remove_user_ids: userIds,
+      remove_user_ids: [],
       members: grants,
       items,
     });
     raw.fill(0);
     s.vaultKeys.delete(vaultId);
+    this.book.generations[vaultId] = generation;
+    await this.saveTrustBook();
     await this.sync();
     return toChange;
   }
@@ -1039,7 +1319,11 @@ export class VaultClient {
     return this.api.request<EmergencyOut[]>("GET", "/emergency");
   }
 
+  /** The only way someone becomes a contact: this person, on one of their own devices. */
   async emergencyInvite(granteeId: string, waitDays: number): Promise<void> {
+    await this.pin(granteeId);
+    if (!this.book.contacts.includes(granteeId)) this.book.contacts.push(granteeId);
+    await this.saveTrustBook();
     await this.api.request("POST", "/emergency", { grantee_id: granteeId, wait_days: waitDays });
   }
 
@@ -1048,17 +1332,23 @@ export class VaultClient {
   }
 
   async emergencyOpen(id: string): Promise<void> {
-    await this.api.request("POST", `/emergency/${id}/open`);
+    const out = await this.api.request<EmergencyOut>("POST", `/emergency/${id}/open`);
+    // Asking for this and waiting was the person's choice, so these are theirs to open.
+    await this.pin(out.grantor_id);
+    for (const vaultId of out.opened_vaults) if (!this.book.accepted.includes(vaultId)) this.book.accepted.push(vaultId);
+    await this.saveTrustBook();
     await this.sync();
   }
 
   /** End it. If it was opened, what they could read gets a new key first. */
   async emergencyEnd(row: EmergencyOut): Promise<void> {
     const s = this.need();
-    if (row.grantor_id === s.userId && row.state === "opened") {
+    if (row.grantor_id === s.userId && (row.state === "opened" || row.state === "ended")) {
       for (const vaultId of row.opened_vaults) await this.removeMembers(vaultId, [row.grantee_id]);
     }
     await this.api.request("DELETE", `/emergency/${row.id}`);
+    this.book.contacts = this.book.contacts.filter((c) => c !== row.grantee_id);
+    await this.saveTrustBook();
     await this.sync();
   }
 
@@ -1069,20 +1359,19 @@ export class VaultClient {
   async refreshEmergency(): Promise<void> {
     const s = this.need();
     const rows = await this.emergencyList();
-    const mine = (await this.store.getVaults()).filter((v) => v.role === "manage" && v.accepted);
+    // Your own vaults only. Other people's logins in a shared vault aren't yours to hand on.
+    const mine = (await this.store.getVaults()).filter((v) => this.isOwnVault(v) || (!v.grantedBy || v.grantedBy === s.userId) && v.memberCount <= 1);
     for (const row of rows) {
-      if (row.grantor_id !== s.userId || row.state === "invited" || row.state === "opened") continue;
+      if (row.grantor_id !== s.userId || row.state === "invited" || row.state === "opened" || row.state === "ended") continue;
+      // A row in this list is only the server's word. Keys go to someone this person named,
+      // on the keys they saw then, and to nobody else, ever.
+      if (!this.book.contacts.includes(row.grantee_id)) continue;
       const current = row.wrapped;
       const stale = mine.length !== Object.keys(current).length || mine.some((v) => current[v.id] !== v.generation);
       if (!stale) continue;
       const keys = await this.api.userKeys(row.grantee_id);
-      const trust = await this.trustEntries();
-      const known = trust[row.grantee_id];
-      if (known && (known.ed25519 !== keys.ed25519_pub || known.x25519 !== keys.x25519_pub)) continue;
-      if (!known) {
-        trust[row.grantee_id] = { x25519: keys.x25519_pub, ed25519: keys.ed25519_pub, firstSeen: new Date().toISOString(), username: keys.username };
-        await this.store.setMeta("trust", trust);
-      }
+      const known = (await this.trustEntries())[row.grantee_id];
+      if (!known || known.ed25519 !== keys.ed25519_pub || known.x25519 !== keys.x25519_pub) continue;
       const grants = [];
       for (const v of mine) {
         const raw = await this.rawVaultKey(v);
@@ -1165,7 +1454,7 @@ export type EmergencyOut = {
   grantee_id: string;
   grantee: string;
   wait_days: number;
-  state: "invited" | "accepted" | "ready" | "requested" | "refused" | "opened";
+  state: "invited" | "accepted" | "ready" | "requested" | "refused" | "opened" | "ended";
   requested_at: string | null;
   opens_at: string | null;
   wrapped: Record<string, number>;

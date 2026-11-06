@@ -206,7 +206,7 @@ function SshSection() {
       <label className="flex items-center gap-2">
         <input type="checkbox" aria-label="SSH agent" checked={s.enabled} onChange={(e) => native.sshSet(e.target.checked).then(setS)} /> Answer SSH on Windows's agent pipe
       </label>
-      <p className="text-[var(--text-muted)]">Offers Ed25519 keys from your SSH items that have no passphrase, while the vault's unlocked. You're asked every time something wants to use one.</p>
+      <p className="text-[var(--text-muted)]">Offers Ed25519 keys from your SSH items that have no passphrase, while the vault's unlocked. You're asked every time something wants to use one. Items set to ask for your master password aren't offered.</p>
       {s.running && <p data-testid="ssh-running" className="text-[var(--text-muted)]">Running.</p>}
       {s.error && <Callout kind="warn">{s.error}</Callout>}
     </div>

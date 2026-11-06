@@ -360,6 +360,10 @@ def configure_logging(
         # we already emit our own access line above, so silence theirs
         # to avoid duplicates in the live console.
         "uvicorn.access",
+        # httpx logs every URL it fetches at INFO, tagged with whoever's signed in. A favicon or
+        # breach lookup for a vault would put which sites someone uses into the logs.
+        "httpx",
+        "httpcore",
     ),
 ) -> None:
     """Wire up JSON logging on the root logger + the ring buffer.

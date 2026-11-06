@@ -46,6 +46,12 @@ test("an item whose two halves don't belong together isn't offered", () => {
   assert.equal(usableIdentity({ kind: "login", title: "x", sshPublic: a.pub, sshPrivate: a.priv }), null);
 });
 
+test("an item that asks for the master password isn't offered", () => {
+  const k = keygen("asks", "ed25519");
+  assert.ok(usableIdentity({ kind: "ssh", title: "x", sshPublic: k.pub, sshPrivate: k.priv, reprompt: false }));
+  assert.equal(usableIdentity({ kind: "ssh", title: "x", sshPublic: k.pub, sshPrivate: k.priv, reprompt: true }), null);
+});
+
 test("junk doesn't throw", () => {
   for (const bad of [undefined, "", "not a key", "ssh-ed25519", "ssh-ed25519 !!!", "ssh-rsa AAAAC3NzaC1lZDI1NTE5AAAAIA=="]) assert.equal(parsePublicLine(bad), null);
   for (const bad of [undefined, "", "-----BEGIN OPENSSH PRIVATE KEY-----\nAAAA\n-----END OPENSSH PRIVATE KEY-----", "-----BEGIN OPENSSH PRIVATE KEY-----\n!!!\n-----END OPENSSH PRIVATE KEY-----"]) assert.equal(parseOpenSshEd25519(bad), null);

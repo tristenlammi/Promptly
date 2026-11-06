@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Card number</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+html,body{margin:0;background:transparent}body{font:15px system-ui,sans-serif}input{width:100%;border:0;outline:0;padding:9px 10px;font:inherit;background:transparent}
+</style>
+</head>
+<body>
+<input name="cardnumber" autocomplete="cc-number" inputmode="numeric" maxlength="19" aria-label="Card number" placeholder="1234 1234 1234 1234" type="text">
+<script>var n=document.querySelector('input');n.addEventListener('input',function(){n.value=n.value.replace(/[^0-9]/g,'').slice(0,16).replace(/(.{4})(?=.)/g,'$1 ');});</script>
+</body>
+</html>

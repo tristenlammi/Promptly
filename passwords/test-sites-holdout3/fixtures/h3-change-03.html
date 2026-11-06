@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security | Tumbledown</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.5 "Segoe UI",sans-serif;background:#101418;color:#e8edf2}.Sec_card__p9Wq2{max-width:460px;margin:64px auto;padding:28px;background:#1a2027;border-radius:12px}.Row_cap__d2Ff5{font-size:13px;color:#9fb0c0;margin-bottom:4px}.Row_wrap__s8Nn1{display:flex;gap:8px;margin-bottom:16px}input{flex:1;width:100%;padding:10px;background:#0d1115;border:1px solid #33404d;color:#fff;border-radius:6px;font:inherit}.Row_eye__c5Vv7{background:none;border:1px solid #33404d;color:#9fb0c0;border-radius:6px;padding:0 10px;cursor:pointer}.Button_primary__Vb7yU{padding:10px 20px;background:#3ddc97;border:0;border-radius:6px;font:inherit;font-weight:600;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="Sec_card__p9Wq2"><h1>Update your password</h1><form onsubmit="return false"><div class="Row_cap__d2Ff5">Old password</div><div class="Row_wrap__s8Nn1"><input class="Row_in__g7Hh3" name="opw" type="password" autocomplete="off" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"><button class="Row_eye__c5Vv7" type="button" tabindex="-1">Show</button></div><div class="Row_cap__d2Ff5">New password</div><div class="Row_wrap__s8Nn1"><input class="Row_in__g7Hh3" name="npw1" type="password" autocomplete="off" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"><button class="Row_eye__c5Vv7" type="button" tabindex="-1">Show</button></div><div class="Row_cap__d2Ff5">New password again</div><div class="Row_wrap__s8Nn1"><input class="Row_in__g7Hh3" name="npw2" type="password" autocomplete="off" placeholder="&bull;&bull;&bull;&bull;&bull;&bull;&bull;&bull;"><button class="Row_eye__c5Vv7" type="button" tabindex="-1">Show</button></div><button class="Button_primary__Vb7yU" type="submit">Save</button></form></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"current-password":r("input[name=\"opw\"]",[]),"new-password":r("input[name=\"npw1\"]",[]),"confirm-password":r("input[name=\"npw2\"]",[])};}};</script>
+<script>document.querySelectorAll('.Row_eye__c5Vv7').forEach(function(b){b.onclick=function(){var i=b.previousElementSibling;i.type=i.type==='password'?'text':'password';b.textContent=i.type==='password'?'Show':'Hide';};});</script>
+</body>
+</html>

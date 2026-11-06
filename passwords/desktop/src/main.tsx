@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { Component, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
-import { ApiError, VaultApi } from "../../../frontend/src/passwords/core/api";
+import { ApiError, type DeviceRequestOut, VaultApi } from "../../../frontend/src/passwords/core/api";
 import { memoryPin } from "../../../frontend/src/passwords/core/connections";
 import { IdbStore } from "../../../frontend/src/passwords/core/store";
 import { VaultClient } from "../../../frontend/src/passwords/core/vault";
@@ -98,6 +98,33 @@ function Connect({ notice, onDone }: { notice: string; onDone: () => void }) {
   );
 }
 
+/** A new device is asking to join. The vault's Devices screen does the approving, with the
+ *  safety words; this only makes sure it's seen. */
+function DeviceRequestNotice({ requests }: { requests: DeviceRequestOut[] }) {
+  const [hash, setHash] = useState(location.hash);
+  const [dismissed, setDismissed] = useState<string[]>([]);
+  useEffect(() => {
+    const onHash = () => setHash(location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const waiting = requests.filter((r) => !dismissed.includes(r.id));
+  // The Devices screen lists them itself.
+  if (!waiting.length || hash.startsWith("#/devices")) return null;
+  const first = waiting[0];
+  return (
+    <div role="alert" data-testid="device-request" className="fixed bottom-4 right-4 z-40 flex max-w-sm flex-col gap-2 rounded-xl border border-[var(--warning)]/50 bg-[var(--surface)] p-3 text-sm text-[var(--text)] shadow-md">
+      <p>
+        <strong>{first.name}</strong> wants to join your vault{waiting.length > 1 ? `, and ${waiting.length - 1} more` : ""}. If that wasn't you, refuse it.
+      </p>
+      <div className="flex gap-2">
+        <Button small kind="primary" onClick={() => { location.hash = "#/devices"; }}>Review</Button>
+        <Button small onClick={() => setDismissed((d) => [...d, ...waiting.map((r) => r.id)])}>Not now</Button>
+      </div>
+    </div>
+  );
+}
+
 /** If the screens ever crash, don't leave a blank window: reloading also drops the keys. */
 class CrashScreen extends Component<{ children: ReactNode }, { crashed: boolean }> {
   state = { crashed: false };
@@ -124,6 +151,7 @@ function Root() {
   const [notice, setNotice] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deviceName, setDeviceName] = useState("Windows app");
+  const [deviceRequests, setDeviceRequests] = useState<DeviceRequestOut[]>([]);
 
   const reload = async () => {
     const c = await native.connectionGet();
@@ -160,6 +188,7 @@ function Root() {
     const api = new VaultApi(server, () => null, nativeFetch);
     const shell = new Shell(api, store);
     shellRef.current = shell;
+    shell.onDeviceRequests = setDeviceRequests;
     return {
       kind: "windows",
       pin,
@@ -220,6 +249,7 @@ function Root() {
       <CrashScreen>
         <VaultApp platform={platform} />
       </CrashScreen>
+      <DeviceRequestNotice requests={deviceRequests} />
       {settingsOpen && shellRef.current && (
         <DesktopSettings
           shell={shellRef.current}

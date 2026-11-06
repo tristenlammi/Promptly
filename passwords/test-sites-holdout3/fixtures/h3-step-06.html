@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in | Marrowbone Analytics</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.5 "Open Sans",sans-serif;background:#faf7f2;color:#2b2118}.sc-bdVaJa{max-width:380px;margin:72px auto;background:#fff;border:1px solid #e6dfd3;border-radius:14px;padding:30px}.sc-htpNat label{display:block;font-size:13px;margin-bottom:4px}.sc-htpNat input{width:100%;padding:10px 12px;border:1px solid #cfc5b4;border-radius:8px;font:inherit}.sc-gzVnrw{margin-top:16px;width:100%;padding:10px;background:#b3541e;color:#fff;border:0;border-radius:8px;font:inherit;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="sc-bdVaJa kYtNGh"><h1 class="sc-EHOje dXkWyq">Marrowbone Analytics</h1><div id="one" class="sc-htpNat gmPbYz"><label for="e">Email</label><input id="e" name="email" type="email" autocomplete="email"><button class="sc-gzVnrw jLpQxe" id="b1" type="button">Continue</button></div><div id="two" class="sc-htpNat gmPbYz" hidden><label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password"><button class="sc-gzVnrw jLpQxe" id="b2" type="button">Continue</button></div><div id="three" class="sc-htpNat gmPbYz" hidden><p>Open your authenticator app and enter the 6-digit code.</p><label for="c">Authentication code</label><input id="c" name="code" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code"><button class="sc-gzVnrw jLpQxe" type="button">Verify</button></div></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"email":r("#e",[]),"password":r("#p",[]),"otp":r("#c",[])};}};</script>
+<script>document.getElementById('b1').onclick=function(){document.getElementById('one').hidden=true;document.getElementById('two').hidden=false;};document.getElementById('b2').onclick=function(){document.getElementById('two').hidden=true;document.getElementById('three').hidden=false;};</script>
+</body>
+</html>

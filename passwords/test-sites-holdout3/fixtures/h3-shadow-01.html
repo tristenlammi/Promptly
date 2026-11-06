@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meridian Learning Portal</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.5 system-ui,sans-serif;background:#eef0f8;color:#222}header{display:flex;justify-content:space-between;align-items:center;padding:10px 20px;background:#2f3a8f;color:#fff}header input{padding:4px 8px;border:0;border-radius:4px;font:inherit}ml-login-card{display:block;max-width:380px;margin:64px auto}
+</style>
+</head>
+<body>
+<header><b>Meridian Learning</b><input id="top-search" type="search" placeholder="Search courses"></header><ml-login-card></ml-login-card>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"email":r(["ml-login-card","ml-field.who","input"],[]),"password":r(["ml-login-card","ml-field.key","input"],[])};}};</script>
+<script>customElements.define('ml-field',class extends HTMLElement{constructor(){super();var s=this.attachShadow({mode:'open'});s.innerHTML='<style>:host{display:block;margin-bottom:14px}label{display:block;font-size:13px;margin-bottom:3px}input{box-sizing:border-box;width:100%;padding:9px;border:1px solid #aab;border-radius:6px;font:inherit}</style><label part="label" for="control"></label><input part="input" id="control">';}connectedCallback(){var s=this.shadowRoot,i=s.querySelector('input');s.querySelector('label').textContent=this.getAttribute('label');i.type=this.getAttribute('type')||'text';if(this.getAttribute('ac'))i.setAttribute('autocomplete',this.getAttribute('ac'));}});customElements.define('ml-login-card',class extends HTMLElement{constructor(){super();var s=this.attachShadow({mode:'open'});s.innerHTML='<style>form{background:#fff;padding:28px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.12)}h2{margin:0 0 16px}button{width:100%;padding:10px;background:#2f3a8f;color:#fff;border:0;border-radius:6px;font:inherit;cursor:pointer}</style><form onsubmit="return false"><h2>Sign in to your courses</h2><ml-field class="who" label="Email" type="email" ac="username"></ml-field><ml-field class="key" label="Password" type="password" ac="current-password"></ml-field><button type="submit">Sign in</button></form>';}});</script>
+</body>
+</html>

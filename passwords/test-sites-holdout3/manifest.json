@@ -1,0 +1,2065 @@
+[
+  {
+    "id": "h3-signin-01",
+    "category": "signin",
+    "description": "Tailwind utility soup with proper labels and autocomplete; header template search and footer product-updates box.",
+    "path": "/fixtures/h3-signin-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#email",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-q",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-signin-02",
+    "category": "signin",
+    "description": "Material style outlined fields written out, generated ids with colons, no names, controlled inputs, password visibility toggle.",
+    "path": "/fixtures/h3-signin-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[id=\":r1:\"]",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "input[id=\":r2:\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-signin-03",
+    "category": "signin",
+    "description": "CSS-module classes, labels as adjacent divs, no ids or names, autocomplete off and new-password on a plain log-in; language picker in the footer.",
+    "path": "/fixtures/h3-signin-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": ".Login_fields__kJ2s1 > div:nth-child(1) input",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": ".Login_fields__kJ2s1 > div:nth-child(2) input",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#locale"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-signin-04",
+    "category": "signin",
+    "description": "Bootstrap 3 forum, placeholder-only, the secret box is type=text until focused, off-screen spam trap, forum search in the sidebar.",
+    "path": "/fixtures/h3-signin-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"login\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"pass\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"website\"]",
+          "#forum-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-signin-05",
+    "category": "signin",
+    "description": "Chakra style markup, aria-label is the only clue on the fields, email in a text input, unusual wording for the secret.",
+    "path": "/fixtures/h3-signin-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[aria-label=\"Work email\"]",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "input[aria-label=\"Passphrase\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-signin-06",
+    "category": "signin",
+    "description": "Ant Design style tabs with sign-in active and register panel hidden in the same page.",
+    "path": "/fixtures/h3-signin-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#login_username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#login_password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#register_email",
+          "#register_password",
+          "#register_confirm"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-signin-07",
+    "category": "signin",
+    "description": "Client-rendered after a skeleton, unusual identifier wording, controlled inputs on a page that re-renders every second, a help widget that appears with the form.",
+    "path": "/fixtures/h3-signin-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#customerId",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#customerPw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#helper-input"
+        ],
+        "wait": "#customerPw"
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-signin-08",
+    "category": "signin",
+    "description": "Bootstrap 5 floating labels; a track-an-order box with its own email comes first in the page, the sign-in second.",
+    "path": "/fixtures/h3-signin-08.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#si-email",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#si-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#to-number",
+          "#to-email"
+        ]
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-signin-09",
+    "category": "signin",
+    "description": "Vue scoped attributes, labels wrapping spans, unusual wording for both credentials, an organisation code and an environment picker that are not credentials.",
+    "path": "/fixtures/h3-signin-09.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#uid",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#sw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#org",
+          "#env"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-signin-10",
+    "category": "signin",
+    "description": "Re-authentication: signed-in account shown as text, one password box, in-app search in the sidebar.",
+    "path": "/fixtures/h3-signin-10.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#sudo_password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#app-search"
+        ]
+      }
+    ],
+    "state": {
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-step-01",
+    "category": "multi-step",
+    "description": "Single-page flow: email input is removed from the DOM and replaced with a chip when the password input is rendered.",
+    "path": "/fixtures/h3-step-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#identifier",
+            "role": "email",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "expected": [
+          {
+            "selector": "#secret",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "wait": "#secret"
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-step-02",
+    "category": "multi-step",
+    "description": "Password block is revealed under the email box in the same form; the email box stays visible and editable.",
+    "path": "/fixtures/h3-step-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#user-email",
+            "role": "email",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#pw"
+        ],
+        "advance": {
+          "click": "#cont"
+        }
+      },
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#user-email",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#pw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-step-03",
+    "category": "multi-step",
+    "description": "Real page navigation between the username page and the password page; second page keeps the username in a hidden input.",
+    "path": "/fixtures/h3-step-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#u",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#go"
+        }
+      },
+      {
+        "kind": "password-next",
+        "expected": [
+          {
+            "selector": "#p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "wait": "#p"
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-step-04",
+    "category": "multi-step",
+    "description": "Email-first with the real password input already mounted but collapsed; after Next there is a short check, then the email hides and the password shows.",
+    "path": "/fixtures/h3-step-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#loginId",
+            "role": "email",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#loginSecret"
+        ],
+        "advance": {
+          "click": "#next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "expected": [
+          {
+            "selector": "#loginSecret",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "wait": "#pw-wrap:not(.stash) input"
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-step-05",
+    "category": "multi-step",
+    "description": "Bank style: unusual wording for the identifier, security image text on the second step, branch finder in the header on both steps.",
+    "path": "/fixtures/h3-step-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#onlineId",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#branch-search",
+          "#pwd"
+        ],
+        "advance": {
+          "click": "#to2"
+        }
+      },
+      {
+        "kind": "password-next",
+        "expected": [
+          {
+            "selector": "#pwd",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#branch-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-step-06",
+    "category": "multi-step",
+    "description": "Three steps in one page: email, then password, then a six digit two-factor code. styled-components class names.",
+    "path": "/fixtures/h3-step-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#e",
+            "role": "email",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#p",
+          "#c"
+        ],
+        "advance": {
+          "click": "#b1"
+        }
+      },
+      {
+        "kind": "password-next",
+        "expected": [
+          {
+            "selector": "#p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#c"
+        ],
+        "advance": {
+          "click": "#b2"
+        }
+      },
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#c",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password",
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "h3-signup-01",
+    "category": "signup",
+    "description": "Tailwind sign-up with names, email, password and confirmation, correct autocomplete; footer newsletter.",
+    "path": "/fixtures/h3-signup-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#first-name",
+            "role": "first-name",
+            "frame": null
+          },
+          {
+            "selector": "#last-name",
+            "role": "last-name",
+            "frame": null
+          },
+          {
+            "selector": "#email",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#password",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#password-confirm",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#footer-nl"
+        ]
+      }
+    ],
+    "state": {
+      "first-name": "first-name",
+      "last-name": "last-name",
+      "email": "email",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h3-signup-02",
+    "category": "signup",
+    "description": "Material style fields, controlled inputs with a countdown that re-renders every second, no confirm box, optional referral code.",
+    "path": "/fixtures/h3-signup-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "input[id=\":r3:\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[id=\":r4:\"]",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "input[id=\":r5:\"]",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[id=\":r6:\"]"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "email": "email",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "h3-signup-03",
+    "category": "signup",
+    "description": "Bootstrap tabs with Register active on load; the sign-in pane is hidden in the same page. No autocomplete attributes.",
+    "path": "/fixtures/h3-signup-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#reg-name",
+            "role": "full-name",
+            "frame": null
+          },
+          {
+            "selector": "#reg-email",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#reg-pass",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#li-email",
+          "#li-pass"
+        ]
+      }
+    ],
+    "state": {
+      "full-name": "full-name",
+      "email": "email",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "h3-signup-04",
+    "category": "signup",
+    "description": "Placeholder-only sign-up with terse names and a birthday in three selects.",
+    "path": "/fixtures/h3-signup-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "input[name=\"fname\"]",
+            "role": "first-name",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"lname\"]",
+            "role": "last-name",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"contact\"]",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"pw\"]",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "select[name=\"dob_d\"]",
+          "select[name=\"dob_m\"]",
+          "select[name=\"dob_y\"]"
+        ]
+      }
+    ],
+    "state": {
+      "first-name": "first-name",
+      "last-name": "last-name",
+      "email": "email",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "h3-signup-05",
+    "category": "signup",
+    "description": "Rendered after one second, aria-label only, wrong autocomplete values on the new password boxes, company field, team-size select.",
+    "path": "/fixtures/h3-signup-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "input[aria-label=\"Work email\"]",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "input[aria-label=\"Company name\"]",
+            "role": "company",
+            "frame": null
+          },
+          {
+            "selector": "input[aria-label=\"Choose a password\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[aria-label=\"Repeat password\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "select[aria-label=\"Team size\"]"
+        ],
+        "wait": "input[aria-label=\"Repeat password\"]"
+      }
+    ],
+    "state": {
+      "email": "email",
+      "company": "company",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h3-signup-06",
+    "category": "signup",
+    "description": "CSS-module classes, grid rows of adjacent div labels, no ids or names, casual wording for password confirmation, security question and answer.",
+    "path": "/fixtures/h3-signup-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": ".Join_grid__lP0kq > div:nth-child(1) input",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": ".Join_grid__lP0kq > div:nth-child(2) input",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": ".Join_grid__lP0kq > div:nth-child(3) input",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          ".Join_grid__lP0kq > div:nth-child(4) select",
+          ".Join_grid__lP0kq > div:nth-child(5) input"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h3-change-01",
+    "category": "change-password",
+    "description": "Settings page: a profile section with name and email above a password section; navigation search in the side bar.",
+    "path": "/fixtures/h3-change-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#current_password",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#new_password",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#confirm_password",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#nav-search",
+          "#display-name",
+          "#profile-email"
+        ]
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h3-change-02",
+    "category": "change-password",
+    "description": "Reset page reached from a mail link: new password and confirm only, Material style, controlled inputs, account name kept in a hidden input.",
+    "path": "/fixtures/h3-change-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "input[id=\":r7:\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[id=\":r8:\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h3-change-03",
+    "category": "change-password",
+    "description": "CSS modules, adjacent div labels with old/new/again wording, autocomplete off throughout, bullets as placeholders, show buttons.",
+    "path": "/fixtures/h3-change-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "input[name=\"opw\"]",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"npw1\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"npw2\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h3-change-04",
+    "category": "change-password",
+    "description": "Accordion on a security page: the password form only exists after opening its section and a short load. Recovery email box in another open section.",
+    "path": "/fixtures/h3-change-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#recovery-email"
+        ],
+        "advance": {
+          "click": "#pw-toggle"
+        }
+      },
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#cp-current",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#cp-new",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#cp-repeat",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#recovery-email"
+        ],
+        "wait": "#cp-repeat"
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h3-change-05",
+    "category": "change-password",
+    "description": "Forced expiry page in Ant style, placeholder-only, account shown as text, controlled inputs re-rendering each second, IT help box.",
+    "path": "/fixtures/h3-change-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#f_a",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#f_b",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#f_c",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#help-q"
+        ]
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h3-otp-01",
+    "category": "otp",
+    "description": "One input with a proper one-time-code autocomplete, numeric input mode and a length limit.",
+    "path": "/fixtures/h3-otp-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#otc",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "h3-otp-02",
+    "category": "otp",
+    "description": "Six separate boxes with Tailwind classes, aria-label per digit, auto-advance and paste handling.",
+    "path": "/fixtures/h3-otp-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "input[aria-label=\"Digit 1 of 6\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[aria-label=\"Digit 2 of 6\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[aria-label=\"Digit 3 of 6\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[aria-label=\"Digit 4 of 6\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[aria-label=\"Digit 5 of 6\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[aria-label=\"Digit 6 of 6\"]",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp-digit": "otp"
+    }
+  },
+  {
+    "id": "h3-otp-03",
+    "category": "otp",
+    "description": "Adjacent div caption, telephone input type, no autocomplete, placeholder of zeros; controlled input re-rendered by a resend countdown; trust-device checkbox.",
+    "path": "/fixtures/h3-otp-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "input[name=\"code\"]",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "h3-otp-04",
+    "category": "otp",
+    "description": "Four-digit SMS code in four unlabelled boxes; the only text is the heading and the group label.",
+    "path": "/fixtures/h3-otp-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "input[name=\"d1\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"d2\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"d3\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"d4\"]",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp-digit": "otp"
+    }
+  },
+  {
+    "id": "h3-otp-05",
+    "category": "otp",
+    "description": "Split into three and three with a dash, name attributes with array syntax, rendered after a short delay, code delivered by email.",
+    "path": "/fixtures/h3-otp-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "input[name=\"otp[0]\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"otp[1]\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"otp[2]\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"otp[3]\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"otp[4]\"]",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"otp[5]\"]",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "wait": "input[name=\"otp[5]\"]"
+      }
+    ],
+    "state": {
+      "otp-digit": "otp"
+    }
+  },
+  {
+    "id": "h3-otp-06",
+    "category": "otp",
+    "description": "aria-label only, autocomplete off, authenticator wording; a recovery-code form is hidden behind a link.",
+    "path": "/fixtures/h3-otp-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#totp",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#backup-code"
+        ]
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "h3-lang-01",
+    "category": "language",
+    "description": "Swahili sign-in, labels with for, product search in the header.",
+    "path": "/fixtures/h3-lang-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#a1",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#a2",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#tafuta"
+        ]
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-lang-02",
+    "category": "language",
+    "description": "Thai sign-in, placeholder-only, no names or ids; footer newsletter box in Thai.",
+    "path": "/fixtures/h3-lang-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": ".login-box input[type=\"text\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": ".login-box input[type=\"password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#news"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-lang-03",
+    "category": "language",
+    "description": "Hungarian registration, opaque ids, labels with for.",
+    "path": "/fixtures/h3-lang-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#f1",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#f2",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#f3",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#f4",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "email": "email",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h3-lang-04",
+    "category": "language",
+    "description": "Greek password change, aria-label only, opaque ids.",
+    "path": "/fixtures/h3-lang-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#pw-a",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#pw-b",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#pw-c",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h3-lang-05",
+    "category": "language",
+    "description": "Hebrew, right to left, single code box without autocomplete.",
+    "path": "/fixtures/h3-lang-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#kod",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "h3-card-01",
+    "category": "card",
+    "description": "Payment step with correct cc autocomplete, input masks on number and expiry; promo code and order note beside it.",
+    "path": "/fixtures/h3-card-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "#cc-name",
+            "role": "card-name",
+            "frame": null
+          },
+          {
+            "selector": "#cc-number",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "#cc-exp",
+            "role": "card-exp",
+            "frame": null
+          },
+          {
+            "selector": "#cc-csc",
+            "role": "card-cvv",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#promo",
+          "#order-note"
+        ]
+      }
+    ],
+    "state": {
+      "card-name": "card-name",
+      "card-number": "card-number",
+      "card-exp": "card-exp",
+      "card-cvv": "card-cvv"
+    }
+  },
+  {
+    "id": "h3-card-02",
+    "category": "card",
+    "description": "Donation form, adjacent div captions, plain wording for card parts, month and year selects, a donation amount box.",
+    "path": "/fixtures/h3-card-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "input[name=\"holder\"]",
+            "role": "card-name",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"pan\"]",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "select[name=\"m\"]",
+            "role": "card-exp-month",
+            "frame": null
+          },
+          {
+            "selector": "select[name=\"y\"]",
+            "role": "card-exp-year",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"sc\"]",
+            "role": "card-cvv",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#amt"
+        ]
+      }
+    ],
+    "state": {
+      "card-name": "card-name",
+      "card-number": "card-number",
+      "card-exp-month": "card-exp-month",
+      "card-exp-year": "card-exp-year",
+      "card-cvv": "card-cvv"
+    }
+  },
+  {
+    "id": "h3-card-03",
+    "category": "card",
+    "description": "Hosted payment fields: number, expiry and CVC each live in their own iframe, name on card is in the page, discount box in the page.",
+    "path": "/fixtures/h3-card-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "#holder",
+            "role": "card-name",
+            "frame": null
+          },
+          {
+            "selector": "input",
+            "role": "card-number",
+            "frame": [
+              "iframe[title=\"Secure card number input frame\"]"
+            ]
+          },
+          {
+            "selector": "input",
+            "role": "card-exp",
+            "frame": [
+              "iframe[title=\"Secure expiration date input frame\"]"
+            ]
+          },
+          {
+            "selector": "input",
+            "role": "card-cvv",
+            "frame": [
+              "iframe[title=\"Secure CVC input frame\"]"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#disc"
+        ]
+      }
+    ],
+    "state": {
+      "card-name": "card-name",
+      "card-number": "card-number",
+      "card-exp": "card-exp",
+      "card-cvv": "card-cvv"
+    }
+  },
+  {
+    "id": "h3-identity-01",
+    "category": "identity",
+    "description": "Checkout shipping form with no autocomplete attributes, generated field ids, labels with for; coupon box and delivery note.",
+    "path": "/fixtures/h3-identity-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "identity",
+        "expected": [
+          {
+            "selector": "#fld_3a",
+            "role": "first-name",
+            "frame": null
+          },
+          {
+            "selector": "#fld_3b",
+            "role": "last-name",
+            "frame": null
+          },
+          {
+            "selector": "#fld_3c",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#fld_3d",
+            "role": "company",
+            "frame": null
+          },
+          {
+            "selector": "#fld_3e",
+            "role": "address1",
+            "frame": null
+          },
+          {
+            "selector": "#fld_3f",
+            "role": "address2",
+            "frame": null
+          },
+          {
+            "selector": "#fld_3g",
+            "role": "city",
+            "frame": null
+          },
+          {
+            "selector": "#fld_3h",
+            "role": "state",
+            "frame": null
+          },
+          {
+            "selector": "#fld_3i",
+            "role": "postcode",
+            "frame": null
+          },
+          {
+            "selector": "#fld_3j",
+            "role": "country",
+            "frame": null
+          },
+          {
+            "selector": "#fld_3k",
+            "role": "phone",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#fld_3l",
+          "#fld_3m"
+        ]
+      }
+    ],
+    "state": {
+      "first-name": "first-name",
+      "last-name": "last-name",
+      "email": "email",
+      "company": "company",
+      "address1": "address1",
+      "address2": "address2",
+      "city": "city",
+      "state": "state",
+      "postcode": "postcode",
+      "country": "country",
+      "phone": "phone"
+    }
+  },
+  {
+    "id": "h3-identity-02",
+    "category": "identity",
+    "description": "Material style floating labels, local wording for address parts, native select for state; discount code and gift message.",
+    "path": "/fixtures/h3-identity-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "identity",
+        "expected": [
+          {
+            "selector": "input[id=\":ra:\"]",
+            "role": "full-name",
+            "frame": null
+          },
+          {
+            "selector": "input[id=\":rb:\"]",
+            "role": "address1",
+            "frame": null
+          },
+          {
+            "selector": "input[id=\":rc:\"]",
+            "role": "address2",
+            "frame": null
+          },
+          {
+            "selector": "input[id=\":rd:\"]",
+            "role": "city",
+            "frame": null
+          },
+          {
+            "selector": "#st",
+            "role": "state",
+            "frame": null
+          },
+          {
+            "selector": "input[id=\":re:\"]",
+            "role": "postcode",
+            "frame": null
+          },
+          {
+            "selector": "input[id=\":rf:\"]",
+            "role": "phone",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[id=\":rg:\"]",
+          "#gift"
+        ]
+      }
+    ],
+    "state": {
+      "full-name": "full-name",
+      "address1": "address1",
+      "address2": "address2",
+      "city": "city",
+      "state": "state",
+      "postcode": "postcode",
+      "phone": "phone"
+    }
+  },
+  {
+    "id": "h3-frame-01",
+    "category": "iframe",
+    "description": "Same-origin iframe holds the member sign-in widget; the host page has a programme search and a newsletter box.",
+    "path": "/fixtures/h3-frame-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#login-user",
+            "role": "username",
+            "frame": [
+              "#auth-frame"
+            ]
+          },
+          {
+            "selector": "#login-pass",
+            "role": "password",
+            "frame": [
+              "#auth-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#q",
+          "#nl"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-frame-02",
+    "category": "iframe",
+    "description": "Payment challenge: an outer iframe is added after a second and holds a nested iframe with one passcode box.",
+    "path": "/fixtures/h3-frame-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#challenge",
+            "role": "otp",
+            "frame": [
+              "#threeds-outer",
+              "#acs-frame"
+            ]
+          }
+        ],
+        "honeypots": [],
+        "wait": "#threeds-outer"
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "h3-shadow-01",
+    "category": "shadow",
+    "description": "Web components: a card with an open shadow root containing field components with their own open shadow roots; course search in the light DOM.",
+    "path": "/fixtures/h3-shadow-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": [
+              "ml-login-card",
+              "ml-field.who",
+              "input"
+            ],
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": [
+              "ml-login-card",
+              "ml-field.key",
+              "input"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#top-search"
+        ]
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-modal-01",
+    "category": "modal",
+    "description": "Log-in dialog is portalled to the end of body only after clicking the header button; the page behind has a search box and a newsletter box.",
+    "path": "/fixtures/h3-modal-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#site-search",
+          "#nl"
+        ],
+        "advance": {
+          "click": "#open-login"
+        }
+      },
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "[role=\"dialog\"] input[name=\"email\"]",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "[role=\"dialog\"] input[name=\"password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search",
+          "#nl"
+        ],
+        "wait": "[role=\"dialog\"] input[name=\"password\"]"
+      }
+    ],
+    "state": {
+      "email": "email",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h3-modal-02",
+    "category": "modal",
+    "description": "A reading wall opens by itself a little after load: Material dialog offering a free account; article behind has a footer newsletter box.",
+    "path": "/fixtures/h3-modal-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#wall input[type=\"email\"]",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#wall input[type=\"password\"]",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#nl-foot"
+        ],
+        "wait": "#wall input[type=\"password\"]"
+      }
+    ],
+    "state": {
+      "email": "email",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "h3-neg-01",
+    "category": "negative",
+    "description": "Search results page: header search box, price range filters and a sort select.",
+    "path": "/fixtures/h3-neg-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "search",
+        "expected": [],
+        "honeypots": [
+          "#q",
+          "#min-price",
+          "#max-price",
+          "#sort"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-02",
+    "category": "negative",
+    "description": "Newsletter landing page, Material style, \"Sign up\" wording, one email box.",
+    "path": "/fixtures/h3-neg-02.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "newsletter",
+        "expected": [],
+        "honeypots": [
+          "input[id=\":rs:\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-03",
+    "category": "negative",
+    "description": "Blog post with a comment form asking only for a nickname and a comment, blog search and footer subscribe box.",
+    "path": "/fixtures/h3-neg-03.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#s",
+          "#nick",
+          "#comment",
+          "#nl"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-04",
+    "category": "negative",
+    "description": "Loan repayment calculator with four numeric boxes.",
+    "path": "/fixtures/h3-neg-04.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#loan-amt",
+          "#rate",
+          "#years",
+          "#extra"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-05",
+    "category": "negative",
+    "description": "Flight search with origin, destination, dates and passenger count.",
+    "path": "/fixtures/h3-neg-05.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "search",
+        "expected": [],
+        "honeypots": [
+          "#from",
+          "#to",
+          "#depart",
+          "#ret",
+          "#pax"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-06",
+    "category": "negative",
+    "description": "Basket page: quantity boxes and a short \"enter code\" promotional box with an Apply button.",
+    "path": "/fixtures/h3-neg-06.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#qty-1",
+          "#qty-2",
+          "#promo-code"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-07",
+    "category": "negative",
+    "description": "Admin table with per-column filter boxes for username, email and role above existing rows.",
+    "path": "/fixtures/h3-neg-07.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "search",
+        "expected": [],
+        "honeypots": [
+          "input[aria-label=\"Filter by username\"]",
+          "input[aria-label=\"Filter by email\"]",
+          "select[aria-label=\"Filter by role\"]"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-08",
+    "category": "negative",
+    "description": "Free-standing password strength tester: one masked box on a tool page, nothing to log in to, the page says to avoid real passwords.",
+    "path": "/fixtures/h3-neg-08.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#strength-input"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-09",
+    "category": "negative",
+    "description": "Webmail compose window with recipient boxes, subject and body, plus mailbox search.",
+    "path": "/fixtures/h3-neg-09.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#mail-search",
+          "#to",
+          "#cc",
+          "#subj",
+          "#body-text"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-10",
+    "category": "negative",
+    "description": "Help article whose text is all about signing in and passwords; only a help search box and a feedback text area.",
+    "path": "/fixtures/h3-neg-10.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#help-q",
+          "#fb-text"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-11",
+    "category": "negative",
+    "description": "Product page with a six-digit delivery PIN code checker and a quantity box.",
+    "path": "/fixtures/h3-neg-11.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#qty",
+          "#pincode"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h3-neg-12",
+    "category": "negative",
+    "description": "Signed-in dashboard: invite a teammate by email with a role select, and workspace search.",
+    "path": "/fixtures/h3-neg-12.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#wsp-search",
+          "#invite-email",
+          "#invite-role"
+        ]
+      }
+    ]
+  }
+]

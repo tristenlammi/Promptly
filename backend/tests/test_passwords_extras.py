@@ -178,3 +178,70 @@ async def test_icon_refuses_svg_and_html(client, db, monkeypatch):
     monkeypatch.setattr(sf, "safe_fetch", fake_png)
     r = await client.post("/api/passwords/icon", headers=v.h, json={"domain": "example.com"})
     assert r.status_code == 200 and r.headers["x-content-type-options"] == "nosniff"
+
+async def test_icon_and_breach_urls_stay_out_of_the_logs(client, db, caplog, monkeypatch):
+    """httpx logs what it fetches at INFO, and the line carries who's signed in."""
+    import logging
+
+    from app.logging_setup import configure_logging
+
+    configure_logging(enable_ring=False)
+    assert logging.getLogger("httpx").level == logging.WARNING
+    # And the part of the fix a reader might undo: nothing below WARNING reaches the handlers.
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
+
+
+async def test_a_member_can_be_cut_off_without_a_rotation(client, db):
+    a = await setup_vault(client, await make_user(db))
+    b = await setup_vault(client, await make_user(db))
+    vid = await shared_vault(client, a)
+    from tests.test_passwords import grant
+
+    assert (await client.post(f"/api/passwords/vaults/{vid}/members", headers=a.h, json={"user_id": str(b.user.id), "role": "edit", "grant": grant()})).status_code == 204
+    # A member can't remove others, and a stranger can't either.
+    assert (await client.delete(f"/api/passwords/vaults/{vid}/members/{a.user.id}", headers=b.h)).status_code == 403
+    c = await setup_vault(client, await make_user(db))
+    assert (await client.delete(f"/api/passwords/vaults/{vid}/members/{b.user.id}", headers=c.h)).status_code == 404
+    assert (await client.delete(f"/api/passwords/vaults/{vid}/members/{b.user.id}", headers=a.h)).status_code == 204
+    # Out now, and whoever manages it is told the key should change.
+    assert (await client.get(f"/api/passwords/vaults/{vid}/changes", headers=b.h)).status_code == 404
+    mine = {v["id"]: v for v in (await client.get("/api/passwords/vaults", headers=a.h)).json()}
+    assert mine[vid]["rotate_needed"] is True
+
+
+async def test_rotate_rules_and_writes_from_an_old_generation(client, db):
+    a = await setup_vault(client, await make_user(db))
+    victim = await make_user(db)
+    vid = await shared_vault(client, a)
+    from tests.test_passwords import grant
+
+    # Can't be used to write to someone else's activity log.
+    body = {"from_generation": 1, "name": b64(os.urandom(286)), "remove_user_ids": [str(victim.id)] * 2, "members": [{"user_id": str(a.user.id), "grant": grant()}], "items": []}
+    assert (await client.post(f"/api/passwords/vaults/{vid}/rotate", headers=a.h, json=body)).status_code == 400
+    body["remove_user_ids"] = [str(victim.id)]
+    assert (await client.post(f"/api/passwords/vaults/{vid}/rotate", headers=a.h, json=body)).status_code == 400
+    body["remove_user_ids"] = []
+    assert (await client.post(f"/api/passwords/vaults/{vid}/rotate", headers=a.h, json=body)).status_code == 204
+    # A client that hasn't seen that can't save under the old key.
+    item = {"id": str(uuid.uuid4()), "blob": b64(os.urandom(50))}
+    assert (await client.post(f"/api/passwords/vaults/{vid}/items", headers=a.h, json={"items": [item], "generation": 1})).status_code == 409
+    assert (await client.post(f"/api/passwords/vaults/{vid}/items", headers=a.h, json={"items": [item], "generation": 2})).status_code == 200
+    assert (await client.post(f"/api/passwords/vaults/{vid}/items", headers=a.h, json={"items": [item, item]})).status_code == 400
+
+
+async def test_a_purge_takes_its_attachments_and_quota_holds(client, db, _uploads, monkeypatch):
+    from app.passwords import service
+
+    v = await setup_vault(client, await make_user(db))
+    item = await _item(client, v)
+    aid = str(uuid.uuid4())
+    url = f"/api/passwords/vaults/{v.vault_id}/attachments"
+    assert (await client.post(url, headers=v.h, json={"id": aid, "item_id": item, "chunk_count": 1})).status_code == 200
+    assert (await client.put(f"{url}/{aid}/chunks/0", headers=v.h, content=b"x" * 100)).status_code == 204
+    await write(client, v, v.vault_id, [{"id": item, "base_revision": 99, "purge": True}])
+    assert not list(_uploads.glob("passwords/**/*.bin"))
+    assert (await client.get(f"{url}/{aid}/chunks/0", headers=v.h)).status_code == 404
+
+    monkeypatch.setattr(service, "QUOTA_MB", 2)
+    other = await _item(client, v)
+    assert (await client.post(url, headers=v.h, json={"id": str(uuid.uuid4()), "item_id": other, "chunk_count": 5})).status_code == 413

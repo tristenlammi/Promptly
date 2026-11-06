@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shipping - Larkspur Goods</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:14px/1.5 ui-sans-serif,system-ui,sans-serif;color:#111827;background:#f9fafb}a{color:#4f46e5;text-decoration:none}label{display:block;font-weight:500;margin-bottom:6px}input,select,textarea{width:100%;font:inherit;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;background:#fff}button{font:inherit;font-weight:600;padding:7px 12px;border:0;border-radius:6px;background:#4f46e5;color:#fff;cursor:pointer}main{max-width:600px;margin:32px auto;padding:0 16px}.g{display:grid;grid-template-columns:1fr 1fr;gap:14px}.full{grid-column:1/-1}
+</style>
+</head>
+<body>
+<main class="mx-auto max-w-2xl"><h1 class="text-xl font-semibold">Where should we send it?</h1><form onsubmit="return false"><div class="g grid grid-cols-2 gap-4"><div><label for="fld_3a">First name</label><input id="fld_3a" name="fld_3a" type="text"></div><div><label for="fld_3b">Last name</label><input id="fld_3b" name="fld_3b" type="text"></div><div class="full col-span-2"><label for="fld_3c">Email for delivery updates</label><input id="fld_3c" name="fld_3c" type="email"></div><div class="full col-span-2"><label for="fld_3d">Company (optional)</label><input id="fld_3d" name="fld_3d" type="text"></div><div class="full col-span-2"><label for="fld_3e">Address</label><input id="fld_3e" name="fld_3e" type="text" placeholder="Street and number"></div><div class="full col-span-2"><label for="fld_3f">Apartment, suite, etc.</label><input id="fld_3f" name="fld_3f" type="text"></div><div><label for="fld_3g">City</label><input id="fld_3g" name="fld_3g" type="text"></div><div><label for="fld_3h">State</label><select id="fld_3h" name="fld_3h"><option value="">Choose</option><option value="OR">Oregon</option><option value="WA">Washington</option><option value="ID">Idaho</option></select></div><div><label for="fld_3i">ZIP code</label><input id="fld_3i" name="fld_3i" type="text"></div><div><label for="fld_3j">Country</label><select id="fld_3j" name="fld_3j"><option value="">Choose</option><option value="CA">Canada</option><option value="US">United States</option></select></div><div class="full col-span-2"><label for="fld_3k">Phone</label><input id="fld_3k" name="fld_3k" type="tel"></div><div class="full col-span-2"><label for="fld_3l">Delivery note</label><textarea id="fld_3l" name="fld_3l" rows="2"></textarea></div><div class="full col-span-2"><label for="fld_3m">Coupon</label><input id="fld_3m" name="fld_3m" type="text"></div></div><button style="margin-top:16px" class="w-full" type="submit">Continue to payment</button></form></main>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"first-name":r("#fld_3a",[]),"last-name":r("#fld_3b",[]),"email":r("#fld_3c",[]),"company":r("#fld_3d",[]),"address1":r("#fld_3e",[]),"address2":r("#fld_3f",[]),"city":r("#fld_3g",[]),"state":r("#fld_3h",[]),"postcode":r("#fld_3i",[]),"country":r("#fld_3j",[]),"phone":r("#fld_3k",[])};}};</script>
+</body>
+</html>

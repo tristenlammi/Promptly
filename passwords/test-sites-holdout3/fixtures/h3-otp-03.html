@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confirm it is you - Verdant Payroll</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.5 system-ui,sans-serif;background:#f8f7fb;color:#1c1b22}.wrap{max-width:400px;margin:80px auto;background:#fff;border-radius:12px;padding:32px;box-shadow:0 2px 10px rgba(30,20,60,.1)}label{display:block;font-size:13px;margin-bottom:4px}input{font:inherit}.one{width:100%;padding:10px;border:1px solid #bbb;border-radius:8px;letter-spacing:.2em}button{margin-top:16px;padding:9px 18px;border:0;border-radius:8px;background:#5b3cc4;color:#fff;font:inherit;cursor:pointer}.lnk{display:inline-block;margin-top:12px;font-size:13px}.cap{font-size:14px;margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="wrap"><h1>Confirm it's you</h1><form onsubmit="return false"><div class="cap">Enter the code we texted to &bull;&bull;&bull;&bull; 4821</div><input class="one" name="code" type="tel" placeholder="000000" maxlength="6"><div style="margin-top:12px"><label style="display:inline"><input type="checkbox"> Trust this device for 30 days</label></div><button type="submit">Confirm</button></form><span class="lnk" id="re">Resend available in 45s</span></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"otp":r("input[name=\"code\"]",[])};}};</script>
+<script>function __ctrl(els,tick){var d=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value');var st=els.map(function(){return ''});var tr=els.map(function(){return ''});function render(){els.forEach(function(el,i){if(d.get.call(el)!==st[i]){d.set.call(el,st[i]);tr[i]=st[i];}});}els.forEach(function(el,i){Object.defineProperty(el,'value',{configurable:true,get:function(){return d.get.call(this)},set:function(v){tr[i]=''+v;d.set.call(this,v)}});function onch(){var c=d.get.call(el);if(c===tr[i])return;tr[i]=c;st[i]=c;render();}el.addEventListener('input',onch);el.addEventListener('change',onch);});if(tick)setInterval(render,tick);return render;}__ctrl([document.querySelector('input[name="code"]')],1000);var n=45;setInterval(function(){n=n>0?n-1:45;document.getElementById('re').textContent='Resend available in '+n+'s';},1000);</script>
+</body>
+</html>

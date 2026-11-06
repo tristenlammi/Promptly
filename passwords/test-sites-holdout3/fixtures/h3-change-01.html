@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Account settings - Larkfield Studio</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:14px/1.5 ui-sans-serif,system-ui,sans-serif;color:#111827;background:#f9fafb}a{color:#4f46e5;text-decoration:none}label{display:block;font-weight:500;margin-bottom:6px}input,select,textarea{width:100%;font:inherit;padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;background:#fff}button{font:inherit;font-weight:600;padding:7px 12px;border:0;border-radius:6px;background:#4f46e5;color:#fff;cursor:pointer}.shell{display:flex;min-height:100vh}.side{width:220px;background:#fff;border-right:1px solid #e5e7eb;padding:16px}.content{flex:1;max-width:640px;padding:32px}section{background:#fff;border:1px solid #e5e7eb;border-radius:10px;padding:20px;margin-bottom:24px}.f{margin-bottom:14px}
+</style>
+</head>
+<body>
+<div class="shell flex h-screen"><aside class="side w-56 shrink-0 border-r"><b>Larkfield Studio</b><p><input id="nav-search" type="search" aria-label="Search settings" placeholder="Search settings" class="block w-full rounded-md"></p></aside><div class="content flex-1 p-8"><h1 class="text-2xl font-bold">Account settings</h1><section class="rounded-xl border p-5"><h2 class="text-lg font-semibold">Profile</h2><form onsubmit="return false"><div class="f"><label for="display-name" class="block text-sm/6">Display name</label><input id="display-name" name="display_name" type="text" class="block w-full rounded-md" value=""></div><div class="f"><label for="profile-email" class="block text-sm/6">Contact email</label><input id="profile-email" name="contact_email" type="email" class="block w-full rounded-md" value=""></div><button type="submit">Save profile</button></form></section><section class="rounded-xl border p-5"><h2 class="text-lg font-semibold">Change password</h2><form onsubmit="return false"><div class="f"><label for="current_password" class="block text-sm/6">Current password</label><input id="current_password" name="current_password" type="password" autocomplete="current-password" class="block w-full rounded-md"></div><div class="f"><label for="new_password" class="block text-sm/6">New password</label><input id="new_password" name="new_password" type="password" autocomplete="new-password" class="block w-full rounded-md"></div><div class="f"><label for="confirm_password" class="block text-sm/6">Confirm new password</label><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" class="block w-full rounded-md"></div><button type="submit">Update password</button></form></section></div></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"current-password":r("#current_password",[]),"new-password":r("#new_password",[]),"confirm-password":r("#confirm_password",[])};}};</script>
+</body>
+</html>

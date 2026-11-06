@@ -842,7 +842,7 @@ export function KeysPanel() {
           Make a new Secret Key
         </Button>
       </div>
-      <p className="text-xs text-[var(--text-muted)]">A new Secret Key is for when an old kit may have been seen. Unlocking with Windows Hello, a PIN or a passkey has to be set up again after either change.</p>
+      <p className="text-xs text-[var(--text-muted)]">A new Secret Key is for when an old kit may have been seen: the old kit stops working with your server. Your identity keys stay the same, so if someone also has your master password and an old copy of your vault's data, this won't stop them. Unlocking with Windows Hello, a PIN or a passkey has to be set up again after either change.</p>
       {error && <Callout kind="danger">{error}</Callout>}
       {newKit && <KitGate fresh onDone={() => setNewKit(false)} />}
     </div>

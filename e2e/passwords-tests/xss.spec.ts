@@ -99,9 +99,10 @@ test("a malicious import shows as text, and a hostile link is never live", async
   await page.locator('input[type="file"]').first().setInputFiles(file);
   await page.waitForTimeout(800);
   await clean(page, "the import preview");
-  const go = page.getByRole("button", { name: /^Import \d*/ }).first();
-  if (await go.count()) await go.click();
-  await page.waitForTimeout(800);
+  const go = page.getByRole("button", { name: /^Import \d+$/ });
+  await expect(go).toBeVisible({ timeout: 15_000 });
+  await go.click();
+  await expect(page.getByText("Delete the file you imported from")).toBeVisible({ timeout: 30_000 });
   await nav(page, "All items");
   await clean(page, "the list after importing");
   await page.getByText("Bad url").first().click();

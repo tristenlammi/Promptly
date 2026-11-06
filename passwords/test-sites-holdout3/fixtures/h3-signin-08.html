@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brightmoor Outfitters - My account</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.5 system-ui,sans-serif;background:#fff;color:#212529}.navbar{padding:12px 24px;background:#212529;color:#fff}.container{max-width:860px;margin:32px auto;padding:0 16px}.row{display:flex;flex-wrap:wrap;gap:32px}.col-md-6{flex:1 1 320px}.form-floating{position:relative;margin-bottom:12px}.form-floating>.form-control{width:100%;height:58px;padding:26px 12px 6px;border:1px solid #ced4da;border-radius:6px;font:inherit}.form-floating>label{position:absolute;left:12px;top:6px;font-size:12px;color:#6c757d;pointer-events:none}.btn{padding:8px 16px;border:0;border-radius:6px;background:#0d6efd;color:#fff;font:inherit;cursor:pointer}.btn-outline{background:#fff;color:#0d6efd;border:1px solid #0d6efd}
+</style>
+</head>
+<body>
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">Brightmoor Outfitters</nav><div class="container"><div class="row"><div class="col-md-6"><h4>Track an order</h4><p>No account needed.</p><form onsubmit="return false"><div class="form-floating"><input class="form-control" id="to-number" type="text" name="order" placeholder=" "><label for="to-number">Order number</label></div><div class="form-floating"><input class="form-control" id="to-email" type="email" name="order_email" placeholder=" "><label for="to-email">Email on the order</label></div><button class="btn btn-outline" type="submit">Find my order</button></form></div><div class="col-md-6"><h4>Sign in</h4><p>Saved addresses and faster checkout.</p><form onsubmit="return false"><div class="form-floating"><input class="form-control" id="si-email" type="email" name="login_email" placeholder=" "><label for="si-email">Email address</label></div><div class="form-floating"><input class="form-control" id="si-pass" type="password" name="login_pass" placeholder=" "><label for="si-pass">Password</label></div><button class="btn" type="submit">Sign in</button> <a href="#">Forgot it?</a></form></div></div></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"email":r("#si-email",[]),"password":r("#si-pass",[])};}};</script>
+</body>
+</html>

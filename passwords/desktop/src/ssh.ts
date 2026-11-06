@@ -91,9 +91,10 @@ export function fromB64u(s: string): Uint8Array {
   return fromB64(s.replace(/-/g, "+").replace(/_/g, "/"));
 }
 
-/** An item the agent can use: Ed25519, with a private key that matches its public line. */
-export function usableIdentity(body: { kind: string; title: string; sshPublic?: string; sshPrivate?: string }): { blob: Uint8Array; comment: string; seed: Uint8Array } | null {
-  if (body.kind !== "ssh") return null;
+/** An item the agent can use: Ed25519, with a private key that matches its public line. Not an
+ *  item marked to ask for the master password: the agent's Yes/No box doesn't ask for it. */
+export function usableIdentity(body: { kind: string; title: string; sshPublic?: string; sshPrivate?: string; reprompt?: boolean }): { blob: Uint8Array; comment: string; seed: Uint8Array } | null {
+  if (body.kind !== "ssh" || body.reprompt) return null;
   const pub = parsePublicLine(body.sshPublic);
   const priv = parseOpenSshEd25519(body.sshPrivate);
   if (!pub || !priv || pub.type !== ED25519 || !sameBytes(pub.blob, priv.publicBlob)) return null;

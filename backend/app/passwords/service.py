@@ -34,7 +34,10 @@ VERSIONS_KEPT = 20
 TRASH_DAYS = 30
 FAILED_LIMIT = 10
 LOCK_MINUTES = 15
-MAX_ITEM_BYTES = 8 * 1024 * 1024
+MAX_ITEM_BYTES = 2 * 1024 * 1024
+MAX_ITEMS_PER_VAULT = 100_000
+# Attachments, per person, across every vault they upload to.
+QUOTA_MB = int(os.environ.get("PASSWORDS_QUOTA_MB", "20480"))
 MAX_BATCH_ITEMS = 500
 MAX_SEND_BYTES = 30 * 1024 * 1024
 ATTACHMENT_CHUNK_BYTES = 1024 * 1024 + 64
@@ -121,6 +124,10 @@ async def write_batch(
             continue
         if e.get("purge"):
             await db.execute(delete(PwItemVersion).where(PwItemVersion.item_id == item_id))
+            # Its attachments go with it: nobody can place them any more.
+            for a in (await db.execute(select(PwAttachment).where(PwAttachment.item_id == item_id))).scalars().all():
+                remove_attachment_files(vault_id, a.id)
+                await db.delete(a)
             row.blob = None
             row.size_bucket = 0
             row.deleted_at = row.deleted_at or now
@@ -214,6 +221,12 @@ async def sweep(db: AsyncSession) -> dict[str, int]:
         row.size_bucket = 0
         row.revision = vault.revision
     out["trash"] = len(stale)
+    # Uploads nobody finished.
+    abandoned = (await db.execute(select(PwAttachment).where(PwAttachment.complete.is_(False), PwAttachment.created_at < now - timedelta(days=2)))).scalars().all()
+    for a in abandoned:
+        remove_attachment_files(a.vault_id, a.id)
+        await db.delete(a)
+    out["abandoned_uploads"] = len(abandoned)
     # Vaults whose last member was a deleted user: nobody can ever open them.
     orphaned = await db.execute(delete(PwVault).where(~PwVault.id.in_(select(PwVaultMember.vault_id))))
     out["empty_vaults"] = orphaned.rowcount or 0

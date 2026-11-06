@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New message - Pinegrove Mail</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:15px/1.55 system-ui,sans-serif;background:#fafaf8;color:#23252a}a{color:#2456b3}header{display:flex;align-items:center;gap:14px;padding:10px 22px;background:#fff;border-bottom:1px solid #e3e3df}header input{margin-left:auto;width:260px}main{max-width:820px;margin:28px auto;padding:0 18px}input,select,textarea{font:inherit;padding:6px 9px;border:1px solid #c8c8c2;border-radius:5px;background:#fff}textarea{width:100%}button{font:inherit;padding:7px 14px;border:0;border-radius:5px;background:#2456b3;color:#fff;cursor:pointer}label{display:block;font-size:13px;margin:10px 0 3px}footer{max-width:820px;margin:0 auto;padding:16px 18px;font-size:13px;display:flex;gap:10px;align-items:center}table{width:100%;border-collapse:collapse;background:#fff}td,th{padding:7px 9px;border-bottom:1px solid #eee;text-align:left;font-size:14px}.cmp{background:#fff;border:1px solid #ddd;border-radius:8px;padding:16px}.cmp input{width:100%}
+</style>
+</head>
+<body>
+<header><b>Pinegrove Mail</b><input id="mail-search" type="search" placeholder="Search mail"></header><main><div class="cmp" role="dialog" aria-label="New message"><form onsubmit="return false"><label for="to">To</label><input id="to" name="to" type="email" multiple><label for="cc">Cc</label><input id="cc" name="cc" type="email" multiple><label for="subj">Subject</label><input id="subj" name="subject" type="text"><label for="body-text">Message</label><textarea id="body-text" name="body" rows="8"></textarea><p><button type="submit">Send</button></p></form></div></main>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {};}};</script>
+</body>
+</html>

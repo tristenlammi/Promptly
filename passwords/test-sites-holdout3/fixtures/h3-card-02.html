@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Give today - Riverkeepers Trust</title>
+<link rel="icon" href="data:,">
+<style>
+*{box-sizing:border-box}[hidden]{display:none!important}input[type=checkbox],input[type=radio]{width:auto}
+body{margin:0;font:16px/1.5 Georgia,serif;background:#eef4f7;color:#17303d}.frm{max-width:520px;margin:40px auto;background:#fff;padding:28px;border-radius:4px}.ln{display:grid;grid-template-columns:190px 1fr;gap:10px;align-items:center;margin-bottom:12px}.tx{font-size:14px}input,select{width:100%;padding:7px;border:1px solid #8ba4b1;font:inherit;background:#fff}.mm{display:flex;gap:8px}.send{padding:10px 22px;background:#0f6a8b;color:#fff;border:0;font:inherit;cursor:pointer}
+</style>
+</head>
+<body>
+<div class="frm"><h1>Give today</h1><form onsubmit="return false"><div class="ln"><div class="tx">Amount to give ($)</div><input id="amt" name="amount" type="text" inputmode="decimal"></div><h2 style="font-size:18px">Card details</h2><div class="ln"><div class="tx">Cardholder</div><input name="holder" type="text"></div><div class="ln"><div class="tx">Long number on the front of your card</div><input name="pan" type="text" maxlength="19"></div><div class="ln"><div class="tx">Expires</div><div class="mm"><select name="m" aria-label="Month"><option value="">MM</option><option value="01">01</option><option value="02">02</option><option value="12">12</option></select><select name="y" aria-label="Year"><option value="">YYYY</option><option value="2027">2027</option><option value="2028">2028</option><option value="2029">2029</option></select></div></div><div class="ln"><div class="tx">3 digits on the back of your card</div><input name="sc" type="text" maxlength="4"></div><button class="send" type="submit">Send my gift</button></form></div>
+<script>window.__fixture={state:function(){function r(sel,frames){var d=document,i;for(i=0;i<frames.length;i++){var fe=d.querySelector(frames[i]);if(!fe||!fe.contentDocument)return '';d=fe.contentDocument;}
+var n;if(Array.isArray(sel)){n=null;var root=d;for(i=0;i<sel.length;i++){n=root&&root.querySelector(sel[i]);if(!n)return '';root=n.shadowRoot;}}else{n=d.querySelector(sel);}return n?n.value:'';}
+return {"card-name":r("input[name=\"holder\"]",[]),"card-number":r("input[name=\"pan\"]",[]),"card-exp-month":r("select[name=\"m\"]",[]),"card-exp-year":r("select[name=\"y\"]",[]),"card-cvv":r("input[name=\"sc\"]",[])};}};</script>
+</body>
+</html>

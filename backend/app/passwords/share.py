@@ -16,10 +16,11 @@ import logging
 import re
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from limits import parse
-from pydantic import Field
+from pydantic import EmailStr, Field
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -173,8 +174,11 @@ def _gone() -> HTTPException:
     return HTTPException(status.HTTP_404_NOT_FOUND, "This Send has gone. It may have expired or been used up.")
 
 
-def _live(row: PwSend | None) -> PwSend:
+async def _live(db: AsyncSession, row: PwSend | None) -> PwSend:
     if row is None or row.disabled_at is not None or row.expires_at <= _now() or row.views_left == 0:
+        raise _gone()
+    owner = await db.get(User, row.user_id)
+    if owner is None or owner.disabled:
         raise _gone()
     return row
 
@@ -187,7 +191,7 @@ async def send_meta(send_id: str, response: Response, db: AsyncSession = Depends
         sid = uuid.UUID(send_id)
     except ValueError:
         raise _gone() from None
-    row = _live(await db.get(PwSend, sid))
+    row = await _live(db, await db.get(PwSend, sid))
     return SendMeta(has_password=row.password_verifier is not None, password_salt=row.password_salt)
 
 
@@ -199,18 +203,24 @@ async def send_open(send_id: str, body: SendOpen, request: Request, response: Re
     except ValueError:
         raise _gone() from None
     row = (await db.execute(select(PwSend).where(PwSend.id == sid).with_for_update())).scalar_one_or_none()
-    row = _live(row)
+    row = await _live(db, row)
     if row.password_verifier is not None:
+        if body.proof is None:
+            # Asking with nothing isn't a guess, so it can't be used to lock someone out.
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "This Send needs its password.")
         limited = rl._settings.RATE_LIMIT_ENABLED and not await rl._limiter.test(_SEND_GUESSES, "pw_send", str(sid))
         if limited:
             raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Too many tries. Try again later.")
-        if body.proof is None or not service.verify(row.password_salt or b"", row.password_verifier, body.proof):
+        if not service.verify(row.password_salt or b"", row.password_verifier, body.proof):
             if rl._settings.RATE_LIMIT_ENABLED:
                 await rl._limiter.hit(_SEND_GUESSES, "pw_send", str(sid))
             raise HTTPException(status.HTTP_403_FORBIDDEN, "That password isn't right.")
     if row.views_left is not None:
         row.views_left -= 1
     out = SendBlob(blob=row.blob, views_left=row.views_left)
+    # Used up: nothing's kept beyond the last view.
+    if row.views_left == 0:
+        await db.delete(row)
     await db.commit()
     return out
 
@@ -223,12 +233,16 @@ _LINK = re.compile(r"^https?://[^\s#]+/passwords/send/([0-9a-f-]{36})#[A-Za-z0-9
 class SendPost(s._Base):
     link: str = Field(max_length=500)
     user_id: uuid.UUID | None = None
-    to: str | None = Field(default=None, max_length=320)
+    to: EmailStr | None = None
 
 
-def _check_link(link: str, send_id: uuid.UUID) -> None:
+def _check_link(link: str, send_id: uuid.UUID, request: Request) -> None:
     m = _LINK.match(link)
     if m is None or m.group(1) != str(send_id):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "That isn't a link to this Send.")
+    # This server's own address and nothing else, or the message could point anywhere.
+    parts = urlsplit(link)
+    if parts.path != f"/passwords/send/{send_id}" or parts.hostname != request.url.hostname:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "That isn't a link to this Send.")
 
 
@@ -237,9 +251,9 @@ def _send_text(user: User, link: str) -> str:
 
 
 @router.post("/sends/{send_id}/via-rooms", status_code=status.HTTP_204_NO_CONTENT)
-async def send_via_rooms(send_id: str, body: SendPost, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> Response:
+async def send_via_rooms(send_id: str, body: SendPost, request: Request, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> Response:
     row = await _my_send(db, send_id, session.user)
-    _check_link(body.link, row.id)
+    _check_link(body.link, row.id, request)
     if body.user_id is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Pick someone to send it to.")
     await post_to_dm(db, session.user, body.user_id, _send_text(session.user, body.link))
@@ -247,9 +261,9 @@ async def send_via_rooms(send_id: str, body: SendPost, session: VaultSession = D
 
 
 @router.post("/sends/{send_id}/via-mail", status_code=status.HTTP_204_NO_CONTENT)
-async def send_via_mail(send_id: str, body: SendPost, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> Response:
+async def send_via_mail(send_id: str, body: SendPost, request: Request, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> Response:
     row = await _my_send(db, send_id, session.user)
-    _check_link(body.link, row.id)
+    _check_link(body.link, row.id, request)
     if not body.to:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Add someone to send it to.")
     from app.mail import router as mail
@@ -257,7 +271,7 @@ async def send_via_mail(send_id: str, body: SendPost, session: VaultSession = De
     accounts = await mail._my_account_ids(db, session.user)
     if not accounts:
         raise HTTPException(status.HTTP_409_CONFLICT, "Set up Mail first, or copy the link instead.")
-    await mail.send(mail.SendBody(account_id=accounts[0], to=[body.to], subject="Something sent to you through Promptly Passwords", text=_send_text(session.user, body.link)), db, session.user)
+    await mail.send(mail.SendBody(account_id=accounts[0], to=[str(body.to)], subject="Something sent to you through Promptly Passwords", text=_send_text(session.user, body.link)), db, session.user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -498,6 +512,10 @@ async def emergency_open(emergency_id: str, session: VaultSession = Depends(requ
             continue
         if await service.member_of(db, vault.id, row.grantee_id):
             continue
+        # They may have left or been demoted since they sealed this.
+        still = await service.member_of(db, vault.id, row.grantor_id)
+        if still is None or still.role != "manage":
+            continue
         db.add(
             PwVaultMember(
                 vault_id=vault.id,
@@ -531,10 +549,18 @@ async def emergency_delete(emergency_id: str, session: VaultSession = Depends(re
     """Either side can end it. A grantor whose vault was opened rotates first, on the client;
     the memberships go here either way."""
     row = await _emergency(db, emergency_id, session.user)
-    for vault_id in _unpack(row).get("opened", []):
+    opened = _unpack(row).get("opened", [])
+    for vault_id in opened:
         await db.execute(delete(PwVaultMember).where(PwVaultMember.vault_id == uuid.UUID(vault_id), PwVaultMember.user_id == row.grantee_id))
-    await db.delete(row)
+        vault = await db.get(PwVault, uuid.UUID(vault_id))
+        if vault is not None:
+            vault.rotate_needed = True
     await service.activity(db, session.user.id, "emergency_ended", session.device.id if session.device else None)
+    if opened and session.user.id == row.grantee_id:
+        # The grantor must still see that this happened, and change the keys. Only they clear it.
+        row.state = "ended"
+    else:
+        await db.delete(row)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

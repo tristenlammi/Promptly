@@ -12,7 +12,7 @@ import uuid
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -51,6 +51,12 @@ async def attachment_start(vault_id: str, body: s.AttachmentStart, session: Vaul
         if row.vault_id != vault.id or row.item_id != body.item_id:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
         return _att_out(row)
+    used = await db.scalar(select(func.coalesce(func.sum(PwAttachment.chunk_count), 0)).where(PwAttachment.uploaded_by == session.user.id))
+    if int(used or 0) + body.chunk_count > service.QUOTA_MB:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "You've used all the attachment space you have here.")
+    from app.files.disk_guard import ensure_room
+
+    ensure_room(body.chunk_count * 1024 * 1024)
     row = PwAttachment(id=body.id, item_id=body.item_id, vault_id=vault.id, uploaded_by=session.user.id, chunk_count=body.chunk_count, received=[])
     db.add(row)
     await db.commit()
@@ -206,7 +212,8 @@ async def icon(body: _Icon, _session: VaultSession = Depends(require_session), d
     from app.net.safe_fetch import safe_fetch
 
     try:
-        r = await safe_fetch("GET", f"https://{domain}/favicon.ico", timeout_seconds=6, max_bytes=256 * 1024, headers={"User-Agent": "Promptly-Passwords"})
+        # No redirects: this fetches on behalf of whoever asks, so it stays on the name it was given.
+        r = await safe_fetch("GET", f"https://{domain}/favicon.ico", follow_redirects=False, timeout_seconds=6, max_bytes=256 * 1024, headers={"User-Agent": "Promptly-Passwords"})
     except Exception:  # noqa: BLE001 — a missing icon is never an error worth more than a 404
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No icon.") from None
     kind = (r.headers.get("content-type") or "").split(";")[0].strip().lower()

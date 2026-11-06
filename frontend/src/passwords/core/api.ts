@@ -28,6 +28,8 @@ export type Prelogin = {
   kdf: Kdf | null;
   salt: string | null;
   min_kdf: Kdf;
+  /** Checked here, before anything derived from the password is sent. */
+  wrapped_keyset?: string | null;
   preview: boolean;
   enabled: boolean;
   server_time: string;
@@ -58,6 +60,7 @@ export type VaultOut = {
   granted_by: string | null;
   member_generation: number;
   accepted: boolean;
+  rotate_needed?: boolean;
   member_count: number;
 };
 export type ItemOut = { id: string; revision: number; blob: string | null; deleted: boolean; purged: boolean; updated_at: string };
@@ -167,12 +170,13 @@ export class VaultApi {
   acceptVault = (id: string) => this.request<void>("POST", `/vaults/${id}/accept`);
   leaveVault = (id: string) => this.request<void>("POST", `/vaults/${id}/leave`);
   changes = (id: string, since: number, limit = 500) => this.request<ChangesOut>("GET", `/vaults/${id}/changes?since=${since}&limit=${limit}`);
-  writeItems = (id: string, items: ItemWrite[]) => this.request<BatchOut>("POST", `/vaults/${id}/items`, { items });
+  writeItems = (id: string, items: ItemWrite[], generation?: number) => this.request<BatchOut>("POST", `/vaults/${id}/items`, { items, generation });
   versions = (vaultId: string, itemId: string) =>
     this.request<{ revision: number; blob: string; created_at: string }[]>("GET", `/vaults/${vaultId}/items/${itemId}/versions`);
 
   members = (id: string) => this.request<MemberOut[]>("GET", `/vaults/${id}/members`);
   addMember = (id: string, body: { user_id: string; role: string; grant: Grant }) => this.request<void>("POST", `/vaults/${id}/members`, body);
+  removeMember = (id: string, userId: string) => this.request<void>("DELETE", `/vaults/${id}/members/${userId}`);
   setRole = (id: string, userId: string, role: string) => this.request<void>("PATCH", `/vaults/${id}/members/${userId}`, { role });
   rotate = (id: string, body: unknown) => this.request<void>("POST", `/vaults/${id}/rotate`, body);
   userKeys = (userId: string) => this.request<{ user_id: string; username: string; x25519_pub: string; ed25519_pub: string }>("GET", `/users/${userId}/keys`);

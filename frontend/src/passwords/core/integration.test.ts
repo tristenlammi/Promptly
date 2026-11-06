@@ -141,7 +141,7 @@ asyncio.run(main())
     await a.c.saveNew(shared, newBody("login", "Shared login", { password: "x" }));
     await a.c.sync();
     await a.c.addMember(shared, ub.id, "view");
-    await b.c.api.acceptVault(shared);
+    await b.c.acceptVault(shared);
     await b.c.sync();
     await b.c.saveNew(await b.c.personalVaultId(), newBody("login", "My own", { password: "y" }));
     await b.c.sync();
@@ -440,9 +440,10 @@ asyncio.run(main())
     await a.c.addMember(shared, bob.id, "edit");
     await b.c.sync();
     const invited = (await b.c.vaults()).find((v) => v.id === shared)!;
-    expect(invited.displayName).toBe("Family");
+    // Nothing opens on an invitation alone.
+    expect(invited.displayName).toBe("(can't open)");
     expect(invited.accepted).toBe(false);
-    await b.c.api.acceptVault(shared);
+    await b.c.acceptVault(shared);
     await b.c.sync();
     expect(b.c.get(item.id)?.body.password).toBe("tv-pass-2");
 
@@ -472,7 +473,7 @@ asyncio.run(main())
     const m = await ready(mallory);
     const shared = await a.c.createSharedVault("Real");
     await a.c.addMember(shared, ub.id, "view");
-    await b.c.sync();
+    await b.c.acceptVault(shared);
     expect((await b.c.vaults()).find((v) => v.id === shared)?.displayName).toBe("Real");
 
     // The server swaps in a grant signed by someone else, claiming to be Alice.
@@ -558,7 +559,7 @@ describe.skipIf(!stackEnabled)("canary: the server can't read", () => {
     await a.c.sync();
     await a.c.update(i1.id, { ...a.c.get(i1.id)!.body, password: `${CANARY}_password2` });
     await a.c.addMember(shared, v.id, "edit");
-    await b.c.api.acceptVault(shared);
+    await b.c.acceptVault(shared);
     await a.c.sync();
     await b.c.sync();
     expect(b.c.get(i2.id)?.body.title).toBe(`${CANARY}_sharedtitle`);

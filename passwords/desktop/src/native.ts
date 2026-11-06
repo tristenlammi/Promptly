@@ -68,6 +68,7 @@ export const native = {
   sshSet: (on: boolean) => invoke<SshStatus>("ssh_set", { on }),
   updaterStatus: () => invoke<boolean>("updater_status"),
   mainShow: () => invoke<void>("main_show"),
+  deviceNotice: (count: number, name: string | null, isNew: boolean) => invoke<void>("device_notice", { count, name, isNew }),
 };
 
 export type BackupStatus = { enabled: boolean; dir: string; every_hours: number; keep: number; last_run_ms: number; last_error: string | null; has_password: boolean; due: boolean; default_dir: string };
