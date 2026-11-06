@@ -6,6 +6,7 @@ import { aad, openSealed, sealTo } from "./format";
 import {
   decryptItem,
   deriveRoot,
+  deriveRootRaw,
   encodeKeyset,
   encryptItem,
   grantVaultKey,
@@ -212,6 +213,66 @@ export class VaultClient {
       items: new Map(),
       search: new Map(),
     };
+    await this.loadLocal();
+    if (!offline) await this.sync();
+    return { offline };
+  }
+
+  /** For "reprompt" items: is this the master password? Local, no server. */
+  async checkPassword(password: string): Promise<boolean> {
+    const s = this.need();
+    const secretKey = await this.loadSecretKey();
+    const account = await this.store.getAccount();
+    if (!secretKey || !account) return false;
+    try {
+      const { unlockKey } = await deriveRoot(password, secretKey, fromB64u(account.salt), account.kdf);
+      await unwrapKeyset(unlockKey, s.accountId, fromB64u(account.wrappedKeyset));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** The derived unlock and auth keys, for a platform that can hold them behind
+   *  the OS (Windows Hello, Android biometrics). Never the master password. */
+  async exportUnlockSecret(password: string): Promise<Uint8Array> {
+    const secretKey = await this.loadSecretKey();
+    const account = await this.store.getAccount();
+    if (!secretKey || !account) throw new Error("This device isn't set up");
+    const { unlock, auth } = await deriveRootRaw(password, secretKey, fromB64u(account.salt), account.kdf);
+    const { unlockKey } = await deriveRoot(password, secretKey, fromB64u(account.salt), account.kdf);
+    await unwrapKeyset(unlockKey, account.accountId, fromB64u(account.wrappedKeyset));
+    const out = new Uint8Array(64);
+    out.set(unlock, 0);
+    out.set(auth, 32);
+    return out;
+  }
+
+  /** Unlock with what ``exportUnlockSecret`` gave, handed back by the OS. */
+  async unlockWithSecret(secret: Uint8Array): Promise<{ offline: boolean }> {
+    if (secret.length !== 64) throw new Error("bad unlock secret");
+    let cached = await this.store.getAccount();
+    const unlockKey = await aesKey(secret.slice(0, 32));
+    const authKey = secret.slice(32);
+    let offline = false;
+    try {
+      const session = await this.api.createSession(b64u(authKey));
+      this.api.session = session.token;
+      await this.cacheAccount(session);
+      cached = await this.store.getAccount();
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) throw new WrongPasswordError();
+      if (e instanceof OfflineError || (e instanceof ApiError && e.status >= 500)) offline = true;
+      else throw e;
+    }
+    if (!cached) throw new Error("This device has no offline copy");
+    let keyset: Keyset;
+    try {
+      keyset = await unwrapKeyset(unlockKey, cached.accountId, fromB64u(cached.wrappedKeyset));
+    } catch {
+      throw new WrongPasswordError();
+    }
+    this.state = { keyset, authKey, userId: cached.userId, accountId: cached.accountId, vaultKeys: new Map(), items: new Map(), search: new Map() };
     await this.loadLocal();
     if (!offline) await this.sync();
     return { offline };

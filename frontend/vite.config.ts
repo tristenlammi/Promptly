@@ -137,6 +137,31 @@ function pdfjsAssets(): Plugin {
   };
 }
 
+/** The PWA plugin adds Promptly's own manifest to every page it sees. The vault
+ *  page installs as its own app (passwords.webmanifest), so that one comes out. */
+function vaultPageManifest(): Plugin {
+  return {
+    name: "promptly-vault-page-manifest",
+    enforce: "post",
+    transformIndexHtml: {
+      order: "post",
+      handler(html, ctx) {
+        if (!ctx.filename.endsWith("passwords.html")) return html;
+        return html.replace(/<link rel="manifest" href="\/manifest\.webmanifest"\s*\/?>/, "");
+      },
+    },
+    generateBundle: {
+      order: "post",
+      handler(_options, bundle) {
+        const page = bundle["passwords.html"];
+        if (page && page.type === "asset" && typeof page.source === "string") {
+          page.source = page.source.replace(/<link rel="manifest" href="\/manifest\.webmanifest"\s*\/?>/, "");
+        }
+      },
+    },
+  };
+}
+
 function versionManifest(): Plugin {
   return {
     name: "promptly-version-json",
@@ -157,6 +182,7 @@ export default defineConfig({
   },
   plugins: [
     react(),
+    vaultPageManifest(),
     versionManifest(),
     pdfjsAssets(),
     hunspellDictionaries(),
@@ -314,6 +340,13 @@ export default defineConfig({
     // download them.
     chunkSizeWarningLimit: 800,
     rollupOptions: {
+      // Passwords is its own page with a stricter CSP (passwords/PLAN.md 3.6).
+      // The main app's bundles must never import vault crypto;
+      // passwords/tests/bundle-check.mjs enforces that.
+      input: {
+        main: path.resolve(__dirname, "index.html"),
+        passwords: path.resolve(__dirname, "passwords.html"),
+      },
       output: {
         // Hand-rolled chunk groups. We split by feature surface so
         // admin-only pages (charts) stay out of the regular user's

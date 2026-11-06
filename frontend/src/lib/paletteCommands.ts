@@ -197,6 +197,9 @@ export const PLACES: Place[] = [
   { label: "Today", to: "/today", words: ["today", "my day", "home", "my work", "cards", "shifts"] },
   { label: "Calendar", to: "/calendar", words: ["calendar", "cal", "events"] },
   { label: "Rooms", to: "/rooms", words: ["rooms", "room", "messages", "dms"] },
+  // Passwords is its own page (the route in App.tsx does a full page load). Item
+  // names can't be searched from here, by design; the vault page has its own palette.
+  { label: "Passwords", to: "/passwords", words: ["passwords", "password", "vault", "logins", "2fa", "totp"] },
   { label: "Files", to: "/files", words: ["files", "drive", "my files", "documents", "docs"] },
   { label: "Photos", to: "/files/photos", words: ["photos", "pictures", "gallery"] },
   { label: "Workspaces", to: "/workspaces", words: ["workspaces", "workspace"] },

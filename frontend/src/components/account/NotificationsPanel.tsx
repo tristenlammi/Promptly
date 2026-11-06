@@ -327,6 +327,14 @@ export function NotificationsPanel() {
                 onChange={(v) => toggle("mail", v)}
                 dimmed={!prefs.enabled}
               />
+              <CategoryRow
+                title="Passwords"
+                subtitle="A new device asking to join your vault, or someone sharing a vault with you. These never carry anything from the vault."
+                checked={prefs.passwords ?? true}
+                busy={prefsBusy === "passwords"}
+                onChange={(v) => toggle("passwords", v)}
+                dimmed={!prefs.enabled}
+              />
             </div>
           )}
           {prefsError && (

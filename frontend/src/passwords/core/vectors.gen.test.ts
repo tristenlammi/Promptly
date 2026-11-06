@@ -11,6 +11,7 @@ import { aad, pad, sealToWith, sealWithNonce, signingInput } from "./format";
 import { decodeKeyset, deriveRootRaw, encodeKeyset, encodeSecretKey, publicKeysOf } from "./keys";
 import { aesKey, argon2, ed25519Sign, type KdfParams } from "./primitives";
 import { deviceSafetyWords, identityWords } from "./safety";
+import { totpCode } from "./totp";
 
 const fill = (n: number, b: number) => new Uint8Array(n).fill(b);
 const seq = (n: number, start = 0) => Uint8Array.from({ length: n }, (_, i) => (start + i) & 255);
@@ -150,6 +151,23 @@ it("writes vectors.json", async () => {
             "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00",
         },
       ],
+      // RFC 6238 appendix B.
+      totp: [
+        ...[59, 1111111109, 20000000000].flatMap((time, i) => [
+          { source: "RFC 6238 B", algorithm: "SHA1", secret_ascii: "12345678901234567890", digits: 8, period: 30, time, code: ["94287082", "07081804", "65353130"][i] },
+          { source: "RFC 6238 B", algorithm: "SHA256", secret_ascii: "12345678901234567890123456789012", digits: 8, period: 30, time, code: ["46119246", "68084774", "77737706"][i] },
+          {
+            source: "RFC 6238 B",
+            algorithm: "SHA512",
+            secret_ascii: "1234567890123456789012345678901234567890123456789012345678901234",
+            digits: 8,
+            period: 30,
+            time,
+            code: ["90693936", "25091201", "47863826"][i],
+          },
+        ]),
+      ],
+      steam: [{ source: "generated", secret_base64: btoa("12345678901234567890"), time: 59, code: await totpCode({ secret: btoa("12345678901234567890"), steam: true }, 59_000) }],
       argon2id: [
         {
           source: "generated; cross-checked against @noble/hashes in crypto.test.ts",
@@ -160,6 +178,7 @@ it("writes vectors.json", async () => {
         },
       ],
     },
+    secret_key_note: "Secret Key text form, CRYPTO_SPEC.md section 5",
     secret_key: await Promise.all(
       [seq(16), fill(16, 0), fill(16, 255), seq(16, 0x77)].map(async (raw) => ({ raw_hex: hex(raw), encoded: await encodeSecretKey(raw) })),
     ),

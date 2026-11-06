@@ -66,6 +66,13 @@ const CORE: Installable[] = [
     icon: "/item-icons/mail-192.png",
     href: "/mail/",
   },
+  {
+    id: "passwords",
+    name: "Promptly Passwords",
+    blurb: "Your passwords and 2FA codes, end-to-end encrypted. Your server can't read them.",
+    icon: "/item-icons/passwords-192.png",
+    href: "/passwords/",
+  },
 ];
 
 function withInstall(href: string): string {

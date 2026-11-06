@@ -23,6 +23,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 - Passwords (preview): the end-to-end encrypted core. Your vault is locked by your master password plus a Secret Key only your devices hold, so a stolen database or backup can't be guessed open.
+- Passwords (preview): the web vault at /passwords, on its own page with a stricter security policy: onboarding with a printable recovery kit, logins, cards, identities, notes, keys and documents, 2FA codes, generator, search, folders, tags, history, Trash, offline use, and new devices approved with safety words.
+- Notifications: a Passwords switch for new-device requests and shared-vault invites. They never carry anything from the vault.
 
 ## [0.28.0] - 2026-11-06
 

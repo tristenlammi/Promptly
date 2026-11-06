@@ -272,6 +272,14 @@ function MapsGate() {
   return <AppLayout />;
 }
 
+/** A full page load, so the vault never runs in the main app's document. */
+function LeaveForPasswords() {
+  useEffect(() => {
+    window.location.replace(window.location.pathname + window.location.search + window.location.hash);
+  }, []);
+  return <FullScreenLoading />;
+}
+
 const MailApp = lazyWithRetry(
   () => import("@/mail/MailApp").then((m) => ({ default: m.MailApp })),
   "MailApp"
@@ -686,6 +694,8 @@ export default function App() {
         <Route index element={<MailApp />} />
         <Route path="*" element={<MailApp />} />
       </Route>
+      {/* Passwords is its own page with a stricter CSP, never part of this bundle. */}
+      <Route path="/passwords/*" element={<LeaveForPasswords />} />
       <Route path="/maps" element={<MapsGate />}>
         <Route index element={<MapsApp embedded />} />
         <Route path="*" element={<MapsApp embedded />} />

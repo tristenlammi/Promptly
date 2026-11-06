@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, Mail, MessageCircle, Navigation, type LucideIcon } from "lucide-react";
+import { CalendarDays, KeyRound, Mail, MessageCircle, Navigation, type LucideIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { authApi } from "@/api/auth";
@@ -26,6 +26,8 @@ export const BUILT_IN_APPS: NavApp[] = [
   { id: "calendar", name: "Calendar", icon: "/item-icons/calendar-192.png", glyph: CalendarDays, to: "/calendar" },
   { id: "maps", name: "Maps", icon: "/item-icons/maps-192.png", glyph: Navigation, to: "/maps" },
   { id: "mail", name: "Mail", icon: "/item-icons/mail-192.png", glyph: Mail, to: "/mail" },
+  // Its own page: the route in App.tsx turns this into a full page load.
+  { id: "passwords", name: "Passwords", icon: "/item-icons/passwords-192.png", glyph: KeyRound, to: "/passwords" },
 ];
 
 /**

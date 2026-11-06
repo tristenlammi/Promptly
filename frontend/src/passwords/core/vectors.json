@@ -51,6 +51,97 @@
     "sig_hex": "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"
    }
   ],
+  "totp": [
+   {
+    "source": "RFC 6238 B",
+    "algorithm": "SHA1",
+    "secret_ascii": "12345678901234567890",
+    "digits": 8,
+    "period": 30,
+    "time": 59,
+    "code": "94287082"
+   },
+   {
+    "source": "RFC 6238 B",
+    "algorithm": "SHA256",
+    "secret_ascii": "12345678901234567890123456789012",
+    "digits": 8,
+    "period": 30,
+    "time": 59,
+    "code": "46119246"
+   },
+   {
+    "source": "RFC 6238 B",
+    "algorithm": "SHA512",
+    "secret_ascii": "1234567890123456789012345678901234567890123456789012345678901234",
+    "digits": 8,
+    "period": 30,
+    "time": 59,
+    "code": "90693936"
+   },
+   {
+    "source": "RFC 6238 B",
+    "algorithm": "SHA1",
+    "secret_ascii": "12345678901234567890",
+    "digits": 8,
+    "period": 30,
+    "time": 1111111109,
+    "code": "07081804"
+   },
+   {
+    "source": "RFC 6238 B",
+    "algorithm": "SHA256",
+    "secret_ascii": "12345678901234567890123456789012",
+    "digits": 8,
+    "period": 30,
+    "time": 1111111109,
+    "code": "68084774"
+   },
+   {
+    "source": "RFC 6238 B",
+    "algorithm": "SHA512",
+    "secret_ascii": "1234567890123456789012345678901234567890123456789012345678901234",
+    "digits": 8,
+    "period": 30,
+    "time": 1111111109,
+    "code": "25091201"
+   },
+   {
+    "source": "RFC 6238 B",
+    "algorithm": "SHA1",
+    "secret_ascii": "12345678901234567890",
+    "digits": 8,
+    "period": 30,
+    "time": 20000000000,
+    "code": "65353130"
+   },
+   {
+    "source": "RFC 6238 B",
+    "algorithm": "SHA256",
+    "secret_ascii": "12345678901234567890123456789012",
+    "digits": 8,
+    "period": 30,
+    "time": 20000000000,
+    "code": "77737706"
+   },
+   {
+    "source": "RFC 6238 B",
+    "algorithm": "SHA512",
+    "secret_ascii": "1234567890123456789012345678901234567890123456789012345678901234",
+    "digits": 8,
+    "period": 30,
+    "time": 20000000000,
+    "code": "47863826"
+   }
+  ],
+  "steam": [
+   {
+    "source": "generated",
+    "secret_base64": "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA=",
+    "time": 59,
+    "code": "PV9M4"
+   }
+  ],
   "argon2id": [
    {
     "source": "generated; cross-checked against @noble/hashes in crypto.test.ts",
@@ -66,6 +157,7 @@
    }
   ]
  },
+ "secret_key_note": "Secret Key text form, CRYPTO_SPEC.md section 5",
  "secret_key": [
   {
    "raw_hex": "000102030405060708090a0b0c0d0e0f",
