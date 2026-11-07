@@ -1,6 +1,7 @@
 // The full vault inside the extension (tab and side panel), and the first-run connect
 // flow: enter a server, grant that one host, approve in a signed-in tab, then get the
 // Secret Key onto this browser as any new device does.
+import { LockSetting } from "./lockchoice";
 import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -225,57 +226,73 @@ function BookmarkSettings() {
 }
 
 /** What only the extension has. Mail codes are opt-in even though the device may read them. */
-function ExtensionSettings() {
-  type Shown = { onClickOnly: boolean; mailCodes: boolean; pin: boolean; clipCheck: boolean };
-  const [s, setS] = useState<Shown | null>(null);
-  const [pin, setPin] = useState("");
-  const [error, setError] = useState("");
-  const load = () => call<Shown>({ t: "extSettings" }).then(setS);
+type ExtShown = { onClickOnly: boolean; mailCodes: boolean; pin: boolean; clipCheck: boolean };
+
+function useExtSettings() {
+  const [s, setS] = useState<ExtShown | null>(null);
+  const load = () => call<ExtShown>({ t: "extSettings" }).then(setS);
   useEffect(() => {
     void load();
   }, []);
+  return { s, load };
+}
+
+function ExtFilling() {
+  const { s, load } = useExtSettings();
+  const [error, setError] = useState("");
   if (!s) return null;
   return (
-    <div data-testid="ext-settings" className="flex flex-col gap-2 text-sm text-[var(--text)]">
-      <h2 className="text-sm font-semibold">This browser</h2>
-      <p className="text-xs text-[var(--text-muted)]">Bookmark sync is under <a className="underline" href="#/bookmarks">Bookmarks</a>.</p>
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={s.mailCodes}
-          onChange={async (e) => {
-            await call({ t: "setMailCodes", on: e.target.checked });
-            await load();
-          }}
-        />
-        Offer codes and sign-in links from Promptly Mail on sign-in pages
-      </label>
-      <p className="text-xs text-[var(--text-muted)]">The extension asks your server for recent codes from your mail, and works out here which belong to the page you're on. The page's address isn't sent. They're in the toolbar button, and on Chromium browsers also in the menu on the page.</p>
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={s.onClickOnly}
-          onChange={(e) => {
-            setError("");
-            const onClickOnly = e.target.checked;
-            // Turning this off needs every site, and the browser only asks inside the click.
-            const asked = onClickOnly ? Promise.resolve(true) : ext.permissions.request({ origins: ["https://*/*", "http://*/*"] });
-            void asked.then(async (granted) => {
-              if (granted) await call({ t: "setAccess", onClickOnly });
-              else setError("The browser didn't give the extension access to all sites, so filling stays on click.");
+    <div className="flex flex-col gap-3 text-sm text-[var(--text)]">
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={s.mailCodes}
+            onChange={async (e) => {
+              await call({ t: "setMailCodes", on: e.target.checked });
               await load();
-            });
-          }}
-        />
-        Only fill when I click the toolbar button
-      </label>
-      <p className="text-xs text-[var(--text-muted)]">When this is on the extension can't read pages until you click, so sites' passkey requests go to your browser's own passkeys instead of your vault.</p>
+            }}
+          />
+          Offer codes and sign-in links from Promptly Mail on sign-in pages
+        </label>
+        <p className="text-xs text-[var(--text-muted)]">Which ones match the page is worked out here. The page's address isn't sent.</p>
+      </div>
+      <div className="flex flex-col gap-1">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={s.onClickOnly}
+            onChange={(e) => {
+              setError("");
+              const onClickOnly = e.target.checked;
+              // Turning this off needs every site, and the browser only asks inside the click.
+              const asked = onClickOnly ? Promise.resolve(true) : ext.permissions.request({ origins: ["https://*/*", "http://*/*"] });
+              void asked.then(async (granted) => {
+                if (granted) await call({ t: "setAccess", onClickOnly });
+                else setError("The browser didn't give the extension access to all sites, so filling stays on click.");
+                await load();
+              });
+            }}
+          />
+          Only fill when I click the toolbar button
+        </label>
+        <p className="text-xs text-[var(--text-muted)]">Sites' passkey requests then go to your browser's own passkeys, not your vault.</p>
+      </div>
+      {error && <Callout kind="danger">{error}</Callout>}
+    </div>
+  );
+}
+
+function ExtClipboard() {
+  const { s, load } = useExtSettings();
+  if (!s) return null;
+  return (
+    <div className="flex flex-col gap-1 text-sm text-[var(--text)]">
       <label className="flex items-center gap-2">
         <input
           type="checkbox"
           checked={s.clipCheck}
           onChange={(e) => {
-            setError("");
             const on = e.target.checked;
             const asked = on ? ext.permissions.request({ permissions: ["clipboardRead"] }) : ext.permissions.remove({ permissions: ["clipboardRead"] });
             void asked.catch(() => false).then(load);
@@ -283,10 +300,22 @@ function ExtensionSettings() {
         />
         Don't clear the clipboard if I've copied something else since
       </label>
-      <p className="text-xs text-[var(--text-muted)]">Copied codes and passwords get cleared after the time in Settings. To see whether what's there is still ours, the browser has to let the extension read your clipboard, so this is off unless you turn it on.</p>
+      <p className="text-xs text-[var(--text-muted)]">The browser has to let the extension read your clipboard for this.</p>
+    </div>
+  );
+}
+
+function ExtPin() {
+  const { s, load } = useExtSettings();
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  if (!s) return null;
+  return (
+    <div className="flex flex-col gap-2 text-sm text-[var(--text)]">
       {s.pin ? (
         <Button
           small
+          className="w-fit"
           onClick={async () => {
             await call({ t: "setPin", pin: null });
             await load();
@@ -296,7 +325,7 @@ function ExtensionSettings() {
         </Button>
       ) : (
         <div className="flex flex-wrap items-end gap-2">
-          <Label text="A short PIN for this browser" hint="Unlocks again until you close the browser. Five wrong tries and it's gone. Off unless you set one, and weaker than your master password.">
+          <Label text="A short PIN for this browser" hint="Works until the browser closes, and five wrong tries remove it. Weaker than your master password.">
             <input className={inputClass} inputMode="numeric" type="password" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value)} />
           </Label>
           <Button
@@ -388,7 +417,10 @@ function Root() {
       baseUrl: connected.server,
       api,
       store,
-      settingsExtras: <ExtensionSettings />,
+      lockControls: <LockSetting />,
+      pinControls: <ExtPin />,
+      fillControls: <ExtFilling />,
+      clipboardControls: <ExtClipboard />,
       bookmarkControls: <BookmarkSettings />,
       // Through the desktop app's host, where it's installed and has registered this
       // extension. Otherwise it reports it's not available, and nothing's offered.

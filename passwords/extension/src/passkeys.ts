@@ -310,7 +310,7 @@ export async function handlePasskey(
 
   if (msg.t === "pkPrompt") {
     const rp = req.options._rp as string;
-    const base = { op: req.op, origin: req.origin, rpId: rp, unlocked: !!c?.unlocked, user: req.options.user, mustVerify: req.options.userVerification === "required", wantsVerify: req.options.userVerification !== "discouraged" };
+    const base = { op: req.op, origin: req.origin, rpId: rp, unlocked: !!c?.unlocked, user: req.options.user };
     if (!c?.unlocked) return { ...base, candidates: [] };
     if (req.op === "get") {
       const only = req.options._only as string | undefined;
@@ -334,13 +334,13 @@ export async function handlePasskey(
   if (action === "native") return finish({ ok: false, native: true });
   if (!c?.unlocked) return { error: "locked" };
 
-  // User verification tells a site this person proved who they are. An unlocked vault and a
-  // click don't. It's true only if they just proved it, here, in this window.
+  // An unlocked vault and a click in this window count as user verification, as they do in other
+  // password managers. How long it stays unlocked is this person's call (SECURITY.md). Asking for
+  // the master password each time is for items they've marked to ask.
   const typed = typeof msg.verify === "string" ? msg.verify : "";
-  const uv = !!typed && (await isThePerson(c, typed));
-  if (typed && !uv) return { error: "wrong" };
-  const mustVerify = req.options.userVerification === "required";
-  if (mustVerify && !uv) return { error: "verify" };
+  const proved = !!typed && (await isThePerson(c, typed));
+  if (typed && !proved) return { error: "wrong" };
+  const uv = req.options.userVerification !== "discouraged";
 
   if (req.op === "create") {
     const o = req.options as { user: { id: string; name: string; displayName?: string }; challenge: string; residentKey: string; _rp: string; exclude: { id: string }[] };
@@ -378,7 +378,7 @@ export async function handlePasskey(
   const chosen = usable.find((u) => u.passkey.credentialId === msg.credentialId);
   if (!chosen) return finish(fail("NotAllowedError", "The request wasn't allowed."));
   const item = c.get(chosen.itemId);
-  if (item?.body.reprompt && !uv) return { error: "verify" };
+  if (item?.body.reprompt && !proved) return { error: "verify" };
   const result = await getAssertion({ passkey: chosen.passkey, challenge: o.challenge, origin: req.origin, crossOrigin: req.crossOrigin, topOrigin: req.topOrigin, uv });
   if (item) {
     const passkeys = (item.body.passkeys ?? []).map((p) => (p.credentialId === chosen.passkey.credentialId ? { ...p, lastUsedAt: new Date().toISOString() } : p));

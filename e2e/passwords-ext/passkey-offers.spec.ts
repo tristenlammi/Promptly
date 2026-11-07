@@ -111,7 +111,6 @@ const answerWith = async (pop: Page) => {
   await expect(prompt.getByText("Sign in with a passkey?")).toBeVisible();
   await expect(prompt.getByRole("strong").or(prompt.locator("strong"))).toContainText("localhost");
   await prompt.getByRole("button", { name: new RegExp(USER) }).click();
-  await prompt.getByRole("button", { name: "Skip" }).click();
 };
 
 test("a quiet request shows nothing by itself, and an imported passkey answers it from the panel", async () => {
@@ -143,7 +142,6 @@ test("a page asking with no click gets our window, not the browser's, when the p
   // The way out to the browser's own is right there.
   await expect(prompt.getByRole("button", { name: "Use another device or security key" })).toBeVisible();
   await prompt.getByRole("button", { name: new RegExp(USER) }).click();
-  await prompt.getByRole("button", { name: "Skip" }).click();
   await verified(page, wanted);
   await page.close();
 });
@@ -237,7 +235,6 @@ test("the on-page menu offers it as well, and picking it goes through the same w
   await row.click();
   const prompt = await opened;
   await prompt.getByRole("button", { name: new RegExp(USER) }).click();
-  await prompt.getByRole("button", { name: "Skip" }).click();
   await verified(page, wanted);
   await page.close();
 });

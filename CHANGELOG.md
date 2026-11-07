@@ -21,7 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Changed
+- Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
+
 ### Fixed
+- Passwords in the browser: using a passkey no longer asks for the master password. An unlocked vault and a click are enough, unless the item is marked to ask.
 - Passwords: keys are sealed to an emergency contact only after you've compared safety words with them.
 - Passwords on Android: adding an emergency contact shows their safety words first, and a contact whose words aren't compared gets no keys.
 - Passwords on Android: a fill sheet that's open when the vault locks goes back to asking for the unlock, and can't fill from what it was holding.
@@ -43,6 +47,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: passkeys imported from Bitwarden now work: their ids are converted to the form sites use.
 
 ### Added
+- Passwords in the browser: choose how long the vault stays unlocked, from 1 minute to 12 hours, when the browser closes, or never, in the toolbar panel and in Settings.
 - Passwords on Android: security emails on the Security check, matched against your logins on the phone.
 - Passwords on Android: a change-password helper from the Security check, with a queue, a new password that waits until you confirm it, and autofill that offers the current and new password on the site's change form.
 - Passwords on Android: the generator makes a plus-address and can have Mail label what's sent to it.

@@ -23,7 +23,7 @@ import { BrowserBookmarks, VaultBookmarks } from "./bookmarks";
 import { type Base, bookmarkHash, bookmarksHtml, reconcile, syncableUrl, validItem } from "../../../frontend/src/passwords/core/bookmarks";
 import { handlePasskey, offerRows, useOffer } from "./passkeys";
 import { packPublicKey } from "./rules-key";
-import { type Candidate, type ContentRequest, ext, type FillOutcome, type MenuRequest, type PageReport, type PageRequest, type SaveRequest, type StateOut, type ToContent } from "./rpc";
+import { type Candidate, type ContentRequest, ext, type FillOutcome, type LockChoice, type LockWhen, type MenuRequest, type PageReport, type PageRequest, type SaveRequest, type StateOut, type ToContent } from "./rpc";
 
 declare const __ENGINE__: string;
 
@@ -31,6 +31,9 @@ const store = new IdbStore("promptly-vault");
 const KEEPALIVE = "keepalive";
 const LOCK_ALARM = "autolock";
 const SYNC_ALARM = "sync";
+const LOCK_CHOICE = "lock_choice";
+/** Only ever there with "Never" chosen, sealed under the same device key as the Secret Key. */
+const KEPT_UNLOCK = "kept_unlock";
 /** Alarms run every 30 to 60 s. A gap this long means the machine was asleep. */
 const SLEEP_GAP_MS = 3 * 60 * 1000;
 const UNCONFIRMED_TAG = "unconfirmed sign-up";
@@ -57,6 +60,15 @@ const session = ext.storage.session;
 
 async function saveSecret(secret: Uint8Array, sessionToken: string | null): Promise<void> {
   await session.set({ unlock: b64u(secret), vaultSession: sessionToken });
+  // If it can't be kept, this browser asks for the password after a restart. That's all.
+  await keepSecretIfChosen((await lockChoice()).when).catch(() => undefined);
+}
+
+/** With "Never" the secret outlasts the browser, and with anything else it's not on the disk. */
+async function keepSecretIfChosen(when: LockWhen): Promise<void> {
+  if (when !== "never") return store.deleteMeta(KEPT_UNLOCK);
+  const { unlock } = await session.get("unlock");
+  if (unlock) await client!.putDeviceSealed(KEPT_UNLOCK, { unlock });
 }
 
 async function boot(): Promise<void> {
@@ -66,19 +78,48 @@ async function boot(): Promise<void> {
     userId = (await store.getMeta<string>("user_id")) ?? null;
     recents = (await store.getMeta<Record<string, number>>("recents")) ?? {};
     client = makeClient();
-    const s = await session.get(["unlock", "vaultSession"]);
+    let s = await session.get(["unlock", "vaultSession"]);
+    let afterRestart = false;
+    if (!s.unlock && (await lockChoice()).when === "never") {
+      const kept = await client.getDeviceSealed<{ unlock: string }>(KEPT_UNLOCK).catch(() => null);
+      if (kept?.unlock) {
+        s = { unlock: kept.unlock, vaultSession: null };
+        afterRestart = true;
+      }
+    }
     if (s.unlock) {
       try {
         await client.restoreSession(fromB64u(s.unlock as string), (s.vaultSession as string) ?? null);
+        if (afterRestart) {
+          await session.set({ unlock: s.unlock, vaultSession: null });
+          void proveAfterRestart(client);
+        }
         startKeepAlive();
         // Never unlocked with no timer running, whatever happened to the last one.
         if (!(await ext.alarms.get(LOCK_ALARM))) await touchLockTimer();
       } catch {
         await session.remove(["unlock", "vaultSession"]);
+        await store.deleteMeta(KEPT_UNLOCK).catch(() => undefined);
       }
     }
   })();
   return booted;
+}
+
+/** The session didn't outlast the browser, so ask for a new one. Offline, it can wait. */
+async function proveAfterRestart(c: VaultClient): Promise<void> {
+  try {
+    await c.reprove();
+    await session.set({ vaultSession: c.api.session });
+  } catch (e) {
+    await lockIfTurnedAway(e);
+  }
+}
+
+/** With the key kept on this computer, a device that's been removed, or a password that's been
+ *  changed, has to stop it working here. The server turning us away is how we find out. */
+async function lockIfTurnedAway(e: unknown): Promise<void> {
+  if (e instanceof ApiError && (e.status === 401 || e.status === 403) && (await lockChoice()).when === "never") await lock();
 }
 
 function startKeepAlive() {
@@ -102,12 +143,33 @@ async function vaultSettings(): Promise<{ autoLockMinutes: number; lockOnSleep: 
   return { autoLockMinutes: number(s.autoLockMinutes, 15, 1), lockOnSleep: s.lockOnSleep !== false, clipboardSeconds: number(s.clipboardSeconds, 30, 1) };
 }
 
+/** This browser's own, and only ever set from its own pages: it isn't in anything that syncs, so
+ *  no other device and no server can turn "Never" on. Until it's first set, the Settings screen's
+ *  old values stand. */
+async function lockChoice(): Promise<LockChoice> {
+  const chosen = await store.getMeta<Partial<LockChoice>>(LOCK_CHOICE);
+  const before = await vaultSettings();
+  return { when: validLockWhen(chosen?.when) ? chosen!.when! : Math.min(before.autoLockMinutes, 720), onSleep: typeof chosen?.onSleep === "boolean" ? chosen.onSleep : before.lockOnSleep };
+}
+
+function validLockWhen(w: unknown): w is LockWhen {
+  return w === "browser" || w === "never" || (typeof w === "number" && Number.isFinite(w) && w >= 1 && w <= 24 * 60 * 7);
+}
+
+async function locksOnSleep(): Promise<boolean> {
+  const c = await lockChoice();
+  return c.when !== "never" && c.onSleep;
+}
+
 async function touchLockTimer() {
-  const s = await vaultSettings();
-  ext.alarms.create(LOCK_ALARM, { delayInMinutes: s.autoLockMinutes });
+  const { when } = await lockChoice();
+  if (typeof when === "number") ext.alarms.create(LOCK_ALARM, { delayInMinutes: when });
+  else await ext.alarms.clear(LOCK_ALARM);
 }
 
 async function lock() {
+  // First, so nothing later can leave the way back in behind.
+  await store.deleteMeta(KEPT_UNLOCK).catch(() => undefined);
   const wasOpen = !!client?.unlocked;
   await client?.lock().catch(() => undefined);
   await session.remove(["unlock", "vaultSession", "flows", "pendingSave", "typedUsers", "deviceRequests", "beat", "onLoadDone"]);
@@ -129,19 +191,19 @@ async function noticeSleep() {
   const now = Date.now();
   const { beat } = await session.get("beat");
   await session.set({ beat: now });
-  if (typeof beat === "number" && now - beat > SLEEP_GAP_MS && client?.unlocked && (await vaultSettings()).lockOnSleep) await lock();
+  if (typeof beat === "number" && now - beat > SLEEP_GAP_MS && client?.unlocked && (await locksOnSleep())) await lock();
 }
 
 async function onIdleState(state: string) {
   // Locked screen or sleep: lock the vault too, unless the person said not to.
   if (state !== "locked") return;
   await boot();
-  if ((await vaultSettings()).lockOnSleep) await lock();
+  if (await locksOnSleep()) await lock();
 }
 
 ext.alarms.onAlarm.addListener(async (a) => {
   await boot();
-  if (a.name === LOCK_ALARM) await lock();
+  if (a.name === LOCK_ALARM && typeof (await lockChoice()).when === "number") await lock();
   if (a.name === KEEPALIVE) await noticeSleep();
   if (a.name === CLIP_ALARM) await clearClipboardIfOurs();
   if (a.name === SYNC_ALARM && client?.unlocked) {
@@ -163,8 +225,9 @@ async function safeSync() {
         await client.reprove();
         await session.set({ vaultSession: client.api.session });
         await client.sync();
-      } catch {
+      } catch (again) {
         /* the token's revoked or the server's gone: keep working from the local copy */
+        await lockIfTurnedAway(again);
       }
     }
   }
@@ -358,7 +421,11 @@ ext.runtime.onInstalled.addListener(() => {
 });
 ext.permissions.onAdded?.addListener(() => applySiteAccess().catch(() => undefined));
 ext.permissions.onRemoved?.addListener(() => applySiteAccess().catch(() => undefined));
-ext.runtime.onStartup?.addListener(() => applySiteAccess().catch(() => undefined));
+ext.runtime.onStartup?.addListener(() => {
+  applySiteAccess().catch(() => undefined);
+  // With "Never" there's a vault to bring back, for the badge and for syncing, before anyone asks.
+  boot().then(updateBadgeAll).catch(() => undefined);
+});
 
 // ---- Fill -----------------------------------------------------------------------------
 
@@ -1094,6 +1161,16 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       const pin = (await session.get("pin")).pin as PinRecord | undefined;
       return { onClickOnly: await fillsOnClickOnly(), mailCodes: s.mailCodes, pin: !!pin, clipCheck: await canCheckClipboard() };
     }
+    case "lockChoice":
+      return lockChoice();
+    case "setLockChoice": {
+      if (!validLockWhen(m.when) || typeof m.onSleep !== "boolean") throw new Error("That isn't a setting.");
+      // Keep the secret first: if that can't be done, nothing has changed.
+      await keepSecretIfChosen(m.when);
+      await store.setMeta(LOCK_CHOICE, { when: m.when, onSleep: m.onSleep });
+      if (c.unlocked) await touchLockTimer();
+      return lockChoice();
+    }
     case "bookmarkState":
       return bookmarkStateForScreen();
     case "bookmarkSyncNow":
@@ -1644,6 +1721,17 @@ async function handleTest(m: { op: string; [k: string]: unknown }): Promise<unkn
     case "idle":
       await onIdleState(m.state as string);
       return { unlocked: !!client?.unlocked };
+    case "restartLike":
+      // What a browser restart does here, for an engine where a test can't restart it.
+      await session.remove(["unlock", "vaultSession"]);
+      client = null;
+      booted = null;
+      await boot();
+      return { unlocked: !!(client as VaultClient | null)?.unlocked };
+    case "kept": {
+      const kept = await store.getMeta<{ ct?: string; unlock?: string }>(KEPT_UNLOCK);
+      return { kept: !!kept, sealed: !!kept?.ct && !kept.unlock };
+    }
     case "sleepGap":
       await session.set({ beat: Date.now() - (m.ms as number) });
       await noticeSleep();

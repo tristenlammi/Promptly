@@ -2,6 +2,7 @@
 // This is the safest way to fill: a page can't touch or cover it. It has to open fast,
 // so anything heavy (the generator's word list and site rules, site matching) stays in
 // the background and is asked for.
+import { LockSetting } from "./lockchoice";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -715,6 +716,9 @@ function MoreTab({ preview, setMessage }: { preview: boolean; setMessage: (m: st
           <span className="text-[var(--text-muted)]"><Icon name="external" size={13} /></span>
         </button>
       ))}
+      <div className="mt-2 border-t border-[var(--border)] px-1.5 pt-3">
+        <LockSetting />
+      </div>
       {preview && <p className="muted mt-2"><span className="badge">Preview</span> Try it on low-value accounts first.</p>}
     </div>
   );

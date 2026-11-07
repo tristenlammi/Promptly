@@ -33,19 +33,17 @@ function button(text: string, onClick: () => void, primary = false) {
   return b;
 }
 
-async function answer(a: Record<string, unknown>, canSkip = false) {
+async function answer(a: Record<string, unknown>) {
   const r = await call({ t: "pkAnswer", ...a });
   if (r?.error === "locked") void render();
-  else if (r?.error === "verify") verifyFor({ ...a, verify: undefined }, "", false);
-  else if (r?.error === "wrong") verifyFor({ ...a, verify: undefined }, "That isn't right.", canSkip);
+  else if (r?.error === "verify") verifyFor({ ...a, verify: undefined }, "");
+  else if (r?.error === "wrong") verifyFor({ ...a, verify: undefined }, "That isn't right.");
   else window.close();
 }
 
-/** Only this tells the site that the person proved who they are. Some sites won't take a passkey
- *  as a sign-in by itself without it, and treat it as a second step after a password instead. */
-function verifyFor(a: Record<string, unknown>, problem: string, canSkip: boolean) {
-  root.replaceChildren(el("p", "Enter your master password, or your PIN if you've set one, to prove it's you."));
-  if (canSkip) root.append(el("p", "This site would like that, and may ask for your password as well without it."));
+/** For an item marked to ask for the master password before it's used. */
+function verifyFor(a: Record<string, unknown>, problem: string) {
+  root.replaceChildren(el("p", "This item asks for your master password, or your PIN if you've set one."));
   const form = el("form") as HTMLFormElement;
   const input = el("input") as HTMLInputElement;
   input.type = "password";
@@ -53,20 +51,13 @@ function verifyFor(a: Record<string, unknown>, problem: string, canSkip: boolean
   form.append(input);
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    if (input.value) void answer({ ...a, verify: input.value }, canSkip);
+    if (input.value) void answer({ ...a, verify: input.value });
   });
   root.append(form);
   const err = el("p", problem, "err");
   root.append(button("Continue", () => form.requestSubmit(), true));
-  if (canSkip) root.append(button("Skip", () => void answer(a, canSkip)));
   root.append(button("Cancel", () => void answer({ action: "cancel" })), err);
   input.focus();
-}
-
-/** Picked something: ask first if the site wants to know it's really this person. */
-function choose(p: Record<string, unknown>, a: Record<string, unknown>) {
-  if (p.wantsVerify) verifyFor(a, "", !p.mustVerify);
-  else void answer(a);
 }
 
 function unlockForm() {
@@ -100,10 +91,9 @@ async function render() {
     root.append(button("Use another device or security key", () => answer({ action: "native" })), button("Cancel", () => answer({ action: "cancel" })));
     return;
   }
-  if (p.mustVerify) root.append(el("p", "This site asks you to prove it's you, so you'll be asked for your master password or PIN."));
   if (p.op === "get") {
     for (const c of p.candidates as { itemId: string; credentialId: string; title: string; userName: string }[]) {
-      root.append(button(`${c.title}: ${c.userName}`, () => choose(p, { action: "use", credentialId: c.credentialId }), true));
+      root.append(button(`${c.title}: ${c.userName}`, () => answer({ action: "use", credentialId: c.credentialId }), true));
     }
   } else {
     const user = p.user as { name: string };
@@ -112,8 +102,8 @@ async function render() {
       root.append(el("p", "You already have a passkey for this account here."));
       root.append(button("Tell the site", () => answer({ action: "create" }), true));
     } else {
-      if (p.existing) root.append(button(`Add it to "${p.existing}"`, () => choose(p, { action: "create", attach: true }), true));
-      root.append(button("Save as a new item", () => choose(p, { action: "create" }), !p.existing));
+      if (p.existing) root.append(button(`Add it to "${p.existing}"`, () => answer({ action: "create", attach: true }), true));
+      root.append(button("Save as a new item", () => answer({ action: "create" }), !p.existing));
     }
   }
   root.append(button("Use another device or security key", () => answer({ action: "native" })), button("Cancel", () => answer({ action: "cancel" })));

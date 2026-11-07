@@ -18,6 +18,10 @@ export function pageHost(url: string): string | null {
 }
 
 /** What a trusted extension page may ask. */
+/** Minutes idle, when the browser closes, or never. */
+export type LockWhen = number | "browser" | "never";
+export type LockChoice = { when: LockWhen; onSleep: boolean };
+
 export type PageRequest =
   | { t: "state" }
   | { t: "unlock"; password: string }
@@ -37,6 +41,8 @@ export type PageRequest =
   | { t: "sync" }
   | { t: "setAccess"; onClickOnly: boolean }
   | { t: "extSettings" }
+  | { t: "lockChoice" }
+  | { t: "setLockChoice"; when: LockWhen; onSleep: boolean }
   | { t: "unlockWithSecret"; secret: string }
   | { t: "setMailCodes"; on: boolean }
   | { t: "setPin"; pin: string | null }

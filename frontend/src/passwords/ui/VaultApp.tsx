@@ -313,6 +313,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
   // Auto-lock: idle time and sleep. A timer that fires far later than asked means
   // the machine slept.
   useEffect(() => {
+    if (platform.lockControls) return;
     let last = Date.now();
     let beat = Date.now();
     const touch = () => {
@@ -331,7 +332,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
       clearInterval(t);
       events.forEach((e) => window.removeEventListener(e, touch));
     };
-  }, [lock]);
+  }, [lock, platform.lockControls]);
 
   useEffect(
     () =>

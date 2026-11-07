@@ -581,7 +581,6 @@ test("passkeys: three at once from a real click opens one window and refuses the
   // Nothing the site calls itself ends up in the vault or the prompt.
   await expect(prompt.locator("body")).not.toContainText("Totally Google");
   await prompt.getByRole("button", { name: "Save as a new item" }).click();
-  await prompt.getByRole("button", { name: "Skip" }).click();
   await expect.poll(async () => (await state(page)).r.some((x: { id?: string }) => x.id)).toBe(true);
   await expect.poll(async () => (await items()).some((i) => i.title === "pk.localhost")).toBe(true);
   expect((await items()).some((i) => i.title.includes("Google"))).toBe(false);
@@ -594,7 +593,6 @@ test("passkeys: a known excluded id isn't a silent probe: it answers only after 
   await seen.click("#go");
   const madePrompt = await made;
   await madePrompt.getByRole("button", { name: "Save as a new item" }).click();
-  await madePrompt.getByRole("button", { name: "Skip" }).click();
   await expect.poll(async () => (await state(seen)).r.some((x: { id?: string }) => x.id)).toBe(true);
   const id = (await state(seen)).r.find((x: { id?: string }) => x.id).id;
   await seen.close();
@@ -643,7 +641,6 @@ test("passkeys: cross-origin is judged on every ancestor, so A inside B inside A
   const run = frame.evaluate((o) => (window as any).__register(o), { rpId: "aba.localhost", userId: Buffer.from("aba").toString("base64url"), userName: "aba@example.com", challenge: crypto.randomBytes(32).toString("base64url") });
   const openedPrompt = await opened;
   await openedPrompt.getByRole("button", { name: "Save as a new item" }).click();
-  await openedPrompt.getByRole("button", { name: "Skip" }).click();
   const r = await run;
   expect(r.error).toBeUndefined();
   const client = JSON.parse(Buffer.from(r.response.clientDataJSON, "base64url").toString());

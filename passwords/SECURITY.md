@@ -21,6 +21,7 @@ Not on the server: titles, URLs, usernames, passwords, notes, folders, tags, ite
 | Malicious mail content | **Mostly** | Codes are shown as text, offered only when the sender's domain matches the page, and fill on a click. AI has no path to the vault. A sender's domain is only the From header, with no DKIM or SPF check, so a forged From on a real site's domain can offer a sign-in link to that site, which could sign someone into an attacker's account. A link always asks first. |
 | Prompt injection in Chat | **Holds** | The vault has no chat tools that read or write secrets. A test asserts this. |
 | Lost phone or laptop, locked | **Holds** | Encrypted local cache. OS-backed key wrapping. Auto-lock. Remote device removal stops future sync, not what's already on the device, which stays encrypted. |
+| Lost laptop, browser set to Never lock | **Does not hold** | Never is the owner's choice, and warned about when it's made. The key to the vault stays on the computer, so whoever gets into that browser or its files has the vault and can sign in with its passkeys. Removing the device locks it the next time it reaches the server, which a thief can avoid by staying offline. |
 | Removed member of a shared vault | **Partly** | Vault key and item keys are rotated. What they already saw can't be unseen, so the app lists the passwords to change. |
 | Trusted contact, with the server on their side | **Does not hold** | Emergency keys are sealed to them in advance, and the wait is kept by the server, so someone who runs the server and is your contact could skip the wait. Pick someone you'd trust with it all. |
 | Secure Send link posted through Rooms or Mail | **Partly** | The link holds the key and passes through the server this way, and the screen warns about it. With a password, the server can still try guessing it offline, at the cost of the key stretching. Without one, it can just open it. Copying the link somewhere end-to-end encrypted avoids this. Chat tools and @promptly never see the key part of a link. |
@@ -75,7 +76,7 @@ Limits we accept and state plainly:
 
 ## Extension
 
-- Unlocked keys live in the background context's memory or in `storage.session`, whose default access level is trusted contexts only in both Chrome and Firefox. Content scripts can't read it; a test checks this. `storage.local` is readable by content scripts in Firefox with no way to restrict it, so it never holds keys, only ciphertext.
+- Unlocked keys live in the background context's memory or in `storage.session`, whose default access level is trusted contexts only in both Chrome and Firefox. Content scripts can't read it; a test checks this. `storage.local` is readable by content scripts in Firefox with no way to restrict it, so it never holds keys, only ciphertext. With **Never** chosen, and only then, the unlock secret is also in the extension's IndexedDB, sealed under the same device key as the Secret Key. That key is a non-extractable WebCrypto key in the same browser profile, so the seal stops scripts and casual reads, and not someone with the profile's files. It's removed when the vault's locked, when the choice changes, or when the server turns the device away. The choice lives only in this browser and never syncs, so no other device or server can turn it on.
 - No remote code. The extension never loads code from the server.
 - A content script runs in a page's process. Treat it as less trusted than the background. Secrets reach it only at fill time and only for fields it has checked.
 - Inline UI runs in an extension iframe the page can't read. Each published DOM-clickjacking variant has a test. These checks raise the bar; they're not a proof. As the researcher says, there's no simple complete protection. The safest setting is to fill only from the toolbar popup, offered as "on click" mode. Each click is judged inside our frame by IntersectionObserver v2, which only Chromium has, so Firefox fills from the toolbar popup only.
@@ -140,7 +141,7 @@ Sharing a vault still works on trust on first use, as the plan says: the words a
 
 ## Passkeys and user verification
 
-A passkey tells a site whether the person just proved who they are. It says yes only if they entered their master password or PIN in the passkey window. When a site requires that, there's no way past it; when it only prefers it, the window asks, and "Skip" answers no. An unlocked vault or a click doesn't count.
+A passkey tells a site whether the person proved who they are, and sites take a yes as a whole sign-in, with no password and no second step. The extension says yes for an unlocked vault and a click in the passkey window, as other password managers do. That's weaker than the fingerprint or PIN a site is imagining: the proof is that the vault was unlocked, however long ago the person's lock setting allows, and with Never lock it isn't proof of anything beyond having the browser. Someone at an unlocked browser can sign in to those sites. A site that says it doesn't want verification is told no. An item marked to ask for the master password still asks first. A click in the window is always needed: nothing is signed silently.
 
 ## Passkey offers
 
@@ -154,4 +155,4 @@ Bookmarks are encrypted items like any other, and only ones in your own vault co
 
 ## Passkeys in the extension
 
-A page can detect the wrapper: `navigator.credentials.get.toString()` isn't native, and on Chromium a stack trace shows the extension id. Without a gesture the extension opens no window, and the browser's own UI handles it. User verification is reported only after a master password or PIN in the prompt, so a site that requires it asks every time.
+A page can detect the wrapper: `navigator.credentials.get.toString()` isn't native, and on Chromium a stack trace shows the extension id. Without a gesture the extension opens no window, and the browser's own UI handles it.

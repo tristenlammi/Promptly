@@ -32,9 +32,15 @@ export type Platform = {
   /** A short PIN for this run of the app. Off unless set. */
   pin?: ReturnType<typeof memoryPin>;
   /** Settings only this platform has. */
-  settingsExtras?: ReactNode;
+  /** Settings only this platform has, shown in the group they belong to. */
+  pinControls?: ReactNode;
+  fillControls?: ReactNode;
+  clipboardControls?: ReactNode;
   /** Turning bookmark sync on and off: only a browser extension can reach a browser's bookmarks. */
   bookmarkControls?: ReactNode;
+  /** This platform decides when it locks, and shows its own setting. Otherwise the app's idle
+   *  and sleep timers run, from the Settings screen's values. */
+  lockControls?: ReactNode;
 };
 
 type Token = { value: string; exp: number };

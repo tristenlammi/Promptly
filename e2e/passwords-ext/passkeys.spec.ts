@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 
-import { bg, connect, launch, makeUsers, MASTER, type Rig, siteA, startSite, tabIdOf, unlockExt } from "./lib";
+import { bg, connect, launch, makeUsers, MASTER, type Rig, siteA, startSite, tabIdOf, testHook, unlockExt } from "./lib";
 
 test.describe.configure({ mode: "serial" });
 
@@ -47,14 +47,14 @@ test("creates a passkey, in a window of its own, and a real server library accep
   await expect(prompt.getByText("Save a passkey?")).toBeVisible();
   await expect(prompt.getByText("localhost:8111")).toBeVisible();
   await prompt.getByRole("button", { name: "Save as a new item" }).click();
-  await prompt.getByRole("button", { name: "Skip" }).click();
   const r = await run;
   expect(r.error).toBeUndefined();
   expect(r.isReal).toBe(true);
   expect(r.authenticatorAttachment).toBe("platform");
   const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: false });
   expect(v.verified).toBe(true);
-  expect(v.registrationInfo?.userVerified, "a click on a button doesn't verify anyone").toBe(false);
+  // With the vault unlocked and a click in our window, and no password asked for.
+  expect(v.registrationInfo?.userVerified).toBe(true);
   expect(v.registrationInfo?.credentialDeviceType).toBe("multiDevice");
   expect(v.registrationInfo?.credentialBackedUp).toBe(true);
   credential = { id: v.registrationInfo!.credential.id, publicKey: v.registrationInfo!.credential.publicKey, counter: v.registrationInfo!.credential.counter };
@@ -69,7 +69,6 @@ test("signs in with it, and the library verifies the signature", async () => {
   const prompt = await promptWindow();
   await expect(prompt.getByText("Sign in with a passkey?")).toBeVisible();
   await prompt.getByRole("button", { name: /ana@example.com/ }).click();
-  await prompt.getByRole("button", { name: "Skip" }).click();
   const r = await run;
   expect(r.error).toBeUndefined();
   const v = await verifyAuthenticationResponse({
@@ -78,10 +77,10 @@ test("signs in with it, and the library verifies the signature", async () => {
     expectedOrigin: ORIGIN,
     expectedRPID: RP,
     credential: { id: credential.id, publicKey: credential.publicKey as Uint8Array<ArrayBuffer>, counter: credential.counter },
-    requireUserVerification: false,
+    requireUserVerification: true,
   });
   expect(v.verified).toBe(true);
-  expect(v.authenticationInfo.userVerified).toBe(false);
+  expect(v.authenticationInfo.userVerified).toBe(true);
   expect(Buffer.from(r.response.userHandle, "base64url").toString()).toBe("user-1");
   await page.close();
 });
@@ -93,7 +92,6 @@ test("discoverable sign-in with no allow list finds it too", async () => {
   const run = page.evaluate((o) => (window as any).__auth(o), { rpId: RP, challenge });
   const prompt = await promptWindow();
   await prompt.getByRole("button", { name: /ana@example.com/ }).click();
-  await prompt.getByRole("button", { name: "Skip" }).click();
   expect((await run).error).toBeUndefined();
   await page.close();
 });
@@ -109,35 +107,47 @@ test("excludeCredentials stops a duplicate, and says so only after the prompt", 
   await page.close();
 });
 
-test("a site that prefers verification is asked for it, and only then told, and can be skipped", async () => {
-  const page = await rig.ctx.newPage();
-  await page.goto(siteA("webauthn.html"));
-  const challenge = b64u(crypto.randomBytes(32));
-  const run = page.evaluate((o) => (window as any).__auth(o), { rpId: RP, challenge, allow: [credential.id] });
-  const prompt = await promptWindow();
-  await prompt.getByRole("button", { name: /ana@example.com/ }).click();
-  await expect(prompt.getByText("may ask for your password as well")).toBeVisible();
-  await prompt.getByLabel("Master password or PIN").fill(MASTER);
-  await prompt.getByLabel("Master password or PIN").press("Enter");
-  const r = await run;
-  expect(r.error).toBeUndefined();
-  const v = await verifyAuthenticationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, credential: { id: credential.id, publicKey: credential.publicKey as Uint8Array<ArrayBuffer>, counter: credential.counter }, requireUserVerification: true });
-  expect(v.verified).toBe(true);
-  expect(v.authenticationInfo.userVerified).toBe(true);
-  await page.close();
-});
-
-test("a site that requires user verification gets it only after the master password, in the prompt", async () => {
+test("a site that requires user verification gets it with no password asked for", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(siteA("webauthn.html"));
   const challenge = b64u(crypto.randomBytes(32));
   const run = page.evaluate((o) => (window as any).__register(o), { rpId: RP, userId: b64u(Buffer.from("user-uv")), userName: "uv@example.com", challenge, uv: "required" });
   const prompt = await promptWindow();
-  await expect(prompt.getByText("prove it's you")).toBeVisible();
   await prompt.getByRole("button", { name: "Save as a new item" }).click();
-  await expect(prompt.getByLabel("Master password or PIN")).toBeVisible();
-  // It's a must here, so there's no way past it.
-  await expect(prompt.getByRole("button", { name: "Skip" })).toHaveCount(0);
+  const r = await run;
+  expect(r.error).toBeUndefined();
+  const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: true });
+  expect(v.verified).toBe(true);
+  expect(v.registrationInfo?.userVerified).toBe(true);
+  await page.close();
+});
+
+test("a site that says it doesn't want user verification isn't told it happened", async () => {
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("webauthn.html"));
+  const challenge = b64u(crypto.randomBytes(32));
+  const run = page.evaluate((o) => (window as any).__register(o), { rpId: RP, userId: b64u(Buffer.from("user-nouv")), userName: "nouv@example.com", challenge, uv: "discouraged" });
+  const prompt = await promptWindow();
+  await prompt.getByRole("button", { name: "Save as a new item" }).click();
+  const r = await run;
+  expect(r.error).toBeUndefined();
+  const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: false });
+  expect(v.verified).toBe(true);
+  expect(v.registrationInfo?.userVerified).toBe(false);
+  await page.close();
+});
+
+test("an item marked to ask still asks, whatever the site wants, and a wrong answer gets nothing", async () => {
+  const items = await bg<{ id: string; username: string }[]>(rig, `return (await chrome.runtime.sendMessage({ t: "list", query: "uv@example.com" })).r;`);
+  const id = items[0].id;
+  const username = items[0].username;
+  await testHook(rig, "patchItem", { id, patch: { reprompt: true } });
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("webauthn.html"));
+  const challenge = b64u(crypto.randomBytes(32));
+  const run = page.evaluate((o) => (window as any).__auth(o), { rpId: RP, challenge });
+  const prompt = await promptWindow();
+  await prompt.getByRole("button", { name: new RegExp(username) }).first().click();
   await prompt.getByLabel("Master password or PIN").fill("not the password");
   await prompt.getByRole("button", { name: "Continue" }).click();
   await expect(prompt.getByText("That isn't right.")).toBeVisible({ timeout: 30_000 });
@@ -145,9 +155,7 @@ test("a site that requires user verification gets it only after the master passw
   await prompt.getByRole("button", { name: "Continue" }).click();
   const r = await run;
   expect(r.error).toBeUndefined();
-  const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: true });
-  expect(v.verified).toBe(true);
-  expect(v.registrationInfo?.userVerified).toBe(true);
+  await testHook(rig, "patchItem", { id, patch: { reprompt: false } });
   await page.close();
 });
 

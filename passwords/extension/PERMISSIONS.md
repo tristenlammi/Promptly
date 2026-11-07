@@ -4,7 +4,7 @@ For store review, and for anyone who wants to know. Nothing is collected or sent
 
 | Permission | Why |
 |---|---|
-| `storage` | `storage.session` holds the unlock secret in memory while unlocked, so the service worker can restart without asking again. Only trusted extension contexts can read it. Everything else is in IndexedDB in the extension's own origin. |
+| `storage` | `storage.session` holds the unlock secret in memory while unlocked, so the service worker can restart without asking again. Only trusted extension contexts can read it. Everything else is in IndexedDB in the extension's own origin, including the sealed unlock secret if the person chooses to never lock. |
 | `activeTab` | "Only when I click" mode: fills the current tab after a click on the toolbar button, with no standing site access. |
 | `scripting` | Registers the content script when the person chooses all-site filling, and injects it on a click in "on click" mode. |
 | `alarms` | Auto-lock timer, periodic sync, clearing a copied secret when it's due, and keeping the decrypted index alive while unlocked. |

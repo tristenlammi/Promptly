@@ -86,8 +86,8 @@ test("mail codes stay off until turned on, then fill from the menu as text", asy
 
   const v = await vaultPage();
   await v.getByRole("navigation", { name: "Passwords" }).getByText("Settings").click();
-  await v.getByTestId("ext-settings").getByRole("checkbox", { name: /codes and sign-in links/ }).click();
-  await expect(v.getByTestId("ext-settings").getByRole("checkbox", { name: /codes and sign-in links/ })).toBeChecked();
+  await v.getByTestId("settings").getByRole("checkbox", { name: /codes and sign-in links/ }).click();
+  await expect(v.getByTestId("settings").getByRole("checkbox", { name: /codes and sign-in links/ })).toBeChecked();
   await v.close();
 
   const page = await rig.ctx.newPage();
@@ -248,7 +248,7 @@ test("a pending new password fills the new boxes, and the old one the current bo
 test("a short PIN unlocks, and five wrong tries wipe it", async () => {
   const v = await vaultPage();
   await v.getByRole("navigation", { name: "Passwords" }).getByText("Settings").click();
-  const s = v.getByTestId("ext-settings");
+  const s = v.getByTestId("settings");
   await s.getByLabel("A short PIN for this browser").fill("4821");
   await s.getByRole("button", { name: "Set PIN" }).click();
   await expect(s.getByRole("button", { name: "Remove my PIN" })).toBeVisible({ timeout: 30_000 });

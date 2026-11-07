@@ -50,7 +50,7 @@ test("a security email becomes a question, and changing the password keeps the o
 
   await nav(page, "Security check");
   const alerts = page.getByTestId("mail-alerts");
-  await expect(alerts).toContainText("Instagram says your password changed. Was that you?");
+  await expect(alerts).toContainText("mail.instagram.com says your password changed. Was that you?");
 
   await alerts.getByRole("button", { name: "Not me: change password" }).click();
   const flow = page.getByTestId("change-flow");
@@ -120,6 +120,7 @@ test("duplicates merge, and travel mode takes a vault off this browser", async (
   await expect(dupes).toHaveCount(0);
 
   await nav(page, "Settings");
+  await page.getByTestId("settings-advanced").locator("summary").click();
   const travel = page.getByTestId("travel");
   page.on("dialog", (d) => d.accept());
   await travel.getByRole("checkbox", { name: "Personal" }).check();
@@ -130,6 +131,7 @@ test("duplicates merge, and travel mode takes a vault off this browser", async (
   await expect(page.getByText("Site one")).toHaveCount(0);
 
   await nav(page, "Settings");
+  await page.getByTestId("settings-advanced").locator("summary").click();
   await travel.getByLabel("Master password, to bring them back").fill(MASTER);
   await travel.getByRole("button", { name: "Turn off travel mode" }).click();
   await expect(travel.getByRole("button", { name: "Take them off this device" })).toBeVisible({ timeout: 30_000 });

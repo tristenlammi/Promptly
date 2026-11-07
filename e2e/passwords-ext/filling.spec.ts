@@ -71,9 +71,9 @@ async function vaultPage(route = ""): Promise<Page> {
 
 async function setSettings(change: { lockMinutes?: number; clipboardSeconds?: number; lockOnSleep?: boolean }) {
   const v = await vaultPage("#/settings");
-  if (change.lockMinutes !== undefined) await v.getByLabel("Lock after this many idle minutes").fill(String(change.lockMinutes));
+  if (change.lockMinutes !== undefined) await v.getByLabel("Lock this browser's vault").selectOption(String(change.lockMinutes));
   if (change.clipboardSeconds !== undefined) await v.locator('input[type=number][min="5"]').fill(String(change.clipboardSeconds));
-  if (change.lockOnSleep !== undefined) await v.getByRole("checkbox", { name: "Lock when the computer sleeps" }).setChecked(change.lockOnSleep);
+  if (change.lockOnSleep !== undefined) await v.getByRole("checkbox", { name: "Also lock when the computer sleeps" }).setChecked(change.lockOnSleep);
   await v.waitForTimeout(400);
   await v.close();
 }
@@ -120,13 +120,13 @@ test("fill on load: never for a base-domain match, a frame, or more than one mat
 // ---- Auto-lock ---------------------------------------------------------------------------
 
 test("auto-lock: the Settings screen's minutes set the alarm, and using the vault page extends it", async () => {
-  await setSettings({ lockMinutes: 37 });
+  await setSettings({ lockMinutes: 30 });
   const alarm = () => bg<number>(rig, `return (await chrome.alarms.get("autolock"))?.scheduledTime ?? 0;`);
   const v = await vaultPage();
   await v.mouse.move(50, 50);
   await v.mouse.move(60, 60);
   const inMinutes = async () => ((await alarm()) - Date.now()) / 60_000;
-  await expect.poll(inMinutes, { timeout: 15_000 }).toBeGreaterThan(36);
+  await expect.poll(inMinutes, { timeout: 15_000 }).toBeGreaterThan(29);
   const first = await alarm();
   // The page tells the background at most every 20 seconds.
   await v.waitForTimeout(21_000);
@@ -182,7 +182,7 @@ test("locking from the popup takes an open vault page with it", async () => {
 test("the on-click box tells the truth: unticking asks for the permission, and a no keeps it ticked", async () => {
   const scripts = () => bg<string[]>(rig, `return (await chrome.scripting.getRegisteredContentScripts()).map((x) => x.id).sort();`);
   const v = await vaultPage("#/settings");
-  const box = v.getByTestId("ext-settings").getByRole("checkbox", { name: "Only fill when I click the toolbar button" });
+  const box = v.getByTestId("settings").getByRole("checkbox", { name: "Only fill when I click the toolbar button" });
   await box.click();
   await expect(box).toBeChecked();
   await expect.poll(scripts).toEqual([]);
@@ -208,7 +208,7 @@ test("the on-click box tells the truth: unticking asks for the permission, and a
     chrome.permissions.request = (async () => false) as never;
   });
   await box.click();
-  await expect(v.getByTestId("ext-settings").getByText("filling stays on click")).toBeVisible();
+  await expect(v.getByTestId("settings").getByText("filling stays on click")).toBeVisible();
   await expect(box).toBeChecked();
   expect(await scripts()).toEqual([]);
 

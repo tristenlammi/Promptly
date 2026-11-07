@@ -369,7 +369,6 @@ test("Firefox: a passkey made and used here satisfies an independent WebAuthn li
     const h = (await driver.getAllWindowHandles()).find((x) => !handles.includes(x));
     await driver.switchTo().window(h);
     await click(driver, buttonName);
-    await click(driver, button("Skip"));
     await driver.sleep(300);
     await driver.switchTo().window(pg);
   };
@@ -385,7 +384,7 @@ test("Firefox: a passkey made and used here satisfies an independent WebAuthn li
   assert.equal(reg.error, undefined);
   const v = await verifyRegistrationResponse({ response: reg, expectedChallenge: challenge, expectedOrigin: `http://localhost:${PORT}`, expectedRPID: "localhost", requireUserVerification: false });
   assert.ok(v.verified);
-  assert.equal(v.registrationInfo.userVerified, false, "a click doesn't verify anyone");
+  assert.equal(v.registrationInfo.userVerified, true, "an unlocked vault and a click, and no password");
 
   const c2 = b64u(crypto.randomBytes(32));
   handles = await driver.getAllWindowHandles();
@@ -427,7 +426,6 @@ test("Firefox: a quiet passkey request is answered from the toolbar, and verifie
   const prompt = (await driver.getAllWindowHandles()).find((x) => !before.includes(x));
   await driver.switchTo().window(prompt);
   await click(driver, By.xpath('//button[contains(., "fox@example.com")]'));
-  await click(driver, button("Skip"));
   await driver.sleep(400);
   await driver.switchTo().window(pg);
   await driver.wait(async () => driver.executeScript("return window.__result !== null"), 15000);
@@ -457,7 +455,6 @@ test("Firefox: a page asking for a passkey with no click gets our window when it
   await driver.switchTo().window(prompt);
   await see(driver, button("Use another device or security key"));
   await click(driver, By.xpath('//button[contains(., "fox@example.com")]'));
-  await click(driver, button("Skip"));
   await driver.sleep(400);
   await driver.switchTo().window(pg);
   await driver.wait(async () => driver.executeScript("return window.__result !== null"), 15000);
@@ -487,10 +484,10 @@ test("Firefox: saves a new login after a sign-in", async () => {
 async function openSettings() {
   await driver.switchTo().window(extTab);
   await driver.executeScript(`location.hash = "#/settings";`);
-  await see(driver, By.css('[data-testid="ext-settings"]'), 30000);
+  await see(driver, By.css('[data-testid="settings"]'), 30000);
 }
 
-const settingsBox = (text) => By.xpath(`//*[@data-testid="ext-settings"]//label[contains(normalize-space(.), ${JSON.stringify(text)})]//input`);
+const settingsBox = (text) => By.xpath(`//*[@data-testid="settings"]//label[contains(normalize-space(.), ${JSON.stringify(text)})]//input`);
 
 const setNumber = async (locator, value) => {
   const el = await see(driver, locator);
@@ -739,11 +736,27 @@ asyncio.run(main())
 
 test("Firefox: auto-lock settings reach the background, and a long gap between alarms locks", async () => {
   await openSettings();
-  await setNumber(By.xpath(`//label[.//span[normalize-space(.)="Lock after this many idle minutes"]]//input`), 37);
+  const lockTo = async (value) => {
+    await click(driver, By.xpath(`//select[ancestor::label[contains(., "Lock this browser's vault")]]/option[@value="${value}"]`));
+    await driver.sleep(300);
+  };
+  await lockTo("30");
   const at = await extEval(`async () => { await browser.runtime.sendMessage({ t: "activity" }); return (await browser.alarms.get("autolock")).scheduledTime; }`);
   const minutes = (at - Date.now()) / 60000;
-  assert.ok(minutes > 36 && minutes <= 37.1, String(minutes));
-  await setNumber(By.xpath(`//label[.//span[normalize-space(.)="Lock after this many idle minutes"]]//input`), 15);
+  assert.ok(minutes > 29 && minutes <= 30.1, String(minutes));
+
+  // Never: the warning first, then no timer, no lock on sleep, and back unlocked after a restart.
+  await lockTo("never");
+  assert.equal(await extEval(`async () => (await browser.runtime.sendMessage({ t: "lockChoice" })).r.when`), 30, "nothing changes until the warning's answered");
+  await click(driver, button("Never lock"));
+  await driver.sleep(300);
+  assert.equal(await extEval(`async () => (await browser.alarms.get("autolock")) ?? null`), null);
+  assert.equal((await hook("sleepGap", { ms: 10 * 60 * 1000 })).unlocked, true);
+  assert.equal((await hook("restartLike", {})).unlocked, true);
+  assert.equal((await hook("kept", {})).kept, true);
+  await lockTo("15");
+  assert.equal((await hook("kept", {})).kept, false);
+  assert.ok(await extEval(`async () => (await browser.alarms.get("autolock"))?.scheduledTime`));
 
   // Firefox doesn't report "locked" from the idle API, so this is how sleep shows up here.
   assert.equal((await hook("sleepGap", { ms: 60 * 1000 })).unlocked, true);

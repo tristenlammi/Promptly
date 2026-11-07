@@ -367,6 +367,7 @@ export function SettingsScreen() {
   const [helloOn, setHelloOn] = useState(false);
   const [helloAvailable, setHelloAvailable] = useState(false);
   const [helloPassword, setHelloPassword] = useState("");
+  const [helloError, setHelloError] = useState("");
   useEffect(() => {
     vault.myIdentityWords().then(setWords);
     platform.hello?.available().then(setHelloAvailable);
@@ -399,25 +400,22 @@ export function SettingsScreen() {
   };
 
   return (
-    <section className="flex max-w-xl flex-col gap-6">
+    <section data-testid="settings" className="flex max-w-xl flex-col gap-4">
       <h1 className="text-lg font-semibold text-[var(--text)]">Settings</h1>
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-[var(--text)]">On this device</h2>
-        <Label text="Lock after this many idle minutes">
-          <input className={inputClass} type="number" min={1} max={1440} value={settings.autoLockMinutes} onChange={(e) => setSettings({ ...settings, autoLockMinutes: Math.max(1, Number(e.target.value) || 15) })} />
-        </Label>
-        <label className="flex items-center gap-2 text-sm text-[var(--text)]">
-          <input type="checkbox" checked={settings.lockOnSleep} onChange={(e) => setSettings({ ...settings, lockOnSleep: e.target.checked })} />Lock when the computer sleeps
-        </label>
-        <Label text="Clear copied secrets after this many seconds">
-          <input className={inputClass} type="number" min={5} max={600} value={settings.clipboardSeconds} onChange={(e) => setSettings({ ...settings, clipboardSeconds: Math.max(5, Number(e.target.value) || 30) })} />
-        </Label>
-        {platform.settingsExtras}
-        <PersonalIcons />
-        <KeysPanel />
+      <SettingsGroup title="Locking">
+        {platform.lockControls ?? (
+          <>
+            <Label text="Lock after this many idle minutes">
+              <input className={inputClass} type="number" min={1} max={1440} value={settings.autoLockMinutes} onChange={(e) => setSettings({ ...settings, autoLockMinutes: Math.min(1440, Math.max(1, Number(e.target.value) || 15)) })} />
+            </Label>
+            <label className="flex items-center gap-2 text-sm text-[var(--text)]">
+              <input type="checkbox" checked={settings.lockOnSleep} onChange={(e) => setSettings({ ...settings, lockOnSleep: e.target.checked })} />Lock when the computer sleeps
+            </label>
+          </>
+        )}
+        {platform.pinControls}
         {platform.pin && <PinPanel />}
         <PasskeyUnlockPanel />
-        <TravelPanel />
         {helloAvailable && (
           <label className="flex items-center gap-2 text-sm text-[var(--text)]">
             <input
@@ -425,6 +423,7 @@ export function SettingsScreen() {
               checked={helloOn}
               onChange={async (e) => {
                 const on = e.target.checked;
+                setHelloError("");
                 try {
                   if (on) {
                     const raw = await vault.exportUnlockSecret(helloPassword);
@@ -435,7 +434,7 @@ export function SettingsScreen() {
                   await vault.store.setMeta("hello_enabled", on);
                   setHelloOn(on);
                 } catch (err) {
-                  setError(errorText(err));
+                  setHelloError(errorText(err));
                 }
               }}
             />
@@ -447,23 +446,51 @@ export function SettingsScreen() {
             <input className={inputClass} type="password" autoComplete="current-password" value={helloPassword} onChange={(e) => setHelloPassword(e.target.value)} />
           </Label>
         )}
-      </div>
-      <div className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Your safety words</h2>
-        <p className="text-sm text-[var(--text-muted)]">Someone sharing a vault with you can compare these, to be sure it's really you. They change only if your account is reset.</p>
-        <code data-testid="my-words" className="rounded-lg bg-[var(--surface-1)] p-2 font-mono text-sm text-[var(--text)]">{words.join(" ")}</code>
-      </div>
-      <form onSubmit={change} className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-[var(--text)]">Change master password</h2>
-        <Label text="Current master password"><input className={inputClass} type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Label>
-        <Label text="New master password"><input className={inputClass} type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} /></Label>
-        <StrengthMeter password={next} />
-        <Label text="Type it again"><input className={inputClass} type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} /></Label>
-        {error && <Callout kind="danger">{error}</Callout>}
-        <Button kind="primary" type="submit" disabled={busy || !current || !next}>Change it</Button>
-      </form>
-      <ResetVault vault={vault} kind={platform.kind} baseUrl={platform.baseUrl} />
+        {helloError && <Callout kind="danger">{helloError}</Callout>}
+      </SettingsGroup>
+      {platform.fillControls && <SettingsGroup title="Filling">{platform.fillControls}</SettingsGroup>}
+      <SettingsGroup title="Clipboard">
+        <Label text="Clear copied secrets after this many seconds">
+          <input className={inputClass} type="number" min={5} max={600} value={settings.clipboardSeconds} onChange={(e) => setSettings({ ...settings, clipboardSeconds: Math.min(600, Math.max(5, Number(e.target.value) || 30)) })} />
+        </Label>
+        {platform.clipboardControls}
+      </SettingsGroup>
+      <SettingsGroup title="Appearance">
+        <PersonalIcons />
+      </SettingsGroup>
+      <details data-testid="settings-advanced" className="rounded-xl border border-[var(--border)] p-4">
+        <summary className="cursor-pointer text-sm font-semibold text-[var(--text)]">Password, keys and recovery</summary>
+        <p className="mt-1 text-xs text-[var(--text-muted)]">Changing your master password or keys, travel mode, your safety words and resetting the vault. Not needed day to day.</p>
+        <div className="mt-4 flex flex-col gap-6">
+          <form onSubmit={change} className="flex flex-col gap-3">
+            <h2 className="text-sm font-semibold text-[var(--text)]">Change master password</h2>
+            <Label text="Current master password"><input className={inputClass} type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} /></Label>
+            <Label text="New master password"><input className={inputClass} type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} /></Label>
+            <StrengthMeter password={next} />
+            <Label text="Type it again"><input className={inputClass} type="password" autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} /></Label>
+            {error && <Callout kind="danger">{error}</Callout>}
+            <Button kind="primary" type="submit" disabled={busy || !current || !next}>Change it</Button>
+          </form>
+          <KeysPanel />
+          <TravelPanel />
+          <div className="flex flex-col gap-3">
+            <h2 className="text-sm font-semibold text-[var(--text)]">Your safety words</h2>
+            <p className="text-sm text-[var(--text-muted)]">Someone sharing a vault with you can compare these, to be sure it's really you. They change only if your account is reset.</p>
+            <code data-testid="my-words" className="rounded-lg bg-[var(--surface-1)] p-2 font-mono text-sm text-[var(--text)]">{words.join(" ")}</code>
+          </div>
+          <ResetVault vault={vault} kind={platform.kind} baseUrl={platform.baseUrl} />
+        </div>
+      </details>
     </section>
+  );
+}
+
+function SettingsGroup({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-[var(--border)] p-4">
+      <h2 className="text-sm font-semibold text-[var(--text)]">{title}</h2>
+      {children}
+    </div>
   );
 }
 
