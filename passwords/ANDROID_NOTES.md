@@ -214,7 +214,7 @@ Final code, commit `39daf37`. AVD `PromptlyTest` (API 36, Google Play image, x86
 - `lintVitalRelease`: passes.
 - **A mutation check, on the emergency fix alone:** taking out the `verified` check and the `x25519` half of the merge's comparison failed three of the new hostile tests. The other fixes weren't mutation-checked.
 - **Slow files, checked before capping:** with the caps out, all three tests timed out at 15 s: `genericCsv`'s column loop, `BigInteger.destructiveMulAdd`, and the decimal regex. With them in, each is refused or ignored at once.
-- **What the KDF ceilings cost, measured on this emulator and scaled up:** 500,000 rounds of PBKDF2 took 1,488 ms, so Bitwarden's 5 million ceiling is about 15 s a try, and a wrong password tries twice. An emulator on a desktop CPU isn't a phone.
+- **What the KDF ceilings cost, measured on this emulator and scaled up:** 500,000 rounds of PBKDF2 took 1,488 ms, so Bitwarden's 5 million ceiling is about 14 s a try, and a wrong password tries twice. An emulator on a desktop CPU isn't a phone.
 
 **Failures on the way.** Real, found by these runs: a password change in progress was dropped from the queue if its screen came back while the vault was still loading, since `get` finds nothing for that moment (A56, now fixed). It failed one full run and is older than this work. In the tests: a test tripped over `.bin` not being an allowed Files type; a Back meant for the keyboard landed on Settings after the keyboard had gone; the check of when a scope arrived read the setting a moment too soon; and the kit gate's second button was under the keyboard.
 
