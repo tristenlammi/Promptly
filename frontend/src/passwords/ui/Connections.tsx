@@ -9,7 +9,8 @@ import { encodeSecretKey, lastGroup } from "../core/keys";
 import { generateForSite } from "../core/generator";
 import { hostOf } from "../core/match";
 import { type Item, newBody } from "../core/model";
-import { moveAttachment, uploadAttachment } from "../core/attachments";
+import { downloadAttachment, moveAttachment, uploadAttachment } from "../core/attachments";
+import { equalBytes } from "../core/bytes";
 import { Reprompt } from "./ItemView";
 import { Button, Callout, errorText, inputClass, Label, Modal, safeHref, useVault } from "./kit";
 import { downloadBlob } from "./Onboarding";
@@ -288,6 +289,9 @@ export function FromFiles({ item, onClose }: { item: Item; onClose: () => void }
       await vault.update(item.id, { ...fresh.body, attachments: [...(fresh.body.attachments ?? []), ref] });
       await vault.sync();
       bump();
+      // The next step offers to delete the original, so make sure this copy really opens first.
+      const back = await downloadAttachment(platform.api, item.vaultId, item.id, ref);
+      if (!equalBytes(back, new Uint8Array(raw))) throw new Error("The copy in your vault didn't read back the same, so the original's still the one to keep.");
       setMoved(f);
     } catch (e) {
       setError(errorText(e));
@@ -630,6 +634,8 @@ export function KitGate({ onDone, username, fresh }: { onDone: () => void; usern
   const [saved, setSaved] = useState(false);
   const [typed, setTyped] = useState("");
   const [error, setError] = useState("");
+  // A broken or hostile server mustn't be able to wall off the vault on this device.
+  const [couldntTell, setCouldntTell] = useState(false);
   useEffect(() => {
     void (async () => {
       const raw = await vault.loadSecretKey();
@@ -672,11 +678,13 @@ export function KitGate({ onDone, username, fresh }: { onDone: () => void; usern
               onDone();
             } catch (e) {
               setError(errorText(e));
+              setCouldntTell(true);
             }
           }}
         >
           Done
         </Button>
+        {couldntTell && <Button onClick={onDone}>Carry on for now</Button>}
       </div>
     </Modal>
   );

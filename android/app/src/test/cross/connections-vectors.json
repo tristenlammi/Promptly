@@ -77,7 +77,7 @@
         { "id": "d", "kind": "password_changed", "from_name": "Promptly Bank", "from_domain": "promptlybnk.com", "subject": "x", "at": "2026-11-07T12:00:00Z" }
       ],
       "want": [
-        { "id": "a", "title": "Bank", "text": "Promptly Bank says your password changed. Was that you?", "androidText": "mail.promptlybank.com says your password changed. Was that you?" },
+        { "id": "a", "title": "Bank", "text": "mail.promptlybank.com says your password changed. Was that you?", "androidText": "mail.promptlybank.com says your password changed. Was that you?" },
         { "id": "b", "title": "Themes", "text": "envato.com says there was a new sign-in. Was that you?" }
       ]
     }

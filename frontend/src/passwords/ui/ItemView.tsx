@@ -177,10 +177,14 @@ function Attachments({ item, canEdit }: { item: Item; canEdit: boolean }) {
     try {
       await vault.sync();
       // An interrupted upload picks up where it stopped, if the same file's chosen again.
-      const resumeName = `upload_resume:${item.id}:${file.name}:${file.size}`;
-      let resume = await vault.getDeviceSealed<{ id: string; key: string }>(resumeName).catch(() => null);
-      if (!resume) {
-        resume = { id: randomUuid(), key: b64u(randomBytes(32)) };
+      // The record's name holds no file name, and the record knows the file's first chunk: another
+      // file of the same name and size must not end up with this one's chunks.
+      const hashOf = async (b: BufferSource) => b64u(new Uint8Array(await crypto.subtle.digest("SHA-256", b)));
+      const resumeName = `upload_resume:${await hashOf(new TextEncoder().encode(`${item.id}\u0000${file.name}\u0000${file.size}`))}`;
+      const fingerprint = await hashOf(await file.slice(0, 1024 * 1024).arrayBuffer());
+      let resume = await vault.getDeviceSealed<{ id: string; key: string; fingerprint?: string }>(resumeName).catch(() => null);
+      if (!resume || resume.fingerprint !== fingerprint) {
+        resume = { id: randomUuid(), key: b64u(randomBytes(32)), fingerprint };
         await vault.putDeviceSealed(resumeName, resume);
       }
       const ref = await uploadAttachment(platform.api, item.vaultId, item.id, file, (d, t) => setBusy(`Uploading ${file.name}: ${d} of ${t} MB`), resume);

@@ -171,6 +171,20 @@ describe("a hostile server", () => {
     expect(s.wrapped).toEqual([]);
   });
 
+  it("\"they match\" is about the words that were on screen, not whatever the server says next", async () => {
+    const { s, c } = await fresh();
+    const cid = "44444444-4444-4444-8444-444444444444";
+    const real = persona("dana").keys;
+    s.userKeys.set(cid, real);
+    const shown = await c.identityWordsFor(cid);
+    s.userKeys.set(cid, persona("dana").keys);
+    await expect(c.markVerified(cid, shown)).rejects.toThrow(/changed/);
+    expect((await c.trustEntries())[cid]?.verified).toBeFalsy();
+    s.userKeys.set(cid, real);
+    await c.markVerified(cid, shown);
+    expect((await c.trustEntries())[cid]?.verified).toBe(true);
+  });
+
   it("can't get a new vault key sealed to someone else when a member's removed", async () => {
     const { s, c } = await fresh();
     const vid = await c.createSharedVault("Team");

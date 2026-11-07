@@ -1,6 +1,7 @@
 // Secure Send: a password or a file, with an expiry and a view limit, for someone
 // who may have no account. What you've sent is remembered in your own vault, so the
 // server never knows what any of them are called.
+import { isSendLink } from "../core/connections";
 import { Copy, Mail, MessageSquare, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -30,14 +31,21 @@ export function SendsScreen() {
     void load();
   }, [load, version]);
 
+  const [personal, setPersonal] = useState<string | null>(null);
+  useEffect(() => {
+    vault.personalVaultId().then(setPersonal).catch(() => setPersonal(null));
+  }, [vault, version]);
+
   const records = useMemo(() => {
     void version;
     const out = new Map<string, { itemId: string; title: string; link: string }>();
+    // Your own vault's only: anyone who can edit a shared one could otherwise replace a Send's
+    // name and the link you'd copy.
     for (const i of vault.allItems({ includeSystem: true })) {
-      if (i.body.kind === "send" && i.body.notes && !i.deleted) out.set(i.body.sendId ?? "", { itemId: i.id, title: i.body.title, link: i.body.notes });
+      if (i.body.kind === "send" && i.body.notes && !i.deleted && i.vaultId === personal && isSendLink(i.body.notes, i.body.sendId ?? "")) out.set(i.body.sendId ?? "", { itemId: i.id, title: i.body.title, link: i.body.notes });
     }
     return out;
-  }, [vault, version]);
+  }, [vault, version, personal]);
 
   const remove = async (id: string) => {
     try {

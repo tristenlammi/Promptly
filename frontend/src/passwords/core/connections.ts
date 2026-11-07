@@ -81,11 +81,23 @@ export function securityAlerts(events: SecurityEvent[], items: Item[]): Security
       return related(h ? baseDomain(h) : null, sender);
     }));
     if (!item) continue;
-    const who = event.from_name || event.from_domain;
+    // The domain, and not the name in the From line: that's whatever the email cares to say.
+    const who = event.from_domain;
     const what = event.kind === "password_changed" ? "your password changed" : "there was a new sign-in";
     out.push({ event, item, text: `${who} says ${what}. Was that you?` });
   }
   return out;
+}
+
+/** A Send's saved link really is that Send's, on this kind of page. Anything else in the item
+ *  isn't offered: it might have been written by someone else's device. */
+export function isSendLink(link: string, sendId: string): boolean {
+  try {
+    const u = new URL(link);
+    return (u.protocol === "https:" || u.protocol === "http:") && u.pathname === `/passwords/send/${sendId}` && !!u.hash;
+  } catch {
+    return false;
+  }
 }
 
 // ---- Change password -----------------------------------------------------------------

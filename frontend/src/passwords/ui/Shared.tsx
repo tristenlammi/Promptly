@@ -460,7 +460,7 @@ function SafetyWords({ member, onClose }: { member: MemberOut; onClose: () => vo
           <Button
             kind="primary"
             onClick={async () => {
-              await vault.markVerified(member.user_id);
+              await vault.markVerified(member.user_id, words);
               toast("Marked as checked");
               onClose();
             }}
@@ -580,11 +580,11 @@ function EmergencyPanel({ people, onChange }: { people: Person[]; onChange: () =
         <EmergencyWords
           person={compare}
           onCancel={() => setCompare(null)}
-          onMatch={async () => {
+          onMatch={async (shown) => {
             const { user_id, invite } = compare;
             setCompare(null);
             await act(async () => {
-              await vault.markVerified(user_id);
+              await vault.markVerified(user_id, shown);
               if (invite) await vault.emergencyInvite(user_id, days);
             }, invite ? "Asked them" : "Checked");
             if (invite) setWho("");
@@ -597,7 +597,7 @@ function EmergencyPanel({ people, onChange }: { people: Person[]; onChange: () =
 
 /** Your vault keys go to these keys, and the server's the one saying they're this person's. These
  *  words are how you find out. Nothing's sealed until you've said they match. */
-function EmergencyWords({ person, onMatch, onCancel }: { person: { user_id: string; username: string }; onMatch: () => void; onCancel: () => void }) {
+function EmergencyWords({ person, onMatch, onCancel }: { person: { user_id: string; username: string }; onMatch: (shown: string[]) => void; onCancel: () => void }) {
   const { vault } = useVault();
   const [words, setWords] = useState<string[]>([]);
   const [problem, setProblem] = useState("");
@@ -612,7 +612,7 @@ function EmergencyWords({ person, onMatch, onCancel }: { person: { user_id: stri
         <p className="text-[var(--text-muted)]">If they don't match, don't go on: someone may be pretending to be them, possibly whoever runs the server.</p>
         <div className="flex flex-wrap gap-2">
           <Button onClick={onCancel}>Not now</Button>
-          <Button kind="primary" disabled={!words.length} onClick={onMatch}>They match</Button>
+          <Button kind="primary" disabled={!words.length} onClick={() => onMatch(words)}>They match</Button>
         </div>
       </div>
     </Modal>

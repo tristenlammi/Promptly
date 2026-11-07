@@ -554,7 +554,8 @@ export class VaultClient {
     const generations = (await this.store.getMeta<Record<string, number>>("trust_generations")) ?? {};
     const people = { ...(remote?.people ?? {}), ...local };
     for (const [id, e] of Object.entries(remote?.people ?? {})) {
-      if (people[id] && e.verified) people[id] = { ...people[id], verified: people[id].ed25519 === e.ed25519 ? true : people[id].verified };
+      // Both keys: words compared on one pair say nothing about another with the same signing key.
+      if (people[id] && e.verified) people[id] = { ...people[id], verified: people[id].ed25519 === e.ed25519 && people[id].x25519 === e.x25519 ? true : people[id].verified };
     }
     this.book = {
       people,
@@ -642,7 +643,10 @@ export class VaultClient {
     return identityWords(s.userId, pub.x25519, pub.ed25519);
   }
 
-  async markVerified(userId: string): Promise<void> {
+  /** `shown` is the words the person compared. If the server's changed its answer since they
+   *  were put on screen, "they match" isn't about these keys. */
+  async markVerified(userId: string, shown?: string[]): Promise<void> {
+    if (shown && (await this.identityWordsFor(userId)).join(" ") !== shown.join(" ")) throw new Error("Those safety words have changed since they were shown. Compare them again.");
     if (!this.book.people[userId]) await this.pin(userId);
     this.book.people[userId].verified = true;
     await this.saveTrustBook();

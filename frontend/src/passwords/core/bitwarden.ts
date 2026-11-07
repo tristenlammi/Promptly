@@ -34,12 +34,14 @@ async function pbkdf2(password: Uint8Array, salt: Uint8Array, iterations: number
 async function masterKey(password: string, salt: Uint8Array, data: Any): Promise<Uint8Array> {
   const kdfType = Number(data.kdfType ?? 0);
   const iterations = Number(data.kdfIterations ?? 0);
-  if (!Number.isInteger(iterations) || iterations < 1 || iterations > 100_000_000) throw new Error("Unusual KDF settings in that file");
+  if (!Number.isInteger(iterations) || iterations < 1) throw new Error("Unusual KDF settings in that file");
+  // A hostile file could otherwise hang this page for as long as it liked, for any password.
+  if (kdfType === 0 && iterations > 5_000_000) throw new Error("Unusual KDF settings in that file");
   if (kdfType === 0) return pbkdf2(utf8(password), salt, iterations);
   if (kdfType === 1) {
     const memory = Number(data.kdfMemory ?? 64);
     const parallelism = Number(data.kdfParallelism ?? 4);
-    if (memory < 1 || memory > 4096 || parallelism < 1 || parallelism > 16) throw new Error("Unusual KDF settings in that file");
+    if (memory < 1 || memory > 1024 || parallelism < 1 || parallelism > 16 || memory * iterations > 32 * 1024) throw new Error("Unusual KDF settings in that file");
     // Bitwarden runs Argon2 with SHA-256 of the salt.
     const hashed = new Uint8Array(await crypto.subtle.digest("SHA-256", buf(salt)));
     const opts = { password: utf8(password), salt: hashed, iterations, parallelism, memorySize: memory * 1024, hashLength: 32, outputType: "binary" as const };

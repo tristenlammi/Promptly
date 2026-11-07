@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { randomBytes } from "./bytes";
-import { agoText, changePageUrl, clockDriftText, commitPending, dropPending, findDuplicates, linkIsSafe, type MailCode, memoryPin, mergeDuplicates, rankMailCodes, savedDomainsOf, securityAlerts, type SecurityEvent, unwrapUnlockSecret, withPending, wrapUnlockSecret } from "./connections";
+import { isSendLink, agoText, changePageUrl, clockDriftText, commitPending, dropPending, findDuplicates, linkIsSafe, type MailCode, memoryPin, mergeDuplicates, rankMailCodes, savedDomainsOf, securityAlerts, type SecurityEvent, unwrapUnlockSecret, withPending, wrapUnlockSecret } from "./connections";
 import { touch } from "./model";
 import { type Item, type ItemBody, newBody } from "./model";
 
@@ -50,7 +50,8 @@ describe("security emails", () => {
     const login = item({ title: "Instagram", urls: [{ url: "https://www.instagram.com/" }] });
     const [a] = securityAlerts([ev({})], [login]);
     expect(a.item.id).toBe(login.id);
-    expect(a.text).toBe("Instagram says your password changed. Was that you?");
+    expect(a.text).toBe(`${a.event.from_domain} says your password changed. Was that you?`);
+    expect(a.text).not.toContain("Instagram says");
     expect(securityAlerts([ev({ kind: "new_signin" })], [login])[0].text).toContain("new sign-in");
   });
 
@@ -157,6 +158,16 @@ describe("duplicates", () => {
     expect(body.attachments ?? []).toEqual([]);
     expect(moves.map((m) => [m.from.id, m.ref.id])).toEqual([[old.id, "att-1"]]);
     expect(body.reprompt).toBe(true);
+  });
+});
+
+describe("Send records", () => {
+  it("a link counts only if it's that Send's", () => {
+    expect(isSendLink("https://home.example/passwords/send/abc#key", "abc")).toBe(true);
+    expect(isSendLink("https://home.example/passwords/send/other#key", "abc")).toBe(false);
+    expect(isSendLink("https://evil.example/somewhere#key", "abc")).toBe(false);
+    expect(isSendLink("javascript:alert(1)//passwords/send/abc#k", "abc")).toBe(false);
+    expect(isSendLink("https://home.example/passwords/send/abc", "abc")).toBe(false);
   });
 });
 
