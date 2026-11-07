@@ -186,7 +186,7 @@ Left open from those reviews:
 
 **On real sites and devices**
 
-- **Real sites:** the only real-site use is your own Google passkey sign-in, which you confirmed worked with the password typed, on the build before D74. The build where it needs no password hasn't been tried on Google. I couldn't test real sign-ins, because logging in to public sites is off limits for me.
+- **Real sites:** the only real-site use is your own Google passkey sign-in. You confirmed it worked with the password typed on the build before D74, and on the current build: after pressing Google's Continue, Promptly's passkey window opened and the sign-in worked. I couldn't test real sign-ins, because logging in to public sites is off limits for me.
 - **Google's password step:** you reported that fill didn't work there. That's unresolved, and I don't have your Describe-this-form output.
 - **Bookmarks in your browser:** you reported none showing, and that's also unresolved. Automated runs pass, on throwaway profiles.
 - **Android on a real phone:** nothing has. Chrome autofill is the biggest gap, as Chrome on the emulator is blocked by its terms screen, which I'm not allowed to accept. WebView and a test app stand in. Also not run: a real camera, a real fingerprint sensor, any arm64 device, and real banking apps.
