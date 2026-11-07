@@ -25,6 +25,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed
+- Passwords in the browser: with a passkey saved for the site, the panel now says to press the site's own button, such as Continue, rather than that the page isn't asking for one.
 - Passwords on Chrome and Chromium browsers: a copied 2FA code, or the timed clear of a copied secret, could be lost because the extension's hidden clipboard page closed too soon.
 - Passwords in the browser: changing the master password, Secret Key or key settings in the vault page keeps the browser's lock working, and the Lock button works even when the server doesn't answer.
 - Passwords in the browser: a page that fills on load no longer postpones the lock timer.

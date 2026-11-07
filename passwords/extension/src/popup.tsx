@@ -779,7 +779,7 @@ function PasskeyRows({ tabId, setMessage }: { tabId: number; setMessage: (m: str
         <p data-testid="passkey-no-match" className="rounded-lg bg-[var(--surface-1)] p-2 text-xs">This page asked for a passkey for {asked}, but it listed only certain passkeys and yours for {saved} isn't one of them. That usually means the site doesn't have it on your account. Check the account's security settings there, or use another way to sign in.</p>
       )}
       {!offers.length && !asked && saved && (
-        <p data-testid="passkey-saved" className="rounded-lg bg-[var(--surface-1)] p-2 text-xs">You have a passkey for {saved}, but this page isn't asking for one. Sites decide when they do: look for "Use a passkey", "Sign in with a passkey" or "Try another way".</p>
+        <p data-testid="passkey-saved" className="rounded-lg bg-[var(--surface-1)] p-2 text-xs">You have a passkey for {saved}. The site asks for it when you press its own button, such as Continue, "Use a passkey" or "Try another way". Our passkey window opens then.</p>
       )}
     </>
   );

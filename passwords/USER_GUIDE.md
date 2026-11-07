@@ -51,7 +51,7 @@ Add a code to a login by scanning its QR, pasting its setup key, or from a pictu
 
 The extension and the Android app can make and use passkeys for you, and they sync. You can always choose your browser's or a hardware key instead. In the browser, an unlocked vault and a click are all it takes, unless you've marked the item to ask for your master password.
 
-A site decides when it asks for a passkey, and nothing can make it ask. When a page asks and the passkey's in your unlocked vault, our window opens, with your browser's and Windows Hello's option one click away. If the site asks quietly, or the vault's locked, the toolbar button shows **PK** once unlocked, and "Sign in with a passkey" is at the top of the panel, and in the menu on the page in Chromium browsers. If you have a passkey for a site that isn't asking, the panel says so: look on the page for "Use a passkey" or "Try another way".
+A site decides when it asks for a passkey, and nothing can make it ask. When a page asks and the passkey's in your unlocked vault, our window opens, with your browser's and Windows Hello's option one click away. If the site asks quietly, or the vault's locked, the toolbar button shows **PK** once unlocked, and "Sign in with a passkey" is at the top of the panel, and in the menu on the page in Chromium browsers. If you have a passkey for a site that hasn't asked yet, the panel says so. Press the site's own button, such as Continue, "Use a passkey" or "Try another way", and our window opens.
 
 ## Sharing
 

@@ -345,7 +345,7 @@ test("with a passkey saved and no request, the panel says why nothing's happenin
   const page = await rig.ctx.newPage();
   await page.goto(siteA("webauthn.html"));
   const pop = await popupFor(rig, page);
-  await expect(pop.getByTestId("passkey-saved")).toContainText("this page isn't asking for one");
+  await expect(pop.getByTestId("passkey-saved")).toContainText("The site asks for it when you press its own button");
   await expect(pop.getByTestId("passkey-offer")).toHaveCount(0);
   await page.close();
 });
