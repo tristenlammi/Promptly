@@ -256,12 +256,15 @@ private fun RecoveryCheckDialog(client: VaultClient, onCancel: () -> Unit, onPas
     )
 }
 
-/** No way past this but saving the kit: forgetting the password without it loses the vault. */
+/** The way past this is saving the kit: forgetting the password without it loses the vault. It's
+ *  the server that keeps count, though, so one that can't or won't take the answer doesn't get to
+ *  shut anyone out of what's on this phone. */
 @Composable
 fun KitGate(client: VaultClient, onDone: () -> Unit) {
     var typed by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var refused by remember { mutableStateOf(false) }
     val key = remember { runCatching { client.encodedSecretKey() }.getOrNull() }
     val scope = rememberCoroutineScope()
     // This phone can't read its own copy of the key, so there's nothing to show. No locking anyone out over it.
@@ -288,10 +291,17 @@ fun KitGate(client: VaultClient, onDone: () -> Unit) {
                 scope.launch {
                     val r = withContext(Dispatchers.IO) { runCatching { client.api.confirmKit() } }
                     busy = false
-                    r.onSuccess { onDone() }.onFailure { error = errorText(it) }
+                    r.onSuccess { onDone() }.onFailure {
+                        error = errorText(it)
+                        refused = true
+                    }
                 }
             }, enabled = !busy && typed.isNotBlank(), modifier = Modifier.testTag("kit-gate-done")) { Text("I've saved it") }
             if (busy) CircularProgressIndicator()
+        }
+        if (refused) {
+            Text("Your server didn't take that, so it'll ask again next time you unlock. You can carry on in the meantime.", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = onDone, enabled = !busy, modifier = Modifier.testTag("kit-gate-later")) { Text("Carry on for now") }
         }
     }
 }

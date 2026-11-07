@@ -351,6 +351,58 @@ object ChangeQueue {
     }
 }
 
+/** Connecting this phone again, through a browser, to add a scope. Going to the browser is enough to
+ *  lock the vault with "Lock after: Leaving", and that takes the screen with it, so like `ChangeQueue`
+ *  this is in memory and outlasts it. The approval needs no vault: asking is public, and it's the
+ *  device token that changes. */
+object ScopeConnect {
+    sealed class State {
+        data object Idle : State()
+        data class Waiting(val code: String) : State()
+        data object Done : State()
+        data class Failed(val text: String) : State()
+    }
+
+    val state = MutableStateFlow<State>(State.Idle)
+
+    /** Something for the Settings screen to say or finish, whatever screen started it. */
+    val active: Boolean get() = state.value != State.Idle
+
+    @Volatile
+    private var run = 0
+
+    fun start(server: String, id: String, pollSecret: String, code: String, turnsOnMail: Boolean) {
+        val mine = ++run
+        state.value = State.Waiting(code)
+        val anon = VaultApi(server, { null })
+        kotlin.concurrent.thread(isDaemon = true, name = "pw-scope-connect") {
+            val deadline = SystemClock.elapsedRealtime() + 10 * 60_000
+            while (run == mine && SystemClock.elapsedRealtime() < deadline) {
+                Thread.sleep(2000)
+                val r = runCatching { anon.connectPoll(id, pollSecret) }.getOrNull() ?: continue
+                if (run != mine) return@thread
+                if (r.status == "denied") {
+                    state.value = State.Failed("That was turned down in the browser.")
+                    return@thread
+                }
+                if (r.token != null && r.deviceId != null) {
+                    runCatching { Pw.replaceDevice(r.token, r.deviceId, r.userId) }.onSuccess {
+                        if (turnsOnMail) Pw.prefs.mailCodes = true
+                        state.value = State.Done
+                    }.onFailure { state.value = State.Failed(it.message ?: "That didn't work.") }
+                    return@thread
+                }
+            }
+            if (run == mine) state.value = State.Failed("No answer from the browser. Try again.")
+        }
+    }
+
+    fun clear() {
+        run++
+        state.value = State.Idle
+    }
+}
+
 object Pw {
     private const val TAG = "PromptlyPasswords"
 
@@ -494,7 +546,8 @@ object Pw {
         val server = prefs.server ?: return
         // From the store and not the session, since this can finish with the vault locked.
         if (!sameAccount(db.getAccount()?.userId, userId)) {
-            runCatching { VaultApi(server, { token }).revokeDevice(deviceId) }
+            // Best effort, and not worth holding up telling the person.
+            kotlin.concurrent.thread(isDaemon = true) { runCatching { VaultApi(server, { token }).revokeDevice(deviceId) } }
             throw WrongAccountError()
         }
         val oldToken = prefs.deviceToken
@@ -513,6 +566,7 @@ object Pw {
     /** The device token stopped working: ask for a new one, keeping everything else. */
     @Synchronized
     fun disconnect() {
+        ScopeConnect.clear()
         clientInstance = null
         prefs.deviceId = null
         prefs.deviceToken = null
@@ -604,6 +658,7 @@ object Pw {
     fun forgetDevice() {
         val ctx = appContext
         ChangeQueue.clear()
+        ScopeConnect.clear()
         clientInstance?.forgetDevice()
         clientInstance = null
         prefs.forgetDevice()

@@ -250,6 +250,45 @@ class AutofillE2ETest {
         }
     }
 
+    /** The site says the app may use its logins, which on its own remembers the link. Not past a
+     *  lookalike warning (A35). A made-up app, so its answer can't turn up in another test. */
+    @Test fun aSiteListingTheAppDoesntGetItRememberedPastALookalikeWarning() {
+        val pkg = "com.example.linked"
+        val cert = "Q0VSVENFUlQ"
+        val fp = org.promptly.sync.passwords.core.hex(org.promptly.sync.passwords.core.fromB64u(cert)).uppercase().chunked(2).joinToString(":")
+        val body = """[{"relation":["delegate_permission/common.get_login_creds"],"target":{"namespace":"android_app","package_name":"$pkg","sha256_cert_fingerprints":["$fp"]}}]""".toByteArray()
+        val server = java.net.ServerSocket(18765, 8, java.net.InetAddress.getByName("localhost"))
+        kotlin.concurrent.thread(isDaemon = true) {
+            while (!server.isClosed) {
+                val c = runCatching { server.accept() }.getOrNull() ?: break
+                runCatching {
+                    c.getInputStream().bufferedReader().let { r -> while (r.readLine()?.isNotEmpty() == true) Unit }
+                    c.getOutputStream().write("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray())
+                    c.getOutputStream().write(body)
+                    c.getOutputStream().flush()
+                }
+                runCatching { c.close() }
+            }
+        }
+        try {
+            login("Real shop", "ana-shop", "pw-Shop-1!", LoginUrl("https://promptlyshop.com"))
+            val listed = login("Listed site", "ana-listed", "pw-Listed-1!", LoginUrl("https://site.promptly.test"))
+            Harness.rebuildIndex()
+            val form = ParsedForm<android.view.autofill.AutofillId>()
+            form.passwords += android.view.View(Harness.ctx).autofillId!!
+            val intent = AutofillAuthActivity.intent(Harness.ctx, AutofillAuthActivity.MODE_PICK, null, FillTarget.App(pkg, cert, "promptlyshap.com"), form, false)
+            Harness.ctx.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            waitFor(By.res("lookalike"), 15_000)
+            Thread.sleep(800)
+            tap("lookalike-yes")
+            tap("pick-Listed site", 15_000)
+            assertTrue("It fills, with no question, as the site lists the app", Harness.gone(By.res("pick-search"), 20_000))
+            assertEquals(1, client.get(listed.id)!!.body.urls.size)
+        } finally {
+            server.close()
+        }
+    }
+
     @Test fun lockingClearsWhatTheIndexHeldInMemory() {
         login("In memory", "ana-mem", "pw-Mem-1!", appLink())
         val memory = AutofillIndex::class.java.getDeclaredField("memory").apply { isAccessible = true }
@@ -351,6 +390,17 @@ class AutofillE2ETest {
         assertEquals(6, filled.length)
         val now = System.currentTimeMillis()
         assertTrue(filled == Totp.code(cfg, now) || filled == Totp.code(cfg, now - 30_000))
+    }
+
+    /** A secret from someone's import can be anything: this says so, and the app stays up. */
+    @Test fun aSecretThatCantBeReadSaysSoRatherThanCrashing() {
+        val hostile = login("Hostile secret", "ana-totp", "pw-Totp-1!", appLink(), totp = TotpConfig("!!! not base32 !!!"))
+        val form = ParsedForm<android.view.autofill.AutofillId>()
+        form.otps += android.view.View(Harness.ctx).autofillId!!
+        val intent = AutofillAuthActivity.intent(Harness.ctx, AutofillAuthActivity.MODE_OTP, hostile.id, FillTarget.App(TEST_APP, certOf(TEST_APP), null), form, false)
+        Harness.ctx.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        waitFor(By.textContains("nothing to fill here"), 15_000)
+        waitFor(By.text("Close")).click()
     }
 
     @Test fun cardsAlwaysConfirmFirst() {

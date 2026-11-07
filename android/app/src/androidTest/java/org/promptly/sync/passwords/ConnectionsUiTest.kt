@@ -221,7 +221,7 @@ class ConnectionsUiTest {
         assertEquals(token, Pw.prefs.deviceToken)
         assertEquals(token, Pw.prefs.alertToken)
         assertEquals("device-1", Pw.prefs.deviceId)
-        assertTrue("Their new device isn't left on their list", s.calls.contains("DELETE /api/passwords/devices/their-device"))
+        waitUntil("Their new device isn't left on their list") { s.calls.contains("DELETE /api/passwords/devices/their-device") }
         org.junit.Assert.assertThrows(org.promptly.sync.passwords.core.WrongAccountError::class.java) { Pw.replaceDevice("pwd_theirs", "their-device", null) }
         assertEquals("device-1", Pw.prefs.deviceId)
     }

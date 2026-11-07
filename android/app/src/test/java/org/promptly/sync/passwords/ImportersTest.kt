@@ -486,6 +486,35 @@ class ImportersTest {
         if (max / 2 < Kdbx.MAX_MEMORY) refusedSaying("this phone") { Kdbx.read(KdbxWriter.headerOnly(KdbxWriter.Argon2(m = max / 2 + 1024)), PASSWORD) }
     }
 
+    // ---- Small files that ask for a lot of time ----
+
+    /** Each row used to look through every column of the header: 100,000 by 190,000, in under a MiB. */
+    @Test(timeout = 15_000) fun aHugeCsvHeaderCantTimeManyRows() {
+        val header = "password," + (0 until 100_000).joinToString(",") { "c$it" }
+        refusedSaying("too many columns") { Importers.importFile("a.csv", (header + "\n" + "x\n".repeat(190_000)).toByteArray()) }
+    }
+
+    @Test fun anOrdinaryWideCsvStillImports() {
+        val header = "password," + (0 until 200).joinToString(",") { "c$it" }
+        assertEquals(1, Importers.importFile("a.csv", (header + "\nx,y\n").toByteArray()).items.size)
+    }
+
+    private fun aegis(digits: String) = """{"version":1,"header":{},"db":{"version":2,"entries":[{"type":"totp","name":"x","issuer":"y","info":{"secret":"JBSWY3DPEHPK3PXP","digits":"$digits","period":30}}]}}""".toByteArray()
+
+    @Test(timeout = 15_000) fun aHugeHexNumberCantHangAnImport() {
+        runCatching { Importers.importFile("a.json", aegis("0x" + "F".repeat(8_000_000))) }
+    }
+
+    /** The regex for a decimal backtracks on the last character, the same size of problem. */
+    @Test(timeout = 15_000) fun aHugeDecimalNumberCantHangAnImport() {
+        runCatching { Importers.importFile("a.json", aegis("1".repeat(2_000_000) + "x")) }
+    }
+
+    @Test fun anOrdinaryNumberInTextStillReads() {
+        assertEquals(8, Importers.importFile("a.json", aegis("0x8")).items.single().body.totp!!.digits)
+        assertEquals(8, Importers.importFile("a.json", aegis("8")).items.single().body.totp!!.digits)
+    }
+
     // ---- Bitwarden's password-protected file chooses its own cost too ----
 
     private fun bitwarden(kdfType: Int, iterations: Long, memory: Int? = null, lanes: Int? = null) = """{"encrypted":true,"passwordProtected":true,"salt":"c2FsdHNhbHRzYWx0","kdfType":$kdfType,"kdfIterations":$iterations,${memory?.let { "\"kdfMemory\":$it," } ?: ""}${lanes?.let { "\"kdfParallelism\":$it," } ?: ""}"encKeyValidation_DO_NOT_EDIT":"2.AAAAAAAAAAAAAAAAAAAAAA==|AAAA|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","data":"2.AAAAAAAAAAAAAAAAAAAAAA==|AAAA|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}""".toByteArray()

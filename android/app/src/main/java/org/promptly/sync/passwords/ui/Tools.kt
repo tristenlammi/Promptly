@@ -69,6 +69,7 @@ import org.promptly.sync.BuildConfig
 import org.promptly.sync.passwords.AlertsCheck
 import org.promptly.sync.passwords.Biometrics
 import org.promptly.sync.passwords.ChangeQueue
+import org.promptly.sync.passwords.ScopeConnect
 import org.promptly.sync.passwords.ChromeSetup
 import org.promptly.sync.passwords.Clip
 import org.promptly.sync.passwords.Pw
@@ -109,10 +110,13 @@ fun MainScreen(activity: PasswordsActivity) {
     val client = Pw.client()!!
     var tab by remember { mutableStateOf(Tab.ITEMS) }
     // A password change in progress survives the vault locking, as leaving for the site's page can.
-    var screen by remember { mutableStateOf<Screen>(if (ChangeQueue.active) Screen.Change else Screen.Home) }
+    var screen by remember { mutableStateOf<Screen>(if (ChangeQueue.active) Screen.Change else if (ScopeConnect.active) Screen.Settings else Screen.Home) }
     var syncing by remember { mutableStateOf(false) }
     var banner by remember { mutableStateOf<String?>(null) }
     var kitNeeded by remember { mutableStateOf(false) }
+    // Been through the gate since the last unlock, whatever the server now says. A server that keeps
+    // saying no doesn't get to wall off what's on this phone.
+    var kitSettled by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val sharedText = activity.shared.value
 
@@ -159,7 +163,9 @@ fun MainScreen(activity: PasswordsActivity) {
 
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         // Not while typing into an item: it would push the form about.
-        if (screen !is Screen.Edit && !kitNeeded) {
+        // It waits for the list, and never takes over a screen someone's in the middle of.
+        val kitGate = kitNeeded && screen == Screen.Home
+        if (screen !is Screen.Edit && !kitGate) {
             MainNotices(
                 client,
                 onHereDevices = screen == Screen.Devices,
@@ -170,11 +176,14 @@ fun MainScreen(activity: PasswordsActivity) {
                 onShared = { screen = Screen.Shared },
                 onSecurity = { screen = Screen.Security },
                 onExport = { screen = Screen.ExportNow },
-                onNeedKit = { kitNeeded = true },
+                onNeedKit = { if (!kitSettled) kitNeeded = true },
             )
         }
-        if (kitNeeded) {
-            KitGate(client) { kitNeeded = false }
+        if (kitGate) {
+            KitGate(client) {
+                kitSettled = true
+                kitNeeded = false
+            }
             return@Column
         }
         Column(Modifier.weight(1f)) {

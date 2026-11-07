@@ -572,6 +572,65 @@ class FinishingUiTest {
         assertFalse(has(By.res("emergency-compare"), 300))
     }
 
+    /** A server that can't or won't take the answer doesn't get to shut anyone out of this phone. */
+    @Test fun aServerThatWontTakeTheKitAnswerCantWallOffTheVault() {
+        val (_, s) = seedWithServer()
+        s.json("/survival", survival(false))
+        s.json("/device-requests", "[]")
+        // No answer for POST /account/kit: every try's a 503.
+        open()
+        waitFor(By.res("kit-gate"), 30_000)
+        assertFalse("Not until they've tried", has(By.res("kit-gate-later"), 300))
+        val key = waitFor(By.res("kit-gate-key")).text
+        fill("kit-gate-typed", org.promptly.sync.passwords.core.SecretKeys.lastGroup(key))
+        tap("kit-gate-done")
+        waitUntil("It should have tried") { s.calls.any { it == "POST /api/passwords/account/kit" } }
+        waitFor(By.res("error"), 20_000)
+        Harness.scrollTap("kit-gate-later")
+        waitFor(By.res("search"), 20_000)
+        // It keeps saying no, and the next look a minute later doesn't take the screen back.
+        val looks = s.calls.count { it.endsWith("/survival") }
+        waitUntil("It looks again each minute", 75_000) { s.calls.count { it.endsWith("/survival") } > looks }
+        Thread.sleep(1_000)
+        assertFalse(has(By.res("kit-gate"), 500))
+        waitFor(By.res("search"), 5_000)
+    }
+
+    /** An answer that comes with something open waits for the list. */
+    @Test fun theKitGateDoesntTakeOverAScreenThatsOpen() {
+        val (client, s) = seedWithServer()
+        val item = client.saveNew(client.personalVaultId(), newBody("login", "Open one").withText("password", "pw-Open-1!"))
+        s.json("/survival", survival(false))
+        s.json("/device-requests", "[]")
+        s.slowMs = 3_000
+        open()
+        tap("item-${item.body.title}", 30_000)
+        // The second of the two calls behind it, and then its slow answer.
+        waitUntil("The answer should be on its way", 30_000) { s.calls.any { it.endsWith("/device-requests") } }
+        Thread.sleep(4_000)
+        assertFalse(has(By.res("kit-gate"), 300))
+        waitFor(By.text("Open one"), 5_000)
+        s.slowMs = 0
+        device.pressBack()
+        waitFor(By.res("kit-gate"), 15_000)
+    }
+
+    /** A record in your own vault can hold anything, and might be the secret itself. */
+    @Test fun aSendsRecordThatIsntItsLinkOffersNothingToCopy() {
+        val (client, s) = seedWithServer()
+        s.json("/survival", survival(true))
+        s.json("/device-requests", "[]")
+        val id = "11111111-2222-4333-8444-555555555555"
+        s.json("/sends", """[{"id":"$id","expires_at":"2099-01-01T00:00:00Z","views_left":null,"has_password":false,"disabled":false,"created_at":"2026-11-07T00:00:00Z"}]""")
+        client.saveNew(client.personalVaultId(), org.promptly.sync.passwords.core.SendRecords.body("Not a link", "the wifi password is hunter2", id))
+        open()
+        tap("tab-more", 30_000)
+        tap("open-sends")
+        waitFor(By.res("send-bad-record"), 20_000)
+        assertFalse(has(By.res("send-copy-again"), 300))
+        assertFalse(has(By.res("send-rooms"), 300))
+    }
+
     @Test fun rubbishFromTheServerDoesntPopUpTheKit() {
         val (_, s) = seedWithServer()
         s.json("/survival", """{"kit_confirmed":"no","offsite_configured":"maybe"}""")

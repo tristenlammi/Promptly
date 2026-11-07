@@ -52,11 +52,17 @@ private fun jsString(e: JsonElement?): String = when (e) {
     is JsonObject -> "[object Object]"
 }
 
+/** Longer than any number means anything here, and both ways of reading one below go quadratic on a
+ *  long enough run of digits: BigInteger, and this regex backtracking on a bad last character. */
+private const val MAX_NUMBER_TEXT = 1100
+
 private val DECIMAL = Regex("^[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?\\z")
 
 private fun numberIn(text: String): Double {
     val t = text.trim()
     if (t.isEmpty()) return 0.0
+    // JavaScript makes this Infinity or NaN. Nothing that reads a number here can hold either.
+    if (t.length > MAX_NUMBER_TEXT) return Double.NaN
     if (t == "Infinity" || t == "+Infinity") return Double.POSITIVE_INFINITY
     if (t == "-Infinity") return Double.NEGATIVE_INFINITY
     if (t.length > 2 && t[0] == '0') {

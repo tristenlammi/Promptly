@@ -217,6 +217,37 @@ class MailRealStackTest {
         waitFor(By.text("Vault created"), 20_000)
     }
 
+    /** "Lock after: Leaving": going to the browser locks the vault and takes the screen away, and the
+     *  approval still gets collected, with nothing asked of the vault. */
+    @Test fun aScopeApprovedWhileTheVaultIsLockedStillArrives() {
+        val bearer = args.getString("pwBearer12")
+        assumeTrue("No -e pwBearer12", !bearer.isNullOrEmpty())
+        val client = oldPhone(bearer!!)
+        val before = Pw.prefs.deviceId
+        Store(ctx).account = null
+        toggleInSettings()
+        tap("mail-scope-add")
+        val code = waitFor(By.res("mail-scope-code"), 20_000).text
+        Pw.lock("test")
+        waitFor(By.res("master-password"), 15_000)
+        val req = Request.Builder().url("$server/api/passwords/connect/code/$code/approve").header("Authorization", "Bearer $bearer").post(ByteArray(0).toRequestBody(null)).build()
+        OkHttpClient().newCall(req).execute().use { assertEquals(204, it.code) }
+        waitUntil("Collected with the vault locked") { org.promptly.sync.passwords.ScopeConnect.state.value == org.promptly.sync.passwords.ScopeConnect.State.Done }
+        assertTrue(Pw.prefs.deviceId != before)
+        assertFalse(client.unlocked)
+        assertTrue("Turning it on was what was asked for", Pw.prefs.mailCodes)
+        Harness.fill("master-password", Harness.MASTER)
+        tap("unlock")
+        // Back where it was, and it says what happened. The keyboard's closing, and a Back meant for it
+        // would land on the screen instead.
+        waitFor(By.res("autofill-enable"), 30_000)
+        Thread.sleep(1_500)
+        Harness.scrollToTag("mail-scope-done")
+        waitFor(By.res("mail-scope-done"), 30_000)
+        assertFalse(org.promptly.sync.passwords.ScopeConnect.active)
+        assertEquals(listOf("mail_codes", "vault"), Harness.retrying429 { client.api.devices() }.single().scopes.sorted())
+    }
+
     /** A browser signed in to someone else approves it: nothing swaps, and it says so. */
     @Test fun aBrowserSignedInAsSomeoneElseChangesNothing() {
         val bearer = args.getString("pwBearer10")
@@ -231,7 +262,14 @@ class MailRealStackTest {
         val code = waitFor(By.res("mail-scope-code"), 20_000).text
         val req = Request.Builder().url("$server/api/passwords/connect/code/$code/approve").header("Authorization", "Bearer $someoneElse").post(ByteArray(0).toRequestBody(null)).build()
         OkHttpClient().newCall(req).execute().use { assertEquals(204, it.code) }
-        waitFor(By.textContains("different Promptly account"), 20_000)
+        waitUntil("Refused by now") { org.promptly.sync.passwords.ScopeConnect.state.value == org.promptly.sync.passwords.ScopeConnect.State.Idle }
+        // The panel has it by now (logged, on the runs this missed). What UiAutomator reads is a cache of
+        // the tree that can miss this one change: refreshing the old code's node said it no longer exists.
+        waitUntil("It should say so") {
+            Harness.inst.uiAutomation.clearCache()
+            Harness.device.hasObject(By.textContains("different Promptly account"))
+        }
+        assertFalse(Harness.device.hasObject(By.res("mail-scope-code")))
         assertEquals(before, Pw.prefs.deviceId)
         assertEquals(token, Pw.prefs.deviceToken)
         assertFalse(Pw.prefs.mailCodes)

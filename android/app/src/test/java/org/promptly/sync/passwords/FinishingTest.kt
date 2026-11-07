@@ -222,6 +222,18 @@ class FinishingTest {
         assertEquals("One notes field's enough", null, m.notes)
     }
 
+    /** Twenty of its own, and what's merged in still gets kept: those copies are about to go. */
+    @Test fun mergeKeepsWhatItsMergingInWithinTheLimit() {
+        val history = JsonArray((1..20).map { i -> buildJsonObject { put("password", "h$i"); put("at", "t") } })
+        val kept = item(at(login("Kept", "ana", "kept-pw", "https://e.example").with("passwordHistory" to history), "2026-02-01T00:00:00.000Z"))
+        val gone = item(at(org.promptly.sync.passwords.core.PasswordChange.withPending(login("Gone", "ana", "gone-pw", "https://e.example"), "gone-waiting"), "2026-01-01T00:00:00.000Z"))
+        val m = Duplicates.merge(listOf(kept, gone)).body
+        assertEquals(20, m.passwordHistory.size)
+        assertEquals(listOf("gone-pw", "gone-waiting", "h1"), m.passwordHistory.take(3).map { it.first })
+        assertEquals("kept-pw", m.password)
+        assertEquals("Only the kept item's own waits", null, m.str("pendingPassword"))
+    }
+
     @Test fun mergeCarriesAskAgainAndUnknownFieldsAcross() {
         val guarded = item(at(login("Guarded", "ana", "pw-a", "https://e.example").withFlag("reprompt", true), "2026-01-01T00:00:00.000Z"))
         val plain = item(at(login("Plain", "ana", "pw-b", "https://e.example").with("newerClientField" to JsonPrimitive("kept")), "2026-02-01T00:00:00.000Z"))
@@ -328,9 +340,18 @@ class FinishingTest {
         assertEquals("https://s.example/passwords/send/$id#k", b.notes)
         assertEquals(id, b.str("sendId"))
         assertTrue("A system item, out of the list", b.isSystem)
-        val rec = SendRecords.of(listOf(item(b, id = "the-record"), item(newBody("send", "No link"), id = "x"), item(SendRecords.body("Gone", "l", "gone"), deleted = true), item(login("Other", "a", "b"))))
+        val rec = SendRecords.of(listOf(item(b, id = "the-record"), item(newBody("send", "No link"), id = "x"), item(SendRecords.body("Gone", "l", "gone"), deleted = true), item(login("Other", "a", "b"))), "v")
         assertEquals(setOf(id), rec.keys)
         assertEquals("the-record", rec.getValue(id).itemId)
+    }
+
+    /** Anyone who can write to a shared vault can write this, naming one of your Sends. */
+    @Test fun aSendRecordPlantedInASharedVaultIsntYours() {
+        val id = "11111111-2222-3333-4444-555555555555"
+        val mine = item(SendRecords.body("Mine", "https://s.example/passwords/send/$id#k", id), vault = "own", id = "mine")
+        val planted = item(SendRecords.body("Planted", "https://evil.example/passwords/send/$id#k", id), vault = "shared", id = "planted")
+        for (order in listOf(listOf(mine, planted), listOf(planted, mine))) assertEquals("mine", SendRecords.of(order, "own").getValue(id).itemId)
+        assertTrue(SendRecords.of(listOf(planted), "own").isEmpty())
     }
 
     @Test fun onlyALinkToThisSendCanBePosted() {

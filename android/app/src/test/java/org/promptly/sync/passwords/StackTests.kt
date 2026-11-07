@@ -637,7 +637,8 @@ class StackTests {
                 data.copyOfRange(off.toInt(), off.toInt() + len)
             })
         }
-        val meta = "upload_resume:${item.id}:r.bin:${data.size}"
+        val meta = store.metaKeys().single { it.startsWith("upload_resume:") }
+        assertFalse("The file's name isn't in the local copy (A38)", store.metaKeys().any { "r.bin" in it })
         assertTrue("Nothing was recorded on the item", c.get(item.id)!!.body.attachments.isEmpty())
         val sealed = store.getMeta(meta)!!.jsonPrimitive.content
         assertFalse("A sealed blob, no id or key to read", sealed.contains("\"key\""))
@@ -646,7 +647,7 @@ class StackTests {
             asked += off
             data.copyOfRange(off.toInt(), off.toInt() + len)
         })
-        assertEquals("Only what the server hadn't got", listOf(1048576L, 2097152L), asked)
+        assertEquals("The first chunk, to know it's the same file, and then only what the server hadn't got", listOf(0L, 1048576L, 2097152L), asked)
         assertEquals(shaHex(data), shaHex(downloadAll(c, vault, item.id, done.body.attachments.single())))
         assertNull("Nothing's left waiting", store.getMeta(meta))
         // The same file again isn't a resume of that one: it's a new upload, of every chunk.
@@ -659,8 +660,40 @@ class StackTests {
         assertEquals(2, c.get(item.id)!!.body.attachments.map { it.id }.toSet().size)
         // A different size is a different file.
         val other = patternBytes(1_500_000, 10)
-        assertThrows(IOException::class.java) { c.addAttachment(item.id, "r.bin", null, other.size.toLong(), { _, _ -> throw IOException("no") }) }
-        assertNotNull(store.getMeta("upload_resume:${item.id}:r.bin:${other.size}"))
+        assertThrows(IOException::class.java) {
+            c.addAttachment(item.id, "r.bin", null, other.size.toLong(), { off, len ->
+                if (off > 0) throw IOException("no")
+                other.copyOfRange(off.toInt(), off.toInt() + len)
+            })
+        }
+        assertEquals(1, store.metaKeys().count { it.startsWith("upload_resume:") })
+    }
+
+    /** The same name and size, and another file. It used to mix them, with no error. */
+    @Test fun aDifferentFileOfTheSameNameAndSizeIsntMixedIn() {
+        need()
+        val u = makeUser("mix")
+        val store = MemoryStore()
+        val c = VaultClient(VaultApi(BASE, { u.token }, patient), store, MemoryKeeper())
+        setupRetrying(c)
+        val vault = c.personalVaultId()
+        val item = c.saveNew(vault, newBody("note", "T"))
+        c.sync()
+        val first = patternBytes(2_200_000, 11)
+        assertThrows(IOException::class.java) {
+            c.addAttachment(item.id, "same.bin", null, first.size.toLong(), { off, len ->
+                if (off > 1048576L) throw IOException("the network went")
+                first.copyOfRange(off.toInt(), off.toInt() + len)
+            })
+        }
+        val second = patternBytes(2_200_000, 12)
+        val asked = ArrayList<Long>()
+        val done = c.addAttachment(item.id, "same.bin", null, second.size.toLong(), { off, len ->
+            asked += off
+            second.copyOfRange(off.toInt(), off.toInt() + len)
+        })
+        assertEquals("Every chunk, since none of what's there is this file's", listOf(0L, 1048576L, 2097152L), asked)
+        assertEquals(shaHex(second), shaHex(downloadAll(c, vault, item.id, done.body.attachments.single())))
     }
 
     /** Everything else the features write, read back by the real TypeScript client: it has to be
@@ -1668,6 +1701,7 @@ asyncio.run(main())
         val ref = updated.body.attachments.single()
         assertEquals("passport-scan.txt", ref.name)
         assertTrue(ref.mime, ref.mime!!.startsWith("text/plain"))
+        assertTrue("Read back and the same, which is what offers the Trash", phone.fromFilesMatches(doc.id, file))
 
         // Another device of the same person opens it, from what the server holds: ciphertext.
         val other = device(u)
@@ -1681,6 +1715,40 @@ asyncio.run(main())
         assertTrue(phone.api.driveFiles("passport").isEmpty())
         assertEquals(404, assertThrows(ApiError::class.java) { phone.api.driveContent(file.id) { _, _ -> } }.status)
         assertEquals("One you can't see isn't there", 404, assertThrows(ApiError::class.java) { phone.api.driveTrash("12345678-1234-1234-1234-123456789012") }.status)
+    }
+
+    /** A first chunk that matches and a rest that doesn't, resumed from another file: only reading it back shows it. */
+    @Test fun aDocumentThatDoesntReadBackIsntOfferedForTheTrash() {
+        need()
+        useSimpleBaseDomains()
+        val u = makeUser("readback")
+        val phone = device(u)
+        setupRetrying(phone)
+        val data = "A long scan, written out in throwaway text. ".repeat(60_000).toByteArray()
+        val body = okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM).addFormDataPart("file", "scan.txt", data.toRequestBody("text/plain".toMediaType())).build()
+        plain.newCall(okhttp3.Request.Builder().url("$BASE/api/files/").header("Authorization", "Bearer ${u.token}").post(body).build()).execute().use { assertTrue(it.body.string(), it.isSuccessful) }
+        val doc = phone.saveNew(phone.personalVaultId(), newBody("document", "Scan"))
+        phone.sync()
+        val file = phone.api.driveFiles("scan").single()
+
+        // An interrupted upload of the same name and size: the same first chunk, another second one.
+        val other = data.copyOf()
+        for (i in 1_100_000 until 1_200_000) other[i] = (other[i] + 1).toByte()
+        assertThrows(IOException::class.java) {
+            phone.addAttachment(doc.id, file.name, file.mime, file.sizeBytes, { off, len ->
+                if (off > 1048576L) throw IOException("the network went")
+                other.copyOfRange(off.toInt(), off.toInt() + len)
+            })
+        }
+        phone.addFromFiles(doc.id, file)
+        assertEquals(1, phone.get(doc.id)!!.body.attachments.size)
+        val e = assertThrows(IllegalStateException::class.java) { phone.fromFilesMatches(doc.id, file) }
+        assertTrue(e.message, e.message!!.contains("didn't match"))
+        assertTrue("What was wrong comes out again", phone.get(doc.id)!!.body.attachments.isEmpty())
+        assertEquals("The original's still there", 1, phone.api.driveFiles("scan").size)
+        // And the next try is the real file.
+        phone.addFromFiles(doc.id, file)
+        assertTrue(phone.fromFilesMatches(doc.id, file))
     }
 
     /** What the server can read says nothing about what it's for. */

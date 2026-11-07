@@ -186,12 +186,13 @@ object SendRecords {
 
     fun body(title: String, link: String, sendId: String): ItemBody = newBody("send", title, "notes" to JsonPrimitive(link), "sendId" to JsonPrimitive(sendId))
 
-    /** By Send id, from your own vault: the server never knows what any of them are called. */
-    fun of(items: Collection<Item>): Map<String, Record> {
+    /** By Send id, from your own vault: the server never knows what any of them are called. Only that
+     *  vault, as anyone who can write to a shared one could plant a record for one of your Sends. */
+    fun of(items: Collection<Item>, ownVaultId: String): Map<String, Record> {
         val out = HashMap<String, Record>()
         for (i in items) {
             val link = i.body.notes
-            if (i.body.kind == "send" && !link.isNullOrEmpty() && !i.deleted) out[i.body.str("sendId") ?: ""] = Record(i.id, i.body.title, link)
+            if (i.vaultId == ownVaultId && i.body.kind == "send" && !link.isNullOrEmpty() && !i.deleted) out[i.body.str("sendId") ?: ""] = Record(i.id, i.body.title, link)
         }
         return out
     }

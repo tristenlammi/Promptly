@@ -1380,39 +1380,55 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
 
     // ---- Attachments: the item's body records them ----
 
-    private fun resumeMeta(itemId: String, name: String, size: Long) = "upload_resume:$itemId:$name:$size"
+    /** A file's name is what A38 keeps out of the local copy, so the key holds a hash of it, under
+     *  the vault's key, so a guess at a name can't be checked against it either. */
+    private fun resumeMeta(item: Item, name: String, size: Long): String {
+        val tag = Primitives.hkdf(vaultKey(cachedVault(item.vaultId)), ByteArray(0), "promptly-pw/android/upload-resume:$name:$size", 16)
+        return "upload_resume:${item.id}:${b64u(tag)}"
+    }
 
     /** The id and key an interrupted upload of this file was using, kept under the vault's key so
-     *  the local copy holds no attachment key in the clear. */
-    private fun resumeFor(item: Item, meta: String): Pair<String, String> {
+     *  the local copy holds no attachment key in the clear. `first` is a hash of the file's first
+     *  chunk: a different file of the same name and size is a new upload, not a mix of the two. */
+    private fun resumeFor(item: Item, meta: String, first: String): Pair<String, String> {
         val v = cachedVault(item.vaultId)
         val key = vaultKey(v)
         val bound = aad(v.id, item.id, "upload_resume")
         (store.getMeta(meta) as? JsonPrimitive)?.content?.let { sealed ->
             // Sealed under a vault key that's since changed: start again.
-            val kept = runCatching {
-                val o = Json.parseToJsonElement(fromUtf8(open(key, fromB64u(sealed), bound))) as JsonObject
-                o.str("id")!! to o.str("key")!!
-            }.getOrNull()
-            if (kept != null) return kept
+            val kept = runCatching { Json.parseToJsonElement(fromUtf8(open(key, fromB64u(sealed), bound))) as JsonObject }.getOrNull()
+            val id = kept?.str("id")
+            val raw = kept?.str("key")
+            if (id != null && raw != null) {
+                if (kept.str("first") == first) return id to raw
+                // Another file's chunks, which nothing's going to finish. If this fails they go with the item.
+                runCatching { api.attachmentDelete(v.id, id) }
+            }
         }
         val fresh = randomUuid() to b64u(randomBytes(32))
         val plain = buildJsonObject {
             put("id", fresh.first)
             put("key", fresh.second)
+            put("first", first)
         }.toString()
         store.setMeta(meta, JsonPrimitive(b64u(seal(key, utf8(plain), bound))))
         return fresh
     }
 
     /** Upload and record on the item. An item not on the server yet is synced first. An
-     *  interrupted upload picks up where it stopped if the same file's chosen again, by name and
-     *  size, as on the web vault. */
+     *  interrupted upload picks up where it stopped if the same file's chosen again: by name and
+     *  size as on the web vault, and by its first chunk as well. */
     fun addAttachment(itemId: String, name: String, mime: String?, size: Long, read: (Long, Int) -> ByteArray, onProgress: (Int, Int) -> Unit = { _, _ -> }): Item {
         var item = get(itemId) ?: throw IllegalStateException("Unknown item")
         if (store.getItem(itemId)?.revision == 0 || store.getItem(itemId)?.dirty == true) sync()
-        val meta = resumeMeta(itemId, name, size)
-        val ref = Attachments.upload(api, item.vaultId, itemId, name, mime, size, read, onProgress, resumeFor(item, meta))
+        val meta = resumeMeta(item, name, size)
+        // What an older version wrote for this file, with its name in the clear.
+        store.deleteMeta("upload_resume:$itemId:$name:$size")
+        // Read once: a file from Files is a stream that only goes forwards.
+        val firstLength = minOf(size, Attachments.CHUNK.toLong()).toInt()
+        val firstChunk = read(0, firstLength)
+        val once: (Long, Int) -> ByteArray = { offset, length -> if (offset == 0L && length == firstLength) firstChunk else read(offset, length) }
+        val ref = Attachments.upload(api, item.vaultId, itemId, name, mime, size, once, onProgress, resumeFor(item, meta, b64u(Primitives.sha256(firstChunk))))
         store.deleteMeta(meta)
         item = get(itemId) ?: item
         val updated = update(itemId, item.body.withAttachments(item.body.attachments + ref))
@@ -1427,6 +1443,37 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
             if (length >= 0 && length != file.sizeBytes) throw IllegalStateException("That file changed in Files. Try again.")
             addAttachment(itemId, file.name, file.mime, file.sizeBytes, Attachments.streamReader(input, file.sizeBytes), onProgress)
         }
+    }
+
+    /** Read back from the vault and compared with Files, before the original's offered for the Trash.
+     *  A first chunk can match and the rest not. If they differ, what reached the vault is no use and
+     *  comes out again. False if it can't be checked right now. */
+    fun fromFilesMatches(itemId: String, file: DriveFile): Boolean {
+        val item = get(itemId) ?: throw IllegalStateException("Unknown item")
+        val ref = item.body.attachments.lastOrNull { it.name == file.name && it.size == file.sizeBytes } ?: throw IllegalStateException("That file didn't reach the vault. Try again.")
+        val same = try {
+            api.driveContent(file.id) { input, _ ->
+                var matches = true
+                Attachments.download(api, item.vaultId, itemId, ref, { part ->
+                    var got = 0
+                    val back = ByteArray(part.size)
+                    while (got < back.size) {
+                        val n = input.read(back, got, back.size - got)
+                        if (n < 0) break
+                        got += n
+                    }
+                    if (got != part.size || !back.contentEquals(part)) matches = false
+                })
+                matches && input.read() == -1
+            }
+        } catch (e: IllegalArgumentException) {
+            false // The chunks themselves don't open, under the key that was recorded.
+        } catch (e: Exception) {
+            return false
+        }
+        if (same) return true
+        removeAttachment(itemId, ref)
+        throw IllegalStateException("What reached the vault didn't match the file in Files, so it's been taken out again. Try once more.")
     }
 
     fun removeAttachment(itemId: String, ref: AttachmentRef): Item {
@@ -1483,7 +1530,7 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         runCatching { sync() }
     }
 
-    fun sendRecords(): Map<String, SendRecords.Record> = SendRecords.of(allItems(includeSystem = true))
+    fun sendRecords(): Map<String, SendRecords.Record> = SendRecords.of(allItems(includeSystem = true), personalVaultId())
 
     /** Remembered in your own vault, so the server never knows what any of them are called. */
     fun recordSend(title: String, link: String, sendId: String): Item {

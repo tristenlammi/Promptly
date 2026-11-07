@@ -159,6 +159,7 @@ open class MemoryStore : LocalStore {
     @Synchronized override fun getMeta(key: String) = meta[key]
     @Synchronized override fun setMeta(key: String, value: JsonElement) { meta[key] = value }
     @Synchronized override fun deleteMeta(key: String) { meta.remove(key) }
+    @Synchronized fun metaKeys(): Set<String> = meta.keys.toSet()
     @Synchronized override fun getAccount() = account
     @Synchronized override fun putAccount(a: CachedAccount) { account = a }
     @Synchronized override fun getVaults() = vaults.values.toList()

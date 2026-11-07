@@ -160,6 +160,10 @@ object Importers {
     const val MAX_BYTES = 64 * 1024 * 1024
     private const val MAX_ITEMS = 200_000
 
+    /** Each row looks through every column of the header, so this times MAX_ITEMS is the work a
+     *  small file could ask for. No export has anywhere near this many. */
+    private const val MAX_COLUMNS = 1000
+
     /** RFC 4180 with the usual messes: BOM, CRLF or LF, quotes in the middle of cells. */
     fun parseCsv(text: String): List<List<String>> {
         val rows = ArrayList<List<String>>()
@@ -186,6 +190,7 @@ object Importers {
             } else if (c == ',') {
                 row.add(cell.toString())
                 cell.clear()
+                if (row.size > MAX_COLUMNS) throw IllegalArgumentException("That file has too many columns")
             } else if (c == '\n' || c == '\r') {
                 if (c == '\r' && i + 1 < s.length && s[i + 1] == '\n') i++
                 row.add(cell.toString())

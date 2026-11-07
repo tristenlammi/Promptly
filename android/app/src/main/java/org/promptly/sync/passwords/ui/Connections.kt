@@ -56,6 +56,7 @@ import org.promptly.sync.passwords.ChangeQueue
 import org.promptly.sync.passwords.Clip
 import org.promptly.sync.passwords.Links
 import org.promptly.sync.passwords.Pw
+import org.promptly.sync.passwords.ScopeConnect
 import org.promptly.sync.passwords.core.ActivityLog
 import org.promptly.sync.passwords.core.ActivityOut
 import org.promptly.sync.passwords.core.ApiError
@@ -128,7 +129,9 @@ fun ActivityScreen(client: VaultClient, onBack: () -> Unit) {
 @Composable
 fun MailCodesSetting(client: VaultClient) {
     var on by remember { mutableStateOf(Pw.prefs.mailCodes) }
-    var needScope by remember { mutableStateOf(false) }
+    // Back from the browser, maybe through an unlock: where it got to shows here.
+    var needScope by remember { mutableStateOf(ScopeConnect.active) }
+    var added by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -160,27 +163,46 @@ fun MailCodesSetting(client: VaultClient) {
     }
     Text("Autofill shows a row on a code box, and on a sign-in step that only asks for your email. Pick it and this phone asks your server for your mail from the last ten minutes, then compares the senders with the site itself. Your server isn't told which site. Nothing fills until you tap it, and a sender that isn't the site gets no row.", style = MaterialTheme.typography.bodySmall)
     error?.let { ErrorCard(it) }
-    if (needScope) MailScopePanel(client, "This phone was connected before email codes, so it isn't allowed to read them yet. Connecting it again adds that. Your vault and everything on this phone stay as they are.") {
+    if (needScope) MailScopePanel(client, "This phone was connected before email codes, so it isn't allowed to read them yet. Connecting it again adds that. Your vault and everything on this phone stay as they are.", turnsOnMail = true) {
         needScope = false
-        on = true
-        Pw.prefs.mailCodes = true
+        added = true
+        on = Pw.prefs.mailCodes
     }
+    if (added) Text("This phone is connected for your email now.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("mail-scope-done"))
 }
 
 /** A device token's scopes are fixed when it's made, so this makes a new one and drops the old one:
  *  the app password if this phone has one that's allowed, or a code approved in a browser. */
 @Composable
-fun MailScopePanel(client: VaultClient, why: String, onDone: () -> Unit) {
+fun MailScopePanel(client: VaultClient, why: String, turnsOnMail: Boolean = false, onDone: () -> Unit) {
     val ctx = LocalContext.current
     var busy by remember { mutableStateOf(false) }
-    var code by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val connecting by ScopeConnect.state.collectAsState()
+    val code = (connecting as? ScopeConnect.State.Waiting)?.code
+
+    // What the browser came to, which may have been while the vault was locked and this wasn't here.
+    LaunchedEffect(connecting) {
+        when (val c = connecting) {
+            ScopeConnect.State.Done -> {
+                ScopeConnect.clear()
+                busy = false
+                onDone()
+            }
+            is ScopeConnect.State.Failed -> {
+                error = c.text
+                ScopeConnect.clear()
+                busy = false
+            }
+            else -> Unit
+        }
+    }
 
     suspend fun finish(token: String, deviceId: String, userId: String?) {
         withContext(Dispatchers.IO) { Pw.replaceDevice(token, deviceId, userId) }
         busy = false
-        code = null
+        if (turnsOnMail) Pw.prefs.mailCodes = true
         onDone()
     }
 
@@ -216,29 +238,9 @@ fun MailScopePanel(client: VaultClient, why: String, onDone: () -> Unit) {
                 busy = false
                 return@launch
             }
-            code = started.code
+            // Started first: leaving for the browser can lock the vault and take this screen with it.
+            ScopeConnect.start(url, started.id, started.pollSecret, started.code, turnsOnMail)
             Links.open(ctx, "$url/passwords/connect?code=${Uri.encode(started.code)}")
-            val deadline = System.currentTimeMillis() + 10 * 60_000
-            while (System.currentTimeMillis() < deadline) {
-                delay(2000)
-                val r = withContext(Dispatchers.IO) { runCatching { anon.connectPoll(started.id, started.pollSecret) } }.getOrNull() ?: continue
-                if (r.status == "denied") {
-                    error = "That was turned down in the browser."
-                    break
-                }
-                if (r.token != null && r.deviceId != null) {
-                    try {
-                        finish(r.token, r.deviceId, r.userId)
-                        return@launch
-                    } catch (e: WrongAccountError) {
-                        error = errorText(e)
-                        break
-                    }
-                }
-            }
-            if (error == null) error = "No answer from the browser. Try again."
-            code = null
-            busy = false
         }
     }
 
@@ -251,8 +253,8 @@ fun MailScopePanel(client: VaultClient, why: String, onDone: () -> Unit) {
                 Text(it, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace, modifier = Modifier.testTag("mail-scope-code"))
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { start() }, enabled = !busy, modifier = Modifier.testTag("mail-scope-add")) { Text("Connect this phone again") }
-                if (busy) CircularProgressIndicator()
+                Button(onClick = { start() }, enabled = !busy && code == null, modifier = Modifier.testTag("mail-scope-add")) { Text("Connect this phone again") }
+                if (busy || code != null) CircularProgressIndicator()
             }
         }
     }
@@ -350,6 +352,16 @@ private fun ChangeOne(client: VaultClient, id: String, position: String?, onNext
     val ctx = LocalContext.current
     val version by Pw.version.collectAsState()
     val item = remember(id, version) { client.get(id) }
+    // A vault that's loading holds nothing for a moment, and a locked one nothing at all. Only what's
+    // in the store says a login's really gone, or the queue would be lost to the moment (A56).
+    val stored = remember(id, version) { runCatching { client.store.getItem(id) }.getOrNull() }
+    if (!Pw.unlocked || (item == null && stored != null && !stored.deleted && !stored.purged)) {
+        Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Header("Change password", onClose)
+            CircularProgressIndicator()
+        }
+        return
+    }
     if (item == null || item.deleted || !client.canEdit(item.vaultId)) {
         LaunchedEffect(Unit) { onNext() }
         return
@@ -478,6 +490,7 @@ fun FromFilesPane(client: VaultClient, item: Item, onClose: () -> Unit) {
     var busy by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var moved by remember { mutableStateOf<DriveFile?>(null) }
+    var checked by remember { mutableStateOf(false) }
     var trashed by remember { mutableStateOf(false) }
     var reminded by remember { mutableStateOf(false) }
     var remind by remember { mutableStateOf(item.body.str("expiresOn") ?: "") }
@@ -495,6 +508,7 @@ fun FromFilesPane(client: VaultClient, item: Item, onClose: () -> Unit) {
             Text("${got.name} is now encrypted here. The original is still in Files, where your server can read it.", Modifier.testTag("files-moved"))
             error?.let { ErrorCard(it) }
             if (trashed) Text("Moved to Files' Trash.", Modifier.testTag("files-trashed"))
+            else if (!checked) Text("This phone couldn't read it back to check it just now, so the original isn't offered for the Trash. Open it from the vault first, then bin the original in Files if it's right.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("files-unchecked"))
             else Button(onClick = { act({ client.api.driveTrash(got.id) }) { trashed = true } }, Modifier.testTag("files-trash")) { Text("Move the original to Trash") }
             HorizontalDivider()
             Text("Calendar isn't end-to-end encrypted, so a reminder just says \"Document expires soon\", and nothing about which one.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("files-remind-why"))
@@ -521,9 +535,19 @@ fun FromFilesPane(client: VaultClient, item: Item, onClose: () -> Unit) {
                     busy = "Encrypting ${f.name}"
                     error = null
                     scope.launch {
-                        val r = withContext(Dispatchers.IO) { runCatching { withSession(client) { client.addFromFiles(item.id, f) { d, t -> busy = "Encrypting ${f.name}: $d of $t MB" } } } }
+                        // The original's only offered for the Trash once what's in the vault has been read back.
+                        val r = withContext(Dispatchers.IO) {
+                            runCatching {
+                                withSession(client) { client.addFromFiles(item.id, f) { d, t -> busy = "Encrypting ${f.name}: $d of $t MB" } }
+                                busy = "Checking ${f.name}"
+                                withSession(client) { client.fromFilesMatches(item.id, f) }
+                            }
+                        }
                         busy = null
-                        r.onSuccess { moved = f }.onFailure { error = errorText(it) }
+                        r.onSuccess {
+                            checked = it
+                            moved = f
+                        }.onFailure { error = errorText(it) }
                     }
                 }.padding(vertical = 8.dp).testTag("files-row-${f.name}")) {
                     Text(f.name)

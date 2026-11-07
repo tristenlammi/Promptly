@@ -908,7 +908,10 @@ fun SendsScreen(client: VaultClient, onBack: () -> Unit) {
                         }
                     }, Modifier.testTag("send-delete")) { Text("Delete") }
                 }
-                if (rec != null && !finished) {
+                // Written by anything that can write to your vault, so a link is checked before it's handed on.
+                if (rec != null && !finished && !SendRecords.isLinkTo(s.id, rec.link, client.api.baseUrl)) {
+                    Text("Its saved link doesn't point at this Send on this server, so it isn't offered here.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("send-bad-record"))
+                } else if (rec != null && !finished) {
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         TextButton(onClick = {
                             Clip.copySecret(ctx, "Send link", rec.link)
