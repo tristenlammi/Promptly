@@ -476,8 +476,7 @@ test("the 2FA code is copied once the next page has no box, with a notice, and c
   await page.click("#go");
   await page.waitForURL(/welcome/);
   await expect.poll(() => readClipboard(rig), { timeout: 15_000, intervals: [500] }).toMatch(/^\d{6}$/);
-  const log = await testHook<{ notices: string[] }>(rig, "log");
-  expect(log.notices.at(-1)).toContain("2FA code copied");
+  await expect.poll(async () => (await testHook<{ notices: string[] }>(rig, "log")).notices.at(-1)).toContain("2FA code copied");
   // Cleared on time.
   await expect.poll(() => readClipboard(rig), { timeout: 15_000, intervals: [1000] }).toBe("");
   await page.close();

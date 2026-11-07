@@ -25,6 +25,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed
+- Passwords on Chrome and Chromium browsers: a copied 2FA code, or the timed clear of a copied secret, could be lost because the extension's hidden clipboard page closed too soon.
 - Passwords in the browser: changing the master password, Secret Key or key settings in the vault page keeps the browser's lock working, and the Lock button works even when the server doesn't answer.
 - Passwords in the browser: a page that fills on load no longer postpones the lock timer.
 - Passwords in the browser: using a passkey no longer asks for the master password. An unlocked vault and a click are enough, unless the item is marked to ask.

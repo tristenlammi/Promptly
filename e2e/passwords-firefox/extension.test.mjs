@@ -760,12 +760,13 @@ test("Firefox: auto-lock settings reach the background, and a long gap between a
 
   // Firefox doesn't report "locked" from the idle API, so this is how sleep shows up here.
   assert.equal((await hook("sleepGap", { ms: 60 * 1000 })).unlocked, true);
-  assert.equal((await hook("sleepGap", { ms: 10 * 60 * 1000 })).unlocked, false);
+  // The lock reloads the vault tab this asks from, so the answer may never get back to it.
+  await hook("sleepGap", { ms: 10 * 60 * 1000 }).catch(() => null);
+  await driver.switchTo().window(extTab);
+  await see(driver, byText("Your vault is locked"), 30000);
   assert.equal(await signedIn(), false);
 
   // Windows Hello isn't offered with no desktop app.
-  await driver.switchTo().window(extTab);
-  await see(driver, byText("Your vault is locked"), 30000);
   const before = await driver.getAllWindowHandles();
   await extEval("(u) => browser.tabs.create({ url: u })", `${EXT}/popup.html`);
   await driver.wait(async () => (await driver.getAllWindowHandles()).length > before.length, 15000);

@@ -14,6 +14,7 @@ declare const __TEST_BUILD__: boolean;
 
 export const CLIP_ALARM = "clip-clear";
 const ALARM_FLOOR_MS = 30_000;
+const CLOSE_AFTER_MS = 300;
 const session = ext.storage.session;
 
 type ClipRecord = { salt: string; hash: string };
@@ -37,6 +38,10 @@ async function viaOffscreen<T>(message: Record<string, unknown>): Promise<T | un
     try {
       return (await ext.runtime.sendMessage({ t: "offscreenClip", ...message })) as T;
     } finally {
+      // execCommand answers before the browser has the text. Closing the page straight away can
+      // lose it, and the page still says it worked: a code that never arrives, or a clear that
+      // leaves a secret on the clipboard. There's nothing to wait on, so it's a pause.
+      await new Promise((r) => setTimeout(r, CLOSE_AFTER_MS));
       await off.closeDocument().catch(() => undefined);
     }
   });
