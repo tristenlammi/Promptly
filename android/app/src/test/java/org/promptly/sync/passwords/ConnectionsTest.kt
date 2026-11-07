@@ -115,7 +115,8 @@ class ConnectionsTest {
             val events = SecurityEvents.parse(c.getValue("events").toString())
             val got = SecurityEvents.alerts(events, items)
             val want = c.getValue("want").jsonArray.map { it.jsonObject }
-            assertEquals(want.map { Triple(it.text("id"), it.text("title"), it.text("text")) }, got.map { Triple(it.event.id, it.item.body.title, it.text) })
+            // A name is whatever an email says. Android goes by the domain, as its mail rows do (A52).
+            assertEquals(want.map { Triple(it.text("id"), it.text("title"), it.text("androidText") ?: it.text("text")) }, got.map { Triple(it.event.id, it.item.body.title, it.text) })
         }
     }
 
@@ -257,8 +258,55 @@ Call 555","from_domain":"Mail.Instagram.com","subject":"${"x".repeat(500)}","at"
         val dropped = touch(waiting, PasswordChange.drop(waiting))
         assertEquals("old-One-1!", dropped.password)
         assertNull(dropped["pendingPassword"])
-        assertTrue(dropped.passwordHistory.isEmpty())
+        assertEquals("A no can be a mistake", "new-One-2!", dropped.passwordHistory.single().first)
         assertEquals("Nothing waiting, nothing to do", start.password, PasswordChange.commit(start).password)
+    }
+
+    /** What `connections-vectors.json` says, which the real TypeScript also has to give. */
+    @Test fun waitingPasswordsAndMergingMatchTheWeb() {
+        fun hist(e: kotlinx.serialization.json.JsonElement?) = (e as kotlinx.serialization.json.JsonArray).map { JsonObject(mapOf("password" to it, "at" to JsonPrimitive("2026-01-01T00:00:00.000Z"))) }
+        for (e in vectors.getValue("pending").jsonArray) {
+            val c = e.jsonObject
+            val body = login("x", c.text("password")!!, "https://e.example").with("passwordHistory" to kotlinx.serialization.json.JsonArray(hist(c["history"])), "pendingPassword" to c.text("pending")?.let { JsonPrimitive(it) })
+            val out = when (c.text("op")) {
+                "touch" -> touch(body, body.with("password" to c["next"]))
+                "commit" -> touch(body, PasswordChange.commit(body))
+                "drop" -> touch(body, PasswordChange.drop(body))
+                else -> {
+                    val gone = login("x", c.text("dropPassword")!!, "https://e.example").with("passwordHistory" to kotlinx.serialization.json.JsonArray(hist(c["dropHistory"])), "pendingPassword" to c.text("dropPending")?.let { JsonPrimitive(it) }, "updatedAt" to JsonPrimitive("2026-01-01T00:00:00.000Z"))
+                    org.promptly.sync.passwords.core.Duplicates.merge(listOf(item(body.with("updatedAt" to JsonPrimitive("2026-02-01T00:00:00.000Z"))), item(gone))).body
+                }
+            }
+            val name = c.text("name")!!
+            assertEquals(name, c.text("wantPassword"), out.password)
+            assertEquals(name, c.text("wantPending"), out.str("pendingPassword"))
+            assertEquals(name, c.getValue("wantHistory").jsonArray.map { it.jsonPrimitive.content }, out.passwordHistory.map { it.first })
+        }
+    }
+
+    /** The bug itself: a password updated from Android's own save sheet, then a yes to an old question. */
+    @Test fun aStaleWaitingPasswordCantOverwriteOneSetSinceThen() {
+        val waiting = PasswordChange.withPending(login("X", "old-One-1!", "https://example.com"), "stale-One-2!")
+        val updated = touch(waiting, waiting.with("password" to JsonPrimitive("typed-One-3!")))
+        assertNull(updated["pendingPassword"])
+        assertEquals("Nothing waiting, so nothing to do", "typed-One-3!", touch(updated, PasswordChange.commit(updated)).password)
+        assertEquals(listOf("stale-One-2!", "old-One-1!"), updated.passwordHistory.map { it.first })
+    }
+
+    @Test fun onlyTheVaultsOwnAccountCanReplaceItsDevice() {
+        assertTrue(org.promptly.sync.passwords.core.sameAccount("A-b", "a-B"))
+        assertFalse(org.promptly.sync.passwords.core.sameAccount("a", "b"))
+        assertFalse("Not knowing isn't yes", org.promptly.sync.passwords.core.sameAccount("a", null))
+        assertFalse(org.promptly.sync.passwords.core.sameAccount(null, "a"))
+        assertFalse(org.promptly.sync.passwords.core.sameAccount("", ""))
+    }
+
+    @Test fun aCodeOnAnInsecurePageAsksAsALoginDoes() {
+        assertEquals(MailOffer.Insecure.HTTP, MailOffer.insecure(FillTarget.Web("x.example", "http", "b")))
+        assertEquals(MailOffer.Insecure.HTTP, MailOffer.insecure(FillTarget.Web("x.example", "HTTP", "b")))
+        assertEquals(MailOffer.Insecure.UNKNOWN, MailOffer.insecure(FillTarget.Web("x.example", "https", "b", schemeKnown = false)))
+        assertNull(MailOffer.insecure(FillTarget.Web("x.example", "https", "b")))
+        assertNull(MailOffer.insecure(FillTarget.App("com.x", "c", null)))
     }
 
     @Test fun theQueueGoesWorstFirstAndEachOnce() {

@@ -202,6 +202,54 @@ class AutofillE2ETest {
         }
     }
 
+    private fun openCardWarning(): Item {
+        login("Real shop", "ana-shop", "pw-Shop-1!", LoginUrl("https://promptlyshop.com"))
+        val card = client.saveNew(client.personalVaultId(), org.promptly.sync.passwords.core.newBody("card", "A card").withText("cardNumber", "4111111111111111"))
+        Harness.rebuildIndex()
+        val intent = AutofillAuthActivity.intent(Harness.ctx, AutofillAuthActivity.MODE_CARD, card.id, FillTarget.Web("promptlyshap.com", "https", TEST_BROWSER), ParsedForm(), false)
+        Harness.ctx.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        waitFor(By.res("lookalike"), 15_000)
+        return card
+    }
+
+    /** "Fill anyway" fills from what's held on the sheet, which is why it can't outlast a lock. */
+    @Test fun aLockWhileTheSheetIsOpenDropsItBackToUnlocking() {
+        openCardWarning()
+        Thread.sleep(800)
+        Pw.lock("test")
+        waitFor(By.res("master-password"), 15_000)
+        assertFalse("Nothing from the vault behind it", has(By.res("lookalike"), 300))
+        assertFalse(has(By.res("lookalike-yes"), 300))
+        // From the top: having said yes before the lock doesn't count.
+        Harness.fill("master-password", Harness.MASTER)
+        tap("unlock")
+        waitFor(By.res("lookalike"), 30_000)
+        tap("lookalike-no")
+    }
+
+    /** The finding as it was found: "Lock after: Leaving", away from the sheet, and back. */
+    @Test fun leavingTheSheetLocksItAndComingBackAsksToUnlock() {
+        try {
+            // Set once it's open: on "Leaving", opening a sheet locks too, which isn't this bug.
+            openCardWarning()
+            Pw.prefs.autoLockMinutes = 0
+            Harness.device.pressHome()
+            val end = System.currentTimeMillis() + 8_000
+            while (client.unlocked && System.currentTimeMillis() < end) Thread.sleep(200)
+            assertFalse("Leaving locks it", client.unlocked)
+            val am = Harness.ctx.getSystemService(android.app.ActivityManager::class.java)
+            am.appTasks.first { it.taskInfo?.topActivity?.className?.endsWith("AutofillAuthActivity") == true }.moveToFront()
+            waitFor(By.res("master-password"), 15_000)
+            assertFalse(has(By.res("lookalike-yes"), 300))
+            Harness.fill("master-password", Harness.MASTER)
+            tap("unlock")
+            waitFor(By.res("lookalike"), 30_000)
+            tap("lookalike-no")
+        } finally {
+            Pw.prefs.autoLockMinutes = 15
+        }
+    }
+
     @Test fun lockingClearsWhatTheIndexHeldInMemory() {
         login("In memory", "ana-mem", "pw-Mem-1!", appLink())
         val memory = AutofillIndex::class.java.getDeclaredField("memory").apply { isAccessible = true }

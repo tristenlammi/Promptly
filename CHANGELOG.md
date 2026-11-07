@@ -24,6 +24,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Fixed
 - Passwords: keys are sealed to an emergency contact only after you've compared safety words with them.
 - Passwords on Android: adding an emergency contact shows their safety words first, and a contact whose words aren't compared gets no keys.
+- Passwords on Android: a fill sheet that's open when the vault locks goes back to asking for the unlock, and can't fill from what it was holding.
+- Passwords on Android: a code from Mail asks first on an http page, or one whose scheme isn't known, as a login does.
+- Passwords on Android: a password-protected Bitwarden file can't ask for more key-derivation work than the phone can give, and two imports can't run those at once.
+- Passwords on Android: updating a password no longer leaves an old new-password waiting that could overwrite it later, and "No, keep the old one" keeps it in the history.
+- Passwords on Android: connecting the phone again for email only accepts the vault's own account, and keeps the old connection otherwise.
+- Passwords on Android: security alerts name the sender's domain, not the name the email gave itself.
+- Passwords on Android: a bad 2FA secret from an import says so when filling, instead of crashing.
+- Passwords on Android: merging duplicates keeps the dropped copies' passwords, and any waiting new password, when the history's full.
 - Passwords: importing a large KeePass file no longer gets passwords wrong after the first few KiB of protected values.
 - Passwords: a LastPass row with only a name no longer turns the next login into a note.
 - Passwords: passkeys imported from Bitwarden now work: their ids are converted to the form sites use.

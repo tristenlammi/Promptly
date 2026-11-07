@@ -50,8 +50,9 @@ object Duplicates {
         val keep = order[0]
         val drop = order.drop(1)
         val body = keep.body
-        val history = ArrayList((body["passwordHistory"] as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList())
+        val history = ArrayList<JsonObject>()
         fun inHistory(pw: String?) = history.any { it.str("password") == pw }
+        fun historyOf(b: ItemBody) = (b["passwordHistory"] as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()
         // As they're written, so a field this client doesn't know about comes across too.
         fun urlOf(e: JsonElement) = (e as? JsonObject)?.str("url") ?: (e as? JsonPrimitive)?.takeIf { it.isString }?.content
         val urls = ArrayList((body["urls"] as? JsonArray)?.filter { urlOf(it) != null } ?: emptyList())
@@ -69,7 +70,10 @@ object Duplicates {
             if (!pw.isNullOrEmpty() && pw != body.password && !inHistory(pw)) {
                 history += JsonObject(mapOf("password" to JsonPrimitive(pw), "at" to JsonPrimitive(b.updatedAt)))
             }
-            for (h in (b["passwordHistory"] as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()) if (!inHistory(h.str("password"))) history += h
+            val pending = b.str("pendingPassword")
+            if (!pending.isNullOrEmpty() && pending != body.password && !inHistory(pending)) {
+                history += JsonObject(mapOf("password" to JsonPrimitive(pending), "at" to JsonPrimitive(isoNow())))
+            }
             for (u in (b["urls"] as? JsonArray) ?: emptyList()) if (urlOf(u) != null && seenUrls.add(urlOf(u))) urls += u
             b.notes?.takeIf { it.isNotEmpty() && it !in notes }?.let { notes += it }
             for (f in (b["fields"] as? JsonArray)?.filterIsInstance<JsonObject>() ?: emptyList()) {
@@ -84,6 +88,8 @@ object Duplicates {
             if (totp == null && b["totp"] is JsonObject) totp = b["totp"]
             if (b.reprompt) reprompt = true
         }
+        // What's being merged in comes first, as the copies are about to go. Older history fills the rest.
+        for (h in historyOf(body) + drop.flatMap { historyOf(it.body) }) if (!inHistory(h.str("password"))) history += h
         val merged = body.with(
             "urls" to JsonArray(urls),
             "notes" to notes.joinToString("\n\n").takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) },
@@ -465,7 +471,8 @@ object SecurityEvents {
     fun alerts(events: List<SecurityEvent>, items: Collection<Item>): List<SecurityAlert> = events.mapNotNull { event ->
         val sender = MailCodes.senderBase(event.fromDomain)
         val item = items.firstOrNull { i -> i.body.kind == "login" && i.body.urls.any { u -> MailCodes.related(Match.hostOf(u.url)?.let { Match.baseDomain(it) }, sender) } } ?: return@mapNotNull null
-        val who = event.fromName.ifEmpty { event.fromDomain }
+        // The domain and never the name: a name is whatever the email says, as on the mail rows (A52).
+        val who = event.fromDomain
         val what = if (event.kind == "password_changed") "your password changed" else "there was a new sign-in"
         SecurityAlert(event, item, "$who says $what. Was that you?")
     }
@@ -504,7 +511,14 @@ object PasswordChange {
         return body.with("pendingPassword" to null, "password" to JsonPrimitive(pending))
     }
 
-    fun drop(body: ItemBody): ItemBody = body.with("pendingPassword" to null)
+    /** Into the history, not away: "no" can be a mistake, and the site may have taken it. */
+    fun drop(body: ItemBody): ItemBody {
+        val pending = body.str("pendingPassword")
+        if (pending.isNullOrEmpty() || pending == body.password) return body.with("pendingPassword" to null)
+        val entry = JsonObject(mapOf("password" to JsonPrimitive(pending), "at" to JsonPrimitive(isoNow())))
+        val old = (body["passwordHistory"] as? JsonArray) ?: JsonArray(emptyList())
+        return body.with("pendingPassword" to null, "passwordHistory" to JsonArray((listOf<JsonElement>(entry) + old).take(20)))
+    }
 
     /** Worst first, each once. */
     fun toChange(r: HealthReport): List<Item> = (r.breached.map { it.first } + r.reused.flatten() + r.weak).distinctBy { it.id }

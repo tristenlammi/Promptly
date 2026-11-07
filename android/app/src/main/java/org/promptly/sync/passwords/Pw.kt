@@ -41,8 +41,10 @@ import org.promptly.sync.passwords.core.SecretKeeper
 import org.promptly.sync.passwords.core.VaultApi
 import org.promptly.sync.passwords.core.VaultClient
 import org.promptly.sync.passwords.core.Wordlist
+import org.promptly.sync.passwords.core.WrongAccountError
 import org.promptly.sync.passwords.core.b64u
 import org.promptly.sync.passwords.core.fromB64u
+import org.promptly.sync.passwords.core.sameAccount
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -486,9 +488,15 @@ object Pw {
 
     /** A new device token in place of this one, with the vault left as it is: to add a scope, which
      *  can't be done to a token that exists. The old one goes last, and if that can't be done right
-     *  now it stays on the Devices list, where it can be removed. */
-    fun replaceDevice(token: String, deviceId: String) {
+     *  now it stays on the Devices list, where it can be removed. Someone else's token, as a browser
+     *  signed in to another account would approve, changes nothing here and doesn't stay around. */
+    fun replaceDevice(token: String, deviceId: String, userId: String?) {
         val server = prefs.server ?: return
+        // From the store and not the session, since this can finish with the vault locked.
+        if (!sameAccount(db.getAccount()?.userId, userId)) {
+            runCatching { VaultApi(server, { token }).revokeDevice(deviceId) }
+            throw WrongAccountError()
+        }
         val oldToken = prefs.deviceToken
         val oldId = prefs.deviceId
         synchronized(this) {

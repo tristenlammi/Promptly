@@ -217,6 +217,28 @@ class MailRealStackTest {
         waitFor(By.text("Vault created"), 20_000)
     }
 
+    /** A browser signed in to someone else approves it: nothing swaps, and it says so. */
+    @Test fun aBrowserSignedInAsSomeoneElseChangesNothing() {
+        val bearer = args.getString("pwBearer10")
+        val someoneElse = args.getString("pwBearer11")
+        assumeTrue("No -e pwBearer10", !bearer.isNullOrEmpty() && !someoneElse.isNullOrEmpty())
+        val client = oldPhone(bearer!!)
+        val before = Pw.prefs.deviceId
+        val token = Pw.prefs.deviceToken
+        Store(ctx).account = null
+        toggleInSettings()
+        tap("mail-scope-add")
+        val code = waitFor(By.res("mail-scope-code"), 20_000).text
+        val req = Request.Builder().url("$server/api/passwords/connect/code/$code/approve").header("Authorization", "Bearer $someoneElse").post(ByteArray(0).toRequestBody(null)).build()
+        OkHttpClient().newCall(req).execute().use { assertEquals(204, it.code) }
+        waitFor(By.textContains("different Promptly account"), 20_000)
+        assertEquals(before, Pw.prefs.deviceId)
+        assertEquals(token, Pw.prefs.deviceToken)
+        assertFalse(Pw.prefs.mailCodes)
+        assertTrue("The vault's still open on the old token", client.unlocked)
+        Harness.retrying429 { client.sync() }
+    }
+
     /** With no app password: a code, a page opened in the browser and approved there, and the same result.
      *  The page itself isn't opened, since it would be Chrome. It's the browser's own API call. */
     @Test fun anOldPhoneWithNoAppPasswordAddsTheScopeThroughTheBrowser() {

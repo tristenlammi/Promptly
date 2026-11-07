@@ -1619,7 +1619,7 @@ asyncio.run(main())
         val events = phone.api.securityEvents()
         assertEquals(3, events.size)
         val alerts = org.promptly.sync.passwords.core.SecurityEvents.alerts(events, phone.allItems())
-        assertEquals("Instagram says your password changed. Was that you?", alerts.single().text)
+        assertEquals("mail.instagram.com says your password changed. Was that you?", alerts.single().text)
         assertEquals("Instagram", alerts.single().item.body.title)
     }
 
@@ -1731,15 +1731,15 @@ asyncio.run(main())
             phone.update(item.id, org.promptly.sync.passwords.core.PasswordChange.withPending(phone.get(item.id)!!.body, "new-One-2!"))
             phone.sync()
             check("old-One-1!", "new-One-2!", emptyList())
-            // A no drops it, and the old one's still the one.
+            // A no drops it into the history, and the old one's still the one.
             phone.update(item.id, org.promptly.sync.passwords.core.PasswordChange.drop(phone.get(item.id)!!.body))
             phone.sync()
-            check("old-One-1!", null, emptyList())
+            check("old-One-1!", null, listOf("new-One-2!"))
             // A yes swaps them, with the old one in its history.
             phone.update(item.id, org.promptly.sync.passwords.core.PasswordChange.withPending(phone.get(item.id)!!.body, "new-One-2!"))
             phone.update(item.id, org.promptly.sync.passwords.core.PasswordChange.commit(phone.get(item.id)!!.body))
             phone.sync()
-            check("new-One-2!", null, listOf("old-One-1!"))
+            check("new-One-2!", null, listOf("old-One-1!", "new-One-2!"))
         }
     }
 

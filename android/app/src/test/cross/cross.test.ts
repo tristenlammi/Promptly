@@ -10,7 +10,7 @@ import { ApiError, VaultApi } from "../../../../../frontend/src/passwords/core/a
 import { downloadAttachment, uploadAttachment } from "../../../../../frontend/src/passwords/core/attachments";
 import { decryptBitwardenExport } from "../../../../../frontend/src/passwords/core/bitwarden";
 import { encryptedExport, plainCsvExport, plainJsonExport, readEncryptedExport } from "../../../../../frontend/src/passwords/core/exporter";
-import { changePageUrl, commitPending, linkIsSafe, rankMailCodes, securityAlerts, withPending } from "../../../../../frontend/src/passwords/core/connections";
+import { changePageUrl, commitPending, dropPending, linkIsSafe, mergeDuplicates, rankMailCodes, securityAlerts, withPending } from "../../../../../frontend/src/passwords/core/connections";
 import { plusAddress } from "../../../../../frontend/src/passwords/core/generator";
 import { coarseCounts, runHealth } from "../../../../../frontend/src/passwords/core/health";
 import { dedupe, fromBitwardenJson, fromGenericCsv, importFile } from "../../../../../frontend/src/passwords/core/importers";
@@ -18,7 +18,7 @@ import { openSend, sendMeta } from "../../../../../frontend/src/passwords/core/s
 import { strengthOf } from "../../../../../frontend/src/passwords/core/strength";
 import { b64u, fromB64u, utf8 } from "../../../../../frontend/src/passwords/core/bytes";
 import { editDistance, hostOf, lookalikeOf, matchUrl, skeleton } from "../../../../../frontend/src/passwords/core/match";
-import { newBody } from "../../../../../frontend/src/passwords/core/model";
+import { newBody, touch } from "../../../../../frontend/src/passwords/core/model";
 import { getAssertion, makeCredential } from "../../../../../frontend/src/passwords/core/passkey";
 import { MemoryStore } from "../../../../../frontend/src/passwords/core/store";
 import { totpCode } from "../../../../../frontend/src/passwords/core/totp";
@@ -338,7 +338,22 @@ it(`step ${STEP}`, async () => {
     for (const c of v.securityAlerts) {
       const items = c.logins.map((l: any, i: number) => ({ id: `i${i}`, vaultId: "v", body: newBody("login", l.title, { urls: l.urls.map((url: string) => ({ url })) }) }));
       const got = securityAlerts(c.events, items).map((a) => ({ id: a.event.id, title: a.item.body.title, text: a.text }));
-      if (JSON.stringify(got) !== JSON.stringify(c.want)) wrong.push(`securityAlerts "${c.name}": ${JSON.stringify(got)}`);
+      if (JSON.stringify(got) !== JSON.stringify(c.want.map(({ androidText: _android, ...w }: any) => w))) wrong.push(`securityAlerts "${c.name}": ${JSON.stringify(got)}`);
+    }
+    for (const c of v.pending) {
+      const hist = (l: string[]) => l.map((password) => ({ password, at: "2026-01-01T00:00:00.000Z" }));
+      const body = { ...newBody("login", "x", { password: c.password, passwordHistory: hist(c.history) }), ...(c.pending ? { pendingPassword: c.pending } : {}) };
+      let out;
+      if (c.op === "touch") out = touch(body, { ...body, password: c.next });
+      else if (c.op === "commit") out = commitPending(body);
+      else if (c.op === "drop") out = dropPending(body);
+      else {
+        const gone = { ...newBody("login", "x", { password: c.dropPassword, passwordHistory: hist(c.dropHistory) }), ...(c.dropPending ? { pendingPassword: c.dropPending } : {}), updatedAt: "2026-01-01T00:00:00.000Z" };
+        const kept = { ...body, updatedAt: "2026-02-01T00:00:00.000Z" };
+        out = mergeDuplicates([{ id: "kept", vaultId: "v", body: kept }, { id: "gone", vaultId: "v", body: gone }] as any).body;
+      }
+      const got = { password: out.password, pending: out.pendingPassword ?? null, history: (out.passwordHistory ?? []).map((h: any) => h.password) };
+      if (JSON.stringify(got) !== JSON.stringify({ password: c.wantPassword, pending: c.wantPending, history: c.wantHistory })) wrong.push(`pending "${c.name}": ${JSON.stringify(got)}`);
     }
     for (const c of v.changePageUrl) {
       const got = changePageUrl(newBody("login", "x", { urls: c.urls.map((url: string) => ({ url })) }));

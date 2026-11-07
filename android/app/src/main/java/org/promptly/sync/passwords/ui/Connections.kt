@@ -72,6 +72,7 @@ import org.promptly.sync.passwords.core.Totp
 import org.promptly.sync.passwords.core.TotpConfig
 import org.promptly.sync.passwords.core.VaultApi
 import org.promptly.sync.passwords.core.VaultClient
+import org.promptly.sync.passwords.core.WrongAccountError
 import org.promptly.sync.passwords.core.newBody
 import org.promptly.sync.passwords.core.parseInstant
 import java.time.ZoneId
@@ -176,8 +177,8 @@ fun MailScopePanel(client: VaultClient, why: String, onDone: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
-    suspend fun finish(token: String, deviceId: String) {
-        withContext(Dispatchers.IO) { Pw.replaceDevice(token, deviceId) }
+    suspend fun finish(token: String, deviceId: String, userId: String?) {
+        withContext(Dispatchers.IO) { Pw.replaceDevice(token, deviceId, userId) }
         busy = false
         code = null
         onDone()
@@ -192,15 +193,22 @@ fun MailScopePanel(client: VaultClient, why: String, onDone: () -> Unit) {
             val paired = runCatching { Store(ctx).account }.getOrNull()?.takeIf { it.server.trimEnd('/') == url }
             if (paired != null) {
                 val r = withContext(Dispatchers.IO) { runCatching { anon.registerDevice(VaultApi.basic(paired.username, paired.password), Api.deviceName()) } }
-                r.getOrNull()?.let {
-                    finish(it.token, it.deviceId)
-                    return@launch
-                }
-                val e = r.exceptionOrNull()
-                if (e !is ApiError || (e.status != 401 && e.status != 403)) {
-                    error = errorText(e ?: IllegalStateException())
-                    busy = false
-                    return@launch
+                val made = r.getOrNull()
+                if (made != null) {
+                    try {
+                        finish(made.token, made.deviceId, made.userId)
+                        return@launch
+                    } catch (_: WrongAccountError) {
+                        // Paired as someone else. It's on to the browser, which can ask who this is.
+                        error = "The account this phone's paired with isn't this vault's, so it keeps the connection it has. Approve this in your browser, signed in as the vault's owner."
+                    }
+                } else {
+                    val e = r.exceptionOrNull()
+                    if (e !is ApiError || (e.status != 401 && e.status != 403)) {
+                        error = errorText(e ?: IllegalStateException())
+                        busy = false
+                        return@launch
+                    }
                 }
             }
             val started = withContext(Dispatchers.IO) { runCatching { anon.connectStart(Api.deviceName()) } }.getOrElse {
@@ -219,8 +227,13 @@ fun MailScopePanel(client: VaultClient, why: String, onDone: () -> Unit) {
                     break
                 }
                 if (r.token != null && r.deviceId != null) {
-                    finish(r.token, r.deviceId)
-                    return@launch
+                    try {
+                        finish(r.token, r.deviceId, r.userId)
+                        return@launch
+                    } catch (e: WrongAccountError) {
+                        error = errorText(e)
+                        break
+                    }
                 }
             }
             if (error == null) error = "No answer from the browser. Try again."
@@ -287,7 +300,7 @@ fun MailAlertsPanel(client: VaultClient, onChange: (Item) -> Unit, onOpen: (Stri
             Card(Modifier.fillMaxWidth().testTag("mail-alert-${a.event.id}"), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(a.text, Modifier.testTag("mail-alert-text"))
-                    Text("${localTime(a.event.at)}, ${a.event.subject}", style = MaterialTheme.typography.bodySmall)
+                    Text("From ${a.event.fromDomain}, ${localTime(a.event.at)}. Subject: ${a.event.subject}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("mail-alert-from"))
                     if (client.canEdit(a.item.vaultId)) OutlinedButton(onClick = { onChange(a.item) }, Modifier.fillMaxWidth().testTag("alert-change")) { Text("Not me: change password") }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         TextButton(onClick = { onOpen(a.item.id) }, Modifier.testTag("alert-open")) { Text("Open login") }
@@ -405,7 +418,7 @@ private fun ChangeOne(client: VaultClient, id: String, position: String?, onNext
                 }, enabled = !busy, modifier = Modifier.testTag("change-yes")) { Text("Yes, it's changed") }
                 OutlinedButton(onClick = {
                     act({
-                        toast(ctx, "Kept the old password.")
+                        toast(ctx, "Kept the old password. The new one's in its history.")
                         onNext()
                     }) { client.update(id, PasswordChange.drop(client.get(id)!!.body)) }
                 }, enabled = !busy, modifier = Modifier.testTag("change-no")) { Text("No, keep the old one") }

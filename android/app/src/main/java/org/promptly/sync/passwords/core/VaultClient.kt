@@ -66,6 +66,12 @@ class WrongPasswordError(val changedElsewhere: Boolean = false) : Exception("Tha
 
 class KeyChangedError(val userId: String, val username: String) : Exception("$username's keys have changed since you last shared with them")
 
+/** A new device token for someone other than this vault's owner. Nothing's been changed. */
+class WrongAccountError : Exception("That sign-in is a different Promptly account from this vault's, so this phone keeps the connection it has. Sign in as the vault's owner and try again.")
+
+/** Whether a token someone's just handed over is for this vault's account. Not knowing isn't yes. */
+fun sameAccount(mine: String?, theirs: String?): Boolean = !mine.isNullOrEmpty() && !theirs.isNullOrEmpty() && mine.equals(theirs, ignoreCase = true)
+
 private const val PERSONAL_META = "personal_vault"
 private const val LAST_SYNC_META = "last_sync"
 private const val RECOVERY_META = "recovery_checked"

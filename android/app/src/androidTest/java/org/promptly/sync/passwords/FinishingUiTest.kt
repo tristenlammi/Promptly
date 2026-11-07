@@ -99,6 +99,7 @@ internal class TinyServer(private val answers: MutableMap<String, Pair<String, B
         calls += key
         bodies += String(body)
         val answer = answers[key]
+        if (slowMs > 0) Thread.sleep(slowMs)
         val out = c.getOutputStream()
         val bytes = answer?.second ?: "{\"detail\":\"down\"}".toByteArray()
         out.write("HTTP/1.1 ${if (key in refusing) "403 No" else if (answer == null) "503 Down" else "200 OK"}\r\nContent-Type: ${answer?.first ?: "application/json"}\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n".toByteArray())
@@ -114,6 +115,10 @@ internal class TinyServer(private val answers: MutableMap<String, Pair<String, B
 
     /** Says 403 to this, as a server does to a device token without the scope. */
     fun answersFor403(key: String) { refusing += key }
+
+    /** How long each answer takes, for a request caught in flight. */
+    @Volatile
+    var slowMs = 0L
 
     fun close() = runCatching { socket.close() }
 
@@ -723,6 +728,37 @@ class FinishingUiTest {
         tap("lookalike-no")
     }
 
+    /** Past the warning it fills once: "Fill and remember" isn't offered, however the login got picked (A35). */
+    @Test fun anAppClaimingALookalikeIsntOfferedRememberingPastTheWarning() {
+        val client = Harness.seedOffline()
+        loginFor(client, "Real bank", "https://promptlybank.com")
+        val mine = loginFor(client, "Some login", "https://elsewhere.example")
+        val intent = AutofillAuthActivity.intent(ctx, AutofillAuthActivity.MODE_PICK, null, FillTarget.App("com.example.app", "CERT", "promptlybnk.com"), ParsedForm(), false)
+        ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        waitFor(By.res("lookalike"), 15_000)
+        Thread.sleep(800)
+        tap("lookalike-yes")
+        tap("pick-Some login", 15_000)
+        waitFor(By.res("confirm-fill"), 25_000)
+        assertFalse(has(By.res("confirm-remember"), 300))
+        tap("confirm-cancel")
+        assertEquals(listOf("https://elsewhere.example"), client.get(mine.id)!!.body.urls.map { it.url })
+    }
+
+    @Test fun whatAChangeFormWouldFillIncludesTheNewPassword() {
+        val client = Harness.seedOffline()
+        loginFor(client, "Real bank", "https://promptlybank.com")
+        val linked = client.saveNew(client.personalVaultId(), org.promptly.sync.passwords.core.PasswordChange.withPending(newBody("login", "App login").withText("username", "ana").withText("password", "pw-App-1!").withUrls(listOf(org.promptly.sync.passwords.core.Match.appUrl("com.example.app", "CERT"))), "pw-New-2!"))
+        val form = ParsedForm<android.view.autofill.AutofillId>()
+        form.passwords += android.view.View(ctx).autofillId!!
+        form.newPasswords += android.view.View(ctx).autofillId!!
+        val intent = AutofillAuthActivity.intent(ctx, AutofillAuthActivity.MODE_LOGIN, linked.id, FillTarget.App("com.example.app", "CERT", "promptlybnk.com"), form, false)
+        ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        waitFor(By.res("lookalike"), 15_000)
+        waitFor(By.text("It will fill: password, new password."), 10_000)
+        tap("lookalike-no")
+    }
+
     @Test fun anAppsWebViewClaimingALookalikeIsWarnedAbout() {
         val client = Harness.seedOffline()
         loginFor(client, "Real bank", "https://promptlybank.com")
@@ -755,6 +791,13 @@ class FinishingUiTest {
         ctx.startActivity(intent)
         waitFor(By.res("lookalike"), 20_000)
         waitFor(By.textContains("promptlybnk.com looks like promptlybank.com"))
+        // A lock while it's open: what it held goes, and the unlock starts this request from the top.
+        Pw.lock("test")
+        waitFor(By.res("master-password"), 15_000)
+        assertFalse(has(By.res("lookalike"), 300))
+        Harness.fill("master-password", Harness.MASTER)
+        tap("unlock")
+        waitFor(By.res("lookalike"), 30_000)
         val no = waitFor(By.res("lookalike-no"))
         assertTrue(no.visibleBounds.top < waitFor(By.res("lookalike-yes")).visibleBounds.top)
         no.click()

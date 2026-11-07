@@ -117,16 +117,21 @@ object Kdbx {
         return sha256(block)
     }
 
+    /** Both ceilings for an Argon2 that a file chose, before any work. Any file format's. */
+    fun checkArgon2(m: Long, t: Long, p: Long, engine: Argon2Engine, tooHeavy: String = TOO_HEAVY) {
+        if (m > WEB_MAX_MEMORY || t > WEB_MAX_PASSES || p > WEB_MAX_LANES) throw IllegalArgumentException(UNUSUAL)
+        // BouncyCastle needs all of it on the Java heap, which is much smaller than the phone.
+        val onHeap = engine === BouncyCastleArgon2 || engine === BouncyCastleArgon2d
+        val limit = minOf(MAX_MEMORY, memoryLimit, if (onHeap) Runtime.getRuntime().maxMemory() / 2 else Long.MAX_VALUE)
+        if (m > limit || m * t > MAX_WORK) throw IllegalArgumentException(tooHeavy)
+    }
+
     private fun argon2(composite: ByteArray, kdf: Map<String, ByteArray>, id: Boolean): ByteArray {
         val m = num(kdf["M"])
         val t = num(kdf["I"])
         val p = num(kdf["P"])
-        if (m > WEB_MAX_MEMORY || t > WEB_MAX_PASSES || p > WEB_MAX_LANES) throw IllegalArgumentException(UNUSUAL)
         val engine = if (id) Primitives.argon2Engine else Primitives.argon2dEngine
-        // BouncyCastle needs all of it on the Java heap, which is much smaller than the phone.
-        val onHeap = engine === BouncyCastleArgon2 || engine === BouncyCastleArgon2d
-        val limit = minOf(MAX_MEMORY, memoryLimit, if (onHeap) Runtime.getRuntime().maxMemory() / 2 else Long.MAX_VALUE)
-        if (m > limit || m * t > MAX_WORK) throw IllegalArgumentException(TOO_HEAVY)
+        checkArgon2(m, t, p, engine)
         val salt = kdf["S"] ?: throw IllegalArgumentException(DAMAGED_HEADER)
         val kib = m / 1024
         if (t < 1 || p < 1 || kib < 8 * p || salt.size < 8) throw IllegalArgumentException(UNUSUAL)

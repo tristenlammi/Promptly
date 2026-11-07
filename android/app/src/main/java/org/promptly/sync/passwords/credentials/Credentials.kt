@@ -26,10 +26,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -72,6 +71,7 @@ import androidx.credentials.provider.PendingIntentHandler
 import androidx.credentials.provider.ProviderClearCredentialStateRequest
 import androidx.credentials.provider.PublicKeyCredentialEntry
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -268,14 +268,37 @@ class CredentialActivity : FragmentActivity() {
         data class Fail(val text: String) : Step()
     }
 
+    // Out here, not in the composition, so a lock can drop what's held even with the window stopped,
+    // when Compose isn't running. A step's closures hold the login or the passkey.
+    private var step by mutableStateOf<Step>(Step.Loading)
+    private var unlocked by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         org.promptly.sync.passwords.ui.hardenWindow(this)
         Pw.init(this)
         Pw.lockIfExpired()
+        unlocked = Pw.unlocked
+        lifecycleScope.launch { Pw.unlockedFlow.collect { if (!Pw.unlocked) lockedOut() } }
         setContent { PwTheme { Flow() } }
     }
+
+    /** The vault locked while this was open. After the unlock, the request's looked at from the start. */
+    private fun lockedOut() {
+        unlocked = false
+        step = Step.Loading
+    }
+
+    /** It can have been a while, and Android's timer doesn't tick in deep sleep. */
+    override fun onStart() {
+        super.onStart()
+        Pw.lockIfExpired()
+        if (!Pw.unlocked) lockedOut()
+    }
+
+    /** Every answer goes through a tap on a step, or comes straight back from working one out. */
+    private fun whileOpen(go: () -> Unit): () -> Unit = { if (Pw.unlocked) go() else lockedOut() }
 
     /** An unlock from here has no app of ours in front, so "Lock after: Leaving" counts here too.
      *  After a bare unlock, the entries it was for are about to be offered: a minute for that. */
@@ -307,8 +330,9 @@ class CredentialActivity : FragmentActivity() {
 
     @Composable
     private fun Flow() {
-        var unlocked by remember { mutableStateOf(Pw.unlocked) }
-        if (!unlocked) {
+        // Here to recompose on a lock, should the collector not have got there.
+        Pw.unlockedFlow.collectAsState().value
+        if (!unlocked || !Pw.unlocked) {
             UnlockPane(this, "Unlock Passwords", { unlocked = true }, {
                 if (intent.action == PromptlyCredentialProviderService.ACTION_CREATE) failCreate(CreateCredentialCancellationException())
                 else if (intent.action == PromptlyCredentialProviderService.ACTION_UNLOCK) finish()
@@ -358,7 +382,6 @@ class CredentialActivity : FragmentActivity() {
 
     @Composable
     private fun GetPasskey() {
-        var step by remember { mutableStateOf<Step>(Step.Loading) }
         val client = Pw.client()!!
         LaunchedEffect(Unit) {
             val r = withContext(Dispatchers.IO) {
@@ -378,6 +401,10 @@ class CredentialActivity : FragmentActivity() {
                     val looks = caller.origin?.takeIf { o -> Match.hostOf(o)?.let { Match.baseDomain(it) } != (Match.baseDomain(req.rpId) ?: req.rpId) }?.let { credentialLookalike(client.allItems(), caller) }
                     Triple(Triple(req, item, chosen), origin, hash) to (caller.origin to looks)
                 }
+            }
+            if (!Pw.unlocked) {
+                lockedOut()
+                return@LaunchedEffect
             }
             r.onSuccess { (held, seen) ->
                 val (t, origin, hash) = held
@@ -408,7 +435,6 @@ class CredentialActivity : FragmentActivity() {
 
     @Composable
     private fun GetPassword() {
-        var step by remember { mutableStateOf<Step>(Step.Loading) }
         val client = Pw.client()!!
         LaunchedEffect(Unit) {
             val r = withContext(Dispatchers.IO) {
@@ -422,6 +448,10 @@ class CredentialActivity : FragmentActivity() {
                     val insecure = caller.origin?.let { o -> Match.matchItems(listOf(found), "$o/").firstOrNull()?.downgrade } == true
                     Triple(found, insecure, caller.origin) to credentialLookalike(client.allItems(), caller)
                 }
+            }
+            if (!Pw.unlocked) {
+                lockedOut()
+                return@LaunchedEffect
             }
             r.onSuccess { (held, looks) ->
                 val (item, insecure, origin) = held
@@ -445,7 +475,6 @@ class CredentialActivity : FragmentActivity() {
 
     @Composable
     private fun Create() {
-        var step by remember { mutableStateOf<Step>(Step.Loading) }
         val client = Pw.client()!!
         LaunchedEffect(Unit) {
             val request = PendingIntentHandler.retrieveProviderCreateCredentialRequest(intent)
@@ -463,6 +492,10 @@ class CredentialActivity : FragmentActivity() {
                             parsed to origin
                         }
                     }
+                    if (!Pw.unlocked) {
+                        lockedOut()
+                        return@LaunchedEffect
+                    }
                     prepared.onSuccess { (parsed, origin) ->
                         val existing = Passkeys.allPasskeys(client.allItems()).filter { it.passkey.rpId == parsed.rpId }.map { Passkeys.siteCredentialId(it.passkey.credentialId) }
                         if (parsed.excludeCredentials.any { it in existing }) {
@@ -471,19 +504,24 @@ class CredentialActivity : FragmentActivity() {
                         }
                         step = Step.Biometric("Create a passkey for ${parsed.rpId}", "As ${parsed.userName}") {
                             lifecycleScopeLaunch {
-                                val json = withContext(Dispatchers.IO) {
-                                    val made = Passkeys.makeCredential(parsed.rpId, parsed.rpName, parsed.userHandle, parsed.userName, parsed.userDisplayName, parsed.challenge, origin, true, parsed.discoverable)
-                                    // Same shape as the browser extension's, so it syncs and works there.
-                                    val login = client.allItems().firstOrNull { i -> i.body.kind == "login" && i.body.username == parsed.userName && Match.hostOf(i.body.urls.firstOrNull()?.url ?: "") == parsed.rpId }
-                                    if (login != null) client.update(login.id, login.body.withPasskeys(login.body.passkeys + made.passkey))
-                                    else client.saveNew(client.personalVaultId(), newBody("passkey", parsed.rpName ?: parsed.rpId).withText("username", parsed.userName).withUrls(listOf(LoginUrl("https://${parsed.rpId}"))).withPasskeys(listOf(made.passkey)))
-                                    runCatching { client.sync() }
-                                    Passkeys.registrationJson(made, parsed.discoverable)
+                                // It goes in the vault off this thread, and a lock can come on the way.
+                                val r = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        val made = Passkeys.makeCredential(parsed.rpId, parsed.rpName, parsed.userHandle, parsed.userName, parsed.userDisplayName, parsed.challenge, origin, true, parsed.discoverable)
+                                        // Same shape as the browser extension's, so it syncs and works there.
+                                        val login = client.allItems().firstOrNull { i -> i.body.kind == "login" && i.body.username == parsed.userName && Match.hostOf(i.body.urls.firstOrNull()?.url ?: "") == parsed.rpId }
+                                        if (login != null) client.update(login.id, login.body.withPasskeys(login.body.passkeys + made.passkey))
+                                        else client.saveNew(client.personalVaultId(), newBody("passkey", parsed.rpName ?: parsed.rpId).withText("username", parsed.userName).withUrls(listOf(LoginUrl("https://${parsed.rpId}"))).withPasskeys(listOf(made.passkey)))
+                                        runCatching { client.sync() }
+                                        Passkeys.registrationJson(made, parsed.discoverable)
+                                    }
                                 }
-                                val data = Intent()
-                                PendingIntentHandler.setCreateCredentialResponse(data, CreatePublicKeyCredentialResponse(json))
-                                setResult(RESULT_OK, data)
-                                finish()
+                                r.onSuccess { json ->
+                                    val data = Intent()
+                                    PendingIntentHandler.setCreateCredentialResponse(data, CreatePublicKeyCredentialResponse(json))
+                                    setResult(RESULT_OK, data)
+                                    finish()
+                                }.onFailure { failCreate(CreateCredentialUnknownException(errorText(it))) }
                             }
                         }
                     }.onFailure {
@@ -531,11 +569,11 @@ class CredentialActivity : FragmentActivity() {
             is Step.Confirm -> Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Text(step.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
                 Text(step.detail)
-                Button(onClick = step.go, Modifier.testTag("credential-confirm")) { Text(step.button) }
+                Button(onClick = whileOpen(step.go), Modifier.testTag("credential-confirm")) { Text(step.button) }
                 TextButton(onClick = cancel, Modifier.testTag("credential-cancel")) { Text("Cancel") }
             }
-            is Step.Biometric -> ConfirmIdentityPane(this, step.title, step.detail, true, step.go, cancel)
-            is Step.Lookalike -> LookalikeWarning(step.page, step.looksLike, emptyList(), "Fill anyway", cancel, step.go)
+            is Step.Biometric -> ConfirmIdentityPane(this, step.title, step.detail, true, whileOpen(step.go), cancel)
+            is Step.Lookalike -> LookalikeWarning(step.page, step.looksLike, emptyList(), "Fill anyway", cancel, whileOpen(step.go))
         }
     }
 

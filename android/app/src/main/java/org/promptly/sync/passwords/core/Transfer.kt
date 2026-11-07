@@ -493,11 +493,17 @@ object Importers {
         return mac.doFinal(concat(utf8(info), byteArrayOf(1)))
     }
 
+    /** Over eight times Bitwarden's default of 600,000. bitwarden.ts allows 100 million, which is
+     *  minutes of a phone's time for each try, on settings the file chose for itself. */
+    const val BITWARDEN_MAX_PBKDF2 = 5_000_000
+    private const val BITWARDEN_TOO_HEAVY = "That file's key settings ask more than this phone should give. Export it from Bitwarden with a lower setting, or as plain JSON on a computer you trust, and try again."
+
     private fun masterKey(password: String, salt: ByteArray, data: JsonObject): ByteArray {
         val kdfType = data["kdfType"].any().toIntOrNull() ?: 0
         val iterations = data["kdfIterations"].any().toIntOrNull() ?: 0
-        require(iterations in 1..100_000_000) { "Unusual KDF settings in that file" }
+        require(iterations >= 1) { "Unusual KDF settings in that file" }
         if (kdfType == 0) {
+            require(iterations <= BITWARDEN_MAX_PBKDF2) { BITWARDEN_TOO_HEAVY }
             val f = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
             // PBEKeySpec takes chars and encodes them as UTF-8 for this algorithm.
             return f.generateSecret(PBEKeySpec(password.toCharArray(), salt, iterations, 256)).encoded
@@ -506,6 +512,8 @@ object Importers {
             val memory = data["kdfMemory"].any().toIntOrNull() ?: 64
             val parallelism = data["kdfParallelism"].any().toIntOrNull() ?: 4
             require(memory in 1..4096 && parallelism in 1..16) { "Unusual KDF settings in that file" }
+            // The same two ceilings as a KeePass file: the phone's memory, and memory times passes.
+            Kdbx.checkArgon2(memory * 1024L * 1024L, iterations.toLong(), parallelism.toLong(), Primitives.argon2Engine, BITWARDEN_TOO_HEAVY)
             return Primitives.argon2Engine.hash(utf8(password), Primitives.sha256(salt), memory * 1024, iterations, parallelism, 32)
         }
         throw IllegalArgumentException("That file uses a key setting we don't know")
@@ -541,11 +549,25 @@ object Importers {
         throw IllegalArgumentException("That password didn't open the file")
     }
 
+    private val opening = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** A key derivation can't be stopped once it's going, and leaving the screen forgets that one
+     *  was. So one with a password runs at a time, for the whole process, or each visit would ask
+     *  for its memory on top of the last's. */
+    private fun <T> oneAtATime(block: () -> T): T {
+        if (!opening.compareAndSet(false, true)) throw IllegalArgumentException("The last file you chose is still opening. Give it a moment, then try again.")
+        try {
+            return block()
+        } finally {
+            opening.set(false)
+        }
+    }
+
     /** Work out what a file is and read it. Password-protected ones raise NeedsPasswordError so
      *  the screen can ask, then pass ``password`` on the next try. Anything else that goes wrong
      *  is an IllegalArgumentException, with a message fit to show. */
     fun importFile(name: String, bytes: ByteArray, password: String? = null): ImportResult = try {
-        sanitize(readFile(name, bytes, password))
+        if (password == null) sanitize(readFile(name, bytes, password)) else oneAtATime { sanitize(readFile(name, bytes, password)) }
     } catch (e: NeedsPasswordError) {
         throw e
     } catch (e: IllegalArgumentException) {

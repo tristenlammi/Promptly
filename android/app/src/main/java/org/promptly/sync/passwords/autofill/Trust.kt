@@ -141,6 +141,16 @@ sealed class FillTarget {
 object MailOffer {
     enum class Row { CODE, LINK }
 
+    enum class Insecure { HTTP, UNKNOWN }
+
+    /** Whether to ask before a code goes on this page, as a login asks. An app has no scheme to read. */
+    fun insecure(target: FillTarget): Insecure? = when {
+        target !is FillTarget.Web -> null
+        !target.schemeKnown -> Insecure.UNKNOWN
+        target.scheme.lowercase() != "https" -> Insecure.HTTP
+        else -> null
+    }
+
     /** Not in a frame from another site, since a code's for the site it's from. Not in an app showing
      *  a page, whose claim about whose page it is can't be checked. In an app, only with a login linked
      *  to it, as that's the only way to know which sites it's for. */

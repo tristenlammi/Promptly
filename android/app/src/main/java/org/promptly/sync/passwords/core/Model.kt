@@ -236,6 +236,17 @@ fun touch(prev: ItemBody?, next: ItemBody): ItemBody {
     } else if (prev == null && !next.password.isNullOrEmpty()) {
         out = out.with("passwordChangedAt" to JsonPrimitive(at))
     }
+    // A password set some other way settles it: a new one still waiting would later overwrite this.
+    // It might be what the site took, so it's kept where it can be got back. As `touch` in model.ts.
+    val pending = out.str("pendingPassword")
+    if (prev != null && before != next.password && !pending.isNullOrEmpty() && next.password != pending) {
+        if (pending != before) {
+            val entry = JsonObject(mapOf("password" to JsonPrimitive(pending), "at" to JsonPrimitive(at)))
+            val old = (out["passwordHistory"] as? JsonArray) ?: JsonArray(emptyList())
+            out = out.with("passwordHistory" to JsonArray((listOf<JsonElement>(entry) + old).take(20)))
+        }
+        out = out.with("pendingPassword" to null)
+    }
     return out
 }
 

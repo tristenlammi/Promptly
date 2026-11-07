@@ -486,6 +486,68 @@ class ImportersTest {
         if (max / 2 < Kdbx.MAX_MEMORY) refusedSaying("this phone") { Kdbx.read(KdbxWriter.headerOnly(KdbxWriter.Argon2(m = max / 2 + 1024)), PASSWORD) }
     }
 
+    // ---- Bitwarden's password-protected file chooses its own cost too ----
+
+    private fun bitwarden(kdfType: Int, iterations: Long, memory: Int? = null, lanes: Int? = null) = """{"encrypted":true,"passwordProtected":true,"salt":"c2FsdHNhbHRzYWx0","kdfType":$kdfType,"kdfIterations":$iterations,${memory?.let { "\"kdfMemory\":$it," } ?: ""}${lanes?.let { "\"kdfParallelism\":$it," } ?: ""}"encKeyValidation_DO_NOT_EDIT":"2.AAAAAAAAAAAAAAAAAAAAAA==|AAAA|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=","data":"2.AAAAAAAAAAAAAAAAAAAAAA==|AAAA|AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}""".toByteArray()
+
+    /** Refused at once, on a timeout a real KDF at these settings couldn't begin to meet. */
+    @Test(timeout = 5_000) fun aBitwardenFileCantAskForTooMuchWork() {
+        Primitives.argon2Engine = nope
+        refusedSaying("ask more than this phone") { Importers.importFile("b.json", bitwarden(0, 100_000_000), PASSWORD) }
+        refusedSaying("ask more than this phone") { Importers.importFile("b.json", bitwarden(0, Importers.BITWARDEN_MAX_PBKDF2 + 1L), PASSWORD) }
+        // The review's file: 4 GiB, 100 million passes.
+        refusedSaying("Unusual KDF") { Importers.importFile("b.json", bitwarden(1, 100_000_000, 4096, 4), PASSWORD) }
+        refusedSaying("ask more than this phone") { Importers.importFile("b.json", bitwarden(1, 3, 4096, 4), PASSWORD) }
+        // Memory times passes, on a memory it could spare. Kdbx's own ceiling.
+        refusedSaying("ask more than this phone") { Importers.importFile("b.json", bitwarden(1, Kdbx.MAX_WORK / (64L * 1024 * 1024) + 1, 64, 4), PASSWORD) }
+        refusedSaying("Unusual KDF") { Importers.importFile("b.json", bitwarden(0, 0), PASSWORD) }
+        refusedSaying("Unusual KDF") { Importers.importFile("b.json", bitwarden(1, 3, 64, 17), PASSWORD) }
+    }
+
+    @Test(timeout = 5_000) fun aBitwardenFileObeysThePhonesFreeMemory() {
+        Primitives.argon2Engine = nope
+        Kdbx.memoryLimit = 32L * 1024 * 1024
+        refusedSaying("ask more than this phone") { Importers.importFile("b.json", bitwarden(1, 3, 64, 4), PASSWORD) }
+    }
+
+    /** Settings an ordinary export uses get past the check, to the hash. */
+    @Test(timeout = 5_000) fun aBitwardenFilesOrdinarySettingsGetAsFarAsTheHash() {
+        var ran = 0
+        val memory = minOf(64L * 1024 * 1024, Runtime.getRuntime().maxMemory() / 4)
+        Primitives.argon2Engine = Argon2Engine { _, _, m, t, p, _ ->
+            ran++
+            assertEquals(memory / 1024, m.toLong())
+            assertEquals(3, t)
+            assertEquals(4, p)
+            ByteArray(32)
+        }
+        refusedSaying("didn't open") { Importers.importFile("b.json", bitwarden(1, 3, (memory / (1024 * 1024)).toInt(), 4), PASSWORD) }
+        assertEquals("Its salt's text, then its bytes", 2, ran)
+    }
+
+    /** Leaving the screen forgets a hash is running, and it can't be stopped. A second one has to wait its turn. */
+    @Test(timeout = 20_000) fun hashesFromAnImportCantStack() {
+        val started = java.util.concurrent.CountDownLatch(1)
+        val finish = java.util.concurrent.CountDownLatch(1)
+        Primitives.argon2Engine = Argon2Engine { _, _, _, _, _, _ ->
+            started.countDown()
+            finish.await()
+            ByteArray(32)
+        }
+        val first = kotlin.concurrent.thread { runCatching { Importers.importFile("b.json", bitwarden(1, 1, 1, 1), PASSWORD) } }
+        started.await()
+        // Another file entirely, of another kind, with a password. The same gate.
+        refusedSaying("still opening") { Importers.importFile("b.json", bitwarden(1, 1, 1, 1), PASSWORD) }
+        refusedSaying("still opening") { Kdbx.memoryLimit = Kdbx.MAX_MEMORY; Importers.importFile("x.kdbx", ImportFixtures.kdbx, PASSWORD) }
+        // Nothing with no password can be waiting on a hash.
+        assertEquals("LastPass", Importers.importFile("lastpass.csv", ImportFixtures.bytes("lastpass.csv")).format)
+        finish.countDown()
+        first.join()
+        // And it's open again, whichever way that went.
+        Primitives.argon2Engine = Argon2Engine { _, _, _, _, _, _ -> ByteArray(32) }
+        refusedSaying("didn't open") { Importers.importFile("b.json", bitwarden(1, 1, 1, 1), PASSWORD) }
+    }
+
     @Test fun anEngineThatFailsIsAnError() {
         Primitives.argon2Engine = Argon2Engine { _, _, _, _, _, _ -> throw OutOfMemoryError("no") }
         refusedSaying("this phone") { Kdbx.read(KdbxWriter.headerOnly(KdbxWriter.Argon2()), PASSWORD) }

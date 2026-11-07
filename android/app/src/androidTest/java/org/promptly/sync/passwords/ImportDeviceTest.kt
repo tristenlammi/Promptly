@@ -180,10 +180,15 @@ class ImportDeviceTest {
                 aes.processBlock(block, 16, block, 16)
             }
         }
+        val iterations = 500_000
+        val pbkdf2 = millis {
+            javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(javax.crypto.spec.PBEKeySpec(CharArray(16) { 'a' }, ByteArray(16) { 4 }, iterations, 256)).encoded
+        }
         val gib = 1024.0 * 1024 * 1024
         val workGib = (megabytes * passes) / 1024.0
         val report = "argon2d native $megabytes MiB x $passes passes, 2 lanes: $argon ms, so MAX_WORK (${(Kdbx.MAX_WORK / gib).toInt()} GiB) is about ${(argon / workGib * (Kdbx.MAX_WORK / gib) / 1000).toInt()} s. " +
-            "AES $rounds rounds: $roundsTook ms, so MAX_ROUNDS (${Kdbx.MAX_ROUNDS}) is about ${(roundsTook.toDouble() / rounds * Kdbx.MAX_ROUNDS / 1000).toInt()} s."
+            "AES $rounds rounds: $roundsTook ms, so MAX_ROUNDS (${Kdbx.MAX_ROUNDS}) is about ${(roundsTook.toDouble() / rounds * Kdbx.MAX_ROUNDS / 1000).toInt()} s. " +
+            "PBKDF2 $iterations: $pbkdf2 ms, so Bitwarden's ceiling (${Importers.BITWARDEN_MAX_PBKDF2}) is about ${(pbkdf2.toDouble() / iterations * Importers.BITWARDEN_MAX_PBKDF2 / 1000).toInt()} s a try, and a wrong password tries twice."
         android.util.Log.i("PwImportCost", report)
         InstrumentationRegistry.getInstrumentation().sendStatus(0, android.os.Bundle().apply { putString("ceilings", report) })
     }

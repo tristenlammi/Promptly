@@ -77,10 +77,19 @@
         { "id": "d", "kind": "password_changed", "from_name": "Promptly Bank", "from_domain": "promptlybnk.com", "subject": "x", "at": "2026-11-07T12:00:00Z" }
       ],
       "want": [
-        { "id": "a", "title": "Bank", "text": "Promptly Bank says your password changed. Was that you?" },
+        { "id": "a", "title": "Bank", "text": "Promptly Bank says your password changed. Was that you?", "androidText": "mail.promptlybank.com says your password changed. Was that you?" },
         { "id": "b", "title": "Themes", "text": "envato.com says there was a new sign-in. Was that you?" }
       ]
     }
+  ],
+  "pending": [
+    { "name": "set some other way: the waiting one goes to history, ahead of the old one", "op": "touch", "password": "old", "pending": "wait", "history": [], "next": "typed", "wantPassword": "typed", "wantPending": null, "wantHistory": ["wait", "old"] },
+    { "name": "a waiting one that's the old password isn't kept twice", "op": "touch", "password": "old", "pending": "old", "history": [], "next": "typed", "wantPassword": "typed", "wantPending": null, "wantHistory": ["old"] },
+    { "name": "the password not changing leaves it waiting", "op": "touch", "password": "old", "pending": "wait", "history": [], "next": "old", "wantPassword": "old", "wantPending": "wait", "wantHistory": [] },
+    { "name": "committing it", "op": "commit", "password": "old", "pending": "wait", "history": [], "wantPassword": "wait", "wantPending": null, "wantHistory": ["old"] },
+    { "name": "no: it goes to history", "op": "drop", "password": "old", "pending": "wait", "history": ["older"], "wantPassword": "old", "wantPending": null, "wantHistory": ["wait", "older"] },
+    { "name": "no, with what's waiting the same as the password", "op": "drop", "password": "old", "pending": "old", "history": [], "wantPassword": "old", "wantPending": null, "wantHistory": [] },
+    { "name": "merging: dropped copies first, older history after", "op": "merge", "password": "kept", "pending": null, "history": ["k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9", "k10", "k11", "k12", "k13", "k14", "k15", "k16", "k17", "k18", "k19", "k20"], "dropPassword": "gone", "dropPending": "gone-waiting", "dropHistory": ["gone-older"], "wantPassword": "kept", "wantPending": null, "wantHistory": ["gone", "gone-waiting", "k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8", "k9", "k10", "k11", "k12", "k13", "k14", "k15", "k16", "k17", "k18"] }
   ],
   "changePageUrl": [
     { "urls": ["https://www.23andme.com/login"], "want": "https://you.23andme.com/user/edit/password/" },

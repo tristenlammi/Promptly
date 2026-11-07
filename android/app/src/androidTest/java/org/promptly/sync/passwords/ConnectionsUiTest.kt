@@ -18,6 +18,7 @@ import org.promptly.sync.passwords.Harness.ctx
 import org.promptly.sync.passwords.Harness.has
 import org.promptly.sync.passwords.Harness.tap
 import org.promptly.sync.passwords.Harness.waitFor
+import org.promptly.sync.passwords.autofill.FillTarget
 import org.promptly.sync.passwords.core.VaultClient
 import org.promptly.sync.passwords.ui.PasswordsActivity
 
@@ -155,6 +156,76 @@ class ConnectionsUiTest {
         Harness.waitText("web-user-echo", "482913", 15_000)
     }
 
+    private fun openMailSheet(page: FillTarget) {
+        val form = org.promptly.sync.passwords.autofill.ParsedForm<android.view.autofill.AutofillId>()
+        form.otps += android.view.View(ctx).autofillId!!
+        val intent = org.promptly.sync.passwords.autofill.AutofillAuthActivity.intent(ctx, org.promptly.sync.passwords.autofill.AutofillAuthActivity.MODE_MAIL_CODE, null, page, form, false)
+        ctx.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** A WebView gives no form at all on an http page, so the sheet's opened directly. */
+    @Test fun aCodeOnAnHttpPageAsksFirst() {
+        seedMail(mail("promptlybank.com", "482913"))
+        openMailSheet(FillTarget.Web("promptlybank.com", "http", Harness.TEST_BROWSER))
+        tap("mail-code-promptlybank.com", 15_000)
+        waitFor(By.res("mail-insecure"), 10_000)
+        waitFor(By.text("Not a secure page"))
+        val no = waitFor(By.res("mail-insecure-no"))
+        assertTrue("The safe choice comes first", no.visibleBounds.top < waitFor(By.res("mail-insecure-yes")).visibleBounds.top)
+        no.click()
+        // Back to the list, and nothing's gone anywhere.
+        tap("mail-code-promptlybank.com", 10_000)
+        tap("mail-insecure-yes", 10_000)
+        assertTrue("It fills, and the sheet's done", Harness.gone(By.res("mail-insecure"), 10_000))
+    }
+
+    @Test fun aCodeOnAPageWithNoSchemeAsksFirst() {
+        seedMail(mail("promptlybank.com", "482913"))
+        openMailSheet(FillTarget.Web("promptlybank.com", "https", Harness.TEST_BROWSER, schemeKnown = false))
+        tap("mail-code-promptlybank.com", 15_000)
+        waitFor(By.text("Is this page secure?"), 10_000)
+        tap("mail-insecure-no")
+        tap("mail-close", 10_000)
+    }
+
+    /** The poll stops, a request in flight across the lock doesn't take the app down with it, and
+     *  the unlock brings the codes back. */
+    @Test fun aLockWhileLookingForCodesGoesBackToUnlocking() {
+        val s = seedMail(mail("promptlybank.com", "482913"))
+        openMailSheet(FillTarget.Web("promptlybank.com", "https", Harness.TEST_BROWSER))
+        waitFor(By.res("mail-code-promptlybank.com"), 15_000)
+        fun asked() = s.calls.count { it == "GET /api/passwords/mail/codes" }
+        // Caught on its way: this answer comes after the lock.
+        s.slowMs = 2_500
+        val before = asked()
+        waitUntil("It keeps looking every 5 s") { asked() > before }
+        Pw.lock("test")
+        waitFor(By.res("master-password"), 15_000)
+        assertFalse(has(By.res("mail-code-promptlybank.com"), 300))
+        Thread.sleep(3_000)
+        s.slowMs = 0
+        val whileLocked = asked()
+        Thread.sleep(6_000)
+        assertEquals("Not looking while it's locked", whileLocked, asked())
+        Harness.fill("master-password", Harness.MASTER)
+        tap("unlock")
+        waitFor(By.res("mail-code-promptlybank.com"), 30_000)
+        tap("mail-close")
+    }
+
+    @Test fun anotherAccountsTokenChangesNothingAndDoesntStayAround() {
+        val (_, s) = seed()
+        s.answersFor("DELETE /api/passwords/devices/their-device", "application/json", "{}".toByteArray())
+        val token = Pw.prefs.deviceToken
+        org.junit.Assert.assertThrows(org.promptly.sync.passwords.core.WrongAccountError::class.java) { Pw.replaceDevice("pwd_theirs", "their-device", java.util.UUID.randomUUID().toString()) }
+        assertEquals(token, Pw.prefs.deviceToken)
+        assertEquals(token, Pw.prefs.alertToken)
+        assertEquals("device-1", Pw.prefs.deviceId)
+        assertTrue("Their new device isn't left on their list", s.calls.contains("DELETE /api/passwords/devices/their-device"))
+        org.junit.Assert.assertThrows(org.promptly.sync.passwords.core.WrongAccountError::class.java) { Pw.replaceDevice("pwd_theirs", "their-device", null) }
+        assertEquals("device-1", Pw.prefs.deviceId)
+    }
+
     /** What the page's own box gets is always the code. Anything odd about it never gets a row. */
     @Test fun aCodeOfTheWrongShapeIsntShown() {
         val rows = """{"id":"a","from_domain":"promptlybank.com","at":"${java.time.Instant.now()}","code":"<b>1</b>"},{"id":"b","from_domain":"promptlybank.com/x","at":"${java.time.Instant.now()}","code":"111222"}"""
@@ -287,7 +358,8 @@ class ConnectionsUiTest {
         ).joinToString(",") + "]")
         security()
         waitFor(By.res("mail-alert-real"), 20_000)
-        assertEquals("Instagram says your password changed. Was that you?", waitFor(By.res("mail-alert-text")).text)
+        // The domain, not the name the email gave itself.
+        assertEquals("mail.instagram.com says your password changed. Was that you?", waitFor(By.res("mail-alert-text")).text)
         waitFor(By.textContains("Your password was changed"))
         for (id in listOf("fake", "nobody", "odd")) assertFalse(id, has(By.res("mail-alert-$id"), 300))
 
@@ -359,11 +431,11 @@ class ConnectionsUiTest {
         assertEquals("https://you.23andme.com/user/edit/password/", opened[1])
         tap("change-no")
 
-        // A no leaves it as it was.
+        // A no leaves the password as it was, and keeps the new one where it can be got back.
         Harness.waitTextRes("change-position", "3 of 3", 15_000)
         assertEquals("bbbbbb", client.get(second.id)!!.body.password)
         assertEquals(null, client.get(second.id)!!.body.str("pendingPassword"))
-        assertTrue(client.get(second.id)!!.body.passwordHistory.isEmpty())
+        assertEquals(1, client.get(second.id)!!.body.passwordHistory.size)
         tap("change-skip")
 
         waitFor(By.res("change-all-done"), 15_000)
@@ -459,6 +531,21 @@ class ConnectionsUiTest {
         assertEquals(null, client.get(item.id)!!.body.str("pendingPassword"))
         assertEquals("Old-Password-1!", client.get(item.id)!!.body.passwordHistory.first().first)
         assertEquals("No second login", 1, client.allItems().size)
+    }
+
+    /** The bug: Android's sheet updating the password with a change waiting. The old question's answer
+     *  mustn't then overwrite what was just saved. */
+    @Test fun updatingFromTheSaveSheetSettlesAWaitingPassword() {
+        val (client, _) = seed()
+        val item = login(client, "Change me", "Old-Password-1!", "https://first.example")
+        client.update(item.id, org.promptly.sync.passwords.core.PasswordChange.withPending(item.body, "Stale-Password-2!"))
+        val id = org.promptly.sync.passwords.autofill.PendingSaves.put(org.promptly.sync.passwords.autofill.PendingSaves.Save(FillTarget.Web("first.example", "https", Harness.TEST_BROWSER), item.body.username, "Typed-Password-3!"))
+        ctx.startActivity(Intent(ctx, org.promptly.sync.passwords.autofill.AutofillSaveActivity::class.java).putExtra(org.promptly.sync.passwords.autofill.AutofillSaveActivity.EXTRA_ID, id).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        tap("save-confirm", 15_000)
+        waitUntil("It's the password now") { client.get(item.id)!!.body.password == "Typed-Password-3!" }
+        val body = client.get(item.id)!!.body
+        assertEquals(null, body.str("pendingPassword"))
+        assertEquals(listOf("Stale-Password-2!", "Old-Password-1!"), body.passwordHistory.map { it.first })
     }
 
     // ---- Plus addresses ---------------------------------------------------------------------------

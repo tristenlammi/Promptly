@@ -35,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +46,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -88,6 +92,13 @@ class AutofillAuthActivity : FragmentActivity() {
     private lateinit var identityKeys: ArrayList<String>
     private val optionsFor = HashMap<AutofillId, List<String>>()
 
+    // Out here, not in the composition, so a lock can drop what's held even with the window stopped,
+    // when Compose isn't running.
+    private var step by mutableStateOf<Step>(Step.Pick)
+
+    // Said "fill anyway" to the lookalike warning, for this one fill.
+    private var lookalikeCleared by mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
@@ -115,7 +126,22 @@ class AutofillAuthActivity : FragmentActivity() {
         val optionValues = i.getStringArrayListExtra(EXTRA_OPTION_VALUES) ?: ArrayList()
         optionIds.forEachIndexed { at, id -> optionsFor[id] = optionValues.getOrElse(at) { "" }.split('\u0001') }
         setResult(RESULT_CANCELED)
+        step = if (Pw.unlocked) Step.Pick else Step.Unlock
+        lifecycleScope.launch { Pw.unlockedFlow.collect { if (!Pw.unlocked) lockedOut() } }
         setContent { PwTheme { Flow() } }
+    }
+
+    /** The vault locked while this was open: whatever was decided, and the item it was about, goes. */
+    private fun lockedOut() {
+        step = Step.Unlock
+        lookalikeCleared = false
+    }
+
+    /** It can have been a while, and Android's timer doesn't tick in deep sleep. */
+    override fun onStart() {
+        super.onStart()
+        Pw.lockIfExpired()
+        if (!Pw.unlocked) lockedOut()
     }
 
     /** A fill unlocks the vault with no app of ours in front, so "Lock after: Leaving" counts here too. */
@@ -140,12 +166,16 @@ class AutofillAuthActivity : FragmentActivity() {
 
     @Composable
     private fun Flow() {
-        var step by remember { mutableStateOf<Step>(if (Pw.unlocked) Step.Pick else Step.Unlock) }
-        // Said "fill anyway" to the lookalike warning, for this one fill.
-        var lookalikeCleared by remember { mutableStateOf(false) }
+        // Here to recompose on a lock. `shown` is what counts, should the collector not have got there.
+        Pw.unlockedFlow.collectAsState().value
+        val shown = if (Pw.unlocked) step else Step.Unlock
         val scope = rememberCoroutineScope()
 
         fun deliver(item: Item) {
+            if (!Pw.unlocked) {
+                lockedOut()
+                return
+            }
             val dataset = buildDataset(item.body)
             if (dataset == null) {
                 step = Step.Fail("This item has nothing to fill here.")
@@ -164,7 +194,13 @@ class AutofillAuthActivity : FragmentActivity() {
         }
 
         fun afterChecks(item: Item) {
-            if (item.body.reprompt) step = Step.Reprompt(item) else deliver(item)
+            if (!Pw.unlocked) lockedOut() else if (item.body.reprompt) step = Step.Reprompt(item) else deliver(item)
+        }
+
+        /** Writing to the vault, off the main thread, can meet a lock on the way. */
+        suspend fun remembering(block: () -> Item): Item? = withContext(Dispatchers.IO) { runCatching(block) }.getOrElse { e ->
+            if (Pw.unlocked) step = Step.Fail(errorText(e)) else lockedOut()
+            null
         }
 
         /** Worked out here from the decrypted vault, whatever the index said when it was offered. */
@@ -178,11 +214,16 @@ class AutofillAuthActivity : FragmentActivity() {
                     t.claimedDomain?.substringBefore(':') ?: return null
                 }
             }
-            return Match.lookalikeAmong(host, AutofillIndex.savedDomainsOf(c.allItems()))
+            // Locked between looking and asking: nothing fills from here, as deliver checks too.
+            return Match.lookalikeAmong(host, AutofillIndex.savedDomainsOf(runCatching { c.allItems() }.getOrElse { return null }))
         }
 
         /** The item's real rules, now that it's decrypted. */
         fun check(item: Item, picked: Boolean) {
+            if (!Pw.unlocked) {
+                lockedOut()
+                return
+            }
             val t = target
             val onPage = (t as? FillTarget.Web)?.let { Match.matchItems(listOf(item), it.url).firstOrNull() }
             val isMatch = when (t) {
@@ -204,13 +245,16 @@ class AutofillAuthActivity : FragmentActivity() {
                 // Past the warning there's nothing to add, and no remembering a lookalike.
                 !isMatch && t is FillTarget.Web && !lookalikeCleared -> step = Step.Confirm(item, "Fill on $where?", "\"${item.body.title}\" isn't saved for $where. Check the address before you go on.", true)
                 !isMatch && t is FillTarget.App -> scope.launch {
+                    // Past a lookalike warning it fills once, and no site's word makes it remembered (A35).
+                    val once = lookalikeCleared
                     val viaLinks = withContext(Dispatchers.IO) { siteLinksApp(item, t) }
-                    if (viaLinks) {
-                        withContext(Dispatchers.IO) { rememberApp(item, t) }
-                        afterChecks(Pw.client()!!.get(item.id)!!)
+                    if (!Pw.unlocked) {
+                        lockedOut()
+                    } else if (viaLinks) {
+                        afterChecks(if (once) item else remembering { rememberApp(item, t) } ?: return@launch)
                     } else {
                         val claim = t.claimedDomain?.let { " It's showing a page that says it's from $it, which an app can't prove." } ?: ""
-                        step = Step.Confirm(item, "Fill in $where?", "\"${item.body.title}\" isn't linked to this app, and its site doesn't list it.$claim Only go on if you trust this app.", true)
+                        step = Step.Confirm(item, "Fill in $where?", "\"${item.body.title}\" isn't linked to this app, and its site doesn't list it.$claim Only go on if you trust this app.", !once)
                     }
                 }
                 t is FillTarget.Web && !t.schemeKnown -> step = Step.Confirm(item, "Is this page secure?", "This browser didn't say whether $where is http or https. If it's http, anyone on the network could read this.", false)
@@ -224,15 +268,18 @@ class AutofillAuthActivity : FragmentActivity() {
             }
         }
 
-        LaunchedEffect(step) {
-            if (step is Step.Pick && itemId != null) {
-                val item = Pw.client()?.get(itemId!!)
+        LaunchedEffect(shown) {
+            if (shown is Step.Pick && itemId != null) {
+                val item = runCatching { Pw.client()?.get(itemId!!) }.getOrElse {
+                    lockedOut()
+                    return@LaunchedEffect
+                }
                 if (item == null) step = Step.Fail("That item isn't in your vault any more.") else check(item, false)
             }
             Pw.touch()
         }
 
-        when (val s = step) {
+        when (val s = shown) {
             Step.Unlock -> UnlockPane(this, "Unlock to fill", { step = Step.Pick }, { finish() })
             Step.Pick -> if (mode == MODE_MAIL_CODE || mode == MODE_MAIL_LINK) MailPane(lookalike(null)) else if (itemId != null) Busy() else {
                 // Nothing from the vault shows behind this.
@@ -242,8 +289,7 @@ class AutofillAuthActivity : FragmentActivity() {
             }
             is Step.Confirm -> ConfirmPane(s) { remember ->
                 scope.launch {
-                    val fresh = if (remember) withContext(Dispatchers.IO) { rememberTarget(s.item) } else s.item
-                    afterChecks(fresh)
+                    afterChecks(if (remember) remembering { rememberTarget(s.item) } ?: return@launch else s.item)
                 }
             }
             is Step.Reprompt -> ConfirmIdentityPane(this, "Confirm it's you", s.item.body.title, true, { deliver(s.item) }, { finish() })
@@ -266,6 +312,7 @@ class AutofillAuthActivity : FragmentActivity() {
         var codes by remember { mutableStateOf<List<MailCode>?>(null) }
         var error by remember { mutableStateOf<String?>(null) }
         var confirming by remember { mutableStateOf<RankedCode?>(null) }
+        var askedFor by remember { mutableStateOf<String?>(null) }
         if (looksLike != null) {
             Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 ErrorCard("${pageName()} looks like $looksLike, but it's a different site, so no codes are offered here.")
@@ -274,28 +321,42 @@ class AutofillAuthActivity : FragmentActivity() {
             return
         }
         LaunchedEffect(Unit) {
-            while (true) {
-                withContext(Dispatchers.IO) { runCatching { withSession(c) { c.api.mailCodes() } } }.onSuccess {
-                    codes = it
-                    error = null
-                }.onFailure { e ->
-                    error = if (e is ApiError && e.status == 403) "This phone isn't connected for email codes yet. Open Passwords, then Settings, Email codes." else errorText(e)
+            // Only while this is on screen, and not at all once it's locked.
+            lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (Pw.unlocked) {
+                    val r = withContext(Dispatchers.IO) { runCatching { withSession(c) { c.api.mailCodes() } } }
+                    // In flight across a lock: whatever it brought isn't for now.
+                    if (!Pw.unlocked) break
+                    r.onSuccess {
+                        codes = it
+                        error = null
+                    }.onFailure { e ->
+                        error = if (e is ApiError && e.status == 403) "This phone isn't connected for email codes yet. Open Passwords, then Settings, Email codes." else errorText(e)
+                    }
+                    delay(5000)
                 }
-                delay(5000)
             }
         }
         val ranked = remember(codes) {
             val list = codes ?: emptyList()
-            val saved = AutofillIndex.savedDomainsOf(c.allItems())
+            // During composition, so a lock on another thread is an empty list and not a crash.
+            val all = runCatching { c.allItems() }.getOrDefault(emptyList())
+            val saved = AutofillIndex.savedDomainsOf(all)
             val now = System.currentTimeMillis() + c.serverTimeOffsetMs
             when (val t = target) {
                 is FillTarget.Web -> MailCodes.rank(list, t.url, saved, now)
-                is FillTarget.App -> MailCodes.rankForSites(list, c.allItems().filter { it.body.kind == "login" && appLinked(it, t) }.flatMapTo(HashSet()) { Match.savedDomainsOf(it.body.urls) }, saved, now)
+                is FillTarget.App -> MailCodes.rankForSites(list, all.filter { it.body.kind == "login" && appLinked(it, t) }.flatMapTo(HashSet()) { Match.savedDomainsOf(it.body.urls) }, saved, now)
             }.filter { MailCodes.fresh(it) }
         }
         val pick = confirming
         if (pick != null) {
             LinkConfirm(pick) { confirming = null }
+            return
+        }
+        val code = askedFor
+        val insecure = MailOffer.insecure(target)
+        if (code != null && insecure != null) {
+            MailInsecure(insecure, { askedFor = null }) { fillCode(code) }
             return
         }
         val wantCodes = mode == MODE_MAIL_CODE && otps.isNotEmpty()
@@ -309,7 +370,7 @@ class AutofillAuthActivity : FragmentActivity() {
             Text("Only mail from this site's own address shows here, and nothing happens until you pick it. A From line can be forged, so only use one you just asked for.", style = MaterialTheme.typography.bodySmall)
             error?.let { ErrorCard(it) }
             for (r in codeRows) {
-                Column(Modifier.fillMaxWidth().clickable { fillCode(r.mail.code!!) }.padding(vertical = 10.dp).testTag("mail-code-${r.mail.fromDomain}")) {
+                Column(Modifier.fillMaxWidth().clickable { if (insecure != null) askedFor = r.mail.code else fillCode(r.mail.code!!) }.padding(vertical = 10.dp).testTag("mail-code-${r.mail.fromDomain}")) {
                     Text("Code from ${r.mail.fromDomain}: ${r.mail.code}", fontWeight = FontWeight.Medium)
                     Text(MailCodes.agoText(r.agoSeconds), style = MaterialTheme.typography.bodySmall)
                 }
@@ -322,6 +383,19 @@ class AutofillAuthActivity : FragmentActivity() {
             if (codes == null && error == null) CircularProgressIndicator()
             for (d in others) Text("$d has a code. It isn't from this site, so it isn't offered here.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("mail-other-$d"))
             TextButton(onClick = { finish() }, Modifier.testTag("mail-close")) { Text("Close") }
+        }
+    }
+
+    /** A code is a secret like a password, and asks the same question a login does on the same page.
+     *  A sign-in link doesn't: it opens in the browser, not on this page. */
+    @Composable
+    private fun MailInsecure(why: MailOffer.Insecure, onNo: () -> Unit, onYes: () -> Unit) {
+        val where = (target as? FillTarget.Web)?.domain ?: ""
+        Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp).testTag("mail-insecure"), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text(if (why == MailOffer.Insecure.HTTP) "Not a secure page" else "Is this page secure?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text(if (why == MailOffer.Insecure.HTTP) "$where is http. Anyone on the network could read this code." else "This browser didn't say whether $where is http or https. If it's http, anyone on the network could read this code.", style = MaterialTheme.typography.bodyMedium)
+            Button(onClick = onNo, Modifier.fillMaxWidth().testTag("mail-insecure-no")) { Text("Don't fill") }
+            OutlinedButton(onClick = onYes, Modifier.fillMaxWidth().testTag("mail-insecure-yes")) { Text("Fill anyway") }
         }
     }
 
@@ -350,6 +424,10 @@ class AutofillAuthActivity : FragmentActivity() {
 
     /** Only ever from a tap on its row. */
     private fun fillCode(code: String) {
+        if (!Pw.unlocked) {
+            lockedOut()
+            return
+        }
         val out = Dataset.Builder()
         val boxes = MailCodes.forBoxes(code, otps.size)
         if (boxes != null) otps.forEachIndexed { i, id -> out.setValue(id, AutofillValue.forText(boxes[i])) }
@@ -382,8 +460,7 @@ class AutofillAuthActivity : FragmentActivity() {
         var query by remember { mutableStateOf("") }
         val c = Pw.client()!!
         val hits = remember(query) {
-            val all = if (query.isBlank()) c.allItems() else c.search(query)
-            all.filter { it.body.kind == "login" }
+            runCatching { if (query.isBlank()) c.allItems() else c.search(query) }.getOrDefault(emptyList()).filter { it.body.kind == "login" }
         }
         Column(Modifier.fillMaxSize().safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(query, { query = it }, label = { Text("Search your logins") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("pick-search"))
@@ -472,6 +549,7 @@ class AutofillAuthActivity : FragmentActivity() {
         else -> listOfNotNull(
             "username".takeIf { usernames.isNotEmpty() && (b.username ?: b.str("email")) != null },
             "password".takeIf { passwords.isNotEmpty() && b.password != null },
+            "new password".takeIf { newPasswords.isNotEmpty() && b.str("pendingPassword") != null },
         )
     }.distinct()
 
@@ -492,7 +570,8 @@ class AutofillAuthActivity : FragmentActivity() {
         when (mode) {
             MODE_OTP -> {
                 val cfg = b.totp ?: return null
-                val code = Totp.code(cfg)
+                // An imported secret can be anything, and code() throws on what it can't read.
+                val code = runCatching { Totp.code(cfg) }.getOrNull() ?: return null
                 // Split boxes, one digit each, get one digit each.
                 if (otps.size > 1 && otps.size == code.length) otps.forEachIndexed { i, id -> put(id, code[i].toString()) } else otps.firstOrNull()?.let { put(it, code) }
             }
