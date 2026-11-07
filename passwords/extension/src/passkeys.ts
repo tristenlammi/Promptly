@@ -310,7 +310,7 @@ export async function handlePasskey(
 
   if (msg.t === "pkPrompt") {
     const rp = req.options._rp as string;
-    const base = { op: req.op, origin: req.origin, rpId: rp, unlocked: !!c?.unlocked, user: req.options.user, mustVerify: req.options.userVerification === "required" };
+    const base = { op: req.op, origin: req.origin, rpId: rp, unlocked: !!c?.unlocked, user: req.options.user, mustVerify: req.options.userVerification === "required", wantsVerify: req.options.userVerification !== "discouraged" };
     if (!c?.unlocked) return { ...base, candidates: [] };
     if (req.op === "get") {
       const only = req.options._only as string | undefined;

@@ -138,6 +138,10 @@ Emergency access seals every key to your own vaults to your contact's public key
 
 Sharing a vault still works on trust on first use, as the plan says: the words are offered, not required, and a key that changes afterwards is flagged. So a hostile server that lies at the first share can get that one shared vault's key, unless someone compares the words. It's worth comparing them for anything that matters.
 
+## Passkeys and user verification
+
+A passkey tells a site whether the person just proved who they are. It says yes only if they entered their master password or PIN in the passkey window. When a site requires that, there's no way past it; when it only prefers it, the window asks, and "Skip" answers no. An unlocked vault or a click doesn't count.
+
 ## Passkey offers
 
 A page that asks for a sign-in passkey with no click behind it, as many do on load, gets our window only if this vault's unlocked and holds a passkey for that exact request, it's the top page, and that tab hasn't done this in the last 30 seconds. So only a site someone already has a passkey for can open one, and not repeatedly. The window opening is something the page could notice, from losing focus, so such a site can tell a passkey's here. Making a new passkey still takes a click.

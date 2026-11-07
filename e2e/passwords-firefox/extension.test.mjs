@@ -369,6 +369,7 @@ test("Firefox: a passkey made and used here satisfies an independent WebAuthn li
     const h = (await driver.getAllWindowHandles()).find((x) => !handles.includes(x));
     await driver.switchTo().window(h);
     await click(driver, buttonName);
+    await click(driver, button("Skip"));
     await driver.sleep(300);
     await driver.switchTo().window(pg);
   };
@@ -426,6 +427,7 @@ test("Firefox: a quiet passkey request is answered from the toolbar, and verifie
   const prompt = (await driver.getAllWindowHandles()).find((x) => !before.includes(x));
   await driver.switchTo().window(prompt);
   await click(driver, By.xpath('//button[contains(., "fox@example.com")]'));
+  await click(driver, button("Skip"));
   await driver.sleep(400);
   await driver.switchTo().window(pg);
   await driver.wait(async () => driver.executeScript("return window.__result !== null"), 15000);
@@ -455,6 +457,7 @@ test("Firefox: a page asking for a passkey with no click gets our window when it
   await driver.switchTo().window(prompt);
   await see(driver, button("Use another device or security key"));
   await click(driver, By.xpath('//button[contains(., "fox@example.com")]'));
+  await click(driver, button("Skip"));
   await driver.sleep(400);
   await driver.switchTo().window(pg);
   await driver.wait(async () => driver.executeScript("return window.__result !== null"), 15000);

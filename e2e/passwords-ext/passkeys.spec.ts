@@ -47,6 +47,7 @@ test("creates a passkey, in a window of its own, and a real server library accep
   await expect(prompt.getByText("Save a passkey?")).toBeVisible();
   await expect(prompt.getByText("localhost:8111")).toBeVisible();
   await prompt.getByRole("button", { name: "Save as a new item" }).click();
+  await prompt.getByRole("button", { name: "Skip" }).click();
   const r = await run;
   expect(r.error).toBeUndefined();
   expect(r.isReal).toBe(true);
@@ -68,6 +69,7 @@ test("signs in with it, and the library verifies the signature", async () => {
   const prompt = await promptWindow();
   await expect(prompt.getByText("Sign in with a passkey?")).toBeVisible();
   await prompt.getByRole("button", { name: /ana@example.com/ }).click();
+  await prompt.getByRole("button", { name: "Skip" }).click();
   const r = await run;
   expect(r.error).toBeUndefined();
   const v = await verifyAuthenticationResponse({
@@ -91,6 +93,7 @@ test("discoverable sign-in with no allow list finds it too", async () => {
   const run = page.evaluate((o) => (window as any).__auth(o), { rpId: RP, challenge });
   const prompt = await promptWindow();
   await prompt.getByRole("button", { name: /ana@example.com/ }).click();
+  await prompt.getByRole("button", { name: "Skip" }).click();
   expect((await run).error).toBeUndefined();
   await page.close();
 });
@@ -106,6 +109,24 @@ test("excludeCredentials stops a duplicate, and says so only after the prompt", 
   await page.close();
 });
 
+test("a site that prefers verification is asked for it, and only then told, and can be skipped", async () => {
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("webauthn.html"));
+  const challenge = b64u(crypto.randomBytes(32));
+  const run = page.evaluate((o) => (window as any).__auth(o), { rpId: RP, challenge, allow: [credential.id] });
+  const prompt = await promptWindow();
+  await prompt.getByRole("button", { name: /ana@example.com/ }).click();
+  await expect(prompt.getByText("may ask for your password as well")).toBeVisible();
+  await prompt.getByLabel("Master password or PIN").fill(MASTER);
+  await prompt.getByLabel("Master password or PIN").press("Enter");
+  const r = await run;
+  expect(r.error).toBeUndefined();
+  const v = await verifyAuthenticationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, credential: { id: credential.id, publicKey: credential.publicKey as Uint8Array<ArrayBuffer>, counter: credential.counter }, requireUserVerification: true });
+  expect(v.verified).toBe(true);
+  expect(v.authenticationInfo.userVerified).toBe(true);
+  await page.close();
+});
+
 test("a site that requires user verification gets it only after the master password, in the prompt", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(siteA("webauthn.html"));
@@ -115,6 +136,8 @@ test("a site that requires user verification gets it only after the master passw
   await expect(prompt.getByText("prove it's you")).toBeVisible();
   await prompt.getByRole("button", { name: "Save as a new item" }).click();
   await expect(prompt.getByLabel("Master password or PIN")).toBeVisible();
+  // It's a must here, so there's no way past it.
+  await expect(prompt.getByRole("button", { name: "Skip" })).toHaveCount(0);
   await prompt.getByLabel("Master password or PIN").fill("not the password");
   await prompt.getByRole("button", { name: "Continue" }).click();
   await expect(prompt.getByText("That isn't right.")).toBeVisible({ timeout: 30_000 });
