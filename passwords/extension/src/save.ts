@@ -19,7 +19,7 @@ function refused() {
   const d = document.createElement("div");
   d.id = "refused";
   d.className = "sub";
-  d.textContent = "To be safe, that click didn't count. Look at this first, then click again.";
+  d.textContent = guard.why() === "hidden" ? "That click didn't count, as this wasn't fully in view. Click again." : "That click came as this opened, so it didn't count. Click again.";
   root.appendChild(d);
   guard.rendered();
 }

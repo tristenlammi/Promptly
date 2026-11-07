@@ -27,6 +27,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Fixed
 - Passwords in the browser: with a passkey saved for the site, the panel now says to press the site's own button, such as Continue, rather than that the page isn't asking for one.
 - Passwords on Chrome and Chromium browsers: a copied 2FA code, or the timed clear of a copied secret, could be lost because the extension's hidden clipboard page closed too soon.
+- Passwords: the menu under a login box fits its rows, so it no longer leaves an empty dark block over the page, and an ordinary click on a row fills straight away. A click that comes as the menu opens is still ignored, now 0.3 s instead of 0.5 s, and the note says why in plain words.
 - Passwords in the browser: changing the master password, Secret Key or key settings in the vault page keeps the browser's lock working, and the Lock button works even when the server doesn't answer.
 - Passwords in the browser: a page that fills on load no longer postpones the lock timer.
 - Passwords in the browser: using a passkey no longer asks for the master password. An unlocked vault and a click are enough, unless the item is marked to ask.

@@ -1603,6 +1603,12 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
   await reloading;
   const tabId = sender.tab?.id;
   if (tabId === undefined) return null;
+  if (m.t === "menuSize") {
+    // Only its size, to the frame that opened it, so the box fits what it shows.
+    const o = await tokenOwner(tabId, "ownsMenu", m.token);
+    if (o && Number.isFinite(m.h)) await send(tabId, o.frameId, { t: "menuResize", h: m.h, token: m.token }, o.documentId);
+    return null;
+  }
   // Firefox has no way to tell this menu is really showing (press.ts), and "on click" means
   // no inline menu at all. The menu says so, and this holds whatever it says.
   if (__ENGINE__ === "firefox" || (await fillsOnClickOnly())) return { ok: false, reason: "popup", locked: false, candidates: [] };
@@ -1830,7 +1836,7 @@ ext.runtime.onMessage.addListener((msg: { t: string }, sender, reply) => {
   let p: Promise<unknown>;
   if (t.startsWith("pk")) {
     p = boot().then(() => handlePasskey(msg as never, sender, () => client, isThePerson, (tabId, url) => void updateBadge(tabId, url)));
-  } else if (t === "menuList" || t === "menuPick" || t === "menuPasskey" || t === "menuMailCode" || t === "menuMailLink" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup") {
+  } else if (t === "menuList" || t === "menuPick" || t === "menuPasskey" || t === "menuMailCode" || t === "menuMailLink" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup" || t === "menuSize") {
     if (!isOurPage(sender, "/menu.html")) return false;
     p = handleMenu(msg as MenuRequest, sender);
   } else if (t === "saveOffer" || t === "saveAnswer") {

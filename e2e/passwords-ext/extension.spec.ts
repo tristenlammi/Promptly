@@ -69,6 +69,22 @@ test("inline menu: nothing in the page's DOM says what it is, and a click fills"
   await page.close();
 });
 
+test("inline menu: the box fits its rows, and an ordinary click a moment after it opens fills", async () => {
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("login.html"));
+  const frame = await openMenuOn(page);
+  await expect(frame.getByRole("button", { name: "Fill Acme" })).toBeVisible();
+  // No empty block below the rows covering the page.
+  const rows = await frame.evaluate(() => document.getElementById("root")!.getBoundingClientRect().height);
+  await expect.poll(async () => (await (await frame.frameElement()).boundingBox())?.height ?? 0).toBeLessThan(rows + 4);
+  expect(rows).toBeLessThan(120);
+  // About how long a person takes to see the row and click it.
+  await page.waitForTimeout(450);
+  await frame.getByRole("button", { name: "Fill Acme" }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).__state())).toEqual({ user: "ana@example.com", pass: "acme-Pass-1" });
+  await page.close();
+});
+
 test("an inline click within the dwell time is refused", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(siteA("login.html"));
@@ -80,7 +96,7 @@ test("an inline click within the dwell time is refused", async () => {
     // Slow machine: the click happened after the dwell. Nothing to conclude.
     test.info().annotations.push({ type: "note", description: "click landed after dwell" });
   } else {
-    await expect(frame.getByText("that click didn't count")).toBeVisible();
+    await expect(frame.getByText("came as the menu opened, so it didn't count")).toBeVisible();
   }
   await page.close();
 });

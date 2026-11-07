@@ -877,7 +877,7 @@ test("a parent frame hiding a whole frame: style checks can't see it, and Inters
   });
   const r = await strike(hidden);
   expect(r.pass).toBe("");
-  await expect(r.menu.getByText("that click didn't count")).toBeVisible();
+  await expect(r.menu.getByText("wasn't fully in view")).toBeVisible();
   await hidden.close();
 });
 

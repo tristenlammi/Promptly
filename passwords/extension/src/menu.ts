@@ -43,7 +43,9 @@ function refused() {
   const d = document.createElement("div");
   d.id = "refused";
   d.className = "note";
-  d.textContent = "To be safe, that click didn't count. Look at this menu first, then click again, or use the toolbar button.";
+  d.textContent = guard.why() === "hidden"
+    ? "That click didn't count, as this menu wasn't fully in view. Click again, or use the toolbar button."
+    : "That click came as the menu opened, so it didn't count. Click again to fill.";
   root.prepend(d);
   guard.rendered();
 }
@@ -150,4 +152,6 @@ async function render() {
 }
 
 window.addEventListener("message", (e) => e.stopImmediatePropagation(), true);
+// The box on the page fits what's here, so nothing empty sits over the page.
+new ResizeObserver(() => void call({ t: "menuSize", h: root.getBoundingClientRect().height })).observe(root);
 void render();

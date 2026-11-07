@@ -96,6 +96,7 @@ export type MenuRequest = { token: string } & (
   | { t: "menuGenerate"; itemId?: string }
   | { t: "menuClose" }
   | { t: "menuOpenPopup" }
+  | { t: "menuSize"; h: number }
 );
 
 export type SaveRequest = { token: string } & ({ t: "saveAnswer"; answer: "save" | "update" | "never" | "dismiss" } | { t: "saveOffer" });
@@ -106,6 +107,7 @@ export type ToContent =
   | { t: "doFill"; values: Record<string, string>; origin: string }
   | { t: "pkOfferResult"; id: number; document: string; origin: string; result: Record<string, unknown> }
   | { t: "menuCheck"; itemId: string; token: string }
+  | { t: "menuResize"; h: number; token: string }
   | { t: "ownsMenu"; token: string }
   | { t: "ownsSave"; token: string }
   | { t: "showSave"; kind: string }

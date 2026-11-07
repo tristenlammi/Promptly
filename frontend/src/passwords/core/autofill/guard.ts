@@ -6,7 +6,8 @@
 // bar, and isn't a proof: the safest setting is filling from the toolbar popup only.
 
 export type GuardVerdict = { ok: boolean; reason?: string };
-export const MIN_DWELL_MS = 400;
+/** Matches the menu frame's own wait (press.ts, D77), so neither refuses what the other allows. */
+export const MIN_DWELL_MS = 300;
 const MIN_OPACITY = 0.99;
 /** Smaller than this isn't a box anyone's meant to see. Hidden card fields use 2 px. */
 export const MIN_FIELD_PX = 10;

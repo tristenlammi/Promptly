@@ -147,7 +147,7 @@ test("control: a press too soon after the menu appears doesn't count, and a seco
   await page.mouse.click(180, 145);
   await page.waitForTimeout(200);
   expect((await state(page)).pass).toBe("");
-  await expect(menus(page)[0].getByText("that click didn't count")).toBeVisible();
+  await expect(menus(page)[0].getByText("came as the menu opened, so it didn't count")).toBeVisible();
   await page.waitForTimeout(VISIBLE_FOR);
   await menus(page)[0].getByRole("button", { name: "Fill HideBank" }).click();
   await expect.poll(async () => (await state(page)).pass).toBe("HIDE-secret-1");

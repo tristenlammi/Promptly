@@ -10,6 +10,10 @@ import { applyRule, describeForm, selectorFor } from "../../../frontend/src/pass
 import type { SiteRule } from "../../../frontend/src/passwords/core/model";
 import { ext, type PageReport, type ToContent } from "./rpc";
 
+/** The inline menu starts this tall and then fits its rows, up to the most. */
+const MENU_START_H = 48;
+const MENU_MAX_H = 240;
+
 const w = window as unknown as { __promptlyContent?: boolean };
 // A document with an opaque origin (a site's sandboxed uploads, say) isn't the site its
 // address says, whatever location.href claims. It doesn't get this script's attention.
@@ -294,18 +298,21 @@ function main() {
     menuToken = newToken();
     frame.src = `${ext.runtime.getURL("menu.html")}#${menuToken}`;
     frame.setAttribute("allow", "");
-    frame.setAttribute("style", "all:initial;display:block;width:320px;height:240px;border:0;background:transparent;color-scheme:normal");
+    // The same colour scheme as the menu page, or the browser paints the frame's empty
+    // part as a solid block.
+    frame.setAttribute("style", `all:initial;display:block;width:320px;height:${MENU_START_H}px;border:0;background:transparent;color-scheme:light dark`);
     shadow.appendChild(frame);
     const r = field.getBoundingClientRect();
-    const top = Math.min(r.bottom + 4, window.innerHeight - 248);
+    const top = Math.min(r.bottom + 4, window.innerHeight - MENU_START_H - 8);
     const left = Math.max(4, Math.min(r.left, window.innerWidth - 328));
     host.setAttribute(
       "style",
-      `all:initial;position:fixed;left:${left}px;top:${top}px;width:320px;height:240px;z-index:2147483647;display:block;opacity:1;border:0;padding:0;margin:0;overflow:hidden;inset:auto;background:transparent`,
+      `all:initial;position:fixed;left:${left}px;top:${top}px;width:320px;height:${MENU_START_H}px;z-index:2147483647;display:block;opacity:1;border:0;padding:0;margin:0;overflow:hidden;inset:auto;background:transparent`,
     );
     // Style it again with inset so a page's popover rules can't move it.
     host.style.setProperty("left", `${left}px`, "important");
     host.style.setProperty("top", `${top}px`, "important");
+    host.style.setProperty("height", `${MENU_START_H}px`, "important");
     for (const [k, v] of [["opacity", "1"], ["visibility", "visible"], ["display", "block"], ["filter", "none"], ["clip-path", "none"], ["mask-image", "none"], ["transform", "none"], ["mix-blend-mode", "normal"], ["position", "fixed"], ["pointer-events", "auto"]]) {
       host.style.setProperty(k, v, "important");
     }
@@ -332,6 +339,23 @@ function main() {
       if (!host) return obs.disconnect();
       if (document.documentElement.lastElementChild !== host) tampered = true;
     }).observe(document.documentElement, { childList: true });
+  }
+
+  /** The menu says how tall its rows are, and the box fits them, so there's no empty
+   *  block over the page. Ours to do, so it isn't tampering; if the box has to move up to
+   *  stay on screen, the wait before a click counts starts again. */
+  function resizeMenu(h: number) {
+    if (!host || !frame || !guard || !menuField) return;
+    const height = Math.max(24, Math.min(MENU_MAX_H, Math.ceil(h)));
+    const r = menuField.getBoundingClientRect();
+    const top = Math.max(4, Math.min(r.bottom + 4, window.innerHeight - height - 8));
+    frame.style.setProperty("height", `${height}px`);
+    host.style.setProperty("height", `${height}px`, "important");
+    const moved = Math.abs(top - guard.rect.top) > 1;
+    if (moved) host.style.setProperty("top", `${top}px`, "important");
+    hostObserver?.takeRecords();
+    const b = host.getBoundingClientRect();
+    guard = { shownAt: moved ? performance.now() : guard.shownAt, rect: { left: b.left, top: b.top, width: b.width, height: b.height } };
   }
 
   function onFocus(e: Event) {
@@ -795,6 +819,10 @@ function main() {
         return false;
       case "ownsSave":
         reply(saveHost && saveToken && msg.token === saveToken ? { origin: self.origin, url: location.href } : false);
+        return false;
+      case "menuResize":
+        if (host && msg.token === menuToken) resizeMenu(msg.h);
+        reply(true);
         return false;
       case "menuCheck": {
         if (!host || !guard || msg.token !== menuToken) {
