@@ -25,6 +25,10 @@ type Req = {
 
 const pending = new Map<string, Req>();
 
+/** The last window a page opened with no click behind it, per tab. */
+const lastNoClick = new Map<number, number>();
+const NO_CLICK_EVERY_MS = 30_000;
+
 /** A request a person can answer from the toolbar or the menu. Kept in session storage, since the
  *  worker can go at any time and the page will still be waiting. Holds nothing secret. */
 type Offer = { key: string; tabId: number; frameId: number; documentId?: string; pageDocument: string; pageId: number; origin: string; topOrigin?: string; crossOrigin: boolean; options: Record<string, unknown>; rp: string };
@@ -50,6 +54,22 @@ function cleanOfferOptions(raw: unknown): Record<string, unknown> | null {
 let offerQueue: Promise<unknown> = Promise.resolve();
 
 const readOffers = async () => ((await ext.storage.session.get("pkOffers")).pkOffers as Offer[] | undefined) ?? [];
+
+/** Which site a tab's page last asked for a passkey for, per tab, until it navigates. The request
+ *  itself may be long gone, since a browser can refuse one at once, and it's what explains why a
+ *  saved passkey wasn't used. */
+type Asked = { rp: string; allow: { id: string }[]; at: number };
+const ASKED_TABS = 32;
+const readAsked = async () => ((await ext.storage.session.get("pkAsked")).pkAsked as Record<string, Asked> | undefined) ?? {};
+function changeAsked(change: (now: Record<string, Asked>) => void): Promise<void> {
+  const next = offerQueue.then(async () => {
+    const now = await readAsked();
+    change(now);
+    await ext.storage.session.set({ pkAsked: now });
+  });
+  offerQueue = next.catch(() => undefined);
+  return next;
+}
 /** One change at a time: a page can make several requests at once. */
 function changeOffers(change: (now: Offer[]) => Offer[]): Promise<void> {
   const next = offerQueue.then(async () => {
@@ -105,6 +125,7 @@ export async function useOffer(tabId: number, key: string, credentialId: string)
 // A page that's gone can't be answered.
 ext.webNavigation?.onCommitted?.addListener(({ tabId, frameId }) => {
   void changeOffers((now) => now.filter((o) => !(o.tabId === tabId && (frameId === 0 || o.frameId === frameId))));
+  if (frameId === 0) void changeAsked((now) => void delete now[tabId]);
   // Nor can a window that names the page that's just gone be left open to be approved.
   for (const r of pending.values()) {
     if (r.tabId !== tabId || (frameId !== 0 && r.frameId !== frameId)) continue;
@@ -115,6 +136,7 @@ ext.webNavigation?.onCommitted?.addListener(({ tabId, frameId }) => {
 });
 ext.tabs?.onRemoved?.addListener((tabId) => {
   void changeOffers((now) => now.filter((o) => o.tabId !== tabId));
+  void changeAsked((now) => void delete now[tabId]);
 });
 
 function allPasskeys(client: VaultClient): { itemId: string; passkey: Passkey; title: string }[] {
@@ -179,7 +201,13 @@ export async function handlePasskey(
     if (msg.t === "pkUseOffer") return c?.unlocked ? useOffer(tabId, msg.key as string, msg.credentialId as string) : { ok: false, reason: "locked" };
     const offers = await offerRows(tabId, c);
     let saved: string | null = null;
+    // The page asked, and what's here isn't on its list.
+    let asked: string | null = null;
     if (!offers.length && c?.unlocked) {
+      // Only if nothing here would have answered it. A request that ended some other way, called
+      // off or refused by the browser, says nothing about whether the passkey's on the site's list.
+      const last = (await readAsked())[tabId];
+      if (last && !usablePasskeys(allPasskeys(c), last.rp, last.allow.map((x) => x.id)).length) asked = last.rp;
       // Saved for this site, and the site isn't asking. Otherwise it just looks broken.
       const tab = await ext.tabs.get(tabId).catch(() => null);
       let origin = "";
@@ -190,7 +218,7 @@ export async function handlePasskey(
       }
       if (origin && origin !== "null") saved = allPasskeys(c).find((p) => rpIdAllowed(p.passkey.rpId, origin))?.passkey.rpId ?? null;
     }
-    return { offers, saved };
+    return { offers, saved, asked };
   }
 
   if (msg.t === "pkOffer" || msg.t === "pkOfferGone") {
@@ -218,6 +246,12 @@ export async function handlePasskey(
       const here = now.filter((o) => o.tabId === tabId && !(o.frameId === frameId && o.pageId === pageId));
       return [...others, ...[...here, offer].slice(-OFFERS_PER_TAB)].slice(-OFFERS_IN_ALL);
     });
+    await changeAsked((now) => {
+      // Checked above to be this page's own, and capped like the offers it came with.
+      now[tabId] = { rp, allow: options.allow as { id: string }[], at: Date.now() };
+      const tabs = Object.keys(now);
+      if (tabs.length > ASKED_TABS) for (const old of tabs.sort((a, b) => now[a].at - now[b].at).slice(0, tabs.length - ASKED_TABS)) delete now[old];
+    });
     offersChanged(tabId, sender.tab.url);
     return { ok: true };
   }
@@ -242,10 +276,20 @@ export async function handlePasskey(
       if (options.attachment === "cross-platform") return { ok: false, native: true };
       // A known excluded id is only answered after the prompt, as a person answered it. An
       // instant error would tell a page, silently, which passkeys this vault holds.
-    } else if (c?.unlocked) {
-      // Nothing of ours to offer: go straight to the browser's own.
-      const usable = usablePasskeys(allPasskeys(c), rp, (options.allow as { id: string }[]).map((x) => x.id));
-      if (!usable.length) return { ok: false, native: true };
+    } else {
+      const usable = c?.unlocked ? usablePasskeys(allPasskeys(c), rp, (options.allow as { id: string }[]).map((x) => x.id)) : null;
+      // Nothing of ours to offer: go straight to the browser's own. Registering it lets the panel
+      // say so, rather than leaving someone to wonder why their passkey wasn't used.
+      if (usable && !usable.length) return { ok: false, native: true, offer: true };
+      // With no click behind it, a window takes more: a passkey for this very site, an unlocked
+      // vault so we know that, the top page, and not too often. That way a page can't throw up
+      // windows, and only a site this person already has a passkey for can ask at all. Anything
+      // else is the browser's, with the offer in the panel.
+      if (msg.noClick === true) {
+        const now = Date.now();
+        if (!usable?.length || sender.frameId !== 0 || now - (lastNoClick.get(sender.tab.id!) ?? 0) < NO_CLICK_EVERY_MS || [...pending.values()].some((r) => r.tabId === sender.tab!.id)) return { ok: false, native: true, offer: true };
+        lastNoClick.set(sender.tab.id!, now);
+      }
     }
     // One at a time from a tab: a page mustn't be able to bury someone in windows.
     if ([...pending.values()].some((r) => r.tabId === sender.tab!.id)) return fail("NotAllowedError", "Another request from this tab is waiting.");

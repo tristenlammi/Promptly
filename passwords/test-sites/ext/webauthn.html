@@ -92,7 +92,12 @@
     <script>
       // Asked as the page loads, with no click behind it, as some sign-in steps do.
       const q = new URLSearchParams(location.search);
-      if (q.get("auto")) window.__ask({ rpId: q.get("rp"), challenge: q.get("auto"), allow: q.get("allow") ? [q.get("allow")] : [] }, q.get("m") || undefined);
+      // ?late=1 waits out the few seconds test tooling's own navigation counts as a click, and notes it.
+      const asking = () => {
+        window.__hadClick = navigator.userActivation.isActive;
+        window.__ask({ rpId: q.get("rp"), challenge: q.get("auto"), allow: q.get("allow") ? [q.get("allow")] : [] }, q.get("m") || undefined);
+      };
+      if (q.get("auto")) setTimeout(asking, q.get("late") ? 7000 : 0);
     </script>
   </body>
 </html>

@@ -735,14 +735,16 @@ type OfferRow = { key: string; credentialId: string; title: string; userName: st
 function PasskeyRows({ tabId, setMessage }: { tabId: number; setMessage: (m: string) => void }) {
   const [offers, setOffers] = useState<OfferRow[]>([]);
   const [saved, setSaved] = useState<string | null>(null);
+  const [asked, setAsked] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
     const look = () =>
-      call<{ offers: OfferRow[]; saved: string | null } | null>({ t: "pkOffers", tabId })
+      call<{ offers: OfferRow[]; saved: string | null; asked: string | null } | null>({ t: "pkOffers", tabId })
         .then((r) => {
           if (!live || !r) return;
           setOffers(r.offers);
           setSaved(r.saved);
+          setAsked(r.asked);
         })
         .catch(() => undefined);
     void look();
@@ -769,7 +771,10 @@ function PasskeyRows({ tabId, setMessage }: { tabId: number; setMessage: (m: str
           Sign in with a passkey: {o.userName || o.title}
         </button>
       ))}
-      {!offers.length && saved && (
+      {!offers.length && asked && saved && (
+        <p data-testid="passkey-no-match" className="rounded-lg bg-[var(--surface-1)] p-2 text-xs">This page asked for a passkey for {asked}, but it listed only certain passkeys and yours for {saved} isn't one of them. That usually means the site doesn't have it on your account. Check the account's security settings there, or use another way to sign in.</p>
+      )}
+      {!offers.length && !asked && saved && (
         <p data-testid="passkey-saved" className="rounded-lg bg-[var(--surface-1)] p-2 text-xs">You have a passkey for {saved}, but this page isn't asking for one. Sites decide when they do: look for "Use a passkey", "Sign in with a passkey" or "Try another way".</p>
       )}
     </>

@@ -710,15 +710,16 @@ function main() {
       reply({ ok: false, name: "NotAllowedError", message: "The Permissions-Policy of this page doesn't allow it." });
       return;
     }
-    // No person, no window of ours: a page could open as many as it liked. The browser
-    // answers such a request by its own rules.
-    if (!(navigator as unknown as { userActivation?: { isActive: boolean } }).userActivation?.isActive) {
-      reply({ ok: false, native: true, offer: d.op === "get" });
+    // Sites ask for a sign-in passkey as a page loads, so a request with no click behind it can
+    // still get our window, with limits the background sets. Making a new one always takes a click.
+    const clicked = !!(navigator as unknown as { userActivation?: { isActive: boolean } }).userActivation?.isActive;
+    if (!clicked && d.op === "create") {
+      reply({ ok: false, native: true });
       return;
     }
     pkWaiting.set(d.id, true);
     const { crossOrigin, topOrigin } = ancestry();
-    const r = (await send({ t: "pkRequest", op: d.op, options: d.options, crossOrigin, topOrigin })) as { ok: boolean; r?: Record<string, unknown> } | null;
+    const r = (await send({ t: "pkRequest", op: d.op, options: d.options, crossOrigin, topOrigin, noClick: !clicked })) as { ok: boolean; r?: Record<string, unknown> } | null;
     if (!pkWaiting.get(d.id)) return;
     pkWaiting.delete(d.id);
     reply(r?.r ?? { ok: false, native: true });

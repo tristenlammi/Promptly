@@ -439,6 +439,32 @@ test("Firefox: a quiet passkey request is answered from the toolbar, and verifie
   await closeTabs();
 });
 
+test("Firefox: a page asking for a passkey with no click gets our window when it's here", async () => {
+  const crypto = await import("node:crypto");
+  // The passkey from the test above, by its id.
+  const guid = "c1df3f1c-2b3c-4d4e-9fa0-1b2c3d4e5f60";
+  const siteId = Buffer.from(guid.replace(/-/g, ""), "hex").toString("base64url");
+  const challenge = crypto.randomBytes(32).toString("base64url");
+  const url = `${siteA("webauthn.html")}?late=1&auto=${challenge}&rp=localhost&allow=${siteId}`;
+  await driver.switchTo().window(extTab);
+  const before = await driver.getAllWindowHandles();
+  const pg = await newTab(url);
+  const withPage = [...before, pg];
+  await driver.wait(async () => (await driver.getAllWindowHandles()).length > withPage.length, 20000, "our window");
+  const prompt = (await driver.getAllWindowHandles()).find((x) => !withPage.includes(x));
+  await driver.switchTo().window(prompt);
+  await see(driver, button("Use another device or security key"));
+  await click(driver, By.xpath('//button[contains(., "fox@example.com")]'));
+  await driver.sleep(400);
+  await driver.switchTo().window(pg);
+  await driver.wait(async () => driver.executeScript("return window.__result !== null"), 15000);
+  assert.equal(await driver.executeScript("return window.__hadClick"), false, "really no click behind it");
+  const r = await driver.executeScript("return window.__result");
+  assert.equal(r.error, undefined);
+  assert.equal(r.id, siteId);
+  await closeTabs();
+});
+
 test("Firefox: saves a new login after a sign-in", async () => {
   await driver.switchTo().window(extTab);
   await newTab(`http://localhost:${PORT}/login.html`);

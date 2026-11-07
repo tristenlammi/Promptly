@@ -32,6 +32,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords on Android: security alerts name the sender's domain, not the name the email gave itself.
 - Passwords on Android: a bad 2FA secret from an import says so when filling, instead of crashing.
 - Passwords on Android: merging duplicates keeps the dropped copies' passwords, and any waiting new password, when the history's full.
+- Passwords on Android: approving "connect this phone again" in the browser still works if going there locked the vault.
+- Passwords on Android: a different file with the same name and size no longer mixes with an interrupted upload, and Files only offers to bin the original once the vault's copy has been read back.
+- Passwords on Android: the recovery kit screen can be passed if your server won't take the answer, and it no longer takes over a screen you have open.
+- Passwords on Android: a Send's "Copy link" only offers a real link to that Send, from your own vault.
+- Passwords on Android: an import with a huge CSV header or a huge number in it is refused or ignored rather than hanging the app.
+- Passwords on Android: a password change in progress could be lost if the vault was still opening when the screen came back.
 - Passwords: importing a large KeePass file no longer gets passwords wrong after the first few KiB of protected values.
 - Passwords: a LastPass row with only a name no longer turns the next login into a note.
 - Passwords: passkeys imported from Bitwarden now work: their ids are converted to the form sites use.
@@ -44,7 +50,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords on Android: saving your Promptly login when you make a vault, with the warning about your kit.
 - Passwords on Android: codes and sign-in links from Promptly Mail on the fill sheet, if you turn them on. Only the site's own sender gets a row, nothing fills until you tap it, and a phone connected earlier can add what it needs from Settings.
 - Passwords on Android: an Activity screen, and an opt-in to post coarse counts to your Today page.
-- Passwords: the extension offers your passkeys when a site asks quietly or with no click, from the toolbar panel and the on-page menu.
+- Passwords: the extension's own passkey window opens when a site asks for a passkey you have here, without needing a click, and it offers them from the toolbar panel and the on-page menu when a site asks quietly.
 - Passwords on Android: import from LastPass, 1Password (.1pux), Proton Pass, Dashlane, KeePass (XML and KDBX, with its password), Credential Exchange, Aegis, 2FAS and Google Authenticator links on the phone itself, with limits so a hostile file can't hang or exhaust it.
 - Passwords: the extension's toolbar button opens a full control panel: this site's logins, categories, live 2FA codes, a generator, bookmarks and shortcuts.
 - Passwords: a Bookmarks screen in the vault, on the web, in the extension and in the Windows app.

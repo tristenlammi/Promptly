@@ -100,6 +100,8 @@ async function verified(page: Page, wanted: string) {
     requireUserVerification: false,
   });
   expect(v.verified).toBe(true);
+  // Answering closes the window. One left open could be approved again later.
+  await expect.poll(() => prompts().length, { timeout: 10_000 }).toBe(0);
 }
 
 const answerWith = async (pop: Page) => {
@@ -127,12 +129,90 @@ test("a quiet request shows nothing by itself, and an imported passkey answers i
   await page.close();
 });
 
-test("a request with no click behind it opens no window of ours, and can still be answered", async () => {
+const NO_CLICK = 7_000 + 600;
+
+test("a page asking with no click gets our window, not the browser's, when the passkey's here", async () => {
   const wanted = challenge();
   const page = await rig.ctx.newPage();
-  await page.goto(`${siteA("webauthn.html")}?auto=${wanted}&rp=${RP}&allow=${SITE_ID}`);
-  await page.waitForTimeout(800);
+  const opened = promptWindow();
+  await page.goto(`${siteA("webauthn.html")}?late=1&auto=${wanted}&rp=${RP}&allow=${SITE_ID}`);
+  const prompt = await opened;
+  expect(await page.evaluate(() => (window as any).__hadClick), "really no click behind it").toBe(false);
+  await expect(prompt.getByText("Sign in with a passkey?")).toBeVisible();
+  // The way out to the browser's own is right there.
+  await expect(prompt.getByRole("button", { name: "Use another device or security key" })).toBeVisible();
+  await prompt.getByRole("button", { name: new RegExp(USER) }).click();
+  await verified(page, wanted);
+  await page.close();
+});
+
+test("a page can't keep throwing up windows: the next no-click request goes to the browser, and the panel still has it", async () => {
+  const wanted = challenge();
+  const page = await rig.ctx.newPage();
+  const opened = promptWindow();
+  await page.goto(`${siteA("webauthn.html")}?late=1&auto=${wanted}&rp=${RP}&allow=${SITE_ID}`);
+  const first = await opened;
+  await first.getByRole("button", { name: "Cancel" }).click();
+  await expect.poll(() => page.evaluate(() => (window as any).__result?.error)).toBe("NotAllowedError");
+  // Asked again straight away, by loading again, in the same tab.
+  const again = challenge();
+  await page.goto(`${siteA("webauthn.html")}?late=1&auto=${again}&rp=${RP}&allow=${SITE_ID}`);
+  await page.waitForTimeout(NO_CLICK);
+  expect(await page.evaluate(() => (window as any).__hadClick)).toBe(false);
   expect(prompts()).toHaveLength(0);
+  const pop = await popupFor(rig, page);
+  await expect(pop.getByTestId("passkey-offer")).toBeVisible();
+  await answerWith(pop);
+  await verified(page, again);
+  await page.close();
+});
+
+test("a page asking in a frame with no click gets no window: that's the browser's to answer", async () => {
+  const wanted = challenge();
+  const inner = `${siteA("webauthn.html")}?late=1&auto=${wanted}&rp=${RP}&allow=${SITE_ID}`;
+  const page = await rig.ctx.newPage();
+  await page.goto(`${siteA("adv-nest.html")}?src=${encodeURIComponent(inner)}`);
+  await page.waitForTimeout(NO_CLICK + 500);
+  const frame = page.frames().find((f) => new URL(f.url()).pathname === "/webauthn.html")!;
+  expect(await frame.evaluate(() => (window as any).__hadClick)).toBe(false);
+  expect(prompts()).toHaveLength(0);
+  await page.close();
+});
+
+test("a site whose list doesn't include the passkey gets no window, and the panel says why", async () => {
+  const page = await rig.ctx.newPage();
+  const other = crypto.randomBytes(16).toString("base64url");
+  await page.goto(`${siteA("webauthn.html")}?late=1&auto=${challenge()}&rp=${RP}&allow=${other}`);
+  await page.waitForTimeout(NO_CLICK);
+  expect(prompts()).toHaveLength(0);
+  const pop = await popupFor(rig, page);
+  await expect(pop.getByTestId("passkey-no-match")).toContainText("isn't one of them");
+  await expect(pop.getByTestId("passkey-offer")).toHaveCount(0);
+  await pop.close();
+  await page.close();
+});
+
+test("locked, a no-click request opens nothing, and a request still waiting is there once unlocked", async () => {
+  const lock = await rig.ctx.newPage();
+  await lock.goto(`chrome-extension://${rig.extId}/popup.html`);
+  await lock.getByRole("button", { name: "Lock" }).click();
+  await lock.close();
+  // There's no way to know a passkey matches while locked, so it's the browser's.
+  const asks = await rig.ctx.newPage();
+  await asks.goto(`${siteA("webauthn.html")}?late=1&auto=${challenge()}&rp=${RP}&allow=${SITE_ID}`);
+  await asks.bringToFront();
+  await asks.waitForTimeout(NO_CLICK);
+  expect(await asks.evaluate(() => (window as any).__hadClick)).toBe(false);
+  expect(prompts()).toHaveLength(0);
+  await asks.close();
+
+  // A quiet request stays open by its nature, so it's still there after unlocking.
+  const wanted = challenge();
+  const page = await rig.ctx.newPage();
+  await page.goto(`${siteA("webauthn.html")}?auto=${wanted}&rp=${RP}&m=conditional&allow=${SITE_ID}`);
+  await page.waitForTimeout(500);
+  expect(prompts()).toHaveLength(0);
+  await unlockExt(rig);
   const pop = await popupFor(rig, page);
   await expect(pop.getByTestId("passkey-offer")).toBeVisible();
   await answerWith(pop);
