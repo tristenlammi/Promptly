@@ -94,6 +94,7 @@ The checklist's install section needs a real install. Automated tests used the d
 - Check bookmark sync with a second browser, using a profile whose bookmarks you don't mind changing. Read [BOOKMARKS.md](BOOKMARKS.md) first. It's off until you turn it on.
 - Google's password step: you saw no fill there. If it still misses, "Describe this form" in the panel gives me what I need, with no secrets in it.
 - Never lock on Firefox: restart with a signed build. Tests could only simulate the restart.
+- On Chrome and Helium, copy a 2FA code and check that it arrives and then clears on time. The fix for lost clipboard writes is a timing pause (D76), so tell me if you ever see one fail.
 - Brave, Vivaldi and Opera aren't on this machine, so they're untested. Edge ran an earlier version of the code, and only the main extension tests.
 - Filling on the release (non-test) extension build was only smoke tested, because the tests drive hooks that release builds don't have.
 

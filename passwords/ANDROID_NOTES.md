@@ -204,6 +204,15 @@ These weren't touched, as asked:
 - `CHANGELOG.md`: an `[Unreleased]` line for M8.
 - `passwords/DECISIONS.md`: M8 row and a pointer here.
 
+## What was run, last checks, 2026-11-07
+
+Android app code unchanged since `39daf37`.
+
+- **JVM:** 302 tests, 0 failed, at `0690722`. Rerun because `connections-vectors.json` changed.
+- `android/run-biometric-test.ps1`: 2 of 2. SmsConsentTest with `-e pwSms 1` and `adb emu sms send`: 1 of 1.
+- **Release build with R8** (`-PemulatorAbi`, signed with a throwaway key made for the run and then deleted), driven by adb: pairing link, connect, create a vault past the new first-run screens, add a login, lock, unlock, the inline chip then unlock in the sheet then the fill, a password through Credential Manager, a passkey refused without asset links, the Wi-Fi QR, Security check, a shared vault and a Send. No crash lines in the log. The script's first attempts failed on screens added since it was written and on a sheet it had left open, none of them in the app. x86_64 only.
+- **Size:** arm64 release, unsigned: 14,552,956 bytes against 12,597,451 shipped: +1,955,505, +15.5%.
+
 ## What was run, second review's fixes, 2026-11-07
 
 Final code, commit `39daf37`. AVD `PromptlyTest` (API 36, Google Play image, x86_64), the `:8092` stack. Every finding was checked against the code first, and all of them were real.
