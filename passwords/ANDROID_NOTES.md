@@ -204,6 +204,39 @@ These weren't touched, as asked:
 - `CHANGELOG.md`: an `[Unreleased]` line for M8.
 - `passwords/DECISIONS.md`: M8 row and a pointer here.
 
+## What was run, second review's fixes, 2026-11-07
+
+Final code, commit `39daf37`. AVD `PromptlyTest` (API 36, Google Play image, x86_64), the `:8092` stack. Every finding was checked against the code first, and all of them were real.
+
+- **JVM:** `gradlew :app:cleanTestDebugUnitTest :app:testDebugUnitTest "-Dpw.stack=http://localhost:8092"`: 302 tests, 0 failed, 0 skipped. CarTemplatesTest 8, ConnectionsTest 28, CoreTest 54, FinishingTest 35, HostileTest 38, ImportersTest 63, ReviewFixesTest 17, StackTests 41, VectorsTest 18.
+- **Cross-check:** `connections-vectors.json` has a new `pending` list, run through the real `touch`, `commitPending`, `dropPending` and `mergeDuplicates` in the web's commit `69445b8` and through Kotlin. Both have to give what the file says. One alert row has an `androidText`, where Android goes by the domain and the web still shows the name.
+- **Instrumented:** `android/run-passwords-tests.ps1`: main pass `OK (137 tests)`, then MailRealStackTest `OK (5 tests)`. That's 142 run, 0 failed, 139 exercised: AutofillE2ETest 28, ConnectionsUiTest 29, CredentialManagerE2ETest 6, DeviceCryptoTest 11, FeaturesUiTest 12, FinishingUiTest 28, ImportDeviceTest 9, MailRealStackTest 5, VaultUiTest 11. 3 skipped by that script, as before: BiometricE2ETest 2, SmsConsentTest 1. They weren't run on their own this round. No class had to be run again for this result. Autofill's suggestion lookup needed its own retry once, as it does. The script makes three more users now.
+- `lintVitalRelease`: passes.
+- **A mutation check, on the emergency fix alone:** taking out the `verified` check and the `x25519` half of the merge's comparison failed three of the new hostile tests. The other fixes weren't mutation-checked.
+- **Slow files, checked before capping:** with the caps out, all three tests timed out at 15 s: `genericCsv`'s column loop, `BigInteger.destructiveMulAdd`, and the decimal regex. With them in, each is refused or ignored at once.
+- **What the KDF ceilings cost, measured on this emulator and scaled up:** 500,000 rounds of PBKDF2 took 1,488 ms, so Bitwarden's 5 million ceiling is about 15 s a try, and a wrong password tries twice. An emulator on a desktop CPU isn't a phone.
+
+**Failures on the way.** Real, found by these runs: a password change in progress was dropped from the queue if its screen came back while the vault was still loading, since `get` finds nothing for that moment (A56, now fixed). It failed one full run and is older than this work. In the tests: a test tripped over `.bin` not being an allowed Files type; a Back meant for the keyboard landed on Settings after the keyboard had gone; the check of when a scope arrived read the setting a moment too soon; and the kit gate's second button was under the keyboard.
+
+**One failure took some finding, and it isn't explained all the way down.** `aBrowserSignedInAsSomeoneElseChangesNothing` failed on most runs, with the old code still on screen and no error. The app was right: logging showed the panel recomposing with the error and without the code within 30 ms, and asking UiAutomator to refresh the old code's node threw `StaleObjectException`, so the node no longer existed. UiAutomator's cached copy of the tree had missed the change, and scrolling didn't always bring it up to date. The test now clears that cache (`uiAutomation.clearCache()`), and passed on the three runs of that class after, and the final run. **I don't know why the cache misses this one change, and an accessibility service like TalkBack could in principle hold the same stale view.** Worth checking on the owner's phone with TalkBack on. Separately, `OfflineError` at the first `prelogin` of a test failed one MailRealStackTest run and not the next ones. It's the same unexplained message noted under "What was run, 2026-11-06".
+
+### Compiled only, or not exercised this way
+
+- **The lock on a fill sheet:** the login sheet is tested with a lock while it's open, by leaving it with "Lock after: Leaving" and coming back, and with a poll caught in flight. Credential Manager is tested for a lock at its password lookalike warning. Its passkey paths and the guards around them are compiled, and that includes a passkey create meeting a lock. So is `remembering` meeting a lock, which is a narrow race nothing forces.
+- **The Files read-back:** a real mismatch is tested on the JVM against the stack, and the screen's ordinary path through the UI. "Couldn't check, so no Trash button" is compiled. Clearing an older version's resume record is compiled.
+- **`ScopeConnect` being turned down in the browser, or timing out:** compiled. It's locked with `Pw.lock` in the test, as opening Chrome stays off limits, and the approval is the page's own API call. Finishing from a security email or plus label, as opposed to Settings, is compiled, and so is reaching the browser after the paired account turned out to be someone else's.
+- **Two imports at once:** tested in `Importers` on the JVM. Leaving the screen and coming back to find one running hasn't been tapped through.
+- **Bitwarden's new ceilings:** on the JVM with a stand-in engine. None of the costly settings were run for real, and the real password-protected file through the screen isn't new here.
+- **An http page in a real browser:** a WebView gives no form on one, so the mail sheet is opened directly, as the login sheet's test does.
+- **R8:** no release build, and nothing on arm64. `lintVitalRelease` compiles the release Kotlin and no more.
+
+### Added to the owner's real-phone checklist
+
+- With "Lock after: Leaving": open a fill sheet from a real browser, switch away and come back. It should ask to unlock. With a real browser for the scope: Email codes on an older phone, approve in Chrome, come back.
+- Add an emergency contact with them beside you, and compare the words for real, on both screens.
+- With TalkBack on, see a refused connection in Settings, and whether it reads the new message (see above).
+- A real password-protected Bitwarden export at its usual settings. It should still open, and how long it takes.
+
 ## What was run, connections, 2026-11-07
 
 Final code for the features that connect the vault to the rest of Promptly on a phone: email codes, security emails, the change helper, plus-addresses, documents from Files, your Promptly login, Today and Activity. AVD `PromptlyTest` (API 36, Google Play image, x86_64), the `:8092` stack. None of the eight was already there: each gap in the audit was still a gap when checked against the code.
