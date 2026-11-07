@@ -58,17 +58,27 @@ function makeClient(): VaultClient {
 /** storage.session survives a restart of this worker, and not a browser restart. */
 const session = ext.storage.session;
 
-async function saveSecret(secret: Uint8Array, sessionToken: string | null): Promise<void> {
+/** Goes up at every lock, so work begun before one can't put a secret back after it. */
+let locks = 0;
+
+async function saveSecret(secret: Uint8Array, sessionToken: string | null, locksBefore: number): Promise<void> {
   await session.set({ unlock: b64u(secret), vaultSession: sessionToken });
   // If it can't be kept, this browser asks for the password after a restart. That's all.
   await keepSecretIfChosen((await lockChoice()).when).catch(() => undefined);
+  if (locks !== locksBefore) {
+    await session.remove(["unlock", "vaultSession"]);
+    await store.deleteMeta(KEPT_UNLOCK);
+  }
 }
 
 /** With "Never" the secret outlasts the browser, and with anything else it's not on the disk. */
 async function keepSecretIfChosen(when: LockWhen): Promise<void> {
   if (when !== "never") return store.deleteMeta(KEPT_UNLOCK);
+  const locksBefore = locks;
   const { unlock } = await session.get("unlock");
-  if (unlock) await client!.putDeviceSealed(KEPT_UNLOCK, { unlock });
+  if (!unlock) return;
+  await client!.putDeviceSealed(KEPT_UNLOCK, { unlock });
+  if (locks !== locksBefore) await store.deleteMeta(KEPT_UNLOCK);
 }
 
 async function boot(): Promise<void> {
@@ -100,6 +110,8 @@ async function boot(): Promise<void> {
       } catch {
         await session.remove(["unlock", "vaultSession"]);
         await store.deleteMeta(KEPT_UNLOCK).catch(() => undefined);
+        // This is a lock too, and an open vault page holds keys of its own.
+        ext.runtime.sendMessage({ t: "locked" }).catch(() => undefined);
       }
     }
   })();
@@ -108,18 +120,25 @@ async function boot(): Promise<void> {
 
 /** The session didn't outlast the browser, so ask for a new one. Offline, it can wait. */
 async function proveAfterRestart(c: VaultClient): Promise<void> {
+  await proveAgain(c);
+}
+
+/** Ask for a new session, which is the server's answer on whether this device still counts. With
+ *  the key kept on this computer, a device that's been removed, a password that's been changed, a
+ *  vault that's been reset (404), or Passwords being turned off has to stop it working here. */
+async function proveAgain(c: VaultClient): Promise<boolean> {
   try {
     await c.reprove();
     await session.set({ vaultSession: c.api.session });
+    return true;
   } catch (e) {
-    await lockIfTurnedAway(e);
+    if (e instanceof ApiError && (e.status === 401 || e.status === 403 || e.status === 404)) await lockIfNever();
+    return false;
   }
 }
 
-/** With the key kept on this computer, a device that's been removed, or a password that's been
- *  changed, has to stop it working here. The server turning us away is how we find out. */
-async function lockIfTurnedAway(e: unknown): Promise<void> {
-  if (e instanceof ApiError && (e.status === 401 || e.status === 403) && (await lockChoice()).when === "never") await lock();
+async function lockIfNever(): Promise<void> {
+  if ((await lockChoice()).when === "never") await lock();
 }
 
 function startKeepAlive() {
@@ -169,9 +188,10 @@ async function touchLockTimer() {
 
 async function lock() {
   // First, so nothing later can leave the way back in behind.
+  locks++;
   await store.deleteMeta(KEPT_UNLOCK).catch(() => undefined);
-  const wasOpen = !!client?.unlocked;
-  await client?.lock().catch(() => undefined);
+  // The keys go at once. Only telling the server waits, and it may not answer.
+  const ending = client?.lock().catch(() => undefined);
   await session.remove(["unlock", "vaultSession", "flows", "pendingSave", "typedUsers", "deviceRequests", "beat", "onLoadDone"]);
   await ext.alarms.clear(KEEPALIVE);
   await ext.alarms.clear(LOCK_ALARM);
@@ -181,8 +201,10 @@ async function lock() {
   // Nothing we copied should outlast the lock.
   await clearClipboardIfOurs().catch(() => undefined);
   updateBadgeAll();
-  // A vault page has its own keys in memory, and goes back to its locked screen.
-  if (wasOpen) ext.runtime.sendMessage({ t: "locked" }).catch(() => undefined);
+  // A vault page has its own keys in memory, and goes back to its locked screen. That's so even
+  // if this worker has just restarted and holds none itself.
+  ext.runtime.sendMessage({ t: "locked" }).catch(() => undefined);
+  await Promise.race([ending, new Promise((r) => setTimeout(r, 3000))]);
 }
 
 /** Firefox doesn't report "locked" from the idle API, and sleep isn't always reported
@@ -220,14 +242,13 @@ async function safeSync() {
   try {
     await client.sync();
   } catch (e) {
-    if (e instanceof ApiError && e.status === 401) {
+    // A 403 can be about one shared vault, so it's asking for a session that says if it's us.
+    if (e instanceof ApiError && (e.status === 401 || e.status === 403) && (await proveAgain(client)) && e.status === 401) {
       try {
-        await client.reprove();
-        await session.set({ vaultSession: client.api.session });
         await client.sync();
       } catch (again) {
         /* the token's revoked or the server's gone: keep working from the local copy */
-        await lockIfTurnedAway(again);
+        if (again instanceof ApiError && again.status === 401) await lockIfNever();
       }
     }
   }
@@ -597,6 +618,8 @@ type FillOptions = {
   reprompted?: boolean;
   /** The menu's frame, or the top page on load: those fill there and nowhere else. */
   onlyFrame?: number;
+  /** A page caused this, not a person, so it doesn't count as using the vault. */
+  notUse?: boolean;
 };
 
 type FrameFill = { frameId: number; url: string; origin: string; documentId?: string; roles: string[] };
@@ -726,7 +749,7 @@ async function fill(tabId: number, itemId: string, opts: FillOptions): Promise<F
   const flows = await getFlows();
   flows[String(tabId)] = afterFill(flows[String(tabId)], itemId, host, filled, sameSite);
   await session.set({ flows });
-  await touchLockTimer();
+  if (!opts.notUse) await touchLockTimer();
   return { ok: true, filled, left };
 }
 
@@ -1041,8 +1064,9 @@ async function handlePage(m: PageRequest): Promise<unknown> {
     case "state":
       return state();
     case "unlock": {
+      const locksBefore = locks;
       const r = await c.unlock(m.password, undefined, { keepSecret: true });
-      await saveSecret(r.secret!, c.api.session);
+      await saveSecret(r.secret!, c.api.session, locksBefore);
       startKeepAlive();
       await touchLockTimer();
       updateBadgeAll();
@@ -1149,8 +1173,9 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       return { ok: true, onClickOnly: await fillsOnClickOnly() };
     case "unlockWithSecret": {
       const secret = fromB64u(m.secret);
+      const locksBefore = locks;
       const r = await c.unlockWithSecret(secret);
-      await saveSecret(secret, c.api.session);
+      await saveSecret(secret, c.api.session, locksBefore);
       startKeepAlive();
       await touchLockTimer();
       updateBadgeAll();
@@ -1254,8 +1279,9 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       } finally {
         stretched.fill(0);
       }
+      const locksBefore = locks;
       await c.unlockWithSecret(secret);
-      await saveSecret(secret, c.api.session);
+      await saveSecret(secret, c.api.session, locksBefore);
       await session.set({ pin: { ...pin, tries: 0 } });
       startKeepAlive();
       await touchLockTimer();
@@ -1556,7 +1582,7 @@ async function maybeAutofillOnLoad(tabId: number, frameId: number, kinds: string
   if (done[String(tabId)] === url) return;
   done[String(tabId)] = url;
   await session.set({ onLoadDone: done });
-  await fill(tabId, matches[0].item.id, { onlyFrame: 0 });
+  await fill(tabId, matches[0].item.id, { onlyFrame: 0, notUse: true });
 }
 
 /** The frame holding this token, and only that one: a page can open a second menu of its
@@ -1724,6 +1750,13 @@ async function handleTest(m: { op: string; [k: string]: unknown }): Promise<unkn
     case "restartLike":
       // What a browser restart does here, for an engine where a test can't restart it.
       await session.remove(["unlock", "vaultSession"]);
+      client = null;
+      booted = null;
+      await boot();
+      return { unlocked: !!(client as VaultClient | null)?.unlocked };
+    case "staleSecret":
+      // What a password changed in a page that didn't say so would leave behind.
+      await session.set({ unlock: b64u(crypto.getRandomValues(new Uint8Array(64))) });
       client = null;
       booted = null;
       await boot();

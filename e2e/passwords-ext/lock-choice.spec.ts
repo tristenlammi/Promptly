@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 
-import { addItem, bg, connect, launch, lockExt, makeUsers, popupFor, type Rig, siteA, startSite, testHook, unlockExt } from "./lib";
+import { addItem, bg, connect, launch, lockExt, makeUsers, MASTER, popupFor, type Rig, siteA, startSite, testHook, unlockExt } from "./lib";
 
 test.describe.configure({ mode: "serial" });
 
@@ -211,6 +211,98 @@ test("When the browser closes: no timer, sleep still follows its own box, and a 
   await unlockExt(rig);
 });
 
+test("a page that fills on load doesn't postpone the lock", async () => {
+  await choose("60");
+  const items = await testHook<{ id: string; title: string }[]>(rig, "items");
+  const item = items.find((i) => i.title === "Staying")!;
+  await testHook(rig, "patchItem", { id: item.id, patch: { autofillOnLoad: true } });
+  await choose("60");
+  const before = await alarm();
+  await new Promise((r) => setTimeout(r, 1500));
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("login.html"));
+  await expect.poll(() => page.evaluate(() => (window as any).__state().pass), { timeout: 10_000 }).toBe("Stay-Pw-1");
+  await page.close();
+  expect(await alarm()).toBe(before);
+  await testHook(rig, "patchItem", { id: item.id, patch: { autofillOnLoad: false } });
+});
+
+test("a secret that no longer opens the vault locks an open vault page too", async () => {
+  const v = await rig.ctx.newPage();
+  await v.goto(`chrome-extension://${rig.extId}/vault.html`);
+  await expect(v.getByRole("navigation", { name: "Passwords" })).toBeVisible({ timeout: 30_000 });
+  expect((await testHook<{ unlocked: boolean }>(rig, "staleSecret")).unlocked).toBe(false);
+  await expect(v.getByLabel("Master password")).toBeVisible({ timeout: 15_000 });
+  await expect(v.getByRole("navigation", { name: "Passwords" })).toHaveCount(0);
+  await v.close();
+  await unlockExt(rig);
+});
+
+test("Lock in the vault page takes hold even when the server doesn't answer", async () => {
+  await choose("never");
+  const v = await rig.ctx.newPage();
+  let held = 0;
+  await v.route("**/api/passwords/session", (route) => {
+    if (route.request().method() !== "DELETE") return route.continue();
+    held++; // and no answer, ever
+  });
+  await v.goto(`chrome-extension://${rig.extId}/vault.html`);
+  await expect(v.getByRole("navigation", { name: "Passwords" })).toBeVisible({ timeout: 30_000 });
+  await v.getByRole("button", { name: "Lock", exact: true }).click();
+  await expect.poll(unlocked, { timeout: 10_000 }).toBe(false);
+  expect((await kept()).kept).toBe(false);
+  expect(held).toBe(1);
+  await v.close();
+  await restart();
+  expect(await unlocked()).toBe(false);
+  await unlockExt(rig);
+});
+
+async function changePassword(from: string, to: string) {
+  const v = await rig.ctx.newPage();
+  await v.goto(`chrome-extension://${rig.extId}/vault.html#/settings`);
+  await v.getByTestId("settings-advanced").locator("summary").click();
+  await v.getByLabel("Current master password").fill(from);
+  await v.getByLabel("New master password").fill(to);
+  await v.getByLabel("Type it again").fill(to);
+  await v.getByRole("button", { name: "Change it" }).click();
+  await expect(v.getByLabel("Current master password")).toHaveValue("", { timeout: 60_000 });
+  await v.close();
+}
+
+test("changing the master password in the vault page: Never carries on, and only the new one opens it", async () => {
+  await choose("never");
+  const NEW = "Different-Master-Pw-27!";
+  await changePassword(MASTER, NEW);
+  expect(await kept()).toEqual({ kept: true, sealed: true });
+  await bg(rig, `return (await chrome.runtime.sendMessage({ t: "sync" })).ok;`);
+  expect(await unlocked()).toBe(true);
+
+  await restart();
+  await expect.poll(unlocked, { timeout: 15_000 }).toBe(true);
+  await bg(rig, `return (await chrome.runtime.sendMessage({ t: "sync" })).ok;`);
+  await new Promise((r) => setTimeout(r, 1000));
+  expect(await unlocked()).toBe(true);
+  expect((await kept()).kept).toBe(true);
+
+  await lockExt(rig);
+  await expect.poll(unlocked).toBe(false);
+  const p = await rig.ctx.newPage();
+  await p.goto(`chrome-extension://${rig.extId}/popup.html`);
+  await p.getByLabel("Master password").fill(MASTER);
+  await p.getByRole("button", { name: "Unlock" }).click();
+  await expect(p.getByRole("alert")).toBeVisible({ timeout: 60_000 });
+  await p.getByLabel("Master password").fill(NEW);
+  await p.getByRole("button", { name: "Unlock" }).click();
+  await expect(p.getByLabel("Search your vault")).toBeVisible({ timeout: 60_000 });
+  await p.close();
+
+  await changePassword(NEW, MASTER);
+  await lockExt(rig);
+  await expect.poll(unlocked).toBe(false);
+  await unlockExt(rig);
+});
+
 test("Never: removing this device from elsewhere locks it and takes the secret away", async () => {
   await choose("never");
   expect((await kept()).kept).toBe(true);
@@ -237,4 +329,29 @@ test("Never: removing this device from elsewhere locks it and takes the secret a
   await pop.goto(`chrome-extension://${rig.extId}/popup.html`);
   await expect(pop.getByLabel("Master password")).toBeVisible();
   await pop.close();
+});
+
+test("Never: a vault reset elsewhere locks it and takes the secret away", async () => {
+  await rig.close();
+  rig = await launchHere();
+  const [u] = makeUsers(["stays2"]);
+  await connect(rig, u);
+  await unlockExt(rig);
+  await choose("never");
+  expect((await kept()).kept).toBe(true);
+
+  const web = await rig.ctx.newPage();
+  await web.goto("/passwords");
+  await expect(web.getByLabel("Master password")).toBeVisible({ timeout: 20_000 });
+  await web.getByText("I've lost my master password and my kit").click();
+  await web.getByRole("button", { name: "Reset vault…" }).click();
+  await web.getByLabel("Your Promptly sign-in password").fill(u.password);
+  await web.getByLabel("Type DELETE MY VAULT").fill("DELETE MY VAULT");
+  await web.getByRole("button", { name: "Destroy my vault" }).click();
+  await expect(web.getByText("I understand")).toBeVisible({ timeout: 30_000 });
+  await web.close();
+
+  await bg(rig, `return (await chrome.runtime.sendMessage({ t: "sync" })).ok;`);
+  await expect.poll(unlocked, { timeout: 15_000 }).toBe(false);
+  expect((await kept()).kept).toBe(false);
 });

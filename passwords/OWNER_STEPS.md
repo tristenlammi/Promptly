@@ -11,12 +11,13 @@ Read [REPORT.md](REPORT.md), mainly "What wasn't tested" and "What wasn't built"
 ## 2. Decide on push, merge and release
 
 - Push the branch and merge when you're happy. Nothing here does that for you.
-- `main` has moved on since this branch started: it's at v0.29.0, two commits ahead of the point the branch left it. A dry-run merge conflicts only in `CHANGELOG.md`, and `backend/app/mail/rules.py` merges automatically (both sides changed it). I didn't merge them in, so nothing here has been tested on top of them. Run the suites again after merging.
+- `main` has moved on since this branch started: it's at v0.29.0 or later. An earlier dry-run merge conflicted only in `CHANGELOG.md`, and `backend/app/mail/rules.py` merged automatically (both sides changed it). I didn't merge them in, so nothing here has been tested on top of them. Run the suites again after merging.
 - Cut a release with `scripts/release.ps1 <version>`. A minor version fits (`0.30.0` if `main` hasn't moved again).
 - **Check the migrations at merge.** Passwords adds `0254_passwords_core` on top of `0253`, then `0255_passwords_hardening`. The memory upgrade work (not on `main` when I checked) adds `0255_memory_lifecycle`, also on top of `0253`. Whichever merges second has to point its `down_revision` at the other's head, or there are two heads and the backend won't boot cleanly. Two files will also be numbered `0255`, which is harmless but confusing. Run `alembic heads` after merging. It should print one line.
 - Rebuild `backend`, `arq-worker` and `mail-worker` together.
-- Download files: `frontend/public/downloads/` holds the Windows installer and the extension zips from this build. Both are unsigned test builds, so see step 3 before offering them to anyone.
-- Build the Android APK with `android/build-release.ps1`. I didn't run this, because it uses your signing key. The APK grew about 13.4% (arm64 14.28 MB, was 12.60 MB).
+- Download files: `frontend/public/downloads/` holds the Windows installer and the extension zips from this build. They're unsigned, so see step 3 before offering them to anyone.
+- The test stack is `passwords/stack/docker-compose.yml`, plus `docker-compose.full.yml` for the whole main e2e suite.
+- Build the Android APK with `android/build-release.ps1`. I didn't run this, because it uses your signing key. The arm64 release APK grew about 15.5% (14,552,956 bytes unsigned, was 12,597,451).
 
 ## 3. Store accounts and signing
 
@@ -73,6 +74,12 @@ Set it up first: Settings → Passwords and accounts, pick Promptly as the autof
 - Share a vault with someone on the web, and check the safety words match on both.
 - Turn on an overlay app (a screen dimmer, a chat head), and check the unlock and fill screens hide it or refuse the tap.
 - Install an update through the in-app updater.
+- Add an emergency contact with them beside you, and compare the words on both screens.
+- A real emailed code on a real site in Chrome, then the same with mail from another sender: no code should show.
+- Change a throwaway account's password from the Security check, with Chrome set up.
+- A real password-protected Bitwarden export, a KeePass file you really use, and a real export from each manager you've got an account with.
+
+The sections called "Added to the owner's real-phone checklist" in [ANDROID_NOTES.md](ANDROID_NOTES.md) have the rest, in more detail.
 
 ### Windows
 
@@ -83,6 +90,10 @@ The checklist's install section needs a real install. Automated tests used the d
 ### Browsers
 
 - Install each extension for real, from its store or as a signed file, and use it on sites you actually sign in to. **Use low-value accounts only.**
+- To try it now in Helium or Chrome: turn on developer mode on the extensions page, then "Load unpacked" and pick `passwords/extension/dist/chrome`. Reload it there after each new build.
+- Check bookmark sync with a second browser, using a profile whose bookmarks you don't mind changing. Read [BOOKMARKS.md](BOOKMARKS.md) first. It's off until you turn it on.
+- Google's password step: you saw no fill there. If it still misses, "Describe this form" in the panel gives me what I need, with no secrets in it.
+- Never lock on Firefox: restart with a signed build. Tests could only simulate the restart.
 - Brave, Vivaldi and Opera aren't on this machine, so they're untested. Edge ran an earlier version of the code, and only the main extension tests.
 - Filling on the release (non-test) extension build was only smoke tested, because the tests drive hooks that release builds don't have.
 
@@ -92,9 +103,13 @@ Autofill failures only really show up on real sites. On pages it had never seen,
 
 Use "Teach it" when it misses, and put what you learn into the rules pack.
 
+**If you choose Never lock in a browser.** Anyone who can open that browser on your computer can open the vault. It's convenient for a low-value trial, and worth rethinking before real passwords go in, especially on a laptop. See "Lost laptop" in [SECURITY.md](SECURITY.md). "When the browser closes" or a few hours keeps most of the convenience.
+
 ## 6. Test recovery before adding anything important
 
 Print the recovery kit, then recover the vault on a clean device using only the kit and your master password. Do this **before** anything important goes in. If you lose both the kit and all your devices, nobody can get the vault back, by design.
+
+If you add an emergency contact, compare safety words with them in person or on a call first. Their keys aren't sealed until you have.
 
 Also restore a real backup of your server to a spare machine and check the vault unlocks. A test does this with a new `SECRET_KEY`, but your backup routine is what matters.
 
@@ -110,6 +125,7 @@ Admin → Passwords → "Show the Preview warning". Do this only after steps 5 t
 
 ## Known follow-ups
 
+- Deleting a user can leave a shared vault with no manager. The backend review found it, and it's not fixed.
 - `backend/app/mail/parse.py` has a regex that goes quadratic on hostile incoming HTML. The backend review found it, and it's outside this work, so it's not fixed.
 - Android `lintDebug` reports 12 errors in older code (`CarApp`, `PhoneActions`, `Crashes`), none in Passwords. `lintVitalRelease` passes.
 - `npm audit` lists 27 production advisories in the main app's existing dependencies (excalidraw, mermaid, dompurify and others). The bundle check shows none of them are in the vault's page, but they're still there for the main app.

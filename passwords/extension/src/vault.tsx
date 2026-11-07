@@ -450,8 +450,14 @@ function Root() {
       },
       lock: () => {
         lockingHere = true;
-        return call({ t: "lock" });
+        // Only for this one. A lock from anywhere else later on still has to bring the page back.
+        return call({ t: "lock" }).finally(() => {
+          lockingHere = false;
+        });
       },
+      // The background holds its own secret, made from the old password. If it can't get a new
+      // one, this browser asks for the password rather than carrying on with a stale one.
+      rekeyed: (password) => call({ t: "unlock", password }).catch(() => call({ t: "lock" })),
       notifyChanged: () => {
         // Now, in case this page closes straight after a save, and once more when a
         // burst of changes has settled.

@@ -408,6 +408,9 @@ export class VaultClient {
     return !!min && (account.kdf.m < min.m || account.kdf.t < min.t);
   }
 
+  /** Told after the account's keys are wrapped afresh, for anything holding the old secret. */
+  onRekey?: (password: string) => Promise<unknown>;
+
   async changePassword(current: string, next: string, kdf?: KdfParams): Promise<void> {
     await this.rekeyWith(current, next, kdf, null);
   }
@@ -447,6 +450,7 @@ export class VaultClient {
     s.authKey = authKey;
     // A shortcut in that wraps the old secret would just say the password's wrong.
     await this.store.deleteMeta("passkey_unlock");
+    await this.onRekey?.(next);
   }
 
   // ---- Local data ----------------------------------------------------------

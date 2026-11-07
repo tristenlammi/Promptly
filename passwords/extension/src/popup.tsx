@@ -132,7 +132,7 @@ function UnlockView({ onDone, preview }: { onDone: () => void; preview: boolean 
         {preview && <span className="badge">Preview</span>}
       </div>
       <input className="input" type="password" aria-label="Master password" placeholder="Master password" autoFocus autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} />
-      {error && <p className="err">{error}</p>}
+      {error && <p role="alert" className="err">{error}</p>}
       <HelloLine onDone={onDone} onError={setError} />
       <PinLine onDone={onDone} onError={setError} />
       <button className="btn-primary" type="submit" disabled={busy || !pw}>{busy ? "Unlocking…" : "Unlock"}</button>

@@ -63,7 +63,11 @@ function deviceLabel(kind: Platform["kind"]): string {
 }
 
 export function VaultApp({ platform }: { platform: Platform }) {
-  const vault = useMemo(() => new VaultClient(platform.api, platform.store, platform.kind), [platform]);
+  const vault = useMemo(() => {
+    const v = new VaultClient(platform.api, platform.store, platform.kind);
+    v.onRekey = platform.rekeyed;
+    return v;
+  }, [platform]);
   const [phase, setPhase] = useState<Phase>("boot");
   const [username, setUsername] = useState("");
   const [preview, setPreview] = useState(true);
@@ -306,8 +310,10 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
   const lock = useCallback(async () => {
     // Leave these screens first: they throw if they draw again on a locked vault.
     onLock();
+    // Whatever holds the way back in hears first: telling the server can hang.
+    const told = platform.lock?.();
     await vault.lock();
-    await platform.lock?.();
+    await told;
   }, [vault, platform, onLock]);
 
   // Auto-lock: idle time and sleep. A timer that fires far later than asked means

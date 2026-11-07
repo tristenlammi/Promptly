@@ -23,6 +23,8 @@ export type Platform = {
   /** The extension: unlock happens in the background, and pages restore from it. */
   unlock?: (password: string) => Promise<unknown>;
   lock?: () => Promise<unknown>;
+  /** The master password, Secret Key or KDF settings just changed, here. */
+  rekeyed?: (password: string) => Promise<unknown>;
   /** The extension: pages and the background share one offline copy, so each tells
    *  the other when it changed. */
   notifyChanged?: () => void;
