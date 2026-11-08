@@ -3,7 +3,7 @@ post went to, its photos and videos, and people's Porch profiles. Plus the
 admin's switches in ``app_settings``.
 
 Revision ID: 0270_porch_core
-Revises: 0321_user_blocks
+Revises: 0330_mail_html_clipped
 """
 import uuid
 
@@ -12,7 +12,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0270_porch_core"
-down_revision = "0321_user_blocks"
+down_revision = "0330_mail_html_clipped"
 branch_labels = None
 depends_on = None
 

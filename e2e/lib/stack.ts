@@ -8,14 +8,16 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const E2E_ROOT = path.resolve(here, "..");
-export const AUTH_DIR = path.join(E2E_ROOT, ".auth");
+// scripts/stack.sh points these at a stack's own containers (and a per-stack
+// .auth folder), so two stacks' runs never share a fake model or sign-ins.
+export const AUTH_DIR = process.env.E2E_AUTH_DIR ?? path.join(E2E_ROOT, ".auth");
 export const RUN_FILE = path.join(AUTH_DIR, "run.json");
 
 export const BASE_URL = process.env.E2E_BASE_URL ?? "http://localhost:8091";
 export const BACKEND = process.env.E2E_BACKEND_CONTAINER ?? "Promptly-Backend";
 const IMAGE = process.env.E2E_BACKEND_IMAGE ?? "promptly-backend:local";
 const NETWORK = process.env.E2E_NETWORK ?? "promptly";
-export const MOCK = "promptly-e2e-mock";
+export const MOCK = process.env.E2E_MOCK_CONTAINER ?? "promptly-e2e-mock";
 
 export type SeededUser = { id: string; email: string; username: string; refresh_token: string };
 export type RunInfo = {
@@ -68,7 +70,9 @@ export function stopMockModel(): void {
 
 export function seed(action: "setup" | "teardown", env: Record<string, string> = {}): any {
   const script = fs.readFileSync(path.join(E2E_ROOT, "seed", "seed.py"), "utf8");
-  const envArgs = Object.entries({ E2E_ACTION: action, ...env }).flatMap(([k, v]) => ["-e", `${k}=${v}`]);
+  const envArgs = Object.entries({ E2E_ACTION: action, E2E_MOCK_URL: `http://${MOCK}:8000/v1`, ...env }).flatMap(
+    ([k, v]) => ["-e", `${k}=${v}`],
+  );
   const out = docker(["exec", "-i", ...envArgs, BACKEND, "python", "-"], script);
   const line = out.split(/\r?\n/).find((l) => l.startsWith("E2E_RESULT "));
   if (!line) throw new Error(`Seed (${action}) printed no result:\n${out}`);
