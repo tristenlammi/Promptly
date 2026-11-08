@@ -192,5 +192,29 @@ export function menuFrame(page: Page): Frame | undefined {
   return page.frames().find((f) => f.url().includes("/menu.html"));
 }
 
+/** The passkey PIN every test vault ends up with (D-PIN-1). */
+export const PASSKEY_PIN = "482913";
+
+/** Types the passkey PIN in our passkey window. The first time, there's a box to type it again. */
+export async function typePasskeyPin(prompt: Page, pin = PASSKEY_PIN) {
+  await prompt.locator("#pin").waitFor({ timeout: 15_000 });
+  await prompt.locator("#pin").fill(pin);
+  if (await prompt.locator("#pin-again").count()) await prompt.locator("#pin-again").fill(pin);
+}
+
+/** Signs in from our passkey window: picks the passkey if there's a choice, types the PIN, presses Sign in. */
+export async function signInWithPin(prompt: Page, who?: RegExp | string, pin = PASSKEY_PIN) {
+  await prompt.locator("#pin").waitFor({ timeout: 15_000 });
+  if (who !== undefined && (await prompt.getByRole("radio").count())) await prompt.getByRole("radio", { name: who }).first().check();
+  await typePasskeyPin(prompt, pin);
+  await prompt.getByRole("button", { name: "Sign in", exact: true }).click();
+}
+
+/** Saves from our passkey window: types the PIN, then presses the button named. */
+export async function saveWithPin(prompt: Page, buttonName = "Save as a new item", pin = PASSKEY_PIN) {
+  await typePasskeyPin(prompt, pin);
+  await prompt.getByRole("button", { name: buttonName }).click();
+}
+
 export const siteA = (path_: string) => `http://localhost:${PORT_A}/${path_}`;
 export const siteB = (path_: string) => `http://localhost:${PORT_B}/${path_}`;

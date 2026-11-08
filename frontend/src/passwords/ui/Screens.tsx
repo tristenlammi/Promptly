@@ -10,7 +10,7 @@ import { DEFAULT_PASSWORD, DEFAULT_PASSPHRASE, generatePassphrase, generatePassw
 import { Button, Callout, CopyButton, errorText, inputClass, Label, Modal, useVault } from "./kit";
 import { StrengthMeter } from "./Onboarding";
 import { Reprompt, TotpRow } from "./ItemView";
-import { ClockWarning, KeysPanel, PasskeyUnlockPanel, PinPanel, TravelPanel, VaultIconsToggle } from "./Connections";
+import { ClockWarning, KeysPanel, PasskeyPinPanel, PasskeyUnlockPanel, PinPanel, TravelPanel, VaultIconsToggle } from "./Connections";
 import { decodeQrFile, scanQrFromCamera } from "./qr";
 
 export function GeneratorScreen() {
@@ -447,6 +447,9 @@ export function SettingsScreen() {
           </Label>
         )}
         {helloError && <Callout kind="danger">{helloError}</Callout>}
+      </SettingsGroup>
+      <SettingsGroup title="Passkeys">
+        <PasskeyPinPanel />
       </SettingsGroup>
       {platform.fillControls && <SettingsGroup title="Filling">{platform.fillControls}</SettingsGroup>}
       <SettingsGroup title="Clipboard">

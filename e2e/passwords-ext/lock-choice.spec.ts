@@ -6,7 +6,7 @@ import fs from "node:fs";
 import { expect, type Page, test } from "@playwright/test";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 
-import { addItem, bg, connect, launch, lockExt, makeUsers, MASTER, popupFor, type Rig, siteA, startSite, testHook, unlockExt } from "./lib";
+import { addItem, bg, connect, launch, lockExt, makeUsers, MASTER, popupFor, type Rig, saveWithPin, signInWithPin, siteA, startSite, testHook, unlockExt } from "./lib";
 
 test.describe.configure({ mode: "serial" });
 
@@ -102,13 +102,13 @@ test("the vault page's Settings shows the same setting, and changing it there co
   await v.close();
 });
 
-test("before Never: a passkey with no password asked for, and a real library accepts it", async () => {
+test("before Never: a passkey with the PIN and no password, and a real library accepts it", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(siteA("webauthn.html"));
   const challenge = b64u(crypto.randomBytes(32));
   const run = page.evaluate((o) => (window as any).__register(o), { rpId: "localhost", userId: b64u(Buffer.from("stay-1")), userName: "stay@example.com", challenge, uv: "required" });
   const prompt = await passkeyWindow();
-  await prompt.getByRole("button", { name: "Save as a new item" }).click();
+  await saveWithPin(prompt);
   const r = await run;
   expect(r.error).toBeUndefined();
   const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: "localhost", requireUserVerification: true });
@@ -127,7 +127,7 @@ test("Never: no timer, sleep doesn't lock it, and the secret's kept sealed", asy
   expect(await unlocked()).toBe(true);
 });
 
-test("Never: after a real restart, the panel, the vault page, filling and a passkey all work with no password", async () => {
+test("Never: after a real restart, the panel, the vault page, filling and a passkey (with its PIN) all work with no password", async () => {
   await restart();
   await expect.poll(unlocked, { timeout: 15_000 }).toBe(true);
 
@@ -159,7 +159,7 @@ test("Never: after a real restart, the panel, the vault page, filling and a pass
   const challenge = b64u(crypto.randomBytes(32));
   const run = page.evaluate((o) => (window as any).__auth(o), { rpId: "localhost", challenge, uv: "required" });
   const prompt = await passkeyWindow();
-  await prompt.getByRole("button", { name: /stay@example.com/ }).click();
+  await signInWithPin(prompt, /stay@example.com/);
   const r = await run;
   expect(r.error).toBeUndefined();
   const ok = await verifyAuthenticationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: "localhost", credential: { id: credential.id, publicKey: credential.publicKey as Uint8Array<ArrayBuffer>, counter: credential.counter }, requireUserVerification: true });

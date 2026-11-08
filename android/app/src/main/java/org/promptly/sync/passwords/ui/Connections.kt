@@ -62,6 +62,8 @@ import org.promptly.sync.passwords.core.ActivityOut
 import org.promptly.sync.passwords.core.ApiError
 import org.promptly.sync.passwords.core.DriveFile
 import org.promptly.sync.passwords.core.DriveFiles
+import org.promptly.sync.passwords.core.PasskeyPin
+import org.promptly.sync.passwords.core.PinCheck
 import org.promptly.sync.passwords.core.Generator
 import org.promptly.sync.passwords.core.Item
 import org.promptly.sync.passwords.core.LoginUrl
@@ -121,6 +123,91 @@ fun ActivityScreen(client: VaultClient, onBack: () -> Unit) {
                 HorizontalDivider()
             }
         }
+    }
+}
+
+/** The passkey PIN, set or changed here as well as the first time a passkey's used. Changing it
+ *  takes the master password or the PIN it replaces, and wrong PINs here count the same. */
+@Composable
+fun PasskeyPinSetting(client: VaultClient) {
+    var isSet by remember { mutableStateOf<Boolean?>(null) }
+    var proof by remember { mutableStateOf("") }
+    var pin by remember { mutableStateOf("") }
+    var again by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var done by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) { isSet = withContext(Dispatchers.IO) { PasskeyPin.of(client) != null } }
+
+    fun save() {
+        error = null
+        done = null
+        PasskeyPin.problem(pin)?.let {
+            error = it
+            return
+        }
+        if (pin != again) {
+            error = "Those two don't match."
+            return
+        }
+        busy = true
+        val typedProof = proof
+        val next = pin
+        scope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching {
+                    val current = PasskeyPin.of(client)
+                    var ok = client.checkPassword(typedProof)
+                    if (!ok && current != null && typedProof.isNotEmpty() && typedProof.all { it in '0'..'9' }) {
+                        when (val c = PasskeyPin.check(client.store, current, typedProof)) {
+                            PinCheck.Ok -> ok = true
+                            is PinCheck.Wrong -> {
+                                if (c.left == 0) {
+                                    Pw.lock("five wrong passkey PINs")
+                                    return@runCatching PasskeyPin.LOCKED_TEXT
+                                }
+                                return@runCatching "That isn't your master password or your passkey PIN. ${c.left} ${if (c.left == 1) "try" else "tries"} left before your vault locks."
+                            }
+                        }
+                    }
+                    if (!ok) return@runCatching if (current != null) "That isn't your master password or your passkey PIN." else "That master password isn't right."
+                    PasskeyPin.save(client, PasskeyPin.make(next))
+                    PasskeyPin.clearTries(client.store)
+                    null
+                }.getOrElse { errorText(it) }
+            }
+            busy = false
+            if (r != null) {
+                error = r
+            } else {
+                done = if (isSet == true) "Passkey PIN changed." else "Passkey PIN set."
+                isSet = true
+                proof = ""
+                pin = ""
+                again = ""
+            }
+        }
+    }
+
+    val known = isSet ?: return
+    Text("Passkey PIN", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+    Text(
+        if (known) "Set. It's asked each time you sign in with a passkey or make one, on all your devices. Five wrong in a row locks your vault. 4 to 12 digits, and not an easy one like 1234."
+        else "Not set yet. You'll be asked to choose one the first time you use or make a passkey, or you can set it here. 4 to 12 digits, and not an easy one like 1234.",
+        style = MaterialTheme.typography.bodySmall,
+        modifier = Modifier.testTag("passkey-pin-state"),
+    )
+    SecretField(proof, { proof = it }, if (known) "Master password or current passkey PIN" else "Master password", "passkey-pin-proof")
+    PinField(pin, { pin = it }, "New passkey PIN", "passkey-pin-new", { save() })
+    PinField(again, { again = it }, "Type it again", "passkey-pin-again", { save() })
+    error?.let { ErrorCard(it) }
+    done?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("passkey-pin-done")) }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Button(onClick = { save() }, enabled = !busy && proof.isNotEmpty() && pin.isNotEmpty() && again.isNotEmpty(), modifier = Modifier.testTag("passkey-pin-save")) {
+            Text(if (known) "Change passkey PIN" else "Set passkey PIN")
+        }
+        if (busy) CircularProgressIndicator(Modifier.padding(start = 4.dp))
     }
 }
 

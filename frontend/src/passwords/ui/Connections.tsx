@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { changePageUrl, clockDriftText, commitPending, createPasskeyUnlock, dropPending, findDuplicates, mergeDuplicates, type PasskeyUnlock, type SecurityAlert, securityAlerts, type SecurityEvent, withPending } from "../core/connections";
 import { buildKitPdf } from "../core/kit";
 import { encodeSecretKey, lastGroup } from "../core/keys";
+import { checkPasskeyPin, clearPinTries, makePinVerifier, passkeyPinOf, PIN_LOCKED_TEXT, pinProblem, savePasskeyPin } from "../core/passkeypin";
 import { generateForSite } from "../core/generator";
 import { hostOf } from "../core/match";
 import { type Item, newBody } from "../core/model";
@@ -548,6 +549,85 @@ export function PinPanel() {
       )}
       {error && <Callout kind="danger">{error}</Callout>}
     </div>
+  );
+}
+
+/** The passkey PIN: asked before every passkey sign-in and every new passkey, in the extension
+ *  and on Android. Synced, so it's the same everywhere. Changing it takes the master password or
+ *  the PIN it replaces, and wrong PINs here count the same as in the passkey window. */
+export function PasskeyPinPanel() {
+  const { vault, version, bump, toast, lock } = useVault();
+  const [isSet, setIsSet] = useState<boolean | null>(null);
+  const [proof, setProof] = useState("");
+  const [pin, setPin] = useState("");
+  const [again, setAgain] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    void version;
+    passkeyPinOf(vault).then((v) => setIsSet(!!v));
+  }, [vault, version]);
+  if (isSet === null) return null;
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    const problem = pinProblem(pin);
+    if (problem) return setError(problem);
+    if (pin !== again) return setError("Those two don't match.");
+    setBusy(true);
+    try {
+      const current = await passkeyPinOf(vault);
+      let ok = await vault.checkPassword(proof);
+      if (!ok && current && /^\d+$/.test(proof)) {
+        const r = await checkPasskeyPin(vault.store, current, proof);
+        if (!r.ok && r.left === 0) {
+          toast(PIN_LOCKED_TEXT, "err");
+          await lock();
+          return;
+        }
+        if (!r.ok) return setError(`That isn't your master password or your passkey PIN. ${r.left} ${r.left === 1 ? "try" : "tries"} left before your vault locks.`);
+        ok = true;
+      }
+      if (!ok) return setError(current ? "That isn't your master password or your passkey PIN." : "That master password isn't right.");
+      await savePasskeyPin(vault, await makePinVerifier(pin));
+      await clearPinTries(vault.store);
+      setProof("");
+      setPin("");
+      setAgain("");
+      setIsSet(true);
+      bump();
+      toast(current ? "Passkey PIN changed" : "Passkey PIN set");
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form data-testid="passkey-pin" onSubmit={save} className="flex flex-col gap-2">
+      <h2 className="text-sm font-semibold text-[var(--text)]">Passkey PIN</h2>
+      <p className="text-xs text-[var(--text-muted)]">
+        {isSet
+          ? "Set. It's asked each time you sign in with a passkey or make one, on all your devices. Five wrong in a row locks your vault."
+          : "Not set yet. You'll be asked to choose one the first time you use or make a passkey, or you can set it here."}{" "}
+        4 to 12 digits, and not an easy one like 1234.
+      </p>
+      <Label text={isSet ? "Master password or current passkey PIN" : "Master password"}>
+        <input data-testid="passkey-pin-proof" className={inputClass} type="password" autoComplete="current-password" value={proof} onChange={(e) => setProof(e.target.value)} />
+      </Label>
+      <Label text="New passkey PIN">
+        <input data-testid="passkey-pin-new" className={inputClass} type="password" inputMode="numeric" autoComplete="off" maxLength={12} value={pin} onChange={(e) => setPin(e.target.value)} />
+      </Label>
+      <Label text="Type it again">
+        <input data-testid="passkey-pin-again" className={inputClass} type="password" inputMode="numeric" autoComplete="off" maxLength={12} value={again} onChange={(e) => setAgain(e.target.value)} />
+      </Label>
+      {error && <Callout kind="danger">{error}</Callout>}
+      <Button className="w-fit" kind="primary" type="submit" disabled={busy || !proof || !pin || !again}>
+        {isSet ? "Change passkey PIN" : "Set passkey PIN"}
+      </Button>
+    </form>
   );
 }
 

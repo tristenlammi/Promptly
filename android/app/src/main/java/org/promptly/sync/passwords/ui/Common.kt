@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -37,6 +38,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalContext
@@ -46,6 +49,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -59,6 +63,8 @@ import org.promptly.sync.passwords.Pw
 import org.promptly.sync.passwords.core.ApiError
 import org.promptly.sync.passwords.core.KeyChangedError
 import org.promptly.sync.passwords.core.OfflineError
+import org.promptly.sync.passwords.core.PasskeyPin
+import org.promptly.sync.passwords.core.PinCheck
 import org.promptly.sync.passwords.core.WrongPasswordError
 
 private val Terracotta = Color(0xFFC8613F)
@@ -154,6 +160,119 @@ fun SecretField(value: String, onChange: (String) -> Unit, label: String, tag: S
     }
 }
 
+/** A passkey PIN box: digits only, hidden, kept out of what the keyboard learns, and Done on the
+ *  keyboard sends it. */
+@Composable
+fun PinField(value: String, onChange: (String) -> Unit, label: String, tag: String, onDone: () -> Unit, focus: FocusRequester? = null) {
+    SensitiveWhile(false)
+    NoKeyboardLearning {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { v -> onChange(v.filter { it in '0'..'9' }.take(PasskeyPin.MAX)) },
+            label = { Text(label) },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword, autoCorrectEnabled = false, imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(onDone = { onDone() }),
+            modifier = Modifier.fillMaxWidth().testTag(tag).let { m -> if (focus != null) m.focusRequester(focus) else m },
+        )
+    }
+}
+
+/** What a typed passkey PIN came to. */
+sealed class PinOutcome {
+    data object Ok : PinOutcome()
+    data class Wrong(val left: Int) : PinOutcome()
+    data class Refused(val text: String) : PinOutcome()
+    /** Five wrong: the vault's been locked. */
+    data object LockedOut : PinOutcome()
+}
+
+/** Checks a passkey PIN, or saves the one being chosen. Off the main thread: Argon2 runs here. Five
+ *  wrong in a row lock the vault. */
+fun answerPasskeyPin(choosing: Boolean, pin: String, again: String): PinOutcome {
+    val client = Pw.client() ?: return PinOutcome.LockedOut
+    if (!client.unlocked) return PinOutcome.LockedOut
+    val current = PasskeyPin.of(client)
+    if (current == null) {
+        PasskeyPin.problem(pin)?.let { return PinOutcome.Refused(it) }
+        if (!choosing) return PinOutcome.Refused("Choose a passkey PIN first.")
+        if (again != pin) return PinOutcome.Refused("Those two don't match.")
+        PasskeyPin.save(client, PasskeyPin.make(pin))
+        PasskeyPin.clearTries(client.store)
+        return PinOutcome.Ok
+    }
+    // Set on another device while this was open: that one counts, and this is a try at it.
+    return when (val r = PasskeyPin.check(client.store, current, pin)) {
+        PinCheck.Ok -> PinOutcome.Ok
+        is PinCheck.Wrong -> if (r.left > 0) PinOutcome.Wrong(r.left) else {
+            Pw.lock("five wrong passkey PINs")
+            PinOutcome.LockedOut
+        }
+    }
+}
+
+/** Asked before every passkey sign-in and every new passkey (D-PIN-1). The box has the focus, and
+ *  Done signs. The first time, it's chosen here, typed twice. */
+@Composable
+fun PasskeyPinPane(heading: String, detail: String?, choosing: Boolean, onConfirmed: () -> Unit, onCancel: () -> Unit) {
+    var pin by remember { mutableStateOf("") }
+    var again by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    val left = remember { Pw.client()?.let { PasskeyPin.TRIES - PasskeyPin.tries(it.store) } ?: PasskeyPin.TRIES }
+    var error by remember { mutableStateOf(if (!choosing && left < PasskeyPin.TRIES) PasskeyPin.triesText(left) else null) }
+    val scope = rememberCoroutineScope()
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+
+    fun submit() {
+        if (busy) return
+        if (pin.isEmpty()) {
+            error = if (choosing) "Choose a PIN first." else "Type your passkey PIN."
+            return
+        }
+        if (choosing && again != pin) {
+            error = "Those two don't match."
+            pin = ""
+            again = ""
+            runCatching { focus.requestFocus() }
+            return
+        }
+        busy = true
+        error = null
+        val typed = pin
+        val second = again
+        scope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { answerPasskeyPin(choosing, typed, second) }.getOrElse { PinOutcome.Refused(errorText(it)) } }
+            busy = false
+            pin = ""
+            again = ""
+            when (r) {
+                PinOutcome.Ok -> onConfirmed()
+                is PinOutcome.Wrong -> error = PasskeyPin.triesText(r.left)
+                is PinOutcome.Refused -> error = r.text
+                // The vault's locked: the sheet goes back to its unlock screen, which says why.
+                PinOutcome.LockedOut -> Unit
+            }
+            runCatching { focus.requestFocus() }
+        }
+    }
+
+    Column(Modifier.fillMaxSize().safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Text(heading, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        detail?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        if (choosing) Text("Choose a passkey PIN. You'll type it each time you use or make a passkey, on all your devices. 4 to 12 digits, and not an easy one like 1234.", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("pin-choose"))
+        PinField(pin, { pin = it }, if (choosing) "Choose a passkey PIN" else "Passkey PIN", "passkey-pin", { submit() }, focus)
+        if (choosing) PinField(again, { again = it }, "Type it again", "passkey-pin-again", { submit() })
+        error?.let { ErrorCard(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Button(onClick = { submit() }, enabled = !busy && pin.isNotEmpty(), modifier = Modifier.testTag("passkey-pin-go")) { Text("Continue") }
+            TextButton(onClick = onCancel, enabled = !busy, modifier = Modifier.testTag("cancel")) { Text("Cancel") }
+            if (busy) CircularProgressIndicator(Modifier.padding(start = 4.dp))
+        }
+    }
+}
+
 /** A secret that's easier to get right when you can read it: a Secret Key, a 2FA secret, a
  *  private key. Shown, but typed like a password, and kept out of what the keyboard learns. */
 @Composable
@@ -201,7 +320,9 @@ fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Un
     var rotatedOut by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
-    val canBio = Biometrics.enrolled && Biometrics.available(ctx)
+    // After five wrong passkey PINs, only the master password, and it says so.
+    val pinLocked = remember { Pw.client()?.let { PasskeyPin.lockedOut(it.store) } == true }
+    val canBio = Biometrics.enrolled && Biometrics.available(ctx) && !pinLocked
 
     fun biometric() {
         error = null
@@ -260,6 +381,7 @@ fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Un
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text(heading, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        if (pinLocked) ErrorCard(PasskeyPin.LOCKED_TEXT)
         SecretField(password, { password = it }, "Master password", "master-password")
         error?.let { ErrorCard(it) }
         if (rotatedOut) {
@@ -286,7 +408,7 @@ fun UnlockPane(activity: FragmentActivity, heading: String, onUnlocked: () -> Un
     }
 }
 
-/** Ask again for one item (the item's "reprompt" setting, or before signing a passkey):
+/** Ask again for one item (the item's "reprompt" setting, or turning on biometric unlock):
  *  a biometric if it's set up, otherwise the master password, checked locally. */
 @Composable
 fun ConfirmIdentityPane(activity: FragmentActivity, heading: String, detail: String?, biometricFirst: Boolean, onConfirmed: () -> Unit, onCancel: () -> Unit) {
