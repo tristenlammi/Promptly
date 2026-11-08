@@ -9,6 +9,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { voiceHarnessEnabled } from "@/pages/dev/flags";
 import { toast } from "@/store/toastStore";
 
+import { hasAndroidCallsApp } from "../../voice/androidApp";
 import { calls, callEngine } from "../actions";
 import { useCallsLive } from "../live";
 import { useCallStore } from "../store";
@@ -44,6 +45,12 @@ function useAnswerFromPush() {
     q.delete("answer");
     const rest = q.toString();
     navigate({ pathname: location.pathname, search: rest ? `?${rest}` : "" }, { replace: true });
+    // The Android app answered it (its call screen's "Show video"): this
+    // page shows the video while the app keeps the sound.
+    if (!answer && hasAndroidCallsApp()) {
+      void calls.watch(callId);
+      return;
+    }
     if (!answer) return; // a plain tap: the incoming call shows if it still rings
     const ring = useCallStore.getState().incoming[callId];
     void calls.answer(callId, { video: ring?.media === "video", roomId: ring?.room_id ?? null, media: ring?.media ?? "audio" });

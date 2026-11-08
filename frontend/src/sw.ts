@@ -169,6 +169,68 @@ interface PushPayload {
   answer_url?: string;
   require_interaction?: boolean;
   silent?: boolean;
+  /** A ring's: the Android app redeems this to answer natively. */
+  answer_token?: string;
+  media?: string;
+  busy?: boolean;
+  group?: boolean;
+}
+
+/** Calls WP-D3: this phone has the Promptly Android app, which rings calls
+ * itself (full screen, Telecom). The page tells the worker when the app
+ * opened it (``rtc/voice/androidApp.ts``); the worker remembers it here,
+ * since it can't read the page's storage. Thirty days, renewed on every visit. */
+const ANDROID_CALLS_CACHE = "promptly-device";
+const ANDROID_CALLS_KEY = "/__promptly/android-calls";
+const ANDROID_CALLS_DAYS = 30;
+
+async function androidCallsApp(): Promise<boolean> {
+  try {
+    const res = await (await caches.open(ANDROID_CALLS_CACHE)).match(ANDROID_CALLS_KEY);
+    if (!res) return false;
+    const at = Number(await res.text());
+    return Number.isFinite(at) && Date.now() - at < ANDROID_CALLS_DAYS * 86_400_000;
+  } catch {
+    return false;
+  }
+}
+
+async function rememberAndroidCallsApp(on: boolean): Promise<void> {
+  try {
+    const cache = await caches.open(ANDROID_CALLS_CACHE);
+    if (on) await cache.put(ANDROID_CALLS_KEY, new Response(String(Date.now())));
+    else await cache.delete(ANDROID_CALLS_KEY);
+  } catch {
+    /* no Cache Storage: the app's ring just won't have a token */
+  }
+}
+
+self.addEventListener("message", (event: ExtendableMessageEvent) => {
+  const d = event.data as { type?: string; on?: boolean } | null;
+  if (d?.type === "promptly-android-calls") event.waitUntil(rememberAndroidCallsApp(d.on !== false));
+});
+
+/** A call push's notification tag. The Android app finds it inside the tag
+ * Chrome gives it (``android/.../calls/CallLogic.kt::CallTag``):
+ * ``call:<id>|r|<a|v>|<busy>|<group>|<answer token>`` for a ring (the token
+ * only for a phone with the app), ``|s`` stop, ``|m`` missed. */
+function callTag(payload: PushPayload, native: boolean): string {
+  const id = payload.call_id ?? "";
+  if (payload.kind === "call_ring") {
+    const token = native && payload.answer_token ? payload.answer_token : "";
+    return `call:${id}|r|${payload.media === "video" ? "v" : "a"}|${payload.busy ? 1 : 0}|${payload.group ? 1 : 0}|${token}`;
+  }
+  if (payload.kind === "call_stop") return `call:${id}|s`;
+  if (payload.kind === "call_missed") return `call:${id}|m`;
+  return payload.tag || `call:${id}`;
+}
+
+/** Close every notification about this call (its ring, its stop). */
+async function closeCall(callId: string): Promise<void> {
+  const prefix = `call:${callId}`;
+  for (const n of await self.registration.getNotifications()) {
+    if (n.tag === prefix || n.tag.startsWith(`${prefix}|`)) n.close();
+  }
 }
 
 /** Calls: give every open Promptly tab the push (they show the incoming
@@ -190,19 +252,20 @@ async function passCallToTabs(payload: PushPayload): Promise<boolean> {
  * answered, declined or stopped), stop (replace the ring, then close it at
  * once: Chrome wants every push to show something), or missed. */
 async function showCall(payload: PushPayload): Promise<void> {
-  const inFront = await passCallToTabs(payload);
-  const tag = payload.tag || (payload.call_id ? `call:${payload.call_id}` : "call");
+  const [inFront, native] = await Promise.all([passCallToTabs(payload), androidCallsApp()]);
+  if (!payload.call_id) return;
+  const tag = callTag(payload, native);
+  // Whatever this push is, it replaces what was shown for the call before.
+  await closeCall(payload.call_id);
   if (payload.kind === "call_stop") {
     await self.registration.showNotification(payload.title || "Promptly", { body: payload.body, tag, silent: true, icon: "/pwa-192.png", badge: "/pwa-192.png", data: { url: payload.url ?? "/" } } as NotificationOptions);
-    for (const n of await self.registration.getNotifications({ tag })) n.close();
+    await closeCall(payload.call_id);
     return;
   }
   if (payload.kind === "call_ring") {
-    if (inFront) {
-      // The page in front rings; clear any older notification for this call.
-      for (const n of await self.registration.getNotifications({ tag })) n.close();
-      return;
-    }
+    // The page in front rings (unless the Android app does: it rings over
+    // whatever's on screen, and the page stays quiet).
+    if (inFront && !native) return;
     const maxActions = (Notification as unknown as { maxActions?: number }).maxActions ?? 2;
     const buttons = (payload.actions ?? []).slice(0, maxActions);
     await self.registration.showNotification(payload.title, {

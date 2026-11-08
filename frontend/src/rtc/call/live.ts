@@ -20,6 +20,7 @@ import { BOOTSTRAP_KEY } from "@/rooms/cache";
 import { subscribeRoomsStream } from "@/rooms/stream";
 import { useAuthStore } from "@/store/authStore";
 
+import { hasAndroidCallsApp } from "../voice/androidApp";
 import { useVoiceStore } from "../voice/store";
 import { loadedEngine } from "./actions";
 import { inCallHere, rememberUsers, useCallStore, type CallStoreState } from "./store";
@@ -76,6 +77,9 @@ function dropIncoming(callId: string): void {
 /** A call is ringing you (the stream's event or the push's fields). */
 export function ringArrived(ring: CallRing): void {
   if (!ring?.call_id || stopped.has(ring.call_id)) return;
+  // The Promptly Android app rings this phone itself (full screen, over
+  // whatever's open): the page stays quiet (Calls WP-D3).
+  if (hasAndroidCallsApp()) return;
   if (ring.ring_until && Date.parse(ring.ring_until) + RING_GRACE_MS < Date.now()) return;
   // Already in that call here (it rang again while you were joining).
   if (get().callId === ring.call_id && inCallHere(get())) return;

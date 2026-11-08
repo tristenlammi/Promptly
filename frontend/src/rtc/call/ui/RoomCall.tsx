@@ -9,6 +9,7 @@ import type { Bootstrap, Room } from "@/api/rooms";
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/utils/cn";
 
+import { hasAndroidCallsApp } from "../../voice/androidApp";
 import { calls } from "../actions";
 import { inCallHere, useCallStore } from "../store";
 import { CALL_GREEN } from "./bits";
@@ -76,6 +77,8 @@ export function CallInProgressBar({ b, room }: { b: Bootstrap; room: Room }) {
   const ringingMe = useCallStore((s) => !!call && !!s.incoming[call.id]);
   if (!call || here || ringingMe || !canCallIn(b, room) || call.in_call.length === 0) return null;
   const meElsewhere = !!self && call.in_call.includes(self);
+  // This phone's Promptly app has the call (answered on its ring): show the video here.
+  const inApp = meElsewhere && hasAndroidCallsApp() && call.participants.some((p) => p.user_id === self && p.in_call && p.device === "android");
   const n = call.in_call.length;
   const what = call.media === "video" ? "Video call in progress" : "Call in progress";
   const people = `${n} ${n === 1 ? "person" : "people"}`;
@@ -88,15 +91,15 @@ export function CallInProgressBar({ b, room }: { b: Bootstrap; room: Room }) {
     >
       <PhoneCall className="h-4 w-4 shrink-0" aria-hidden />
       <span className="min-w-0 flex-1 truncate font-medium">
-        {meElsewhere ? "You're in this call on another device" : `${what} · ${people}`}
+        {inApp ? "You're in this call in the Promptly app" : meElsewhere ? "You're in this call on another device" : `${what} · ${people}`}
       </span>
       <button
         type="button"
-        onClick={() => void calls.answer(call.id, { video: false, roomId: room.id, media: call.media })}
+        onClick={() => void (inApp ? calls.watch(call.id) : calls.answer(call.id, { video: false, roomId: room.id, media: call.media }))}
         className="shrink-0 rounded-full bg-white px-4 py-1.5 text-sm font-semibold text-[#14532d] hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#15803d]"
         data-testid="call-join"
       >
-        {meElsewhere ? "Switch here" : "Join"}
+        {inApp ? "Show call" : meElsewhere ? "Switch here" : "Join"}
       </button>
     </div>
   );

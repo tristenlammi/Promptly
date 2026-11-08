@@ -857,6 +857,8 @@ async def test_a_second_device_takes_over_and_the_old_ones_leave_is_ignored(clie
     # The phone's connection going does.
     await hook(client, "participant_left", lk_room(cid), ident(w.ann), sid="PA_phone")
     assert (await call_row(db, cid)).ended_reason == "completed"
+    # ...and the call's room closes, so Ben (an Android phone needs telling) isn't left in it.
+    assert lk_room(cid) in lk.deleted
 
 
 async def test_webhooks_kick_strangers_and_late_connections(client, db, lk):
@@ -916,6 +918,44 @@ async def test_answer_with_the_pushs_token(client, db, lk, pushes):
     w.ben.token_version = (w.ben.token_version or 0) + 1
     await db.commit()
     assert (await client.post("/api/calls/answer", json={"token": token})).status_code == 404
+
+
+async def test_android_ring_state_and_decline_with_the_answer_token(client, db, lk, pushes):
+    w = await world(client, db)
+    cid = (await start(client, w.ann, w.dm))["call"]["id"]
+    token = pushes[0]["extra"]["answer_token"]
+    r = await client.post("/api/calls/answer/state", json={"token": token})
+    assert r.status_code == 200 and r.json() == {"ringing": True, "ring": "ringing", "ended": False, "in_call_here": False}
+    # Wrong kind of token, junk: 404, never a hint.
+    assert (await client.post("/api/calls/answer/state", json={"token": pushes[0]["extra"]["actions"][1]["token"]})).status_code == 404
+    assert (await client.post("/api/calls/answer/decline", json={"token": "junk.junk.junk"})).status_code == 404
+    r = await client.post("/api/calls/answer/decline", json={"token": token})
+    assert r.status_code == 200, r.text
+    row = await call_row(db, cid)
+    assert row.ended_at is not None and row.ended_reason == "declined"
+    r = await client.post("/api/calls/answer/state", json={"token": token})
+    assert r.json()["ringing"] is False and r.json()["ended"] is True and r.json()["ring"] == "declined"
+    # Declining twice: the call isn't ringing any more.
+    assert (await client.post("/api/calls/answer/decline", json={"token": token})).status_code == 409
+
+    # Answered on another device: this one's ring is over.
+    pushes.clear()
+    g = (await start(client, w.ann, w.dm))["call"]["id"]
+    token = next(p for p in pushes if p["extra"].get("kind") == "call_ring")["extra"]["answer_token"]
+    await act(client, w.ben, g, "join")
+    out = (await client.post("/api/calls/answer/state", json={"token": token})).json()
+    assert out["ringing"] is False and out["ended"] is False and out["in_call_here"] is True
+
+
+async def test_the_page_controls_the_phones_call(client, db, lk):
+    w = await world(client, db)
+    cid = (await start(client, w.ann, w.dm, device="android"))["call"]["id"]
+    r = await act(client, w.ann, cid, "control", action="mute")
+    assert r["delivered"] is True and r["device"] == "android"
+    assert lk.data[-1] == (lk_room(cid), {"action": "mute"}, [ident(w.ann)], "call.control")
+    # Not in the call (ringing still), or an unknown action.
+    await act(client, w.ben, cid, "control", action="mute", expect=409)
+    await act(client, w.ann, cid, "control", action="explode", expect=422)
 
 
 async def test_view_token_is_listen_only(client, db, lk):

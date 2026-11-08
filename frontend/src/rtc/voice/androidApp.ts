@@ -18,13 +18,44 @@ function isAndroid(): boolean {
   return typeof navigator !== "undefined" && /android/i.test(navigator.userAgent);
 }
 
+const CALLS_KEY = "promptly.android.calls";
+
 /** Remember that this phone has the app (from the launcher's address). */
 export function captureAppCaps(): void {
   try {
-    const caps = new URLSearchParams(window.location.search).get("caps") ?? "";
-    if (caps.split(",").includes("voice")) window.localStorage.setItem(KEY, String(Date.now()));
+    const caps = (new URLSearchParams(window.location.search).get("caps") ?? "").split(",");
+    if (caps.includes("voice")) window.localStorage.setItem(KEY, String(Date.now()));
+    // Calls WP-D3: the app rings DM calls itself.
+    if (caps.includes("calls")) window.localStorage.setItem(CALLS_KEY, String(Date.now()));
   } catch {
     /* no storage: the page holds voice itself */
+  }
+  if (hasAndroidCallsApp()) tellWorker(true);
+}
+
+/**
+ * This is an Android phone whose Promptly app rings DM calls (Calls WP-D3):
+ * full screen over the lock screen, through Android's call system, answered
+ * by the app's own call service. The page then stays quiet when a call
+ * rings, and the service worker gives the ring's answer token to the app.
+ */
+export function hasAndroidCallsApp(): boolean {
+  if (!isAndroid()) return false;
+  try {
+    return !!window.localStorage.getItem(CALLS_KEY);
+  } catch {
+    return false;
+  }
+}
+
+/** The service worker can't read the page's storage: tell it (renewed on every visit). */
+function tellWorker(on: boolean): void {
+  try {
+    const sw = navigator.serviceWorker;
+    if (!sw) return;
+    void sw.ready.then((r) => r.active?.postMessage({ type: "promptly-android-calls", on })).catch(() => undefined);
+  } catch {
+    /* no service worker: no app rings either */
   }
 }
 

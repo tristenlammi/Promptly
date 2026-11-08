@@ -119,6 +119,98 @@ export class CallEngine {
     return this.enter(() => dmCallsApi.join(callId), { outgoing: false, video: opts.video, roomId: opts.roomId ?? null, media: opts.media ?? "audio" });
   }
 
+  /**
+   * A call the Promptly Android app on this phone answered (Calls WP-D3):
+   * the app holds its sound, with the screen off or in other apps; this
+   * page shows the cameras and screens over a listen-only connection
+   * (``POST /calls/{id}/view``) and drives the app's mute and loudspeaker
+   * through the server. "Switch here" (``answer``) moves the whole call to
+   * this page instead.
+   */
+  async watch(callId: string): Promise<boolean> {
+    if (inCallHere(get())) return get().callId === callId;
+    let call: DmCall;
+    try {
+      call = await dmCallsApi.get(callId);
+    } catch {
+      return false;
+    }
+    const mine = call.participants.find((p) => p.user_id === me());
+    if (!call.live || !mine?.in_call || mine.device !== "android") return false;
+    const gen = ++this.gen;
+    this.clearEndTimer();
+    this.serverEnd = null;
+    set({
+      ...initialCallConnection,
+      ended: null,
+      status: "connecting",
+      outgoing: false,
+      callId: call.id,
+      roomId: call.room_id,
+      media: call.media,
+      call,
+      phone: true,
+      phoneSpeaker: call.media === "video",
+    });
+    this.noteCall(call);
+    let lk: LiveKit;
+    let view: { url: string; token: string };
+    try {
+      [lk, view] = await Promise.all([this.loadLk(), dmCallsApi.view(callId)]);
+    } catch (err) {
+      if (gen !== this.gen) return false;
+      set({ ...initialCallConnection, problem: joinProblem(err) });
+      return false;
+    }
+    if (gen !== this.gen) return false;
+    const room = new lk.Room({ adaptiveStream: true, disconnectOnPageLeave: true });
+    this.room = room;
+    this.wire(lk, room, gen);
+    try {
+      await room.connect(signalUrl(view.url), view.token, { autoSubscribe: false });
+    } catch (err) {
+      if (gen !== this.gen) return false;
+      this.room = null;
+      room.removeAllListeners();
+      set({ ...initialCallConnection, problem: { kind: "connect-failed", message: detailOf(err) } });
+      return false;
+    }
+    if (gen !== this.gen) return false;
+    for (const p of room.remoteParticipants.values()) this.refreshPeer(p);
+    set({ status: "connected", connectedAt: Date.now() });
+    return true;
+  }
+
+  /** Phone mode: watch cameras and screens (no sound: the app plays it),
+   *  and read your own mute from the app's connection. */
+  private watchTracks(p: RemoteParticipant): void {
+    const lk = this.lk;
+    if (!lk) return;
+    const S = lk.Track.Source;
+    if (userOfIdentity(p.identity) === me()) {
+      const mic = p.getTrackPublication(S.Microphone);
+      const muted = !mic || mic.isMuted;
+      if (get().muted !== muted) set({ muted, ...(muted ? { speaking: false } : {}) });
+      return;
+    }
+    for (const pub of p.trackPublications.values()) {
+      const want = pub.source === S.Camera || pub.source === S.ScreenShare;
+      if (pub.isSubscribed !== want) pub.setSubscribed(want);
+    }
+  }
+
+  /** Phone mode: the app's loudspeaker. */
+  async setPhoneSpeaker(on: boolean): Promise<void> {
+    const s = get();
+    if (!s.phone || !s.callId) return;
+    set({ phoneSpeaker: on });
+    try {
+      await dmCallsApi.control(s.callId, on ? "speaker_on" : "speaker_off");
+    } catch {
+      set({ phoneSpeaker: !on });
+    }
+  }
+
   private ensureContext(): AudioContext {
     if (!this.ctx || this.ctx.state === "closed") this.ctx = createVoiceContext();
     if (this.ctx.state === "suspended") void this.ctx.resume().catch(() => undefined);
@@ -302,6 +394,22 @@ export class CallEngine {
   private onDisconnected(lk: LiveKit, reason: number | undefined): void {
     const R = lk.DisconnectReason;
     if (reason === R.CLIENT_INITIATED || this.leaving) return;
+    if (get().phone) {
+      // Only the picture dropped (the app keeps the sound): connect again,
+      // unless the server says the call's over meanwhile.
+      const callId = get().callId;
+      set({ status: "reconnecting" });
+      void this.dropRoom();
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        if (!callId || get().callId !== callId || !get().phone) return;
+        void this.teardown().then(async () => {
+          set({ ...initialCallConnection });
+          if (!(await this.watch(callId))) set({ ...initialCallConnection });
+        });
+      }, REMOVED_GRACE_MS);
+      return;
+    }
     if (reason === R.DUPLICATE_IDENTITY) {
       // The call moved to another tab or device of yours.
       void this.finish("replaced");
@@ -429,6 +537,8 @@ export class CallEngine {
     const j = this.join;
     const s = get();
     if (!inCallHere(s) && !this.room) return;
+    // Phone mode: hang up the app's call (wherever you are in it).
+    if (s.phone && s.callId) void dmCallsApi.leave(s.callId).catch(() => undefined);
     const kind: CallEndKind = s.status === "calling" ? "cancelled" : "ended";
     if (j) void dmCallsApi.leave(j.call.id, j.session_id).catch(() => undefined);
     await this.finish(kind, { quiet: false });
@@ -458,6 +568,18 @@ export class CallEngine {
   onCallState(call: DmCall, ended: boolean): void {
     if (call.id !== get().callId) return;
     set({ call });
+    if (get().phone && !ended) {
+      const mine = call.participants.find((p) => p.user_id === me());
+      // Hung up in the app (a group call carries on without you), or taken to another device.
+      if (!mine?.in_call) {
+        void this.finish("ended");
+        return;
+      }
+      if (mine.device !== "android") {
+        void this.finish("replaced", { quiet: true });
+        return;
+      }
+    }
     if (!ended) {
       this.updateStatus();
       return;
@@ -595,6 +717,7 @@ export class CallEngine {
   }
 
   private refreshPeer(p: RemoteParticipant): void {
+    if (get().phone) this.watchTracks(p);
     const peer = this.peerOf(p);
     if (!peer) return;
     set((s) => ({ peers: { ...s.peers, [peer.userId]: peer } }));
@@ -668,6 +791,17 @@ export class CallEngine {
 
   async setMuted(muted: boolean): Promise<void> {
     if (get().muted === muted) return;
+    const s = get();
+    if (s.phone && s.callId) {
+      // The app mutes; its microphone's state comes back over LiveKit.
+      set({ muted, ...(muted ? { speaking: false } : {}) });
+      try {
+        await dmCallsApi.control(s.callId, muted ? "mute" : "unmute");
+      } catch {
+        set({ muted: !muted });
+      }
+      return;
+    }
     set({ muted, ...(muted ? { speaking: false } : {}) });
     this.sound(muted ? "mute" : "unmute");
     this.pipeline?.configure({ muted });

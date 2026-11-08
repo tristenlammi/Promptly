@@ -142,6 +142,17 @@ export const dmCallsApi = {
     const { data } = await apiClient.post<DmCall>(`/calls/${callId}/end`);
     return data;
   },
+  /** A listen-only connection for a call the Android app holds the sound
+   *  of: this page shows its cameras and screens (Calls WP-D3). */
+  async view(callId: string): Promise<{ url: string; token: string; identity: string; lk_room: string }> {
+    const { data } = await apiClient.post<{ url: string; token: string; identity: string; lk_room: string }>(`/calls/${callId}/view`);
+    return data;
+  },
+  /** Mute or the loudspeaker for your call in the Android app. */
+  async control(callId: string, action: "mute" | "unmute" | "speaker_on" | "speaker_off"): Promise<{ delivered: boolean }> {
+    const { data } = await apiClient.post<{ delivered: boolean }>(`/calls/${callId}/control`, { action });
+    return data;
+  },
   /** Ring people who aren't in the call (everyone missing, by default). */
   async ring(callId: string, userIds?: string[]): Promise<DmCall & { rang: string[] }> {
     const { data } = await apiClient.post<DmCall & { rang: string[] }>(`/calls/${callId}/ring`, { user_ids: userIds ?? null });

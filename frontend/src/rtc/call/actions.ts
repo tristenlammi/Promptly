@@ -72,6 +72,10 @@ export const calls = {
   dismiss(callId: string): void {
     forget(callId);
   },
+  /** A call the Android app on this phone holds the sound of: show its
+   *  video here, and drive the app's mute and speaker (Calls WP-D3). */
+  watch: withEngine((e, callId: string) => e.watch(callId)),
+  togglePhoneSpeaker: withEngine((e) => e.setPhoneSpeaker(!useCallStore.getState().phoneSpeaker)),
   hangUp: withEngine((e) => e.hangUp()),
   endForEveryone: withEngine((e) => e.endForEveryone()),
   setMuted: withEngine((e, muted: boolean) => e.setMuted(muted)),

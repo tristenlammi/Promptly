@@ -46,7 +46,9 @@ public class SuiteLauncher extends LauncherActivity {
         String sep = path.contains("?") ? "&" : "?";
         // caps=voice: this app can hold a voice channel in the background
         // (the page hands Join over to it, frontend/src/rtc/voice/androidApp.ts).
-        return Uri.parse(Server.get(this) + path + sep + "source=android&caps=voice");
+        // calls: this app rings DM calls itself, full screen (Calls WP-D3), so the
+        // page gives its rings the answer token and leaves the ringing to it.
+        return Uri.parse(Server.get(this) + path + sep + "source=android&caps=voice,calls");
     }
 
     /** A path to open instead of the launcher's own (see getLaunchingUrl). */

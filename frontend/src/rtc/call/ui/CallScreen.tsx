@@ -19,6 +19,7 @@ import {
   MoreHorizontal,
   PhoneOff,
   PictureInPicture2,
+  Smartphone,
   SwitchCamera,
   Video,
   VideoOff,
@@ -431,7 +432,7 @@ function EndedStage({ s, who }: { s: CallStoreState; who: RoomUser | null }) {
 /** Problems and the browser holding sound back, over the stage. */
 function Notices({ s }: { s: CallStoreState }) {
   const problem = s.problem;
-  if (!problem && !s.audioBlocked && !s.screen) return null;
+  if (!problem && !s.audioBlocked && !s.screen && !s.phone) return null;
   const words: Record<string, string> = {
     "mic-denied": "Your browser is blocking the microphone, so they can't hear you. Allow it in the address bar, then try again.",
     "mic-missing": "No microphone found. Plug one in, then try again.",
@@ -451,6 +452,11 @@ function Notices({ s }: { s: CallStoreState }) {
         >
           <Volume2 className="h-4 w-4" /> Your browser paused the sound. Turn it on
         </button>
+      )}
+      {s.phone && (
+        <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-xs font-semibold text-white" data-testid="call-in-app">
+          <Smartphone className="h-3.5 w-3.5" aria-hidden /> Sound is in the Promptly app&apos;s call
+        </span>
       )}
       {s.screen && (
         <span className="inline-flex items-center gap-2 rounded-full bg-[var(--accent-strong)] px-3 py-1.5 text-xs font-semibold text-white" data-testid="call-sharing">
@@ -476,12 +482,42 @@ function Notices({ s }: { s: CallStoreState }) {
 
 // ---------------------------------------------------------------- controls
 
+/** The call is in the Promptly Android app (it holds the sound): its mute
+ *  and loudspeaker from here, the camera by moving the call to this page. */
+function PhoneControls({ isPhone }: { isPhone: boolean }) {
+  const { muted, phoneSpeaker, callId, roomId } = useCallStore((s) => ({ muted: s.muted, phoneSpeaker: s.phoneSpeaker, callId: s.callId, roomId: s.roomId }));
+  const size = isPhone ? 60 : 56;
+  return (
+    <div className="relative z-10 flex shrink-0 items-center justify-center gap-3 px-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3 md:gap-4" role="toolbar" aria-label="Call controls">
+      <RoundButton label={muted ? "Unmute" : "Mute"} tone={muted ? "on" : "plain"} pressed={muted} size={size} onClick={() => void calls.toggleMute()} testId="call-mute" focusFirst>
+        {muted ? <MicOff className="h-6 w-6" /> : <Mic className="h-6 w-6" />}
+      </RoundButton>
+      <RoundButton label={phoneSpeaker ? "Speaker on" : "Speaker"} tone={phoneSpeaker ? "accent" : "plain"} pressed={phoneSpeaker} size={size} onClick={() => void calls.togglePhoneSpeaker()} testId="call-speaker">
+        <Volume2 className="h-6 w-6" />
+      </RoundButton>
+      <RoundButton
+        label="Turn camera on (the call moves to this page)"
+        tone="on"
+        size={size}
+        onClick={() => callId && void calls.answer(callId, { video: true, roomId, media: "video" })}
+        testId="call-camera"
+      >
+        <VideoOff className="h-6 w-6" />
+      </RoundButton>
+      <RoundButton label="Hang up" tone="red" size={size + 8} onClick={() => void calls.hangUp()} testId="call-hangup">
+        <PhoneOff className="h-7 w-7" />
+      </RoundButton>
+    </div>
+  );
+}
+
 function Controls({ isPhone, pipSupported, onPopOut }: { isPhone: boolean; pipSupported: boolean; onPopOut: () => void }) {
-  const { muted, camera, screen } = useCallStore((s) => ({ muted: s.muted, camera: s.camera, screen: s.screen }));
+  const { muted, camera, screen, phone } = useCallStore((s) => ({ muted: s.muted, camera: s.camera, screen: s.screen, phone: s.phone }));
   const [more, setMore] = useState<HTMLElement | null>(null);
   const canShare = !isPhone && typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia;
   const { cameras } = useMediaDevices();
   const size = isPhone ? 60 : 56;
+  if (phone) return <PhoneControls isPhone={isPhone} />;
   return (
     <div className="relative z-10 flex shrink-0 items-center justify-center gap-3 px-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3 md:gap-4" role="toolbar" aria-label="Call controls">
       <RoundButton label={muted ? "Unmute" : "Mute"} tone={muted ? "on" : "plain"} pressed={muted} size={size} onClick={() => void calls.toggleMute()} testId="call-mute" focusFirst>

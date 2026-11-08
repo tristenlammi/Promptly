@@ -117,6 +117,29 @@ async def answer_with_token(body: TokenIn, db: AsyncSession = Depends(get_db)) -
         raise _err(e) from None
 
 
+class RingTokenIn(BaseModel):
+    token: str = Field(min_length=10, max_length=2000)
+
+
+@router.post("/answer/decline")
+async def decline_with_token(body: RingTokenIn, db: AsyncSession = Depends(get_db)) -> dict:
+    """Decline with the ringing push's answer token (the Android
+    incoming-call screen)."""
+    try:
+        return await dm.decline_with_token(db, body.token)
+    except dm.CallError as e:
+        raise _err(e) from None
+
+
+@router.post("/answer/state")
+async def ring_state(body: RingTokenIn, db: AsyncSession = Depends(get_db)) -> dict:
+    """Still ringing you? (The Android ring checks while it rings.)"""
+    try:
+        return await dm.ring_state_with_token(db, body.token)
+    except dm.CallError as e:
+        raise _err(e) from None
+
+
 @router.post("/session/refresh")
 async def session_refresh(body: CallSessionIn, db: AsyncSession = Depends(get_db)) -> dict:
     """A fresh LiveKit token for a call session (the Android service)."""
@@ -220,6 +243,21 @@ async def ring_again(call_id: uuid.UUID, body: RingIn | None = None, db: AsyncSe
     cs = await access.require_voice(db, user)
     try:
         return await dm.ring_again(db, user, call_id, (body or RingIn()).user_ids, cs)
+    except dm.CallError as e:
+        raise _err(e) from None
+
+
+class ControlIn(BaseModel):
+    action: Literal["mute", "unmute", "speaker_on", "speaker_off"]
+
+
+@router.post("/{call_id}/control")
+async def control(call_id: uuid.UUID, body: ControlIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Mute or the loudspeaker for your call in the Android app, from the
+    page that shows the call's video."""
+    await access.require_voice(db, user)
+    try:
+        return await dm.control(db, user, call_id, body.action)
     except dm.CallError as e:
         raise _err(e) from None
 

@@ -603,11 +603,13 @@ async def leave(
     left = _present(parts)
     if call.answered_at is None:
         if not left:
-            await _end_locked(db, call, room, parts, "cancelled" if uid == call.started_by else "missed", kick_out=kick)
+            await _end_locked(db, call, room, parts, "cancelled" if uid == call.started_by else "missed", kick_out=True)
             await _after_leave(call, uid, old_session, reason, kick, notify)
             return True
     elif room is None or room.kind == "dm" or not left:
-        await _end_locked(db, call, room, parts, "completed", kick_out=kick)
+        # Over for everyone: the room closes even when the leaver's connection
+        # already went (a webhook), so nobody (an Android phone) stays in it.
+        await _end_locked(db, call, room, parts, "completed", kick_out=True)
         await _after_leave(call, uid, old_session, reason, kick, notify)
         return True
     await db.commit()
@@ -856,9 +858,8 @@ async def session_leave(db: AsyncSession, token: str) -> bool:
     return await leave(db, uuid.UUID(claims["sub"]), uuid.UUID(claims["call"]), session=claims["sid"])
 
 
-async def answer_with_token(db: AsyncSession, token: str, device: str) -> dict:
-    """Answer from the ringing push's own token (the Android incoming-call
-    screen, or a page opened from the push), with no bearer."""
+async def _ring_token(db: AsyncSession, token: str) -> tuple[User, uuid.UUID, access.CallsSettings]:
+    """Whose ring the push's answer token is, and which call; else 404."""
     from app.notifications import actions
 
     try:
@@ -867,17 +868,71 @@ async def answer_with_token(db: AsyncSession, token: str, device: str) -> dict:
         raise not_found() from exc
     if claims.get("a") != "call_answer":
         raise not_found()
-    user = await db.get(User, uuid.UUID(str(claims["u"])))
+    try:
+        user = await db.get(User, uuid.UUID(str(claims["u"])))
+        cid = uuid.UUID(str(claims.get("t")))
+    except (KeyError, ValueError) as exc:
+        raise not_found() from exc
     if user is None or user.disabled or int(user.token_version or 0) != int(claims.get("v") or 0):
         raise not_found()
     cs = await access.load_settings(db)
     if not await access.voice_allowed(db, user, cs):
         raise not_found()
-    try:
-        cid = uuid.UUID(str(claims.get("t")))
-    except ValueError as exc:
-        raise not_found() from exc
+    return user, cid, cs
+
+
+async def answer_with_token(db: AsyncSession, token: str, device: str) -> dict:
+    """Answer from the ringing push's own token (the Android incoming-call
+    screen, or a page opened from the push), with no bearer."""
+    user, cid, cs = await _ring_token(db, token)
     return await join(db, user, cid, cs, device)
+
+
+async def decline_with_token(db: AsyncSession, token: str) -> dict:
+    """Decline from the Android incoming-call screen, with the same token
+    (the push's own Decline button has a token of its own)."""
+    user, cid, _cs = await _ring_token(db, token)
+    return await decline_by_id(db, user, cid)
+
+
+async def ring_state_with_token(db: AsyncSession, token: str) -> dict:
+    """Is this call still ringing the token's person? The Android ring asks
+    every few seconds, so it stops even when the push that says so is late
+    or lost (answered on another device, the caller hung up)."""
+    user, cid, _cs = await _ring_token(db, token)
+    call, _room = await visible_call(db, user, cid)
+    me = (await _parts(db, call.id)).get(user.id)
+    ringing = call.ended_at is None and me is not None and me.ring == "ringing"
+    return {
+        "ringing": ringing,
+        "ring": me.ring if me is not None else None,
+        "ended": call.ended_at is not None,
+        "in_call_here": me is not None and me.in_call_since is not None,
+    }
+
+
+CONTROL_TOPIC = "call.control"
+CONTROL_ACTIONS = ("mute", "unmute", "speaker_on", "speaker_off")
+
+
+async def control(db: AsyncSession, user: User, call_id: uuid.UUID, action: str) -> dict:
+    """The page driving the Android app's call (it holds the audio): mute,
+    unmute, loudspeaker on or off, sent to your own connection as LiveKit
+    data on ``call.control``. Best effort; the app's microphone state shows
+    on the page through LiveKit itself."""
+    call, _room = await visible_call(db, user, call_id)
+    me = (await _parts(db, call.id)).get(user.id)
+    if call.ended_at is not None or me is None or me.in_call_since is None:
+        raise CallError(409, "You're not in this call")
+    if action not in CONTROL_ACTIONS:
+        raise CallError(422, "Unknown action")
+    try:
+        await service.send_data(lk_room(call.id), json.dumps({"action": action}).encode(), identities=[identity(user.id)], topic=CONTROL_TOPIC)
+        delivered = True
+    except Exception:  # noqa: BLE001
+        logger.info("call control %s to %s not delivered", action, user.id, exc_info=True)
+        delivered = False
+    return {"ok": True, "delivered": delivered, "device": me.device}
 
 
 async def view_token(db: AsyncSession, user: User, call_id: uuid.UUID) -> dict:

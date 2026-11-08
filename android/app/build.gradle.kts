@@ -173,6 +173,10 @@ dependencies {
     // Pinned: bump on purpose, together with the server and the web client.
     implementation("io.livekit:livekit-android:2.30.0")
 
+    // DM calls: Android treats them as phone calls (lock screen, headsets, the car).
+    // Core-Telecom, Apache-2.0. Pinned to the settled 1.0.x line; bump on purpose.
+    implementation("androidx.core:core-telecom:1.0.1")
+
     // The car's rules are checked when a template is built, so build them in a test.
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.7.0")

@@ -92,6 +92,12 @@ export interface CallStoreState {
   outgoing: boolean;
   /** When this tab connected (ms), for the timer when nobody has answered. */
   connectedAt: number | null;
+  /** The Promptly Android app on this phone holds the call's sound; this
+   *  page shows its cameras and screens and drives the app's mute and
+   *  loudspeaker through the server (Calls WP-D3). */
+  phone: boolean;
+  /** The app's loudspeaker (as asked from here; the app's notification has the truth). */
+  phoneSpeaker: boolean;
   muted: boolean;
   camera: boolean;
   cameraTrack: LocalVideoTrack | null;
@@ -123,6 +129,8 @@ export const initialCallConnection = {
   call: null,
   outgoing: false,
   connectedAt: null,
+  phone: false,
+  phoneSpeaker: false,
   muted: false,
   camera: false,
   cameraTrack: null,
