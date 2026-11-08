@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-08
+
 ### Added
 - Passwords: once the Firefox add-on is signed by Mozilla, Install apps offers it with one click from your own server, and it updates itself. `passwords/extension/sign-firefox.mjs` does the signing.
 - Passwords: a passkey PIN, asked every time you sign in with a passkey or make one, in the browser extension and on Android. You choose it the first time, it syncs to all your devices, and it can be changed in Settings. Five wrong in a row lock the vault until the master password.
@@ -31,6 +33,46 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: "Remind me" on IDs, licences and cards with an expiry date puts an event in Calendar and/or a task in Tasks, with a heads-up some weeks before. It moves when the date changes and goes when the item is deleted. Off unless you turn it on, and it says that the wording and date go on the server.
 - Passwords: the Security check lists what's expired or expiring in the next three months, worked out on your device.
 - Passwords: breach alerts for your email addresses, from Have I Been Pwned. An admin adds a paid HIBP key in Admin, Passwords; each person turns alerts on for themselves on the Security check, which shows the breaches each address is in and the change helper for logins at those sites. New breaches arrive as a notification.
+- Passwords: Security check lists "Accounts not in your vault", sites your own email says you have an account with and no login for, worked out on your device. Each has Add login, Not an account, and Delete account, which links to the site's deletion or account page (from JustDeleteMe's list of over 6,000 sites) and opens a ready-to-send deletion request in Mail as a draft.
+- Passwords: each login has a match setting: Auto, Same domain, Exact host, Exact host and port, Starts with, or Never. Set it in the item editor on the web, in the extension and on Android. Each website can still have its own.
+- Passwords in the browser: open tabs on your other browsers, sending a tab to another browser or your phone, synced history (off until turned on) and a reading list, between Chrome, Firefox and the others, end-to-end encrypted. Turn each on under Settings, "Sync with this browser"; the panel's Browse section and the vault's Tabs and history screen show them.
+- Passwords in the browser: choose how long the vault stays unlocked, from 1 minute to 12 hours, when the browser closes, or never, in the toolbar panel and in Settings.
+- Passwords on Android: security emails on the Security check, matched against your logins on the phone.
+- Passwords on Android: a change-password helper from the Security check, with a queue, a new password that waits until you confirm it, and autofill that offers the current and new password on the site's change form.
+- Passwords on Android: the generator makes a plus-address and can have Mail label what's sent to it.
+- Passwords on Android: move a document from Files into an item, with an offer to bin the original and a Calendar reminder that says nothing about it.
+- Passwords on Android: saving your Promptly login when you make a vault, with the warning about your kit.
+- Passwords on Android: codes and sign-in links from Promptly Mail on the fill sheet, if you turn them on. Only the site's own sender gets a row, nothing fills until you tap it, and a phone connected earlier can add what it needs from Settings.
+- Passwords on Android: an Activity screen, and an opt-in to post coarse counts to your Today page.
+- Passwords: the extension's own passkey window opens when a site asks for a passkey you have here, without needing a click, and it offers them from the toolbar panel and the on-page menu when a site asks quietly.
+- Passwords on Android: import from LastPass, 1Password (.1pux), Proton Pass, Dashlane, KeePass (XML and KDBX, with its password), Credential Exchange, Aegis, 2FAS and Google Authenticator links on the phone itself, with limits so a hostile file can't hang or exhaust it.
+- Passwords: the extension's toolbar button opens a full control panel: this site's logins, categories, live 2FA codes, a generator, bookmarks and shortcuts.
+- Passwords: a Bookmarks screen in the vault, on the web, in the extension and in the Windows app.
+- Passwords: the extension can keep your bookmarks the same in every browser, end-to-end encrypted in your vault.
+- Passwords: email codes and sign-in links in the extension's toolbar button, which is how Firefox gets them.
+- Passwords: on Windows, typing a login copies its 2FA code afterwards, and Ctrl+Alt+Enter types the code.
+- Passwords: big attachments save straight to a file on Chromium browsers.
+- Export my library has its own step for saving an encrypted copy of your vault.
+- Passwords (preview): the end-to-end encrypted core. Your vault is locked by your master password plus a Secret Key only your devices hold, so a stolen database or backup can't be guessed open.
+- Passwords (preview): the web vault at /passwords, on its own page with a stricter security policy: onboarding with a printable recovery kit, logins, cards, identities, notes, keys and documents, 2FA codes, generator, search, folders, tags, history, Trash, offline use, and new devices approved with safety words.
+- Passwords (preview): import from Chrome, Edge, Firefox, Google, Bitwarden, 1Password, LastPass, Dashlane, Proton Pass, Apple Passwords, KeePass, Credential Exchange, Aegis, 2FAS and Google Authenticator, all read on your device. Encrypted export, a Security check with breach lookups through your server, and encrypted attachments.
+- Passwords (preview): a browser extension for the Chrome family and Firefox: popup, inline menu with anti-clickjacking checks, multi-step sign-ins, save and update prompts, teach-it-once site rules, 2FA codes, side panel, and passkeys that sync.
+- Notifications: a Passwords switch for new-device requests and shared-vault invites. They never carry anything from the vault.
+- Passwords: a Windows app with quick search, auto-type, Windows Hello, scheduled encrypted backups and an optional SSH agent.
+- Passwords: codes and sign-in links from Promptly Mail in the fill menu, if you turn them on. The server isn't told which page you're on.
+- Passwords: Security check now raises security emails against your logins, warns about what could lose your vault, merges duplicates, and walks you through changing passwords one at a time.
+- Passwords: move a document from Files into the vault, with a Calendar reminder that says nothing about it; plus-address labels in Mail; a coarse count on Today if you opt in; vault devices in Account; admin policy in Admin.
+- Passwords: travel mode, a short PIN on the extension and Windows app, unlock with a passkey on the web, fill on page load for logins that ask, and scanning a 2FA QR code off the current tab.
+- Passwords: shared vaults with safety words, roles, and a new key when someone's removed, plus a list of the passwords they could read.
+- Passwords: Secure Send, a link with an expiry and a view limit for someone with no account. It can be posted in Rooms or sent by Mail.
+- Passwords: emergency access, where a trusted contact can ask for your vault and it opens after a wait unless you refuse.
+- Passwords (preview): Promptly for Android gets the vault too: autofill in apps and browsers that support it, passkeys through Credential Manager, fingerprint unlock, sharing, Security check, attachments, import and export, and adding a device by QR code.
+- Passwords (preview): a fresh review of the crypto, the extension, Android and the server's access rules. Trust in other people's keys now lives in your own encrypted vault, removing someone from a shared vault can't be blocked by them, and imports can't plant internal items. `passwords/SECURITY.md` says what it still doesn't defend against.
+- Passwords on Android: a guided setup after your first unlock turns on autofill, passkeys and Chrome's autofill setting, and a new vault offers to make a Family vault when others are on your Promptly.
+- Passwords on Android: warns before filling on a site that only looks like one you have a login for, in autofill and Credential Manager. Such a page gets no ordinary suggestions, and "Don't fill" comes first.
+- Passwords on Android: the same warnings as the web vault about what could lose your vault, a recovery kit check, and a reminder every three months to save an encrypted export, right from the reminder.
+- Passwords on Android: filter by tag, rename and delete folders, site icons you can turn on per vault, merge logins saved twice, and the passkey directory in the Security check.
+- Passwords on Android: Sends show their name and can copy their link again, or post it in Rooms or by Mail. Name an emergency contact and ask for access from the phone. A dropped attachment upload picks up where it stopped.
 
 ### Changed
 - Passwords: the browser extension and the Windows app are now version 0.2.0, with the Passwords changes in this release.
@@ -84,48 +126,6 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: importing a large KeePass file no longer gets passwords wrong after the first few KiB of protected values.
 - Passwords: a LastPass row with only a name no longer turns the next login into a note.
 - Passwords: passkeys imported from Bitwarden now work: their ids are converted to the form sites use.
-
-### Added
-- Passwords: Security check lists "Accounts not in your vault", sites your own email says you have an account with and no login for, worked out on your device. Each has Add login, Not an account, and Delete account, which links to the site's deletion or account page (from JustDeleteMe's list of over 6,000 sites) and opens a ready-to-send deletion request in Mail as a draft.
-- Passwords: each login has a match setting: Auto, Same domain, Exact host, Exact host and port, Starts with, or Never. Set it in the item editor on the web, in the extension and on Android. Each website can still have its own.
-- Passwords in the browser: open tabs on your other browsers, sending a tab to another browser or your phone, synced history (off until turned on) and a reading list, between Chrome, Firefox and the others, end-to-end encrypted. Turn each on under Settings, "Sync with this browser"; the panel's Browse section and the vault's Tabs and history screen show them.
-- Passwords in the browser: choose how long the vault stays unlocked, from 1 minute to 12 hours, when the browser closes, or never, in the toolbar panel and in Settings.
-- Passwords on Android: security emails on the Security check, matched against your logins on the phone.
-- Passwords on Android: a change-password helper from the Security check, with a queue, a new password that waits until you confirm it, and autofill that offers the current and new password on the site's change form.
-- Passwords on Android: the generator makes a plus-address and can have Mail label what's sent to it.
-- Passwords on Android: move a document from Files into an item, with an offer to bin the original and a Calendar reminder that says nothing about it.
-- Passwords on Android: saving your Promptly login when you make a vault, with the warning about your kit.
-- Passwords on Android: codes and sign-in links from Promptly Mail on the fill sheet, if you turn them on. Only the site's own sender gets a row, nothing fills until you tap it, and a phone connected earlier can add what it needs from Settings.
-- Passwords on Android: an Activity screen, and an opt-in to post coarse counts to your Today page.
-- Passwords: the extension's own passkey window opens when a site asks for a passkey you have here, without needing a click, and it offers them from the toolbar panel and the on-page menu when a site asks quietly.
-- Passwords on Android: import from LastPass, 1Password (.1pux), Proton Pass, Dashlane, KeePass (XML and KDBX, with its password), Credential Exchange, Aegis, 2FAS and Google Authenticator links on the phone itself, with limits so a hostile file can't hang or exhaust it.
-- Passwords: the extension's toolbar button opens a full control panel: this site's logins, categories, live 2FA codes, a generator, bookmarks and shortcuts.
-- Passwords: a Bookmarks screen in the vault, on the web, in the extension and in the Windows app.
-- Passwords: the extension can keep your bookmarks the same in every browser, end-to-end encrypted in your vault.
-- Passwords: email codes and sign-in links in the extension's toolbar button, which is how Firefox gets them.
-- Passwords: on Windows, typing a login copies its 2FA code afterwards, and Ctrl+Alt+Enter types the code.
-- Passwords: big attachments save straight to a file on Chromium browsers.
-- Export my library has its own step for saving an encrypted copy of your vault.
-- Passwords (preview): the end-to-end encrypted core. Your vault is locked by your master password plus a Secret Key only your devices hold, so a stolen database or backup can't be guessed open.
-- Passwords (preview): the web vault at /passwords, on its own page with a stricter security policy: onboarding with a printable recovery kit, logins, cards, identities, notes, keys and documents, 2FA codes, generator, search, folders, tags, history, Trash, offline use, and new devices approved with safety words.
-- Passwords (preview): import from Chrome, Edge, Firefox, Google, Bitwarden, 1Password, LastPass, Dashlane, Proton Pass, Apple Passwords, KeePass, Credential Exchange, Aegis, 2FAS and Google Authenticator, all read on your device. Encrypted export, a Security check with breach lookups through your server, and encrypted attachments.
-- Passwords (preview): a browser extension for the Chrome family and Firefox: popup, inline menu with anti-clickjacking checks, multi-step sign-ins, save and update prompts, teach-it-once site rules, 2FA codes, side panel, and passkeys that sync.
-- Notifications: a Passwords switch for new-device requests and shared-vault invites. They never carry anything from the vault.
-- Passwords: a Windows app with quick search, auto-type, Windows Hello, scheduled encrypted backups and an optional SSH agent.
-- Passwords: codes and sign-in links from Promptly Mail in the fill menu, if you turn them on. The server isn't told which page you're on.
-- Passwords: Security check now raises security emails against your logins, warns about what could lose your vault, merges duplicates, and walks you through changing passwords one at a time.
-- Passwords: move a document from Files into the vault, with a Calendar reminder that says nothing about it; plus-address labels in Mail; a coarse count on Today if you opt in; vault devices in Account; admin policy in Admin.
-- Passwords: travel mode, a short PIN on the extension and Windows app, unlock with a passkey on the web, fill on page load for logins that ask, and scanning a 2FA QR code off the current tab.
-- Passwords: shared vaults with safety words, roles, and a new key when someone's removed, plus a list of the passwords they could read.
-- Passwords: Secure Send, a link with an expiry and a view limit for someone with no account. It can be posted in Rooms or sent by Mail.
-- Passwords: emergency access, where a trusted contact can ask for your vault and it opens after a wait unless you refuse.
-- Passwords (preview): Promptly for Android gets the vault too: autofill in apps and browsers that support it, passkeys through Credential Manager, fingerprint unlock, sharing, Security check, attachments, import and export, and adding a device by QR code.
-- Passwords (preview): a fresh review of the crypto, the extension, Android and the server's access rules. Trust in other people's keys now lives in your own encrypted vault, removing someone from a shared vault can't be blocked by them, and imports can't plant internal items. `passwords/SECURITY.md` says what it still doesn't defend against.
-- Passwords on Android: a guided setup after your first unlock turns on autofill, passkeys and Chrome's autofill setting, and a new vault offers to make a Family vault when others are on your Promptly.
-- Passwords on Android: warns before filling on a site that only looks like one you have a login for, in autofill and Credential Manager. Such a page gets no ordinary suggestions, and "Don't fill" comes first.
-- Passwords on Android: the same warnings as the web vault about what could lose your vault, a recovery kit check, and a reminder every three months to save an encrypted export, right from the reminder.
-- Passwords on Android: filter by tag, rename and delete folders, site icons you can turn on per vault, merge logins saved twice, and the passkey directory in the Security check.
-- Passwords on Android: Sends show their name and can copy their link again, or post it in Rooms or by Mail. Name an emergency contact and ask for access from the phone. A dropped attachment upload picks up where it stopped.
 
 ## [0.30.0] - 2026-11-08
 
