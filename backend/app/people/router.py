@@ -253,8 +253,13 @@ async def _page(db: AsyncSession, viewer: User, p: Person) -> dict[str, Any]:
         "dm_room_id": None,
         "rooms": [],
         "files": [],
+        # Only whether *you* blocked them — never whether they blocked you.
+        "blocked": False,
     }
     if p.user is not None and not is_me:
+        from .blocks import has_blocked
+
+        out["blocked"] = await has_blocked(db, viewer.id, p.user.id)
         out["events"] = await _events(db, viewer, p.user)
         out["dm_room_id"], out["rooms"] = await _rooms(db, viewer, p.user)
         out["files"] = await _files(db, viewer, p.user)
@@ -267,6 +272,74 @@ async def _page(db: AsyncSession, viewer: User, p: Person) -> dict[str, Any]:
 @router.get("/u/{user_id}")
 async def person_by_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), viewer: User = Depends(get_current_user)) -> dict:
     return await _page(db, viewer, await _by_user(db, viewer, user_id))
+
+
+# ------------------------------------------------------------------ blocking (app/people/blocks.py)
+
+
+@router.get("/blocks")
+async def list_blocks(db: AsyncSession = Depends(get_db), viewer: User = Depends(get_current_user)) -> list[dict]:
+    """The people you've blocked, newest first (Account → Blocked people)."""
+    from .blocks import UserBlock
+
+    rows = (
+        await db.execute(
+            select(UserBlock, User)
+            .join(User, User.id == UserBlock.blocked_id)
+            .where(UserBlock.blocker_id == viewer.id)
+            .order_by(UserBlock.created_at.desc())
+        )
+    ).all()
+    return [{**_user_out(u), "blocked_at": b.created_at.isoformat()} for b, u in rows]
+
+
+@router.put("/blocks/{user_id}")
+async def block_person(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), viewer: User = Depends(get_current_user)) -> dict:
+    """Block someone. They aren't told. Idempotent."""
+    from . import blocks
+
+    if user_id == viewer.id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You can't block yourself")
+    target = await db.get(User, user_id)
+    if target is None or target.disabled:
+        raise _not_found()
+    await blocks.block(db, viewer.id, user_id)
+    await db.commit()
+    await _blocks_changed(db, viewer.id, user_id)
+    return {"user_id": str(user_id), "blocked": True}
+
+
+@router.delete("/blocks/{user_id}")
+async def unblock_person(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), viewer: User = Depends(get_current_user)) -> dict:
+    """Unblock someone you blocked. 404 when you hadn't."""
+    from . import blocks
+
+    if not await blocks.unblock(db, viewer.id, user_id):
+        raise _not_found()
+    await db.commit()
+    await _blocks_changed(db, viewer.id, user_id)
+    return {"user_id": str(user_id), "blocked": False}
+
+
+async def _blocks_changed(db: AsyncSession, me: uuid.UUID, other: uuid.UUID) -> None:
+    """Refresh your 1:1 conversation with them in Rooms (live), so its
+    composer opens or closes. Only you get the event — they aren't told."""
+    try:
+        from app.rooms import core as rooms_core
+        from app.rooms.models import Room, RoomMember
+
+        mine = select(RoomMember.room_id).where(RoomMember.user_id == me)
+        theirs = select(RoomMember.room_id).where(RoomMember.user_id == other)
+        room = (
+            await db.execute(select(Room).where(Room.space_id.is_(None), Room.kind == "dm", Room.id.in_(mine), Room.id.in_(theirs)).limit(1))
+        ).scalar_one_or_none()
+        viewer = await db.get(User, me)
+        if room is not None and viewer is not None:
+            await rooms_core.publish([me], {"type": "room", "room": await rooms_core.room_out(db, room, viewer)})
+    except Exception:  # noqa: BLE001 — live refresh is a nicety
+        import logging
+
+        logging.getLogger("promptly.people").warning("block live refresh failed", exc_info=True)
 
 
 @router.get("/c/{file_id}/{contact_id}")

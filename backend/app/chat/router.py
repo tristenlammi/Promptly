@@ -1930,6 +1930,7 @@ async def send_message(
                 body=preview or "(empty message)",
                 url=f"/chat/{conv.id}",
                 tag=f"promptly-shared-{conv.id}",
+                actor_user_id=user.id,
             )
         except Exception:  # pragma: no cover — push is never critical
             logging.getLogger("promptly.chat.push").warning(

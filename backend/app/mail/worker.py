@@ -111,7 +111,7 @@ async def _announce(account_id: uuid.UUID, messages: list[MailMessage]) -> None:
     now = datetime.now(timezone.utc)
     fresh = [m for m in messages if not m.seen and now - m.sent_at < ANNOUNCE_WITHIN]
     if len(fresh) > MAX_ANNOUNCED:
-        await notify_user(user_id=account.user_id, category="mail", title=f"{len(fresh)} new emails", body=account.email, url="/mail", tag=f"mail-{account.id}", inbox=False)
+        await notify_user(user_id=account.user_id, category="mail", title=f"{len(fresh)} new emails", body=account.email, url="/mail", tag=f"mail-{account.id}", inbox=False, extra={"count": len(fresh)})
         return
     for m in fresh:
         await notify_user(
@@ -161,7 +161,7 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
                         account_id=account_id, folder_id=folder_id, uid=uid, thread_key=await _thread_for(db, account_id, found),
                         message_id=found.message_id, in_reply_to=found.in_reply_to, references=found.references, subject=found.subject,
                         from_name=found.from_name, from_addr=found.from_addr, to_addrs=found.to, cc_addrs=found.cc, sent_at=found.sent_at,
-                        snippet=found.snippet.replace("\x00", ""), body_text=found.text.replace("\x00", ""), body_html=found.html.replace("\x00", ""),
+                        snippet=found.snippet.replace("\x00", ""), body_text=found.text.replace("\x00", ""), body_html=found.html.replace("\x00", ""), html_clipped=found.html_clipped,
                         attachments=found.attachments, unsubscribe=found.unsubscribe, reply_to=found.reply_to, invite=found.invite, **state,
                     )
                     db.add(message)

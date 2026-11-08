@@ -272,6 +272,18 @@ async def rooms_out(db: AsyncSession, rooms: list[Room], user: User) -> list[dic
             .where(RoomMessage.room_id.in_(dm_ids))
         )
         previews = {m.room_id: m for m in (await db.execute(last)).scalars()}
+    # 1:1 conversations closed by a block (D7): who I blocked, and who
+    # blocked me (that one only ever shows as "can't send").
+    i_blocked: set[uuid.UUID] = set()
+    blocked_me: set[uuid.UUID] = set()
+    if any(r.kind == "dm" for r in rooms if r.space_id is None):
+        from app.people.blocks import UserBlock
+
+        for b in (await db.execute(select(UserBlock).where((UserBlock.blocker_id == user.id) | (UserBlock.blocked_id == user.id)))).scalars():
+            if b.blocker_id == user.id:
+                i_blocked.add(b.blocked_id)
+            else:
+                blocked_me.add(b.blocker_id)
     out = []
     for r in rooms:
         st = mine.get(r.id)
@@ -297,6 +309,10 @@ async def rooms_out(db: AsyncSession, rooms: list[Room], user: User) -> list[dic
             d["ai_ok"] = {str(m.user_id): m.ai_ok for m in members}
             d["ai_context"] = bool(members) and all(m.ai_ok for m in members)
             d["hidden"] = st.hidden if st else False
+            if r.kind == "dm":
+                others = {m.user_id for m in members} - {user.id}
+                d["blocked"] = bool(others & i_blocked)
+                d["can_send"] = not (others & (i_blocked | blocked_me))
             p = previews.get(r.id)
             if p is not None:
                 d["preview"] = {

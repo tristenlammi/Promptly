@@ -1079,7 +1079,7 @@ function MessageCard({ message, people, startOpen }: { message: Message; people:
       {open && (
         <div className="px-3 pb-3">
           {message.invite && <InviteCard message={message} />}
-          <MessageBody html={message.html} text={message.text} remoteImages={message.remote_images} />
+          <MessageBody html={message.html} text={message.text} remoteImages={message.remote_images} clipped={message.html_clipped} />
           {message.attachments.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
               {message.attachments.map((a, i) => (

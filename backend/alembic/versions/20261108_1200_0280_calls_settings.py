@@ -1,14 +1,14 @@
 """Calls: the server-wide voice switches in app_settings (Admin > Calls).
 
 Revision ID: 0280_calls_settings
-Revises: 0260_pw_browsersync
+Revises: 0330_mail_html_clipped
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0280_calls_settings"
-down_revision = "0260_pw_browsersync"
+down_revision = "0330_mail_html_clipped"
 branch_labels = None
 depends_on = None
 

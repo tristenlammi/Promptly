@@ -11,9 +11,11 @@ import {
   SlidersHorizontal,
   Smartphone,
   UserRound,
+  UserX,
   Volume2,
 } from "lucide-react";
 
+import { BlockedPeoplePanel } from "@/components/account/BlockedPeoplePanel";
 import { ChangePasswordPanel } from "@/components/account/ChangePasswordPanel";
 import { ChatPreferencesPanel } from "@/components/account/ChatPreferencesPanel";
 import { FeatureVisibilityPanel } from "@/components/account/FeatureVisibilityPanel";
@@ -80,6 +82,7 @@ export function AccountSecurityPage() {
     { id: "usage", label: "Usage & cost", icon: BarChart3, node: <UsagePanel /> },
     { id: "prompts", label: "Saved prompts", icon: Bookmark, node: <SavedPromptsPanel /> },
     { id: "notifications", label: "Notifications", icon: Bell, node: <NotificationsPanel /> },
+    { id: "blocked", label: "Blocked people", icon: UserX, node: <BlockedPeoplePanel /> },
     { id: "devices", label: "Devices", icon: Smartphone, node: <><DevicesPanel /><PasswordDevices /></> },
     {
       id: "security",
