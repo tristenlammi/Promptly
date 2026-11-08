@@ -34,6 +34,7 @@ const KINDS = [
   ["maps", "Navigation", "#2F9E6E"],
   ["mail", "Mail", TERRACOTTA],
   ["passwords", "KeyRound", TERRACOTTA],
+  ["notes", "Lightbulb", "#E0A526"], // Notes
   ["example", "ListChecks", "#4F8A8B"],
   ["item", "LayoutGrid", TERRACOTTA], // fallback for a kind without its own
 ];

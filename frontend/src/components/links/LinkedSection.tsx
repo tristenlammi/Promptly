@@ -12,6 +12,7 @@ import {
   Image,
   Images,
   LayoutGrid,
+  Lightbulb,
   Link2,
   MessageSquare,
   MessagesSquare,
@@ -60,6 +61,7 @@ export const KIND_ICONS: Record<ThingKind, LucideIcon> = {
   witem: LayoutGrid,
   room_msg: MessageSquare,
   chat_msg: MessagesSquare,
+  note: Lightbulb,
 };
 
 export const connectionsKey = (ref: ThingRef) => ["connections", ref.kind, ref.id] as const;

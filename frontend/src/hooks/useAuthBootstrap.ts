@@ -62,7 +62,7 @@ export function useAuthBootstrap() {
           // copy on this device and saves when the connection is back.
           if (!navigator.onLine || isServerUnavailable(err)) {
             const path = window.location.pathname;
-            if (path.startsWith("/app/") || path.startsWith("/files/item/")) {
+            if (path.startsWith("/app/") || path.startsWith("/files/item/") || path === "/notes" || path.startsWith("/notes/")) {
               try {
                 const cached = JSON.parse(localStorage.getItem("promptly.offline-user") || "null");
                 if (cached?.id) {

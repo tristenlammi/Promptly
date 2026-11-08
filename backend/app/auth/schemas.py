@@ -267,6 +267,8 @@ class UserPreferencesUpdate(BaseModel):
     nav_app_icons: Literal["line", "color"] | None = None
     # The desktop sidebar stays as you left it, everywhere, until you change it.
     sidebar_collapsed: bool | None = None
+    # Notes: the grid of cards or one column (saved per person, every device).
+    notes_view: Literal["grid", "list"] | None = None
     # The Today page, curated: cards hidden from it, and the order the rest
     # appear in (keys from ``TODAY_SECTIONS``; unknown ones are dropped).
     today_hidden: list[str] | None = None

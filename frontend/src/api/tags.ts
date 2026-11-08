@@ -16,7 +16,7 @@ export interface Tag {
   count?: number;
 }
 
-export type TaggableKind = "file" | "event" | "album" | "task" | "contact" | "journal_entry" | "recipe" | "transaction";
+export type TaggableKind = "file" | "event" | "album" | "task" | "contact" | "journal_entry" | "recipe" | "transaction" | "note";
 
 export interface TaggedThing {
   kind: TaggableKind;

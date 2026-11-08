@@ -25,6 +25,7 @@
  *     doesn't leak into other browser profiles.
  */
 import { stashSharedFiles } from "./lib/shareTargetStash";
+import { stashSharedText } from "./notes/shareStash";
 import {
   cleanupOutdatedCaches,
   matchPrecache,
@@ -81,6 +82,7 @@ function manifestFor(path: string): string {
   if (/^\/maps(\/|$)/.test(path)) return "/maps.webmanifest";
   if (/^\/mail(\/|$)/.test(path)) return "/mail.webmanifest";
   if (/^\/photos(\/|$)/.test(path)) return "/photos.webmanifest";
+  if (/^\/notes(\/|$)/.test(path)) return "/notes.webmanifest";
   const app = /^\/app\/([0-9a-fA-F-]{36})/.exec(path);
   if (app) return `/api/items/app-manifest/${app[1]}.webmanifest`;
   return "/manifest.webmanifest";
@@ -128,6 +130,30 @@ self.addEventListener("fetch", (event: FetchEvent) => {
         // Nothing usable arrived — still land the user in Files.
       }
       return Response.redirect("/files/?shared=1", 303);
+    })()
+  );
+});
+
+// ----- Share target: "Share → Promptly Notes" -----
+// Text or a link shared into the installed Notes app becomes a note. The
+// share is a POST so the words never sit in a URL; the page makes the note
+// (it works offline too, from the outbox).
+self.addEventListener("fetch", (event: FetchEvent) => {
+  const url = new URL(event.request.url);
+  if (event.request.method !== "POST" || url.pathname !== "/notes/share-target") return;
+  event.respondWith(
+    (async () => {
+      try {
+        const form = await event.request.formData();
+        const str = (k: string) => {
+          const v = form.get(k);
+          return typeof v === "string" ? v.slice(0, 20_000) : "";
+        };
+        await stashSharedText({ title: str("title"), text: str("text"), url: str("url") });
+      } catch {
+        // Nothing usable arrived — still open Notes.
+      }
+      return Response.redirect("/notes/?shared=1", 303);
     })()
   );
 });
@@ -313,12 +339,12 @@ self.addEventListener("notificationclick", (event) => {
       // a window already in that app, else opens fresh (so the installed
       // app, which owns that scope, handles it) — never hijacks Promptly.
       const target0 = new URL(url, self.location.origin);
-      const scope = ["/rooms/", "/calendar/", "/photos/", "/passwords/"].find((s) => target0.pathname.startsWith(s) || target0.pathname === s.slice(0, -1)) ?? null;
+      const scope = ["/rooms/", "/calendar/", "/photos/", "/passwords/", "/notes/"].find((s) => target0.pathname.startsWith(s) || target0.pathname === s.slice(0, -1)) ?? null;
       // "/calendar?event=…" → "/calendar/?event=…", inside the installed app's scope.
       if (scope && target0.pathname === scope.slice(0, -1)) url = scope + target0.search + target0.hash;
       const inScope = (w: WindowClient | Client) => {
         const p = new URL(w.url).pathname;
-        return scope ? p.startsWith(scope) : !p.startsWith("/rooms/") && !p.startsWith("/calendar/") && !p.startsWith("/photos/") && !p.startsWith("/passwords");
+        return scope ? p.startsWith(scope) : !p.startsWith("/rooms/") && !p.startsWith("/calendar/") && !p.startsWith("/photos/") && !p.startsWith("/passwords") && !p.startsWith("/notes/");
       };
       const target = wins.find((w) => new URL(w.url).origin === self.location.origin && inScope(w));
       if (target) {

@@ -41,6 +41,8 @@ function purgeUserData(): void {
   }
   // Item files kept on this device for offline use, and their unsaved changes.
   void import("@/items/offlineStore").then((m) => m.offlineStore.wipe());
+  // Notes kept on this device, and their unsaved changes.
+  void import("@/notes/db").then((m) => m.notesDb.wipe());
 }
 
 /** Drop everything this tab knows about the signed-in user and start over

@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest.json",
+  "name": "Promptly Notes",
+  "short_name": "Notes",
+  "description": "Quick notes and checklists on your own Promptly — pin, colour and label them, share a list with someone, and use them with no signal.",
+  "id": "/notes/",
+  "start_url": "/notes/?source=pwa",
+  "scope": "/notes/",
+  "display": "standalone",
+  "background_color": "#FAF9F7",
+  "theme_color": "#E0A526",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "productivity"
+  ],
+  "icons": [
+    {
+      "src": "/item-icons/notes-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/notes-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/notes-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New list",
+      "short_name": "List",
+      "url": "/notes/?new=list&source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/item-icons/notes-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ],
+  "share_target": {
+    "action": "/notes/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  }
+}

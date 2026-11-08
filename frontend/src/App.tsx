@@ -311,6 +311,25 @@ function CalendarGate() {
   return <AppLayout />;
 }
 
+// Promptly Notes (Keep-style notes and lists).
+const NotesApp = lazyWithRetry(
+  () => import("@/notes/NotesApp").then((m) => ({ default: m.NotesApp })),
+  "NotesApp"
+);
+
+/** Notes sits inside Promptly's layout; only the installed Notes app shows
+ *  it on its own. */
+function NotesGate() {
+  if (launchedAppKey() === "notes") {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <NotesApp />
+      </Suspense>
+    );
+  }
+  return <AppLayout />;
+}
+
 const PhotosAppShell = lazyWithRetry(
   () => import("@/components/photos/PhotosAppShell").then((m) => ({ default: m.PhotosAppShell })),
   "PhotosAppShell"
@@ -689,6 +708,11 @@ export default function App() {
       <Route path="/calendar" element={<CalendarGate />}>
         <Route index element={<CalendarApp embedded />} />
         <Route path="*" element={<CalendarApp embedded />} />
+      </Route>
+      {/* Promptly Notes: inside Promptly, except as the installed Notes app. */}
+      <Route path="/notes" element={<NotesGate />}>
+        <Route index element={<NotesApp embedded />} />
+        <Route path="*" element={<NotesApp embedded />} />
       </Route>
       <Route path="/mail" element={<MailGate />}>
         <Route index element={<MailApp />} />

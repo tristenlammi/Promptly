@@ -1,0 +1,82 @@
+/* Notes: card colours (Keep's palette, in Promptly's light and dark), and
+   the little bits of layout Tailwind doesn't say well. */
+
+.note-c {
+  --note-bg: var(--surface);
+  --note-border: var(--border);
+  --note-text: var(--text);
+  --note-muted: var(--text-muted);
+  --note-hover: rgba(0, 0, 0, 0.06);
+  background: var(--note-bg);
+  border-color: var(--note-border);
+  color: var(--note-text);
+}
+.note-c[data-color]:not([data-color="default"]) {
+  --note-border: transparent;
+  --note-muted: rgba(0, 0, 0, 0.66);
+}
+.note-c[data-color="coral"] { --note-bg: #faafa8; }
+.note-c[data-color="peach"] { --note-bg: #f39f76; }
+.note-c[data-color="sand"] { --note-bg: #fff8b8; }
+.note-c[data-color="mint"] { --note-bg: #e2f6d3; }
+.note-c[data-color="sage"] { --note-bg: #b4ddd3; }
+.note-c[data-color="fog"] { --note-bg: #d4e4ed; }
+.note-c[data-color="storm"] { --note-bg: #aeccdc; }
+.note-c[data-color="dusk"] { --note-bg: #d3bfdb; }
+.note-c[data-color="blossom"] { --note-bg: #f6e2dd; }
+.note-c[data-color="clay"] { --note-bg: #e9e3d4; }
+.note-c[data-color="chalk"] { --note-bg: #efeff1; }
+.note-c[data-color]:not([data-color="default"]) { --note-text: #1a1a19; }
+
+html.dark .note-c { --note-hover: rgba(255, 255, 255, 0.08); }
+html.dark .note-c[data-color]:not([data-color="default"]) {
+  --note-text: #f5f5f4;
+  --note-muted: rgba(255, 255, 255, 0.74);
+}
+html.dark .note-c[data-color="coral"] { --note-bg: #77172e; }
+html.dark .note-c[data-color="peach"] { --note-bg: #692b17; }
+html.dark .note-c[data-color="sand"] { --note-bg: #7c4a03; }
+html.dark .note-c[data-color="mint"] { --note-bg: #264d3b; }
+html.dark .note-c[data-color="sage"] { --note-bg: #0c625d; }
+html.dark .note-c[data-color="fog"] { --note-bg: #256377; }
+html.dark .note-c[data-color="storm"] { --note-bg: #284255; }
+html.dark .note-c[data-color="dusk"] { --note-bg: #472e5b; }
+html.dark .note-c[data-color="blossom"] { --note-bg: #6c394f; }
+html.dark .note-c[data-color="clay"] { --note-bg: #4b443a; }
+html.dark .note-c[data-color="chalk"] { --note-bg: #232427; }
+
+/* A swatch in the colour picker shows the colour it gives a card. */
+.note-swatch { background: var(--note-bg); }
+.note-c[data-color="default"].note-swatch { background: var(--surface); }
+
+.note-muted { color: var(--note-muted); }
+.note-hover:hover { background: var(--note-hover); }
+
+/* The note body editor. */
+.note-body .ProseMirror {
+  outline: none;
+  min-height: 1.5em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.note-body .ProseMirror p { margin: 0; }
+.note-body .ProseMirror h1 { font-size: 1.35rem; font-weight: 600; margin: 0.4em 0 0.15em; line-height: 1.3; }
+.note-body .ProseMirror h2 { font-size: 1.12rem; font-weight: 600; margin: 0.35em 0 0.1em; line-height: 1.3; }
+.note-body .ProseMirror a { text-decoration: underline; color: inherit; }
+.note-body .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--note-muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+/* Card previews: headings a touch larger, nothing more. */
+.note-preview h1 { font-size: 1.05rem; font-weight: 600; }
+.note-preview h2 { font-size: 0.98rem; font-weight: 600; }
+
+.note-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

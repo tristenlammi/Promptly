@@ -98,6 +98,7 @@ export function appKeyFor(path: string): string {
   if (path === "/rooms" || path.startsWith("/rooms/")) return "rooms";
   if (path === "/calendar" || path.startsWith("/calendar/")) return "calendar";
   if (path === "/maps" || path.startsWith("/maps/")) return "maps";
+  if (path === "/notes" || path.startsWith("/notes/")) return "notes";
   if (path === "/mail" || path.startsWith("/mail/")) return "mail";
   const m = /^\/app\/([^/]+)/.exec(path);
   return m ? `app:${m[1]}` : "promptly";

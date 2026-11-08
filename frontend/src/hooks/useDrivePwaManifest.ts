@@ -70,6 +70,13 @@ export function useDrivePwaManifest(): void {
       setAppleMobileTitle("P Maps");
       return;
     }
+    if (location.pathname === "/notes" || location.pathname.startsWith("/notes/")) {
+      // Promptly Notes: its own app, scope ``/notes/``.
+      setManifestHref("/notes.webmanifest");
+      setAppleTouchIconHref("/item-icons/notes-apple-180.png");
+      setAppleMobileTitle("Notes");
+      return;
+    }
     const onCalendar =
       location.pathname === "/calendar" || location.pathname.startsWith("/calendar/");
     if (onCalendar) {
