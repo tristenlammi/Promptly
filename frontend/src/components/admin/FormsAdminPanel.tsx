@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ClipboardList, Flag } from "lucide-react";
+import { ClipboardList, Flag, Paperclip } from "lucide-react";
 import { useState } from "react";
 
 import { formsAdminApi, type AdminFormRow, type AdminFormsOverview } from "@/api/formsAdmin";
@@ -16,8 +16,8 @@ const KEY = ["admin", "forms"];
 /**
  * Admin → Forms (Forms WP-F1.3): whether people without an account can
  * answer forms at all, the forms anyone with the link can answer, their
- * reports, and closing one (its owner is told why). Answers aren't shown
- * here.
+ * reports, and closing one (its owner is told why); and how much each form
+ * may take in files a day (WP-F1.6). Answers aren't shown here.
  */
 export function FormsAdminPanel() {
   const qc = useQueryClient();
@@ -52,6 +52,26 @@ export function FormsAdminPanel() {
         </label>
       </SettingsCard>
 
+      <SettingsCard title="Files sent with answers" icon={<Paperclip className="h-4 w-4" />}>
+        <p className="text-xs text-[var(--text-muted)]">
+          The most each form can take in files in 24 hours. Files count against the form owner&apos;s storage. People
+          without an account can only send pictures and PDFs, and only to forms that allow it. This server doesn&apos;t
+          scan files for viruses.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-4">
+          <CapField
+            label="Forms for people on this server"
+            value={data.upload_cap_mb}
+            onSave={(mb) => formsAdminApi.setUploadCaps({ upload_cap_mb: mb }).then((d) => qc.setQueryData(KEY, d))}
+          />
+          <CapField
+            label="Forms anyone with the link can answer"
+            value={data.link_upload_cap_mb}
+            onSave={(mb) => formsAdminApi.setUploadCaps({ link_upload_cap_mb: mb }).then((d) => qc.setQueryData(KEY, d))}
+          />
+        </div>
+      </SettingsCard>
+
       <section aria-labelledby="admin-forms-h" className="flex flex-col gap-2">
         <h2 id="admin-forms-h" className="text-sm font-semibold text-[var(--text)]">
           Forms anyone with the link can answer
@@ -74,6 +94,55 @@ export function FormsAdminPanel() {
         )}
       </section>
     </div>
+  );
+}
+
+/** One allowance, in MB a day, saved when it's changed and left. */
+function CapField({ label, value, onSave }: { label: string; value: number; onSave: (mb: number) => Promise<unknown> }) {
+  const [text, setText] = useState(String(value));
+  const [saving, setSaving] = useState(false);
+  const id = `cap-${label.replace(/\W+/g, "-").toLowerCase()}`;
+  const save = async () => {
+    const mb = Math.round(Number(text));
+    if (!Number.isFinite(mb) || mb < 1 || mb > 100000) {
+      toast.error("Enter a number of MB from 1 to 100,000.");
+      setText(String(value));
+      return;
+    }
+    if (mb === value) return;
+    setSaving(true);
+    try {
+      await onSave(mb);
+      toast.success("Saved");
+    } catch (e) {
+      toast.error(apiErrorMessage(e));
+      setText(String(value));
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <label htmlFor={id} className="flex flex-col gap-1 text-xs text-[var(--text-muted)]">
+      {label}
+      <span className="flex items-center gap-2">
+        <input
+          id={id}
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={100000}
+          className="h-9 w-28 rounded-md border border-[var(--border)] bg-[var(--bg)] px-2 text-sm text-[var(--text)]"
+          value={text}
+          disabled={saving}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={() => void save()}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+          }}
+        />
+        <span className="text-sm text-[var(--text)]">MB a day</span>
+      </span>
+    </label>
   );
 }
 

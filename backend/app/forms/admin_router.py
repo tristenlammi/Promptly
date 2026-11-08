@@ -7,7 +7,9 @@ What a server admin can do about forms, and nothing more:
   answer "doesn't exist");
 * see the forms anyone with the link can answer — title, owner, number of
   answers, when it was made, and reports — and read the reports;
-* close one of them, with a reason the owner is told.
+* close one of them, with a reason the owner is told;
+* set how much each form may take in files in a day (WP-F1.6) — forms for
+  people on this server and link forms separately.
 
 Admins can't read a form's answers from here.
 """
@@ -70,31 +72,55 @@ async def _listing(db: AsyncSession) -> list[dict[str, Any]]:
     return out
 
 
+async def _caps(db: AsyncSession) -> dict[str, int]:
+    from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
+    from app.forms.uploads import DEFAULT_DAILY_MB, DEFAULT_LINK_DAILY_MB
+
+    row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+    return {
+        "upload_cap_mb": int(getattr(row, "forms_upload_cap_mb", None) or DEFAULT_DAILY_MB),
+        "link_upload_cap_mb": int(getattr(row, "forms_link_upload_cap_mb", None) or DEFAULT_LINK_DAILY_MB),
+    }
+
+
+async def _overview(db: AsyncSession) -> dict[str, Any]:
+    return {"link_answers": await link_answers_allowed(db), **await _caps(db), "forms": await _listing(db)}
+
+
 @router.get("")
 async def overview(db: AsyncSession = Depends(get_db), _admin: User = Depends(require_admin)) -> dict:
-    return {"link_answers": await link_answers_allowed(db), "forms": await _listing(db)}
+    return await _overview(db)
 
 
 class _Settings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    link_answers: bool
+    link_answers: bool | None = None
+    # Each form's 24-hour allowance for files, in MB.
+    upload_cap_mb: int | None = Field(default=None, ge=1, le=100_000)
+    link_upload_cap_mb: int | None = Field(default=None, ge=1, le=100_000)
 
 
 @router.patch("/settings")
 async def change_settings(
     payload: _Settings, db: AsyncSession = Depends(get_db), _admin: User = Depends(require_admin)
 ) -> dict:
-    """Answers from people without an account, on or off for everyone."""
+    """Answers from people without an account, on or off for everyone; and
+    how much each form may take in files in a day."""
     from app.app_settings.models import SINGLETON_APP_SETTINGS_ID, AppSettings
 
     row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
     if row is None:
         row = AppSettings(id=SINGLETON_APP_SETTINGS_ID)
         db.add(row)
-    row.forms_link_answers = payload.link_answers
+    if payload.link_answers is not None:
+        row.forms_link_answers = payload.link_answers
+    if payload.upload_cap_mb is not None:
+        row.forms_upload_cap_mb = payload.upload_cap_mb
+    if payload.link_upload_cap_mb is not None:
+        row.forms_link_upload_cap_mb = payload.link_upload_cap_mb
     await db.commit()
-    return {"link_answers": payload.link_answers, "forms": await _listing(db)}
+    return await _overview(db)
 
 
 @router.get("/{form_id:uuid}/reports")
@@ -152,7 +178,7 @@ async def close_form(
             tag=f"form-closed:{form.id}",
             extra={"kind": "closed"},
         )
-    return {"link_answers": await link_answers_allowed(db), "forms": await _listing(db)}
+    return await _overview(db)
 
 
 __all__ = ["router"]

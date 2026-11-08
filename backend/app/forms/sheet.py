@@ -12,6 +12,9 @@ one you already have. Then:
 * a new question adds a column at the right; a renamed one renames its
   header only if the header still says the old name;
 * a deleted answer stays in the sheet;
+* a file question's cell lists each file sent, one per line, as its name
+  and a link that opens it in the form's Responses (WP-F1.6) — the file
+  itself stays private to people who can see the answers;
 * every cell Forms writes is typed text (``ct: {fa: "@", t: "s"}``) with no
   formula, so an answer like ``=IMPORTXML(…)`` can't run anything.
 
@@ -165,15 +168,36 @@ def wanted_columns(
     return out
 
 
+def file_link(origin: str, form_file_id: Any, number: int, upload_id: str) -> str:
+    """Where a file in the sheet points: the answer it came with, in the
+    form's Responses, opened at that file (signed in, with access)."""
+    return f"{origin}/files/form/{form_file_id}?tab=responses&answer={number}&file={upload_id}"
+
+
+def files_text(value: Any, link: Any = None) -> str:
+    """A file answer in a cell: ``name — link`` per file, one per line."""
+    if not isinstance(value, list):
+        return ""
+    lines = []
+    for v in value:
+        if not isinstance(v, dict):
+            continue
+        name = str(v.get("name") or "file")
+        lines.append(f"{name} — {link(str(v.get('id')))}" if link is not None and v.get("id") else name)
+    return "\n".join(lines)
+
+
 def row_values(
     definition: dict[str, Any],
     r: Any,
     *,
     who: dict[Any, str] | None = None,
     tz: Any = None,
+    link: Any = None,
 ) -> dict[str, str]:
     """One answer as ``{column key: text}`` — not neutralised: the cells are
-    typed text, so nothing in them is ever run."""
+    typed text, so nothing in them is ever run. ``link(number, upload_id)``
+    makes the link for a file (:func:`file_link`)."""
     out = {
         "number": str(r.number),
         "submitted": when(r.submitted_at, tz),
@@ -183,7 +207,13 @@ def row_values(
     }
     answers = r.answers or {}
     for q in questions(definition or {}, include_deleted=True):
-        out[f"q:{q.get('id')}"] = answer_text(q, answers.get(q.get("id")))
+        value = answers.get(q.get("id"))
+        if q.get("kind") == "file_upload" and isinstance(value, list):
+            out[f"q:{q.get('id')}"] = files_text(
+                value, (lambda uid, n=r.number: link(n, uid)) if link is not None else None
+            )
+        else:
+            out[f"q:{q.get('id')}"] = answer_text(q, value)
     return out
 
 
@@ -722,7 +752,15 @@ async def sync_once(
     defn = form.definition or {}
     email, account = await _flags(db, form)
     wanted = wanted_columns(defn, email=email, account=account, layout=form.sheet_columns)
-    values = [(r.number, row_values(defn, r, who=who, tz=tz)) for r in rows]
+    from app.calendars.reach import site_origin
+
+    origin = await site_origin(db)
+    shell_id = form.file_id
+
+    def link(number: int, upload_id: str) -> str:
+        return file_link(origin, shell_id, number, upload_id)
+
+    values = [(r.number, row_values(defn, r, who=who, tz=tz, link=link)) for r in rows]
     room = f"sheet:{sheet.id}"
     tab_id = form.sheet_tab_id
 

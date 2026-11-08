@@ -16,6 +16,8 @@ export type AnswerPageState = "open" | "closed" | "sign_in";
 export interface MyAnswer {
   number: number;
   answers: Record<string, unknown>;
+  /** Files already sent with this answer, by upload id. */
+  files?: Record<string, { name: string }>;
   email: string | null;
   submitted_at: string | null;
   edited_at: string | null;
@@ -43,6 +45,17 @@ export interface AnswerPageOpen {
   /** Your last answer (signed in, with changing answers on). */
   mine: MyAnswer | null;
   closes_at: string | null;
+  /** File questions: who may send files here, and what the picker takes per question. */
+  uploads: { mode: "all" | "link" | "none"; accept: Record<string, string> };
+}
+
+/** A file picked on the answer page, kept until the answer is sent. */
+export interface StagedFile {
+  id: string;
+  name: string;
+  size: number;
+  mime: string;
+  image: boolean;
 }
 
 export interface AnswerPageClosed {
@@ -69,6 +82,8 @@ export interface SubmitBody {
   website?: string;
   /** Changing a link answer: its edit token. */
   edit?: string;
+  /** This page's key for the files it picked. */
+  draft_key?: string;
 }
 
 /** A refusal's body (``detail``). */
@@ -85,7 +100,13 @@ export interface Refusal {
     | "start_expired"
     | "bad_start"
     | "too_big"
-    | "bad_request";
+    | "bad_request"
+    | "no_files"
+    | "too_many"
+    | "bad_type"
+    | "no_room"
+    | "daily_full"
+    | "empty";
   message: string;
   question_id?: string;
   option_id?: string;
@@ -121,5 +142,32 @@ export const formAnswerApi = {
   },
   async report(token: string, reason: string): Promise<void> {
     await apiClient.post(`${base(token)}/report`, { reason });
+  },
+  /** Stage one file for a file question (shown with its progress). */
+  async upload(
+    token: string,
+    questionId: string,
+    draftKey: string,
+    file: File,
+    onProgress?: (fraction: number) => void,
+    signal?: AbortSignal
+  ): Promise<StagedFile> {
+    const form = new FormData();
+    form.append("file", file, file.name);
+    form.append("question_id", questionId);
+    form.append("draft_key", draftKey);
+    const { data } = await apiClient.post<StagedFile>(`${base(token)}/uploads`, form, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 0,
+      signal,
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) onProgress(e.loaded / e.total);
+      },
+    });
+    return data;
+  },
+  /** Take back a staged file. */
+  async removeUpload(token: string, uploadId: string, draftKey: string): Promise<void> {
+    await apiClient.delete(`${base(token)}/uploads/${encodeURIComponent(uploadId)}`, { params: { draft_key: draftKey } });
   },
 };

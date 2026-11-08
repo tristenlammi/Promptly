@@ -17,6 +17,9 @@ need it.
 * ``GET  /{token}/mine?edit=`` · ``PUT /{token}/mine`` — change your answer
   (signed in, or with the edit token from the confirmation).
 * ``POST /{token}/report`` — ``{reason}``, link forms only.
+* ``POST /{token}/uploads`` (multipart: ``file``, ``question_id``,
+  ``draft_key``) — stage a file for a file question (WP-F1.6);
+  ``DELETE /{token}/uploads/{id}?draft_key=`` takes it back.
 
 Answering never gives access to the form's file: the link is a
 ``resource_type="form"`` row that nothing serving files reads.
@@ -27,7 +30,7 @@ import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from limits import parse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +48,7 @@ router = APIRouter()
 # Route-level limits, per address (on top of the per-form ones in abuse.py).
 _submit_limit = rate_limit(parse("10/minute"), bucket="form_submit")
 _report_limit = rate_limit(parse("5/hour"), bucket="form_report")
+_upload_limit = rate_limit(parse("30/hour"), bucket="form_upload")
 
 MAX_BODY_BYTES = 128 * 1024
 
@@ -105,6 +109,7 @@ def _incoming(data: dict[str, Any]) -> Incoming:
         email=text("email", 400),
         website=text("website", 2000),
         edit=text("edit", 200),
+        draft_key=text("draft_key", 100),
     )
 
 
@@ -199,6 +204,43 @@ async def put_mine(
         return await responses.edit(db, token, _incoming(data), user)
     except Refusal as exc:
         await db.rollback()
+        raise _raise(exc) from None
+
+
+@router.post("/{token}/uploads", status_code=201)
+async def add_upload(
+    token: str,
+    request: Request,
+    file: UploadFile = File(...),
+    question_id: str = Form(..., min_length=1, max_length=40),
+    draft_key: str = Form(..., min_length=16, max_length=100),
+    db: AsyncSession = Depends(get_db),
+    _limit: None = Depends(_upload_limit),
+) -> dict:
+    """One file for a file question, kept until the answer is sent (and
+    deleted after a day if it never is). ``{id, name, size, mime, image}``."""
+    user = await _who(request, db)
+    try:
+        return await responses.add_file(db, token, user, question_id=question_id, draft_key=draft_key, upload=file)
+    except Refusal as exc:
+        await db.rollback()
+        raise _raise(exc) from None
+    finally:
+        await file.close()
+
+
+@router.delete("/{token}/uploads/{upload_id:uuid}", status_code=204)
+async def remove_upload(
+    token: str,
+    upload_id: uuid.UUID,
+    request: Request,
+    draft_key: str = Query(..., min_length=16, max_length=100),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    user = await _who(request, db)
+    try:
+        await responses.remove_file(db, token, user, upload_id, draft_key)
+    except Refusal as exc:
         raise _raise(exc) from None
 
 

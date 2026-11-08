@@ -52,7 +52,11 @@ RENDITIONS = ("thumb", "preview", "poster", "video", "original")
 # export (WP-10.4): the "file" is the export, ``ver`` the part number. A face
 # or animal's crop (PH-3): the "file" is the face (or animal). An edited
 # photo's tile and preview (PH-7). New codes only ever go on the end.
-_CODE = {name: i + 1 for i, name in enumerate((*RENDITIONS, "zip", "version", "export", "face", "thumb_edit", "preview_edit", "basemap"))}
+_CODE = {name: i + 1 for i, name in enumerate((
+    *RENDITIONS, "zip", "version", "export", "face", "thumb_edit", "preview_edit", "basemap",
+    # Forms (WP-F1.6): a file someone sent with an answer, and its tile.
+    "form_upload", "form_thumb",
+))}
 _NAME = {v: k for k, v in _CODE.items()}
 # What each rendition is on disk under derived/<file_id>/.
 RENDITION_FILE = {

@@ -20,6 +20,8 @@ downloaded like any office file. These routes are the builder's:
   · ``GET /{file_id}/export?format=csv|xlsx`` — the Responses tab
   (WP-F1.4); ``PUT /{file_id}/notify`` and ``POST /{file_id}/seen`` — your
   notifications for this form.
+* ``POST /{file_id}/uploads/{upload_id}/save`` — Save to Files: a copy of
+  a file someone sent, into your own Drive (WP-F1.6).
 * ``POST /{file_id}/sheet`` (link a new or existing sheet) ·
   ``POST /{file_id}/sheet/sync`` (Sync now) · ``DELETE /{file_id}/sheet``
   (unlink) — the linked Sheet (WP-F1.5, :mod:`app.forms.sheet`).
@@ -33,7 +35,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse as FastAPIFileResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -460,7 +462,7 @@ async def responses_summary(
     from app.forms import notify, results
 
     shell, form, access = await load_form(db, file_id, user)
-    out = await results.summary(db, form)
+    out = await results.summary(db, form, user)
     out["new_count"] = await notify.unseen_count(db, form.id, user.id)
     out["can_delete"] = access == "edit"
     out["accepting"] = bool(form.accepting)
@@ -487,7 +489,7 @@ async def question_responses(
     from app.forms import results
 
     _shell, form, _access = await load_form(db, file_id, user)
-    out = await results.question_answers(db, form, question, before=before, search=q)
+    out = await results.question_answers(db, form, question, before=before, search=q, user=user)
     if out is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
     return out
@@ -504,7 +506,7 @@ async def one_response(
     from app.forms import results
 
     _shell, form, _access = await load_form(db, file_id, user)
-    out = await results.one(db, form, number)
+    out = await results.one(db, form, number, user)
     if out is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That answer isn't here any more.")
     return out
@@ -568,6 +570,49 @@ async def export_responses(
             "Cache-Control": "no-store",
         },
     )
+
+
+@router.post("/{file_id:uuid}/uploads/{upload_id:uuid}/save", status_code=status.HTTP_201_CREATED)
+async def save_upload_to_files(
+    file_id: uuid.UUID,
+    upload_id: uuid.UUID,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _room: None = Depends(require_disk_room),
+) -> dict:
+    """Save to Files: copy a file someone sent into your own Drive (your
+    Forms folder), through the normal upload path — so it gets every check
+    and everything Files does with a file (search, previews…). Your
+    storage counts the copy."""
+    from app.files import blobstore
+    from app.files.router import ingest_staged
+    from app.files.storage import absolute_path
+    from app.files.system_folders import ensure_forms_folder
+    from app.forms import uploads
+    from app.forms.models import FormUpload
+
+    _shell, form, _access = await load_form(db, file_id, user)
+    up = await db.get(FormUpload, upload_id)
+    row = await uploads.readable(db, up.file_id, user) if up is not None and up.form_id == form.id else None
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That file isn't here any more.")
+    path = absolute_path(row.storage_path)
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That file isn't here any more.")
+    folder = await ensure_forms_folder(db, user)
+    await db.commit()
+    with open(path, "rb") as fh:
+        staged = await blobstore.stage_upload(fh)
+    try:
+        saved = await ingest_staged(
+            db, request=request, user=user, staged=staged, filename=row.filename, declared_mime=row.mime_type,
+            scope="mine", folder_id=folder.id, route=None, on_conflict="keep_both", workspace_id=None,
+            last_modified=None, exact_folder=True,
+        )
+    finally:
+        blobstore.blobstore.discard(staged)
+    return {"file": saved.model_dump(mode="json") if hasattr(saved, "model_dump") else saved}
 
 
 # --------------------------------------------------------------------

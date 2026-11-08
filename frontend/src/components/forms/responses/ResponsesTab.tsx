@@ -37,6 +37,7 @@ import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 import { ChoiceBars, ScaleColumns, pct, type ChoiceRow } from "./charts";
+import { FileList, FileStrip } from "./Files";
 import { SheetCard } from "./SheetCard";
 
 /**
@@ -60,6 +61,8 @@ export function ResponsesTab({
   onSend,
   onCount,
   formTitle = "",
+  openAnswer = null,
+  openFile = null,
 }: {
   fileId: string;
   canEdit: boolean;
@@ -68,6 +71,10 @@ export function ResponsesTab({
   onCount?: (n: number) => void;
   /** For a new sheet's name, "<Form> (Responses)". */
   formTitle?: string;
+  /** Open this answer first (a link from the sheet: ``?answer=3&file=…``). */
+  openAnswer?: number | null;
+  /** …with this file of it picked out. */
+  openFile?: string | null;
 }) {
   const qc = useQueryClient();
   const isPhone = useIsMobile();
@@ -77,9 +84,9 @@ export function ResponsesTab({
     refetchInterval: 10_000,
     refetchIntervalInBackground: false,
   });
-  const [view, setView] = useState<ViewKind>("summary");
+  const [view, setView] = useState<ViewKind>(openAnswer ? "individual" : "summary");
   const [questionId, setQuestionId] = useState<string | null>(null);
-  const [number, setNumber] = useState<number | null>(null);
+  const [number, setNumber] = useState<number | null>(openAnswer);
   // "3 new since you last looked": what was new when you opened the tab.
   const [newOnOpen, setNewOnOpen] = useState<number | null>(null);
   const markedRef = useRef(false);
@@ -128,7 +135,7 @@ export function ResponsesTab({
     setQuestionId(id);
     setView("question");
   };
-  const openAnswer = (n: number) => {
+  const showAnswer = (n: number) => {
     setNumber(n);
     setView("individual");
   };
@@ -166,14 +173,14 @@ export function ResponsesTab({
         ) : (
           <>
             <ViewSwitch view={view} onView={setView} />
-            {view === "summary" && <SummaryView summary={data} narrow={isPhone} onQuestion={openQuestion} onAnswer={openAnswer} />}
+            {view === "summary" && <SummaryView summary={data} narrow={isPhone} onQuestion={openQuestion} onAnswer={showAnswer} />}
             {view === "question" && (
               <QuestionView
                 fileId={fileId}
                 summary={data}
                 questionId={questionId ?? data.questions[0]?.id ?? null}
                 onQuestion={setQuestionId}
-                onAnswer={openAnswer}
+                onAnswer={showAnswer}
               />
             )}
             {view === "individual" && (
@@ -185,6 +192,7 @@ export function ResponsesTab({
                 canDelete={data.can_delete}
                 isPhone={isPhone}
                 sheetLinked={!!data.sheet?.file_id}
+                highlight={openFile}
               />
             )}
           </>
@@ -526,6 +534,9 @@ function QuestionSummary({ q, narrow, onQuestion, onAnswer }: { q: SummaryQuesti
       </>
     );
   }
+  if (q.files) {
+    return <FileStrip files={q.files} answered={q.answered} onAnswer={onAnswer} onQuestion={() => onQuestion(q.id)} />;
+  }
   if (q.latest) {
     return (
       <>
@@ -655,7 +666,11 @@ function QuestionView({
         <ul className="space-y-2" data-testid="question-answers">
           {items.map((i) => (
             <li key={i.number} className="rounded-card border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-              <p className="whitespace-pre-wrap break-words text-sm text-[var(--text)]">{i.text || <span className="text-[var(--text-muted)]">No answer</span>}</p>
+              {i.files ? (
+                <FileList fileId={fileId} files={i.files} />
+              ) : (
+                <p className="whitespace-pre-wrap break-words text-sm text-[var(--text)]">{i.text || <span className="text-[var(--text-muted)]">No answer</span>}</p>
+              )}
               <p className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-[var(--text-muted)]">
                 <button type="button" onClick={() => onAnswer(i.number)} className="font-medium text-[var(--accent-text)] hover:underline">
                   #{i.number}
@@ -691,6 +706,7 @@ function IndividualView({
   canDelete,
   isPhone,
   sheetLinked,
+  highlight = null,
 }: {
   fileId: string;
   number: number | null;
@@ -701,8 +717,28 @@ function IndividualView({
   isPhone: boolean;
   /** A sheet is linked: say that deleting here leaves it alone. */
   sheetLinked: boolean;
+  /** A file to pick out (opened from the sheet). */
+  highlight?: string | null;
 }) {
   const qc = useQueryClient();
+  // Opened at one file (from the sheet): bring it into view once it's there.
+  const scrolled = useRef(false);
+  useEffect(() => {
+    if (!highlight || scrolled.current) return;
+    const t = window.setInterval(() => {
+      const el = document.getElementById(`form-file-${highlight}`);
+      if (el) {
+        el.scrollIntoView({ block: "center" });
+        scrolled.current = true;
+        window.clearInterval(t);
+      }
+    }, 200);
+    const stop = window.setTimeout(() => window.clearInterval(t), 5000);
+    return () => {
+      window.clearInterval(t);
+      window.clearTimeout(stop);
+    };
+  }, [highlight]);
   const { data, error, isLoading } = useQuery({
     queryKey: ["form-response", fileId, number, total],
     queryFn: () => formsApi.response(fileId, number!),
@@ -824,7 +860,7 @@ function IndividualView({
                 {a.deleted ? " (deleted question)" : ""}
               </dt>
               <dd className={cn("mt-0.5 whitespace-pre-wrap break-words text-sm", a.answered ? "text-[var(--text)]" : "italic text-[var(--text-muted)]")}>
-                {a.answered ? a.text : "No answer"}
+                {a.answered && a.files ? <FileList fileId={fileId} files={a.files} highlight={highlight} /> : a.answered ? a.text : "No answer"}
               </dd>
             </div>
           ))}

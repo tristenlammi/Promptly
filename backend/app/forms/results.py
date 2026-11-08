@@ -10,8 +10,12 @@ for the page to show escaped. Nothing here goes to chat or AI (that's
 WP-F1.7, where answers are marked as outside content).
 
 Deleting an answer gives back what it took: its places on limited options
-(``form_option_counts``), its count towards an answer limit, and its size
-on the owner's storage. Response numbers are never reused.
+(``form_option_counts``), its count towards an answer limit, its size on
+the owner's storage, and the files sent with it (WP-F1.6). Response
+numbers are never reused.
+
+Files people sent come back as cards with short-lived signed links (a
+tile for pictures, a download for everything), never as their content.
 """
 from __future__ import annotations
 
@@ -79,8 +83,9 @@ def _iso(d: datetime | None) -> str | None:
 # --------------------------------------------------------------------
 # Summary
 # --------------------------------------------------------------------
-async def summary(db: AsyncSession, form: Form) -> dict[str, Any]:
-    """Per-question aggregates for the summary view."""
+async def summary(db: AsyncSession, form: Form, user: User | None = None) -> dict[str, Any]:
+    """Per-question aggregates for the summary view (with ``user``: a strip
+    of the newest files sent to each file question, linked for them)."""
     defn = form.definition or {}
     qs = [q for q in questions(defn, include_deleted=True)]
     params = {"f": form.id}
@@ -158,7 +163,7 @@ async def summary(db: AsyncSession, form: Form) -> dict[str, Any]:
         ):
             strings.setdefault(k, {})[v] = int(n)
 
-    latest_ids = [q["id"] for q in qs if q.get("kind") in TEXT_KINDS + ("file_upload",)]
+    latest_ids = [q["id"] for q in qs if q.get("kind") in TEXT_KINDS]
     latest: dict[str, list[dict[str, Any]]] = {}
     if latest_ids:
         by_id = {q["id"]: q for q in qs}
@@ -230,8 +235,12 @@ async def summary(db: AsyncSession, form: Form) -> dict[str, Any]:
             groups = sorted(strings.get(qid, {}).items())
             block["groups"] = [{"value": v, "count": c} for v, c in groups[:MAX_GROUPS]]
             block["more_groups"] = max(0, len(groups) - MAX_GROUPS)
-        elif kind in TEXT_KINDS or kind == "file_upload":
+        elif kind in TEXT_KINDS:
             block["latest"] = latest.get(qid, [])
+        elif kind == "file_upload":
+            from app.forms.uploads import strip_for
+
+            block["files"] = await strip_for(db, form, user, qid) if user is not None else []
         out_qs.append(block)
     # Live questions in form order, then deleted ones that still have answers.
     live = [b for b in out_qs if not b["deleted"]]
@@ -252,7 +261,13 @@ def _like(q: str) -> str:
 
 
 async def question_answers(
-    db: AsyncSession, form: Form, question_id: str, *, before: int | None = None, search: str | None = None
+    db: AsyncSession,
+    form: Form,
+    question_id: str,
+    *,
+    before: int | None = None,
+    search: str | None = None,
+    user: User | None = None,
 ) -> dict[str, Any] | None:
     """Every answer to one question, newest first, a page at a time. Text
     questions can be searched. None for a question the form never had."""
@@ -285,17 +300,19 @@ async def question_answers(
     more = len(rows) > PAGE
     rows = rows[:PAGE]
     names = await names_of(db, {r.respondent_id for r in rows if r.respondent_id})
+    cards = await _cards(db, form, user, [(q, r[5]) for r in rows])
     items = []
     for r in rows:
         value = r[5]  # decoded jsonb
-        items.append(
-            {
-                "number": r.number,
-                "submitted_at": _iso(r.submitted_at),
-                "who": who(r, names),
-                "text": answer_text(q, value),
-            }
-        )
+        item = {
+            "number": r.number,
+            "submitted_at": _iso(r.submitted_at),
+            "who": who(r, names),
+            "text": answer_text(q, value),
+        }
+        if q.get("kind") == "file_upload":
+            item["files"] = _files_of(value, cards, outside=r.source == "link")
+        items.append(item)
     return {
         "question": {"id": question_id, "title": (q.get("title") or "").strip() or "Untitled question", "kind": q.get("kind"), "deleted": bool(q.get("deleted"))},
         "items": items,
@@ -316,7 +333,32 @@ async def _live(db: AsyncSession, form: Form, number: int) -> FormResponse | Non
     ).scalar_one_or_none()
 
 
-async def one(db: AsyncSession, form: Form, number: int) -> dict[str, Any] | None:
+async def _cards(
+    db: AsyncSession, form: Form, user: User | None, pairs: list[tuple[dict[str, Any], Any]]
+) -> dict[str, dict[str, Any]]:
+    """Signed cards for every file in these (question, answer) pairs."""
+    from app.forms.uploads import file_cards, ids_in
+
+    if user is None:
+        return {}
+    ids = [i for q, v in pairs if q.get("kind") == "file_upload" for i in ids_in(v)]
+    return await file_cards(db, form, user, ids) if ids else {}
+
+
+def _files_of(value: Any, cards: dict[str, dict[str, Any]], *, outside: bool) -> list[dict[str, Any]]:
+    """One answer's files, in the order they were sent. A file whose card
+    is missing (deleted since) still shows its name."""
+    from app.forms.uploads import ids_in
+
+    names = {str(v.get("id")): str(v.get("name") or "file") for v in value or [] if isinstance(v, dict)} if isinstance(value, list) else {}
+    out = []
+    for i in ids_in(value):
+        card = cards.get(i)
+        out.append({**card, "outside": outside} if card else {"id": i, "name": names.get(i, "file"), "missing": True, "outside": outside})
+    return out
+
+
+async def one(db: AsyncSession, form: Form, number: int, user: User | None = None) -> dict[str, Any] | None:
     """One answer with its place among the rest (``‹ 3 of 12 ›``)."""
     r = await _live(db, form, number)
     if r is None:
@@ -328,21 +370,24 @@ async def one(db: AsyncSession, form: Form, number: int) -> dict[str, Any] | Non
     nxt = await db.scalar(select(func.min(FormResponse.number)).where(*live, FormResponse.number > number))
     names = await names_of(db, {r.respondent_id} if r.respondent_id else set())
     answers = r.answers or {}
+    all_qs = questions(form.definition or {}, include_deleted=True)
+    cards = await _cards(db, form, user, [(q, answers.get(q["id"])) for q in all_qs])
     items = []
-    for q in questions(form.definition or {}, include_deleted=True):
+    for q in all_qs:
         qid = q["id"]
         if q.get("deleted") and qid not in answers:
             continue
-        items.append(
-            {
-                "id": qid,
-                "title": (q.get("title") or "").strip() or "Untitled question",
-                "kind": q.get("kind"),
-                "deleted": bool(q.get("deleted")),
-                "answered": qid in answers,
-                "text": answer_text(q, answers.get(qid)),
-            }
-        )
+        item = {
+            "id": qid,
+            "title": (q.get("title") or "").strip() or "Untitled question",
+            "kind": q.get("kind"),
+            "deleted": bool(q.get("deleted")),
+            "answered": qid in answers,
+            "text": answer_text(q, answers.get(qid)),
+        }
+        if q.get("kind") == "file_upload":
+            item["files"] = _files_of(answers.get(qid), cards, outside=r.source == "link")
+        items.append(item)
     items = [i for i in items if not i["deleted"]] + [i for i in items if i["deleted"]]
     return {
         "number": r.number,
@@ -395,6 +440,10 @@ async def delete_one(db: AsyncSession, shell: UserFile, form: Form, number: int)
                 row.taken -= 1
     form.response_count = max(0, (form.response_count or 0) - 1)
     form.updated_at = datetime.now(timezone.utc)
+    # The files sent with it go too (WP-F1.6).
+    from app.forms.uploads import drop_for_response
+
+    await drop_for_response(db, r.id)
     await db.delete(r)
     await db.flush()
     await _grow_shell(db, shell.id, -_size(answers))
@@ -407,7 +456,9 @@ async def delete_all(db: AsyncSession, shell: UserFile, form: Form) -> int:
     Counters go back to zero; numbering carries on."""
     from app.forms.notify import reopened
     from app.forms.service import refresh_shell
+    from app.forms.uploads import drop_for_form
 
+    await drop_for_form(db, form.id)
     n = (
         await db.execute(delete(FormResponse).where(FormResponse.form_id == form.id).returning(FormResponse.id))
     ).all()

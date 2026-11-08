@@ -270,6 +270,24 @@ export interface SummaryQuestion {
   groups?: { value: string; count: number }[];
   more_groups?: number;
   latest?: { number: number; text: string; submitted_at: string | null }[];
+  /** File questions: the newest files sent (WP-F1.6). */
+  files?: (AnswerFile & { number: number })[];
+}
+
+/** A file someone sent with an answer: signed links that work for a few
+ *  hours (``url`` always downloads; ``thumb`` is a picture's tile once
+ *  it's made). ``missing``: deleted since. ``outside``: from someone
+ *  with the link, not an account. */
+export interface AnswerFile {
+  id: string;
+  name: string;
+  size?: number;
+  mime?: string;
+  image?: boolean;
+  thumb?: string | null;
+  url?: string;
+  missing?: boolean;
+  outside: boolean;
 }
 
 export type NotifyMode = "each" | "daily" | "off";
@@ -314,7 +332,7 @@ export interface ResponsesSummary {
 
 export interface QuestionAnswers {
   question: { id: string; title: string; kind: QuestionKind; deleted: boolean };
-  items: { number: number; submitted_at: string | null; who: Respondent; text: string }[];
+  items: { number: number; submitted_at: string | null; who: Respondent; text: string; files?: AnswerFile[] }[];
   next_before: number | null;
 }
 
@@ -328,7 +346,15 @@ export interface OneResponse {
   source: "server" | "link";
   submitted_at: string | null;
   edited_at: string | null;
-  answers: { id: string; title: string; kind: QuestionKind; deleted: boolean; answered: boolean; text: string }[];
+  answers: {
+    id: string;
+    title: string;
+    kind: QuestionKind;
+    deleted: boolean;
+    answered: boolean;
+    text: string;
+    files?: AnswerFile[];
+  }[];
 }
 
 export const formsApi = {
@@ -400,6 +426,11 @@ export const formsApi = {
   },
   async response(fileId: string, number: number): Promise<OneResponse> {
     const { data } = await apiClient.get<OneResponse>(`/forms/${fileId}/responses/${number}`);
+    return data;
+  },
+  /** Save to Files: a copy of a file someone sent, into your own Drive. */
+  async saveUpload(fileId: string, uploadId: string): Promise<{ file: { id: string; filename: string; folder_id: string | null } }> {
+    const { data } = await apiClient.post(`/forms/${fileId}/uploads/${uploadId}/save`);
     return data;
   },
   async deleteResponse(fileId: string, number: number): Promise<{ deleted: number; response_count: number }> {

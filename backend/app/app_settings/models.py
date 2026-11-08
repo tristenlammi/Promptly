@@ -150,6 +150,10 @@ class AppSettings(Base):
     forms_link_answers: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # Forms (0297): how much each form may take in files in 24 hours, in
+    # MB — a form for people on this server, and a link form.
+    forms_upload_cap_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=500, server_default="500")
+    forms_link_upload_cap_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
 
     # ----- Public origins (replaces the old static .env ALLOWED_ORIGINS) -----
     # JSON array of fully-qualified origins (scheme + host [+ :port]) the

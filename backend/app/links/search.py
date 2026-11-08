@@ -114,6 +114,7 @@ async def search(db: AsyncSession, user: User, q: str, limit: int = 6, kinds: se
         out += [_r("user", str(u.id), u.username, "Person on Promptly") for u in rows]
 
     if want & {"file", "photo"}:
+        from app.files.generated_kinds import HIDDEN_KINDS
         from app.files.models import UserFile
         from app.files.office_templates import office_title
 
@@ -123,7 +124,12 @@ async def search(db: AsyncSession, user: User, q: str, limit: int = 6, kinds: se
                 .where(
                     UserFile.user_id == user.id,
                     UserFile.trashed_at.is_(None),
-                    or_(UserFile.source_kind.is_(None), UserFile.source_kind != "item"),
+                    # Never a hidden row: a form's pictures, files people
+                    # sent with form answers, the AI's text mirrors.
+                    or_(
+                        UserFile.source_kind.is_(None),
+                        UserFile.source_kind.not_in(["item", *sorted(HIDDEN_KINDS)]),
+                    ),
                     UserFile.filename.ilike(pat, escape="\\"),
                 )
                 .order_by(UserFile.updated_at.desc())
@@ -134,7 +140,8 @@ async def search(db: AsyncSession, user: User, q: str, limit: int = 6, kinds: se
             media = (f.mime_type or "").startswith(("image/", "video/"))
             kind = "photo" if media else "file"
             if kind in want:
-                out.append(_r(kind, str(f.id), office_title(f), "Photo" if media else "File"))
+                label = "Photo" if media else ("Form" if f.source_kind == "form" else "File")
+                out.append(_r(kind, str(f.id), office_title(f), label))
 
     if "album" in want:
         from app.photos.album_models import Album, AlbumMember

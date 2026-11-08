@@ -21,6 +21,9 @@ export interface AdminFormRow {
 
 export interface AdminFormsOverview {
   link_answers: boolean;
+  /** Each form's files allowance for 24 hours, in MB (WP-F1.6). */
+  upload_cap_mb: number;
+  link_upload_cap_mb: number;
   forms: AdminFormRow[];
 }
 
@@ -37,6 +40,10 @@ export const formsAdminApi = {
   },
   async setLinkAnswers(on: boolean): Promise<AdminFormsOverview> {
     const { data } = await apiClient.patch<AdminFormsOverview>("/admin/forms/settings", { link_answers: on });
+    return data;
+  },
+  async setUploadCaps(caps: { upload_cap_mb?: number; link_upload_cap_mb?: number }): Promise<AdminFormsOverview> {
+    const { data } = await apiClient.patch<AdminFormsOverview>("/admin/forms/settings", caps);
     return data;
   },
   async reports(formId: string): Promise<FormReportRow[]> {

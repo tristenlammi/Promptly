@@ -310,6 +310,15 @@ async def forms_sheet_nightly(ctx) -> int:
     return await nightly()
 
 
+async def forms_upload_sweep(ctx) -> int:
+    """Cron: files picked on a form's answer page but never sent (WP-F1.6)."""
+    from app.database import SessionLocal
+    from app.forms.uploads import sweep
+
+    async with SessionLocal() as db:
+        return await sweep(db)
+
+
 class WorkerSettings:
     functions = [
         # Never retried by arq: a run interrupted mid-way is closed out by
@@ -374,6 +383,8 @@ class WorkerSettings:
         # down, a sync was lost), and are checked in full overnight.
         cron(forms_sheet_tick, minute={4, 14, 24, 34, 44, 54}, run_at_startup=False, unique=True, timeout=1800),
         cron(forms_sheet_nightly, hour=3, minute=50, run_at_startup=False, unique=True, timeout=3600),
+        # Forms (WP-F1.6): staged files nobody sent go after a day.
+        cron(forms_upload_sweep, hour=4, minute=20, run_at_startup=False, unique=True, timeout=1800),
     ]
     on_startup = wait_for_schema
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

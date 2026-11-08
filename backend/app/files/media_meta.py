@@ -383,6 +383,11 @@ async def extract_and_store(file_id: uuid.UUID | str) -> bool:
         media.extracted_at = datetime.now(timezone.utc)
         db.add(media)
         await db.flush()
+        if row.source_kind == "form_upload":
+            # A file sent with a form answer (Forms): a tile for Responses,
+            # never a photo in anyone's library.
+            await db.commit()
+            return True
         await _pair_live_photo(db, row, media)
         from app.photos.library import sync as sync_photo
 

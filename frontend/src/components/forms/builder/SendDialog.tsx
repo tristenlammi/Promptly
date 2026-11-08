@@ -99,7 +99,16 @@ export function SendDialog({
       : s.max_responses !== null && view.form.response_count >= s.max_responses
         ? "It has all the answers you asked for, so it isn't taking more."
         : null;
-  const fileQuestions = view.form.definition.items.filter((i) => !i.deleted && i.kind === "file_upload");
+  // File questions people without an account won't be asked (link forms).
+  const fileQuestions =
+    s.audience === "link"
+      ? view.form.definition.items.filter(
+          (i) =>
+            !i.deleted &&
+            i.kind === "file_upload" &&
+            (!s.allow_uploads_from_link || !(i.config as { kinds: string[] }).kinds.some((k) => k === "images" || k === "pdf"))
+        )
+      : [];
 
   return (
     <Sheet open={open} onClose={onClose} title="Send" size="md">
@@ -151,8 +160,12 @@ export function SendDialog({
           <p className="flex gap-2 text-xs text-[var(--text-muted)]">
             <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span>
-              File questions ({fileQuestions.map((q) => `“${q.title || "Untitled question"}”`).join(", ")}) aren&apos;t on
-              the answer page yet, so people won&apos;t be asked them.
+              People without an account won&apos;t be asked{" "}
+              {fileQuestions.map((q) => `“${q.title || "Untitled question"}”`).join(", ")}:{" "}
+              {s.allow_uploads_from_link
+                ? "they can only send pictures and PDFs."
+                : "letting them send files is off in Settings."}{" "}
+              People who sign in are.
             </span>
           </p>
         )}

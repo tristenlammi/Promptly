@@ -147,10 +147,25 @@ async def latest_by(db: AsyncSession, form: Form, user: User) -> FormResponse | 
     ).scalar_one_or_none()
 
 
-def _mine(r: FormResponse) -> dict[str, Any]:
+def _mine(r: FormResponse, defn: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Your answer, to change it. File answers go back as upload ids (what
+    the page sends), with the files' names alongside."""
+    from app.forms.definition import questions
+    from app.forms.uploads import ids_in
+
+    answers = dict(r.answers or {})
+    files: dict[str, dict[str, Any]] = {}
+    file_qs = {q["id"] for q in questions(defn or {}, include_deleted=True) if q.get("kind") == "file_upload"}
+    for qid in file_qs & set(answers):
+        value = answers[qid]
+        answers[qid] = ids_in(value)
+        for v in value if isinstance(value, list) else []:
+            if isinstance(v, dict) and v.get("id"):
+                files[str(v["id"])] = {"name": str(v.get("name") or "file")}
     return {
         "number": r.number,
-        "answers": r.answers or {},
+        "answers": answers,
+        "files": files,
         "email": r.email,
         "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
         "edited_at": r.edited_at.isoformat() if r.edited_at else None,
@@ -186,7 +201,10 @@ async def page(db: AsyncSession, ctx: AnswerCtx, user: User | None, token: str) 
             "asset_urls": _asset_urls(token, top),
             "closed_message": form.closed_message or "",
         }
-    respondent_defn = ans.respondent_definition(defn)
+    from app.forms.uploads import page_rules
+
+    files = _files_mode(form, user)
+    respondent_defn = ans.respondent_definition(defn, files)
     previous = await latest_by(db, form, user) if user is not None else None
     return {
         "state": "open",
@@ -206,14 +224,23 @@ async def page(db: AsyncSession, ctx: AnswerCtx, user: User | None, token: str) 
         "start_token": abuse.start_token(form.id),
         "respondent": {"name": _display_name(user)} if user is not None else None,
         "answered": previous is not None,
-        "mine": _mine(previous) if previous is not None and form.allow_edit else None,
+        "mine": _mine(previous, defn) if previous is not None and form.allow_edit else None,
         "closes_at": form.close_at.isoformat() if form.close_at else None,
+        # File questions (WP-F1.6): who may send files, and what to pick.
+        "uploads": page_rules(defn, files),
     }
+
 
 
 # --------------------------------------------------------------------
 # Taking an answer
 # --------------------------------------------------------------------
+def _files_mode(form: Form, user: User | None) -> str:
+    from app.forms.uploads import mode_for
+
+    return mode_for(form, user)
+
+
 @dataclass
 class Incoming:
     answers: Any
@@ -222,6 +249,8 @@ class Incoming:
     email: str | None = None
     website: str | None = None
     edit: str | None = None
+    # The answer page's key for the files it staged (WP-F1.6).
+    draft_key: str | None = None
 
 
 def _check_start(form: Form, token: str | None) -> None:
@@ -389,12 +418,15 @@ async def submit(
             can_edit=bool(form.allow_edit),
         )
 
+    from app.forms import uploads
+
     defn = form.definition or {}
     try:
-        clean, path = ans.check_answers(defn, body.answers)
+        clean, path = ans.check_answers(defn, body.answers, _files_mode(form, user))
         email = None
         if form.collect_email and form.audience == "link" and user is None:
             email = ans.check_email(body.email)
+        claimed = await uploads.claim(db, form, clean, draft_key=body.draft_key)
     except ans.AnswerError as exc:
         raise _invalid(exc) from None
 
@@ -419,6 +451,7 @@ async def submit(
     form.response_count = (form.response_count or 0) + 1
     form.last_response_at = now
     await db.flush()
+    await uploads.attach(db, form, r, claimed, draft_key=body.draft_key)
     await _grow_shell(db, shell.id, _size(clean))
     out = _result(token, form, r, user=user)
     await db.commit()
@@ -484,7 +517,7 @@ async def mine(db: AsyncSession, token: str, user: User | None, edit: str | None
         raise gone()
     if _closed_for_edits(form):
         raise Refusal(409, "closed", form.closed_message or CLOSED_MESSAGE)
-    return {**_mine(r), "start_token": abuse.start_token(form.id)}
+    return {**_mine(r, form.definition or {}), "start_token": abuse.start_token(form.id)}
 
 
 async def edit(db: AsyncSession, token: str, body: Incoming, user: User | None) -> dict[str, Any]:
@@ -503,12 +536,15 @@ async def edit(db: AsyncSession, token: str, body: Incoming, user: User | None) 
     if _closed_for_edits(form):
         raise Refusal(409, "closed", form.closed_message or CLOSED_MESSAGE)
     _check_start(form, body.start_token)
+    from app.forms import uploads
+
     defn = form.definition or {}
     try:
-        clean, path = ans.check_answers(defn, body.answers)
+        clean, path = ans.check_answers(defn, body.answers, _files_mode(form, user))
         email = r.email
         if form.collect_email and form.audience == "link" and r.respondent_id is None:
             email = ans.check_email(body.email)
+        claimed = await uploads.claim(db, form, clean, draft_key=body.draft_key, response=r)
     except ans.AnswerError as exc:
         raise _invalid(exc) from None
     old = dict(r.answers or {})
@@ -521,12 +557,35 @@ async def edit(db: AsyncSession, token: str, body: Incoming, user: User | None) 
     # A new seq: the linked Sheet rewrites this row (WP-F1.5).
     r.seq = (await db.execute(text("SELECT nextval('form_response_seq')"))).scalar_one()
     await db.flush()
+    # Files the changed answer still has stay; the ones it dropped go.
+    await uploads.attach(db, form, r, claimed, draft_key=body.draft_key)
     await _grow_shell(db, shell.id, delta)
     await db.commit()
     from app.forms.sheet import sync_soon
 
     sync_soon(form)
     return {"number": r.number}
+
+
+# --------------------------------------------------------------------
+# Files (WP-F1.6)
+# --------------------------------------------------------------------
+async def add_file(
+    db: AsyncSession, token: str, user: User | None, *, question_id: str, draft_key: str | None, upload: Any
+) -> dict[str, Any]:
+    """``POST /api/f/{token}/uploads``: stage one file picked on the page."""
+    from app.forms import uploads
+
+    ctx = await load(db, token, user)
+    return await uploads.stage(db, ctx, user, question_id=question_id, draft_key=draft_key, upload=upload)
+
+
+async def remove_file(db: AsyncSession, token: str, user: User | None, upload_id: uuid.UUID, draft_key: str | None) -> None:
+    """``DELETE /api/f/{token}/uploads/{id}``: take back a staged file."""
+    from app.forms import uploads
+
+    ctx = await load(db, token, user)
+    await uploads.unstage(db, ctx, upload_id, draft_key)
 
 
 # --------------------------------------------------------------------
@@ -566,6 +625,7 @@ __all__ = [
     "GONE_MESSAGE",
     "AnswerCtx",
     "Incoming",
+    "add_file",
     "Refusal",
     "asset_url",
     "edit",
@@ -575,6 +635,7 @@ __all__ = [
     "load",
     "mine",
     "page",
+    "remove_file",
     "report",
     "submit",
     "verify_asset",

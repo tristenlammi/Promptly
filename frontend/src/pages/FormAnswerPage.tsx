@@ -9,6 +9,7 @@ import {
   type AnswerPageOpen,
   type SubmitBody,
 } from "@/api/formAnswer";
+import { FileAnswer, type FileMeta } from "@/components/forms/FileAnswer";
 import { FormDone, FormRenderer } from "@/components/forms/FormRenderer";
 import { answersOnPath, walkPath, type Answers } from "@/components/forms/logic";
 import { themeVars } from "@/components/forms/theme";
@@ -82,6 +83,8 @@ const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
 interface Draft {
   answers: Answers;
   email: string;
+  /** Names of the files picked so far (they're kept on the server). */
+  files?: Record<string, FileMeta>;
 }
 interface Pending {
   kind: "submit" | "change";
@@ -111,6 +114,8 @@ export function FormAnswerPage() {
       // This device answered (the soft one-per-device check on link forms).
       done: stored<{ at: string }>(`promptly.form-done.${token}`),
       edit: stored<string>(`promptly.form-edit.${token}`),
+      // This page's key for the files it picked (they're the server's until sent).
+      fileKey: stored<string>(`promptly.form-files.${token}.${uid}`),
     }),
     [token, uid]
   );
@@ -124,6 +129,16 @@ export function FormAnswerPage() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string> | null>(null);
+  // Files in the answers: names and sizes, by upload id.
+  const [files, setFiles] = useState<Record<string, FileMeta>>(() => keys.draft.get()?.files ?? {});
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  const busyFiles = useRef<Set<string>>(new Set());
+  const fileKey = useRef<string>(keys.fileKey.get() ?? "");
+  if (!fileKey.current) {
+    fileKey.current = uuid4().replace(/-/g, "");
+    keys.fileKey.set(fileKey.current);
+  }
   const startAt = useRef(Date.now());
   const startToken = useRef("");
   const submitId = useRef(keys.pending.get()?.body.submit_id ?? uuid4());
@@ -213,6 +228,7 @@ export function FormAnswerPage() {
     setSending(true);
     setSendError(null);
     setFieldErrors(null);
+    pending = { ...pending, body: { ...pending.body, draft_key: pending.body.draft_key ?? fileKey.current } };
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
       setOffline(true);
       setSending(false);
@@ -298,6 +314,10 @@ export function FormAnswerPage() {
     keys.draft.clear();
     if (page.state === "open" && !page.respondent) keys.done.set({ at: new Date().toISOString() });
     submitId.current = uuid4();
+    // The files went with the answer: a fresh key for the next one.
+    fileKey.current = uuid4().replace(/-/g, "");
+    keys.fileKey.set(fileKey.current);
+    setFiles({});
     setOffline(false);
     setSendError(null);
     setEditing(null);
@@ -308,11 +328,16 @@ export function FormAnswerPage() {
   };
 
   const onSubmit = (page: AnswerPageOpen) => (answers: Answers, _path: number[], email?: string) => {
+    if (busyFiles.current.size) {
+      setSendError("Wait for your files to finish uploading, then send.");
+      return;
+    }
     const onPath = answersOnPath(page.definition, answers, walkPath(page.definition, answers));
     const body: SubmitBody = {
       answers: onPath as Record<string, unknown>,
       submit_id: submitId.current,
       start_token: startToken.current,
+      draft_key: fileKey.current,
       ...(email ? { email } : {}),
       ...(honeypot.current?.value ? { website: honeypot.current.value } : {}),
     };
@@ -330,6 +355,7 @@ export function FormAnswerPage() {
       const mine = page.respondent && page.mine ? { ...page.mine, start_token: page.start_token } : await formAnswerApi.mine(token, edit);
       startToken.current = mine.start_token;
       startAt.current = Date.now();
+      setFiles((prev) => ({ ...prev, ...(mine.files ?? {}) }));
       setEditing({ answers: mine.answers as Answers, email: mine.email ?? "", edit, when: mine.edited_at ?? mine.submitted_at });
       setMode("form");
       setRun((n) => n + 1);
@@ -341,6 +367,11 @@ export function FormAnswerPage() {
       } else setSendError(refusal?.message ?? "Your answer couldn't be loaded. Try again.");
     }
   };
+
+  const onFileBusy = useCallback((questionId: string, busy: boolean) => {
+    if (busy) busyFiles.current.add(questionId);
+    else busyFiles.current.delete(questionId);
+  }, []);
 
   const anotherAnswer = () => {
     setDone(null);
@@ -532,7 +563,7 @@ export function FormAnswerPage() {
           draftTimer.current = window.setTimeout(() => {
             const prev = keys.draft.get();
             if (!Object.keys(a).length && !prev?.email) keys.draft.clear();
-            else keys.draft.set({ answers: a, email: prev?.email ?? "" });
+            else keys.draft.set({ answers: a, email: prev?.email ?? "", files: filesRef.current });
           }, 250);
         }}
         askEmail={s.collect_email && !(editing && signedIn)}
@@ -540,7 +571,7 @@ export function FormAnswerPage() {
         onEmailChange={(email) => {
           if (editing) return;
           const prev = keys.draft.get();
-          keys.draft.set({ answers: prev?.answers ?? {}, email });
+          keys.draft.set({ answers: prev?.answers ?? {}, email, files: prev?.files });
         }}
         notice={notice}
         onSubmit={onSubmit(page)}
@@ -548,6 +579,29 @@ export function FormAnswerPage() {
         submitError={sendError}
         submitLabel={editing ? "Save changes" : "Submit"}
         fieldErrors={fieldErrors}
+        renderUpload={(item, value, onChange) => (
+          <FileAnswer
+            token={token}
+            draftKey={fileKey.current}
+            item={item}
+            accept={page.uploads?.accept?.[item.id] ?? ""}
+            value={value}
+            onChange={onChange}
+            files={files}
+            onFiles={(update) =>
+              setFiles((prev) => {
+                const next = update(prev);
+                filesRef.current = next;
+                if (!editing) {
+                  const d = keys.draft.get();
+                  if (d) keys.draft.set({ ...d, files: next });
+                }
+                return next;
+              })
+            }
+            onBusy={onFileBusy}
+          />
+        )}
         footer={<FooterLinks token={token} link={page.audience === "link"} />}
         className="flex-1"
       />

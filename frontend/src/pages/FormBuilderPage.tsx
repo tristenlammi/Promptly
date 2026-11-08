@@ -240,7 +240,15 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
       <SaveBanner status={doc.status} onRetry={() => void doc.saveNow()} />
       {tab === "responses" ? (
         <div id="form-panel-responses" role="tabpanel" aria-labelledby="form-tab-responses" className="flex min-h-0 flex-1 flex-col">
-          <ResponsesTab fileId={fileId} canEdit={canEdit} onSend={() => setSendOpen(true)} onCount={setAnswerCount} formTitle={doc.def.title} />
+          <ResponsesTab
+            fileId={fileId}
+            canEdit={canEdit}
+            onSend={() => setSendOpen(true)}
+            onCount={setAnswerCount}
+            formTitle={doc.def.title}
+            openAnswer={Number(params.get("answer")) || null}
+            openFile={params.get("file")}
+          />
         </div>
       ) : tab === "questions" ? (
         <div id="form-panel-questions" role="tabpanel" aria-labelledby="form-tab-questions" className="flex min-h-0 flex-1 flex-col">

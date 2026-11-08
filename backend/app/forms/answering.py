@@ -24,7 +24,8 @@ multiple_choice ``{option: id}`` or ``{other: text}``; dropdown
 ``{option: id}``; checkboxes ``{options: [id…], other?: text}``;
 linear_scale / rating a whole number; date ``YYYY-MM-DD`` (``THH:MM`` with
 time; ``MM-DD…`` without the year); time ``HH:MM`` or a duration
-``H:MM:SS``; file_upload upload ids (WP-F1.6).
+``H:MM:SS``; file_upload a list of upload ids (stored as ``[{id, name}]``,
+WP-F1.6).
 """
 from __future__ import annotations
 
@@ -41,10 +42,18 @@ from app.forms.definition import QUESTION_KINDS, json_size
 BRANCHING_KINDS = ("multiple_choice", "dropdown")
 LIMITED_KINDS = ("multiple_choice", "checkboxes", "dropdown")
 
-# File questions take answers once uploads land (WP-F1.6). Until then the
-# answer page doesn't show them: they're left out of what a respondent is
-# sent, never required, and any answer to them is dropped.
-UPLOADS_OPEN = False
+# File questions take answers (WP-F1.6). Who may send files is decided per
+# answer page (:func:`app.forms.uploads.mode_for`): signed-in people get
+# what the question allows; people without an account only on link forms
+# that allow it, and only pictures and PDFs. A question someone can't send
+# files to is left out of what they're sent, never required of them, and
+# any answer to it is dropped. Set this to False to close every file
+# question at once.
+UPLOADS_OPEN = True
+
+# Who may send files here: "all" (signed in: the question's kinds), "link"
+# (no account: pictures and PDFs only) or "none".
+FileMode = str
 
 MAX_ANSWERS_BYTES = 64 * 1024
 OTHER_MAX = 500
@@ -143,34 +152,56 @@ def walk_path(defn: dict[str, Any], answers: dict[str, Any]) -> list[int]:
 # --------------------------------------------------------------------
 # What a respondent is sent
 # --------------------------------------------------------------------
-def answerable(item: dict[str, Any]) -> bool:
+def file_kinds(item: dict[str, Any], files: FileMode) -> list[str]:
+    """The kinds of file this person may send to a file question: the
+    question's own, only pictures and PDFs for someone without an account,
+    nothing when files are off for them."""
+    from app.forms.definition import LINK_UPLOAD_GROUPS
+
+    if not UPLOADS_OPEN or files == "none":
+        return []
+    kinds = [k for k in (item.get("config") or {}).get("kinds") or []]
+    if files == "link":
+        kinds = [k for k in kinds if k in LINK_UPLOAD_GROUPS]
+    return kinds
+
+
+def answerable(item: dict[str, Any], files: FileMode = "all") -> bool:
     """A question someone can answer on the answer page now."""
     kind = item.get("kind")
     if kind not in QUESTION_KINDS or item.get("deleted"):
         return False
-    return UPLOADS_OPEN or kind != "file_upload"
+    return kind != "file_upload" or bool(file_kinds(item, files))
 
 
-def respondent_definition(defn: dict[str, Any]) -> dict[str, Any]:
+def respondent_definition(defn: dict[str, Any], files: FileMode = "all") -> dict[str, Any]:
     """The definition as someone answering sees it: no deleted items, and
-    no file questions until uploads open (WP-F1.6). Sections and branching
-    are untouched, so the walk is the same on both sides."""
+    file questions only when this person may send files (with only the
+    kinds they may send). Sections and branching are untouched, so the
+    walk is the same on both sides."""
     out = copy.deepcopy(defn)
-    out["items"] = [
-        i
-        for i in out.get("items") or []
-        if not i.get("deleted") and (i.get("kind") != "file_upload" or UPLOADS_OPEN)
-    ]
+    items = []
+    for i in out.get("items") or []:
+        if i.get("deleted"):
+            continue
+        if i.get("kind") == "file_upload":
+            kinds = file_kinds(i, files)
+            if not kinds:
+                continue
+            i["config"] = {**(i.get("config") or {}), "kinds": kinds}
+        items.append(i)
+    out["items"] = items
     return out
 
 
-def hidden_questions(defn: dict[str, Any]) -> list[dict[str, Any]]:
-    """Live questions the answer page leaves out for now (file questions
-    before WP-F1.6) — the Send dialog tells the owner."""
+def hidden_questions(defn: dict[str, Any], files: FileMode = "link") -> list[dict[str, Any]]:
+    """Live questions some people answering won't be asked (file questions,
+    for people without an account when the form doesn't take their files)
+    — the Send dialog tells the owner."""
     return [
         i
         for i in defn.get("items") or []
-        if not i.get("deleted") and i.get("kind") in QUESTION_KINDS and not answerable(i)
+        if not i.get("deleted") and i.get("kind") in QUESTION_KINDS and not answerable(i, files)
     ]
 
 
@@ -407,14 +438,34 @@ def check_one(item: dict[str, Any], v: Any) -> Any:
             raise bad("Pick a time.")
         return v
 
+    if kind == "file_upload":
+        # Upload ids from the answer page (or ``{id, name}`` as they're
+        # stored, when an answer is sent back unchanged). Which uploads they
+        # are — this form's, this question's, sent by this person — is
+        # checked against the database by ``app.forms.uploads.claim``.
+        if not isinstance(v, list) or not v:
+            raise bad("Add your file again.")
+        ids: list[str] = []
+        for x in v:
+            fid = x.get("id") if isinstance(x, dict) else x
+            if not isinstance(fid, str) or not 1 <= len(fid) <= 64:
+                raise bad("Add your file again.")
+            if fid not in ids:
+                ids.append(fid)
+        most = int(cfg.get("max_files") or 1)
+        if len(ids) > most:
+            raise bad("Send 1 file at most." if most == 1 else f"Send {most} files at most.")
+        return ids
+
     raise bad("This question can't take answers here.")
 
 
-def check_answers(defn: dict[str, Any], raw: Any) -> tuple[dict[str, Any], list[int]]:
+def check_answers(defn: dict[str, Any], raw: Any, files: FileMode = "all") -> tuple[dict[str, Any], list[int]]:
     """(clean answers, path): the path re-walked from ``raw``, only the
     answers on it, each checked, and every required question on it
     answered. Raises :class:`AnswerError` at the first problem, in form
-    order."""
+    order. ``files``: who's answering, for file questions (see
+    :func:`file_kinds`); file answers come back as upload ids."""
     if not isinstance(raw, dict):
         raise AnswerError("The answers didn't arrive in a shape the form understands.")
     if json_size(raw) > MAX_ANSWERS_BYTES:
@@ -424,7 +475,7 @@ def check_answers(defn: dict[str, Any], raw: Any) -> tuple[dict[str, Any], list[
     clean: dict[str, Any] = {}
     for idx in path:
         for item in sections[idx].items:
-            if not answerable(item):
+            if not answerable(item, files):
                 continue
             v = raw.get(item["id"])
             if is_empty(item, v):
@@ -454,6 +505,7 @@ __all__ = [
     "check_answers",
     "check_email",
     "check_one",
+    "file_kinds",
     "hidden_questions",
     "is_empty",
     "limited_options",
