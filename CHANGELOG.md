@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Passwords: aliases on your own domain. Point a domain you own at your mail provider with a catch-all, add it in Passwords → Aliases and run the check, then make a different address for each login from the item editor or the extension's Generator, which fills it into the sign-up form.
+- Mail: an email sent to one of your aliases says which alias and links to its login, warns when the sender doesn't look like the site, and lets you turn the alias off, which moves its new mail to Trash or a folder you choose.
+- Mail: a reply to mail that came to an alias goes out from that alias, when your provider allows it, and says so when it doesn't.
+
 ### Changed
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 

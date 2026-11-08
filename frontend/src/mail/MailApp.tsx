@@ -15,6 +15,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 
 import { mailApi, personName, shortWhen, type Person, type InviteAnswer, type KnownPerson, type MailAccount, type MailInvite, type MailLabel, type Message, type ThreadAction, type ThreadRow } from "./api";
 import { AccountPicker, AccountSheet, MailboxSheet } from "./AccountSheet";
+import { AliasNotes, replyAlias, sendAsNote, useThreadAliases } from "./Aliases";
 import { asParagraphs, Composer, type Draft } from "./Composer";
 import { AttachmentViewer, SaveToFiles, useSavedAttachments } from "./AttachmentViewer";
 import { useThreadDrag } from "./DragMove";
@@ -712,6 +713,7 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   markRead: () => void;
 }) {
   const { data, isLoading, isError } = useQuery({ queryKey: ["mail-conversation", open.account_id, open.key], queryFn: () => mailApi.conversation(open.account_id, open.key) });
+  const aliasInfo = useThreadAliases(open.account_id, open.key);
   const marked = useRef(false);
   useEffect(() => {
     if (!data || marked.current || data.messages.every((m) => m.seen)) return;
@@ -744,9 +746,11 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
   const replyTo = isMine(last.from.addr) ? others(last.to) : [last.reply_to || last.from.addr];
   const everyoneElse = [...new Set([...others(last.to), ...others(last.cc)])].filter((a) => !replyTo.includes(a));
   const reSubject = data.subject.toLowerCase().startsWith("re:") ? data.subject : `Re: ${data.subject}`;
+  const viaAlias = replyAlias(aliasInfo, data.messages.map((m) => m.id));
   const reply = (all: boolean) => onWrite({
     account_id: open.account_id, to: replyTo.join(", "), cc: all ? everyoneElse.join(", ") : "", subject: reSubject, reply_to: last.id, thread_key: open.key,
     quoting: `The email you're replying to will be quoted below this.`,
+    ...(viaAlias && viaAlias.send_as !== "refused" ? { from_alias: viaAlias.address, from_alias_note: sendAsNote(viaAlias.send_as, viaAlias.send_as_text) } : {}),
   });
   const forward = () => onWrite({
     account_id: open.account_id, to: "", subject: data.subject.toLowerCase().startsWith("fwd:") ? data.subject : `Fwd: ${data.subject}`, forward_of: last.id, thread_key: open.key,
@@ -784,6 +788,7 @@ function ConversationPane({ open, showBack, labels, mine, prefill, onPrefilled, 
             <button type="button" onClick={onUnsnooze} className="font-medium text-[#D97757]">Back to Inbox</button>
           </p>
         )}
+        <AliasNotes info={aliasInfo} accountId={open.account_id} threadKey={open.key} />
         {data.labels.length > 0 && <div className="flex flex-wrap gap-1.5">{labels.filter((l) => data.labels.includes(l.id)).map((l) => <LabelPill key={l.id} label={l} />)}</div>}
         {data.messages.map((m, i) => <MessageCard key={m.id} message={m} people={people} startOpen={i === data.messages.length - 1 || !m.seen} />)}
       </div>

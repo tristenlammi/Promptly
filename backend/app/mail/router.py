@@ -932,6 +932,8 @@ class SendBody(BaseModel):
     forward_of: uuid.UUID | None = None
     files: list[OutgoingFile] = Field(default_factory=list, max_length=50)
     file_ids: list[uuid.UUID] = Field(default_factory=list, max_length=50)
+    # Sent as one of your aliases (app/mail/aliases.py).
+    from_alias: str | None = Field(default=None, max_length=320)
 
 
 def _server_for(account: MailAccount, user: User) -> imap.Server:
@@ -992,6 +994,10 @@ async def send(body: SendBody, db: AsyncSession = Depends(get_db), user: User = 
         compose.Draft(to=[str(a) for a in body.to], cc=[str(a) for a in body.cc], subject=body.subject, text=body.text, html=body.html, files=files),
         reply_to=reply_to, forward=forward,
     )
+    if body.from_alias:
+        from . import aliases
+
+        await aliases.use_from(db, user, account, message, str(body.from_alias))
     if reply_to is not None:
         # You've replied: it isn't waiting on you any more.
         await db.execute(update(MailMessage).where(MailMessage.account_id == account.id, MailMessage.thread_key == reply_to.thread_key).values(needs_reply=False))

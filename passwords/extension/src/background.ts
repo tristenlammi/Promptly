@@ -13,6 +13,7 @@ import { decideOffer, type SaveOffer } from "../../../frontend/src/passwords/cor
 import { afterFill, codeStep, flowFor, mayFillOnLoad, type TabFlow } from "../../../frontend/src/passwords/core/autofill/flow";
 import { openSignedPack, ruleForHost } from "../../../frontend/src/passwords/core/autofill/rules";
 import { generateForSite, generatePassphrase, generatePin, generateUsername, plusAddress } from "../../../frontend/src/passwords/core/generator";
+import { aliasApi, aliasWord } from "../../../frontend/src/passwords/core/aliases";
 import { baseDomain, hostOf, lookalikeOf, matchItems, matchUrl } from "../../../frontend/src/passwords/core/match";
 import { type Item, type ItemBody, newBody, type SiteRule } from "../../../frontend/src/passwords/core/model";
 import { IdbStore } from "../../../frontend/src/passwords/core/store";
@@ -1342,6 +1343,10 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       return { password: generateForSite(m.host) };
     case "plusBase":
       return { email: mostUsedEmail() };
+    case "aliasDomains":
+      return c.unlocked ? aliasApi(c.api).domains().catch(() => []) : [];
+    case "aliasNew":
+      return c.unlocked ? aliasInto(m.tabId, m.domainId, m.custom) : { ok: false, reason: "locked" };
     case "plusAddress": {
       const base = m.host ? baseDomain(m.host) : null;
       try {
@@ -1364,6 +1369,37 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       await answerSave(m.tabId, m.answer);
       return { ok: true };
   }
+}
+
+/** A new alias on your own domain for the sign-up on this tab: saved as the username of
+ *  the login being made here (the same tagged login a generated password goes into),
+ *  and filled into the page's email or username box. Only the top page's own frames
+ *  get it: an address isn't a secret, but a third party's frame has no use for it. */
+async function aliasInto(tabId: number, domainId?: string, custom?: string): Promise<{ ok: boolean; address?: string; filled?: boolean; reason?: string }> {
+  const c = client!;
+  const api = aliasApi(c.api);
+  const domains = await api.domains();
+  const d = domains.find((x) => x.id === domainId) ?? domains.find((x) => x.status === "ok") ?? domains[0];
+  if (!d) return { ok: false, reason: "no-domain" };
+  const tab = await ext.tabs.get(tabId);
+  const url = tab.url ?? "";
+  const origin = originOf(url);
+  const host = hostOf(url);
+  const waiting = loginItems().find((i) => i.body.tags?.includes(UNCONFIRMED_TAG) && (i.body.urls ?? []).some((u) => originOf(u.url) === origin));
+  const alias = await api.make(d.id, aliasWord(d.word_style, { url, custom }), waiting?.id ?? null);
+  if (waiting) {
+    await c.update(waiting.id, { ...waiting.body, username: alias.address });
+  } else {
+    const made = await c.saveNew(await c.personalVaultId(), newBody("login", host?.replace(/^www\./, "") ?? "New login", { username: alias.address, urls: url ? [{ url: origin }] : [], tags: [UNCONFIRMED_TAG] }));
+    await api.edit(alias.id, { item_id: made.id }).catch(() => undefined);
+  }
+  await safeSync();
+  for (const { f, report } of await reportedFrames(tabId)) {
+    if (report.origin !== origin || !report.roles.some((r) => r === "email" || r === "username")) continue;
+    const out = await inTime(send<{ filled: string[] }>(tabId, f.frameId, { t: "doFill", values: { username: alias.address }, origin: report.origin }, f.documentId), 5000);
+    if (out?.filled.length) return { ok: true, address: alias.address, filled: true };
+  }
+  return { ok: true, address: alias.address, filled: false };
 }
 
 /** Where a plus-address starts from: the address this person signs up with most. */

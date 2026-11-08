@@ -157,3 +157,18 @@ Bookmarks are encrypted items like any other, and only ones in your own vault co
 ## Passkeys in the extension
 
 A page can detect the wrapper: `navigator.credentials.get.toString()` isn't native, and on Chromium a stack trace shows the extension id. Without a gesture, the extension opens no window unless the vault's unlocked and holds a passkey for that site (D71). So such a site can notice the window, and at most every 30 seconds it can open it. One click in it then signs in, because an unlocked vault and a click count as user verification (D74). Nobody typing anything is part of what that choice gives up.
+
+## Aliases on your own domain
+
+An alias like `shop.k7m2@yourdomain.com` reaches you through a catch-all at your mail provider. Promptly Mail then sorts it. So some of this has to live on the server in plain text, and that's weaker than the rest of the vault:
+
+- **The server keeps every alias address**, which domain and mailbox it belongs to, whether it's on, and when it was turned off. Mail needs the address to know which alias an email was for.
+- **It keeps the vault item's id** that each alias is linked to. The id is opaque: the server can't read the item, so it doesn't learn the site's address or the login's name from it.
+- **It keeps which sender domains mailed each alias**, with counts and dates, and the first sender an alias heard from. Mail was already on the server, but this ties it to an alias and an item id. Put together, someone with the database can usually guess which sites you have accounts at, from who mails each alias. Plain logins don't give the server that.
+- **The word at the start** is a random word by default. If you choose "the site's name", the address itself names the site, for the server and for anyone who sees the address.
+- **The leak flag is a guess.** It compares the sender's domain on the From line, which can be forged, with the first sender (on the server) or the login's own websites (in the vault, which the server never sees). It isn't checked against DKIM or SPF. A mismatch can be a newsletter service; a match can be a forgery.
+- **Turning an alias off doesn't refuse mail.** A mail client can't. The sender sees it delivered, your provider stores it, and Promptly moves it to Trash or your chosen folder once it sees it. Another mail app may show it first, and while the mail-worker is stopped it stays in your Inbox.
+- **Forgetting an alias doesn't stop its mail.** The catch-all still delivers it. Anyone can also make up addresses on your domain and reach you; mail to an address Promptly didn't make is left alone and not counted.
+- **Replying from an alias** puts the alias on the From line and the Message-ID. The envelope sender stays your mailbox's own address, because that's what your provider lets you send as, so a recipient who looks at the hidden headers (Return-Path, Received) can usually see your real address. Some providers rewrite the From line or refuse; the setup check finds out and Mail says so.
+- **The setup check** sends one test email from your mailbox to a random address on the domain, then moves it to Trash.
+- **In the extension**, a new alias fills only into frames of the top page's own site. An address isn't a secret, but a third-party frame has no use for it.

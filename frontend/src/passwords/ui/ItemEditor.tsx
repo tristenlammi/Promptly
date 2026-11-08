@@ -2,11 +2,13 @@
 import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 
+import { aliasApi } from "../core/aliases";
 import { generateForSite } from "../core/generator";
 import { hostOf } from "../core/match";
 import type { CustomField, ItemBody, ItemKind, LoginUrl, UrlMatch } from "../core/model";
 import { parseOtpauth } from "../core/totp";
 import { Button, Callout, errorText, IconButton, inputClass, Label, useVault } from "./kit";
+import { NewAliasButton } from "./Aliases";
 import { StrengthMeter } from "./Onboarding";
 import { decodeQrFile, scanQrFromCamera } from "./qr";
 
@@ -95,6 +97,8 @@ export function ItemEditor({ initial, vaultId, id, onDone, onCancel }: { initial
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [otp, setOtp] = useState(initial.totp ? initial.totp.secret : "");
+  // An alias made for a login that isn't saved yet gets linked once it is.
+  const [newAlias, setNewAlias] = useState<string | null>(null);
   const folders = useMemo(() => vault.allItems({ includeSystem: true }).filter((i) => i.body.kind === "folder"), [vault]);
   const [vaults, setVaults] = useState<{ id: string; displayName: string; role: string }[]>([]);
   useMemo(() => {
@@ -151,6 +155,7 @@ export function ItemEditor({ initial, vaultId, id, onDone, onCancel }: { initial
         }
       }
       const saved = id ? await vault.update(id, clean) : await vault.saveNew(target, clean);
+      if (newAlias && !id) await aliasApi(vault.api).edit(newAlias, { item_id: saved.id }).catch(() => undefined);
       vault.sync().catch(() => undefined);
       onDone(saved.id);
     } catch (err) {
@@ -186,6 +191,14 @@ export function ItemEditor({ initial, vaultId, id, onDone, onCancel }: { initial
           <Label text="Username or email">
             <input className={inputClass} autoComplete="off" value={body.username ?? ""} onChange={(e) => set("username", e.target.value)} />
           </Label>
+          <NewAliasButton
+            urls={urls}
+            itemId={id}
+            onMade={(a) => {
+              set("username", a.address);
+              if (!id) setNewAlias(a.id);
+            }}
+          />
           <Label text="Password">
             <div className="flex gap-2">
               <input className={`${inputClass} font-mono`} autoComplete="new-password" value={body.password ?? ""} onChange={(e) => set("password", e.target.value)} />

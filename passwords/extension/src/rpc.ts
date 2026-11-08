@@ -66,6 +66,8 @@ export type PageRequest =
   | { t: "bookmarkExport" }
   | { t: "plusBase" }
   | { t: "plusAddress"; email: string; host?: string | null }
+  | { t: "aliasDomains" }
+  | { t: "aliasNew"; tabId: number; domainId?: string; custom?: string }
   | { t: "clipWatch"; text: string }
   | { t: "clipClear" };
 
