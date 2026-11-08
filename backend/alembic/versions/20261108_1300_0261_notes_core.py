@@ -2,14 +2,14 @@
 reminders, versions, and the Notes push switch.
 
 Revision ID: 0261_notes_core
-Revises: 0260_pw_browsersync
+Revises: 0330_mail_html_clipped
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0261_notes_core"
-down_revision = "0321_user_blocks"
+down_revision = "0330_mail_html_clipped"
 branch_labels = None
 depends_on = None
 
