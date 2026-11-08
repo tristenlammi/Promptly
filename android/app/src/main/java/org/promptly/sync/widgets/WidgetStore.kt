@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import org.promptly.sync.capture.Capture
 import java.io.File
 import java.util.UUID
 
@@ -20,6 +21,13 @@ data class Op(val id: String, val type: String, val body: JSONObject, val create
     companion object {
         const val COMPLETE = "complete"
         const val ADD_TASK = "add_task"
+
+        // Notes (W1.3). NEW_NOTE's id is the new note's; NOTE_ITEM's is the new item's.
+        const val NEW_NOTE = "new_note"
+        const val NOTE_ADD = "note_add"
+        const val NOTE_TICK = "note_tick"
+        const val NOTE_ITEM = "note_item"
+        val NOTES = setOf(NEW_NOTE, NOTE_ADD, NOTE_TICK, NOTE_ITEM)
 
         fun from(j: JSONObject) = Op(j.getString("id"), j.getString("type"), j.optJSONObject("body") ?: JSONObject(), j.optLong("created"), j.optString("label"), j.optInt("tries"))
     }
@@ -40,8 +48,9 @@ data class Tick(val fileId: String, val taskId: String, val due: String?, val at
     }
 }
 
-/** Something the widget should say once: "Couldn't tick … — the task was deleted." */
-data class Notice(val id: String, val text: String, val at: Long)
+/** Something the widget should say once: "Couldn't tick … — the task was deleted."
+ *  [area]: which widgets say it ("tasks" or "notes"). */
+data class Notice(val id: String, val text: String, val at: Long, val area: String = "tasks")
 
 /** Everything a widget draws from. [version] moves on every change (and on
  *  [WidgetStore.bump]), so a time-based redraw recomposes too. */
@@ -97,7 +106,7 @@ object WidgetStore {
                     snapshot = Snapshot.parse(raw),
                     ops = ops.list().map(Op::from),
                     ticks = local.optJSONArray("ticks").list().map(Tick::from),
-                    notices = local.optJSONArray("notices").list().map { Notice(it.optString("id"), it.optString("text"), it.optLong("at")) },
+                    notices = local.optJSONArray("notices").list().map { Notice(it.optString("id"), it.optString("text"), it.optLong("at"), it.optString("area", "tasks")) },
                     version = 1,
                     loaded = true,
                 )
@@ -114,7 +123,7 @@ object WidgetStore {
     private fun saveLocal(ctx: Context, ticks: List<Tick>, notices: List<Notice>) = writeAtomic(
         File(dir(ctx), "local.json"),
         JSONObject().put("ticks", JSONArray(ticks.map { it.json() }))
-            .put("notices", JSONArray(notices.map { JSONObject().put("id", it.id).put("text", it.text).put("at", it.at) })).toString(),
+            .put("notices", JSONArray(notices.map { JSONObject().put("id", it.id).put("text", it.text).put("at", it.at).put("area", it.area) })).toString(),
     )
 
     private fun saveSnapshot(ctx: Context) = writeAtomic(File(dir(ctx), "snapshot.json"), raw.toString())
@@ -203,6 +212,16 @@ object WidgetStore {
     /** The server did it: out of the outbox, and its answer into the saved copy
      *  (so it doesn't flicker back before the next snapshot). */
     suspend fun done(ctx: Context, op: Op, answer: JSONObject) = change(ctx) { s ->
+        if (op.type in Op.NOTES) {
+            // The server's copy of the note, in at once: no flicker back before the next snapshot.
+            val notesRaw = raw.optJSONObject("notes")
+            if (notesRaw != null && NotesLogic.applyAnswer(notesRaw, answer)) {
+                raw.put("notes", notesRaw)
+                saveSnapshot(ctx)
+            }
+            Capture.delete(op)
+            return@change s.copy(ops = s.ops.filter { it.id != op.id }, snapshot = Snapshot.parse(raw)) to Unit
+        }
         val task = answer.optJSONObject("task")
         val tasksRaw = raw.optJSONObject("tasks")
         if (task != null && tasksRaw != null) {
@@ -230,17 +249,82 @@ object WidgetStore {
 
     /** The server said no for good (the task was deleted, say): drop it, undo what
      *  it showed, and say so once. */
-    suspend fun refused(ctx: Context, op: Op, now: Long) = change(ctx) { s ->
+    suspend fun refused(ctx: Context, op: Op, now: Long, reason: String? = null) = change(ctx) { s ->
+        val label = op.label.take(40)
+        val why = reason?.trim()?.trimEnd('.')?.takeIf { it.isNotBlank() }?.let { " — $it." } ?: "."
         val text = when (op.type) {
-            Op.COMPLETE -> "Couldn't tick “${op.label.take(40)}” — the task was deleted."
-            else -> "Couldn't add “${op.label.take(40)}” to Tasks."
+            Op.COMPLETE -> "Couldn't tick “$label” — the task was deleted."
+            Op.NEW_NOTE -> if (op.body.optString("source") == "voice") "Couldn't save the voice note$why" else "Couldn't save “$label” to Notes$why"
+            Op.NOTE_ADD -> "Couldn't add to “$label” — the note isn't there any more."
+            Op.NOTE_TICK -> "Couldn't tick “$label” — the list or item is gone."
+            Op.NOTE_ITEM -> "Couldn't add “$label” — the list isn't there any more."
+            else -> "Couldn't add “$label” to Tasks."
         }
         val ticks = if (op.type == Op.COMPLETE) s.ticks.filter { it.key != op.key() } else s.ticks
+        Capture.delete(op)
+        val area = if (op.type in Op.NOTES) "notes" else "tasks"
         s.copy(
             ops = s.ops.filter { it.id != op.id },
             ticks = ticks,
-            notices = (s.notices + Notice(op.id, text, now)).filter { now - it.at < NOTICE_MS }.takeLast(3),
+            notices = (s.notices + Notice(op.id, text, now, area)).filter { now - it.at < NOTICE_MS }.takeLast(3),
         ) to Unit
+    }
+
+    // ------------------------------------------------------------ notes (W1.3)
+
+    /** Quick note, Voice note, Share to Notes: a new note, shown on the widgets
+     *  at once and sent when there's signal. [files]: copies in [Capture]'s
+     *  folder ([Capture.ref]); they go up first. The op's id is the note's. */
+    suspend fun addNote(
+        ctx: Context, kind: String, title: String, text: String, items: List<String>, source: String, files: List<JSONObject>, now: Long,
+        id: String = UUID.randomUUID().toString(),
+    ): Op = change(ctx) { s ->
+        val body = JSONObject().put("kind", kind).put("title", title).put("text", text).put("items", JSONArray(items))
+            .put("source", source).put("files", JSONArray(files))
+        val first = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()
+        val label = title.ifBlank { first ?: items.firstOrNull() ?: if (source == "voice") "Voice note" else "Note" }
+        val op = Op(id, Op.NEW_NOTE, body, now, label.take(80))
+        s.copy(ops = s.ops + op) to op
+    }
+
+    /** Share to Notes → Add to… a note that's on the server. [title]: the note's, for messages. */
+    suspend fun addToNote(ctx: Context, noteId: String, title: String, text: String, files: List<JSONObject>, now: Long): Op = change(ctx) { s ->
+        val body = JSONObject().put("note_id", noteId).put("text", text).put("files", JSONArray(files))
+        val op = Op(UUID.randomUUID().toString(), Op.NOTE_ADD, body, now, title.take(80))
+        s.copy(ops = s.ops + op) to op
+    }
+
+    /** Tick (or untick) a list item. Tapped again before it went: the waiting
+     *  change is dropped rather than sending both. */
+    suspend fun tickNoteItem(ctx: Context, noteId: String, itemId: String, checked: Boolean, label: String, now: Long) = change(ctx) { s ->
+        val waiting = s.ops.firstOrNull { it.type == Op.NOTE_TICK && it.body.optString("note_id") == noteId && it.body.optString("item_id") == itemId }
+        var ops = if (waiting != null) s.ops - waiting else s.ops
+        if (waiting == null || NotesLogic.serverChecked(s.snapshot, noteId, itemId) != checked) {
+            ops = ops + Op(
+                UUID.randomUUID().toString(), Op.NOTE_TICK,
+                JSONObject().put("note_id", noteId).put("item_id", itemId).put("checked", checked), now, label.take(80),
+            )
+        }
+        s.copy(ops = ops) to Unit
+    }
+
+    /** The One note widget's +: an item at the end of the list. The op's id is the item's. */
+    suspend fun addNoteItem(ctx: Context, noteId: String, text: String, now: Long): Op = change(ctx) { s ->
+        val op = Op(UUID.randomUUID().toString(), Op.NOTE_ITEM, JSONObject().put("note_id", noteId).put("text", text), now, text.take(80))
+        s.copy(ops = s.ops + op) to op
+    }
+
+    /** How far one of [opId]'s files got: its tus address ("tus") or, once it's
+     *  in Drive, its file id ("file_id"). Kept, so a retry carries on from there. */
+    suspend fun uploading(ctx: Context, opId: String, attachmentId: String, key: String, value: String) = change(ctx) { s ->
+        val ops = s.ops.map { op ->
+            if (op.id != opId) return@map op
+            val body = JSONObject(op.body.toString())
+            val files = body.optJSONArray("files") ?: return@map op
+            for (i in 0 until files.length()) files.optJSONObject(i)?.takeIf { it.optString("id") == attachmentId }?.put(key, value)
+            op.copy(body = body)
+        }
+        s.copy(ops = ops) to Unit
     }
 
     suspend fun tried(ctx: Context, op: Op) = change(ctx) { s ->
@@ -254,7 +338,8 @@ object WidgetStore {
     /** This phone was removed (or unlinked): nothing of the account stays on it. */
     suspend fun wipe(ctx: Context) = withContext(Dispatchers.IO) {
         lock.withLock {
-            dir(ctx).listFiles()?.forEach { it.delete() }
+            dir(ctx).listFiles()?.forEach { it.deleteRecursively() }
+            Capture.wipe(ctx)
             raw = JSONObject()
             _state.value = WidgetState(version = _state.value.version + 1, loaded = true)
         }

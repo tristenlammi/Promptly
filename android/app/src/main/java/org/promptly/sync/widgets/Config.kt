@@ -29,6 +29,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -45,13 +46,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.core.Preferences
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.getAppWidgetState
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.state.PreferencesGlanceStateDefinition
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.promptly.sync.Store
 import org.promptly.sync.capture.CaptureTheme
 
 /*
@@ -234,6 +241,114 @@ class TasksConfigActivity : ComponentActivity() {
                     for (l in lists) Choice(l.name, listId == l.id, { listId = l.id }, WColors.parse(l.color))
                     HorizontalDivider(Modifier.padding(vertical = 8.dp))
                     Toggle("Tasks with no date", "Show them under today's.", someday) { someday = it }
+                }
+            }
+        }
+    }
+}
+
+/** Notes: titles only (no text or items on the home screen). */
+class NotesConfigActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        val id = widgetId(this)
+        if (id == AppWidgetManager.INVALID_APPWIDGET_ID) return finish()
+        ready(this, id)
+        setContent {
+            CaptureTheme {
+                val scope = rememberCoroutineScope()
+                var titlesOnly by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    prefsOf(this@NotesConfigActivity, id)?.let { NotesWidget.configOf(it) }?.let { titlesOnly = it.titlesOnly }
+                }
+                Screen("Notes widget", onSave = {
+                    scope.launch {
+                        save(this@NotesConfigActivity, id, { p -> p[NotesWidget.TITLES_ONLY] = titlesOnly }) { NotesWidget().update(this@NotesConfigActivity, it) }
+                        finish()
+                    }
+                }) {
+                    Text(
+                        "Shows your pinned notes, then the latest. Tap the mic for a voice note — it records with no signal and is sent later.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                    Toggle("Titles only", "Hide what's in your notes. Anyone holding your unlocked phone can see the widget.", titlesOnly) { titlesOnly = it }
+                }
+            }
+        }
+    }
+}
+
+/** One note: which note or list (search as you type). */
+class OneNoteConfigActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        val id = widgetId(this)
+        if (id == AppWidgetManager.INVALID_APPWIDGET_ID) return finish()
+        ready(this, id)
+        setContent {
+            CaptureTheme {
+                val scope = rememberCoroutineScope()
+                var q by remember { mutableStateOf("") }
+                var notes by remember { mutableStateOf<List<NoteCard>>(emptyList()) }
+                var picked by remember { mutableStateOf<String?>(null) }
+                var loading by remember { mutableStateOf(true) }
+                var offline by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) {
+                    prefsOf(this@OneNoteConfigActivity, id)?.get(OneNoteWidget.NOTE_ID)?.takeIf { it.isNotBlank() }?.let { picked = it }
+                }
+                LaunchedEffect(q) {
+                    if (q.isNotEmpty()) delay(300)
+                    loading = true
+                    val cached = WidgetStore.load(this@OneNoteConfigActivity).snapshot.notesSection?.cards.orEmpty()
+                        .filter { !it.pending && (q.isBlank() || it.title.contains(q, ignoreCase = true) || it.text.contains(q, ignoreCase = true)) }
+                    if (notes.isEmpty() || q.isNotBlank()) notes = cached
+                    val account = Store(this@OneNoteConfigActivity).account
+                    val fetched = if (account == null) null else withContext(Dispatchers.IO) { runCatching { WidgetApi(account).pick(q) }.getOrNull() }
+                    offline = fetched == null
+                    if (fetched != null) notes = fetched
+                    loading = false
+                }
+                Screen("One note widget", onSave = {
+                    val chosen = notes.firstOrNull { it.id == picked }
+                    scope.launch {
+                        if (picked != null) {
+                            save(this@OneNoteConfigActivity, id, { p ->
+                                p[OneNoteWidget.NOTE_ID] = picked!!
+                                if (chosen != null) p[OneNoteWidget.NOTE_TITLE] = chosen.title
+                            }) { OneNoteWidget().update(this@OneNoteConfigActivity, it) }
+                            WidgetSync.now(this@OneNoteConfigActivity)
+                        }
+                        finish()
+                    }
+                }) {
+                    OutlinedTextField(
+                        value = q, onValueChange = { q = it.take(200) }, singleLine = true,
+                        placeholder = { Text("Search your notes") },
+                        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Search your notes" },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    when {
+                        loading && notes.isEmpty() -> Text("Looking…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        notes.isEmpty() -> Text(
+                            when {
+                                q.isNotBlank() -> "No notes match “$q”."
+                                offline -> "Your notes show here when there's signal."
+                                else -> "No notes yet. Make one in P Notes, then pick it here."
+                            },
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        else -> for (n in notes) {
+                            val sub = when {
+                                n.isList -> if (n.left == 1) "List · 1 left" else "List · ${n.left} left"
+                                n.shared -> "Shared with you"
+                                else -> null
+                            }
+                            Choice(n.title + (sub?.let { " — $it" } ?: ""), picked == n.id, { picked = n.id }, org.promptly.sync.capture.NoteColors.swatch(n.color))
+                        }
+                    }
                 }
             }
         }

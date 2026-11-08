@@ -364,5 +364,23 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".NotesLauncher"
+            android:label="P Notes"
+            android:enabled="false"
+            android:icon="@mipmap/ic_notes"
+            android:roundIcon="@mipmap/ic_notes"
+            android:taskAffinity="org.promptly.app.notes"
+            android:theme="@style/Launch"
+            android:exported="true">
+            <meta-data android:name="org.promptly.app.PATH" android:value="/notes" />
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts_notes" />
+            <meta-data android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR" android:resource="@color/bar" />
+            <meta-data android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR" android:resource="@color/bar" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

@@ -8,7 +8,10 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.state.getAppWidgetState
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,14 +27,16 @@ import java.time.ZonedDateTime
 /** Is this phone linked to Promptly, as the widgets see it. */
 enum class Link { LINKED, NOT_LINKED, REMOVED, OFF }
 
-/** The widgets this app has, and what each needs from the snapshot. Notes widgets
- *  (W1.3) add their line here. */
+/** The widgets this app has, and what each needs from the snapshot. */
 object Widgets {
     class Kind(val receiver: Class<out GlanceAppWidgetReceiver>, val widget: () -> GlanceAppWidget, val needs: List<String>)
 
     val ALL: List<Kind> = listOf(
         Kind(AgendaWidgetReceiver::class.java, { AgendaWidget() }, listOf("calendar")),
         Kind(TasksWidgetReceiver::class.java, { TasksWidget() }, listOf("tasks")),
+        // Notes (W1.3).
+        Kind(NotesWidgetReceiver::class.java, { NotesWidget() }, listOf("notes")),
+        Kind(OneNoteWidgetReceiver::class.java, { OneNoteWidget() }, listOf("notes")),
     )
 
     /** For work that outlives a widget action (the redraw after a tick's moment). */
@@ -44,6 +49,35 @@ object Widgets {
 
     /** The snapshot sections the widgets on the home screen need. */
     fun wanted(ctx: Context): List<String> = ALL.filter { ids(ctx, it).isNotEmpty() }.flatMap { it.needs }.distinct()
+
+    /** The notes the One note widgets show (the snapshot sends them whole). */
+    suspend fun noteIds(ctx: Context): List<String> = runCatching {
+        val mgr = GlanceAppWidgetManager(ctx)
+        mgr.getGlanceIds(OneNoteWidget::class.java).mapNotNull { id ->
+            getAppWidgetState(ctx, PreferencesGlanceStateDefinition, id)[OneNoteWidget.NOTE_ID]?.takeIf { it.isNotBlank() }
+        }.distinct()
+    }.getOrDefault(emptyList())
+
+    /**
+     * The widget picker's previews, drawn from sample notes and events (never
+     * your own): Android 15+ shows them instead of a plain icon. Set once per
+     * app version — Android rate-limits it, so a refused try is made again at
+     * the next start.
+     */
+    fun publishPreviews(ctx: Context) {
+        if (android.os.Build.VERSION.SDK_INT < 35) return
+        val app = ctx.applicationContext
+        val prefs = app.getSharedPreferences("widgets", Context.MODE_PRIVATE)
+        val version = org.promptly.sync.BuildConfig.VERSION_CODE
+        if (prefs.getInt("previews_for", 0) == version) return
+        scope.launch {
+            val mgr = GlanceAppWidgetManager(app)
+            val ok = ALL.all { k ->
+                runCatching { mgr.setWidgetPreviews(k.receiver.kotlin) == GlanceAppWidgetManager.SET_WIDGET_PREVIEWS_RESULT_SUCCESS }.getOrDefault(false)
+            }
+            if (ok) prefs.edit().putInt("previews_for", version).apply()
+        }
+    }
 
     fun link(ctx: Context): Link {
         val store = Store(ctx)
@@ -110,6 +144,7 @@ object Widgets {
     /** After an app update: keep the schedule if there are widgets (WorkManager
      *  keeps it anyway; this covers a cleared app). */
     fun upgrade(ctx: Context) {
+        publishPreviews(ctx)
         if (placed(ctx)) {
             WidgetSync.periodic(ctx)
             val app = ctx.applicationContext

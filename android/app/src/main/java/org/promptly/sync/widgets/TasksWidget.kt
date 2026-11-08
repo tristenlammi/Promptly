@@ -73,6 +73,11 @@ class TasksWidget : GlanceAppWidget() {
         }
     }
 
+    /** The widget picker's preview (Android 15+): made-up events and tasks. */
+    override suspend fun providePreview(context: Context, widgetCategory: Int) {
+        provideContent { TasksContent(Samples.calendarAndTasks(), TasksConfig(), Samples.now(), clockOf(context), small = false) }
+    }
+
     companion object {
         val SMALL = DpSize(110.dp, 110.dp)
         val WIDE = DpSize(250.dp, 110.dp)
@@ -136,7 +141,7 @@ fun TasksContent(state: WidgetState, cfg: TasksConfig, now: Long, clock: Clock, 
                 items(view.rows, itemId = { (it.fileId + "/" + it.id + "/" + it.due).hashCode().toLong() }) { row -> TaskLine(row, small) }
             }
         }
-        Footer(state.notices.lastOrNull(), stale)
+        Footer(state.notices.lastOrNull { it.area == "tasks" }, stale)
     }
 }
 

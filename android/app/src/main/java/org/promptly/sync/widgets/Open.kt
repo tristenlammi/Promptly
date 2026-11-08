@@ -23,6 +23,7 @@ object Open {
 
     const val CALENDAR = "org.promptly.app.CalendarLauncher"
     const val TASKS = "org.promptly.app.TasksLauncher"
+    const val NOTES = "org.promptly.app.NotesLauncher"
 
     /** An intent for a widget: through [OpenActivity], which decides at tap time. */
     fun page(ctx: Context, launcher: String, path: String): Intent =
@@ -73,6 +74,10 @@ object Open {
         false
     }
 }
+
+/** A note's page in P Notes (one made on this phone and not sent yet: Notes itself). */
+fun notePath(id: String?): String =
+    if (id.isNullOrBlank() || id.any { !(it.isLetterOrDigit() || it == '-') }) "/notes" else "/notes/n/$id"
 
 /** No screen of its own: opens what the widget asked for, then goes. */
 class OpenActivity : Activity() {

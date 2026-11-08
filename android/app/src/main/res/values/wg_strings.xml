@@ -5,4 +5,8 @@
     <string name="wg_agenda_description">Today and the week ahead from P Calendar. Works with no signal.</string>
     <string name="wg_tasks_name">Tasks</string>
     <string name="wg_tasks_description">Today\'s and overdue tasks. Tick them off, even with no signal.</string>
+    <string name="wg_notes_name">Notes</string>
+    <string name="wg_notes_description">Your pinned and latest notes, with a note, list or voice note a tap away. Works with no signal.</string>
+    <string name="wg_one_note_name">One note</string>
+    <string name="wg_one_note_description">A note or list you choose. Tick items off, even with no signal.</string>
 </resources>

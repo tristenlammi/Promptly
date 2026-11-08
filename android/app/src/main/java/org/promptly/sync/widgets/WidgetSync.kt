@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import org.promptly.sync.Refused
 import org.promptly.sync.Store
 import org.promptly.sync.Unlinked
+import org.promptly.sync.capture.Capture
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -40,7 +41,7 @@ class WidgetSync(context: Context, params: WorkerParameters) : CoroutineWorker(c
             if (store.unlinked) WidgetStore.wipe(ctx)
             SyncLogic.Outcome.NOT_LINKED
         } else {
-            SyncLogic.run(ctx, WidgetApi(account), Widgets.wanted(ctx), System.currentTimeMillis())
+            SyncLogic.run(ctx, WidgetApi(account), Widgets.wanted(ctx), System.currentTimeMillis(), Widgets.noteIds(ctx))
         }
         if (outcome == SyncLogic.Outcome.REMOVED) store.unlinked = true
         Widgets.redraw(ctx)
@@ -97,26 +98,31 @@ object SyncLogic {
     private const val DAYS = 7
     private const val MAX_TRIES = 20
 
-    suspend fun run(ctx: Context, api: WidgetBackend, want: List<String>, now: Long): Outcome {
+    suspend fun run(ctx: Context, api: WidgetBackend, want: List<String>, now: Long, noteIds: List<String> = emptyList()): Outcome {
         try {
             // The outbox first, oldest first: an add then a tick of it arrive in order.
-            for (op in WidgetStore.load(ctx).ops) {
+            for (queued in WidgetStore.load(ctx).ops) {
+                var op = queued
                 try {
+                    // A note's pictures and recordings go up first (resumable), then the note.
+                    op = upload(ctx, api, op)
                     WidgetStore.done(ctx, op, api.send(op))
                 } catch (e: Refused) {
                     when {
                         e.status == 403 -> return off(ctx)
                         e.status == 429 -> return Outcome.RETRY
-                        else -> WidgetStore.refused(ctx, op, now)
+                        else -> WidgetStore.refused(ctx, op, now, e.message.takeIf { e.status == 413 || e.status == 507 || e.status == 400 })
                     }
                 } catch (e: IOException) {
                     if (e is Unlinked) throw e
-                    if (op.tries + 1 >= MAX_TRIES) WidgetStore.refused(ctx, op, now) else WidgetStore.tried(ctx, op)
+                    // A recording or picture is never given up on for a bad signal: it waits on the phone.
+                    if (op.tries + 1 >= MAX_TRIES && Capture.files(op).isEmpty()) WidgetStore.refused(ctx, op, now) else WidgetStore.tried(ctx, op)
                     return Outcome.RETRY
                 }
             }
+            Capture.sweep(ctx, WidgetStore.state.value.ops, now)
             if (want.isEmpty()) return Outcome.OK
-            val answer = api.snapshot(want, DAYS, someday = true, etags = WidgetStore.etags(), noteIds = emptyList())
+            val answer = api.snapshot(want, DAYS, someday = true, etags = WidgetStore.etags(), noteIds = noteIds)
             WidgetsOff.set(ctx, false)
             WidgetStore.merge(ctx, answer, now)
             return Outcome.OK
@@ -132,6 +138,24 @@ object SyncLogic {
             Log.w("PromptlyWidgets", "Odd answer from the server", e)
             return Outcome.RETRY
         }
+    }
+
+    /** Send [op]'s files that aren't up yet; the op as it is now (with their Drive ids). */
+    private suspend fun upload(ctx: Context, api: WidgetBackend, op: Op): Op {
+        var now = op
+        for (f in Capture.files(op)) {
+            if (f.optString("file_id").isNotBlank()) continue
+            val id = f.optString("id")
+            val fileId = withContext(Dispatchers.IO) {
+                api.upload(
+                    java.io.File(f.optString("path")), f.optString("name", "Recording.m4a"), f.optString("mime", "audio/mp4"),
+                    f.optString("tus").ifBlank { null },
+                ) { where -> kotlinx.coroutines.runBlocking { WidgetStore.uploading(ctx, op.id, id, "tus", where) } }
+            }
+            WidgetStore.uploading(ctx, op.id, id, "file_id", fileId)
+            now = WidgetStore.state.value.ops.firstOrNull { it.id == op.id } ?: now
+        }
+        return now
     }
 
     /** Widgets were turned off for this phone (Account → Devices): forget what they showed. */

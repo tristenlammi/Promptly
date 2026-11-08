@@ -9,6 +9,15 @@ without ``widgets`` gets 403; a file or task that isn't yours is 404.
          &calendar_etag=…&tasks_etag=…&notes_etag=…
     POST /widgets/tasks/complete  {client_id, file_id, task_id, due?, done?}
     POST /widgets/tasks           {client_id, title, due?: today|tomorrow|YYYY-MM-DD, list_id?}
+    POST /widgets/notes           {client_id, kind, title?, text?, items?, files?, source?} — Quick note,
+                                  Voice note, Share to Notes (client_id is the new note's id)
+    POST /widgets/notes/{id}/add  {client_id, text?, files?} — Share to Notes → Add to…
+    POST /widgets/notes/{id}/items        {client_id, text} — One note's + (client_id is the item's id)
+    PATCH /widgets/notes/{id}/items/{iid} {client_id, checked}
+    GET  /widgets/notes/pick?q=   your notes, for the One note widget's settings
+
+Pictures and recordings come up first through tus (``route=note``, with the
+phone's ``upload`` scope) and are attached here by their file id.
 
 Every write carries a ``client_id`` (one per change, made on the phone).
 The answer is kept for a day under ``promptly:widget-op:<user>:<client_id>``,
@@ -19,9 +28,10 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
@@ -252,6 +262,286 @@ async def add_task(body: AddBody, db: AsyncSession = Depends(get_db), user: User
         raise
     await _remember(user, body.client_id, answer)
     return answer
+
+
+# ------------------------------------------------------------------ notes (W1.3)
+
+
+class FileIn(BaseModel):
+    """A picture or recording the phone uploaded (tus ``route=note``)."""
+
+    id: uuid.UUID  # the attachment's id, made on the phone
+    file_id: uuid.UUID
+    duration_ms: int | None = Field(default=None, ge=0)
+    peaks: list[float] | None = Field(default=None, max_length=200)
+
+
+class NoteNew(BaseModel):
+    client_id: uuid.UUID
+    kind: Literal["text", "list"] = "text"
+    title: str = Field(default="", max_length=300)
+    text: str | None = Field(default=None, max_length=20_000)
+    items: list[str] = Field(default_factory=list, max_length=1000)
+    files: list[FileIn] = Field(default_factory=list, max_length=20)
+    source: Literal["android", "voice", "share"] = "android"
+
+    @field_validator("items")
+    @classmethod
+    def _items(cls, v: list[str]) -> list[str]:
+        return [" ".join(x.split())[:1000] for x in v if x and x.strip()]
+
+
+class NoteMore(BaseModel):
+    client_id: uuid.UUID
+    text: str | None = Field(default=None, max_length=20_000)
+    files: list[FileIn] = Field(default_factory=list, max_length=20)
+
+
+class ItemNew(BaseModel):
+    client_id: uuid.UUID  # the item's id
+    text: str = Field(min_length=1, max_length=1000)
+
+    @field_validator("text")
+    @classmethod
+    def _text(cls, v: str) -> str:
+        v = " ".join(v.split())
+        if not v:
+            raise ValueError("Type the item first.")
+        return v
+
+
+class ItemTick(BaseModel):
+    client_id: uuid.UUID
+    checked: bool
+
+
+_URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+
+
+def _lines(text: str) -> list[str]:
+    return [ln.strip()[:1000] for ln in text.replace("\r", "\n").split("\n") if ln.strip()]
+
+
+async def _page_title(text: str | None) -> str:
+    """Shared text with a link in it and no title from the app: the page's
+    own title, fetched through the SSRF-safe fetcher (``safe_fetch``, as
+    link previews do). "" if there's none."""
+    from urllib.parse import urlparse
+
+    if not text:
+        return ""
+    m = _URL.search(text)
+    if not m:
+        return ""
+    url = m.group(0).rstrip(".,;:!?)]}")
+    from app.files.links_router import unfurl
+
+    try:
+        preview = await unfurl(url=url, user=None)  # type: ignore[arg-type] — the route doesn't use the user
+    except Exception:  # noqa: BLE001 — a title is a nicety
+        return ""
+    title = " ".join((preview.title or "").split())
+    return "" if not title or title == urlparse(url).netloc else title[:300]
+
+
+async def _attach_files(db: AsyncSession, user: User, note: Any, files: list[FileIn]) -> list[uuid.UUID]:
+    """Put the phone's uploads in the note. Returns the recordings to
+    transcribe. A file that isn't yours (or is gone) is 404 for the lot."""
+    from app.notes import attachments as attach
+    from app.notes import transcription
+
+    if not files:
+        return []
+    cfg = await transcription.config(db)
+    audio: list[uuid.UUID] = []
+    for f in files:
+        att, created = await attach.add(
+            db, user, note, attachment_id=f.id, file_id=f.file_id, duration_ms=f.duration_ms, peaks=f.peaks, transcribe=cfg.on,
+        )
+        if created and att.kind == "audio" and cfg.on:
+            audio.append(att.id)
+    return audio
+
+
+async def _after_note_change(db: AsyncSession, note: Any, audio: list[uuid.UUID]) -> None:
+    """After commit: the people on the note refetch it; recordings queue for their words."""
+    from app.notes import access, events, transcription
+
+    await events.publish(await access.participants(db, note), events.note_event(note))
+    for aid in audio:
+        await transcription.enqueue(aid)
+
+
+@router.post("/notes", status_code=status.HTTP_201_CREATED)
+async def new_note(body: NoteNew, db: AsyncSession = Depends(get_db), user: User = Depends(widget_user)) -> dict[str, Any]:
+    """Quick note, Voice note and Share to Notes: a new note of yours, with
+    its pictures or recording. ``client_id`` is the note's id. Safe to send twice."""
+    from app.notes import service
+    from app.notes.body import BodyError
+
+    if not (body.title.strip() or (body.text or "").strip() or body.items or body.files):
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "There's nothing in the note to save.")
+    if (prior := await _replayed(user, body.client_id)) is not None:
+        return prior
+    try:
+        title = " ".join(body.title.split())[:300]
+        if not title and body.source == "share":
+            title = await _page_title(body.text)
+        items = [{"text": t} for t in body.items]
+        text = body.text
+        if body.kind == "list" and not items and text:
+            items, text = [{"text": ln} for ln in _lines(text)], None
+        try:
+            note, _created = await service.create(
+                db, user, note_id=body.client_id, kind=body.kind, title=title, text=text if body.kind == "text" else None,
+                items=items if body.kind == "list" else [], source=body.source,
+            )
+            audio = await _attach_files(db, user, note, body.files)
+            if audio or body.files:
+                await service.touch(db, note, user)
+        except BodyError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        answer = {"ok": True, "note_id": str(note.id), **await snapshot.note_views(db, user, note)}
+        await db.commit()
+    except BaseException:
+        await _forget(user, body.client_id)
+        raise
+    await _remember(user, body.client_id, answer)
+    await _after_note_change(db, note, audio)
+    return answer
+
+
+@router.post("/notes/{note_id}/add")
+async def add_to_note(note_id: uuid.UUID, body: NoteMore, db: AsyncSession = Depends(get_db), user: User = Depends(widget_user)) -> dict[str, Any]:
+    """Share to Notes → Add to…: text goes under what's there (a list gets
+    a new item for each line); pictures and recordings are attached."""
+    from app.notes import access, service
+    from app.notes import body as B
+
+    text = (body.text or "").strip()
+    if not text and not body.files:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "There's nothing to add.")
+    if (prior := await _replayed(user, body.client_id)) is not None:
+        return prior
+    try:
+        note = await access.load(db, user, note_id, lock=True)
+        if text:
+            if note.kind == "list":
+                for i, ln in enumerate(_lines(text)):
+                    # Ids from the change's own id: a retry adds nothing twice.
+                    await service.add_item(db, user, note, item_id=uuid.uuid5(body.client_id, str(i)), text=ln)
+            else:
+                extra = (B.text_doc(text) or {}).get("content") or []
+                doc = {"type": "doc", "content": [*((note.body_doc or {}).get("content") or []), *extra]}
+                try:
+                    B.checked_text(B.doc_text(doc))
+                    await service.patch(db, user, note, note.revision, {"body_doc": B.clean_doc(doc)})
+                except B.BodyError as exc:
+                    raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+        audio = await _attach_files(db, user, note, body.files)
+        if body.files:
+            await service.touch(db, note, user)
+        answer = {"ok": True, "note_id": str(note.id), **await snapshot.note_views(db, user, note)}
+        await db.commit()
+    except BaseException:
+        await _forget(user, body.client_id)
+        raise
+    await _remember(user, body.client_id, answer)
+    await _after_note_change(db, note, audio)
+    return answer
+
+
+@router.post("/notes/{note_id}/items", status_code=status.HTTP_201_CREATED)
+async def add_note_item(note_id: uuid.UUID, body: ItemNew, db: AsyncSession = Depends(get_db), user: User = Depends(widget_user)) -> dict[str, Any]:
+    """The One note widget's **+**: an item at the end of the list.
+    ``client_id`` is the item's id."""
+    from app.notes import access, service
+
+    if (prior := await _replayed(user, body.client_id)) is not None:
+        return prior
+    try:
+        note = await access.load(db, user, note_id, lock=True)
+        if note.kind != "list":
+            raise HTTPException(status.HTTP_409_CONFLICT, "That note isn't a list any more.")
+        await service.add_item(db, user, note, item_id=body.client_id, text=body.text)
+        answer = {"ok": True, "note_id": str(note.id), **await snapshot.note_views(db, user, note)}
+        await db.commit()
+    except BaseException:
+        await _forget(user, body.client_id)
+        raise
+    await _remember(user, body.client_id, answer)
+    await _after_note_change(db, note, [])
+    return answer
+
+
+@router.patch("/notes/{note_id}/items/{item_id}")
+async def tick_note_item(
+    note_id: uuid.UUID, item_id: uuid.UUID, body: ItemTick, db: AsyncSession = Depends(get_db), user: User = Depends(widget_user),
+) -> dict[str, Any]:
+    """Tick (or untick) a list item on a widget. Ticking one that's already
+    ticked changes nothing."""
+    from app.notes import access, service
+
+    if (prior := await _replayed(user, body.client_id)) is not None:
+        return prior
+    try:
+        note = await access.load(db, user, note_id, lock=True)
+        if note.kind != "list":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "That item isn't there any more.")
+        _item, changed = await service.update_item(db, user, note, item_id, {"checked": body.checked})
+        answer = {"ok": True, "note_id": str(note.id), **await snapshot.note_views(db, user, note)}
+        await db.commit()
+    except BaseException:
+        await _forget(user, body.client_id)
+        raise
+    await _remember(user, body.client_id, answer)
+    if changed:
+        await _after_note_change(db, note, [])
+    return answer
+
+
+@router.get("/notes/pick")
+async def pick_note(
+    q: str | None = Query(None, max_length=200), db: AsyncSession = Depends(get_db), user: User = Depends(widget_user),
+) -> dict[str, Any]:
+    """Your notes for the One note widget's settings: pinned first, then the
+    most recently changed; ``q`` narrows by title and words."""
+    from sqlalchemy import and_, case, func, literal_column, or_, select
+
+    from app.files.search_query import drive_tsquery
+    from app.notes import access
+    from app.notes.models import Note, NoteItem, NoteUserState
+    from app.notes.service import display_title
+
+    st = NoteUserState
+    stmt = (
+        select(Note, st.pinned)
+        .outerjoin(st, and_(st.note_id == Note.id, st.user_id == user.id))
+        .where(access.visible_predicate(user.id), st.archived_at.is_(None))
+    )
+    if q and q.strip():
+        term = q.strip()[:200]
+        pat = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        stmt = stmt.where(or_(literal_column("notes.tsv").op("@@")(drive_tsquery(term)), Note.title.ilike(pat, escape="\\")))
+    rank = case((func.coalesce(st.pinned, False), 0), else_=1)
+    rows = (await db.execute(stmt.order_by(rank, Note.updated_at.desc(), Note.id).limit(40))).all()
+    left: dict[uuid.UUID, int] = {}
+    lists = [n.id for n, _ in rows if n.kind == "list"]
+    if lists:
+        counted = select(NoteItem.note_id, func.count()).where(NoteItem.note_id.in_(lists), NoteItem.checked.is_(False)).group_by(NoteItem.note_id)
+        left = {nid: cnt for nid, cnt in (await db.execute(counted)).all()}
+    # A recording on its own is "Voice note", as on the widget's cards.
+    bare = [n.id for n, _ in rows if n.kind == "text" and not n.title.strip() and not (n.body_text or "").strip()]
+    voiced = await snapshot._voiced(db, bare)
+    return {
+        "notes": [
+            {
+                "id": str(n.id), "kind": n.kind, "title": "Voice note" if n.id in voiced else display_title(n), "color": n.color, "pinned": bool(p),
+                "shared": n.owner_id != user.id, "left": left.get(n.id, 0) if n.kind == "list" else None,
+            }
+            for n, p in rows
+        ]
+    }
 
 
 __all__ = ["router", "widget_user"]

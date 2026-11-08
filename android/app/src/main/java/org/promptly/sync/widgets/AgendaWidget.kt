@@ -66,6 +66,11 @@ class AgendaWidget : GlanceAppWidget() {
         }
     }
 
+    /** The widget picker's preview (Android 15+): made-up events and tasks. */
+    override suspend fun providePreview(context: Context, widgetCategory: Int) {
+        provideContent { AgendaContent(Samples.calendarAndTasks(), AgendaConfig(), Samples.now(), clockOf(context), small = false) }
+    }
+
     companion object {
         val SMALL = DpSize(110.dp, 110.dp)
         val WIDE = DpSize(250.dp, 110.dp)
@@ -152,7 +157,7 @@ fun AgendaContent(state: WidgetState, cfg: AgendaConfig, now: Long, clock: Clock
                 items(all, itemId = { it.key }) { line -> AgendaLine(line, cfg, small) }
             }
         }
-        Footer(state.notices.lastOrNull(), stale)
+        Footer(state.notices.lastOrNull { it.area == "tasks" }, stale)
     }
 }
 

@@ -185,7 +185,8 @@ async def _items_of(db: AsyncSession, ids: list[uuid.UUID]) -> dict[uuid.UUID, l
     return out
 
 
-async def _voiced(db: AsyncSession, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+async def _attached(db: AsyncSession, ids: list[uuid.UUID], kind: str) -> set[uuid.UUID]:
+    """The notes among ``ids`` with a live picture (``image``) or recording (``audio``)."""
     from app.files.models import UserFile
     from app.notes.attachments import live_join
     from app.notes.models import NoteAttachment
@@ -195,24 +196,32 @@ async def _voiced(db: AsyncSession, ids: list[uuid.UUID]) -> set[uuid.UUID]:
     q = (
         select(NoteAttachment.note_id)
         .join(UserFile, live_join())
-        .where(NoteAttachment.note_id.in_(ids), NoteAttachment.kind == "audio")
+        .where(NoteAttachment.note_id.in_(ids), NoteAttachment.kind == kind)
         .distinct()
     )
     return set((await db.execute(q)).scalars())
 
 
-def _note_out(n, user: User, items: list, pinned: bool, voiced: bool, *, full: bool) -> dict[str, Any]:
+async def _voiced(db: AsyncSession, ids: list[uuid.UUID]) -> set[uuid.UUID]:
+    return await _attached(db, ids, "audio")
+
+
+def _note_out(n, user: User, items: list, pinned: bool, voiced: bool, *, full: bool, pictured: bool = False) -> dict[str, Any]:
     from app.notes.service import display_title
 
     limit_items = FULL_ITEMS if full else CARD_ITEMS
+    title = display_title(n)
+    if voiced and not n.title.strip() and not (n.body_text or "").strip() and not items:
+        title = "Voice note"  # a recording on its own (its words are under it, not in the text)
     out: dict[str, Any] = {
         "id": str(n.id),
         "kind": n.kind,
-        "title": display_title(n),
+        "title": title,
         "color": n.color,
         "pinned": pinned,
         "shared": n.owner_id != user.id,
         "voice": voiced,
+        "image": pictured,
         "updated_at": n.updated_at.astimezone(UTC).isoformat().replace("+00:00", "Z") if n.updated_at else None,
     }
     if n.kind == "list":
@@ -252,15 +261,34 @@ async def notes_section(db: AsyncSession, user: User, note_ids: list[uuid.UUID])
     ids = list({n.id for n, _ in rows} | {w[0].id for w in wanted if isinstance(w, tuple)})
     items = await _items_of(db, ids)
     voiced = await _voiced(db, ids)
-    cards = [_note_out(n, user, items.get(n.id, []), bool(p), n.id in voiced, full=False) for n, p in rows]
+    pictured = await _attached(db, ids, "image")
+    cards = [_note_out(n, user, items.get(n.id, []), bool(p), n.id in voiced, full=False, pictured=n.id in pictured) for n, p in rows]
     full = []
     for w in wanted:
         if isinstance(w, tuple):
             n, p = w
-            full.append(_note_out(n, user, items.get(n.id, []), bool(p), n.id in voiced, full=True))
+            full.append(_note_out(n, user, items.get(n.id, []), bool(p), n.id in voiced, full=True, pictured=n.id in pictured))
         else:
             full.append({"id": str(w), "gone": True})
     return {"cards": cards, "notes": full}
+
+
+async def note_views(db: AsyncSession, user: User, note) -> dict[str, Any]:
+    """One note as the widgets show it — its card and the whole of it — for
+    the answer to a change made on the phone (so the widget shows the
+    server's copy at once, without waiting for the next snapshot)."""
+    from app.notes.service import state_for
+
+    st = await state_for(db, note.id, user.id)
+    items = (await _items_of(db, [note.id])).get(note.id, [])
+    voiced = note.id in await _voiced(db, [note.id])
+    pictured = note.id in await _attached(db, [note.id], "image")
+    pinned = bool(st.pinned)
+    return {
+        "card": _note_out(note, user, items, pinned, voiced, full=False, pictured=pictured),
+        "full": _note_out(note, user, items, pinned, voiced, full=True, pictured=pictured),
+        "archived": st.archived_at is not None,
+    }
 
 
 # ------------------------------------------------------------------ the whole thing
@@ -305,4 +333,4 @@ async def build(
     return out
 
 
-__all__ = ["MAX_DAYS", "MAX_NOTE_IDS", "SECTIONS", "build", "etag_of", "tasks_from", "with_etag"]
+__all__ = ["MAX_DAYS", "MAX_NOTE_IDS", "SECTIONS", "build", "etag_of", "note_views", "tasks_from", "with_etag"]

@@ -28,7 +28,14 @@ APPS = [
     ("meals", "P Macros", "/app/open/meals", "item-icons/meals-maskable-512.png"),
     ("trip", "P Trips", "/app/open/trip", "item-icons/trip-maskable-512.png"),
     ("tasks", "P Tasks", "/app/open/tasks", "item-icons/tasks-maskable-512.png"),
+    # Notes (docs/notes-plan.md §9): long-press → New note · New list · Voice note (native, in :app).
+    ("notes", "P Notes", "/notes", "item-icons/notes-maskable-512.png"),
 ]
+
+# Launchers with a long-press menu of their own (shortcuts_<key>.xml, written below).
+# Append a key here to give another launcher one.
+SHORTCUT_KEYS = ["promptly", "photos"]
+SHORTCUT_KEYS += ["notes"]  # Notes
 
 # Native screens in :app, not web pages: they get an icon and a row in the picker, but no
 # TWA launcher class or activity here. :app's manifest declares the activity-alias.
@@ -79,7 +86,7 @@ for key, label, path, icon in APPS + NATIVE:
     # Long-press menus: Promptly → Choose apps / Change server; P Photos → Backup settings.
     shortcuts = (
         f'\n            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts_{key}" />'
-        if key in ("promptly", "photos") else ""
+        if key in SHORTCUT_KEYS else ""
     )
     if key != "promptly":
         registry.append(f'        {{"{key}", "{label}", "org.promptly.app.{cls}"}},')
@@ -133,7 +140,31 @@ def shortcut_xml(note: str, items: list[tuple[str, str, str, str]]) -> str:
     '    <string name="change_server">Change server</string>\n'
     '    <string name="choose_apps">Choose apps</string>\n'
     '    <string name="backup_settings">Backup settings</string>\n'
-    '    <string name="photo_backup">Photo backup</string>\n</resources>\n'
+    '    <string name="photo_backup">Photo backup</string>\n'
+    # Notes: P Notes' long-press menu.
+    '    <string name="notes_new_note">New note</string>\n'
+    '    <string name="notes_new_list">New list</string>\n'
+    '    <string name="notes_voice_note">Voice note</string>\n'
+    '</resources>\n'
+)
+# Notes: long-press P Notes → the native quick capture screens in :app (they work with
+# no signal). New list is Quick note opened as a list (its data says so).
+(MOD / "res/xml/shortcuts_notes.xml").write_text(
+    '<?xml version="1.0" encoding="utf-8"?>\n<!-- Long-press P Notes: quick capture (the app module\'s capture screens). -->\n'
+    '<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">\n'
+    + "".join(
+        f'    <shortcut android:shortcutId="{sid}" android:enabled="true" android:icon="@mipmap/ic_notes"\n'
+        f'        android:shortcutShortLabel="@string/{label}">\n'
+        '        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"\n'
+        f'            android:targetClass="{target}" android:data="{data}" />\n'
+        '    </shortcut>\n'
+        for sid, label, target, data in (
+            ("notes_new_note", "notes_new_note", "org.promptly.sync.capture.QuickNoteActivity", "promptly-widget://new-note"),
+            ("notes_new_list", "notes_new_list", "org.promptly.sync.capture.QuickNoteActivity", "promptly-widget://new-list"),
+            ("notes_voice_note", "notes_voice_note", "org.promptly.sync.capture.VoiceNoteActivity", "promptly-widget://voice-note"),
+        )
+    )
+    + '</shortcuts>\n'
 )
 (java / "Apps.java").write_text(
     "package org.promptly.app;\n\n"

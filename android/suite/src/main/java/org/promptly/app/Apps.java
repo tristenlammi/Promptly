@@ -23,6 +23,7 @@ final class Apps {
         {"meals", "P Macros", "org.promptly.app.MealsLauncher"},
         {"trip", "P Trips", "org.promptly.app.TripLauncher"},
         {"tasks", "P Tasks", "org.promptly.app.TasksLauncher"},
+        {"notes", "P Notes", "org.promptly.app.NotesLauncher"},
         {"passwords", "P Passwords", "org.promptly.app.PasswordsLauncher"},
     };
 }
