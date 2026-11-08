@@ -27,6 +27,7 @@ import { FormRenderer } from "@/components/forms/FormRenderer";
 import { LookPanel } from "@/components/forms/builder/LookPanel";
 import { PreviewPane } from "@/components/forms/builder/PreviewPane";
 import { QuestionsTab } from "@/components/forms/builder/QuestionsTab";
+import { ResponsesTab } from "@/components/forms/responses/ResponsesTab";
 import { SendDialog } from "@/components/forms/builder/SendDialog";
 import { SettingsTab } from "@/components/forms/builder/SettingsTab";
 import { Menu, MenuItem, Switch, iconBtnCls } from "@/components/forms/builder/ui";
@@ -44,9 +45,10 @@ import { cn } from "@/utils/cn";
 /**
  * The form builder, ``/files/form/:id`` (Forms WP-F1.2). The office
  * editors' header — where it lives, its name, star, Share and "…" (Make a
- * copy, Save as template, Download, Move to trash) — over two tabs,
- * Questions and Settings, with Preview, the look and the "Taking answers"
- * switch. Everything saves as you go.
+ * copy, Save as template, Download, Move to trash) — over three tabs,
+ * Questions, Responses (WP-F1.4) and Settings, with Preview, the look and
+ * the "Taking answers" switch. Everything saves as you go. Someone who can
+ * only see the form gets Questions (read-only) and Responses.
  */
 export function FormBuilderPage() {
   const { fileId = "" } = useParams<{ fileId: string }>();
@@ -111,13 +113,16 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
     },
     onRemote: (v) => setView((cur) => ({ ...v, form: { ...v.form, definition: cur.form.definition } })),
   });
-  const tab = canEdit && params.get("tab") === "settings" ? "settings" : "questions";
-  const setTab = (t: "questions" | "settings") => {
+  const tabs: Tab[] = canEdit ? ["questions", "responses", "settings"] : ["questions", "responses"];
+  const asked = params.get("tab");
+  const tab: Tab = tabs.includes(asked as Tab) ? (asked as Tab) : "questions";
+  const setTab = (t: Tab) => {
     const next = new URLSearchParams(params);
-    if (t === "settings") next.set("tab", "settings");
+    if (t !== "questions") next.set("tab", t);
     else next.delete("tab");
     setParams(next, { replace: true });
   };
+  const [answerCount, setAnswerCount] = useState(initial.form.response_count);
   const [previewOpen, setPreviewOpen] = useState(() => !isPhone && window.innerWidth >= 1280);
   const [lookOpen, setLookOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -185,9 +190,8 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
         }
       />
       <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[var(--bg)] px-2 sm:px-4">
-        {canEdit ? (
-          <div role="tablist" aria-label="Form" className="flex">
-            {(["questions", "settings"] as const).map((t) => (
+        <div role="tablist" aria-label="Form" className="flex">
+            {tabs.map((t, i) => (
               <button
                 key={t}
                 type="button"
@@ -199,7 +203,7 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
                 onKeyDown={(e) => {
                   if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
                     e.preventDefault();
-                    const next = t === "questions" ? "settings" : "questions";
+                    const next = tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length];
                     setTab(next);
                     document.getElementById(`form-tab-${next}`)?.focus();
                   }
@@ -210,14 +214,19 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
                   tab === t ? "text-[var(--text)]" : "text-[var(--text-muted)] hover:text-[var(--text)]"
                 )}
               >
-                {t === "questions" ? "Questions" : "Settings"}
+                {t === "questions" ? "Questions" : t === "settings" ? "Settings" : (
+                  <>
+                    Responses
+                    {answerCount > 0 && <span className="tabular-nums text-[var(--text-muted)]">{` (${answerCount.toLocaleString()})`}</span>}
+                  </>
+                )}
                 {tab === t && <span aria-hidden="true" className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-[var(--accent)]" />}
               </button>
             ))}
           </div>
-        ) : (
-          <p className="py-2.5 text-xs text-[var(--text-muted)]">
-            You can see this form. Ask its owner if you need to change it, or make a copy.
+        {!canEdit && (
+          <p className="hidden py-2.5 text-xs text-[var(--text-muted)] md:block">
+            You can see this form and its answers. Ask its owner if you need to change it, or make a copy.
           </p>
         )}
         <span className="flex-1" />
@@ -229,8 +238,12 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
         )}
       </div>
       <SaveBanner status={doc.status} onRetry={() => void doc.saveNow()} />
-      {tab === "questions" ? (
-        <div id="form-panel-questions" role={canEdit ? "tabpanel" : undefined} aria-labelledby={canEdit ? "form-tab-questions" : undefined} className="flex min-h-0 flex-1 flex-col">
+      {tab === "responses" ? (
+        <div id="form-panel-responses" role="tabpanel" aria-labelledby="form-tab-responses" className="flex min-h-0 flex-1 flex-col">
+          <ResponsesTab fileId={fileId} canEdit={canEdit} onSend={() => setSendOpen(true)} onCount={setAnswerCount} />
+        </div>
+      ) : tab === "questions" ? (
+        <div id="form-panel-questions" role="tabpanel" aria-labelledby="form-tab-questions" className="flex min-h-0 flex-1 flex-col">
           {canEdit ? (
             <QuestionsTab
               doc={doc}
@@ -300,6 +313,8 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
     </>
   );
 }
+
+type Tab = "questions" | "responses" | "settings";
 
 function statusWords(s: SaveStatus): { text: string; tone: "ok" | "busy" | "bad" } {
   switch (s.kind) {

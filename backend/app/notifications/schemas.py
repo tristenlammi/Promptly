@@ -55,6 +55,7 @@ class PreferencesSchema(BaseModel):
     calendar: bool = True
     passwords: bool = True
     mail: bool = True
+    form_response: bool = True
     # Quiet hours (0320) — "HH:MM" in the person's own time zone.
     quiet_enabled: bool = False
     quiet_start: str = "22:00"
@@ -91,6 +92,7 @@ class PreferencesUpdate(BaseModel):
     calendar: bool | None = None
     passwords: bool | None = None
     mail: bool | None = None
+    form_response: bool | None = None
     quiet_enabled: bool | None = None
     quiet_start: str | None = Field(default=None, pattern=_CLOCK)
     quiet_end: str | None = Field(default=None, pattern=_CLOCK)

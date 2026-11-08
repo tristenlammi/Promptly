@@ -321,13 +321,17 @@ async def _tell_owner_busy(form: Form, shell: UserFile) -> None:
     if not await abuse.first_busy_this_hour(form.id):
         return
     title = (form.definition or {}).get("title") or "Your form"
+    # Forms' own category (WP-F1.4): the owner's switch for their forms
+    # covers it, and it may wait out quiet hours (system alerts never do,
+    # and they're for server admins).
     await notify_user(
         user_id=shell.user_id,
-        category="system_alert",
+        category="form_response",
         title=f"“{title}” is getting lots of answers",
         body="Some people were asked to try again in a minute. If that's unexpected, close the form or reset its link.",
         url=f"/files/form/{shell.id}?tab=settings",
         tag=f"form-busy:{form.id}",
+        extra={"kind": "busy"},
     )
 
 
@@ -421,6 +425,17 @@ async def submit(
     await abuse.note_answer(
         form.id, user_id=user.id if user else None, ip=ip, link_form=form.audience == "link"
     )
+    # Tell the owner (and anyone following it): counts only (WP-F1.4).
+    from app.forms import notify
+
+    notify.answer_arrived(form.id)
+    if form.max_responses is not None and (form.response_count or 0) >= form.max_responses:
+        try:
+            await notify.tell_closed(db, form, shell, why="full")
+        except Exception:  # noqa: BLE001 — the answer is saved whatever happens here
+            import logging
+
+            logging.getLogger("promptly.forms").exception("forms: closing push failed")
     return out
 
 

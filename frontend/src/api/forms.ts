@@ -237,6 +237,80 @@ export interface FormCard {
   owner: string | null;
 }
 
+/** Who sent an answer: an account, an email they typed (not checked),
+ *  someone with the link, or an account that has since been removed. */
+export interface Respondent {
+  kind: "account" | "email" | "link" | "gone";
+  name: string;
+}
+
+export interface SummaryOption {
+  id: string;
+  label: string;
+  count: number;
+  /** Places on the option (null: no limit) and how many are taken. */
+  limit: number | null;
+  taken: number | null;
+}
+
+export interface SummaryQuestion {
+  id: string;
+  title: string;
+  kind: QuestionKind;
+  deleted: boolean;
+  /** How many answers have something for this question. */
+  answered: number;
+  options?: SummaryOption[];
+  /** "Other" answers (null when the question has no "Other"). */
+  other?: number | null;
+  bins?: { value: number; count: number }[];
+  average?: number | null;
+  min_label?: string;
+  max_label?: string;
+  groups?: { value: string; count: number }[];
+  more_groups?: number;
+  latest?: { number: number; text: string; submitted_at: string | null }[];
+}
+
+export type NotifyMode = "each" | "daily" | "off";
+
+export interface NotifySettings {
+  mode: NotifyMode;
+  email_daily: boolean;
+  /** This server can send email. */
+  can_email: boolean;
+}
+
+export interface ResponsesSummary {
+  total: number;
+  first_number: number | null;
+  latest_number: number | null;
+  new_count: number;
+  can_delete: boolean;
+  accepting: boolean;
+  notify: NotifySettings;
+  questions: SummaryQuestion[];
+}
+
+export interface QuestionAnswers {
+  question: { id: string; title: string; kind: QuestionKind; deleted: boolean };
+  items: { number: number; submitted_at: string | null; who: Respondent; text: string }[];
+  next_before: number | null;
+}
+
+export interface OneResponse {
+  number: number;
+  position: number;
+  total: number;
+  prev: number | null;
+  next: number | null;
+  who: Respondent;
+  source: "server" | "link";
+  submitted_at: string | null;
+  edited_at: string | null;
+  answers: { id: string; title: string; kind: QuestionKind; deleted: boolean; answered: boolean; text: string }[];
+}
+
 export const formsApi = {
   async get(fileId: string): Promise<FormView> {
     const { data } = await apiClient.get<FormView>(`/forms/${fileId}`);
@@ -291,6 +365,53 @@ export const formsApi = {
   async send(fileId: string, userIds: string[]): Promise<{ sent: number }> {
     const { data } = await apiClient.post<{ sent: number }>(`/forms/${fileId}/send`, { user_ids: userIds });
     return data;
+  },
+  /** The Responses tab: every question's counts, and how many are new to you. */
+  async summary(fileId: string): Promise<ResponsesSummary> {
+    const { data } = await apiClient.get<ResponsesSummary>(`/forms/${fileId}/summary`);
+    return data;
+  },
+  /** Every answer to one question, newest first; ``before`` pages back, ``q`` searches text. */
+  async questionAnswers(fileId: string, question: string, opts: { before?: number | null; q?: string } = {}): Promise<QuestionAnswers> {
+    const { data } = await apiClient.get<QuestionAnswers>(`/forms/${fileId}/responses`, {
+      params: { question, before: opts.before ?? undefined, q: opts.q || undefined },
+    });
+    return data;
+  },
+  async response(fileId: string, number: number): Promise<OneResponse> {
+    const { data } = await apiClient.get<OneResponse>(`/forms/${fileId}/responses/${number}`);
+    return data;
+  },
+  async deleteResponse(fileId: string, number: number): Promise<{ deleted: number; response_count: number }> {
+    const { data } = await apiClient.delete(`/forms/${fileId}/responses/${number}`);
+    return data;
+  },
+  async deleteAllResponses(fileId: string): Promise<{ deleted: number; response_count: number }> {
+    const { data } = await apiClient.delete(`/forms/${fileId}/responses`);
+    return data;
+  },
+  /** Download every answer as CSV or Excel (formula-safe). */
+  async exportResponses(fileId: string, format: "csv" | "xlsx"): Promise<{ blob: Blob; filename: string }> {
+    const res = await apiClient.get<Blob>(`/forms/${fileId}/export`, { params: { format }, responseType: "blob", timeout: 120_000 });
+    const dispo = String(res.headers?.["content-disposition"] ?? "");
+    const utf8 = dispo.match(/filename\*=UTF-8''([^;]+)/i);
+    let filename = `Responses.${format}`;
+    if (utf8) {
+      try {
+        filename = decodeURIComponent(utf8[1].trim());
+      } catch {
+        /* keep the fallback */
+      }
+    }
+    return { blob: res.data, filename };
+  },
+  async setNotify(fileId: string, changes: { mode?: NotifyMode; email_daily?: boolean }): Promise<NotifySettings> {
+    const { data } = await apiClient.put<NotifySettings>(`/forms/${fileId}/notify`, changes);
+    return data;
+  },
+  /** You looked at the answers: "new" counts from now. */
+  async markSeen(fileId: string): Promise<void> {
+    await apiClient.post(`/forms/${fileId}/seen`);
   },
   /** A new form in your Forms folder: blank, a built-in template, or one you saved. */
   async create(payload: { template?: string; template_id?: string; title?: string } = {}): Promise<FileItem> {

@@ -372,6 +372,15 @@ export function NotificationsPanel() {
                 extra={(prefs.mail ?? true) && summaryMode("mail")}
               />
               <CategoryRow
+                title="Forms"
+                subtitle="New answers to your forms, and a form closing. Only how many came in, never what anyone wrote (each form's own setting still applies)."
+                checked={prefs.form_response ?? true}
+                busy={prefsBusy === "form_response"}
+                onChange={(v) => toggle("form_response", v)}
+                dimmed={!prefs.enabled}
+                extra={(prefs.form_response ?? true) && summaryMode("form_response")}
+              />
+              <CategoryRow
                 title="Passwords"
                 subtitle="A new device asking to join your vault, or someone sharing a vault with you. These never carry anything from the vault."
                 checked={prefs.passwords ?? true}

@@ -8,6 +8,7 @@ import {
   Cake,
   CalendarClock,
   CalendarDays,
+  ClipboardList,
   Check,
   ChevronRight,
   Clock,
@@ -779,6 +780,30 @@ export function MailCard({ m }: { m: NonNullable<Sections["mail"]> }) {
         <Link key={item.url} to={item.url} className="block rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
           <span className="block truncate text-sm text-[var(--text)]">{item.from}: {item.subject}</span>
           {item.summary && <span className="block truncate text-xs text-[var(--text-muted)]">{item.summary}</span>}
+        </Link>
+      ))}
+    </HubCard>
+  );
+}
+
+/** Forms (WP-F1.4): how many new answers per form, never what they say. */
+export function FormsCard({ f }: { f: NonNullable<Sections["forms"]> }) {
+  return (
+    <HubCard icon={ClipboardList} title="Forms" to={f.url} open="Open">
+      {f.new_total > 0 && (
+        <p className="px-1 pb-1 text-sm font-medium text-[var(--text)]">{f.new_total === 1 ? "1 new answer" : `${f.new_total} new answers`}</p>
+      )}
+      {f.forms.map((x) => (
+        <Link key={x.url} to={x.url} className="flex items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+          <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{x.title}</span>
+          <span className="shrink-0 rounded-full bg-[var(--accent)] px-1.5 text-[11px] font-semibold leading-5 text-white">{x.new > 99 ? "99+" : x.new} new</span>
+        </Link>
+      ))}
+      {f.more > 0 && <p className="px-1 pt-0.5 text-xs text-[var(--text-muted)]">and {f.more} more {f.more === 1 ? "form" : "forms"}</p>}
+      {f.closing.map((x) => (
+        <Link key={`c-${x.url}`} to={x.url} className="flex items-center gap-2 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+          <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{x.title}</span>
+          <span className="shrink-0 text-xs text-[var(--text-muted)]">closes {timeLabel(new Date(x.closes_at))}</span>
         </Link>
       ))}
     </HubCard>

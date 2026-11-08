@@ -215,6 +215,10 @@ async def apply_settings(db: AsyncSession, form: Form, changes: dict[str, Any]) 
         if k in SETTING_FIELDS:
             setattr(form, k, v)
     form.updated_at = datetime.now(timezone.utc)
+    # Open again: closing by itself later tells the owner again (WP-F1.4).
+    from app.forms.notify import reopened
+
+    reopened(form)
     if "audience" in changes:
         # The link's mode follows who can answer (Shared links shows it).
         shell = await db.get(UserFile, form.file_id)

@@ -63,6 +63,8 @@ class Form(Base):
     next_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     response_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     last_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When the owner was told it closed (0296); cleared when it opens again.
+    close_pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -153,6 +155,8 @@ class FormNotify(Base):
     email_daily: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
     seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_push_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    # The last daily email of new answers (0296).
+    emailed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class FormReport(Base):

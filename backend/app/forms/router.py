@@ -15,6 +15,11 @@ downloaded like any office file. These routes are the builder's:
 * ``POST /{file_id}/link`` (make, or ``reset``) / ``DELETE /{file_id}/link``
   (turn off) — the answer link ``/f/<token>`` (WP-F1.3);
   ``POST /{file_id}/send`` — send it to people on this server.
+* ``GET /{file_id}/summary`` · ``GET /{file_id}/responses?question=`` ·
+  ``GET|DELETE /{file_id}/responses/{n}`` · ``DELETE /{file_id}/responses``
+  · ``GET /{file_id}/export?format=csv|xlsx`` — the Responses tab
+  (WP-F1.4); ``PUT /{file_id}/notify`` and ``POST /{file_id}/seen`` — your
+  notifications for this form.
 
 Every route checks :mod:`app.forms.access`; anything you can't open is a
 404, never a 403.
@@ -426,6 +431,171 @@ async def send_to_people(
         )
         sent += 1
     return {"sent": sent}
+
+
+# --------------------------------------------------------------------
+# Responses, downloads and notifications (WP-F1.4)
+# --------------------------------------------------------------------
+@router.get("/{file_id:uuid}/summary")
+async def responses_summary(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """The Responses tab's summary: every question's counts, and how many
+    answers are new to you. Answers are other people's words, sent as plain
+    text."""
+    from app.forms import notify, results
+
+    shell, form, access = await load_form(db, file_id, user)
+    out = await results.summary(db, form)
+    out["new_count"] = await notify.unseen_count(db, form.id, user.id)
+    out["can_delete"] = access == "edit"
+    out["accepting"] = bool(form.accepting)
+    out["notify"] = await notify.settings_for(db, shell, form, user)
+    return out
+
+
+@router.get("/{file_id:uuid}/responses")
+async def question_responses(
+    file_id: uuid.UUID,
+    question: str = Query(..., min_length=1, max_length=40),
+    before: int | None = Query(None, ge=1),
+    q: str | None = Query(None, max_length=200),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Every answer to one question, newest first (``before`` pages back);
+    ``q`` searches a text question's answers (or a choice's "Other")."""
+    from app.forms import results
+
+    _shell, form, _access = await load_form(db, file_id, user)
+    out = await results.question_answers(db, form, question, before=before, search=q)
+    if out is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question not found")
+    return out
+
+
+@router.get("/{file_id:uuid}/responses/{number:int}")
+async def one_response(
+    file_id: uuid.UUID,
+    number: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """One answer, with where it sits among the rest (``‹ 3 of 12 ›``)."""
+    from app.forms import results
+
+    _shell, form, _access = await load_form(db, file_id, user)
+    out = await results.one(db, form, number)
+    if out is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That answer isn't here any more.")
+    return out
+
+
+@router.delete("/{file_id:uuid}/responses/{number:int}")
+async def delete_response(
+    file_id: uuid.UUID,
+    number: int,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Delete one answer for good. Its places on limited options and its
+    storage are given back; the linked sheet (WP-F1.5) keeps its row."""
+    from app.forms import results
+
+    shell, form, _access = await load_form(db, file_id, user, need="edit", lock=True)
+    if not await results.delete_one(db, shell, form, number):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That answer isn't here any more.")
+    await db.commit()
+    return {"deleted": 1, "response_count": form.response_count}
+
+
+@router.delete("/{file_id:uuid}/responses")
+async def delete_all_responses(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Delete every answer (the page asks twice first)."""
+    from app.forms import results
+
+    shell, form, _access = await load_form(db, file_id, user, need="edit", lock=True)
+    n = await results.delete_all(db, shell, form)
+    await db.commit()
+    return {"deleted": n, "response_count": 0}
+
+
+@router.get("/{file_id:uuid}/export")
+async def export_responses(
+    file_id: uuid.UUID,
+    format: Literal["csv", "xlsx"] = Query("csv"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Every answer as CSV or Excel. Values that a spreadsheet could run as
+    a formula start with ``'``; Excel cells are stored as text."""
+    from fastapi.responses import Response
+
+    from app.files.router import _content_disposition
+    from app.forms import results
+
+    shell, form, _access = await load_form(db, file_id, user)
+    data, filename, mime = await results.export(db, shell, form, user, format)
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={
+            "Content-Disposition": _content_disposition(filename),
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+class _Notify(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["each", "daily", "off"] | None = None
+    email_daily: bool | None = None
+
+
+@router.put("/{file_id:uuid}/notify")
+async def set_notify(
+    file_id: uuid.UUID,
+    payload: _Notify,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Your own choice for this form: tell me each time / once a day /
+    never, and a daily email (only when this server can send email)."""
+    from app.calendars.reach import smtp_ready
+    from app.forms import notify
+
+    shell, form, _access = await load_form(db, file_id, user)
+    if payload.email_daily and not await smtp_ready(db):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This server can't send email yet. An admin can set it up in Admin → Settings.",
+        )
+    await notify.set_settings(db, shell, form, user, mode=payload.mode, email_daily=payload.email_daily)
+    await db.commit()
+    return await notify.settings_for(db, shell, form, user)
+
+
+@router.post("/{file_id:uuid}/seen")
+async def mark_seen(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """You looked at the answers: "new" counts from now."""
+    from app.forms import notify
+
+    shell, form, _access = await load_form(db, file_id, user)
+    await notify.mark_seen(db, shell, form, user)
+    await db.commit()
+    return {"new_count": 0}
 
 
 @router.get("/{file_id:uuid}/assets/{asset_id:uuid}")

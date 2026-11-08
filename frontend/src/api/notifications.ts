@@ -22,6 +22,8 @@ export interface NotificationPreferences {
   calendar: boolean;
   passwords: boolean;
   mail: boolean;
+  /** Forms: new answers to my forms (counts only), and a form closing. */
+  form_response: boolean;
   /** Quiet hours, "HH:MM" in your own time zone (one setting for all of Promptly). */
   quiet_enabled: boolean;
   quiet_start: string;
@@ -56,7 +58,8 @@ export type NotificationSwitch =
   | "room_message"
   | "calendar"
   | "passwords"
-  | "mail";
+  | "mail"
+  | "form_response";
 
 export interface NotificationRow {
   id: string;

@@ -176,7 +176,8 @@ def test_every_category_declares_whether_it_can_be_held():
     always = {c for c, r in RULES.items() if not r.holdable}
     assert {"calendar", "passwords", "system_alert", "test", "item_reminder"} <= always
     assert RULES["room_message"].holdable and RULES["mail"].holdable
-    assert set(SUMMARY_CATEGORIES) == {"room_message", "mail"}
+    # Apps add themselves (Forms: form_response); these are the groundwork's.
+    assert {"room_message", "mail"} <= set(SUMMARY_CATEGORIES)
     # Something unknown (a future ringing call before it registers) is never held.
     assert rule_for("call").holdable is False
 
@@ -388,7 +389,7 @@ async def test_preferences_quiet_hours_and_summary_settings(client, db):
     j = r.json()
     assert j["quiet_enabled"] is False and j["quiet_start"] == "22:00" and j["quiet_end"] == "07:00"
     assert j["quiet_weekend"] is False and j["summary_categories"] == []
-    assert set(j["summary_capable"]) == {"room_message", "mail"}
+    assert {"room_message", "mail"} <= set(j["summary_capable"])
     assert j["timezone"] == "Australia/Sydney" and j["summary_time"] == "08:00"
 
     r = await client.patch("/api/notifications/preferences", headers=H(ann),

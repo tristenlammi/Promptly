@@ -257,6 +257,25 @@ async def memory_learning(ctx) -> dict[str, int]:
     return {"suggested": await nightly()}
 
 
+# Forms (WP-F1.4): telling owners their form closed, and the daily email.
+async def forms_close_tick(ctx) -> int:
+    """Cron: forms whose closing time passed — tell their owners once."""
+    from app.database import SessionLocal
+    from app.forms.notify import close_tick
+
+    async with SessionLocal() as db:
+        return await close_tick(db)
+
+
+async def forms_digest(ctx) -> int:
+    """Cron: the daily email of new answers, at each person's Today time."""
+    from app.database import SessionLocal
+    from app.forms.notify import send_email_digests
+
+    async with SessionLocal() as db:
+        return await send_email_digests(db)
+
+
 class WorkerSettings:
     functions = [
         # Never retried by arq: a run interrupted mid-way is closed out by
@@ -310,6 +329,10 @@ class WorkerSettings:
             run_at_startup=False,
             unique=True,
         ),
+        # Forms (WP-F1.4): closing pushes every 5 minutes; the daily email
+        # checks four times an hour (it goes at each person's own time).
+        cron(forms_close_tick, minute=set(range(2, 60, 5)), run_at_startup=False, unique=True),
+        cron(forms_digest, minute={7, 22, 37, 52}, run_at_startup=False, unique=True),
     ]
     on_startup = wait_for_schema
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

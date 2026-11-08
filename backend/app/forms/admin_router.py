@@ -145,11 +145,12 @@ async def close_form(
     if shell is not None and shell.user_id and shell.user_id != admin.id:
         await notify_user(
             user_id=shell.user_id,
-            category="system_alert",
+            category="form_response",
             title=f"An admin closed “{title}”",
             body=f"It isn't taking answers any more. The reason given: {payload.reason.strip()}",
             url=f"/files/form/{shell.id}",
             tag=f"form-closed:{form.id}",
+            extra={"kind": "closed"},
         )
     return {"link_answers": await link_answers_allowed(db), "forms": await _listing(db)}
 
