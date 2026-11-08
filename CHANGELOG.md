@@ -33,6 +33,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Promptly for Android: a Google Play build (for Android Auto, which only runs Play-installed apps) that Play keeps up to date, plus a "P Maps in your car" card in Apps → Install apps explaining how to get it.
 - P Maps: the server now makes offline map packs with each monthly map update: the map, directions and search (house numbers included) for all of Australia, in squares a phone can download. `MAPS_OFFLINE=0` turns them off.
 - P Maps: offline areas you save (a view, a route's corridor or around a place) and signed, resumable downloads of their packs, for the Android app's offline maps. Admin → App settings says if making the packs failed.
+- Promptly for Android: Offline areas (P Maps on the web hand-off, Photo backup → Offline maps, or the download notification): choose an area on a map and see its size first, or save the area around Home; it downloads on Wi-Fi (or now, on mobile data, if you say so), carries on from where it stopped after a lost connection or a restart, checks every file, and updates itself after your server's monthly map update. Shows the space used and free, says plainly when there isn't room, and deleting an area frees its space at once.
 
 ### Changed
 <!-- P Maps offline (maps-offline) -->

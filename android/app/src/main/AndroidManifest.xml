@@ -107,6 +107,23 @@
                 <data android:scheme="google.navigation" />
             </intent-filter>
         </activity>
+        <!-- P Maps offline areas: what's kept on this phone for no signal. The web's
+             hand-off is promptlymaps://offline?server=&code=[&area=]. -->
+        <activity
+            android:name=".maps.offline.OfflineAreasActivity"
+            android:label="Offline areas"
+            android:icon="@mipmap/ic_maps"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="org.promptly.app.maps.offline"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptlymaps" android:host="offline" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".maps.TimelineActivity"
             android:label="Your timeline"

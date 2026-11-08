@@ -531,6 +531,11 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
             modifier = Modifier.fillMaxWidth(),
         ) { Text("Phone assistant") }
 
+        OutlinedButton(
+            onClick = { ctx.startActivity(Intent(ctx, org.promptly.sync.maps.offline.OfflineAreasActivity::class.java)) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Offline maps") }
+
         TextButton(onClick = { confirmUnlink = true }) { Text("Unlink this phone", color = MaterialTheme.colorScheme.error) }
         Text(
             "Promptly ${BuildConfig.VERSION_NAME}",
