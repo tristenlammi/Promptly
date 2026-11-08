@@ -29,7 +29,10 @@ import {
   Wallet,
   Workflow,
   type LucideIcon,
+  Volume2,
 } from "lucide-react";
+import { joinVoice } from "@/rtc/ui/uiStore";
+import { namesList } from "@/rtc/ui/words";
 
 import type { TodayAttention, TodayComing, TodayData, TodayScheduleItem } from "@/api/today";
 import { timeLabel } from "@/calendar/dates";
@@ -939,6 +942,44 @@ export function DiscoverCard({ apps }: { apps: TodayData["discover"] }) {
                 <span className="block truncate text-xs text-[var(--text-muted)]">{a.why}</span>
               </span>
             </Link>
+          </li>
+        ))}
+      </ul>
+    </HubCard>
+  );
+}
+
+// -------------------------------------------------------------- voice
+
+/** Calls: who's hanging out in a voice channel of your spaces right now. */
+export function VoiceCard({ v }: { v: NonNullable<Sections["voice"]> }) {
+  const navigate = useNavigate();
+  return (
+    <HubCard icon={Volume2} title="Hanging out now" to="/rooms/" open="Rooms">
+      <ul className="space-y-1">
+        {v.channels.map((c) => (
+          <li key={c.room_id} className="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-[var(--hover)]">
+            <Link to={c.url} className="min-w-0 flex-1">
+              <span className="block truncate text-sm text-[var(--text)]">
+                {namesList(c.people, 2)} {c.people.length === 1 ? "is" : "are"} in <b className="font-semibold">{c.name}</b>
+              </span>
+              <span className="block truncate text-xs text-[var(--text-muted)]">{c.space}</span>
+            </Link>
+            {c.here || v.in_voice === c.room_id ? (
+              <span className="shrink-0 text-xs font-medium text-[var(--success)]">You're here</span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  navigate(c.url);
+                  void joinVoice(c.room_id);
+                }}
+                className="shrink-0 rounded-lg bg-[var(--accent)] px-2.5 py-1 text-xs font-semibold text-white hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1"
+                aria-label={`Join ${c.name}`}
+              >
+                Join
+              </button>
+            )}
           </li>
         ))}
       </ul>

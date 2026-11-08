@@ -961,3 +961,62 @@ async def test_the_android_service_reports_with_its_session(client, db, lk, even
     assert await where(w.sam) is not None
     r = await client.post("/api/rooms/voice/session/leave", json={"voice_session": web["session"]})
     assert r.json()["left"] is True and await where(w.sam) is None
+
+
+# ---------------------------------------------------------------- WP-V4: the rest of Promptly
+
+
+async def test_bootstrap_carries_the_servers_voice_limits(client, db, lk):
+    w = await world(client, db, calls_max_participants=12, calls_max_stream="1080p30")
+    boot = (await client.get("/api/rooms/bootstrap", headers=bearer(w.sam))).json()
+    assert boot["voice_limits"] == {"max_participants": 12, "max_stream": "1080p30"}
+    await voice_on(db, calls_enabled=False)
+    boot = (await client.get("/api/rooms/bootstrap", headers=bearer(w.sam))).json()
+    assert boot["voice_available"] is False and boot["voice_limits"] is None
+
+
+async def test_today_says_who_is_hanging_out(client, db, lk):
+    from app.calls.apps import today_section
+
+    w = await world(client, db)
+    assert await today_section(db, w.jo) is None
+    # Alone in a channel isn't "hanging out" for you; for others it is.
+    await join(client, w.sam, w.lounge)
+    assert await today_section(db, w.sam) is None
+    got = await today_section(db, w.jo)
+    (c,) = got["channels"]
+    assert c["room_id"] == w.lounge and c["name"] == "Lounge" and c["space"] == "The Lads"
+    assert c["people"] == [w.sam.username] and c["here"] is False and got["in_voice"] is None
+    await join(client, w.jo, w.lounge)
+    got = await today_section(db, w.jo)
+    assert got["channels"][0]["here"] is True and got["in_voice"] == w.lounge
+    # Someone outside the space sees nothing; voice off for you: nothing.
+    assert await today_section(db, w.outsider) is None
+    await voice_on(db, calls_enabled=False)
+    assert await today_section(db, w.sam) is None
+
+
+async def test_today_hub_has_the_voice_line(client, db, lk):
+    w = await world(client, db)
+    await join(client, w.sam, w.lounge)
+    r = await client.get("/api/today", headers=bearer(w.jo))
+    assert r.status_code == 200, r.text
+    v = r.json()["sections"]["voice"]
+    assert v["channels"][0]["people"] == [w.sam.username]
+
+
+async def test_export_has_your_voice_sessions(client, db, lk):
+    from app.calls.apps import export_sessions
+    from app.calls import voice
+    from app.redis_client import redis
+
+    w = await world(client, db)
+    await join(client, w.sam, w.lounge)
+    m = json.loads(await redis.hget(f"voice:r:{w.lounge}", str(w.sam.id)))
+    m["joined_at"] = (datetime.now(timezone.utc) - timedelta(minutes=3)).isoformat()
+    await voice._save_member(m)
+    await client.post("/api/rooms/voice/leave", headers=bearer(w.sam), json={})
+    (s,) = await export_sessions(db, w.sam.id)
+    assert s["channel"] == "Lounge" and s["space"] == "The Lads" and s["kind"] == "voice"
+    assert 2.9 <= s["minutes"] <= 3.2 and s["joined_at"] and s["left_at"]
+    assert await export_sessions(db, w.jo.id) == []

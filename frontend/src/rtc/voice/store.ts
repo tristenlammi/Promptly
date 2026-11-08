@@ -119,6 +119,9 @@ export interface VoiceStoreState {
   quiet: boolean;
   /** Push to talk key held. */
   pttActive: boolean;
+  /** The browser is holding sound back until a click or key (a join
+   *  without one, e.g. rejoining after a reload). */
+  audioBlocked: boolean;
 
   camera: boolean;
   /** Your own camera, for a self view. */
@@ -179,6 +182,7 @@ export const initialVoiceState: VoiceStoreState = {
   talkingWhileMuted: false,
   quiet: false,
   pttActive: false,
+  audioBlocked: false,
   camera: false,
   cameraTrack: null,
   live: false,

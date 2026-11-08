@@ -3,6 +3,7 @@ import { Menu } from "lucide-react";
 
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { useUIStore } from "@/store/uiStore";
+import { VoicePill } from "@/rtc/ui/VoicePill";
 import { cn } from "@/utils/cn";
 
 interface TopNavProps {
@@ -31,6 +32,9 @@ export function TopNav({
   const openMobileNav = useUIStore((s) => s.openMobileNav);
 
   return (
+    <>
+    {/* Calls: on a phone, the "you're in voice" bar above every page. */}
+    {isMobile && <VoicePill />}
     <header
       className={cn(
         // Phase 5 — pad the top safe-area inset (notch / status bar)
@@ -85,5 +89,6 @@ export function TopNav({
       </div>
       {actions && <div className="flex items-center gap-2">{actions}</div>}
     </header>
+    </>
   );
 }

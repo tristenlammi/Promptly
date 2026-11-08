@@ -33,6 +33,7 @@ import {
   type Command,
   type DoKind,
 } from "@/lib/paletteCommands";
+import { useVoicePaletteRows } from "@/rtc/ui/paletteVoice";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
@@ -56,6 +57,8 @@ export interface PaletteAction {
   target?: { label: string; count: number };
   /** Runs it. Resolves true when the palette should close. */
   run: () => Promise<boolean>;
+  /** A heading of its own (e.g. "Voice"); else Do / Suggestion / Create. */
+  group?: string;
 }
 
 const PICK_KEY = "promptly.palette.target.";
@@ -167,9 +170,16 @@ export function usePaletteActions(
     };
   }, [cmd, query, navigate]);
 
+  // Calls: join a voice channel, and Mute / Deafen / Leave while in one.
+  const voiceRows = useVoicePaletteRows(query, navigate);
+  const voiceFirst = !doRow && voiceRows.length > 0 && voiceRows[0].sure;
+
   const actions = useMemo(
-    () => [...(doRow ? [doRow] : []), ...createRows, ...(mapRow ? [mapRow] : [])],
-    [doRow, createRows, mapRow],
+    () =>
+      voiceFirst
+        ? [...voiceRows, ...createRows, ...(mapRow ? [mapRow] : [])]
+        : [...(doRow ? [doRow] : []), ...createRows, ...voiceRows, ...(mapRow ? [mapRow] : [])],
+    [doRow, createRows, mapRow, voiceRows, voiceFirst],
   );
 
   /** Tab on the Do row: the next file to write to. */
@@ -182,7 +192,7 @@ export function usePaletteActions(
     return true;
   };
 
-  return { actions, sureTop: !!doRow?.sure, cycleTarget };
+  return { actions, sureTop: !!doRow?.sure || voiceFirst, cycleTarget };
 }
 
 interface Ctx {
@@ -426,12 +436,12 @@ export function ActionRows({
   onCycle: () => void;
 }) {
   if (!actions.length) return null;
-  const doFirst = actions[0].key.startsWith("do-");
+  const groupOf = (a: PaletteAction) => a.group ?? (a.key.startsWith("do-") ? (a.sure ? "Do" : "Suggestion") : "Create");
   return (
     <div className="py-1">
       {actions.map((a, idx) => {
         const active = idx === cursor;
-        const label = idx === 0 && doFirst ? (a.sure ? "Do" : "Suggestion") : idx === (doFirst ? 1 : 0) ? "Create" : null;
+        const label = idx === 0 || groupOf(actions[idx - 1]) !== groupOf(a) ? groupOf(a) : null;
         return (
           <div key={a.key}>
             {label && (

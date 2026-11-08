@@ -77,6 +77,8 @@ export interface Bootstrap {
   voice?: Record<string, VoiceMember[]>;
   /** Calls: where you are in voice, if anywhere. */
   voice_me?: VoiceWhere | null;
+  /** Calls: the server's caps (null when voice is off for you). */
+  voice_limits?: { max_participants: number; max_stream: "720p30" | "1080p30" | "1080p60" } | null;
 }
 
 export interface Attachment {
@@ -188,7 +190,7 @@ export const roomsApi = {
   },
 
   // ---- rooms ----
-  async createRoom(spaceId: string, body: { name: string; topic?: string | null }): Promise<Room> {
+  async createRoom(spaceId: string, body: { name: string; topic?: string | null; kind?: "text" | "voice" }): Promise<Room> {
     const { data } = await apiClient.post<Room>(`/rooms/spaces/${spaceId}/rooms`, body);
     return data;
   },

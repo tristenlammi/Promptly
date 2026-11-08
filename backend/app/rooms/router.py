@@ -93,7 +93,8 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
     from app.calls import access as calls_access
     from app.calls import voice as calls_voice
 
-    voice_on = await calls_access.voice_allowed(db, user)
+    calls_settings = await calls_access.load_settings(db)
+    voice_on = await calls_access.voice_allowed(db, user, calls_settings)
     voice_ids = [r.id for r in rooms if r.kind == "voice"]
     voice_me = await calls_voice.where(user.id) if voice_on else None
     return {
@@ -107,6 +108,10 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
             {k: voice_me.get(k) for k in ("room_id", "space_id", "device", "joined_at")} | {"session_id": voice_me.get("session")}
             if voice_me
             else None
+        ),
+        # The server's caps, for channel settings (user limit) and Go Live.
+        "voice_limits": (
+            {"max_participants": calls_settings.max_participants, "max_stream": calls_settings.max_stream} if voice_on else None
         ),
     }
 

@@ -62,11 +62,15 @@ export const voice = {
   setStreamVolume: withEngine((e, percent: number) => e.setStreamVolume(percent)),
 
   setCamera: withEngine((e, on: boolean) => e.setCamera(on)),
-  startLive: withEngine((e, opts?: { quality?: StreamQuality; hint?: StreamHint; audio?: boolean }) => e.startLive(opts)),
+  startLive: withEngine((e, opts?: { quality?: StreamQuality; hint?: StreamHint; audio?: boolean; surface?: "monitor" | "window" | "browser" }) => e.startLive(opts)),
   stopLive: withEngine((e) => e.stopLive()),
   watch: withEngine((e, userId: string | null) => e.setWatching(userId)),
 
   answerStillHere: withEngine((e) => e.answerStillHere()),
+  /** Ask for the microphone again (after it was refused or failed). */
+  retryMic: withEngine((e) => e.retryMic()),
+  /** Turn sound on when the browser held it back. */
+  resumeAudio: withEngine((e) => e.resumeAudio()),
   dismissNotice: withEngine((e) => e.dismissNotice()),
   dismissProblem: withEngine((e) => e.dismissProblem()),
 

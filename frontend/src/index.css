@@ -1375,3 +1375,10 @@ html.dark .promptly-doc .suggestion-del { color: #f87171; }
 @media (prefers-reduced-motion: reduce) {
   .mail-tick, .mail-fade { animation: none; }
 }
+
+/* Calls WP-V4: items/ui pieces (Toggle, primary buttons) used outside an
+   app, e.g. the voice sheets over any page, take Promptly's accent. Apps
+   still set their own on <html> (inline, so it wins). */
+:root {
+  --item-accent: var(--accent);
+}

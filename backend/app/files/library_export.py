@@ -238,7 +238,19 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
         "user_id": str(user.id), "created": time.time(), "part_gb": int(part_gb),
         "parts": parts, "albums": albums, "counts": counts,
         "bytes": sum(e["s"] for e in entries), "zone": str(zone) if zone else None,
+        "voice": await _voice_sessions(db, user.id),
     }
+
+
+async def _voice_sessions(db: AsyncSession, user_id: Any) -> list[dict[str, Any]]:
+    """Calls: your own voice-channel sessions (voice.json). Never fails the export."""
+    try:
+        from app.calls.apps import export_sessions
+
+        return await export_sessions(db, user_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("library export: voice sessions failed")
+        return []
 
 
 def _safe(name: str) -> str:
@@ -351,7 +363,14 @@ def readme(state: dict[str, Any]) -> bytes:
         "                           import a Takeout read these;\n"
         "              <name>.xmp   date, place and description for Lightroom, digiKam,\n"
         "                           darktable and similar.\n"
-        "albums.json  your albums and the photos in each.\n\n"
+        "albums.json  your albums and the photos in each.\n"
+        + (
+            "voice.json   your time in voice channels: which channel, when, and for how long\n"
+            "             (nothing anyone says in voice is ever recorded).\n"
+            if state.get("voice")
+            else ""
+        )
+        + "\n"
         "To bring it into another Promptly: Files -> Import -> A folder of photos, and add\n"
         "the parts. Dates, places, favourites and albums come with it.\n\n"
         "Your passwords aren't here. This server can't read them, so it can't export them.\n"
@@ -490,6 +509,11 @@ async def stream_part(export_id: str, n: int) -> AsyncIterator[bytes]:
                 _info(ROOT + "albums.json", int(planned["created"]), zone, zipfile.ZIP_DEFLATED),
                 json.dumps(planned["albums"], ensure_ascii=False, indent=2).encode("utf-8"),
             )
+            if planned.get("voice"):
+                zf.writestr(
+                    _info(ROOT + "voice.json", int(planned["created"]), zone, zipfile.ZIP_DEFLATED),
+                    json.dumps(planned["voice"], ensure_ascii=False, indent=2).encode("utf-8"),
+                )
             yield sink.take()
         for e in entries:
             arc = e["a"]

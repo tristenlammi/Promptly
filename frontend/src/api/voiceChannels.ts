@@ -125,4 +125,25 @@ export const voiceApi = {
     const { data } = await apiClient.post<{ ok: boolean; delivered: boolean }>("/rooms/voice/control", { action });
     return data;
   },
+
+  // ---- WP-V4: channel settings and moderation (the space's admins) ----
+
+  /** A voice channel's settings; ``alone_minutes: null`` = never. */
+  async patchSettings(
+    roomId: string,
+    body: Partial<Pick<VoiceChannelSettings, "user_limit" | "quality" | "join_role" | "talk_role" | "video" | "alone_minutes">>,
+  ): Promise<VoiceChannelSettings> {
+    const { data } = await apiClient.patch<VoiceChannelSettings>(`/rooms/rooms/${roomId}/voice`, body);
+    return data;
+  },
+  /** Mute or deafen someone for everyone (they can't undo it). */
+  async moderate(roomId: string, userId: string, body: { server_mute?: boolean; server_deafen?: boolean }): Promise<void> {
+    await apiClient.post(`/rooms/rooms/${roomId}/voice/members/${userId}`, body);
+  },
+  async move(roomId: string, userId: string, toRoomId: string): Promise<void> {
+    await apiClient.post(`/rooms/rooms/${roomId}/voice/members/${userId}/move`, { to_room_id: toRoomId });
+  },
+  async disconnect(roomId: string, userId: string): Promise<void> {
+    await apiClient.delete(`/rooms/rooms/${roomId}/voice/members/${userId}`);
+  },
 };

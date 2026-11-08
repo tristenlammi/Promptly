@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { EyeOff, Sparkles, Trash2 } from "lucide-react";
+import { EyeOff, Hash, Sparkles, Trash2, Volume2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -10,6 +10,8 @@ import { apiErrorMessage } from "@/utils/apiError";
 
 import { BOOTSTRAP_KEY, dmTitle, patchRoom, removeRoom, upsertRoom } from "../cache";
 import { PeoplePicker } from "./PeoplePicker";
+import { ChannelVoiceSettings } from "@/rtc/ui/ChannelVoiceSettings";
+import { cn } from "@/utils/cn";
 import { NotifyControl, UserAvatar } from "./ui";
 
 export const AI_CONTEXT_EXPLAINER =
@@ -24,29 +26,50 @@ function slug(name: string) {
     .slice(0, 80);
 }
 
-export function CreateRoomSheet({ open, onClose, space }: { open: boolean; onClose: () => void; space: Space }) {
+/** Voice channels keep their spaces and capitals ("Movie night"). */
+function voiceName(name: string) {
+  return name.trim().replace(/\s+/g, " ").slice(0, 80);
+}
+
+export function CreateRoomSheet({
+  open,
+  onClose,
+  space,
+  kind: initialKind = "text",
+  voiceAvailable = true,
+}: {
+  open: boolean;
+  onClose: () => void;
+  space: Space;
+  kind?: "text" | "voice";
+  /** Voice is on for you (else only text rooms are offered). */
+  voiceAvailable?: boolean;
+}) {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [name, setName] = useState("");
   const [topic, setTopic] = useState("");
+  const [kind, setKind] = useState<"text" | "voice">(initialKind);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (open) {
       setName("");
       setTopic("");
+      setKind(voiceAvailable ? initialKind : "text");
     }
-  }, [open]);
+  }, [open, initialKind, voiceAvailable]);
+  const norm = kind === "voice" ? voiceName : slug;
   const create = async () => {
-    const n = slug(name);
+    const n = norm(name);
     if (!n) return;
     setBusy(true);
     try {
-      const room = await roomsApi.createRoom(space.id, { name: n, topic: topic.trim() || null });
+      const room = await roomsApi.createRoom(space.id, { name: n, topic: topic.trim(), kind });
       if (!upsertRoom(qc, room)) await qc.invalidateQueries({ queryKey: BOOTSTRAP_KEY });
       onClose();
       navigate(`/rooms/r/${room.id}`);
     } catch (err) {
-      toast.error(apiErrorMessage(err, "Couldn't create the room."));
+      toast.error(apiErrorMessage(err, kind === "voice" ? "Couldn't create the voice channel." : "Couldn't create the room."));
     } finally {
       setBusy(false);
     }
@@ -55,21 +78,52 @@ export function CreateRoomSheet({ open, onClose, space }: { open: boolean; onClo
     <Sheet
       open={open}
       onClose={onClose}
-      title={`New room in ${space.name}`}
+      title={kind === "voice" ? `New voice channel in ${space.name}` : `New room in ${space.name}`}
       size="sm"
       footer={
-        <ItemButton variant="primary" block disabled={!slug(name) || busy} onClick={() => void create()}>
-          Create room
+        <ItemButton variant="primary" block disabled={!norm(name) || busy} onClick={() => void create()}>
+          {kind === "voice" ? "Create voice channel" : "Create room"}
         </ItemButton>
       }
     >
       <div className="flex flex-col gap-3">
-        <Field label="Name" hint={slug(name) ? `#${slug(name)}` : "Lower-case, no spaces — like #holidays"}>
+        {voiceAvailable && (
+          <div className="flex flex-col gap-1.5" role="radiogroup" aria-label="Kind">
+            {(
+              [
+                { value: "text", label: "Text room", text: "Messages, photos, files and @promptly", Icon: Hash },
+                { value: "voice", label: "Voice channel", text: "Drop in to talk, share your screen, hang out", Icon: Volume2 },
+              ] as const
+            ).map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={kind === o.value}
+                onClick={() => setKind(o.value)}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
+                  kind === o.value ? "border-[var(--item-accent)] bg-[color-mix(in_srgb,var(--item-accent)_8%,transparent)]" : "border-[var(--border)] hover:bg-[var(--hover)]",
+                )}
+              >
+                <o.Icon className="h-5 w-5 shrink-0 text-[var(--text-muted)]" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium text-[var(--text)]">{o.label}</span>
+                  <span className="block text-xs text-[var(--text-muted)]">{o.text}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        <Field
+          label="Name"
+          hint={kind === "voice" ? "Like Lounge, Games or Movie night" : slug(name) ? `#${slug(name)}` : "Lower-case, no spaces — like #holidays"}
+        >
           <TextInput
             value={name}
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void create()}
-            placeholder="holidays"
+            placeholder={kind === "voice" ? "Lounge" : "holidays"}
             maxLength={80}
             data-autofocus=""
           />
@@ -144,14 +198,16 @@ export function RoomSettingsSheet({
     }
   };
 
-  const dirty = slug(name) !== room.name || topic.trim() !== (room.topic ?? "");
+  const isVoice = room.kind === "voice";
+  const norm = isVoice ? voiceName : slug;
+  const dirty = norm(name) !== room.name || topic.trim() !== (room.topic ?? "");
 
   return (
-    <Sheet open={open} onClose={onClose} title={`#${room.name}`} size="md">
+    <Sheet open={open} onClose={onClose} title={isVoice ? room.name : `#${room.name}`} size="md">
       <div className="flex flex-col gap-5">
         {isAdmin && (
           <div className="flex flex-col gap-3">
-            <Field label="Name" hint={slug(name) && slug(name) !== name ? `#${slug(name)}` : undefined}>
+            <Field label="Name" hint={!isVoice && slug(name) && slug(name) !== name ? `#${slug(name)}` : undefined}>
               <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
             </Field>
             <Field label="Topic">
@@ -159,13 +215,15 @@ export function RoomSettingsSheet({
             </Field>
             <ItemButton
               variant="primary"
-              disabled={!dirty || !slug(name) || busy}
-              onClick={() => void save({ name: slug(name), topic: topic.trim() || null }, "Saved")}
+              disabled={!dirty || !norm(name) || busy}
+              onClick={() => void save({ name: norm(name), topic: topic.trim() || null }, "Saved")}
             >
               Save changes
             </ItemButton>
           </div>
         )}
+
+        {isVoice && <ChannelVoiceSettings room={room} isAdmin={isAdmin} />}
 
         <div className="flex flex-col gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
           <div className="flex items-start gap-3">
@@ -198,7 +256,14 @@ export function RoomSettingsSheet({
               icon={<Trash2 className="h-4 w-4" />}
               disabled={busy}
               onClick={async () => {
-                if (!window.confirm(`Delete #${room.name} and all its messages for everyone?`)) return;
+                if (
+                  !window.confirm(
+                    isVoice
+                      ? `Delete ${room.name}? Anyone in it is disconnected, and its chat is deleted for everyone.`
+                      : `Delete #${room.name} and all its messages for everyone?`,
+                  )
+                )
+                  return;
                 setBusy(true);
                 try {
                   await roomsApi.deleteRoom(room.id);
@@ -212,7 +277,7 @@ export function RoomSettingsSheet({
                 }
               }}
             >
-              Delete room
+              {isVoice ? "Delete channel" : "Delete room"}
             </ItemButton>
           </div>
         )}

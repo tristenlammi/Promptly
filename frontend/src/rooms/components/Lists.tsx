@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { BellOff, ChevronDown, Hash, LogOut, MessageSquarePlus, Plus, Settings, Sparkles, Users } from "lucide-react";
+import { BellOff, ChevronDown, Hash, LogOut, MessageSquarePlus, Plus, Settings, Sparkles, Users, Volume2 } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -12,6 +12,8 @@ import { cn } from "@/utils/cn";
 import { BOOTSTRAP_KEY, dmTitle, effectiveNotify, updateBootstrap } from "../cache";
 import { plainSnippet, shortWhen } from "../format";
 import { CountBadge, Popover, UserAvatar } from "./ui";
+import { RoomSettingsSheet } from "./RoomSheets";
+import { VoiceChannelRow } from "@/rtc/ui/ChannelRow";
 
 const rowFocus = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]";
 
@@ -21,6 +23,7 @@ export function SpaceRoomList({
   activeRoomId,
   onSettings,
   onNewRoom,
+  onNewVoice,
   isPhone,
 }: {
   b: Bootstrap;
@@ -28,12 +31,17 @@ export function SpaceRoomList({
   activeRoomId: string | null;
   onSettings: () => void;
   onNewRoom: () => void;
+  /** Calls: add a voice channel (admins, voice on). */
+  onNewVoice?: () => void;
   isPhone: boolean;
 }) {
   const qc = useQueryClient();
   const menuBtn = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState(false);
+  const [voiceSettings, setVoiceSettings] = useState<string | null>(null);
   const isAdmin = space.role === "owner" || space.role === "admin";
+  const voiceOn = b.voice_available === true;
+  const settingsRoom = space.rooms.find((r) => r.id === voiceSettings) ?? null;
 
   const setNotify = (notify: NotifyLevel) => {
     setMenu(false);
@@ -104,6 +112,19 @@ export function SpaceRoomList({
               <Plus className="h-4 w-4" /> New room
             </button>
           )}
+          {isAdmin && voiceOn && onNewVoice && (
+            <button
+              type="button"
+              role="menuitem"
+              className={menuItem}
+              onClick={() => {
+                setMenu(false);
+                onNewVoice();
+              }}
+            >
+              <Volume2 className="h-4 w-4" /> New voice channel
+            </button>
+          )}
           <div className="my-1 border-t border-[var(--border)]" />
           <p className="px-3 pb-1 pt-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">Notify me about</p>
           {(["all", "mentions", "none"] as NotifyLevel[]).map((n) => (
@@ -140,6 +161,18 @@ export function SpaceRoomList({
         </div>
         <ul className="flex flex-col gap-0.5 px-2">
           {space.rooms.map((r) => {
+            if (r.kind === "voice")
+              return (
+                <VoiceChannelRow
+                  key={r.id}
+                  b={b}
+                  space={space}
+                  room={r}
+                  active={r.id === activeRoomId}
+                  isPhone={isPhone}
+                  onSettings={() => setVoiceSettings(r.id)}
+                />
+              );
             const n = effectiveNotify(r, space);
             const unread = r.unread > 0 && n !== "none";
             const active = r.id === activeRoomId;
@@ -165,6 +198,15 @@ export function SpaceRoomList({
             );
           })}
         </ul>
+        {isAdmin && voiceOn && onNewVoice && !space.rooms.some((r) => r.kind === "voice") && (
+          <button
+            type="button"
+            onClick={onNewVoice}
+            className={cn("mx-2 mt-1 flex h-9 w-[calc(100%-1rem)] items-center gap-2 rounded-xl px-2.5 text-sm text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]", rowFocus)}
+          >
+            <Plus className="h-4 w-4" /> Add voice channel
+          </button>
+        )}
         {space.member_ids.length <= 1 && isAdmin && (
           <div className="m-3 rounded-2xl border border-dashed border-[var(--border)] p-3 text-xs text-[var(--text-muted)]">
             It's just you here.{" "}
@@ -175,6 +217,9 @@ export function SpaceRoomList({
           </div>
         )}
       </nav>
+      {settingsRoom && (
+        <RoomSettingsSheet open={!!settingsRoom} onClose={() => setVoiceSettings(null)} room={settingsRoom} space={space} />
+      )}
     </div>
   );
 }

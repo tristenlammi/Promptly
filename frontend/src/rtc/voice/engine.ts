@@ -119,6 +119,7 @@ export class VoiceEngine {
   private pttHeld = false;
   private unsubsGlobal: (() => void)[] = [];
   private preparedAt = 0;
+  private audioUnblock: (() => void) | null = null;
 
   constructor() {
     try {
@@ -282,7 +283,8 @@ export class VoiceEngine {
     // sound play (joining was a click).
     await room.startAudio().catch(() => undefined);
     if (gen !== this.gen) return false;
-    set({ status: "connected", joiningRoomId: null });
+    set({ status: "connected", joiningRoomId: null, audioBlocked: !room.canPlaybackAudio || ctx.state !== "running" });
+    this.watchAudioBlocked(ctx);
     for (const p of room.remoteParticipants.values()) this.addPeer(p);
     this.reconcile();
     await this.syncMic();
@@ -374,6 +376,10 @@ export class VoiceEngine {
           /* not for us */
         }
       })
+      .on(E.AudioPlaybackStatusChanged, () => {
+        if (!mine()) return;
+        set({ audioBlocked: !room.canPlaybackAudio || this.ctx?.state !== "running" });
+      })
       .on(E.Reconnecting, () => mine() && set({ status: "reconnecting" }))
       .on(E.SignalReconnecting, () => mine() && set({ status: "reconnecting" }))
       .on(E.Reconnected, () => {
@@ -404,12 +410,43 @@ export class VoiceEngine {
 
   private stopSession(): void {
     this.unsubs.splice(0).forEach((u) => u());
+    this.audioUnblock?.();
+    this.audioUnblock = null;
     this.timers.splice(0).forEach((t) => clearInterval(t));
     this.speakingReporter?.stop();
     this.speakingReporter = null;
     if (this.stateTimer) clearTimeout(this.stateTimer);
     this.stateTimer = null;
     this.stateDirty.clear();
+  }
+
+  /** The browser held sound back (a join without a click, e.g. after a
+   *  reload): any click or key turns it on; this does it from a button. */
+  async resumeAudio(): Promise<void> {
+    const ctx = this.ctx;
+    if (ctx && ctx.state === "suspended") await ctx.resume().catch(() => undefined);
+    await this.room?.startAudio().catch(() => undefined);
+    set({ audioBlocked: !!this.room && (!this.room.canPlaybackAudio || this.ctx?.state !== "running") });
+  }
+
+  private watchAudioBlocked(ctx: AudioContext): void {
+    if (ctx.state === "running" && this.room?.canPlaybackAudio !== false) return;
+    const onGesture = () => {
+      void this.resumeAudio().then(() => {
+        if (!get().audioBlocked) off();
+      });
+    };
+    const onState = () => set({ audioBlocked: ctx.state !== "running" || this.room?.canPlaybackAudio === false });
+    const off = () => {
+      window.removeEventListener("pointerdown", onGesture, true);
+      window.removeEventListener("keydown", onGesture, true);
+      ctx.removeEventListener("statechange", onState);
+    };
+    window.addEventListener("pointerdown", onGesture, true);
+    window.addEventListener("keydown", onGesture, true);
+    ctx.addEventListener("statechange", onState);
+    this.audioUnblock?.();
+    this.audioUnblock = off;
   }
 
   async leave(): Promise<void> {
@@ -837,6 +874,13 @@ export class VoiceEngine {
     this.reportState(["muted", "deafened"]);
   }
 
+  /** "Try again" after the microphone was refused or failed (still in
+   *  the channel, listening). */
+  async retryMic(): Promise<void> {
+    set({ problem: null });
+    await this.syncMic();
+  }
+
   /** Push to talk from an on-screen button (phones) or the keybind. */
   pushToTalk(down: boolean): void {
     if (this.pttHeld === down) return;
@@ -1101,7 +1145,7 @@ export class VoiceEngine {
    *  false if cancelled or refused. ``liveAudio`` says whether sound came
    *  with it (a tab's sound works everywhere; a whole screen's on
    *  Chrome/Edge for Windows and ChromeOS; one window's never). */
-  async startLive(opts: { quality?: StreamQuality; hint?: StreamHint; audio?: boolean } = {}): Promise<boolean> {
+  async startLive(opts: { quality?: StreamQuality; hint?: StreamHint; audio?: boolean; surface?: "monitor" | "window" | "browser" } = {}): Promise<boolean> {
     const room = this.room;
     const lk = this.lk;
     if (!room || !lk || !get().canVideo) return false;
@@ -1112,6 +1156,9 @@ export class VoiceEngine {
         true,
         {
           audio: opts.audio === false ? false : { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+          // Which tab the browser's chooser opens on (a hint; the person
+          // can still pick anything there).
+          ...(opts.surface ? { video: { displaySurface: opts.surface } } : {}),
           resolution: plan.capture,
           contentHint: plan.contentHint,
           systemAudio: "include",

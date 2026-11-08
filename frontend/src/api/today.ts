@@ -122,6 +122,11 @@ export interface TodayComing {
 
 export interface TodayHub {
   passwords?: { attention: number; updated_at: string | null };
+  /** Calls: voice channels of your spaces with people in them now. */
+  voice?: {
+    channels: { room_id: string; name: string; space: string; user_ids: string[]; people: string[]; here: boolean; url: string }[];
+    in_voice: string | null;
+  };
   mail?: {
     url: string;
     unread: number;

@@ -75,7 +75,7 @@ async function openHarness(page: Page, inputMode: "vad" | "ptt" = "vad"): Promis
   const r = await page.request.patch("/api/auth/me/preferences", {
     headers: { Authorization: auth },
     data: {
-      voice: { noise: "enhanced", input_mode: inputMode, ptt_key: "Backquote", ptt_release_ms: 200, auto_sensitivity: true, input_volume: 100, output_volume: 100, sounds: true, data_saver: false },
+      voice: { noise: "enhanced", input_mode: inputMode, ptt_key: "Backquote", ptt_release_ms: 200, auto_sensitivity: true, input_volume: 100, output_volume: 100, sounds: true, data_saver: false, stream_quality: "720p30", stream_hint: "motion", tips_seen: true },
       voice_volumes: {},
       voice_local_mutes: [],
     },
