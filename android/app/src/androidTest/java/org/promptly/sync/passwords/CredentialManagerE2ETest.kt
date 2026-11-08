@@ -64,6 +64,7 @@ class CredentialManagerE2ETest {
     }
 
     private val createJson = """{"rp":{"id":"passkey-test.promptly.test","name":"Passkey Test"},"user":{"id":"${b64u(utf8("user-1"))}","name":"ana@passkey.test","displayName":"Ana"},"challenge":"${b64u(utf8("challenge-create"))}","pubKeyCredParams":[{"type":"public-key","alg":-7}],"authenticatorSelection":{"residentKey":"required","userVerification":"required"},"attestation":"none"}"""
+    private val PIN = "482913"
     private val getJson = """{"rpId":"passkey-test.promptly.test","challenge":"${b64u(utf8("challenge-get"))}","userVerification":"required"}"""
 
     @Before fun setUp() {
@@ -157,9 +158,15 @@ class CredentialManagerE2ETest {
 
         start("createPasskey", "--es json64 ${b64u(utf8(createJson))}")
         pickOurEntry("Continue", "Save passkey to Passwords", "Create")
-        // No biometric on this phone, so the master password stands in for it.
-        Harness.fill("confirm-password", Harness.MASTER)
-        tap("confirm")
+        // No passkey PIN yet: it's chosen here, typed twice (D-PIN-1). An easy one is refused.
+        waitFor(By.res("pin-choose"), 25_000)
+        Harness.fill("passkey-pin", "1234")
+        Harness.fill("passkey-pin-again", "1234")
+        tap("passkey-pin-go")
+        waitFor(By.textContains("too easy"), 25_000)
+        Harness.fill("passkey-pin", PIN)
+        Harness.fill("passkey-pin-again", PIN)
+        tap("passkey-pin-go")
         val created = result()
         assertTrue(created, created.startsWith("created:"))
         val reg = Json.parseToJsonElement(created.removePrefix("created:")).jsonObject
@@ -177,12 +184,15 @@ class CredentialManagerE2ETest {
 
         start("getPasskey", "--es json64 ${b64u(utf8(getJson))}")
         pickOurEntry("ana@passkey.test")
-        Harness.fill("confirm-password", Harness.MASTER)
-        tap("confirm")
+        // One box now, and no biometric or master password.
+        Harness.fill("passkey-pin", PIN)
+        tap("passkey-pin-go")
         val got = result()
         assertTrue(got, got.startsWith("got:"))
         val auth = Json.parseToJsonElement(got.removePrefix("got:")).jsonObject.getValue("response").jsonObject
         val authData = fromB64u(auth.getValue("authenticatorData").jsonPrimitive.content)
+        // User verified, only after the PIN.
+        assertTrue("UV", (authData[32].toInt() and 0x04) != 0)
         val cd = fromB64u(auth.getValue("clientDataJSON").jsonPrimitive.content)
         assertTrue(String(cd).contains(pkgOrigin))
         val v = java.security.Signature.getInstance("SHA256withECDSA")
@@ -191,6 +201,37 @@ class CredentialManagerE2ETest {
         v.update(Primitives.sha256(cd))
         assertTrue(v.verify(fromB64u(auth.getValue("signature").jsonPrimitive.content)))
         assertEquals(b64u(utf8("user-1")), auth.getValue("userHandle").jsonPrimitive.content)
+    }
+
+    /** D-PIN-1: five wrong passkey PINs lock the vault, the sheet says so, and only the master
+     *  password opens it again, with a fresh count. */
+    @Test fun fiveWrongPasskeyPinsLockTheVault() {
+        serveAssetLinks(assetLinksFor(TEST_APP, certOf(TEST_APP)))
+        start("createPasskey", "--es json64 ${b64u(utf8(createJson))}")
+        pickOurEntry("Continue", "Save passkey to Passwords", "Create")
+        Harness.fill("passkey-pin", PIN)
+        Harness.fill("passkey-pin-again", PIN)
+        tap("passkey-pin-go")
+        assertTrue(result().startsWith("created:"))
+
+        start("getPasskey", "--es json64 ${b64u(utf8(getJson))}")
+        pickOurEntry("ana@passkey.test")
+        for (said in listOf("4 tries left", "3 tries left", "2 tries left", "One more wrong")) {
+            Harness.fill("passkey-pin", "907153")
+            tap("passkey-pin-go")
+            waitFor(By.textContains(said), 25_000)
+        }
+        Harness.fill("passkey-pin", "907153")
+        tap("passkey-pin-go")
+        waitFor(By.textContains("Five wrong passkey PINs in a row"), 25_000)
+        assertFalse(Pw.unlocked)
+        // No biometric offered, and the master password brings the PIN back.
+        assertFalse(has(By.res("use-biometric"), 500))
+        Harness.fill("master-password", Harness.MASTER)
+        tap("unlock")
+        Harness.fill("passkey-pin", PIN)
+        tap("passkey-pin-go")
+        assertTrue(result().startsWith("got:"))
     }
 
     /** Which sites got asked about says which accounts you have, so it's kept sealed. */

@@ -9,7 +9,12 @@ import { isSystem, type Item, type ItemBody } from "./model";
 import { clearPinTries, PIN_TITLE, pinTries } from "./passkeypin";
 import { MemoryStore } from "./store";
 
-type Handle = typeof import("../../../../passwords/extension/src/passkeys").handlePasskey;
+/** The extension's own file. Loaded by a path tsc doesn't follow, since the frontend's build has no
+ *  `chrome` types. */
+const PASSKEYS = "../../../../passwords/extension/src/passkeys";
+type Sender = { tab?: { id: number }; frameId?: number; url?: string; origin?: string };
+type Guard = { store: MemoryStore; lockOut: () => Promise<void> };
+type Handle = (msg: never, sender: Sender, client: () => never, isThePerson: () => Promise<boolean>, offersChanged?: () => void, guard?: Guard) => Promise<unknown>;
 let handlePasskey: Handle;
 const opened: string[] = [];
 
@@ -35,7 +40,7 @@ beforeAll(async () => {
       },
     },
   };
-  ({ handlePasskey } = await import("../../../../passwords/extension/src/passkeys"));
+  ({ handlePasskey } = (await import(/* @vite-ignore */ PASSKEYS)) as { handlePasskey: Handle });
 });
 
 /** Just enough of VaultClient for the passkey code. */
@@ -66,7 +71,7 @@ class FakeVault {
   }
 }
 
-const SITE = { tab: { id: 7 }, frameId: 0, url: "https://example.com/login", origin: "https://example.com" } as unknown as chrome.runtime.MessageSender;
+const SITE: Sender = { tab: { id: 7 }, frameId: 0, url: "https://example.com/login", origin: "https://example.com" };
 const notThePerson = async () => false;
 
 function rig() {
@@ -80,13 +85,13 @@ function rig() {
       vault.unlocked = false;
     },
   };
-  const send = (msg: Record<string, unknown>, sender: chrome.runtime.MessageSender) => handlePasskey(msg as never, sender, () => vault as never, notThePerson, () => undefined, guard) as Promise<Record<string, unknown>>;
+  const send = (msg: Record<string, unknown>, sender: Sender) => handlePasskey(msg as never, sender, () => vault as never, notThePerson, () => undefined, guard) as Promise<Record<string, unknown>>;
   /** A page's request, and the window that opens for it. */
   const ask = async (op: "get" | "create", options: Record<string, unknown>) => {
     const before = opened.length;
     const result = send({ t: "pkRequest", op, options }, SITE);
     await expect.poll(() => opened.length).toBe(before + 1);
-    const win = { url: opened[opened.length - 1] } as chrome.runtime.MessageSender;
+    const win: Sender = { url: opened[opened.length - 1] };
     const id = new URL(win.url!).searchParams.get("id");
     const window = (m: Record<string, unknown>) => send({ ...m, id }, win);
     return { result, window };

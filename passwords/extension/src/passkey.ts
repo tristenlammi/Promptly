@@ -70,7 +70,7 @@ function pinRefused(text: string) {
 
 /** For an item marked to ask for the master password before it's used. */
 function verifyFor(a: Record<string, unknown>, problem: string) {
-  root.replaceChildren(el("p", "This item asks for your master password, or your PIN if you've set one."));
+  root.replaceChildren(el("p", "This item also asks for your master password, or this browser's unlock PIN if you've set one."));
   const form = el("form") as HTMLFormElement;
   const input = el("input") as HTMLInputElement;
   input.type = "password";

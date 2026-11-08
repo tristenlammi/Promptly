@@ -64,7 +64,7 @@ Set it up first: Settings → Passwords and accounts, pick Promptly as the autof
 - A login saved for `https://nas.example:5001` isn't suggested, and Search asks first.
 - App autofill in a few real apps.
 - A banking app that signs in through its own WebView: expect the "showing a web page" question unless the site's saved on that login.
-- A real passkey on a real site through Credential Manager, both creating and signing in.
+- A real passkey on a real site through Credential Manager, both creating and signing in. It asks for your passkey PIN now, not a fingerprint (D-PIN-1). Check the PIN box comes up ready to type with the number keyboard, Done signs in, and five wrong PINs lock the vault and say so.
 - Fingerprint unlock with a real sensor, and what happens after you add a new finger (it should ask for the master password).
 - Join a phone by QR, both ways, with a real camera.
 - Join another phone to Wi-Fi from the QR.
@@ -92,6 +92,7 @@ The checklist's install section needs a real install. Automated tests used the d
 - Install each extension for real, from its store or as a signed file, and use it on sites you actually sign in to. **Use low-value accounts only.**
 - To try it now in Helium or Chrome: turn on developer mode on the extensions page, then "Load unpacked" and pick `passwords/extension/dist/chrome`. Reload it there after each new build.
 - Check bookmark sync with a second browser, using a profile whose bookmarks you don't mind changing. Read [BOOKMARKS.md](BOOKMARKS.md) first. It's off until you turn it on.
+- **Your Google passkey sign-in again, with the passkey PIN** (D-PIN-1). Press Google's Continue, and Promptly's window should open with the PIN box ready to type in. The first time, it asks you to choose a PIN, twice. Type it and press Enter, and Google should sign you in with no password step, since it now hears you were verified. Then try once with a wrong PIN to see the count, and the right one after. Tell me if Google still asks for a password, or calls it a "2-Step Verification only security key".
 - Google's password step: you saw no fill there. If it still misses, "Describe this form" in the panel gives me what I need, with no secrets in it.
 - Never lock on Firefox: restart with a signed build. Tests could only simulate the restart.
 - On Chrome and Helium, copy a 2FA code and check that it arrives and then clears on time. The fix for lost clipboard writes is a timing pause (D76), so tell me if you ever see one fail.

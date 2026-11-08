@@ -272,6 +272,8 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         if (secretKeyOverride != null) keeper.save(secretKey) else secretKey.fill(0)
         state = Unlocked(keyset, raw.auth, raw.unlock, account.userId, account.accountId)
         loadLocal()
+        // The master password is what five wrong passkey PINs ask for. It starts the count again.
+        PasskeyPin.clearTries(store)
         if (!offline) sync()
         return UnlockResult(offline, if (keepSecret) concat(raw.unlock, raw.auth) else null)
     }
@@ -304,6 +306,8 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
     @Synchronized
     fun unlockWithSecret(secret: ByteArray): Boolean {
         require(secret.size == 64) { "bad unlock secret" }
+        // A biometric: not after five wrong passkey PINs on this phone.
+        if (PasskeyPin.lockedOut(store)) throw IllegalStateException(PasskeyPin.LOCKED_TEXT)
         var cached = store.getAccount()
         val unlockKey = secret.copyOfRange(0, 32)
         val authKey = secret.copyOfRange(32, 64)

@@ -675,6 +675,8 @@ private fun SettingsScreen(activity: FragmentActivity, client: VaultClient, onBa
             }
         }
 
+        PasskeyPinSetting(client)
+
         Text("Site icons", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         runCatching { client.personalVaultId() }.getOrNull()?.let { VaultIconsToggle(client, it, "icons-personal") }
 

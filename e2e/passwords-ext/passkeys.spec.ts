@@ -308,6 +308,59 @@ test("passkey PIN: the page can't see it, type it, or answer for the window", as
   await page.close();
 });
 
+test("passkey PIN: changed in Settings with the current PIN, and only the new one works after", async () => {
+  const v = await rig.ctx.newPage();
+  await v.goto(`chrome-extension://${rig.extId}/vault.html`);
+  await v.getByRole("navigation", { name: "Passwords" }).getByText("Settings").click();
+  const panel = v.getByTestId("passkey-pin");
+  await expect(panel).toContainText("Set. It's asked each time");
+  // A wrong current PIN counts, like one in the passkey window.
+  await panel.getByTestId("passkey-pin-proof").fill("907153");
+  await panel.getByTestId("passkey-pin-new").fill("739104");
+  await panel.getByTestId("passkey-pin-again").fill("739104");
+  await panel.getByRole("button", { name: "Change passkey PIN" }).click();
+  await expect(panel).toContainText("4 tries left", { timeout: 30_000 });
+  // An easy new one is refused before anything's checked.
+  await panel.getByTestId("passkey-pin-new").fill("1111");
+  await panel.getByTestId("passkey-pin-again").fill("1111");
+  await panel.getByRole("button", { name: "Change passkey PIN" }).click();
+  await expect(panel).toContainText("too easy");
+  await panel.getByTestId("passkey-pin-proof").fill(PASSKEY_PIN);
+  await panel.getByTestId("passkey-pin-new").fill("739104");
+  await panel.getByTestId("passkey-pin-again").fill("739104");
+  await panel.getByRole("button", { name: "Change passkey PIN" }).click();
+  await expect(v.getByText("Passkey PIN changed")).toBeVisible({ timeout: 30_000 });
+  await v.close();
+
+  const page = await rig.ctx.newPage();
+  let ask = await askForAna(page);
+  // The right PIN put the count back.
+  await expect(ask.prompt.locator("#pin-error")).toHaveText("");
+  await wrongPin(ask.prompt, "4 tries left");
+  await ask.prompt.locator("#pin").fill(PASSKEY_PIN);
+  await ask.prompt.locator("#pin").press("Enter");
+  await expect(ask.prompt.locator("#pin-error")).toContainText("3 tries left", { timeout: 30_000 });
+  await ask.prompt.locator("#pin").fill("739104");
+  await ask.prompt.locator("#pin").press("Enter");
+  await verifiedSignIn(ask.run, ask.challenge);
+
+  // And back, with the master password this time, so the other tests' PIN stands.
+  const back = await rig.ctx.newPage();
+  await back.goto(`chrome-extension://${rig.extId}/vault.html`);
+  await back.getByRole("navigation", { name: "Passwords" }).getByText("Settings").click();
+  const p2 = back.getByTestId("passkey-pin");
+  await p2.getByTestId("passkey-pin-proof").fill(MASTER);
+  await p2.getByTestId("passkey-pin-new").fill(PASSKEY_PIN);
+  await p2.getByTestId("passkey-pin-again").fill(PASSKEY_PIN);
+  await p2.getByRole("button", { name: "Change passkey PIN" }).click();
+  await expect(back.getByText("Passkey PIN changed")).toBeVisible({ timeout: 30_000 });
+  await back.close();
+  ask = await askForAna(page);
+  await signInWithPin(ask.prompt);
+  await verifiedSignIn(ask.run, ask.challenge);
+  await page.close();
+});
+
 test("RP ID spoofing is refused, in every form", async () => {
   const page = await rig.ctx.newPage();
   await page.goto("http://a.localhost:8111/webauthn.html");

@@ -356,6 +356,23 @@ test("Firefox: a content script can't read storage.session, or ask for secrets",
   await closeTabs();
 });
 
+/** The passkey PIN (D-PIN-1), typed into our passkey window. The first time, it's typed twice. */
+const PASSKEY_PIN = "482913";
+async function typePasskeyPin(pin = PASSKEY_PIN) {
+  const box = await driver.wait(until.elementLocated(By.css("#pin")), 15000);
+  await driver.wait(until.elementIsVisible(box), 15000);
+  await box.sendKeys(pin);
+  const again = await driver.findElements(By.css("#pin-again"));
+  if (again.length) await again[0].sendKeys(pin);
+}
+
+/** Wrong PINs, and what the window says. */
+async function wrongPasskeyPin(said) {
+  const box = await driver.wait(until.elementLocated(By.css("#pin")), 15000);
+  await box.sendKeys("907153\n");
+  await driver.wait(async () => (await driver.findElement(By.css("#pin-error")).getText()).includes(said), 30000, said);
+}
+
 test("Firefox: a passkey made and used here satisfies an independent WebAuthn library", async () => {
   const { verifyAuthenticationResponse, verifyRegistrationResponse } = await import("@simplewebauthn/server");
   const b64u = (b) => Buffer.from(b).toString("base64url");
@@ -368,6 +385,9 @@ test("Firefox: a passkey made and used here satisfies an independent WebAuthn li
     await driver.wait(async () => (await driver.getAllWindowHandles()).length > handles.length, 15000);
     const h = (await driver.getAllWindowHandles()).find((x) => !handles.includes(x));
     await driver.switchTo().window(h);
+    // The PIN box has the focus as the window opens.
+    assert.equal(await driver.executeScript("return document.activeElement && document.activeElement.id"), "pin");
+    await typePasskeyPin();
     await click(driver, buttonName);
     await driver.sleep(300);
     await driver.switchTo().window(pg);
@@ -384,18 +404,46 @@ test("Firefox: a passkey made and used here satisfies an independent WebAuthn li
   assert.equal(reg.error, undefined);
   const v = await verifyRegistrationResponse({ response: reg, expectedChallenge: challenge, expectedOrigin: `http://localhost:${PORT}`, expectedRPID: "localhost", requireUserVerification: false });
   assert.ok(v.verified);
-  assert.equal(v.registrationInfo.userVerified, true, "an unlocked vault and a click, and no password");
+  assert.equal(v.registrationInfo.userVerified, true, "after the passkey PIN, and no password");
 
   const c2 = b64u(crypto.randomBytes(32));
   handles = await driver.getAllWindowHandles();
   await clickAt(300, 300);
   await driver.executeScript(`window.__res = null; window.__auth(arguments[0]).then((r) => (window.__res = r));`, { rpId: "localhost", challenge: c2, allow: [v.registrationInfo.credential.id] });
-  await finishPrompt(By.xpath('//button[contains(., "ff@example.com")]'), handles);
+  await finishPrompt(button("Sign in"), handles);
   await driver.wait(async () => driver.executeScript("return window.__res !== null"), 15000);
   const auth = await driver.executeScript("return window.__res");
   assert.equal(auth.error, undefined);
-  const a = await verifyAuthenticationResponse({ response: auth, expectedChallenge: c2, expectedOrigin: `http://localhost:${PORT}`, expectedRPID: "localhost", credential: { id: v.registrationInfo.credential.id, publicKey: v.registrationInfo.credential.publicKey, counter: 0 }, requireUserVerification: false });
+  const a = await verifyAuthenticationResponse({ response: auth, expectedChallenge: c2, expectedOrigin: `http://localhost:${PORT}`, expectedRPID: "localhost", credential: { id: v.registrationInfo.credential.id, publicKey: v.registrationInfo.credential.publicKey, counter: 0 }, requireUserVerification: true });
   assert.ok(a.verified);
+  assert.equal(a.authenticationInfo.userVerified, true);
+
+  // Five wrong PINs lock the vault, and only the master password opens it again.
+  const c3 = b64u(crypto.randomBytes(32));
+  handles = await driver.getAllWindowHandles();
+  await clickAt(300, 300);
+  await driver.executeScript(`window.__res = null; window.__auth(arguments[0]).then((r) => (window.__res = r));`, { rpId: "localhost", challenge: c3, allow: [v.registrationInfo.credential.id] });
+  await driver.wait(async () => (await driver.getAllWindowHandles()).length > handles.length, 15000);
+  const lockWin = (await driver.getAllWindowHandles()).find((x) => !handles.includes(x));
+  await driver.switchTo().window(lockWin);
+  for (const said of ["4 tries left", "3 tries left", "2 tries left", "One more wrong"]) await wrongPasskeyPin(said);
+  const box = await driver.findElement(By.css("#pin"));
+  await box.sendKeys("907153\n");
+  await see(driver, byText("Five wrong passkey PINs in a row, so your vault is locked."));
+  // Typed into the page, a PIN goes nowhere near this window.
+  await driver.switchTo().window(pg);
+  assert.equal(await driver.executeScript("return window.__res"), null, "nothing signed");
+  assert.equal(await signedIn(), false, "the vault locked");
+  await driver.switchTo().window(lockWin);
+  await fill(driver, By.css('input[aria-label="Master password"]'), MASTER);
+  await driver.sleep(700);
+  await click(driver, button("Unlock"));
+  await driver.wait(until.elementLocated(By.css("#pin")), 60000);
+  await typePasskeyPin();
+  await click(driver, button("Sign in"));
+  await driver.switchTo().window(pg);
+  await driver.wait(async () => driver.executeScript("return window.__res !== null"), 15000);
+  assert.equal((await driver.executeScript("return window.__res")).error, undefined);
   await closeTabs();
 });
 
@@ -425,7 +473,8 @@ test("Firefox: a quiet passkey request is answered from the toolbar, and verifie
   await driver.wait(async () => (await driver.getAllWindowHandles()).length > before.length, 15000);
   const prompt = (await driver.getAllWindowHandles()).find((x) => !before.includes(x));
   await driver.switchTo().window(prompt);
-  await click(driver, By.xpath('//button[contains(., "fox@example.com")]'));
+  await typePasskeyPin();
+  await click(driver, button("Sign in"));
   await driver.sleep(400);
   await driver.switchTo().window(pg);
   await driver.wait(async () => driver.executeScript("return window.__result !== null"), 15000);
@@ -454,7 +503,9 @@ test("Firefox: a page asking for a passkey with no click gets our window when it
   const prompt = (await driver.getAllWindowHandles()).find((x) => !withPage.includes(x));
   await driver.switchTo().window(prompt);
   await see(driver, button("Use another device or security key"));
-  await click(driver, By.xpath('//button[contains(., "fox@example.com")]'));
+  // No click needed first: the PIN box is focused, and Enter signs in.
+  assert.equal(await driver.executeScript("return document.activeElement && document.activeElement.id"), "pin");
+  await driver.findElement(By.css("#pin")).sendKeys(PASSKEY_PIN + "\n");
   await driver.sleep(400);
   await driver.switchTo().window(pg);
   await driver.wait(async () => driver.executeScript("return window.__result !== null"), 15000);

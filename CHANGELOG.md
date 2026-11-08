@@ -21,7 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Passwords: a passkey PIN, asked every time you sign in with a passkey or make one, in the browser extension and on Android. You choose it the first time, it syncs to all your devices, and it can be changed in Settings. Five wrong in a row lock the vault until the master password.
+
 ### Changed
+- Passwords: a site is told you were verified only after the passkey PIN, not just for an unlocked vault and a click, and Android asks for the PIN instead of a fingerprint before using a passkey.
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed

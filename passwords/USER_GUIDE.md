@@ -49,7 +49,9 @@ Add a code to a login by scanning its QR, pasting its setup key, or from a pictu
 
 ## Passkeys
 
-The extension and the Android app can make and use passkeys for you, and they sync. You can always choose your browser's or a hardware key instead. In the browser, an unlocked vault and a click are all it takes, unless you've marked the item to ask for your master password.
+The extension and the Android app can make and use passkeys for you, and they sync. You can always choose your browser's or a hardware key instead.
+
+Each time you sign in with a passkey or make one, Promptly asks for your **passkey PIN**, in its own window in the browser or its own sheet on Android. The box is ready to type in, and Enter (or Done) signs in. The first time, it asks you to choose one and type it twice: 4 to 12 digits, and not an easy one like 1234 or 1111. It's the same PIN on all your devices. You can change it in Settings, under Passkeys on the web and in the extension, and Passkey PIN on Android, with your master password or the PIN you have now. Five wrong PINs in a row lock your vault, and then you need your master password to unlock it. An item you've marked to ask for your master password still asks, after the PIN.
 
 A site decides when it asks for a passkey, and nothing can make it ask. When a page asks and the passkey's in your unlocked vault, our window opens, with your browser's and Windows Hello's option one click away. If the site asks quietly, or the vault's locked, the toolbar button shows **PK** once unlocked, and "Sign in with a passkey" is at the top of the panel, and in the menu on the page in Chromium browsers. If you have a passkey for a site that hasn't asked yet, the panel says so. Press the site's own button, such as Continue, "Use a passkey" or "Try another way", and our window opens.
 

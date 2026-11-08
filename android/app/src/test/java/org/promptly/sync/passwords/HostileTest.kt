@@ -34,6 +34,8 @@ import org.promptly.sync.passwords.core.KdfParams
 import org.promptly.sync.passwords.core.KeyChangedError
 import org.promptly.sync.passwords.core.MemoryKeeper
 import org.promptly.sync.passwords.core.MemoryStore
+import org.promptly.sync.passwords.core.PasskeyPin
+import org.promptly.sync.passwords.core.PinCheck
 import org.promptly.sync.passwords.core.Primitives
 import org.promptly.sync.passwords.core.TrustBook
 import org.promptly.sync.passwords.core.VaultApi
@@ -441,6 +443,38 @@ class HostileTest {
         val before = s.authKeys.size
         assertThrows(IllegalStateException::class.java) { c.unlock(MASTER) }
         assertEquals(before, s.authKeys.size)
+    }
+
+    /** D-PIN-1: five wrong passkey PINs leave only the master password, against the real client and
+     *  a real (if hostile) server, and the PIN itself syncs as a system item the server can't read. */
+    @Test fun fiveWrongPasskeyPinsLeaveOnlyTheMasterPassword() {
+        val w = fresh()
+        if (!w.c.unlocked) w.c.unlock(MASTER)
+        val secret = w.c.currentUnlockSecret()
+        PasskeyPin.save(w.c, PasskeyPin.make("482913"))
+        val v = PasskeyPin.of(w.c)!!
+        // What the server holds is an encrypted item like any other.
+        assertTrue(w.s.items.values.any { it.blob != null })
+        assertTrue(w.s.items.values.none { (it.blob ?: "").contains("482913") })
+        for (left in listOf(4, 3, 2, 1)) assertEquals(PinCheck.Wrong(left), PasskeyPin.check(w.store, v, "907153"))
+        assertEquals(PinCheck.Wrong(0), PasskeyPin.check(w.store, v, "907153"))
+        assertTrue(PasskeyPin.lockedOut(w.store))
+        w.c.lock()
+        // A biometric hands back the same keys: refused, before anything goes to the server.
+        val e = assertThrows(IllegalStateException::class.java) { w.c.unlockWithSecret(secret) }
+        assertEquals(PasskeyPin.LOCKED_TEXT, e.message)
+        assertFalse(w.c.unlocked)
+        // The master password opens it, and starts the count again.
+        w.c.unlock(MASTER)
+        assertEquals(0, PasskeyPin.tries(w.store))
+        assertEquals(PinCheck.Ok, PasskeyPin.check(w.store, PasskeyPin.of(w.c)!!, "482913"))
+        w.c.lock()
+        w.c.unlockWithSecret(secret)
+        assertTrue(w.c.unlocked)
+        // Another phone on the same account gets the same PIN through sync.
+        val phone = VaultClient(w.s.api, MemoryStore(), MemoryKeeper())
+        phone.unlock(MASTER, w.secretKey)
+        assertEquals(PinCheck.Ok, PasskeyPin.check(phone.store, PasskeyPin.of(phone)!!, "482913"))
     }
 
     @Test fun whatAKeySessionStoresIsWhatRealOpened() {

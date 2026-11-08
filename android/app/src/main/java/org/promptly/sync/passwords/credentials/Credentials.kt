@@ -1,7 +1,8 @@
 // Credential Manager (Android 14+), the two-phase flow in the official docs. The service's
 // first phase answers fast with entries, from what's in memory. Picking one opens
-// CredentialActivity, which validates the request, checks who's asking, gets a biometric
-// or the master password, and only then signs or hands a password over.
+// CredentialActivity, which validates the request, checks who's asking, asks for the passkey PIN
+// (a passkey) or a biometric or the master password (a password marked to ask), and only then
+// signs or hands a password over.
 package org.promptly.sync.passwords.credentials
 
 import android.app.PendingIntent
@@ -28,6 +29,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -83,6 +85,7 @@ import org.promptly.sync.passwords.autofill.appOrigin
 import org.promptly.sync.passwords.core.Item
 import org.promptly.sync.passwords.core.LoginUrl
 import org.promptly.sync.passwords.core.Match
+import org.promptly.sync.passwords.core.PasskeyPin
 import org.promptly.sync.passwords.core.Passkeys
 import org.promptly.sync.passwords.core.VaultClient
 import org.promptly.sync.passwords.core.b64u
@@ -91,6 +94,7 @@ import org.promptly.sync.passwords.core.newBody
 import org.promptly.sync.passwords.ui.ConfirmIdentityPane
 import org.promptly.sync.passwords.ui.ErrorCard
 import org.promptly.sync.passwords.ui.LookalikeWarning
+import org.promptly.sync.passwords.ui.PasskeyPinPane
 import org.promptly.sync.passwords.ui.PwTheme
 import org.promptly.sync.passwords.ui.UnlockPane
 import org.promptly.sync.passwords.ui.errorText
@@ -264,6 +268,8 @@ class CredentialActivity : FragmentActivity() {
         data object Unlock : Step()
         data class Confirm(val title: String, val detail: String, val button: String = "Save", val go: () -> Unit) : Step()
         data class Biometric(val title: String, val detail: String, val go: () -> Unit) : Step()
+        /** The passkey PIN. `choosing`: none's set yet, so it's chosen here. */
+        data class Pin(val title: String, val detail: String, val choosing: Boolean, val go: () -> Unit) : Step()
         data class Lookalike(val page: String, val looksLike: String, val go: () -> Unit) : Step()
         data class Fail(val text: String) : Step()
     }
@@ -406,22 +412,15 @@ class CredentialActivity : FragmentActivity() {
                 lockedOut()
                 return@LaunchedEffect
             }
+            val choosing = withContext(Dispatchers.IO) { pinToChoose(client) }
             r.onSuccess { (held, seen) ->
                 val (t, origin, hash) = held
                 val (req, item, chosen) = t
-                val sign = Step.Biometric("Sign in to ${req.rpId}", "As ${chosen.passkey.userName}") {
-                    lifecycleScopeLaunch {
-                        val json = withContext(Dispatchers.IO) {
-                            val a = Passkeys.getAssertion(chosen.passkey, req.challenge, origin, true, hash)
-                            runCatching {
-                                val passkeys = item.body.passkeys.map { if (it.credentialId == chosen.passkey.credentialId) it.copy(lastUsedAt = isoNow()) else it }
-                                client.update(item.id, item.body.withPasskeys(passkeys))
-                                client.sync()
-                            }
-                            Passkeys.assertionJson(a)
-                        }
-                        finishGet(json = PublicKeyCredential(json))
-                    }
+                // The passkey PIN, every time (D-PIN-1). UV is reported only after it. An item marked
+                // to ask for more still asks, after the PIN.
+                val sign = Step.Pin("Sign in to ${req.rpId}", "As ${chosen.passkey.userName}", choosing) {
+                    if (item.body.reprompt) step = Step.Biometric("Confirm it's you", item.body.title) { signPasskey(client, item, chosen, req.challenge, origin, hash) }
+                    else signPasskey(client, item, chosen, req.challenge, origin, hash)
                 }
                 val looks = seen.second
                 step = if (looks != null) Step.Lookalike(seen.first ?: "", looks) { step = sign } else sign
@@ -431,6 +430,31 @@ class CredentialActivity : FragmentActivity() {
             }
         }
         Render(step) { failGet(GetCredentialCancellationException()) }
+    }
+
+    /** Signs, only ever after the passkey PIN. */
+    private fun signPasskey(client: VaultClient, item: Item, chosen: Passkeys.Usable, challenge: String, origin: String, hash: ByteArray?) {
+        lifecycleScopeLaunch {
+            val json = withContext(Dispatchers.IO) {
+                // uv: the passkey PIN was just typed.
+                val a = Passkeys.getAssertion(chosen.passkey, challenge, origin, true, hash)
+                runCatching {
+                    val passkeys = item.body.passkeys.map { if (it.credentialId == chosen.passkey.credentialId) it.copy(lastUsedAt = isoNow()) else it }
+                    client.update(item.id, item.body.withPasskeys(passkeys))
+                    client.sync()
+                }
+                Passkeys.assertionJson(a)
+            }
+            finishGet(json = PublicKeyCredential(json))
+        }
+    }
+
+    /** Whether the passkey PIN is still to be chosen. Another device may have set one that hasn't
+     *  come down yet, so look again before asking for a new one. */
+    private fun pinToChoose(client: VaultClient): Boolean {
+        if (PasskeyPin.of(client) != null) return false
+        runCatching { client.sync() }
+        return PasskeyPin.of(client) == null
     }
 
     @Composable
@@ -496,13 +520,15 @@ class CredentialActivity : FragmentActivity() {
                         lockedOut()
                         return@LaunchedEffect
                     }
+                    val choosing = withContext(Dispatchers.IO) { pinToChoose(client) }
                     prepared.onSuccess { (parsed, origin) ->
                         val existing = Passkeys.allPasskeys(client.allItems()).filter { it.passkey.rpId == parsed.rpId }.map { Passkeys.siteCredentialId(it.passkey.credentialId) }
                         if (parsed.excludeCredentials.any { it in existing }) {
                             failCreate(CreatePublicKeyCredentialDomException(InvalidStateError(), "A passkey for this account already exists here."))
                             return@onSuccess
                         }
-                        step = Step.Biometric("Create a passkey for ${parsed.rpId}", "As ${parsed.userName}") {
+                        // The passkey PIN, every time (D-PIN-1). UV is reported only after it.
+                        step = Step.Pin("Create a passkey for ${parsed.rpId}", "As ${parsed.userName}", choosing) {
                             lifecycleScopeLaunch {
                                 // It goes in the vault off this thread, and a lock can come on the way.
                                 val r = withContext(Dispatchers.IO) {
@@ -573,6 +599,7 @@ class CredentialActivity : FragmentActivity() {
                 TextButton(onClick = cancel, Modifier.testTag("credential-cancel")) { Text("Cancel") }
             }
             is Step.Biometric -> ConfirmIdentityPane(this, step.title, step.detail, true, whileOpen(step.go), cancel)
+            is Step.Pin -> key(step) { PasskeyPinPane(step.title, step.detail, step.choosing, whileOpen(step.go), cancel) }
             is Step.Lookalike -> LookalikeWarning(step.page, step.looksLike, emptyList(), "Fill anyway", cancel, whileOpen(step.go))
         }
     }

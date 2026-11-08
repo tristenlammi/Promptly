@@ -1,7 +1,9 @@
 // Biometric unlock (plan 3.5). The derived unlock and auth keys are sealed under a
 // Keystore key that needs a strong biometric for every use and dies when a new biometric
-// is enrolled. The master password never reaches the Keystore. Reprompt and passkey
-// signing use `confirm`, which has to open what's sealed under that same key.
+// is enrolled. The master password never reaches the Keystore. Reprompt uses `confirm`,
+// which has to open what's sealed under that same key. Passkeys ask for the passkey PIN
+// instead (D-PIN-1), and after five wrong PINs a biometric won't unlock until the master
+// password has.
 package org.promptly.sync.passwords
 
 import android.content.Context
@@ -121,7 +123,7 @@ object Biometrics {
         }
     }
 
-    /** For "reprompt" items and before signing a passkey. Not just a callback: the answer has
+    /** For "reprompt" items. Not just a callback: the answer has
      *  to open what's sealed under the key, which dies when a new fingerprint's enrolled. */
     fun confirm(activity: FragmentActivity, title: String, subtitle: String?, onDone: (Result<Unit>) -> Unit) {
         open(activity, title, subtitle) { r ->
