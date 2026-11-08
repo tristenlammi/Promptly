@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useEditorStore } from "@/store/editorStore";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Check,
@@ -43,6 +43,9 @@ import { MemoryConversationButton } from "@/components/chat/MemoryConversationBu
 import { ResearchDialog } from "@/components/chat/ResearchDialog";
 import { RefineResearchDialog } from "@/components/chat/RefineResearchDialog";
 import { VoiceModeOverlay } from "@/components/chat/VoiceModeOverlay";
+import { TalkPanel } from "@/talk/TalkPanel";
+import { resumeRecord, talk, useTalkStore } from "@/talk/session";
+import { apiClient } from "@/api/client";
 import { ResearchProgressCard } from "@/components/chat/ResearchProgressCard";
 import { WorkspaceProposalsPanel } from "@/components/chat/WorkspaceProposalsPanel";
 import { CodeArtifactPanel } from "@/components/codeArtifacts/CodeArtifactPanel";
@@ -673,6 +676,12 @@ export function ChatPage({
   useEffect(() => {
     if (!id || !conversation) return;
     if (reattachedRef.current === id) return;
+    // Talk (WP-T4) follows its own replies over its socket; tailing the
+    // same stream here too would show it twice and give it a Stop button.
+    if (talk.live || resumeRecord()?.conversationId === id) {
+      reattachedRef.current = id;
+      return;
+    }
     // "Streaming locally" only counts when it's THIS conversation's stream
     // (or a fresh not-yet-tagged send, which can only belong to the chat on
     // screen). A stream running for a *different* chat must not suppress the
@@ -1215,6 +1224,163 @@ export function ChatPage({
     pendingTemporaryMode ??
     ((conversation?.temporary_mode as TemporaryMode | null) ?? null);
 
+  // ---------------------------------------------------------- Talk (WP-T4)
+  // Live spoken conversation over /api/talk/ws. The session lives outside
+  // React (``talk/session.ts``); this page opens it, docks its screen beside
+  // the chat, refreshes the chat as turns land, and switches to the Phase 2
+  // voice mode when Talk can't run (or the connection is weak).
+  const talkPhase = useTalkStore((s) => s.phase);
+  const talkConversation = useTalkStore((s) => s.conversationId);
+  const talkChanged = useTalkStore((s) => s.changed);
+  const talkFallback = useTalkStore((s) => s.fallback);
+  const talkOpen = talkPhase !== "off";
+  // The Phase 2 overlay as Talk's fallback: why it was opened, and
+  // whether the connection has recovered enough to go back to hands-free.
+  const [fallbackWeak, setFallbackWeak] = useState(false);
+  const [connectionBack, setConnectionBack] = useState(false);
+  // Talk switched off on the server or not for this account (Admin → Talk):
+  // no Talk orb, and every way in opens the tap-to-talk voice mode instead.
+  // An older server without Talk (404) keeps the orb; starting says so.
+  const talkConfig = useQuery({
+    queryKey: ["talk", "config"],
+    queryFn: async () => (await apiClient.get<{ enabled: boolean }>("/talk/config")).data,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const talkAvailable = talkConfig.data?.enabled !== false;
+  // Turned off since the page loaded: the next look hides the orb.
+  const talkProblem = useTalkStore((s) => s.problem?.code ?? null);
+  useEffect(() => {
+    if (talkProblem === "talk_off") void queryClient.invalidateQueries({ queryKey: ["talk", "config"] });
+  }, [talkProblem, queryClient]);
+
+  const openTalk = useCallback(() => {
+    if (talk.live) return;
+    if (!talkAvailable) {
+      setFallbackWeak(false);
+      setVoiceModeOpen(true);
+      return;
+    }
+    if (embedded && !id) {
+      // A brand-new chat inside a workspace pane has nowhere to put a new
+      // conversation yet: the simple voice mode sends through the composer.
+      setVoiceModeOpen(true);
+      return;
+    }
+    setFallbackWeak(false);
+    void talk.start({
+      conversationId: id ?? null,
+      createConversation: id
+        ? undefined
+        : async (temporary) => {
+            if (!selectedModel) throw new Error("no model");
+            const conv = await chatApi.create({
+              provider_id: selectedModel.provider_id,
+              model_id: selectedModel.model_id,
+              web_search_mode: webSearchMode,
+              temporary_mode: pendingTemporaryMode ?? (temporary ? "one_hour" : null),
+              folder_id: pendingFolderId,
+            });
+            const convId = String(conv.id);
+            upsertConversation(conv);
+            setActive(convId);
+            navigate(`/chat/${convId}`, { replace: true });
+            return convId;
+          },
+    });
+  }, [
+    talkAvailable,
+    embedded,
+    id,
+    selectedModel,
+    webSearchMode,
+    pendingTemporaryMode,
+    pendingFolderId,
+    upsertConversation,
+    setActive,
+    navigate,
+  ]);
+
+  // Talk to Promptly from elsewhere (Today, Ctrl+K, the shortcut) lands on
+  // /chat?talk=1: start it once, then drop the flag from the address.
+  const talkParam = new URLSearchParams(location.search).get("talk") === "1";
+  const talkConfigKnown = !talkConfig.isPending;
+  useEffect(() => {
+    // Wait for /talk/config, so Talk being off goes straight to voice mode.
+    if (!talkParam || !talkConfigKnown) return;
+    const params = new URLSearchParams(location.search);
+    params.delete("talk");
+    const rest = params.toString();
+    navigate(`${location.pathname}${rest ? `?${rest}` : ""}`, { replace: true });
+    openTalk();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [talkParam, talkConfigKnown]);
+
+  // A reload in the middle of a conversation picks it up again (the server
+  // keeps it for 30 s). Audio waits for a tap if the browser wants one.
+  useEffect(() => {
+    if (!id || talk.live) return;
+    const r = resumeRecord();
+    if (r && r.conversationId === id) {
+      void talk.start({ conversationId: id, resumeSessionId: r.sessionId });
+    }
+  }, [id]);
+
+  // New words and replies are saved by the server: show them in the chat.
+  useEffect(() => {
+    if (!talkChanged || !id) return;
+    const t = window.setTimeout(() => {
+      void queryClient.invalidateQueries({ queryKey: ["conversation", id] });
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [talkChanged, id, queryClient]);
+
+  // Leaving the chat ends the conversation (another chat, or another page).
+  useEffect(() => {
+    if (talkOpen && talkConversation && id && id !== talkConversation) talk.close();
+  }, [id, talkOpen, talkConversation]);
+  useEffect(() => () => talk.close(), []);
+
+  const switchToFallback = useCallback((weak: boolean) => {
+    talk.close();
+    setFallbackWeak(weak);
+    setConnectionBack(false);
+    setVoiceModeOpen(true);
+  }, []);
+  useEffect(() => {
+    if (talkFallback === "weak") switchToFallback(true);
+  }, [talkFallback, switchToFallback]);
+
+  // On the fallback because the connection was weak: check it now and
+  // then, and offer hands-free again once it's quick three times running.
+  useEffect(() => {
+    if (!voiceModeOpen || !fallbackWeak) return;
+    let quick = 0;
+    let stopped = false;
+    const check = async () => {
+      const t0 = performance.now();
+      try {
+        await apiClient.get("/talk/config", { timeout: 5000 });
+        quick = performance.now() - t0 < 400 ? quick + 1 : 0;
+      } catch {
+        quick = 0;
+      }
+      if (!stopped && quick >= 3) setConnectionBack(true);
+    };
+    const timer = window.setInterval(() => void check(), 8000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [voiceModeOpen, fallbackWeak]);
+
+  const backToLive = useCallback(() => {
+    setVoiceModeOpen(false);
+    setFallbackWeak(false);
+    setConnectionBack(false);
+    openTalk();
+  }, [openTalk]);
+
   // Footer line under the input bar reflects which web-search mode is
   // currently active so the user understands what'll happen on send
   // without having to open the picker. "Off" falls through to the
@@ -1455,7 +1621,7 @@ export function ChatPage({
           {isOwner ? (
             <InputBar
               streaming={viewIsStreaming}
-              disabled={!selectedModel}
+              disabled={!selectedModel || talkOpen}
               onSend={handleSend}
               onCancel={() => void stop()}
               webSearchMode={webSearchMode}
@@ -1469,14 +1635,17 @@ export function ChatPage({
               toolsEnabled={toolsEnabled}
               onToolsChange={handleToolsChange}
               onResearch={() => setResearchDialogOpen(true)}
-              onVoiceMode={() => setVoiceModeOpen(true)}
+              onVoiceMode={openTalk}
+              talkAvailable={talkAvailable}
               onSubchat={id && hasMessages ? openSubchat : undefined}
               footer={footerText}
               autoFocus
               currentConversationId={id ?? null}
               workspaceId={conversation?.workspace_id ?? null}
               placeholder={
-                selectedModel
+                talkOpen
+                  ? "Talking. Use Type instead in the Talk panel."
+                  : selectedModel
                   ? // The @-hint wraps the single-row mobile composer onto
                     // two lines — keep it desktop-only.
                     isMobile
@@ -1507,6 +1676,15 @@ export function ChatPage({
             closed, so the chat column owns the full width by default.
             When open it self-mounts a draggable resizer + the panel
             aside as siblings of the chat column. */}
+        {talkOpen && (
+          <TalkPanel
+            docked={!isMobile}
+            title={conversation?.title ?? null}
+            temporary={Boolean(effectiveTemporaryMode)}
+            onClose={() => talk.close()}
+            onFallback={() => switchToFallback(false)}
+          />
+        )}
         <CodeArtifactPanel />
       </div>
       {/* Phase A3: side-panel Markdown editor for AI-generated PDFs.
@@ -1538,7 +1716,23 @@ export function ChatPage({
           only while open so all teardown lives in its unmount cleanup. */}
       {voiceModeOpen && (
         <VoiceModeOverlay
-          onClose={() => setVoiceModeOpen(false)}
+          onClose={() => {
+            setVoiceModeOpen(false);
+            setFallbackWeak(false);
+            setConnectionBack(false);
+          }}
+          notice={
+            fallbackWeak
+              ? connectionBack
+                ? "Your connection is back."
+                : "Weak connection: tap to talk."
+              : null
+          }
+          action={connectionBack ? { label: "Back to hands-free", onClick: backToLive } : null}
+          onPhaseChange={(phase, prev) => {
+            // Back to hands-free at a calm moment: a fresh listen, nothing said.
+            if (connectionBack && phase === "listening" && (prev === "speaking" || prev === "idle")) backToLive();
+          }}
           onSend={(text) => void handleSend(text, [], { voice: true })}
           // Barge-in has to stop the reply for real, not just stop reading
           // it — the user is interrupting because they don't want it.

@@ -3700,6 +3700,34 @@ async def _run_native_tool(
         return ("unexpected", type(e).__name__, _ms())
 
 
+async def _talk_categories(
+    db: AsyncSession, user: User, memory_mode: str, talk: dict[str, Any]
+) -> set[str]:
+    """The tool categories a Talk turn draws from (WP-T3). The same "does
+    this person have it" checks as a typed turn; the voice allowlist in
+    ``app/talk/tools.py`` then keeps only the quick tools."""
+    from app.chat.tools.items import has_items
+    from app.chat.tools.mail import has_mail
+    from app.chat.tools.photos import has_library
+    from app.files.drive_index import chat_mode_for
+    from app.talk.tools import device_tools
+
+    cats = {"calendar", "apps", "search"}
+    if await has_items(db, user.id):
+        cats.add("items")
+    if await has_mail(db, user.id):
+        cats |= {"mail", "phone"}
+    if await has_library(db, user.id):
+        cats.add("photos")
+    if memory_mode != "off":
+        cats.add("memory")
+    if chat_mode_for(user) != "off":
+        cats.add("drive")
+    if device_tools(talk.get("caps")):
+        cats.add("device")
+    return cats
+
+
 async def _dispatch_tools(
     *,
     db: AsyncSession,
@@ -3721,6 +3749,10 @@ async def _dispatch_tools(
     # main loop always passes it, so a tool that wasn't offered — named by
     # a confused model or by injected web/file content — never runs.
     allowed_tool_names: set[str] | None = None,
+    # Talk (WP-T3): on a spoken turn, the gate in front of every tool that
+    # changes something (``app/talk/tools.py``). It holds the call for a yes
+    # (``held``), or refuses it, before anything runs.
+    voice_gate=None,  # noqa: ANN001 - app.talk.tools.VoiceGate | None
 ) -> AsyncGenerator[
     tuple[str, dict[str, Any] | None], None
 ]:
@@ -3877,6 +3909,18 @@ async def _dispatch_tools(
                 (call_id, name, "fail", (parse_error, "bad_arguments", None))
             )
             continue
+
+        # A spoken turn's change waits for a yes (or is refused out loud).
+        if voice_gate is not None:
+            verdict = await voice_gate.check(name, args, ctx.turn)
+            if verdict is not None:
+                if verdict.kind == "hold":
+                    plan.append((call_id, name, "held", verdict))
+                else:
+                    plan.append(
+                        (call_id, name, "fail", (verdict.say, f"voice_{verdict.kind}", None))
+                    )
+                continue
 
         # Cross-hop dedup: if the model already ran this exact tool with
         # these exact args earlier in the turn, replay the cached content
@@ -4042,6 +4086,32 @@ async def _dispatch_tools(
                         "role": "tool",
                         "tool_call_id": call_id,
                         "content": content,
+                    },
+                )
+                continue
+
+            if kind == "held":
+                # Talk (WP-T3): a change asked for out loud. Not run: the
+                # reply ends with the read-back, and a yes (spoken, or the
+                # card) runs it through chat/approvals.py.
+                from app.talk.tools import held_note
+
+                verdict = payload
+                event = {
+                    "event": "tool_finished",
+                    "id": call_id,
+                    "name": name,
+                    "ok": True,
+                    "elapsed_ms": 0,
+                    "meta": verdict.meta,
+                }
+                _record_tool_event(event, elapsed_ms=0, meta=verdict.meta)
+                yield (
+                    sse_yield(event),
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": held_note(verdict.say),
                     },
                 )
                 continue
@@ -5143,8 +5213,23 @@ async def _stream_generator(
         # prompt already steers voice toward short, direct answers, so tools
         # rarely help here anyway. (Users who want to look something up can
         # do it as an explicit text turn.)
+        #
+        # Talk (WP-T3) brings tools back for its turns, narrowly: the voice
+        # allowlist in ``app/talk/tools.py`` (quick look-ups, small changes
+        # that wait for a spoken yes, the phone's own actions). The older
+        # voice overlay (no ``talk`` in the context) still gets none: it
+        # can't take a spoken yes.
+        talk_turn: dict[str, Any] | None = (
+            ctx.get("talk") if voice_turn and isinstance(ctx.get("talk"), dict) else None
+        )
+        voice_gate = None
         if voice_turn:
-            pass  # no tool/search categories on voice
+            if talk_turn is not None:
+                enabled_categories |= await _talk_categories(db, user, memory_mode, talk_turn)
+                turn_state["talk"] = {
+                    "device": talk_turn.get("device") or "web",
+                    "driving": bool(talk_turn.get("driving")),
+                }
         else:
             if ctx.get("tools_enabled"):
                 enabled_categories.add("artefact")
@@ -5240,6 +5325,15 @@ async def _stream_generator(
         tools_payload: list[dict[str, Any]] | None = (
             list_openai_tools(enabled_categories) if enabled_categories else None
         )
+        if talk_turn is not None and tools_payload:
+            from app.talk.tools import VoiceGate, voice_tool_names
+
+            _voice_names = voice_tool_names(talk_turn.get("caps"))
+            tools_payload = [
+                t for t in tools_payload if t.get("function", {}).get("name") in _voice_names
+            ] or None
+            if tools_payload:
+                voice_gate = VoiceGate(user=user, talk=talk_turn)
         if tools_payload and excluded_tools:
             tools_payload = [
                 t
@@ -5439,9 +5533,16 @@ async def _stream_generator(
             if (
                 data.get("event") in ("tool_started", "tool_finished")
                 and data.get("name") in SILENT_TOOL_NAMES
+                # A silent tool held for a yes (Talk) still shows its card.
+                and not (data.get("meta") or {}).get("approval")
             ):
                 return ""
             return _sse(data)
+
+        def _log_voice(rec: dict) -> None:
+            if voice_gate is not None:
+                voice_gate.saw(rec)
+            _log_visible(rec)
 
         def _log_visible(rec: dict) -> None:
             meta = rec.get("meta") or {}
@@ -5452,7 +5553,7 @@ async def _stream_generator(
             tool_memory_proposals.extend(meta.get("memory_proposals") or [])
             if rec.get("id") and rec.get("name"):
                 call_names[rec["id"]] = rec["name"]
-            if rec.get("name") not in SILENT_TOOL_NAMES:
+            if rec.get("name") not in SILENT_TOOL_NAMES or meta.get("approval"):
                 tool_call_log.append(rec)
         prompt_tokens: int | None = None
         completion_tokens: int | None = None
@@ -5666,7 +5767,15 @@ async def _stream_generator(
         # the tool". Sidesteps the common refusal pattern (Gemini in
         # particular) where the model insists it can't produce binary
         # artefacts even with a valid tools[] payload in scope.
-        if enabled_categories and tools_payload:
+        if talk_turn is not None and tools_payload:
+            from app.talk.tools import prompt as _talk_tools_prompt
+
+            tools_prompt_text = _talk_tools_prompt(
+                {t.get("function", {}).get("name") for t in tools_payload},
+                device=str(talk_turn.get("device") or "web"),
+                driving=bool(talk_turn.get("driving")),
+            )
+        elif enabled_categories and tools_payload:
             tools_prompt_text = (
                 build_tools_system_prompt(
                     enabled_categories,
@@ -5937,6 +6046,22 @@ async def _stream_generator(
         if voice_turn:
             system_prompt = merge_system_prompt(
                 VOICE_SYSTEM_PROMPT, system_prompt or ""
+            )
+        # Talk (WP-T3): they were asked to confirm a change and said
+        # something other than yes ("no, Friday"). It wasn't done; their
+        # answer is the latest message.
+        _talk_pending = (talk_turn or {}).get("pending")
+        if isinstance(_talk_pending, dict) and _talk_pending.get("question"):
+            turn_context.append(
+                "You had just asked them: \""
+                + str(_talk_pending.get("question"))[:300]
+                + "\" (that's "
+                + str(_talk_pending.get("tool") or "a change")[:40]
+                + " with "
+                + json.dumps(_talk_pending.get("arguments") or {}, default=str)[:600]
+                + "). Their answer is their latest message, and it wasn't a yes, so nothing was done. "
+                "If they're changing what they asked for, call the tool again with the change, and "
+                "they'll be asked again. If they don't want it, say you'll leave it, in a few words."
             )
 
         # Standing layers first (cacheable), this turn's context last.
@@ -6388,7 +6513,7 @@ async def _stream_generator(
                     on_attachment=assistant_attachment_snaps.append,
                     on_sources=sources_accumulator.extend,
                     on_cost=_record_tool_cost,
-                    on_tool_event=_log_visible,
+                    on_tool_event=_log_visible if voice_gate is None else _log_voice,
                     invocation_counts=tool_invocation_counts,
                     per_tool_caps=per_tool_caps,
                     dedup_cache=tool_dedup_cache,
@@ -6397,6 +6522,7 @@ async def _stream_generator(
                         t.get("function", {}).get("name")
                         for t in (tools_payload or [])
                     },
+                    voice_gate=voice_gate,
                 ):
                     # Always forward the SSE event. ``tool_history_msg``
                     # is None for "started" pre-events (which have no
@@ -6412,7 +6538,32 @@ async def _stream_generator(
                                 **tool_history_msg,
                                 "content": _frame_untrusted(tool_history_msg["content"], _name),
                             }
+                        if talk_turn is not None and isinstance(tool_history_msg.get("content"), str):
+                            # How to say it out loud (the headline; the
+                            # details are on the screen), outside the frame.
+                            from app.talk.tools import result_note
+
+                            _note = result_note(
+                                _name,
+                                tool_history_msg["content"],
+                                device=str(talk_turn.get("device") or "web"),
+                            )
+                            if _note:
+                                tool_history_msg = {
+                                    **tool_history_msg,
+                                    "content": f"{tool_history_msg['content']}\n\n[Saying it: {_note}]",
+                                }
                         running_history.append(tool_history_msg)
+                # Talk (WP-T3): a change held for a yes, refused, or done on
+                # the phone ends the turn here, with the read-back (or what
+                # happened) as the rest of the reply: no second model call.
+                if voice_gate is not None and voice_gate.ends:
+                    _line = voice_gate.line()
+                    if _line:
+                        _sep = " " if "".join(collected_text).strip() else ""
+                        yield _sse({"delta": _sep + _line})
+                        collected_text.append(_sep + _line)
+                    break
             # NOTE: no ``for...else`` clause here on purpose. The
             # forced-finish hop's unconditional ``break`` above
             # guarantees we always exit via ``break``, so the
@@ -7112,6 +7263,29 @@ async def _bridge_generator_to_session(
     """
     async for chunk in _stream_generator(stream_id, user, request, session=session):
         session.push(chunk)
+
+
+async def start_spoken_reply(
+    stream_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    user: User,
+    connection: Any,
+) -> StreamSession:
+    """Talk (``app/talk``) starts a reply here, the same run a typed send
+    starts, and follows its session's events instead of an SSE response.
+    ``connection`` stands in for the request (audit rows read its client
+    address and headers). The stream context must already be enqueued."""
+    return await get_or_create_session(
+        stream_id=stream_id,
+        user_id=user.id,
+        conversation_id=conversation_id,
+        runner=lambda s: _bridge_generator_to_session(stream_id, user, connection, s),
+    )
+
+
+async def enforce_send_quotas(connection: Any, user: User, db: AsyncSession) -> None:
+    """The send-rate and budget checks a typed message gets, for Talk."""
+    await _enforce_send_quotas(connection, user, db)
 
 
 async def _subscribe_session_to_response(

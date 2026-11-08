@@ -317,6 +317,8 @@ async def forms_upload_sweep(ctx) -> int:
 
     async with SessionLocal() as db:
         return await sweep(db)
+
+
 # ---- Calls (voice channels): is the calls service up, has the home's
 # address moved? One admin alert a day at most, only while voice is on.
 async def calls_check(ctx) -> dict:
@@ -376,6 +378,13 @@ async def calls_reaper(ctx) -> dict:
     from app.calls.dm import reap
 
     return await reap()
+
+
+# Talking to Promptly (WP-T6): Talk's timings are kept 30 days.
+async def prune_talk_metrics(ctx) -> int:
+    from app.talk.metrics import prune_talk_metrics as prune
+
+    return await prune()
 
 
 class WorkerSettings:
@@ -458,6 +467,8 @@ class WorkerSettings:
         cron(voice_reaper, minute=set(range(2, 60, 5)), run_at_startup=False, unique=True, timeout=240),
         # Calls phase 2: DM calls whose timers were lost, or whose people left LiveKit.
         cron(calls_reaper, minute=set(range(1, 60, 2)), run_at_startup=False, unique=True, timeout=240),
+        # Talking to Promptly (WP-T6): drop Talk timings older than 30 days.
+        cron(prune_talk_metrics, hour=4, minute=35, run_at_startup=False, unique=True),
     ]
     on_startup = wait_for_schema
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

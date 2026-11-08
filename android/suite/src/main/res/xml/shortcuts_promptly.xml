@@ -16,4 +16,9 @@
         <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
             android:targetClass="org.promptly.sync.MainActivity" />
     </shortcut>
+    <shortcut android:shortcutId="talk" android:enabled="true" android:icon="@mipmap/ic_promptly"
+        android:shortcutShortLabel="@string/talk">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.sync.assistant.AssistantActivity" />
+    </shortcut>
 </shortcuts>

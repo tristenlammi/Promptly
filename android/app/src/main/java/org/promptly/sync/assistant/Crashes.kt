@@ -39,6 +39,7 @@ object Crashes {
     /** Call once, when the app starts. */
     fun watch(context: Context) {
         val app = context.applicationContext
+        VoiceTrail.init(app)
         val before = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, error ->
             runCatching {
@@ -69,8 +70,15 @@ object Crashes {
         }.getOrDefault(emptyList())
         val system = if (Build.VERSION.SDK_INT >= 30) fromAndroid(context) else emptyList()
         // Android's record of a crash we caught ourselves says less about the same thing.
-        val extra = system.filter { row -> row.kind != "crash" || ours.none { abs(it.at - row.at) < 15_000 } }
-        return (ours + extra).sortedByDescending { it.at }
+        // Its time is when the process went, which an "app has stopped" dialog can hold
+        // up for 20 s or more after the crash (seen on the emulator).
+        val extra = system.filter { row -> row.kind != "crash" || ours.none { abs(it.at - row.at) < 60_000 } }
+        // What voice was doing at the time (the car crash is still not root-caused).
+        val trail = VoiceTrail.marks(context)
+        return (ours + extra).map { r ->
+            val voice = VoiceTrail.describe(trail, r.at) ?: return@map r
+            r.copy(stack = if (r.stack.isEmpty()) voice else "${r.stack.take(STACK_CHARS - 300)}\n\n$voice")
+        }.sortedByDescending { it.at }
     }
 
     private fun fromAndroid(context: Context): List<Report> {

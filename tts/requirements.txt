@@ -10,3 +10,6 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 numpy==2.2.1
 requests==2.32.3
+# Talk's /tts/stream (WP-T1): a thin ctypes binding (BSD-3) over the system
+# libopus (Dockerfile), to encode the streamed speech as Opus.
+opuslib==3.0.1

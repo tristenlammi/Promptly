@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talk echo test</title>
+<!--
+  WP-T0 (Talking to Promptly): does the browser's echo canceller remove speech
+  that the page itself plays? Plays the same sound three ways while recording the
+  microphone with echoCancellation on, and once with it off as the baseline:
+    audio     an <audio> element (what read-aloud and voice mode do today)
+    webaudio  Web Audio straight to the speakers
+    loopback  through a local RTCPeerConnection pair in this page into <audio>,
+              so the browser treats it as call audio (no server involved)
+  Open over https or http://localhost, use speakers (not headphones), keep the
+  room quiet. ?auto=1 runs at once; ?ref=<wav url> plays that instead of the
+  built-in voice-like sound; ?sink=<label part>&mic=<label part> pick devices;
+  ?plan=audio:1,audio:0 runs only those steps, in that order.
+  Results are in the table and in window.__echoResults. Nothing is uploaded.
+-->
+<style>
+  :root { --bg: #faf7f2; --fg: #2b2622; --muted: #6f655c; --accent: #c4673f; --line: #e6ddd2; --ok: #2f7d4f; --bad: #b3412e; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1d1a17; --fg: #f1ebe4; --muted: #b0a59a; --line: #3a332d; --ok: #6fc18f; --bad: #f08a76; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p { color: var(--muted); margin: 0 0 16px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin: 8px 0 2px; }
+  select, button { font: inherit; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--fg); max-width: 100%; }
+  button { background: var(--accent); border-color: var(--accent); color: #fff; margin-top: 12px; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .scroll { overflow-x: auto; }
+  #status { margin-top: 12px; min-height: 1.5em; }
+  .ok { color: var(--ok); } .bad { color: var(--bad); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Talk echo test</h1>
+  <p>Plays a short voice-like sound through your speakers a few times while recording the microphone, then shows how much of it the microphone still hears. Use speakers, not headphones, and keep the room quiet. It takes about a minute.</p>
+  <label for="mic">Microphone</label><select id="mic"></select>
+  <label for="sink">Speakers</label><select id="sink"></select>
+  <div><button id="run" type="button">Run the test</button></div>
+  <div id="status" role="status" aria-live="polite"></div>
+  <div class="scroll"><table id="results" hidden>
+    <thead><tr><th>Playback</th><th>Echo cancel</th><th>Floor dBFS</th><th>During dBFS</th><th>Above floor</th><th>First second</th><th>Match to sound</th><th>Removed</th><th>Verdict</th></tr></thead>
+    <tbody></tbody>
+  </table></div>
+  <p id="summary"></p>
+</main>
+<script>
+const qs = new URLSearchParams(location.search);
+const $ = (id) => document.getElementById(id);
+const status = (t) => { $("status").textContent = t; };
+const FLOOR_S = 1.0, TAIL_S = 0.6, FRAME_S = 0.02;
+
+function voiceLike(ctx, seconds) {
+  // Syllable-length bursts of a buzzy 120-180 Hz voice with formant-ish harmonics,
+  // so noise suppression treats it as speech, not as a steady tone.
+  const rate = ctx.sampleRate, n = Math.floor(seconds * rate);
+  const buf = ctx.createBuffer(1, n, rate), d = buf.getChannelData(0);
+  let phase = 0, seed = 7;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  let syl = 0, sylLen = 0, f0 = 140;
+  for (let i = 0; i < n; i++) {
+    if (i >= syl + sylLen) { syl = i; sylLen = Math.floor((0.12 + rnd() * 0.22) * rate); f0 = 115 + rnd() * 70; }
+    const t = (i - syl) / sylLen, env = t < 0.85 ? Math.sin(Math.PI * Math.min(1, t / 0.85)) : 0;
+    phase += 2 * Math.PI * (f0 * (1 + 0.04 * Math.sin(i / rate * 5))) / rate;
+    let s = 0;
+    for (let h = 1; h <= 18; h++) s += Math.sin(h * phase) * (h < 4 ? 1 : h < 9 ? 0.6 : 0.25) / h;
+    d[i] = 0.5 * env * s + 0.01 * (rnd() - 0.5);
+  }
+  return buf;
+}
+
+async function reference(ctx) {
+  if (qs.get("ref")) {
+    const bytes = await (await fetch(qs.get("ref"))).arrayBuffer();
+    return await ctx.decodeAudioData(bytes);
+  }
+  return voiceLike(ctx, 5);
+}
+
+function wavBlob(buffer) {
+  const d = buffer.getChannelData(0), rate = buffer.sampleRate, n = d.length;
+  const view = new DataView(new ArrayBuffer(44 + n * 2));
+  const str = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+  str(0, "RIFF"); view.setUint32(4, 36 + n * 2, true); str(8, "WAVE"); str(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  str(36, "data"); view.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) view.setInt16(44 + i * 2, Math.max(-1, Math.min(1, d[i])) * 32767, true);
+  return new Blob([view], { type: "audio/wav" });
+}
+
+async function devices() {
+  const probe = await navigator.mediaDevices.getUserMedia({ audio: true });
+  probe.getTracks().forEach((t) => t.stop());
+  const all = await navigator.mediaDevices.enumerateDevices();
+  const fill = (el, kind, want) => {
+    el.innerHTML = "";
+    for (const d of all.filter((x) => x.kind === kind)) {
+      const o = document.createElement("option");
+      o.value = d.deviceId; o.textContent = d.label || d.deviceId || "Default";
+      if (want && (d.label || "").toLowerCase().includes(want.toLowerCase())) o.selected = true;
+      el.appendChild(o);
+    }
+    if (!el.options.length) { const o = document.createElement("option"); o.value = ""; o.textContent = "Default"; el.appendChild(o); }
+  };
+  fill($("mic"), "audioinput", qs.get("mic"));
+  fill($("sink"), "audiooutput", qs.get("sink"));
+  if (!("setSinkId" in HTMLMediaElement.prototype)) $("sink").disabled = true;
+}
+
+function recorder(stream) {
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const node = ctx.createScriptProcessor(2048, 1, 1);
+  const chunks = [];
+  node.onaudioprocess = (e) => chunks.push({ at: performance.now(), data: new Float32Array(e.inputBuffer.getChannelData(0)) });
+  src.connect(node); node.connect(ctx.destination); // output is silent: we never write to it
+  return { ctx, chunks, stop: () => { node.disconnect(); src.disconnect(); return ctx.close(); } };
+}
+
+function frames(chunks, rate, from, to) {
+  // RMS per 20 ms frame of the samples recorded between two performance.now() marks.
+  const per = Math.round(FRAME_S * rate), out = [];
+  let acc = 0, cnt = 0;
+  for (const c of chunks) {
+    const start = c.at - (c.data.length / rate) * 1000;
+    for (let i = 0; i < c.data.length; i++) {
+      const t = start + (i / rate) * 1000;
+      if (t < from || t > to) continue;
+      acc += c.data[i] * c.data[i]; cnt++;
+      if (cnt === per) { out.push(Math.sqrt(acc / cnt)); acc = 0; cnt = 0; }
+    }
+  }
+  return out;
+}
+
+const rms = (xs) => Math.sqrt(xs.reduce((a, x) => a + x * x, 0) / Math.max(1, xs.length));
+const db = (x) => 20 * Math.log10(Math.max(x, 1e-6));
+
+function envelope(buffer) {
+  const d = buffer.getChannelData(0), per = Math.round(FRAME_S * buffer.sampleRate), out = [];
+  for (let i = 0; i + per <= d.length; i += per) { let a = 0; for (let j = 0; j < per; j++) a += d[i + j] * d[i + j]; out.push(Math.sqrt(a / per)); }
+  return out;
+}
+
+function bestMatch(mic, ref) {
+  // Pearson correlation of the loudness envelopes at the best delay up to 500 ms.
+  let best = 0;
+  for (let lag = 0; lag <= 25; lag++) {
+    const n = Math.min(ref.length, mic.length - lag);
+    if (n < 20) break;
+    let sa = 0, sb = 0, saa = 0, sbb = 0, sab = 0;
+    for (let i = 0; i < n; i++) { const a = ref[i], b = mic[i + lag]; sa += a; sb += b; saa += a * a; sbb += b * b; sab += a * b; }
+    const cov = sab / n - (sa / n) * (sb / n), va = saa / n - (sa / n) ** 2, vb = sbb / n - (sb / n) ** 2;
+    if (va > 0 && vb > 0) best = Math.max(best, cov / Math.sqrt(va * vb));
+  }
+  return best;
+}
+
+async function loopbackStream(ctx, source) {
+  const dest = ctx.createMediaStreamDestination();
+  source.connect(dest);
+  const a = new RTCPeerConnection(), b = new RTCPeerConnection();
+  a.onicecandidate = (e) => e.candidate && b.addIceCandidate(e.candidate);
+  b.onicecandidate = (e) => e.candidate && a.addIceCandidate(e.candidate);
+  const remote = new Promise((resolve) => { b.ontrack = (e) => resolve(e.streams[0] || new MediaStream([e.track])); });
+  a.addTrack(dest.stream.getAudioTracks()[0], dest.stream);
+  await a.setLocalDescription(await a.createOffer());
+  await b.setRemoteDescription(a.localDescription);
+  await b.setLocalDescription(await b.createAnswer());
+  await a.setRemoteDescription(b.localDescription);
+  const stream = await remote;
+  return { stream, close: () => { a.close(); b.close(); } };
+}
+
+async function play(mode, refBuffer, sinkId) {
+  // Returns { started, ended } in performance.now() time, once playback has finished.
+  const seconds = refBuffer.duration;
+  if (mode === "audio") {
+    const el = new Audio(URL.createObjectURL(wavBlob(refBuffer)));
+    el.volume = 0.6;
+    if (sinkId && el.setSinkId) await el.setSinkId(sinkId);
+    await new Promise((r) => { el.oncanplaythrough = r; el.load(); });
+    const started = performance.now();
+    await el.play();
+    await new Promise((r) => { el.onended = r; });
+    return { started, ended: performance.now() };
+  }
+  const opts = sinkId && mode === "webaudio" && "setSinkId" in AudioContext.prototype ? { sinkId } : {};
+  const ctx = new AudioContext(opts);
+  const src = ctx.createBufferSource();
+  src.buffer = refBuffer;
+  const gain = ctx.createGain(); gain.gain.value = 0.6; src.connect(gain);
+  let cleanup = () => {};
+  if (mode === "webaudio") {
+    gain.connect(ctx.destination);
+  } else {
+    const lb = await loopbackStream(ctx, gain);
+    const el = new Audio(); el.srcObject = lb.stream;
+    if (sinkId && el.setSinkId) await el.setSinkId(sinkId);
+    await el.play();
+    await new Promise((r) => setTimeout(r, 500)); // let the connection settle
+    cleanup = () => { el.pause(); el.srcObject = null; lb.close(); };
+  }
+  const started = performance.now();
+  src.start();
+  await new Promise((r) => { src.onended = r; });
+  await new Promise((r) => setTimeout(r, 150)); // the far end of the loopback lags a little
+  const ended = performance.now();
+  cleanup();
+  await ctx.close();
+  return { started, ended };
+}
+
+async function measure(mode, ec, refBuffer, refEnv) {
+  const micId = $("mic").value, sinkId = $("sink").value;
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { deviceId: micId ? { exact: micId } : undefined, echoCancellation: ec, noiseSuppression: ec, autoGainControl: false },
+  });
+  const settings = stream.getAudioTracks()[0].getSettings();
+  const rec = recorder(stream);
+  const t0 = performance.now();
+  await new Promise((r) => setTimeout(r, FLOOR_S * 1000 + 300));
+  const { started, ended } = await play(mode, refBuffer, sinkId);
+  await new Promise((r) => setTimeout(r, TAIL_S * 1000));
+  await rec.stop();
+  stream.getTracks().forEach((t) => t.stop());
+  const rate = rec.ctx.sampleRate;
+  const floor = frames(rec.chunks, rate, t0 + 300, t0 + 300 + FLOOR_S * 1000);
+  const during = frames(rec.chunks, rate, started + 300, ended);
+  const first = frames(rec.chunks, rate, started, started + 1000);
+  const fl = db(rms(floor)), du = db(rms(during)), fi = db(rms(first));
+  const match = bestMatch(frames(rec.chunks, rate, started, ended), refEnv);
+  return {
+    mode, echoCancellation: ec, applied: { echoCancellation: settings.echoCancellation, noiseSuppression: settings.noiseSuppression },
+    floorDb: +fl.toFixed(1), duringDb: +du.toFixed(1), aboveFloorDb: +(du - fl).toFixed(1), firstSecondAboveFloorDb: +(fi - fl).toFixed(1), match: +match.toFixed(2),
+  };
+}
+
+function verdict(row, base) {
+  if (!row.echoCancellation) return row.aboveFloorDb > 10 && row.match > 0.5 ? "Mic hears the speakers (good baseline)" : "Mic barely hears the speakers: inconclusive";
+  // Compare loudness while playing with the baseline's: noise suppression also
+  // lowers the floor, so "above floor" alone would undersell the canceller.
+  row.removedDb = base ? +(base.duringDb - row.duringDb).toFixed(1) : null;
+  const heard = row.match > 0.4 && (row.removedDb === null || row.removedDb < 10);
+  return heard ? `Leaks (${row.removedDb} dB removed)` : `Cancelled (${row.removedDb} dB removed)`;
+}
+
+async function run() {
+  $("run").disabled = true; $("results").hidden = true;
+  const tbody = $("results").querySelector("tbody"); tbody.innerHTML = "";
+  const results = { userAgent: navigator.userAgent, sink: $("sink").selectedOptions[0]?.textContent, mic: $("mic").selectedOptions[0]?.textContent, rows: [] };
+  try {
+    const ctx = new AudioContext();
+    const ref = await reference(ctx);
+    await ctx.close();
+    const refEnv = envelope(ref);
+    // <audio> with echo cancel runs twice, first and last, so a canceller that
+    // needs warming up can't decide the answer by itself.
+    let plan = [["audio", false], ["audio", true], ["webaudio", true], ["loopback", false], ["loopback", true], ["audio", true]];
+    // ?plan=audio:1,loopback:0 runs just those, in that order (mode:echo cancel).
+    if (qs.get("plan")) plan = qs.get("plan").split(",").map((x) => { const [m, e] = x.split(":"); return [m, e === "1"]; });
+    for (const [mode, ec] of plan) {
+      status(`Playing through ${mode}, echo cancel ${ec ? "on" : "off"}…`);
+      const row = await measure(mode, ec, ref, refEnv);
+      results.rows.push(row);
+      await new Promise((r) => setTimeout(r, 400));
+    }
+    const base = (mode) => results.rows.find((r) => r.mode === mode && !r.echoCancellation) || results.rows.find((r) => !r.echoCancellation);
+    for (const row of results.rows) {
+      row.verdict = verdict(row, row.echoCancellation ? base(row.mode) : null);
+      const tr = document.createElement("tr");
+      const cells = [row.mode, row.echoCancellation ? "on" : "off", row.floorDb, row.duringDb, `${row.aboveFloorDb} dB`, `${row.firstSecondAboveFloorDb} dB`, row.match, row.removedDb === undefined || row.removedDb === null ? "" : `${row.removedDb} dB`, row.verdict];
+      for (const c of cells) { const td = document.createElement("td"); td.textContent = c; tr.appendChild(td); }
+      tr.lastChild.className = /Cancelled|good/.test(row.verdict) ? "ok" : "bad";
+      tbody.appendChild(tr);
+    }
+    $("results").hidden = false;
+    status("Done.");
+  } catch (err) {
+    results.error = String(err && err.message || err);
+    status(`Couldn't run the test: ${results.error}`);
+  }
+  window.__echoResults = results;
+  $("run").disabled = false;
+}
+
+$("run").addEventListener("click", run);
+devices().then(() => { if (qs.get("auto")) run(); }).catch((err) => {
+  status(`Allow the microphone to run the test (${err.message || err}).`);
+  window.__echoResults = { error: String(err.message || err) };
+});
+</script>
+</body>
+</html>

@@ -144,3 +144,5 @@ from app.workspaces.meetings_models import MeetingJob  # noqa: F401
 from app.forms.models import Form, FormNotify, FormOptionCount, FormReport, FormResponse, FormUpload  # noqa: F401
 # Calls (voice channels): channel settings and voice-session history (0281).
 from app.calls.models import Call, CallParticipant, RoomVoice  # noqa: F401
+# Talking to Promptly (WP-T2): per-turn timings.
+from app.talk.models import TalkMetric  # noqa: F401

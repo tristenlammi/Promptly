@@ -261,13 +261,15 @@ export const chatApi = {
       disabled_connector_ids: disabledIds,
     });
   },
-  /** Approve or decline a connector action the model asked to take. */
+  /** Approve or decline an action the model asked to take: a connector
+   *  action that can't be undone, or a change asked for out loud in Talk.
+   *  ``content`` is the reply's new text when the outcome was added to it. */
   async decideToolCall(
     messageId: string,
     callId: string,
     approve: boolean
-  ): Promise<{ tool_call: PersistedToolCall }> {
-    const { data } = await apiClient.post<{ tool_call: PersistedToolCall }>(
+  ): Promise<{ tool_call: PersistedToolCall; content?: string | null }> {
+    const { data } = await apiClient.post<{ tool_call: PersistedToolCall; content?: string | null }>(
       `/chat/messages/${messageId}/tool-calls/${encodeURIComponent(callId)}/approval`,
       { approve },
       // Running it reaches the outside service — give it time.

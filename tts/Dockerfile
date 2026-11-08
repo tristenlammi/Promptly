@@ -19,15 +19,15 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # espeak-ng is Kokoro's fallback grapheme-to-phoneme backend. libgomp1
-# is needed by onnxruntime's threadpool.
+# is needed by onnxruntime's threadpool. libopus (BSD) encodes /tts/stream.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends espeak-ng libgomp1 \
+    && apt-get install -y --no-install-recommends espeak-ng libgomp1 libopus0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.py ./
+COPY server.py streaming.py ./
 
 EXPOSE 8000
 

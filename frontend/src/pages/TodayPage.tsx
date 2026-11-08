@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AudioLines,
   Bell,
   CalendarDays,
   Check,
@@ -84,7 +85,24 @@ export function TodayPage() {
 
   return (
     <>
-      <TopNav title="Today" actions={<CustomiseToday />} />
+      <TopNav
+        title="Today"
+        actions={
+          <div className="flex items-center gap-2">
+            {/* Talk to Promptly (WP-T4): "What's on today?" out loud. */}
+            <Link
+              to="/chat?talk=1"
+              className="promptly-voice-orb inline-flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-semibold text-white transition hover:opacity-90"
+              aria-label="Talk to Promptly"
+              title="Talk to Promptly (Ctrl+Shift+Space)"
+            >
+              <AudioLines className="h-3.5 w-3.5" />
+              Talk
+            </Link>
+            <CustomiseToday />
+          </div>
+        }
+      />
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-7xl px-4 py-5 md:py-8">
           {isLoading ? (

@@ -331,6 +331,16 @@ class UserPreferencesUpdate(BaseModel):
     # Format-validated (not allowlisted against the live model) so the
     # backend doesn't have to track the exact voice catalogue.
     tts_voice: str | None = Field(default=None, max_length=64)
+    # Talk (Voice Phase 3, WP-T4), Account -> Voice: speaking speed, how you
+    # take turns, whether talking over it interrupts, captions, and whether
+    # a conversation started outside a chat is kept like any chat or
+    # temporary (gone in an hour, never in memory). Read by
+    # ``talk/access.py::voice_prefs``.
+    tts_speed: float | None = Field(default=None, ge=0.9, le=1.3)
+    talk_turn_mode: Literal["hands_free", "tap"] | None = None
+    talk_interrupt: Literal["talk", "tap"] | None = None
+    talk_captions: bool | None = None
+    talk_save: Literal["chat", "temporary"] | None = None
     # Preferred display currency (ISO 4217 code, e.g. ``"AUD"``). Surfaces in
     # the ambient personal-context block and takes precedence over whatever
     # the user's location would imply — so someone whose locale is ambiguous

@@ -17,7 +17,6 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime
 from typing import Any
 
 from fastapi import HTTPException, Request, UploadFile, status
@@ -26,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
+from app.talk import confirm, readback
 
 from . import data, engine, incidents, nearby, traffic
 
@@ -117,9 +117,6 @@ FAILED = "Sorry, I can't do that right now."
 WHILE_DRIVING = "I can't do that while you're driving."
 # Only digits and the usual separators: no * or # dialling codes.
 _NUMBER = re.compile(r"\+?[0-9][0-9 ()\-]{2,24}")
-# A plain yes or no to what was read back needs no model to understand it.
-_YES = re.compile(r"(?:yes|yeah|yep|yup|sure|ok|okay|do it|go ahead|please do|sounds good)(?: please| thanks| thank you)?")
-_NO = re.compile(r"(?:no|nope|cancel|stop|don't|never mind)(?: thanks| thank you)?")
 # About 30 seconds of 16 kHz speech.
 MAX_AUDIO = 1024 * 1024
 
@@ -175,7 +172,7 @@ async def _model(db: AsyncSession, user: User) -> tuple[Any, str] | None:
     defaults = await load_effective_defaults(db)
     for provider_id, model_id in (
         (defaults.voice_provider_id, defaults.voice_model_id),
-        (getattr(user, "default_provider_id", None), getattr(user, "default_model_id", None)),
+        _own_default(user),
         (defaults.default_chat_provider_id, defaults.default_chat_model_id),
     ):
         if not provider_id or not model_id:
@@ -197,6 +194,19 @@ async def _model(db: AsyncSession, user: User) -> tuple[Any, str] | None:
         except HTTPException:
             continue
     return None
+
+
+def _own_default(user: User) -> tuple[uuid.UUID | None, str | None]:
+    """The model you picked as your default (Account -> Chat defaults). It
+    lives in ``users.settings``, not on the row: reading it as attributes
+    meant the phone never used it."""
+    mine = getattr(user, "settings", None) or {}
+    try:
+        provider_id = uuid.UUID(str(mine["default_provider_id"])) if mine.get("default_provider_id") else None
+    except ValueError:
+        provider_id = None
+    model_id = mine.get("default_model_id")
+    return provider_id, model_id if isinstance(model_id, str) and model_id else None
 
 
 def _system(state: DriveState, phone: bool) -> str:
@@ -335,20 +345,8 @@ def _clock(kind: Any, fields: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _spoken_length(seconds: int) -> str:
-    hours, rest = divmod(seconds, 3600)
-    minutes, secs = divmod(rest, 60)
-    parts = [f"{n} {word}{'' if n == 1 else 's'}" for n, word in ((hours, "hour"), (minutes, "minute"), (secs, "second")) if n]
-    return " and ".join(parts)
-
-
-def _clock_words(action: dict[str, Any]) -> str:
-    called = f" called {action['label']}" if action.get("label") else ""
-    if action["type"] == "set_timer":
-        return f"a timer for {_spoken_length(action['seconds'])}{called}"
-    hour, minute = action["hour"], action["minute"]
-    at = f"{hour % 12 or 12}" + (f":{minute:02d}" if minute else "")
-    return f"an alarm for {at} {'AM' if hour < 12 else 'PM'}{called}"
+_spoken_length = readback.spoken_length
+_clock_words = readback.clock_words
 
 
 async def _numbers_for(db: AsyncSession, user: User, who: str) -> dict[str, str]:
@@ -555,87 +553,26 @@ async def _run_tool(db: AsyncSession, user: User, name: str, args: dict[str, Any
         return "That didn't work."
 
 
-def _spoken_time(value: Any) -> str:
-    """"2026-11-05T09:00" -> "Thursday 5 November at 9 AM"."""
-    text = str(value)[:80]
-    try:
-        at = datetime.fromisoformat(text)
-    except ValueError:
-        return text
-    day = f"{at:%A} {at.day} {at:%B}"
-    if "T" not in text:
-        return day
-    clock = f"{at.hour % 12 or 12}" + (f":{at.minute:02d}" if at.minute else "")
-    return f"{day} at {clock} {'AM' if at.hour < 12 else 'PM'}"
+# Read-backs are built from what would really be done (app/talk/readback.py,
+# shared with Talk).
+_spoken_time = readback.spoken_time
+_words = readback.words
+_question = readback.question
+_reply_to_whom = readback.reply_to_whom
 
 
 async def _cant_use(db: AsyncSession, user: User, args: dict[str, Any]) -> str | None:
     """Don't ask them to agree to something that can't work."""
-    from app.chat.tools.base import ToolContext, ToolError
-    from app.chat.tools.items import _find
-    from app.items.registry import get_spec
-
-    ctx = ToolContext(db=db, user=user, conversation_id=uuid.uuid4(), user_message_id=uuid.uuid4(), turn={})
-    try:
-        _, doc, access = await _find(ctx, args)
-    except ToolError as e:
-        return str(e)
-    spec = get_spec(doc.kind)
-    action = spec.action(str(args.get("action") or "")) if spec else None
-    if action is None or not action.chat:
-        return "That file has no such action. Check read_item."
-    return "They can only read that file." if action.writes and access != "edit" else None
-
-
-def _words(value: Any) -> list[str]:
-    """The values in a request, out loud: no brackets, ids or yes/no flags."""
-    if isinstance(value, dict):
-        return [w for v in value.values() for w in _words(v)]
-    if isinstance(value, list):
-        return [w for v in value for w in _words(v)]
-    if isinstance(value, bool) or value is None:
-        return []
-    return [str(value)[:80]]
-
-
-async def _reply_to_whom(db: AsyncSession, user: User, args: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
-    from app.chat.tools.mail import reply_address
-    from app.mail.models import MailAccount, MailMessage
-
-    try:
-        row = await db.get(MailMessage, uuid.UUID(str(args.get("message_id"))))
-    except ValueError:
-        row = None
-    account = await db.get(MailAccount, row.account_id) if row is not None else None
-    if row is None or account is None or account.user_id != user.id:
-        return args, "that email wasn't found"
-    return {"message_id": str(row.id), "text": str(args.get("text") or "")[:4000], "to": row.from_name or reply_address(row)}, None
-
-
-def _question(name: str, args: dict[str, Any]) -> str:
-    """Read back from what would actually be done, not from what the model says it is."""
-    def text(value: Any) -> str:
-        return str(value)[:80]
-
-    if name == "calendar_add_event":
-        guests = args.get("guests") or []
-        invite = f", inviting {', '.join(text(g) for g in guests)}" if isinstance(guests, list) and guests else ""
-        return f"Add {text(args.get('title'))} to your calendar for {_spoken_time(args.get('start'))}{invite}?"
-    if name == "calendar_change_event":
-        changes = [f"{k} {text(v)}" for k, v in args.items() if k not in ("event_id", "occurrence")]
-        return f"Change that event: {', '.join(changes)[:160]}?"
-    if name == "mail_reply":
-        return f"Reply to {text(args.get('to'))}, saying: {str(args.get('text'))[:300]}. Send it?"
-    values = args.get("args") if isinstance(args.get("args"), dict) else {}
-    action = text(args.get("action") or "do that").replace("_", " ")
-    return f"Should I {action}: {', '.join(_words(values))[:160]}?"
+    problem, _name = await readback.cant_use(db, user, args)
+    return problem
 
 
 def _plainly(heard: str, state: DriveState) -> dict[str, Any] | None:
     if not state.pending:
         return None
-    words = heard.lower().strip(" .,!?")
-    return {"do": "confirm"} if _YES.fullmatch(words) else {"do": "cancel"} if _NO.fullmatch(words) else None
+    # The one strict matcher Talk uses too (app/talk/confirm.py).
+    said = confirm.answer(heard)
+    return {"do": "confirm"} if said == "yes" else {"do": "cancel"} if said == "no" else None
 
 
 async def _conversation(db: AsyncSession, user: User, heard: str, state: DriveState, phone: bool) -> dict[str, Any]:

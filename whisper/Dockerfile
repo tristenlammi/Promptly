@@ -23,15 +23,16 @@ WORKDIR /app
 
 # ffmpeg is belt-and-braces: PyAV (pulled in by faster-whisper) bundles
 # its own decoders, but having the system binary present avoids any
-# codec surprises with exotic browser containers.
+# codec surprises with exotic browser containers. libopus (BSD) decodes the
+# Opus packets Talk can stream into /live.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg \
+    && apt-get install -y --no-install-recommends ffmpeg libopus0 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.py ./
+COPY server.py live.py ./
 
 EXPOSE 8000
 

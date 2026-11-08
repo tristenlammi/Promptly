@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
+  AudioLines,
   CalendarPlus,
   CheckSquare,
   ClipboardList,
@@ -178,6 +179,23 @@ export function usePaletteActions(
     };
   }, [cmd, query, navigate]);
 
+  // Talk to Promptly (WP-T4): on an empty palette, or when you look for it.
+  const talkRow = useMemo<PaletteAction | null>(() => {
+    const t = query.trim().toLowerCase();
+    if (cmd || (t && !"talk to promptly voice speak".split(" ").some((w) => w.startsWith(t) || t.startsWith(w)))) return null;
+    return {
+      key: "talk",
+      icon: <AudioLines className="h-4 w-4" />,
+      title: "Talk to Promptly",
+      detail: "A spoken conversation in a new chat · Ctrl+Shift+Space",
+      sure: false,
+      run: async () => {
+        navigate("/chat?talk=1");
+        return true;
+      },
+    };
+  }, [cmd, query, navigate]);
+
   // Calls: join a voice channel, and Mute / Deafen / Leave while in one.
   const voiceRows = useVoicePaletteRows(query, navigate);
   // Calls: "Call Mum", "Video call Sam" (people you can call).
@@ -188,11 +206,11 @@ export function usePaletteActions(
   const actions = useMemo(
     () =>
       callFirst
-        ? [...callRows, ...voiceRows, ...createRows, ...(mapRow ? [mapRow] : [])]
+        ? [...callRows, ...voiceRows, ...createRows, ...(mapRow ? [mapRow] : []), ...(talkRow ? [talkRow] : [])]
         : voiceFirst
-          ? [...voiceRows, ...callRows, ...createRows, ...(mapRow ? [mapRow] : [])]
-          : [...(doRow ? [doRow] : []), ...callRows, ...createRows, ...voiceRows, ...(mapRow ? [mapRow] : [])],
-    [doRow, createRows, mapRow, voiceRows, voiceFirst, callRows, callFirst],
+          ? [...voiceRows, ...callRows, ...createRows, ...(mapRow ? [mapRow] : []), ...(talkRow ? [talkRow] : [])]
+          : [...(doRow ? [doRow] : []), ...callRows, ...createRows, ...voiceRows, ...(mapRow ? [mapRow] : []), ...(talkRow ? [talkRow] : [])],
+    [doRow, createRows, mapRow, voiceRows, voiceFirst, callRows, callFirst, talkRow],
   );
 
   /** Tab on the Do row: the next file to write to. */

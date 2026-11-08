@@ -26,6 +26,10 @@ object SpokenAnswer {
     private var player: MediaPlayer? = null
     private var finished: CountDownLatch? = null
 
+    /** An answer is being said right now (for the crash breadcrumb). */
+    @Volatile var speaking = false
+        private set
+
     fun say(context: Context, words: String, done: (() -> Unit)? = null) {
         stop()
         val mine = turn.get()
@@ -34,6 +38,8 @@ object SpokenAnswer {
         thread(name = "spoken-answer") {
             val release = Voice.holdFocus(app)
             val fetching = Executors.newSingleThreadExecutor()
+            speaking = true
+            Voice.setState(Voice.state.value)
             try {
                 val parts = sentences(words)
                 var next = fetching.submit<ByteArray> { Maps.speech(app, parts[0]) }
@@ -52,6 +58,10 @@ object SpokenAnswer {
             } finally {
                 fetching.shutdownNow()
                 release()
+                if (turn.get() == mine) {
+                    speaking = false
+                    Voice.quiet()
+                }
             }
         }
     }
@@ -59,6 +69,10 @@ object SpokenAnswer {
     /** You've moved on: stop now, rather than when the next sentence turns up. */
     fun stop() {
         turn.incrementAndGet()
+        if (speaking) {
+            speaking = false
+            Voice.quiet()
+        }
         synchronized(lock) {
             runCatching { player?.stop() }
             player?.release()

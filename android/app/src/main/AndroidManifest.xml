@@ -212,6 +212,24 @@
             android:label="Phone assistant"
             android:taskAffinity="org.promptly.app.assistant.settings" />
 
+        <!-- Talk (Voice Phase 3): the conversation's lock-screen notification, Quick
+             Settings tile. Opened from the sheet, never on its own. -->
+        <service
+            android:name=".talk.TalkService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+        <service
+            android:name=".talk.TalkTile"
+            android:exported="true"
+            android:icon="@drawable/ic_map_mic"
+            android:label="Talk to Promptly"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="false" />
+        </service>
+
         <!-- Android Auto. -->
         <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="2" />
         <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc" />
