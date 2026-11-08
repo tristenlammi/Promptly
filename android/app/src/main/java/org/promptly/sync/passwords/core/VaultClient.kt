@@ -73,6 +73,9 @@ class WrongAccountError : Exception("That sign-in is a different Promptly accoun
 fun sameAccount(mine: String?, theirs: String?): Boolean = !mine.isNullOrEmpty() && !theirs.isNullOrEmpty() && mine.equals(theirs, ignoreCase = true)
 
 private const val PERSONAL_META = "personal_vault"
+/** The vaults this device knows are this person's own. See `refreshOwnPins`. */
+private const val OWN_META = "own_vaults"
+private const val STATE_META = "trust_state"
 private const val LAST_SYNC_META = "last_sync"
 private const val RECOVERY_META = "recovery_checked"
 
@@ -163,6 +166,8 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         cacheAccount(session, setup = true)
         state = Unlocked(keyset, root.auth, root.unlock, userId, accountId)
         store.setMeta(PERSONAL_META, JsonPrimitive(vaultId))
+        // Made here, so known for certain. The first sync signs it as theirs for their other devices.
+        store.setMeta(OWN_META, TrustBook.stringArray(listOf(vaultId)))
         sync()
         return secretKey
     }
@@ -356,6 +361,9 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
                 s.search.clear()
             }
             book = TrustBook()
+            ownership = TrustState()
+            ownVaultIds = emptySet()
+            homeMissing = false
             api.session.also { api.session = null }
         }
         onChange?.invoke()
@@ -462,16 +470,32 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
     @Volatile
     private var book = TrustBook()
 
-    private fun isOwnVault(v: CachedVault): Boolean {
-        val s = need()
-        return v.kind == "personal" && (v.grantedBy == null || v.grantedBy == s.userId)
-    }
+    /** Pinned on this device; never from what the server calls a vault. */
+    @Volatile
+    private var ownVaultIds: Set<String> = emptySet()
+
+    /** One of them has no signed statement in it yet, so other devices can't tell it's theirs. */
+    @Volatile
+    private var homeMissing = false
+
+    /** Who's an emergency contact, and which vaults were made alone: synced beside the trust book. */
+    @Volatile
+    private var ownership = TrustState()
+
+    /** Their own vault: one this device pinned as theirs, still signed by them. What the server
+     *  calls a vault ("personal" or not) doesn't come into it: a shared vault they made has a grant
+     *  signed by them too, and every member of it holds its key. */
+    private fun isOwnVault(v: CachedVault): Boolean = v.id in ownVaultIds && selfGranted(v.grantedBy)
+
+    private fun selfGranted(grantedBy: String?): Boolean = grantedBy == null || grantedBy == need().userId
+
+    /** For other parts of the app that should only take things from this person's own vault. */
+    fun isOwn(vaultId: String): Boolean = vaultId in ownVaultIds
 
     /** A vault opens if it's your own, or you made it, or you chose to accept it. What the
      *  server says about who accepted what doesn't come into it. */
     private fun mayOpen(v: CachedVault): Boolean {
-        val s = need()
-        return isOwnVault(v) || v.grantedBy == null || v.grantedBy == s.userId || v.id in book.accepted
+        return isOwnVault(v) || selfGranted(v.grantedBy) || v.id in book.accepted
     }
 
     /** For the screens: has this person said yes to this vault? */
@@ -481,12 +505,58 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
      *  put an item of this kind there. */
     private fun trustItems(): List<Item> {
         val s = need()
-        val own = store.getVaults().filter { isOwnVault(it) }.map { it.id }.toSet()
+        val own = ownVaultIds
         return s.items.values.filter { it.vaultId in own && it.body.kind == "trust" && !it.deleted && it.body["trustBook"] is JsonObject }.sortedBy { it.id }
+    }
+
+    /** Which vaults are theirs. Pinned at setup; carried over once from what this device already
+     *  trusted before this check existed; or proven by a statement signed with their identity key
+     *  inside the vault itself, which their other devices write. A server can relabel a shared
+     *  vault they made as "personal", and any member can write a trust book into it, but neither
+     *  can sign that statement. The same rules as vault.ts. */
+    private fun refreshOwnPins() {
+        val s = need()
+        val vaults = store.getVaults()
+        var pins = store.getMeta(OWN_META)?.let { TrustBook.strings(it) }
+        if (pins == null) {
+            val first = ArrayList<String>()
+            val synced = store.getMeta(LAST_SYNC_META) != null
+            val before = (store.getMeta(PERSONAL_META) as? JsonPrimitive)?.content
+            if (before != null) first += before
+            else if (synced) {
+                // A device from before: what it already took to be theirs. A new device has no history.
+                val was = vaults.filter { it.kind == "personal" && selfGranted(it.grantedBy) }
+                if (was.size == 1) first += was[0].id
+            }
+            if (synced) {
+                // The vaults it already treated as made alone, for emergency access, once.
+                val local = TrustState().also { it.absorb(store.getMeta(STATE_META)) }
+                local.made += vaults.filter { it.id !in first && it.kind != "personal" && selfGranted(it.grantedBy) && it.memberCount <= 1 }.map { it.id }
+                store.setMeta(STATE_META, local.toJson())
+            }
+            store.setMeta(OWN_META, TrustBook.stringArray(first))
+            pins = first
+        }
+        val me = s.keyset.ed25519Pub
+        val byId = vaults.associateBy { it.id }
+        val signed = HashSet<String>()
+        for (item in s.items.values) {
+            if (item.body.kind != "trust" || item.vaultId in signed) continue
+            val v = byId[item.vaultId] ?: continue
+            if (selfGranted(v.grantedBy) && Ownership.verifyHome(item.body.str("homeSig"), s.userId, v.id, me)) signed += v.id
+        }
+        val found = signed.filter { it !in pins }
+        if (found.isNotEmpty()) {
+            pins = pins + found
+            store.setMeta(OWN_META, TrustBook.stringArray(pins))
+        }
+        ownVaultIds = pins.toSet()
+        homeMissing = pins.any { id -> byId[id]?.let { !it.hidden && selfGranted(it.grantedBy) && id !in signed } ?: false }
     }
 
     /** Bring in what other devices decided. Union, and never a key change without a prompt. */
     private fun mergeTrustBook() {
+        refreshOwnPins()
         val local = TrustBook.peopleOf(store.getMeta("trust"))
         val merged = TrustBook()
         val generations = HashMap<String, Int>()
@@ -503,7 +573,6 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
             accepted += TrustBook.strings(o["accepted"])
             contacts += TrustBook.strings(o["contacts"])
             raise(TrustBook.numbers(o["generations"]))
-            o.str("personalVaultId")?.let { merged.personalVaultId = it }
         }
         for ((id, e) in remotePeople) {
             val mine = local[id]
@@ -519,30 +588,43 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         accepted += book.accepted
         contacts += book.contacts
         raise(book.generations)
+        // Contacts go by counter, so a removal on any device sticks. A plain list could only add.
+        val state = TrustState()
+        for (item in trustItems()) state.absorb(item.body["trustState"])
+        state.absorb(store.getMeta(STATE_META))
+        state.absorb(ownership.toJson())
+        Ownership.withListed(state.contacts, contacts)
+        ownership = state
         merged.accepted += accepted
-        merged.contacts += contacts
+        merged.contacts += Ownership.named(state.contacts)
         merged.generations += generations
-        if (merged.personalVaultId == null) merged.personalVaultId = book.personalVaultId
         book = merged
         store.setMeta("trust", JsonObject(merged.people.mapValues { it.value.toJson() }))
     }
 
     private fun sameKeys(a: TrustEntry, b: TrustEntry) = a.ed25519 == b.ed25519 && a.x25519 == b.x25519
 
-    /** Saved locally now, and to your own vault so other devices know too. */
+    /** Saved locally now, and to your own vault so other devices know too. With no vault known
+     *  for certain to be theirs yet, it stays on this device until there is one. */
     private fun saveTrustBook() {
+        book.contacts.clear()
+        book.contacts += Ownership.named(ownership.contacts)
         store.setMeta("trust", JsonObject(book.people.mapValues { it.value.toJson() }))
         store.setMeta("trust_accepted", TrustBook.stringArray(book.accepted))
         store.setMeta("trust_contacts", TrustBook.stringArray(book.contacts))
         store.setMeta("trust_generations", JsonObject(book.generations.mapValues { JsonPrimitive(it.value) }))
-        if (state == null) return
-        val own = runCatching { cachedVault(personalVaultId()) }.getOrNull() ?: return
-        // In travel mode the items aren't here, and a fresh one would look like the only one.
-        if (own.hidden) return
-        book.personalVaultId = own.id
+        store.setMeta(STATE_META, ownership.toJson())
+        val s = state ?: return
         val item = trustItems().firstOrNull()
-        val body = (item?.body ?: newBody("trust", "trust-book")).with("trustBook" to book.toJson())
-        if (item != null) update(item.id, body) else saveNew(own.id, body)
+        // In travel mode the items aren't here, and a fresh one would look like the only one.
+        val home = item?.vaultId ?: store.getVaults().firstOrNull { isOwnVault(it) && !it.hidden }?.id ?: return
+        book.personalVaultId = null
+        val body = (item?.body ?: newBody("trust", "trust-book")).with(
+            "trustBook" to book.toJson(),
+            "trustState" to ownership.toJson(),
+            "homeSig" to JsonPrimitive(Ownership.signHome(s.keyset.ed25519, s.userId, home)),
+        )
+        if (item != null) update(item.id, body) else saveNew(home, body)
     }
 
     /** Remember this person's keys, because the person just chose to deal with them. A name
@@ -643,11 +725,13 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         roles.clear()
         val all = store.getVaults()
         // Their own vault has their decisions in it, so it opens before anything else is judged.
-        val ownFirst = all.filter { isOwnVault(it) } + all.filter { !isOwnVault(it) }
+        // Then the others they made, which open on their own signature and may prove one theirs.
         mergeTrustBook()
+        fun rank(v: CachedVault) = if (isOwnVault(v)) 0 else if (selfGranted(v.grantedBy)) 1 else 2
+        val ownFirst = all.sortedBy { rank(it) }
         var merged = false
         for (v in ownFirst) {
-            if (!merged && !isOwnVault(v)) {
+            if (!merged && rank(v) == 2) {
                 merged = true
                 mergeTrustBook()
             }
@@ -711,25 +795,40 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
             val remote = api.vaults()
             val known = store.getVaults().associateBy { it.id }
             val seen = HashSet<String>()
-            // Their own vault first: it holds what they've decided about the others. A "personal"
-            // vault not signed by them is somebody else's, whatever the server calls it.
+            // Their own vault first: it holds what they've decided about the others. Then the rest
+            // they made, which may prove one theirs on a new device. What the server calls a vault
+            // doesn't decide any of this: a "personal" vault not signed by them is somebody else's,
+            // and one signed by them is only their own if this device knows it is (refreshOwnPins).
+            fun rank(rv: VaultOut) = if (rv.id in ownVaultIds) 0 else if (selfGranted(rv.grantedBy)) 1 else 2
             val ordered = remote
-                .map { if (it.kind == "personal" && it.grantedBy != null && it.grantedBy != s.userId) it.copy(kind = "shared") else it }
-                .sortedByDescending { it.kind == "personal" }
+                .map { if (it.kind == "personal" && !selfGranted(it.grantedBy)) it.copy(kind = "shared") else it }
+                .sortedBy { rank(it) }
             var trustFresh = false
-            for (rv in ordered) {
-                if (!trustFresh && rv.kind != "personal") {
+            for (rv0 in ordered) {
+                if (!trustFresh && rank(rv0) == 2) {
                     trustFresh = true
                     mergeTrustBook()
                 }
+                var rv = rv0
                 seen += rv.id
                 val prev = known[rv.id]
-                var next = cacheVault(rv, prev)
                 // Your own vault's key is signed by you. Being told otherwise isn't a reason to believe it.
-                if (prev != null && isOwnVault(prev) && ((rv.grantedBy != null && rv.grantedBy != s.userId) || rv.kind != "personal")) {
+                if (prev != null && isOwnVault(prev) && !selfGranted(rv.grantedBy)) {
                     warnRollback(out, rv.id)
                     continue
                 }
+                // And it stays your own vault, whatever it's called.
+                if (rv.id in ownVaultIds && rv.kind != "personal") {
+                    warnRollback(out, rv.id)
+                    rv = rv.copy(kind = "personal")
+                }
+                // Another vault of theirs turning "personal" is a server trying to pass a shared vault,
+                // whose key its members hold, off as their own. Kept as what it is, and warned about.
+                if (rv.kind == "personal" && ownVaultIds.isNotEmpty() && rv.id !in ownVaultIds) {
+                    warnRollback(out, rv.id)
+                    rv = rv.copy(kind = "shared")
+                }
+                var next = cacheVault(rv, prev)
                 val highest = maxOf(prev?.memberGeneration ?: 0, book.generations[rv.id] ?: 0)
                 // An older key brought back, or an older state: an old grant still has a good
                 // signature, so this is the only thing that can catch it. Stay on what we have.
@@ -791,11 +890,13 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
                     }
                 }
             }
-            if (!trustFresh) mergeTrustBook()
-            if (generationsMoved) {
+            if (!trustFresh) mergeTrustBook() else refreshOwnPins()
+            // Sign their own vault as theirs, once, so their other devices can tell it from the rest.
+            val unsigned = homeMissing
+            if (generationsMoved || unsigned) {
                 saveTrustBook()
                 // Up straight away, rather than waiting for the next sync.
-                runCatching { cachedVault(personalVaultId()) }.getOrNull()?.takeIf { !it.hidden }?.let { pushVault(it, out) }
+                store.getVaults().firstOrNull { isOwnVault(it) && !it.hidden }?.let { pushVault(it, out) }
             }
             for (v in known.values) {
                 if (v.id !in seen) {
@@ -1003,12 +1104,16 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
 
     private fun cachedVault(id: String) = store.getVaults().firstOrNull { it.id == id } ?: throw IllegalStateException("Unknown vault")
 
-    /** Pinned the first time it's found, so a server can't swap in another later. */
+    /** Where new things are saved. Their own vault, as this device knows it (refreshOwnPins). A new
+     *  device whose other devices haven't signed theirs yet goes on the one vault the server calls
+     *  personal, as before, but reads no trust book from it and seals nothing from it. */
     fun personalVaultId(): String {
         val vaults = store.getVaults()
-        val pinned = (store.getMeta(PERSONAL_META) as? JsonPrimitive)?.content ?: book.personalVaultId
-        val v = vaults.firstOrNull { it.id == pinned && isOwnVault(it) } ?: vaults.firstOrNull { isOwnVault(it) } ?: throw IllegalStateException("No personal vault")
-        if (pinned == null) store.setMeta(PERSONAL_META, JsonPrimitive(v.id))
+        val preferred = (store.getMeta(PERSONAL_META) as? JsonPrimitive)?.content
+        val own = vaults.filter { isOwnVault(it) }
+        val v = own.firstOrNull { it.id == preferred } ?: own.firstOrNull()
+            ?: vaults.filter { it.kind == "personal" && selfGranted(it.grantedBy) }.takeIf { ownVaultIds.isEmpty() && it.size == 1 }?.first()
+            ?: throw IllegalStateException("No personal vault")
         return v.id
     }
 
@@ -1116,6 +1221,9 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         val grant = grantVaultKey(s.userId, s.keyset, id, s.userId, s.keyset.x25519Pub, 1, raw)
         api.createVault(id, sealField(raw, id, "name", JsonPrimitive(name)), grantJson(grant))
         raw.fill(0)
+        // Made alone, so it counts as theirs for emergency access until anyone else is added.
+        ownership.made += id
+        saveTrustBook()
         sync()
         return id
     }
@@ -1126,6 +1234,8 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         val v = cachedVault(vaultId)
         // Picking someone is the person's own act, and this is when their keys get remembered.
         val keys = pin(userId)
+        // Someone else's logins can be in it from now on, so it's no longer only theirs to hand on.
+        if (ownership.shared.add(vaultId)) saveTrustBook()
         val raw = rawVaultKey(v)
         val grant = grantVaultKey(s.userId, s.keyset, vaultId, userId, fromB64u(keys.x25519), v.generation, raw)
         raw.fill(0)
@@ -1313,7 +1423,7 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
     @Synchronized
     fun emergencyInvite(granteeId: String, waitDays: Int) {
         pin(granteeId)
-        if (granteeId !in book.contacts) book.contacts += granteeId
+        Ownership.name(ownership.contacts, granteeId)
         saveTrustBook()
         api.emergencyInvite(granteeId, waitDays)
     }
@@ -1336,7 +1446,8 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
             for (vaultId in row.openedVaults) removeMembers(vaultId, listOf(row.granteeId))
         }
         api.emergencyDelete(row.id)
-        book.contacts -= row.granteeId
+        // Removed for good: the counter beats any device's older list of contacts.
+        if (row.grantorId == s.userId) Ownership.remove(ownership.contacts, row.granteeId)
         saveTrustBook()
         sync()
     }
@@ -1348,8 +1459,11 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
     fun refreshEmergency() {
         val s = need()
         val rows = api.emergencyList()
-        // Your own vaults only. Other people's logins in a shared vault aren't yours to hand on.
-        val mine = store.getVaults().filter { isOwnVault(it) || ((it.grantedBy == null || it.grantedBy == s.userId) && it.memberCount <= 1) }
+        // Your own vaults only. Other people's logins in a shared vault aren't yours to hand on. Which
+        // vaults those are is decided on your devices: the vault you own, and ones you made that you've
+        // never added anyone to. A member count, or a label, from the server doesn't come into it.
+        val own = ownership
+        val mine = store.getVaults().filter { isOwnVault(it) || (selfGranted(it.grantedBy) && it.id in own.made && it.id !in own.shared) }
         for (row in rows) {
             if (row.grantorId != s.userId || row.state == "invited" || row.state == "opened" || row.state == "ended") continue
             if (row.granteeId !in book.contacts) continue

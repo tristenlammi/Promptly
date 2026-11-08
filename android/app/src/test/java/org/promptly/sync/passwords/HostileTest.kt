@@ -34,6 +34,7 @@ import org.promptly.sync.passwords.core.KdfParams
 import org.promptly.sync.passwords.core.KeyChangedError
 import org.promptly.sync.passwords.core.MemoryKeeper
 import org.promptly.sync.passwords.core.MemoryStore
+import org.promptly.sync.passwords.core.Ownership
 import org.promptly.sync.passwords.core.Primitives
 import org.promptly.sync.passwords.core.TrustBook
 import org.promptly.sync.passwords.core.VaultApi
@@ -1029,7 +1030,9 @@ class HostileTest {
         assertEquals(w.c.personalVaultId(), own.vaultId)
         assertTrue("A system item shows in lists", w.c.allItems().none { it.body.kind == "trust" })
         val book = own.body["trustBook"] as JsonObject
-        assertEquals(setOf("people", "accepted", "contacts", "generations", "personalVaultId"), book.keys)
+        assertEquals(setOf("people", "accepted", "contacts", "generations"), book.keys)
+        assertEquals(setOf("contacts", "made", "shared"), (own.body["trustState"] as JsonObject).keys)
+        assertTrue(Ownership.verifyHome(own.body.str("homeSig"), ALICE, own.vaultId, fromB64u(w.store.getAccount()!!.ed25519Pub)))
         assertEquals(setOf("x25519", "ed25519", "firstSeen", "verified", "username"), (book["people"] as JsonObject).getValue(bobId).jsonObject.keys)
         assertEquals(listOf(invited), TrustBook.strings(book["accepted"]))
         assertEquals(listOf(carolId), TrustBook.strings(book["contacts"]))
@@ -1152,6 +1155,140 @@ class HostileTest {
         assertTrue(vid in r.rollback)
         assertEquals("stays-1", w.c.get(item.id)!!.body.password)
         assertNotEquals(0, w.store.getItems(vid).size)
+    }
+
+    // ---- The 2026-11-08 review (F1, F2, F6) ----
+    // A shared vault you made has a grant you signed, and every member holds its key. A server
+    // that calls it "personal" mustn't make it count as yours.
+
+    private class Planted(val w: World, val real: String, val vid: String, val blob: String)
+
+    private fun plantedTeam(): Planted {
+        val w = fresh()
+        val real = w.c.personalVaultId()
+        w.c.saveNew(real, newBody("login", "Bank").withText("password", "hunter2-secret"))
+        val vid = w.c.createSharedVault("Team")
+        val mallory = Persona("mallory")
+        w.s.userKeys[malloryId] = mallory
+        w.c.addMember(vid, malloryId, "edit")
+        w.c.sync()
+        val k = opened(mallory, vid, malloryId, w.s.members.getValue(vid).first { it.userId == malloryId }.grant!!)
+        // Mallory writes a trust book into the vault she's in, naming herself checked and a contact,
+        // with a "this is my own vault" statement she signed herself.
+        val forged = TrustBook()
+        forged.contacts += malloryId
+        forged.people[malloryId] = org.promptly.sync.passwords.core.TrustEntry(mallory.xPub, mallory.ePub, "", true, "mallory")
+        val body = newBody("trust", "trust-book").with(
+            "trustBook" to forged.toJson(),
+            "trustState" to buildJsonObject { put("contacts", buildJsonObject { put(malloryId, 99) }) },
+            "homeSig" to JsonPrimitive(b64u(Primitives.ed25519Sign(mallory.e, Ownership.homeInput(ALICE, vid)))),
+        )
+        val v = w.s.vaults.getValue(vid)
+        v.revision += 1
+        val blob = b64u(encryptItem(k, vid, "planted-book", body))
+        w.s.items["planted-book"] = FI("planted-book", vid, v.revision, blob, deleted = false, purged = false)
+        // The server calls it personal, and makes up an accepted emergency row for her.
+        v.kind = "personal"
+        w.s.emergency = mutableListOf(w.s.emergencyRow("e9", malloryId, "accepted"))
+        return Planted(w, real, vid, blob)
+    }
+
+    @Test fun aSharedVaultYouMadeCantBePassedOffAsYourPersonalOne() {
+        val p = plantedTeam()
+        val w = p.w
+        val r = w.c.sync()
+        w.c.refreshEmergency()
+        assertEquals(emptyList<JsonObject>(), w.s.wrapped)
+        assertTrue(p.vid in r.rollback)
+        assertFalse(w.c.trustEntries()[malloryId]?.verified ?: false)
+        assertEquals(p.real, w.c.personalVaultId())
+        w.c.lock()
+        w.c.unlock(MASTER)
+        w.c.refreshEmergency()
+        assertEquals(emptyList<JsonObject>(), w.s.wrapped)
+        assertEquals(p.real, w.c.personalVaultId())
+        // Her book was never written over with the real one, where she could read it.
+        assertEquals(p.blob, w.s.items.getValue("planted-book").blob)
+        assertFalse(w.c.isOwn(p.vid))
+    }
+
+    @Test fun norOnYourOtherDeviceWithTheLabelsSwapped() {
+        val p = plantedTeam()
+        val w = p.w
+        w.c.sync()
+        w.s.vaults.getValue(p.real).kind = "shared"
+        val c2 = VaultClient(w.s.api, MemoryStore(), MemoryKeeper())
+        c2.unlock(MASTER, w.secretKey)
+        c2.refreshEmergency()
+        assertEquals(emptyList<JsonObject>(), w.s.wrapped)
+        assertEquals(p.real, c2.personalVaultId())
+        assertFalse(c2.isOwn(p.vid))
+        assertFalse(c2.trustEntries()[malloryId]?.verified ?: false)
+        val saved = c2.saveNew(c2.personalVaultId(), newBody("login", "From the phone").withText("password", "phone-secret"))
+        c2.sync()
+        assertEquals(p.real, w.s.items[saved.id]?.vaultId)
+    }
+
+    @Test fun aDeviceFromBeforeTheFixKeepsItsOwnVault() {
+        val p = plantedTeam()
+        val w = p.w
+        // As an older version left it: no pinned list, just the vault it saved to.
+        w.store.deleteMeta("own_vaults")
+        w.c.lock()
+        w.c.unlock(MASTER)
+        w.c.refreshEmergency()
+        assertEquals(emptyList<JsonObject>(), w.s.wrapped)
+        assertEquals(p.real, w.c.personalVaultId())
+        assertEquals(listOf(p.real), TrustBook.strings(w.store.getMeta("own_vaults")))
+    }
+
+    @Test fun aMemberCountFromTheServerDoesntDecideWhatsSealed() {
+        val w = fresh()
+        w.s.userKeys[carolId] = Persona("carol")
+        val team = w.c.createSharedVault("Team")
+        w.s.userKeys[bobId] = Persona("bob")
+        w.c.addMember(team, bobId, "edit")
+        val solo = w.c.createSharedVault("Just me")
+        w.c.sync()
+        // Bob's logins are in there; the server says Alice is alone.
+        w.s.vaults.getValue(team).memberCount = 1
+        w.c.markVerified(carolId)
+        w.c.emergencyInvite(carolId, 3)
+        w.c.sync()
+        val sealed = w.s.wrapped.flatMap { o -> o["grants"]!!.jsonArray.map { it.jsonObject["vault_id"]!!.jsonPrimitive.content } }.toSet()
+        assertEquals(setOf(w.c.personalVaultId(), solo), sealed)
+    }
+
+    @Test fun aRemovedEmergencyContactStaysRemovedAcrossDevices() {
+        val w = fresh()
+        w.s.userKeys[carolId] = Persona("carol")
+        w.c.markVerified(carolId)
+        w.c.emergencyInvite(carolId, 3)
+        w.c.sync()
+        val c2 = VaultClient(w.s.api, MemoryStore(), MemoryKeeper())
+        c2.unlock(MASTER, w.secretKey)
+        val erinId = "88888888-8888-4888-8888-888888888888"
+        w.s.userKeys[danaId] = Persona("dana")
+        w.s.userKeys[erinId] = Persona("erin")
+        c2.markVerified(danaId)
+        assertTrue(carolId in TrustBook.strings(c2.store.getMeta("trust_contacts")))
+        w.c.emergencyEnd(w.s.api.emergencyList().first())
+        // The other device saves its trust book from its older list, as it would after any change.
+        c2.markVerified(erinId)
+        c2.sync()
+        w.c.sync()
+        // The server brings the row back, and both devices are asked to seal.
+        w.s.wrapped.clear()
+        w.s.emergency = mutableListOf(w.s.emergencyRow("back", carolId, "accepted"))
+        w.c.refreshEmergency()
+        c2.refreshEmergency()
+        assertEquals(emptyList<JsonObject>(), w.s.wrapped)
+        // Naming her again is the person's own act, and works.
+        c2.emergencyInvite(carolId, 3)
+        c2.sync()
+        w.c.sync()
+        w.c.refreshEmergency()
+        assertTrue(w.s.wrapped.isNotEmpty())
     }
 
     @Test fun aGrantThatDoesntVerifyDoesntReplaceTheOneThatWorks() {
