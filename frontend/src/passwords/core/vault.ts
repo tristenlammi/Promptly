@@ -20,6 +20,7 @@ import {
   unwrapKeyset,
   wrapKeyset,
 } from "./keys";
+import { clearPinTries, lockedOutByPin, PIN_LOCKED_TEXT } from "./passkeypin";
 import { isSystem, type Item, type ItemBody, mergeBodies, newBody, searchText, touch, type TrustBook, type TrustEntry } from "./model";
 import { aesKey, KDF_FLOOR, type KdfParams, x25519Public } from "./primitives";
 import { deviceSafetyWords, identityWords } from "./safety";
@@ -259,6 +260,8 @@ export class VaultClient {
       search: new Map(),
     };
     await this.loadLocal();
+    // The master password is what five wrong passkey PINs ask for. It starts the count again.
+    await clearPinTries(this.store);
     if (!offline) await this.sync();
     if (opts.keepSecret) {
       const secret = new Uint8Array(64);
@@ -329,6 +332,8 @@ export class VaultClient {
   /** Unlock with what ``exportUnlockSecret`` gave, handed back by the OS. */
   async unlockWithSecret(secret: Uint8Array): Promise<{ offline: boolean }> {
     if (secret.length !== 64) throw new Error("bad unlock secret");
+    // A PIN, Windows Hello or a passkey: none of them, after five wrong passkey PINs here.
+    if (await lockedOutByPin(this.store)) throw new Error(PIN_LOCKED_TEXT);
     let cached = await this.store.getAccount();
     const unlockKey = await aesKey(secret.slice(0, 32));
     const authKey = secret.slice(32);

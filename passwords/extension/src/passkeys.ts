@@ -4,6 +4,7 @@
 import { b64u } from "../../../frontend/src/passwords/core/bytes";
 import { type Item, type Passkey, newBody } from "../../../frontend/src/passwords/core/model";
 import { getAssertion, makeCredential, rpIdAllowed, siteCredentialId, usablePasskeys } from "../../../frontend/src/passwords/core/passkey";
+import { checkPasskeyPin, clearPinTries, makePinVerifier, type MetaStore, passkeyPinOf, PIN_TRIES, pinProblem, pinTries, savePasskeyPin } from "../../../frontend/src/passwords/core/passkeypin";
 import type { VaultClient } from "../../../frontend/src/passwords/core/vault";
 import { ext } from "./rpc";
 
@@ -184,12 +185,17 @@ function loginFor(client: VaultClient, rpId: string, userName: string): Item | u
   }) && (!i.body.username || !userName || i.body.username === userName));
 }
 
+/** Where wrong passkey PINs are counted (the extension's own IndexedDB, which no page and no
+ *  content script can reach), and what five of them do: lock the vault. */
+export type PinGuard = { store: MetaStore; lockOut: () => Promise<void> };
+
 export async function handlePasskey(
   msg: { t: string; [k: string]: unknown },
   sender: chrome.runtime.MessageSender,
   client: () => VaultClient | null,
   isThePerson: (c: VaultClient, typed: string) => Promise<boolean>,
   offersChanged: (tabId: number, url?: string) => void = () => undefined,
+  guard?: PinGuard,
 ): Promise<unknown> {
   const isPrompt = !!sender.url && sender.url.startsWith(ext.runtime.getURL("passkey.html"));
 
@@ -312,6 +318,15 @@ export async function handlePasskey(
     const rp = req.options._rp as string;
     const base = { op: req.op, origin: req.origin, rpId: rp, unlocked: !!c?.unlocked, user: req.options.user };
     if (!c?.unlocked) return { ...base, candidates: [] };
+    // "choose" the first time, on any of this person's devices. Another device may have set one
+    // that hasn't come down yet, so look again before asking for a new one.
+    let pin = await passkeyPinOf(c);
+    if (!pin) {
+      await c.sync().catch(() => undefined);
+      pin = await passkeyPinOf(c);
+    }
+    const tries = guard ? await pinTries(guard.store) : 0;
+    Object.assign(base, { pin: pin ? "enter" : "choose", triesLeft: PIN_TRIES - tries });
     if (req.op === "get") {
       const only = req.options._only as string | undefined;
       const usable = usablePasskeys(allPasskeys(c), rp, (req.options.allow as { id: string }[]).map((x) => x.id)).filter((u) => !only || u.passkey.credentialId === only);
@@ -334,18 +349,48 @@ export async function handlePasskey(
   if (action === "native") return finish({ ok: false, native: true });
   if (!c?.unlocked) return { error: "locked" };
 
-  // An unlocked vault and a click in this window count as user verification, as they do in other
-  // password managers. How long it stays unlocked is this person's call (SECURITY.md). Asking for
-  // the master password each time is for items they've marked to ask.
+  // Telling a site it already has one makes nothing and signs nothing, so it needs no PIN.
+  if (req.op === "create") {
+    const o = req.options as { _rp: string; exclude: { id: string }[] };
+    const excluded = o.exclude.map((x) => x.id);
+    if (allPasskeys(c).some((p) => p.passkey.rpId === o._rp && excluded.includes(siteCredentialId(p.passkey.credentialId)))) return finish(fail("InvalidStateError", "That passkey is already saved here."));
+  }
+
+  // The passkey PIN, every time (D-PIN-1). Only after it's right does the site hear the person
+  // was verified. The window can't be reached by a page, and the count lives where a page can't
+  // reset it. No guard means no way to count, so nothing's signed.
+  if (!guard) return { error: "locked" };
+  const pin = await passkeyPinOf(c);
+  if (!pin) {
+    const chosen = typeof msg.newPin === "string" ? msg.newPin : "";
+    if (!chosen) return { error: "choose" };
+    const problem = pinProblem(chosen);
+    if (problem) return { error: "badPin", message: problem };
+    if (msg.newPinAgain !== chosen) return { error: "badPin", message: "Those two don't match." };
+    await savePasskeyPin(c, await makePinVerifier(chosen));
+    await clearPinTries(guard.store);
+  } else {
+    const typedPin = typeof msg.pin === "string" ? msg.pin : "";
+    if (!typedPin) return { error: "pin", left: PIN_TRIES - (await pinTries(guard.store)) };
+    const checked = await checkPasskeyPin(guard.store, pin, typedPin);
+    if (!checked.ok) {
+      if (checked.left > 0) return { error: "pin", left: checked.left };
+      // The window stays, to say so and to take the master password.
+      await guard.lockOut();
+      return { error: "pinLocked" };
+    }
+  }
+  // The vault can have locked while the PIN was being checked.
+  if (!c.unlocked) return { error: "locked" };
+  const uv = true;
+
+  // Items marked to ask for the master password still ask, after the PIN.
   const typed = typeof msg.verify === "string" ? msg.verify : "";
   const proved = !!typed && (await isThePerson(c, typed));
   if (typed && !proved) return { error: "wrong" };
-  const uv = req.options.userVerification !== "discouraged";
 
   if (req.op === "create") {
     const o = req.options as { user: { id: string; name: string; displayName?: string }; challenge: string; residentKey: string; _rp: string; exclude: { id: string }[] };
-    const excluded = o.exclude.map((x) => x.id);
-    if (allPasskeys(c).some((p) => p.passkey.rpId === o._rp && excluded.includes(siteCredentialId(p.passkey.credentialId)))) return finish(fail("InvalidStateError", "That passkey is already saved here."));
     const made = await makeCredential({
       rpId: o._rp,
       // A site's own name for itself is whatever it likes. The RP ID has been checked.

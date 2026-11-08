@@ -7,7 +7,7 @@ import { expect, type Page, test } from "@playwright/test";
 import { verifyAuthenticationResponse } from "@simplewebauthn/server";
 
 import { fromBitwardenJson } from "../../frontend/src/passwords/core/importers";
-import { connect, launch, makeUsers, menuFrame, popupFor, type Rig, siteA, startSite, tabIdOf, testHook, unlockExt } from "./lib";
+import { connect, launch, makeUsers, menuFrame, popupFor, type Rig, signInWithPin, siteA, startSite, tabIdOf, testHook, unlockExt } from "./lib";
 
 test.describe.configure({ mode: "serial" });
 
@@ -97,9 +97,10 @@ async function verified(page: Page, wanted: string) {
     expectedOrigin: ORIGIN,
     expectedRPID: RP,
     credential: { id: SITE_ID, publicKey: coseKey() as Uint8Array<ArrayBuffer>, counter: 0 },
-    requireUserVerification: false,
+    requireUserVerification: true,
   });
   expect(v.verified).toBe(true);
+  expect(v.authenticationInfo.userVerified).toBe(true);
   // Answering closes the window. One left open could be approved again later.
   await expect.poll(() => prompts().length, { timeout: 10_000 }).toBe(0);
 }
@@ -110,7 +111,7 @@ const answerWith = async (pop: Page) => {
   const prompt = await opened;
   await expect(prompt.getByText("Sign in with a passkey?")).toBeVisible();
   await expect(prompt.getByRole("strong").or(prompt.locator("strong"))).toContainText("localhost");
-  await prompt.getByRole("button", { name: new RegExp(USER) }).click();
+  await signInWithPin(prompt, new RegExp(USER));
 };
 
 test("a quiet request shows nothing by itself, and an imported passkey answers it from the panel", async () => {
@@ -141,7 +142,9 @@ test("a page asking with no click gets our window, not the browser's, when the p
   await expect(prompt.getByText("Sign in with a passkey?")).toBeVisible();
   // The way out to the browser's own is right there.
   await expect(prompt.getByRole("button", { name: "Use another device or security key" })).toBeVisible();
-  await prompt.getByRole("button", { name: new RegExp(USER) }).click();
+  // The PIN box is ready to type in, with no click needed first.
+  await expect(prompt.locator("#pin")).toBeFocused();
+  await signInWithPin(prompt, new RegExp(USER));
   await verified(page, wanted);
   await page.close();
 });
@@ -234,7 +237,7 @@ test("the on-page menu offers it as well, and picking it goes through the same w
   const opened = promptWindow();
   await row.click();
   const prompt = await opened;
-  await prompt.getByRole("button", { name: new RegExp(USER) }).click();
+  await signInWithPin(prompt, new RegExp(USER));
   await verified(page, wanted);
   await page.close();
 });

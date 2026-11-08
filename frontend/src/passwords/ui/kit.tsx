@@ -27,6 +27,8 @@ export type Ctx = {
   route: string;
   toast: (message: string, kind?: "ok" | "err") => void;
   copy: (text: string, what: string, sensitive?: boolean) => Promise<void>;
+  /** Lock now, as the Lock button does. */
+  lock: () => Promise<void>;
 };
 export const VaultContext = createContext<Ctx | null>(null);
 

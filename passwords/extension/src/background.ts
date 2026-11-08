@@ -1835,7 +1835,7 @@ ext.runtime.onMessage.addListener((msg: { t: string }, sender, reply) => {
   if (t === "vaultChanged" || t === "locked" || t === "offscreenClip") return false;
   let p: Promise<unknown>;
   if (t.startsWith("pk")) {
-    p = boot().then(() => handlePasskey(msg as never, sender, () => client, isThePerson, (tabId, url) => void updateBadge(tabId, url)));
+    p = boot().then(() => handlePasskey(msg as never, sender, () => client, isThePerson, (tabId, url) => void updateBadge(tabId, url), { store, lockOut: lock }));
   } else if (t === "menuList" || t === "menuPick" || t === "menuPasskey" || t === "menuMailCode" || t === "menuMailLink" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup" || t === "menuSize") {
     if (!isOurPage(sender, "/menu.html")) return false;
     p = handleMenu(msg as MenuRequest, sender);

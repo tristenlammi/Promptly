@@ -391,7 +391,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const ctx: Ctx = { platform, vault, settings, setSettings, preview, version, bump, go, route, toast, copy };
+  const ctx: Ctx = { platform, vault, settings, setSettings, preview, version, bump, go, route, toast, copy, lock };
   const folders = vault.unlocked ? vault.allItems({ includeSystem: true }).filter((i) => i.body.kind === "folder") : [];
   const tags = useMemo(() => {
     void version;

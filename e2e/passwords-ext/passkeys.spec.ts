@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import { expect, type Page, test } from "@playwright/test";
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from "@simplewebauthn/server";
 
-import { bg, connect, launch, makeUsers, MASTER, type Rig, siteA, startSite, tabIdOf, testHook, unlockExt } from "./lib";
+import { bg, connect, launch, makeUsers, MASTER, PASSKEY_PIN, type Rig, saveWithPin, signInWithPin, siteA, startSite, tabIdOf, testHook, typePasskeyPin, unlockExt } from "./lib";
 
 test.describe.configure({ mode: "serial" });
 
@@ -38,7 +38,7 @@ async function promptWindow() {
   return p;
 }
 
-test("creates a passkey, in a window of its own, and a real server library accepts it", async () => {
+test("creates a passkey, in a window of its own, choosing the passkey PIN first, and a real server library accepts it", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(siteA("webauthn.html"));
   const challenge = b64u(crypto.randomBytes(32));
@@ -46,14 +46,29 @@ test("creates a passkey, in a window of its own, and a real server library accep
   const prompt = await promptWindow();
   await expect(prompt.getByText("Save a passkey?")).toBeVisible();
   await expect(prompt.getByText("localhost:8111")).toBeVisible();
+  // No PIN yet: the same window asks for one, twice, with the box already focused.
+  await expect(prompt.getByText("Choose a passkey PIN.")).toBeVisible();
+  await expect(prompt.locator("#pin")).toBeFocused();
+  await expect(prompt.locator("#pin-again")).toBeVisible();
+  // An easy one, and two that don't match, are refused, and nothing's made.
+  await prompt.locator("#pin").fill("1234");
+  await prompt.locator("#pin-again").fill("1234");
   await prompt.getByRole("button", { name: "Save as a new item" }).click();
+  await expect(prompt.locator("#pin-error")).toContainText("too easy");
+  await prompt.locator("#pin").fill(PASSKEY_PIN);
+  await prompt.locator("#pin-again").fill("482914");
+  await prompt.locator("#pin-again").press("Enter");
+  await expect(prompt.locator("#pin-error")).toContainText("don't match");
+  // Enter in the box saves it.
+  await typePasskeyPin(prompt);
+  await prompt.locator("#pin-again").press("Enter");
   const r = await run;
   expect(r.error).toBeUndefined();
   expect(r.isReal).toBe(true);
   expect(r.authenticatorAttachment).toBe("platform");
-  const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: false });
+  const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: true });
   expect(v.verified).toBe(true);
-  // With the vault unlocked and a click in our window, and no password asked for.
+  // Only after the PIN.
   expect(v.registrationInfo?.userVerified).toBe(true);
   expect(v.registrationInfo?.credentialDeviceType).toBe("multiDevice");
   expect(v.registrationInfo?.credentialBackedUp).toBe(true);
@@ -68,7 +83,11 @@ test("signs in with it, and the library verifies the signature", async () => {
   const run = page.evaluate((o) => (window as any).__auth(o), { rpId: RP, challenge, allow: [credential.id] });
   const prompt = await promptWindow();
   await expect(prompt.getByText("Sign in with a passkey?")).toBeVisible();
-  await prompt.getByRole("button", { name: /ana@example.com/ }).click();
+  // The PIN's set now, so it's one box, focused, and Enter signs in.
+  await expect(prompt.locator("#pin")).toBeFocused();
+  await expect(prompt.locator("#pin-again")).toHaveCount(0);
+  await prompt.locator("#pin").fill(PASSKEY_PIN);
+  await prompt.locator("#pin").press("Enter");
   const r = await run;
   expect(r.error).toBeUndefined();
   const v = await verifyAuthenticationResponse({
@@ -91,7 +110,7 @@ test("discoverable sign-in with no allow list finds it too", async () => {
   const challenge = b64u(crypto.randomBytes(32));
   const run = page.evaluate((o) => (window as any).__auth(o), { rpId: RP, challenge });
   const prompt = await promptWindow();
-  await prompt.getByRole("button", { name: /ana@example.com/ }).click();
+  await signInWithPin(prompt, /ana@example.com/);
   expect((await run).error).toBeUndefined();
   await page.close();
 });
@@ -107,13 +126,13 @@ test("excludeCredentials stops a duplicate, and says so only after the prompt", 
   await page.close();
 });
 
-test("a site that requires user verification gets it with no password asked for", async () => {
+test("a site that requires user verification gets it after the PIN, with no password asked for", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(siteA("webauthn.html"));
   const challenge = b64u(crypto.randomBytes(32));
   const run = page.evaluate((o) => (window as any).__register(o), { rpId: RP, userId: b64u(Buffer.from("user-uv")), userName: "uv@example.com", challenge, uv: "required" });
   const prompt = await promptWindow();
-  await prompt.getByRole("button", { name: "Save as a new item" }).click();
+  await saveWithPin(prompt);
   const r = await run;
   expect(r.error).toBeUndefined();
   const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: true });
@@ -122,18 +141,20 @@ test("a site that requires user verification gets it with no password asked for"
   await page.close();
 });
 
-test("a site that says it doesn't want user verification isn't told it happened", async () => {
+test("a site that says it doesn't want user verification still gets the PIN asked, and is told it happened", async () => {
   const page = await rig.ctx.newPage();
   await page.goto(siteA("webauthn.html"));
   const challenge = b64u(crypto.randomBytes(32));
   const run = page.evaluate((o) => (window as any).__register(o), { rpId: RP, userId: b64u(Buffer.from("user-nouv")), userName: "nouv@example.com", challenge, uv: "discouraged" });
   const prompt = await promptWindow();
-  await prompt.getByRole("button", { name: "Save as a new item" }).click();
+  await expect(prompt.locator("#pin")).toBeVisible();
+  await saveWithPin(prompt);
   const r = await run;
   expect(r.error).toBeUndefined();
   const v = await verifyRegistrationResponse({ response: r, expectedChallenge: challenge, expectedOrigin: ORIGIN, expectedRPID: RP, requireUserVerification: false });
   expect(v.verified).toBe(true);
-  expect(v.registrationInfo?.userVerified).toBe(false);
+  // The PIN was typed, so it's true. A site that doesn't want it can ignore it.
+  expect(v.registrationInfo?.userVerified).toBe(true);
   await page.close();
 });
 
@@ -147,7 +168,7 @@ test("an item marked to ask still asks, whatever the site wants, and a wrong ans
   const challenge = b64u(crypto.randomBytes(32));
   const run = page.evaluate((o) => (window as any).__auth(o), { rpId: RP, challenge });
   const prompt = await promptWindow();
-  await prompt.getByRole("button", { name: new RegExp(username) }).first().click();
+  await signInWithPin(prompt, new RegExp(username));
   await prompt.getByLabel("Master password or PIN").fill("not the password");
   await prompt.getByRole("button", { name: "Continue" }).click();
   await expect(prompt.getByText("That isn't right.")).toBeVisible({ timeout: 30_000 });
@@ -156,6 +177,134 @@ test("an item marked to ask still asks, whatever the site wants, and a wrong ans
   const r = await run;
   expect(r.error).toBeUndefined();
   await testHook(rig, "patchItem", { id, patch: { reprompt: false } });
+  await page.close();
+});
+
+// ---- The passkey PIN (D-PIN-1) --------------------------------------------------------------
+
+async function askForAna(page: Page) {
+  await page.goto(siteA("webauthn.html"));
+  const challenge = b64u(crypto.randomBytes(32));
+  const run = page.evaluate((o) => (window as any).__auth(o), { rpId: RP, challenge, allow: [credential.id] });
+  return { run, challenge, prompt: await promptWindow() };
+}
+
+const stillWaiting = (run: Promise<unknown>) => Promise.race([run.then(() => "answered"), new Promise((r) => setTimeout(() => r("waiting"), 600))]);
+
+async function wrongPin(prompt: Page, said: string) {
+  await prompt.locator("#pin").fill("907153");
+  await prompt.locator("#pin").press("Enter");
+  await expect(prompt.locator("#pin-error")).toContainText(said, { timeout: 30_000 });
+  await expect(prompt.locator("#pin")).toHaveValue("");
+  await expect(prompt.locator("#pin")).toBeFocused();
+}
+
+async function verifiedSignIn(run: Promise<any>, challenge: string) {
+  const r = await run;
+  expect(r.error).toBeUndefined();
+  const v = await verifyAuthenticationResponse({
+    response: r,
+    expectedChallenge: challenge,
+    expectedOrigin: ORIGIN,
+    expectedRPID: RP,
+    credential: { id: credential.id, publicKey: credential.publicKey as Uint8Array<ArrayBuffer>, counter: 0 },
+    requireUserVerification: true,
+  });
+  expect(v.verified).toBe(true);
+  expect(v.authenticationInfo.userVerified).toBe(true);
+}
+
+test("passkey PIN: a wrong one is refused, says how many tries are left, and nothing reaches the site", async () => {
+  const page = await rig.ctx.newPage();
+  const { run, challenge, prompt } = await askForAna(page);
+  await wrongPin(prompt, "4 tries left");
+  expect(await stillWaiting(run)).toBe("waiting");
+  await prompt.locator("#pin").fill(PASSKEY_PIN);
+  await prompt.locator("#pin").press("Enter");
+  await verifiedSignIn(run, challenge);
+  await page.close();
+});
+
+test("passkey PIN: a page asking again can't reset the count, and a right PIN does", async () => {
+  const page = await rig.ctx.newPage();
+  let ask = await askForAna(page);
+  await wrongPin(ask.prompt, "4 tries left");
+  await wrongPin(ask.prompt, "3 tries left");
+  await ask.prompt.getByRole("button", { name: "Cancel" }).click();
+  expect((await ask.run).error).toBe("NotAllowedError");
+  // A fresh request, from a fresh page: the count is the extension's, not the page's.
+  await page.close();
+  const again = await rig.ctx.newPage();
+  ask = await askForAna(again);
+  await expect(ask.prompt.locator("#pin-error")).toContainText("3 tries left");
+  await ask.prompt.locator("#pin").fill(PASSKEY_PIN);
+  await ask.prompt.locator("#pin").press("Enter");
+  await verifiedSignIn(ask.run, ask.challenge);
+  // Back to five.
+  ask = await askForAna(again);
+  await expect(ask.prompt.locator("#pin")).toBeFocused();
+  await expect(ask.prompt.locator("#pin-error")).toHaveText("");
+  await ask.prompt.getByRole("button", { name: "Cancel" }).click();
+  await again.close();
+});
+
+test("passkey PIN: five wrong in a row lock the vault, and only the master password opens it", async () => {
+  // A short unlock PIN on this browser, to show it doesn't get round the lock.
+  await bg(rig, `const r = await chrome.runtime.sendMessage({ t: "setPin", pin: "7391" }); if (!r.ok) throw new Error(r.error);`);
+  const page = await rig.ctx.newPage();
+  const { run, challenge, prompt } = await askForAna(page);
+  for (const left of [4, 3, 2]) await wrongPin(prompt, `${left} tries left`);
+  await wrongPin(prompt, "One more wrong and your vault locks.");
+  await prompt.locator("#pin").fill("907153");
+  await prompt.locator("#pin").press("Enter");
+  await expect(prompt.locator("#pk-notice")).toContainText("Five wrong passkey PINs in a row, so your vault is locked. Unlock it with your master password.", { timeout: 30_000 });
+  await expect(prompt.getByLabel("Master password")).toBeVisible();
+  expect(await stillWaiting(run)).toBe("waiting");
+  expect(await bg<boolean>(rig, `return (await chrome.runtime.sendMessage({ t: "state" })).r.unlocked;`)).toBe(false);
+  // Nothing shorter than the master password opens it now.
+  const quick = await bg<{ ok: boolean; error?: string }>(rig, `return await chrome.runtime.sendMessage({ t: "pinUnlock", pin: "7391" });`);
+  expect(quick.ok).toBe(false);
+  expect(quick.error).toContain("Five wrong passkey PINs");
+  expect(await bg<boolean>(rig, `return (await chrome.runtime.sendMessage({ t: "state" })).r.unlocked;`)).toBe(false);
+  // The master password, in the same window, and the request carries on with a fresh count.
+  await prompt.getByLabel("Master password").fill(MASTER);
+  await prompt.getByRole("button", { name: "Unlock" }).click();
+  await expect(prompt.locator("#pin")).toBeVisible({ timeout: 60_000 });
+  await expect(prompt.locator("#pin-error")).toHaveText("");
+  await expect(prompt.locator("#pk-notice")).toHaveCount(0);
+  await prompt.locator("#pin").fill(PASSKEY_PIN);
+  await prompt.locator("#pin").press("Enter");
+  await verifiedSignIn(run, challenge);
+  await bg(rig, `await chrome.runtime.sendMessage({ t: "setPin", pin: null });`);
+  await page.close();
+});
+
+test("passkey PIN: the page can't see it, type it, or answer for the window", async () => {
+  const page = await rig.ctx.newPage();
+  await page.goto(siteA("webauthn.html"));
+  await page.evaluate(() => {
+    (window as any).__seen = [];
+    window.addEventListener("message", (e) => (window as any).__seen.push(JSON.stringify(e.data)));
+  });
+  const challenge = b64u(crypto.randomBytes(32));
+  const run = page.evaluate((o) => (window as any).__auth(o), { rpId: RP, challenge, allow: [credential.id] });
+  const prompt = await promptWindow();
+  await expect(prompt.locator("#pin")).toBeFocused();
+  // Keys the page gets stay in the page. The window is the extension's own, out of its reach.
+  await page.keyboard.type(PASSKEY_PIN);
+  await page.keyboard.press("Enter");
+  await expect(prompt.locator("#pin")).toHaveValue("");
+  expect(await page.evaluate(() => !document.getElementById("pin") && !window.opener && window.frames.length === 0)).toBe(true);
+  expect(await stillWaiting(run)).toBe("waiting");
+  // Only our window can ask what's waiting, or answer it. Anything else, even another of our own pages, is told nothing.
+  const said = await bg<unknown[]>(rig, `return [await chrome.runtime.sendMessage({ t: "pkPrompt", id: "x" }), await chrome.runtime.sendMessage({ t: "pkAnswer", id: "x", action: "use", pin: arg })].map((m) => m?.r ?? null);`, PASSKEY_PIN);
+  expect(said).toEqual([null, null]);
+  await prompt.locator("#pin").fill(PASSKEY_PIN);
+  await prompt.locator("#pin").press("Enter");
+  await verifiedSignIn(run, challenge);
+  // The PIN never went near the page: not in any message it could hear.
+  const seen = await page.evaluate(() => (window as any).__seen as string[]);
+  expect(seen.join("\n")).not.toContain(PASSKEY_PIN);
   await page.close();
 });
 
