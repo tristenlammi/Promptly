@@ -4516,6 +4516,8 @@ async def _stream_generator(
         # What retrieval found in the workspace for *this* message — kept
         # apart from the workspace's instructions, which don't change.
         workspace_knowledge_block: str | None = None
+        # Whether that block carried item or file text (not just the map).
+        workspace_text_seen = False
         if conv.workspace_id is not None:
             # Walk the workspace-share ACL so a collaborator's send
             # still picks up the workspace's system prompt + pinned
@@ -4597,6 +4599,7 @@ async def _stream_generator(
                     injection = WorkspaceInjection()
                 if injection.system_block:
                     workspace_knowledge_block = injection.system_block
+                    workspace_text_seen = injection.has_content
 
                 # ACL for pinned files in a (possibly shared) workspace:
                 # anyone with workspace access can *use* any file pinned
@@ -4638,6 +4641,8 @@ async def _stream_generator(
         # abort the turn.
         attachment_indexed_ids: set[uuid.UUID] = set()
         attachment_rag_system: str | None = None
+        # The files behind those chunks, for the outside-content mark below.
+        attachment_rag_files: list[UserFile] = []
         try:
             from app.chat.attachment_rag import (
                 attachment_rag_block,
@@ -4671,6 +4676,16 @@ async def _stream_generator(
                         len(attachment_indexed_ids),
                     )
                     attachment_indexed_ids = set()
+                if attachment_rag_system:
+                    attachment_rag_files = list(
+                        (
+                            await db.execute(
+                                select(UserFile).where(
+                                    UserFile.id.in_(attachment_indexed_ids)
+                                )
+                            )
+                        ).scalars()
+                    )
         except Exception:
             logger.exception(
                 "attachment RAG gathering failed (conversation_id=%s); "
@@ -4689,15 +4704,27 @@ async def _stream_generator(
         # emitted per image so the user sees what happened.
         triggering_files = per_message_attachments.get(triggering_user_msg_id, [])
         # Shared by every tool call this turn (see ToolContext.turn).
-        # Attached files are outside content too.
-        turn_state = TurnState(
-            untrusted=bool(triggering_files),
-            # Your own files, attached here, and not a shared workspace's: enough to
-            # log what they say (see ItemAction.from_documents), and nothing more.
-            own_attachments_only=bool(triggering_files)
-            and conv.workspace_id is None
-            and all(f.user_id == user.id for f in triggering_files),
-        )
+        # Attached files are outside content too. Your own files, attached here,
+        # and not a workspace's: enough to log what they say (see
+        # ItemAction.from_documents), and nothing more.
+        in_workspace = conv.workspace_id is not None
+        turn_state = TurnState(untrusted=False, own_attachments_only=False)
+        turn_state.saw_files(triggering_files, user_id=user.id, in_workspace=in_workspace)
+        # Chunks retrieved from files attached on earlier turns: the same files.
+        turn_state.saw_files(attachment_rag_files, user_id=user.id, in_workspace=in_workspace)
+        if attachment_rag_system and not attachment_rag_files:
+            turn_state["untrusted"] = True
+        # Workspace text injected before the model answers is outside content,
+        # whoever wrote it — the same rule as read_workspace_item and
+        # query_board_cards, which mark the turn for any item. Authorship isn't
+        # knowable here: boards, sheets, rosters and discussions are saved under
+        # the workspace owner's name whoever edited them, any member can edit a
+        # note, and the user's "own" items include imported files, web clippings
+        # and notes an earlier chat wrote after reading a web page. Only the map
+        # of item titles doesn't count, so a chat in an empty workspace isn't
+        # marked. An explicit "remember …" still saves (R-019).
+        if workspace_text_seen:
+            turn_state["untrusted"] = True
         # On a DeepSeek model, web_search / fetch_url use DeepSeek's own
         # Search and Fetch (app.search.deepseek).
         from app.search.deepseek import mark_turn
@@ -4906,6 +4933,9 @@ async def _stream_generator(
             snaps = {
                 str(a.get("id")): a for a in (m.attachments or []) if isinstance(a, dict)
             }
+            # An earlier turn's files whose text, caption or picture is re-sent
+            # below: outside content, the same as on the turn that brought them.
+            resent_files: list[UserFile] = []
 
             # Text/PDF preamble. The turn that brought a file gets all of it.
             # Later turns used to get nothing — the model answered follow-ups
@@ -4934,6 +4964,8 @@ async def _stream_generator(
                     preamble_files,
                     vision_handles_images=vision_effective,
                 )
+                if not is_triggering and preamble.strip():
+                    resent_files.extend(preamble_files)
             else:
                 preamble = ""
 
@@ -4956,6 +4988,9 @@ async def _stream_generator(
                 ]
                 if cached:
                     preamble = format_captions_as_text(cached) + "\n\n" + preamble
+                    if not is_triggering:
+                        cached_ids = {fid for fid, _n, _c in cached}
+                        resent_files.extend(f for f in earlier_images if f.id in cached_ids)
                 elif earlier_images and model_supports_vision:
                     names = ", ".join(f.filename or "image" for f in earlier_images)
                     preamble = (
@@ -5009,8 +5044,12 @@ async def _stream_generator(
                 # don't need to re-warn even if the file changed since.
                 if is_triggering:
                     triggering_warnings.extend(_img_warnings)
+                elif images:
+                    resent_files.extend(f for f in attachments if looks_image(f))
                 image_parts = images
             image_parts = image_parts + scan_parts
+            if resent_files:
+                turn_state.saw_files(resent_files, user_id=user.id, in_workspace=in_workspace)
 
             # Hydrate DeepSeek thinking-mode chain-of-thought on
             # assistant rows. NULL on non-DeepSeek providers and on
@@ -5726,6 +5765,10 @@ async def _stream_generator(
                 ref_block = build_reference_system_block(refs)
                 if ref_block:
                     turn_context.append(ref_block)
+                    # Another chat's summary may repeat a web page, a file or
+                    # someone else's words: outside content, like
+                    # search_past_chats (R-019).
+                    turn_state["untrusted"] = True
 
             # Drive-file @-mentions (Phase 2.2). Resolve each referenced
             # file the caller can read and inject its extracted text as
@@ -5756,6 +5799,8 @@ async def _stream_generator(
                 file_block = await asyncio.to_thread(build_file_mention_block, resolved_files)
                 if file_block:
                     turn_context.append(file_block)
+                    # File text, like read_file (R-019).
+                    turn_state.saw_files(resolved_files, user_id=user.id, in_workspace=in_workspace)
 
             # Connector @-mentions (Phase 10). ``@[name](connector:id)``
             # explicitly invokes an MCP connector's tools for this turn —
@@ -5850,6 +5895,10 @@ async def _stream_generator(
             knowledge_block = format_retrieved_block(retrieved)
             if knowledge_block:
                 turn_context.append(knowledge_block)
+                # Documents an admin uploaded to the model: file text the user
+                # didn't write (R-019). The personality above is the model's
+                # standing instructions, which the user chose by picking it.
+                turn_state["untrusted"] = True
 
         # A model that can't call tools still gets "always" Drive answers:
         # the passages ride in this turn's context, with the same citations.

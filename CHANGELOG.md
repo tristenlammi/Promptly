@@ -84,6 +84,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: importing a large KeePass file no longer gets passwords wrong after the first few KiB of protected values.
 - Passwords: a LastPass row with only a name no longer turns the next login into a note.
 - Passwords: passkeys imported from Bitwarden now work: their ids are converted to the form sites use.
+- Chat: workspace notes, boards, sheets and files that the chat reads on its own before answering now count as outside content, the same as when it opens them with a tool, so text someone else wrote there can't make it save to memory, change your calendar or files, or post for you without you asking. The same goes for @-mentioned files and chats, a custom model's documents, and files attached earlier in the chat.
 
 ### Added
 - Passwords: Security check lists "Accounts not in your vault", sites your own email says you have an account with and no login for, worked out on your device. Each has Add login, Not an account, and Delete account, which links to the site's deletion or account page (from JustDeleteMe's list of over 6,000 sites) and opens a ready-to-send deletion request in Mail as a draft.

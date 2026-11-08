@@ -41,6 +41,21 @@ class TurnState(dict):
             dict.__setitem__(self, "own_attachments_only", False)
         dict.__setitem__(self, key, value)
 
+    def saw_files(self, files: Any, *, user_id: Any, in_workspace: bool) -> None:
+        """File text reached this turn's prompt: outside content, whoever owns the file
+        (the same as ``read_file`` / ``search_my_files``). Files the person attached to
+        this chat themselves, outside a workspace, keep the narrow ``own_attachments_only``
+        exception, unless something else has already marked the turn."""
+        files = list(files)
+        if not files:
+            return
+        if not in_workspace and all(getattr(f, "user_id", None) == user_id for f in files):
+            if not self.get("untrusted"):
+                dict.__setitem__(self, "untrusted", True)
+                dict.__setitem__(self, "own_attachments_only", True)
+            return
+        self["untrusted"] = True
+
 
 @dataclass
 class ToolContext:

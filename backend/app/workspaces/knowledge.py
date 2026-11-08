@@ -2362,12 +2362,15 @@ class WorkspaceInjection:
     matched). ``attach_file_ids`` — files to fold into the triggering
     turn's attachments (full-dump mode: everything; retrieval mode:
     images + not-yet-indexed text as a fallback). ``retrieval_active``
-    is surfaced for logging / SSE only.
+    is surfaced for logging / SSE only. ``has_content`` is True when
+    ``system_block`` carries item or file text, not just the map of titles:
+    the chat counts that as outside content (R-019).
     """
 
     system_block: str | None = None
     attach_file_ids: list[uuid.UUID] = field(default_factory=list)
     retrieval_active: bool = False
+    has_content: bool = False
 
 
 async def _indexed_token_total(
@@ -3214,6 +3217,7 @@ async def build_workspace_injection(
             system_block=_with_map(map_md, struct_block),
             attach_file_ids=[uf.id for _, uf in file_rows],
             retrieval_active=False,
+            has_content=bool(struct_block),
         )
 
     # Retrieval mode. The retrieved block already spans the whole
@@ -3268,6 +3272,7 @@ async def build_workspace_injection(
         system_block=_with_map(map_md, combined or None),
         attach_file_ids=attach_ids,
         retrieval_active=True,
+        has_content=bool(combined),
     )
 
 
