@@ -13,11 +13,21 @@ import androidx.car.app.model.CarText
 import androidx.car.app.model.DurationSpan
 import androidx.car.app.model.Header
 import androidx.car.app.model.ItemList
+import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.MessageTemplate
 import androidx.car.app.model.Row
 import androidx.car.app.model.Template
+import androidx.car.app.navigation.model.MapWithContentTemplate
+import androidx.car.app.navigation.model.MessageInfo
 import androidx.car.app.navigation.model.NavigationTemplate
-import androidx.car.app.navigation.model.RoutePreviewNavigationTemplate
+import androidx.car.app.navigation.model.RoutingInfo
+import androidx.car.app.navigation.model.Step
+import androidx.car.app.versioning.CarAppApiLevels
+import com.stadiamaps.ferrostar.car.app.template.models.toCarDistance
+import com.stadiamaps.ferrostar.car.app.template.models.toCarLane
+import com.stadiamaps.ferrostar.car.app.template.models.toCarManeuver
+import uniffi.ferrostar.DrivingSide
+import uniffi.ferrostar.VisualInstruction
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -60,7 +70,7 @@ data class CarRoute(
 )
 
 /** Where you're thinking of going: still looking, or the ways there. */
-data class CarTripPlan(val stop: Stop, val routes: List<CarRoute>? = null, val selected: Int = 0) {
+data class CarTripPlan(val stop: Stop, val routes: List<CarRoute>? = null, val selected: Int = 0, val options: TripOptions = TripOptions()) {
     val route: CarRoute? get() = routes?.getOrNull(selected)
 }
 
@@ -77,15 +87,17 @@ object CarPreview {
     private val _problem = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val problem = _problem.asSharedFlow()
 
-    fun show(context: Context, stop: Stop) {
+    /** The ways to [stop], avoiding what your last drive on the phone avoided, unless
+     *  whoever sent you here (another app's "navigate to") said otherwise. */
+    fun show(context: Context, stop: Stop, options: TripOptions = Nav.driveOptions()) {
         asking?.cancel()
-        _plan.value = CarTripPlan(stop)
+        _plan.value = CarTripPlan(stop, options = options)
         asking = scope.launch {
             try {
                 val here = freshLocation() ?: throw NoFix()
-                val routes = routesTo(context, here, stop)
+                val routes = routesTo(context, here, stop, options)
                 if (routes.isEmpty()) throw IOException("none")
-                _plan.value = CarTripPlan(stop, routes)
+                _plan.value = CarTripPlan(stop, routes, options = options)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: NoFix) {
@@ -93,6 +105,23 @@ object CarPreview {
             } catch (e: Exception) {
                 Log.w(TAG, "Couldn't get a route", e)
                 giveUp(if (e.message?.contains("422") == true) "No route from here to there." else "Couldn't get a route. Check your connection.")
+            }
+        }
+    }
+
+    /** "Navigate to <words>" from another app: the nearest match, then its routes. */
+    fun showQuery(context: Context, words: String, options: TripOptions = Nav.driveOptions()) {
+        asking?.cancel()
+        asking = scope.launch {
+            try {
+                val here = runCatching { Nav.locationProvider.lastLocation() }.getOrNull()
+                val found = Maps.search(context, words, here?.let { it.latitude to it.longitude }).firstOrNull()
+                if (found == null) giveUp("Couldn't find $words.") else show(context, found, options)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "Couldn't look that up", e)
+                giveUp("Couldn't reach your server.")
             }
         }
     }
@@ -117,7 +146,7 @@ object CarPreview {
     fun go() {
         val plan = _plan.value ?: return
         val route = plan.route ?: return
-        Nav.start(listOf(plan.stop), TripOptions(), route.through)
+        Nav.start(listOf(plan.stop), plan.options, route.through)
         clear()
     }
 
@@ -125,11 +154,13 @@ object CarPreview {
         withTimeoutOrNull(12_000) { Nav.locationProvider.locationUpdates(1000L).first { System.currentTimeMillis() - it.time < 60_000 } }
             ?: withTimeoutOrNull(8_000) { Nav.locationProvider.locationUpdates(1000L).first() }
 
-    private suspend fun routesTo(context: Context, here: Location, stop: Stop): List<CarRoute> = withContext(Dispatchers.IO) {
+    private suspend fun routesTo(context: Context, here: Location, stop: Stop, options: TripOptions): List<CarRoute> = withContext(Dispatchers.IO) {
         val stops = JSONArray()
             .put(JSONObject().put("lat", here.latitude).put("lon", here.longitude).put("name", "Your location"))
             .put(JSONObject().put("lat", stop.lat).put("lon", stop.lon).put("name", stop.name))
-        parseRoutes(Maps.send(context, "POST", "/api/maps/route", JSONObject().put("stops", stops).put("mode", "drive")))
+        val body = JSONObject().put("stops", stops).put("mode", "drive")
+            .put("avoid_tolls", options.tolls).put("avoid_highways", options.highways).put("avoid_ferries", options.ferries)
+        parseRoutes(Maps.send(context, "POST", "/api/maps/route", body, Maps.DRIVING_TIMEOUT_SECONDS))
     }
 
     internal fun parseRoutes(body: JSONObject): List<CarRoute> {
@@ -237,8 +268,15 @@ internal object CarTemplates {
             .build()
     }
 
+    /** "no tolls", so a route avoiding them doesn't look like a mistake. */
+    fun avoiding(options: TripOptions): String? = listOfNotNull(
+        if (options.tolls) "no tolls" else null,
+        if (options.highways) "no highways" else null,
+        if (options.ferries) "no ferries" else null,
+    ).joinToString(", ").ifEmpty { null }
+
     /** "22 min", which the car writes in its own way, and how that compares. */
-    private fun routeRow(route: CarRoute, fastest: Int): Row {
+    private fun routeRow(route: CarRoute, fastest: Int, avoid: String?): Row {
         val title = SpannableString(" ")
         title.setSpan(DurationSpan.create(route.seconds.toLong()), 0, 1, Spanned.SPAN_INCLUSIVE_INCLUSIVE)
         val row = Row.Builder().setTitle(CarText.create(title))
@@ -250,23 +288,74 @@ internal object CarTemplates {
         val notes = listOfNotNull(
             if (route.seconds > fastest + 60) "${Math.round((route.seconds - fastest) / 60.0)} min longer" else null,
             if (route.addsMinutes >= 1) "${route.addsMinutes} min of traffic" else null,
+            avoid,
         ).joinToString(" · ")
         if (notes.isNotEmpty()) row.addText(notes)
         return row.build()
     }
 
-    /** The route on the map, how long it takes, and one big Go. */
-    fun preview(plan: CarTripPlan, limit: Int, onSelect: (Int) -> Unit, onGo: () -> Unit, onBack: Action = Action.BACK): Template {
-        val builder = RoutePreviewNavigationTemplate.Builder()
-            .setHeader(Header.Builder().setStartHeaderAction(onBack).setTitle(plan.stop.name).build())
+    private fun goAction(onGo: () -> Unit): Action =
+        Action.Builder().setTitle("Go").setFlags(Action.FLAG_PRIMARY).setBackgroundColor(CarColor.BLUE).setOnClickListener { onGo() }.build()
+
+    /** The route on the map, how long it takes, and one big Go. Cars on car API 7 or
+     *  later get the map-with-a-list template that replaced the route preview one
+     *  (deprecated in car-app 1.7); older cars keep the one they know. */
+    fun preview(plan: CarTripPlan, limit: Int, onSelect: (Int) -> Unit, onGo: () -> Unit, onBack: Action = Action.BACK, carApi: Int = CarAppApiLevels.LEVEL_7): Template {
+        val header = Header.Builder().setStartHeaderAction(onBack).setTitle(plan.stop.name).build()
         val routes = plan.routes?.take(limit.coerceAtLeast(1))
-        if (routes.isNullOrEmpty()) return builder.setLoading(true).build()
-        val list = ItemList.Builder().setOnSelectedListener { onSelect(it) }.setSelectedIndex(plan.selected.coerceIn(0, routes.lastIndex))
-        val fastest = routes.minOf { it.seconds }
-        routes.forEach { list.addItem(routeRow(it, fastest)) }
-        return builder
-            .setItemList(list.build())
-            .setNavigateAction(Action.Builder().setTitle("Go").setFlags(Action.FLAG_PRIMARY).setBackgroundColor(CarColor.BLUE).setOnClickListener { onGo() }.build())
+        val list = routes?.takeIf { it.isNotEmpty() }?.let { found ->
+            val items = ItemList.Builder().setOnSelectedListener { onSelect(it) }.setSelectedIndex(plan.selected.coerceIn(0, found.lastIndex))
+            val fastest = found.minOf { it.seconds }
+            val avoid = avoiding(plan.options)
+            found.forEach { items.addItem(routeRow(it, fastest, avoid)) }
+            items.build()
+        }
+        if (carApi >= CarAppApiLevels.LEVEL_7) {
+            // The list's own buttons can only be icons, so Go sits in the action strip.
+            val content = ListTemplate.Builder().setHeader(header)
+            val template = MapWithContentTemplate.Builder()
+            if (list == null) content.setLoading(true) else {
+                content.setSingleList(list)
+                template.setActionStrip(ActionStrip.Builder().addAction(goAction(onGo)).build())
+            }
+            return template.setContentTemplate(content.build()).build()
+        }
+        @Suppress("DEPRECATION")
+        val builder = androidx.car.app.navigation.model.RoutePreviewNavigationTemplate.Builder().setHeader(header)
+        if (list == null) return builder.setLoading(true).build()
+        return builder.setItemList(list).setNavigateAction(goAction(onGo)).build()
+    }
+
+    /** The card at the top while driving: the next turn, its lanes, and how far.
+     *  While a new route is being worked out after a wrong turn, the car's own
+     *  "loading" card, so it's clear something is happening. */
+    fun routingInfo(context: Context, instruction: VisualInstruction?, metresToTurn: Double?, side: DrivingSide, exit: Int?, rerouting: Boolean): RoutingInfo? {
+        if (rerouting) return RoutingInfo.Builder().setLoading(true).build()
+        if (instruction == null || metresToTurn == null) return null
+        val primary = instruction.primaryContent
+        val step = Step.Builder(primary.text).setManeuver(primary.toCarManeuver(context, side, exit))
+        instruction.secondaryContent?.text?.takeIf { it.isNotBlank() }?.let { step.setRoad(it) }
+        // The server's router sends lanes with the instruction under the turn, not on it.
+        val lanes = instruction.subContent?.laneInfo?.takeIf { it.isNotEmpty() } ?: primary.laneInfo?.takeIf { it.isNotEmpty() }
+        if (lanes != null) {
+            lanes.forEach { step.addLane(it.toCarLane()) }
+            // The car only shows lanes it's given a picture of.
+            step.setLanesImage(CarIcon.Builder(IconCompat.createWithBitmap(LaneImage.draw(lanes, side))).build())
+        }
+        return RoutingInfo.Builder().setCurrentStep(step.build(), metresToTurn.toCarDistance()).build()
+    }
+
+    /** "You've arrived", on the map, with what's next. */
+    fun arrival(context: Context, at: String?, onPark: () -> Unit, onDone: () -> Unit): Template {
+        val message = MessageInfo.Builder("You've arrived")
+            .setImage(icon(context, R.drawable.ic_map_place, tint = true))
+        at?.let { message.setText(it) }
+        val strip = ActionStrip.Builder()
+            .addAction(Action.Builder().setTitle("Save parking").setIcon(icon(context, R.drawable.ic_map_car)).setOnClickListener { onPark() }.build())
+            .addAction(Action.Builder().setTitle("Done").setFlags(Action.FLAG_PRIMARY).setOnClickListener { onDone() }.build())
+        return NavigationTemplate.Builder()
+            .setNavigationInfo(message.build())
+            .setActionStrip(strip.build())
             .build()
     }
 

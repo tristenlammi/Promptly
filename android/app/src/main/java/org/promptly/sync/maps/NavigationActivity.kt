@@ -45,6 +45,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -63,10 +67,8 @@ import com.stadiamaps.ferrostar.ui.formatters.LocalizedDistanceFormatter
 import com.stadiamaps.ferrostar.core.measurement.MeasurementSpeedUnit
 import com.stadiamaps.ferrostar.maplibreui.runtime.rememberNavigationMapState
 import com.stadiamaps.ferrostar.maplibreui.views.DynamicallyOrientingNavigationView
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.maplibre.compose.style.BaseStyle
-import uniffi.ferrostar.TripState
 
 /** The driving screen: `promptlymaps://navigate?server=…&code=…&stops=…`.
  *  Native because voice with the screen off and steady GPS need an app, not a
@@ -110,6 +112,9 @@ class NavigationActivity : ComponentActivity() {
         Nav.init(this)
         enableEdgeToEdge()
         request.value = parse(intent?.data)
+        // Ended somewhere else (the car's End, the assistant, arriving and walking
+        // away): don't leave a map with no trip on it.
+        lifecycleScope.launch { Nav.ended.collect { finish() } }
         setContent {
             val dark = isSystemInDarkTheme()
             MaterialTheme(colorScheme = if (dark) darkColorScheme(primary = Color(0xFFE08B6D), onPrimary = Color(0xFF3A1A0E)) else lightColorScheme(primary = Color(0xFFD97757), onPrimary = Color.White)) {
@@ -193,12 +198,7 @@ class NavigationActivity : ComponentActivity() {
                 Voice.clearReply()
             }
         }
-        LaunchedEffect(state.location) {
-            state.location?.let { Nav.onLocation(it.coordinates.lat, it.coordinates.lng) }
-        }
-        LaunchedEffect(state.tripState) {
-            if (state.tripState is TripState.Complete) Nav.arrivedNow()
-        }
+        // Cameras, warnings and arriving are Nav's: they work with this screen closed.
         val mapState = rememberNavigationMapState()
         Box(Modifier.fillMaxSize()) {
             DynamicallyOrientingNavigationView(
@@ -261,8 +261,17 @@ class NavigationActivity : ComponentActivity() {
                     Pill("$kmh km/h", if (over) Color(0xFFB3261E) else MaterialTheme.colorScheme.surface, if (over) Color.White else MaterialTheme.colorScheme.onSurface)
                 }
             }
-            if (message != null) {
-                Pill(message, Color(0xFF3A3A3A), Color.White, Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 8.dp))
+            when {
+                message != null ->
+                    Pill(message, Color(0xFF3A3A3A), Color.White, Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 8.dp))
+                // After a wrong turn, while the new way is worked out.
+                state.isCalculatingNewRoute == true ->
+                    Pill(
+                        "Finding a new route…",
+                        Color(0xFF3A3A3A),
+                        Color.White,
+                        Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                    )
             }
             said?.let {
                 Pill(it, Color(0xFF3A3A3A), Color.White, Modifier.align(Alignment.Center).padding(horizontal = 24.dp))
@@ -294,21 +303,17 @@ class NavigationActivity : ComponentActivity() {
             }
             if (arrived) {
                 Arrival(
+                    at = Nav.arrivedAt,
                     onPark = {
-                        val at = state.location
-                        scope.launch(Dispatchers.IO) {
-                            val ok = at != null && runCatching { Maps.park(context, at.coordinates.lat, at.coordinates.lng, "manual") }.isSuccess
-                            launch(Dispatchers.Main) {
-                                Toast.makeText(context, if (ok) "Parked here" else "Couldn't save that", Toast.LENGTH_SHORT).show()
-                                Nav.stop()
-                                Nav.dismissArrival()
-                                onDone()
-                            }
+                        scope.launch {
+                            val ok = Nav.parkHere()
+                            Toast.makeText(context, if (ok) "Parked here" else "Couldn't save that", Toast.LENGTH_SHORT).show()
+                            Nav.finishArrival()
+                            onDone()
                         }
                     },
                     onDone = {
-                        Nav.stop()
-                        Nav.dismissArrival()
+                        Nav.finishArrival()
                         onDone()
                     },
                 )
@@ -408,11 +413,11 @@ private fun AddStopSheet(onClose: () -> Unit) {
 }
 
 @Composable
-private fun Arrival(onPark: () -> Unit, onDone: () -> Unit) {
+private fun Arrival(at: String?, onPark: () -> Unit, onDone: () -> Unit) {
     Box(Modifier.fillMaxSize().background(Color(0x66000000)), contentAlignment = Alignment.BottomCenter) {
         Surface(shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.safeDrawingPadding().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("You've arrived", fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
+                Text(if (at != null) "You've arrived at $at" else "You've arrived", fontWeight = FontWeight.SemiBold, fontSize = 20.sp)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(onClick = onPark) { Text("Save where I parked") }
                     OutlinedButton(onClick = onDone) { Text("Done") }

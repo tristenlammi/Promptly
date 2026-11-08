@@ -50,7 +50,11 @@ import com.rallista.car.app.compose.ComposableScreen
 import com.stadiamaps.ferrostar.car.app.navigation.NavigationManagerBridge
 import com.stadiamaps.ferrostar.car.app.navigation.TurnByTurnNotificationManager
 import com.stadiamaps.ferrostar.car.app.template.icons.InterfaceCarIcons
-import com.stadiamaps.ferrostar.car.app.template.models.FerrostarRoutingInfo
+import com.stadiamaps.ferrostar.core.extensions.currentStep
+import com.stadiamaps.ferrostar.core.extensions.progress
+import com.stadiamaps.ferrostar.core.extensions.visualInstruction
+import org.promptly.sync.BuildConfig
+import uniffi.ferrostar.DrivingSide
 import com.stadiamaps.ferrostar.car.app.template.models.toCarDistance
 import com.stadiamaps.ferrostar.composeui.config.VisualNavigationViewConfig
 import com.stadiamaps.ferrostar.composeui.config.withSpeedLimitStyle
@@ -73,11 +77,18 @@ import org.promptly.sync.R
 
 /** P Maps on the car's screen (Android Auto). */
 class PromptlyCarService : CarAppService() {
-    // Sideloaded with no Play listing, so there's no allowlist of hosts to check against.
-    override fun createHostValidator(): HostValidator = HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+    override fun createHostValidator(): HostValidator = carHosts(this, BuildConfig.DEBUG)
 
     override fun onCreateSession(sessionInfo: SessionInfo): Session = PromptlyCarSession()
 }
+
+/** Which apps may show P Maps on a screen. A release build only talks to Google's own
+ *  car hosts (Android Auto, and Android Automotive's template host), from the car
+ *  library's list of their signing keys. A debug build talks to any, for the Desktop
+ *  Head Unit and test hosts. */
+internal fun carHosts(context: android.content.Context, debug: Boolean): HostValidator =
+    if (debug) HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+    else HostValidator.Builder(context).addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample).build()
 
 class PromptlyCarSession : Session() {
     private val styleScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -92,7 +103,36 @@ class PromptlyCarSession : Session() {
         if (Maps.server(carContext) == null) {
             return NotReady(carContext, "Open P Maps on your phone and start a trip once, then come back.")
         }
-        return DriveScreen(carContext)
+        val screen = DriveScreen(carContext)
+        // Opened by "navigate to…" from another app or the assistant. Once this screen
+        // is on the car, so anything it opens goes on top of it.
+        android.os.Handler(android.os.Looper.getMainLooper()).post { handle(intent, screen) }
+        return screen
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        val root = carContext.getCarService(androidx.car.app.ScreenManager::class.java)
+        if (Maps.server(carContext) == null) return
+        root.popToRoot()
+        handle(intent, root.top as? DriveScreen ?: return)
+    }
+
+    private fun handle(intent: Intent, screen: DriveScreen) {
+        // Only the car drives: another app's "walk there" still gets the drive preview.
+        val drive = Nav.driveOptions()
+        when (val ask = MapLinks.read(intent, drive)) {
+            is MapLinks.Ask.Navigate ->
+                if (ask.addStop && Nav.onTrip()) {
+                    Nav.addStop(ask.stop)
+                    CarToast.makeText(carContext, "Adding ${ask.stop.name}", CarToast.LENGTH_SHORT).show()
+                } else {
+                    CarPreview.show(carContext, ask.stop, if (ask.options.mode == "drive") ask.options else drive)
+                }
+            is MapLinks.Ask.NavigateTo -> CarPreview.showQuery(carContext, ask.query, if (ask.options.mode == "drive") ask.options else drive)
+            is MapLinks.Ask.Show -> CarPreview.show(carContext, ask.stop, drive)
+            is MapLinks.Ask.Search -> screen.screenManager.push(SearchScreen(carContext, ask.query))
+            null -> Unit
+        }
     }
 }
 
@@ -125,14 +165,21 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
     init {
         Nav.loadCarStyle(scope, carContext.isDarkMode)
         bridge.start(scope)
+        // Nav itself watches the trip for arriving, cameras and warnings, so a trip
+        // the car started still has them with the phone in a pocket.
         vm.navigationUiState.onEach {
             val wasNavigating = uiState?.isNavigating() == true
             uiState = it
-            it.location?.let { at -> Nav.onLocation(at.coordinates.lat, at.coordinates.lng) }
             if (wasNavigating != it.isNavigating() || it.isNavigating()) invalidate()
         }.launchIn(scope)
         Nav.carStyle.onEach { invalidate() }.launchIn(scope)
         Nav.traffic.onEach { invalidate() }.launchIn(scope)
+        Nav.arrived.onEach { invalidate() }.launchIn(scope)
+        // The voice says it; the screen shows it too, for when the music's loud.
+        Nav.cameraWarning.onEach { alert ->
+            val text = alert.limit?.let { "Speed camera · $it" } ?: "Speed camera ahead"
+            CarToast.makeText(carContext, text, CarToast.LENGTH_LONG).show()
+        }.launchIn(scope)
         CarPreview.plan.onEach {
             backFromPreview.isEnabled = it != null
             invalidate()
@@ -172,6 +219,8 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                         runCatching { Maps.park(carContext, at.coordinates.lat, at.coordinates.lng, "auto") }
                     }
                 }
+                // Arrived and switched the car off: that trip is over.
+                if (Nav.arrived.value) Nav.finishArrival()
                 bridge.stop()
                 scope.cancel()
             }
@@ -256,9 +305,18 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 )
                 .build(),
         )
-        state.tripState?.let { trip ->
-            FerrostarRoutingInfo.Builder(carContext).setTripState(trip).build()?.let { builder.setNavigationInfo(it) }
-        }
+        // Our own card rather than Ferrostar's: it adds the lanes (with their picture,
+        // which the car requires) and says when a new route is being worked out.
+        val trip = state.tripState
+        val step = trip?.currentStep()
+        CarTemplates.routingInfo(
+            carContext,
+            instruction = trip?.visualInstruction(),
+            metresToTurn = trip?.progress()?.distanceToNextManeuver,
+            side = step?.drivingSide ?: DrivingSide.LEFT,
+            exit = step?.roundaboutExitNumber?.toInt(),
+            rerouting = state.isCalculatingNewRoute == true,
+        )?.let { builder.setNavigationInfo(it) }
         state.progress?.let { progress ->
             val traffic = Nav.traffic.value
             val arrive = traffic?.arriveAt ?: java.time.Instant.now().plusSeconds(progress.durationRemaining.toLong())
@@ -318,11 +376,31 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         if (state?.isNavigating() == true) {
             return drivingTemplate(state)
         }
+        if (Nav.arrived.value) {
+            return CarTemplates.arrival(
+                carContext,
+                Nav.arrivedAt,
+                onPark = {
+                    scope.launch {
+                        val ok = Nav.parkHere()
+                        CarToast.makeText(carContext, if (ok) "Parked here" else "Couldn't save that", CarToast.LENGTH_SHORT).show()
+                        Nav.finishArrival()
+                    }
+                },
+                onDone = { Nav.finishArrival() },
+            )
+        }
         CarPreview.plan.value?.let { plan ->
-            return CarTemplates.preview(plan, carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_ROUTE_LIST), onSelect = CarPreview::select, onGo = {
-                CarToast.makeText(carContext, "Starting your trip", CarToast.LENGTH_SHORT).show()
-                CarPreview.go()
-            })
+            return CarTemplates.preview(
+                plan,
+                carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_ROUTE_LIST),
+                onSelect = CarPreview::select,
+                onGo = {
+                    CarToast.makeText(carContext, "Starting your trip", CarToast.LENGTH_SHORT).show()
+                    CarPreview.go()
+                },
+                carApi = carContext.carAppApiLevel,
+            )
         }
         return CarTemplates.landing(
             carContext,
@@ -458,7 +536,8 @@ private class PlacesScreen(context: CarContext) : Screen(context) {
     }
 }
 
-private class SearchScreen(context: CarContext) : Screen(context) {
+/** Search, optionally already asked: "search for coffee" from another app. */
+private class SearchScreen(context: CarContext, initial: String = "") : Screen(context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var results: List<Stop> = emptyList()
     private var query = ""
@@ -471,6 +550,7 @@ private class SearchScreen(context: CarContext) : Screen(context) {
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) = scope.cancel()
         })
+        if (initial.trim().length >= 2) search(initial, 0)
     }
 
     private fun search(words: String, pause: Long) {

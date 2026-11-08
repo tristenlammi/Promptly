@@ -86,6 +86,29 @@
                 <data android:scheme="promptlymaps" android:host="navigate" />
             </intent-filter>
         </activity>
+        <!-- "Navigate to" and "show on a map" from other apps and the assistant:
+             google.navigation: starts driving, geo: shows the place in P Maps. -->
+        <activity
+            android:name=".maps.MapLinkActivity"
+            android:label="P Maps"
+            android:icon="@mipmap/ic_maps"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="org.promptly.app.maps"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="geo" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="google.navigation" />
+            </intent-filter>
+        </activity>
         <activity
             android:name=".maps.TimelineActivity"
             android:label="Your timeline"

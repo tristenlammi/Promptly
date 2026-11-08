@@ -17,12 +17,17 @@ import com.stadiamaps.ferrostar.core.location.NavigationLocationProvider
 import com.stadiamaps.ferrostar.core.location.SimulatedLocationProvider
 import com.stadiamaps.ferrostar.core.location.toUserLocation
 import com.stadiamaps.ferrostar.core.service.FerrostarForegroundServiceManager
-import com.stadiamaps.ferrostar.core.withJsonOptions
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -33,10 +38,11 @@ import uniffi.ferrostar.CourseFiltering
 import uniffi.ferrostar.GeographicCoordinate
 import uniffi.ferrostar.NavigationControllerConfig
 import uniffi.ferrostar.RouteDeviationTracking
+import uniffi.ferrostar.TripState
+import uniffi.ferrostar.UserLocation
 import uniffi.ferrostar.Waypoint
 import uniffi.ferrostar.WaypointAdvanceMode
 import uniffi.ferrostar.WaypointKind
-import uniffi.ferrostar.WellKnownRouteProvider
 import uniffi.ferrostar.stepAdvanceDistanceEntryAndExit
 import uniffi.ferrostar.stepAdvanceDistanceToEndOfStep
 import java.time.Instant
@@ -59,10 +65,17 @@ object Nav {
     private const val TAG = "PromptlyNav"
     private const val SAME_PLACE_METRES = 500f
 
+    /** How long "You've arrived" waits for Done before the trip ends by itself, so a
+     *  phone left in a pocket doesn't keep the GPS on all afternoon. */
+    private const val ARRIVAL_ENDS_AFTER_MS = 180_000L
+
     @SuppressLint("StaticFieldLeak") // the application context
     private lateinit var app: Context
     private var core: FerrostarCore? = null
     private var model: TripModel? = null
+    private var routes: ServerRoutes? = null
+    // Lives as long as the app: watches the one trip for both screens.
+    private val watching = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tts: AndroidTtsObserver? = null
     private var liveJob: Job? = null
     private var lastOptions: TripOptions? = null
@@ -106,10 +119,27 @@ object Nav {
     private var trafficJob: Job? = null
     private val _arrived = MutableStateFlow(false)
     val arrived = _arrived.asStateFlow()
+    /** Where you arrived, for "You've arrived at Home". */
+    var arrivedAt: String? = null
+        private set
+    private var arrivalJob: Job? = null
 
-    private var cameras: List<Camera> = emptyList()
+    /** The trip ended (from the car, the phone, the assistant or by itself), so a
+     *  screen still showing it can close. */
+    private val _ended = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val ended = _ended.asSharedFlow()
+
+    /** A speed camera coming up, once for each, for the car's screen. */
+    private val _cameraWarning = MutableSharedFlow<CameraAlert.Ahead>(extraBufferCapacity = 2)
+    val cameraWarning = _cameraWarning.asSharedFlow()
+
+    @Volatile private var cameras: List<Camera> = emptyList()
     private val warned = mutableSetOf<Camera>()
     private val closestSoFar = mutableMapOf<Camera, Float>()
+    // Which route the cameras are for: every new route gets its own, wrong turns too.
+    private var camerasFor: Triple<Int, GeographicCoordinate, GeographicCoordinate>? = null
+    private var cameraJob: Job? = null
+    private var lastFix: UserLocation? = null
 
     val locationProvider: NavigationLocationProvider by lazy {
         NavigationLocationProvider(
@@ -142,27 +172,15 @@ object Nav {
         }
     }
 
-    /** The view model the screens draw from. */
+    /** The view model the screens draw from. There's only ever one, so the phone's
+     *  driving screen and the car's always show the same trip; [options] are the ones
+     *  the next route is asked for with. */
     fun viewModel(options: TripOptions = lastOptions ?: TripOptions()): TripModel {
-        model?.takeIf { lastOptions == options }?.let { return it }
-        val profile = when (options.mode) {
-            "walk" -> "pedestrian"
-            "cycle" -> "bicycle"
-            else -> "auto"
-        }
-        val costing = mutableMapOf<String, Any>()
-        if (options.tolls) costing["use_tolls"] = 0.0
-        if (options.highways && profile == "auto") costing["use_highways"] = 0.0
-        if (options.ferries) costing["use_ferry"] = 0.0
-        val server = Maps.server(app) ?: throw IllegalStateException("Not signed in")
-        val provider = WellKnownRouteProvider.Valhalla("$server/api/maps/navigate/route", profile)
-            .withJsonOptions(
-                mapOf(
-                    "costing_options" to mapOf(profile to costing),
-                    "units" to "kilometers",
-                    "language" to "en-GB",
-                ),
-            )
+        val provider = routes ?: ServerRoutes(app).also { routes = it }
+        provider.options = options
+        lastOptions = options
+        model?.let { return it }
+        Maps.server(app) ?: throw IllegalStateException("Not signed in")
         val config = NavigationControllerConfig(
             WaypointAdvanceMode.WaypointWithinRange(60.0),
             stepAdvanceDistanceEntryAndExit(30u, 5u, 32u),
@@ -172,10 +190,10 @@ object Nav {
         )
         val built = FerrostarCore(
             provider,
-            httpClient = Maps.client(app).toOkHttpClientProvider(),
-            locationProvider = locationProvider,
-            foregroundServiceManager = FerrostarForegroundServiceManager(app, DefaultForegroundNotificationBuilder(app)),
-            navigationControllerConfig = config,
+            Maps.client(app, Maps.DRIVING_TIMEOUT_SECONDS).toOkHttpClientProvider(),
+            locationProvider,
+            config,
+            FerrostarForegroundServiceManager(app, DefaultForegroundNotificationBuilder(app)),
         )
         val observer = tts ?: AndroidTtsObserver(app).also { t ->
             t.statusObserver = object : AndroidTtsStatusListener {
@@ -195,8 +213,62 @@ object Nav {
         observer.setMuted(savedMuted())
         built.spokenInstructionObserver = observer
         core = built
-        lastOptions = options
-        return TripModel(built).also { model = it }
+        return TripModel(built).also {
+            model = it
+            watch(it)
+        }
+    }
+
+    /** What every trip needs, whichever screen (if any) is showing it: arriving,
+     *  the cameras on each new route (wrong turns included), and the warnings. */
+    private fun watch(vm: TripModel) {
+        var wasNavigating = false
+        vm.navigationUiState.onEach { state ->
+            val navigating = state.isNavigating()
+            if (wasNavigating && !navigating && state.tripState is TripState.Complete) arrivedNow()
+            wasNavigating = navigating
+            state.location?.let { lastFix = it }
+            if (navigating) {
+                state.routeGeometry?.let(::routeIs)
+                state.location?.let { onLocation(it.coordinates.lat, it.coordinates.lng) }
+            }
+        }.launchIn(watching)
+    }
+
+    /** A new route, from you or from Ferrostar after a wrong turn: its own cameras. */
+    private fun routeIs(line: List<GeographicCoordinate>) {
+        if (line.size < 2) return
+        val key = Triple(line.size, line.first(), line.last())
+        if (key == camerasFor) return
+        camerasFor = key
+        cameraJob?.cancel()
+        cameraJob = watching.launch(Dispatchers.IO + keepDriving) {
+            val shape = Maps.encodeShape(line.map { it.lat to it.lng })
+            try {
+                cameras = Maps.cameras(app, shape)
+            } catch (e: java.io.IOException) {
+                // Keep the last ones, and ask again in a minute.
+                Log.w(TAG, "Couldn't fetch cameras: ${e.message}")
+                delay(60_000)
+                withContext(Dispatchers.Main) { if (camerasFor == key) camerasFor = null }
+            }
+        }
+    }
+
+    /** The avoid choices of the last drive you started on the phone. The car uses
+     *  them too, so "no tolls" on the phone is "no tolls" in the car. */
+    fun driveOptions(): TripOptions {
+        val p = app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE)
+        return TripOptions("drive", p.getBoolean("avoid_tolls", false), p.getBoolean("avoid_highways", false), p.getBoolean("avoid_ferries", false))
+    }
+
+    private fun rememberDriveOptions(options: TripOptions) {
+        if (options.mode != "drive") return
+        app.getSharedPreferences("maps_nav", Context.MODE_PRIVATE).edit()
+            .putBoolean("avoid_tolls", options.tolls)
+            .putBoolean("avoid_highways", options.highways)
+            .putBoolean("avoid_ferries", options.ferries)
+            .apply()
     }
 
     private fun startsHere(stops: List<Stop>, here: Location): Boolean {
@@ -211,11 +283,14 @@ object Nav {
     /** Ask for the route from where you are, and go. */
     fun start(stops: List<Stop>, options: TripOptions, through: List<ThroughPoint> = emptyList()) {
         val vm = viewModel(options)
+        rememberDriveOptions(options)
         _error.value = null
-        _arrived.value = false
+        dismissArrival()
         _camera.value = CameraAlert.None
         warned.clear()
         closestSoFar.clear()
+        cameras = emptyList()
+        camerasFor = null
         vm.viewModelScope.launch(Dispatchers.IO) {
             try {
                 // A fresh fix if one comes quickly. The phone's last known position
@@ -242,13 +317,12 @@ object Nav {
                 // The way you picked is the way into the last stop. Going through it
                 // first would drive the whole route, come back, and drive it again.
                 val waypoints = rest.dropLast(1).map(::stopAt) + through.map(::viaPoint) + rest.takeLast(1).map(::stopAt)
-                val route = c.getRoutes(here.toUserLocation(), waypoints).first()
+                val route = provider().fetch(here.toUserLocation(), waypoints).first()
                 vm.setDestination(rest.lastOrNull()?.name)
                 withContext(Dispatchers.Main) {
                     if (vm.navigationUiState.value.isNavigating()) c.replaceRoute(route) else c.startNavigation(route)
                 }
-                val shape = Maps.encodeShape(route.geometry.map { it.lat to it.lng })
-                cameras = runCatching { Maps.cameras(app, shape) }.getOrDefault(emptyList())
+                // The route's cameras follow from watch().
                 liveLoop(vm)
                 trafficLoop(vm)
             } catch (e: Exception) {
@@ -322,9 +396,11 @@ object Nav {
             return
         }
         val limit = hit.first.maxSpeed?.toInt()
-        _camera.value = CameraAlert.Ahead(hit.second.toInt(), limit)
+        val alert = CameraAlert.Ahead(hit.second.toInt(), limit)
+        _camera.value = alert
         if (warned.add(hit.first)) {
             speak(if (limit != null) "Speed camera ahead. $limit limit." else "Speed camera ahead.")
+            _cameraWarning.tryEmit(alert)
         }
     }
 
@@ -382,15 +458,43 @@ object Nav {
         id?.let { afterSpeech.remove(it)?.invoke() }
     }
 
+    /** You're there: both screens say so, whichever started the trip. */
     fun arrivedNow() {
+        if (_arrived.value) return
+        arrivedAt = destination?.name?.takeIf { it.isNotBlank() && it != "Destination" }
         _arrived.value = true
         cameras = emptyList()
         _camera.value = CameraAlert.None
+        _hazard.value = null
+        arrivalJob?.cancel()
+        arrivalJob = watching.launch {
+            delay(ARRIVAL_ENDS_AFTER_MS)
+            if (_arrived.value) {
+                stop()
+                dismissArrival()
+            }
+        }
     }
 
     fun dismissArrival() {
+        arrivalJob?.cancel()
+        arrivalJob = null
         _arrived.value = false
     }
+
+    /** "Save where I parked", from the arrival screen on the phone or in the car. */
+    suspend fun parkHere(): Boolean = withContext(Dispatchers.IO) {
+        val at = lastFix ?: return@withContext false
+        runCatching { Maps.park(app, at.coordinates.lat, at.coordinates.lng, "manual") }.isSuccess
+    }
+
+    /** Done with the trip you arrived at. */
+    fun finishArrival() {
+        stop()
+        dismissArrival()
+    }
+
+    private fun provider(): ServerRoutes = routes ?: ServerRoutes(app).also { routes = it }
 
     private fun viaPoint(p: ThroughPoint): Waypoint {
         // Its direction of travel, so it lands on the right side of the road.
@@ -422,11 +526,9 @@ object Nav {
         vm.viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 val here = vm.navigationUiState.value.location ?: return@launch
-                val route = c.getRoutes(here, stops.map { Waypoint(coordinate = GeographicCoordinate(it.lat, it.lon), kind = WaypointKind.BREAK) }).first()
+                val route = provider().fetch(here, stops.map { Waypoint(coordinate = GeographicCoordinate(it.lat, it.lon), kind = WaypointKind.BREAK) }).first()
                 withContext(Dispatchers.Main) { c.replaceRoute(route) }
                 then()
-                val shape = Maps.encodeShape(route.geometry.map { it.lat to it.lng })
-                cameras = runCatching { Maps.cameras(app, shape) }.getOrDefault(cameras)
                 hazards = emptyList()
                 lastWarningCheck = 0L
                 trafficLoop(vm)
@@ -479,7 +581,7 @@ object Nav {
         when (action.optString("type")) {
             "add_stop" -> stop()?.let(::addStop)
             "remove_stop" -> removeStop()
-            "go" -> stop()?.let { start(listOf(it), lastOptions ?: TripOptions()) }
+            "go" -> stop()?.let { start(listOf(it), lastOptions ?: driveOptions()) }
             "end_trip" -> this.stop()
         }
     }
@@ -495,10 +597,8 @@ object Nav {
             runCatching {
                 val here = vm.navigationUiState.value.location ?: return@launch
                 val waypoints = offer.through.map(::viaPoint) + Waypoint(coordinate = GeographicCoordinate(to.lat, to.lon), kind = WaypointKind.BREAK)
-                val route = c.getRoutes(here, waypoints).first()
+                val route = provider().fetch(here, waypoints).first()
                 withContext(Dispatchers.Main) { c.replaceRoute(route) }
-                val shape = Maps.encodeShape(route.geometry.map { it.lat to it.lng })
-                cameras = runCatching { Maps.cameras(app, shape) }.getOrDefault(cameras)
                 speak("Taking the faster route.")
                 // Traffic on the new road, right away.
                 trafficLoop(vm)
@@ -621,8 +721,11 @@ object Nav {
         hazards = emptyList()
         _hazard.value = null
         cameras = emptyList()
+        camerasFor = null
+        cameraJob?.cancel()
         _camera.value = CameraAlert.None
         model?.stopNavigation()
+        _ended.tryEmit(Unit)
     }
 }
 

@@ -21,9 +21,27 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- P Maps offline (maps-offline) -->
+- P Maps in the car: "You've arrived at …" on the car's screen, with Save parking and Done, including for trips started from the car with the phone in a pocket.
+- P Maps in the car: lane guidance on the turn card at junctions where the map knows the lanes.
+- P Maps in the car: a "Speed camera · 60" note on the car's screen as well as the voice.
+- P Maps: "Finding a new route…" on the phone and the car's loading card while a new way is worked out after a wrong turn.
+- P Maps: "navigate to" and map links from other apps and assistants open P Maps (a navigate link starts driving; a place or a search opens it in P Maps), on the phone and in the car.
+
+### Changed
+<!-- P Maps offline (maps-offline) -->
+- P Maps in the car uses the avoid choices (tolls, highways, ferries) of your last drive started on the phone, and the route list says so.
+- P Maps: a trip started on the phone with avoid options now shows on the car's screen too, and wrong turns get the new road's speed cameras.
+- P Maps: on a weak signal, routes give up sooner with a clear message, and the car's map and saved places use the copies from last time instead of waiting.
+- P Maps: wrong turns check for road closures at most once every 5 minutes, so a bad day doesn't use up the day's closure checks (Admin → App settings explains this).
+- P Maps in the car: the route choice uses the newer car screen on cars that support it.
+
 ### Fixed
 <!-- P Maps offline (maps-offline) -->
 - P Maps (Android): your speed on the driving screen now turns red when you're over the road's speed limit. It never did, because the limit was read the wrong way.
+- P Maps: ending a trip from the car (or by voice) now closes the phone's driving screen instead of leaving a map with no trip.
+- Android Auto: release builds only talk to Google's own car hosts.
 
 ## [0.31.0] - 2026-11-08
 

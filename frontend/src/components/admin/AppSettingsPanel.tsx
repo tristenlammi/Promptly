@@ -1222,6 +1222,9 @@ function MapsTrafficCard({ settings, onSubmit, busy }: CardSubmit) {
           Adds &quot;traffic adds 6 min&quot;, traffic-aware arrival times, warnings about crashes and closures, and routing around closed roads to P Maps, anywhere TomTom covers. This server asks TomTom by map area, so TomTom sees this server and the areas, not who is driving or where to. The one exception is a place&apos;s More details button, which names that place. Without a key, P Maps works without any of this.
         </p>
         <p className="text-xs text-[var(--text-muted)]">
+          Closed roads are checked when a trip starts, every 10 minutes along the way, and after a wrong turn at most once every 5 minutes, so a day of driving stays inside the daily allowance. Once it&apos;s used up, directions carry on without closure warnings until tomorrow.
+        </p>
+        <p className="text-xs text-[var(--text-muted)]">
           TomTom&apos;s free tier is licensed for evaluation only, and its terms need written permission for turn-by-turn and in-car use. Get that from TomTom before relying on this day to day.
         </p>
         <div>

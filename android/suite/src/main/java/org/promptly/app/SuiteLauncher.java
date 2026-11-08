@@ -30,6 +30,11 @@ public class SuiteLauncher extends LauncherActivity {
         return Server.get(this) != null;
     }
 
+    /** A path on your server to open instead of this launcher's own, e.g. P Maps
+     *  showing a place another app sent ("/maps?to=…"). Only ever a path: the
+     *  server is always the one you set up. */
+    static final String EXTRA_PATH = "org.promptly.app.OPEN_PATH";
+
     @Override
     protected Uri getLaunchingUrl() {
         String path = "/";
@@ -39,6 +44,8 @@ public class SuiteLauncher extends LauncherActivity {
         } catch (PackageManager.NameNotFoundException ignored) {
             // Can't happen for our own activity; "/" is a fine fallback.
         }
+        String asked = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_PATH);
+        if (asked != null && asked.startsWith("/") && !asked.startsWith("//") && !asked.contains("\\")) path = asked;
         String sep = path.contains("?") ? "&" : "?";
         return Uri.parse(Server.get(this) + path + sep + "source=android");
     }

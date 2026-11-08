@@ -291,11 +291,12 @@ async def way_round_closure(here: dict[str, Any], to: dict[str, float], mode: st
     }
 
 
-async def around_for_navigation(db: AsyncSession, ask: dict[str, Any]) -> dict[str, Any]:
+async def around_for_navigation(db: AsyncSession, ask: dict[str, Any], check_closures: bool = True) -> dict[str, Any]:
     """The phone's route request, kept off roads reported closed. Costs one
-    incident request, so a day of driving stays inside the allowance."""
+    incident request, so a day of driving stays inside the allowance.
+    ``check_closures=False`` (a reroute soon after the last check) costs none."""
     answer = await engine.valhalla("/route", ask)
-    if ask.get("costing") == "pedestrian":
+    if ask.get("costing") == "pedestrian" or not check_closures:
         return answer
     routes = answer.get("routes") or []
     if not routes or not routes[0].get("geometry"):

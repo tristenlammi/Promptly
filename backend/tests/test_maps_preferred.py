@@ -269,3 +269,26 @@ async def test_the_driving_screen_is_told_about_a_faster_way(user, client, monke
     del body["to"]
     got = (await client.post("/api/maps/traffic/route", headers=_hdr(user), json=body)).json()
     assert got["traffic"] and got["faster"] is None
+
+
+async def test_reroutes_from_the_phone_check_closures_now_and_then(user, client, valhalla, monkeypatch):
+    from app.maps import planning
+
+    checks: list[bool] = []
+    real = planning.around_for_navigation
+
+    async def spy(db, ask, check_closures=True):
+        checks.append(check_closures)
+        return await real(db, ask, check_closures)
+
+    monkeypatch.setattr(planning, "around_for_navigation", spy)
+    body = {"costing": "auto", "format": "osrm", "locations": [{"lat": -27.9, "lon": 153.5}, {"lat": WORK["lat"], "lon": WORK["lon"]}]}
+    reroute = {**_hdr(user), "X-Promptly-Reroute": "1"}
+    assert (await client.post("/api/maps/navigate/route", headers=_hdr(user), json=body)).status_code == 200
+    assert (await client.post("/api/maps/navigate/route", headers=reroute, json=body)).status_code == 200
+    assert (await client.post("/api/maps/navigate/route", headers=reroute, json=body)).status_code == 200
+    # Starting checks; the wrong turns right after it don't.
+    assert checks == [True, False, False]
+    # A new trip checks again.
+    assert (await client.post("/api/maps/navigate/route", headers=_hdr(user), json=body)).status_code == 200
+    assert checks[-1] is True

@@ -409,11 +409,17 @@ _NAV_FIELDS = {
 
 
 @router.post("/navigate/route")
-async def navigate_route(body: dict[str, Any], db: AsyncSession = Depends(get_db), user: User = Depends(maps_user)) -> dict[str, Any]:
-    """A route for turn-by-turn on the phone, in the format its library reads."""
+async def navigate_route(
+    body: dict[str, Any], request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(maps_user)
+) -> dict[str, Any]:
+    """A route for turn-by-turn on the phone, in the format its library reads.
+    The phone marks the ones its navigation library asks for after a wrong turn
+    (``X-Promptly-Reroute: 1``): those check for closures every few minutes, not
+    every time."""
     locations = body.get("locations")
     if not isinstance(locations, list) or not 2 <= len(locations) <= 20:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Two to twenty stops.")
+    check = await incidents.closures_due(user.id, request.headers.get("x-promptly-reroute") == "1")
     ask = {k: v for k, v in body.items() if k in _NAV_FIELDS}
     # A plain A to B follows the way you prefer, including after a wrong turn.
     from . import planning
@@ -424,10 +430,10 @@ async def navigate_route(body: dict[str, Any], db: AsyncSession = Depends(get_db
         if found:
             ask = {**planning.with_through(ask, found[1]), "alternates": ask.get("alternates", 0)}
             try:
-                return await planning.around_for_navigation(db, ask)
+                return await planning.around_for_navigation(db, ask, check)
             except HTTPException:
                 ask = {k: v for k, v in body.items() if k in _NAV_FIELDS}
-    return await planning.around_for_navigation(db, ask)
+    return await planning.around_for_navigation(db, ask, check)
 
 
 # ---- The way you prefer ------------------------------------------------------

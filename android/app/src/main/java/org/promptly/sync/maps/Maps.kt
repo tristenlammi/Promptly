@@ -31,13 +31,20 @@ object Maps {
 
     fun server(context: Context): String? = account(context)?.server
 
-    /** An HTTP client that signs each request in. */
-    fun client(context: Context): OkHttpClient {
+    /** How long anything the driving screens wait on may take, on one bar of signal:
+     *  long enough for a route on a slow connection, short enough to say so and retry. */
+    const val DRIVING_TIMEOUT_SECONDS = 20L
+
+    /** The car's lists and search: you're looking at the screen, waiting. */
+    const val CAR_TIMEOUT_SECONDS = 12L
+
+    /** An HTTP client that signs each request in, giving up after [timeoutSeconds]. */
+    fun client(context: Context, timeoutSeconds: Long = 40): OkHttpClient {
         val auth = account(context)
         return OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(40, TimeUnit.SECONDS)
+            .connectTimeout(minOf(10L, timeoutSeconds / 2), TimeUnit.SECONDS)
+            .readTimeout(minOf(30L, timeoutSeconds), TimeUnit.SECONDS)
+            .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .addInterceptor(Interceptor { chain ->
                 val request = chain.request()
                 val signed = if (auth != null && request.url.toString().startsWith(auth.server)) {
@@ -48,21 +55,21 @@ object Maps {
             .build()
     }
 
-    private fun call(context: Context, build: Request.Builder.() -> Unit): Pair<Int, String> {
+    private fun call(context: Context, timeoutSeconds: Long = 40, build: Request.Builder.() -> Unit): Pair<Int, String> {
         val request = Request.Builder().apply(build).build()
-        client(context).newCall(request).execute().use { r -> return r.code to r.body.string() }
+        client(context, timeoutSeconds).newCall(request).execute().use { r -> return r.code to r.body.string() }
     }
 
-    fun get(context: Context, path: String): JSONObject {
+    fun get(context: Context, path: String, timeoutSeconds: Long = 40): JSONObject {
         val server = server(context) ?: throw IOException("Not signed in")
-        val (code, text) = call(context) { url("$server$path") }
+        val (code, text) = call(context, timeoutSeconds) { url("$server$path") }
         if (code !in 200..299) throw IOException("Server said $code")
         return JSONObject(text)
     }
 
-    fun send(context: Context, method: String, path: String, body: JSONObject): JSONObject {
+    fun send(context: Context, method: String, path: String, body: JSONObject, timeoutSeconds: Long = 40): JSONObject {
         val server = server(context) ?: throw IOException("Not signed in")
-        val (code, text) = call(context) { url("$server$path").method(method, body.toString().toRequestBody(JSON)) }
+        val (code, text) = call(context, timeoutSeconds) { url("$server$path").method(method, body.toString().toRequestBody(JSON)) }
         if (code !in 200..299) throw IOException("Server said $code: ${text.take(300)}")
         return if (text.isBlank()) JSONObject() else JSONObject(text)
     }
@@ -126,21 +133,36 @@ object Maps {
         }
     }
 
-    /** The map style with this server's addresses filled in, as a local file. */
+    /** The map style with this server's addresses filled in, as a local file. On a weak
+     *  signal, the copy saved last time, rather than a blank screen while it tries. */
     suspend fun styleFile(context: Context, forceDark: Boolean? = null): String = withContext(Dispatchers.IO) {
         val server = server(context) ?: throw IOException("Not signed in")
-        val config = get(context, "/api/maps/config")
-        val basemap = config.optString("basemap").takeIf { it.isNotEmpty() && it != "null" }
-            ?: throw IOException("Maps aren't set up on this server yet.")
         val dark = forceDark ?: (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
         val flavor = if (dark) "dark" else "light"
-        val (code, text) = call(context) { url("$server/map-assets/style-$flavor.json") }
-        if (code != 200) throw IOException("Server said $code")
-        val style = text.replace("__ORIGIN__", server).replace("__BASEMAP__", "$server$basemap")
-        val file = File(context.cacheDir, "map-style-$flavor.json")
-        file.writeText(style)
+        val file = File(context.filesDir, "map-style-$flavor.json")
+        try {
+            val config = get(context, "/api/maps/config", CAR_TIMEOUT_SECONDS)
+            val basemap = config.optString("basemap").takeIf { it.isNotEmpty() && it != "null" }
+                ?: throw NotSetUp()
+            val (code, text) = call(context, CAR_TIMEOUT_SECONDS) { url("$server/map-assets/style-$flavor.json") }
+            if (code != 200) throw IOException("Server said $code")
+            val style = text.replace("__ORIGIN__", server).replace("__BASEMAP__", "$server$basemap")
+            val fresh = File(context.filesDir, "map-style-$flavor.json.new")
+            fresh.writeText(style)
+            if (!fresh.renameTo(file)) {
+                file.writeText(style)
+                fresh.delete()
+            }
+        } catch (e: NotSetUp) {
+            throw IOException("Maps aren't set up on this server yet.")
+        } catch (e: IOException) {
+            // Only a style made for this server will do.
+            if (!file.exists() || !file.readText().contains(server)) throw e
+        }
         "file://${file.absolutePath}"
     }
+
+    private class NotSetUp : Exception()
 
     /** Speed cameras within a few metres of this route. */
     suspend fun cameras(context: Context, shape: String): List<Camera> = withContext(Dispatchers.IO) {
@@ -156,10 +178,26 @@ object Maps {
         send(context, "PUT", "/api/maps/parked", JSONObject().put("lat", lat).put("lon", lon).put("source", source))
     }
 
-    /** Places to pick from on the car's screen. */
+    /** Places to pick from on the car's screen. With no answer in time, the ones from
+     *  last time: home is still home on one bar of signal. */
     suspend fun myPlaces(context: Context): List<Stop> = withContext(Dispatchers.IO) {
+        val saved = File(context.filesDir, "maps-places.json")
+        val server = server(context) ?: throw IOException("Not signed in")
+        val mine = try {
+            get(context, "/api/maps/places", CAR_TIMEOUT_SECONDS).also {
+                saved.writeText(JSONObject().put("server", server).put("places", it).toString())
+            }
+        } catch (e: IOException) {
+            // Only this server's places, never another account's.
+            val kept = runCatching { JSONObject(saved.readText()) }.getOrNull()
+            if (kept == null || kept.optString("server") != server) throw e
+            kept.getJSONObject("places")
+        }
+        placesFrom(mine)
+    }
+
+    internal fun placesFrom(mine: JSONObject): List<Stop> {
         val out = mutableListOf<Stop>()
-        val mine = get(context, "/api/maps/places")
         val places = mine.getJSONArray("places")
         val rows = List(places.length()) { places.getJSONObject(it) }
         for (kind in listOf("home", "work", "favourite", "list")) {
@@ -176,13 +214,13 @@ object Maps {
             val r = recents.getJSONObject(i)
             out += Stop(r.getDouble("lat"), r.getDouble("lon"), r.getString("name"), "recent", textOf(r, "address"))
         }
-        out.distinctBy { "%.4f,%.4f".format(it.lat, it.lon) }
+        return out.distinctBy { "%.4f,%.4f".format(java.util.Locale.ROOT, it.lat, it.lon) }
     }
 
     suspend fun search(context: Context, query: String, near: Pair<Double, Double>?): List<Stop> = withContext(Dispatchers.IO) {
         val q = java.net.URLEncoder.encode(query, "UTF-8")
         val at = near?.let { "&lat=${it.first}&lon=${it.second}" } ?: ""
-        val rows = get(context, "/api/maps/search?q=$q$at").getJSONArray("results")
+        val rows = get(context, "/api/maps/search?q=$q$at", CAR_TIMEOUT_SECONDS).getJSONArray("results")
         List(rows.length()) { i ->
             val r = rows.getJSONObject(i)
             Stop(r.getDouble("lat"), r.getDouble("lon"), r.getString("name"), r.optString("kind").ifEmpty { null }, textOf(r, "address"))
