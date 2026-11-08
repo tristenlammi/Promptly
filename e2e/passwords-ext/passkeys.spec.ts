@@ -212,6 +212,8 @@ async function verifiedSignIn(run: Promise<any>, challenge: string) {
   });
   expect(v.verified).toBe(true);
   expect(v.authenticationInfo.userVerified).toBe(true);
+  // Answering closes our window. Wait for that before the next step opens a tab, as passkey-offers does.
+  await expect.poll(() => rig.ctx.pages().filter((x) => x.url().includes("/passkey.html")).length, { timeout: 10_000 }).toBe(0);
 }
 
 test("passkey PIN: a wrong one is refused, says how many tries are left, and nothing reaches the site", async () => {
@@ -233,18 +235,15 @@ test("passkey PIN: a page asking again can't reset the count, and a right PIN do
   await ask.prompt.getByRole("button", { name: "Cancel" }).click();
   expect((await ask.run).error).toBe("NotAllowedError");
   // A fresh request, from a fresh page: the count is the extension's, not the page's.
-  await page.close();
+  // The new tab first: closing the browser's last tab would end the browser.
   const again = await rig.ctx.newPage();
+  await page.close();
   ask = await askForAna(again);
   await expect(ask.prompt.locator("#pin-error")).toContainText("3 tries left");
   await ask.prompt.locator("#pin").fill(PASSKEY_PIN);
   await ask.prompt.locator("#pin").press("Enter");
   await verifiedSignIn(ask.run, ask.challenge);
-  // Back to five.
-  ask = await askForAna(again);
-  await expect(ask.prompt.locator("#pin")).toBeFocused();
-  await expect(ask.prompt.locator("#pin-error")).toHaveText("");
-  await ask.prompt.getByRole("button", { name: "Cancel" }).click();
+  // The right PIN put the count back to five: the next test's first wrong one says "4 tries left".
   await again.close();
 });
 
@@ -355,10 +354,13 @@ test("passkey PIN: changed in Settings with the current PIN, and only the new on
   await p2.getByRole("button", { name: "Change passkey PIN" }).click();
   await expect(back.getByText("Passkey PIN changed")).toBeVisible({ timeout: 30_000 });
   await back.close();
-  ask = await askForAna(page);
+  // A fresh tab: one that asked with no click in the last 30 s gets no window (D71).
+  const after = await rig.ctx.newPage();
+  await page.close();
+  ask = await askForAna(after);
   await signInWithPin(ask.prompt);
   await verifiedSignIn(ask.run, ask.challenge);
-  await page.close();
+  await after.close();
 });
 
 test("RP ID spoofing is refused, in every form", async () => {

@@ -723,7 +723,9 @@ test("on-click mode: after a popup fill the page still gets no menu, and menu me
 
 // ---- 13 and 14. Matching ------------------------------------------------------------------------------
 
-test("a saved host with no port doesn't match another port, or fill on load there", async () => {
+// D91 (was D51): a saved host with no port is offered on any port of that host, picked by hand.
+// It never fills on load there, and Exact host and port keeps it to the default port.
+test("a saved host with no port is offered on another port, but never fills on load there", async () => {
   await addItem(rig, { title: "PortBank", url: "http://portbank.localhost", username: "victim@example.com", password: "PORT-secret-1" });
   const it = await itemNamed("PortBank");
   await patch(it.id, { autofillOnLoad: true });
@@ -731,9 +733,19 @@ test("a saved host with no port doesn't match another port, or fill on load ther
   await page.waitForTimeout(1500);
   expect((await state(page)).pass).toBe("");
   const pop = await popupFor(rig, page);
-  await expect(pop.getByRole("button", { name: "Fill PortBank" })).toHaveCount(0);
+  await expect(pop.getByRole("button", { name: "Fill PortBank" })).toHaveCount(1);
   await pop.close();
   await page.close();
+
+  await patch(it.id, { match: "port" });
+  const strict = await open(at("portbank.localhost", "login.html"));
+  await strict.waitForTimeout(1500);
+  expect((await state(strict)).pass).toBe("");
+  const pop2 = await popupFor(rig, strict);
+  await expect(pop2.getByText("Nothing saved for this site.")).toBeVisible();
+  await expect(pop2.getByRole("button", { name: "Fill PortBank" })).toHaveCount(0);
+  await pop2.close();
+  await strict.close();
 });
 
 test("prefix mode doesn't cross a host boundary", async () => {
