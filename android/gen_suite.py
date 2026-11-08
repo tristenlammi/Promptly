@@ -124,6 +124,8 @@ def shortcut_xml(note: str, items: list[tuple[str, str, str, str]]) -> str:
     ("apps", "ic_promptly", "choose_apps", "org.promptly.app.ChooseAppsActivity"),
     ("server", "ic_promptly", "change_server", "org.promptly.app.SetupActivity"),
     ("backup", "ic_photos", "photo_backup", "org.promptly.sync.MainActivity"),
+    # Talking to Promptly (WP-T5): a Talk conversation, in the assistant sheet.
+    ("talk", "ic_promptly", "talk", "org.promptly.sync.assistant.AssistantActivity"),
 ]))
 (MOD / "res/xml/shortcuts_photos.xml").write_text(shortcut_xml("Long-press P Photos: photo backup (the app module's MainActivity).", [
     ("photos_backup", "ic_photos", "backup_settings", "org.promptly.sync.MainActivity"),
@@ -133,7 +135,8 @@ def shortcut_xml(note: str, items: list[tuple[str, str, str, str]]) -> str:
     '    <string name="change_server">Change server</string>\n'
     '    <string name="choose_apps">Choose apps</string>\n'
     '    <string name="backup_settings">Backup settings</string>\n'
-    '    <string name="photo_backup">Photo backup</string>\n</resources>\n'
+    '    <string name="photo_backup">Photo backup</string>\n'
+    '    <string name="talk">Talk</string>\n</resources>\n'
 )
 (java / "Apps.java").write_text(
     "package org.promptly.app;\n\n"

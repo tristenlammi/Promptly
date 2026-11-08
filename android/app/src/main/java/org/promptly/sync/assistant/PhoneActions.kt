@@ -46,10 +46,12 @@ object PhoneActions {
 
     /** Carry out what the assistant decided. Returns what to say instead, if it
      *  couldn't be done. Anything that isn't for the phone itself goes to the map. */
-    fun carry(context: Context, action: JSONObject): String? {
+    fun carry(context: Context, action: JSONObject, locked: Boolean = false): String? {
         val type = action.optString("type")
         // You can't press anything on the phone from the car's screen.
         if (Voice.inCar && type in setOf("dial", "message", "open_app")) return "That needs your phone's screen."
+        // A Talk conversation that carried on after the screen locked.
+        if (locked && !Voice.inCar && type in setOf("dial", "message", "open_app", "go")) return "Unlock your phone for that."
         return when (type) {
             "set_timer" -> timer(context, action)
             "set_alarm" -> alarm(context, action)

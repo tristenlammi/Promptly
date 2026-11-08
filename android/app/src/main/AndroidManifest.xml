@@ -39,6 +39,10 @@
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
     <!-- Only what Chrome's documented autofill-state provider asks of a caller. -->
     <uses-permission android:name="android.permission.READ_USER_DICTIONARY" />
+    <!-- Talk: a conversation you started keeps going when the screen locks. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- Talk: answers through the phone's speaker or a headset as call audio (echo cancelling). -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <application
         android:name=".SyncApp"
@@ -153,6 +157,24 @@
             android:exported="true"
             android:label="Phone assistant"
             android:taskAffinity="org.promptly.app.assistant.settings" />
+
+        <!-- Talk (Voice Phase 3): the conversation's lock-screen notification, Quick
+             Settings tile. Opened from the sheet, never on its own. -->
+        <service
+            android:name=".talk.TalkService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+        <service
+            android:name=".talk.TalkTile"
+            android:exported="true"
+            android:icon="@drawable/ic_map_mic"
+            android:label="Talk to Promptly"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data android:name="android.service.quicksettings.TOGGLEABLE_TILE" android:value="false" />
+        </service>
 
         <!-- Android Auto. -->
         <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="2" />

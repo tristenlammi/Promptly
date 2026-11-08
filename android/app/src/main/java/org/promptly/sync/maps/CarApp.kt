@@ -291,8 +291,11 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         scope.launch(Dispatchers.IO) {
             val release = Voice.holdFocus(carContext)
             val record = CarAudioRecord.create(carContext)
+            var recording = false
             try {
+                Voice.setState(Voice.State.HEARD)
                 record.startRecording()
+                recording = true
                 val bytes = ByteArray(CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE)
                 val clip = Voice.capture(200.0) { frame ->
                     val want = minOf(bytes.size, frame.size * 2)
@@ -303,10 +306,16 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                     if (got <= 0) -1 else got / 2
                 }
                 runCatching { record.stopRecording() }
+                recording = false
+                Voice.setState(Voice.State.OFF)
                 if (clip != null) Voice.ask(carContext, clip)
             } catch (e: Exception) {
                 Log.w("PromptlyVoice", "Couldn't use the car's microphone", e)
             } finally {
+                // Stopped even when capturing threw (WP-T0 found it was left running).
+                if (recording) runCatching { record.stopRecording() }
+                if (Voice.state.value == Voice.State.HEARD) Voice.setState(Voice.State.OFF)
+                Voice.quiet()
                 release()
                 listening.set(false)
             }
