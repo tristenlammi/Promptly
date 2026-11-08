@@ -34,11 +34,11 @@ import java.util.concurrent.TimeUnit
 /** What's new since last time. Pure, so a count going down and back up isn't missed, and a
  *  count that merely stayed the same doesn't say anything twice. */
 object AlertDiff {
-    data class News(val devices: Boolean, val invitations: Boolean, val emergency: Boolean) {
-        val any: Boolean get() = devices || invitations || emergency
+    data class News(val devices: Boolean, val invitations: Boolean, val emergency: Boolean, val sentTabs: Boolean = false) {
+        val any: Boolean get() = devices || invitations || emergency || sentTabs
     }
 
-    fun news(before: Alerts, now: Alerts) = News(now.deviceRequests > before.deviceRequests, now.invitations > before.invitations, now.emergency > before.emergency)
+    fun news(before: Alerts, now: Alerts) = News(now.deviceRequests > before.deviceRequests, now.invitations > before.invitations, now.emergency > before.emergency, now.sentTabs > before.sentTabs)
 }
 
 object AlertsCheck {
@@ -59,14 +59,14 @@ object AlertsCheck {
         prefs(context).edit().clear().apply()
         // This phone's left the account: what was waiting isn't its business any more.
         val nm = context.getSystemService(NotificationManager::class.java)
-        for (id in 1..4) nm.cancel("pw-alert", id)
+        for (id in 1..5) nm.cancel("pw-alert", id)
     }
 
     private fun channel(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
         if (nm.getNotificationChannel(CHANNEL) == null) {
             nm.createNotificationChannel(NotificationChannel(CHANNEL, "Passwords", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                description = "A new device, an invitation or an emergency request is waiting, or it's time for an encrypted export."
+                description = "A new device, an invitation or an emergency request is waiting, a browser sent a tab here, or it's time for an encrypted export."
             })
         }
     }
@@ -114,13 +114,16 @@ object AlertsCheck {
             return e.status < 500
         }
         val p = prefs(context)
-        val before = Alerts(p.getInt("devices", 0), p.getInt("invitations", 0), p.getInt("emergency", 0))
+        val before = Alerts(p.getInt("devices", 0), p.getInt("invitations", 0), p.getInt("emergency", 0), p.getInt("sent", 0))
         val news = AlertDiff.news(before, now)
         // Quiet when you're in the app already: the screens show all this.
         if (news.devices) post(context, 1, "A new device wants your vault", "Approve it from Passwords, if it's yours.")
         if (news.invitations) post(context, 2, "A shared vault is waiting", "Open Passwords to accept or decline it.")
         if (news.emergency) post(context, 3, "Emergency access needs you", "Open Passwords to see it, and refuse it if you want to.")
-        p.edit().putInt("devices", now.deviceRequests).putInt("invitations", now.invitations).putInt("emergency", now.emergency).apply()
+        // No address or title: the phone can't open it while locked, and a notification can be read
+        // from the lock screen. Unlocking opens it (SentTabs).
+        if (news.sentTabs) post(context, 5, "A tab was sent to this phone", "Open Passwords and unlock to open it.")
+        p.edit().putInt("devices", now.deviceRequests).putInt("invitations", now.invitations).putInt("emergency", now.emergency).putInt("sent", now.sentTabs).apply()
         return true
     }
 }

@@ -3,6 +3,7 @@
 import { ApiError, OfflineError, type SessionOut, type VaultApi, type VaultOut } from "./api";
 import { b64u, fromB64u, hex, randomBytes, randomUuid, utf8, fromUtf8 } from "./bytes";
 import { aad, openSealed, sealTo } from "./format";
+import { deriveSyncKey, type SyncKey } from "./browsersync";
 import {
   decryptItem,
   deriveRoot,
@@ -1093,6 +1094,25 @@ export class VaultClient {
     if (!v) throw new Error("Unknown vault");
     return v;
   }
+
+  /** Browser sync's key (SYNC.md, CRYPTO_SPEC section 13), from the personal vault's key, so only
+   *  this person's own devices can make it. Kept with the unlocked state, and gone at a lock. */
+  async browserSyncKey(): Promise<SyncKey> {
+    const s = this.need();
+    const known = this.syncKeys.get(s);
+    if (known) return known;
+    const id = await this.personalVaultId();
+    const raw = await this.rawVaultKey(await this.cachedVault(id));
+    try {
+      const k = await deriveSyncKey(raw, id);
+      this.syncKeys.set(s, k);
+      return k;
+    } finally {
+      raw.fill(0);
+    }
+  }
+
+  private syncKeys = new WeakMap<object, SyncKey>();
 
   async personalVaultId(): Promise<string> {
     const vaults = await this.store.getVaults();
