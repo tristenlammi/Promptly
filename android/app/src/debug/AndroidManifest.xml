@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only: the WP-M0 offline spike screen (maps.offline.OfflineSpikeActivity). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name="org.promptly.sync.maps.offline.OfflineSpikeActivity"
+            android:label="P Maps offline spike"
+            android:exported="true"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+    </application>
+</manifest>
