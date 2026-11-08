@@ -8,7 +8,7 @@ from datetime import datetime
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 
-from . import parse
+from . import clean, parse
 from .models import MailAccount, MailMessage
 
 _MIME = re.compile(r"^[a-z0-9.+-]+/[a-z0-9.+-]+$")
@@ -65,10 +65,13 @@ def build(account: MailAccount, draft: Draft, reply_to: MailMessage | None = Non
         message["References"] = " ".join(x for x in (reply_to.references, reply_to.message_id) if x)
 
     text = draft.text.rstrip()
-    if draft.html.strip() and parse.html_fits(draft.html):
-        rich = parse.safe_html(draft.html)
+    # In a child process with a time limit: what you send is cleaned too, and sending
+    # runs in the app. Call this from a thread.
+    cleaned = clean.safe_html_in_time(draft.html) if draft.html.strip() and parse.html_fits(draft.html) else None
+    if cleaned is not None:
+        rich = cleaned
     else:
-        # No HTML, or too much to clean quickly (sending runs in the app, so it would hold everyone up).
+        # No HTML, or too much to clean in time: plain text.
         text = text or parse.html_to_text(draft.html)
         rich = _escaped(text)
     if account.signature:

@@ -1124,7 +1124,9 @@ async def send(body: SendBody, db: AsyncSession = Depends(get_db), user: User = 
     files += await apps.files_to_attach(db, user, body.file_ids)
     if sum(len(f.data) for f in files) > MAX_ATTACHMENTS_BYTES:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Attachments can be up to 25 MB in all. Most mail servers refuse more.")
-    message = compose.build(
+    # Off the event loop: cleaning your HTML can take a few seconds (see compose.build).
+    message = await asyncio.to_thread(
+        compose.build,
         account,
         compose.Draft(to=[str(a) for a in body.to], cc=[str(a) for a in body.cc], subject=body.subject, text=body.text, html=body.html, files=files),
         reply_to=reply_to, forward=forward,

@@ -173,12 +173,13 @@ def test_quick_image_handling_matches_the_plain_pattern(raw, monkeypatch):
     assert seen == [m.group(2).strip() for m in plain.finditer(raw)]
 
 
-# ---- HTML too big or tangled to clean quickly
+# ---- HTML too big or tangled to clean in time
 #
 # Even with the regexes fixed, bleach's parser (html5lib) is slower than linear on
-# some shapes: at 1 MB these took 20 seconds to 2 minutes. Past ``html_fits`` the
-# email is shown as plain text. Measured on the dev machine: a 256 KB newsletter
-# cleans in 0.2 s, and the slowest shape that still fits takes about a second.
+# some shapes: at 1 MB these took 20 seconds to 2 minutes. Cleaning runs in a child
+# process that's killed after ``clean.TIMEOUT``; ``html_fits`` turns away the plainly
+# hopeless first. Either way the email shows as plain text. Measured on the dev
+# machine: a 256 KB newsletter cleans in 0.2 s; a fresh child starts in 0.4 s.
 
 
 def _newsletter(stories: int) -> str:
@@ -192,7 +193,33 @@ def _newsletter(stories: int) -> str:
     return "<html><body><center>" + "".join(story.format(i=i) for i in range(stories)) + "</center></body></html>"
 
 
-_TOO_MUCH = {
+def _timed_parse(raw: bytes):
+    import time
+    start = time.perf_counter()
+    found = parse.parse(raw)
+    return found, time.perf_counter() - start
+
+
+def _cleaners() -> set[int]:
+    """The cleaning children still running (this reads Linux's /proc)."""
+    import os
+    found = set()
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                if b"app.mail.clean" in f.read():
+                    found.add(int(pid))
+        except OSError:
+            pass
+    return found
+
+
+def _idle_cleaners() -> set[int]:
+    from app.mail import clean
+    return {c.proc.pid for c in clean._idle}
+
+
+_HOPELESS = {
     "1 MB of <img": "<img " * 209_715,
     "1 MB of <": "<" * 1_048_576,
     "1 MB of <br": "<br " * 262_144,
@@ -201,34 +228,78 @@ _TOO_MUCH = {
     "20,000 different attributes": "<p " + "".join(f"a{i} " for i in range(20_000)),
     "attributes after a quoted >": '<p z=">" ' + "a " * 60_000,
     "30,000 unclosed <b>": "<b>" * 30_000,
-    "100,000 stray &": "&" * 100_000,
+    "250,000 stray &": "&" * 250_000,
     "siblings with something inside": "<b><p></b>" * 15_000,
-    "a newsletter over 256 KB": _newsletter(250),
+    "a newsletter over 1 MB": _newsletter(1000),
 }
+# Fits the quick check, but takes about 7 s to clean.
+_SLOW = "".join(f"<b x={i}>" for i in range(6000))
+# A paragraph's <font> closed by the paragraph, again and again: sloppy, but real.
+_SLOPPY = '<p><font face="Arial">Some text here</p>' * 1000
 
 
-@pytest.mark.parametrize("name", list(_TOO_MUCH))
-def test_html_too_big_to_clean_quickly_shows_the_text_part(name):
-    raw = build(html=_TOO_MUCH[name], text="The plain version")
-    took = _seconds(lambda: parse.parse(raw))
-    found = parse.parse(raw)
+@pytest.mark.parametrize("name", list(_HOPELESS))
+def test_hopeless_html_is_turned_away_without_trying(name):
+    assert not parse.html_fits(_HOPELESS[name])
+    found, took = _timed_parse(build(html=_HOPELESS[name], text="The plain version"))
     assert took < 3
     assert found.html == "" and found.html_clipped
     assert found.text.strip() == "The plain version"
 
 
 def test_without_a_text_part_the_html_is_turned_into_text():
-    found = parse.parse(build(html="<p>Hello <b>there</b></p>" + "<p>More news &amp; views.</p>" * 12_000, text=None))
+    found = parse.parse(build(html="<p>Hello <b>there</b></p>" + "<p>More news &amp; views.</p>" * 40_000, text=None))
     assert found.html == "" and found.html_clipped
     assert found.text.startswith("Hello there") and "More news & views." in found.text
     assert found.snippet.startswith("Hello there")
 
 
+def test_html_too_slow_to_clean_is_cut_off_and_its_cleaner_killed(monkeypatch):
+    from app.mail import clean
+    monkeypatch.setattr(clean, "TIMEOUT", 1.0)
+    assert parse.html_fits(_SLOW)
+    found, took = _timed_parse(build(html=_SLOW, text="The plain version"))
+    assert took < 4
+    assert found.html == "" and found.html_clipped and found.text.strip() == "The plain version"
+    # Nothing is left running but the cleaners waiting for the next email.
+    assert _cleaners() == _idle_cleaners()
+    # And the next email is cleaned as usual, by a fresh one.
+    assert parse.parse(build(html="<p>Hi <b>there</b></p>")).html.strip() == "<p>Hi <b>there</b></p>"
+
+
+def test_a_cleaner_that_dies_half_way_falls_back_too():
+    import os
+    import signal
+    import threading
+    import time
+
+    from app.mail import clean
+    clean.shutdown()
+    answer: list[str | None] = []
+    work = threading.Thread(target=lambda: answer.append(clean.safe_html_in_time(_SLOW, timeout=60)))
+    work.start()
+    deadline = time.monotonic() + 10
+    while not _cleaners() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    time.sleep(1.5)  # past its start, into the cleaning
+    for pid in _cleaners():
+        os.kill(pid, signal.SIGKILL)
+    work.join(10)
+    assert not work.is_alive() and answer == [None]
+    assert _cleaners() == _idle_cleaners() == set()
+
+
+def test_sloppy_but_real_html_is_still_formatted():
+    assert parse.html_fits(_SLOPPY)
+    found, took = _timed_parse(build(html=_SLOPPY))
+    assert not found.html_clipped and found.html.count('<font face="Arial">') >= 1000
+    assert took < 3
+
+
 def test_a_big_ordinary_newsletter_is_still_formatted():
     raw = _newsletter(200)
     assert 200 * 1024 < len(raw) < parse.MAX_HTML and parse.html_fits(raw)
-    took = _seconds(lambda: parse.parse(build(html=raw)))
-    found = parse.parse(build(html=raw))
+    found, took = _timed_parse(build(html=raw))
     assert not found.html_clipped and found.html.strip() == parse.safe_html(raw)
     assert "<table" in found.html and 'data-remote-src="https://cdn.example.com/7.png"' in found.html
     assert took < 3
@@ -239,23 +310,17 @@ def test_mail_without_html_isnt_marked_clipped():
     assert found.html == "" and not found.html_clipped
 
 
-# The slowest shapes found that still fit: each is just under one of the limits.
-_JUST_FITS = {
-    "nesting": "<div>" * 1_700,
-    "attributes": "<p " + "a " * 1_400,
-    "stray <": "<" * 19_000,
-    "siblings with something inside": "<b><p></b>" * 6_000,
-    "unclosed formatting": "".join(f"<b x={i}>" for i in range(1_700)),
-    "formatting copied into each paragraph": "".join(f"<p><b x={i}>" for i in range(200)),
-}
+def test_html_cleaned_to_nothing_isnt_marked_clipped():
+    found = parse.parse(build(html="<script>alert(1)</script>"))
+    assert found.html.strip() == "" and not found.html_clipped
 
 
-@pytest.mark.parametrize("name", list(_JUST_FITS))
-def test_the_slowest_html_that_fits_is_still_quick(name):
-    assert parse.html_fits(_JUST_FITS[name])
-    assert _seconds(lambda: parse.safe_html(_JUST_FITS[name])) < 5
+def test_odd_characters_survive_the_trip_to_the_cleaner():
+    from app.mail import clean
+    raw = "<p>café \U0001f600 \ud800 &amp;</p>"
+    assert clean.safe_html_in_time(raw) == parse.safe_html(raw)
 
 
 def test_checking_whether_it_fits_is_quick():
-    for raw in [*_TOO_MUCH.values(), *_JUST_FITS.values()]:
+    for raw in [*_HOPELESS.values(), _SLOW, _SLOPPY]:
         assert _seconds(lambda: parse.html_fits(raw)) < 0.5

@@ -54,21 +54,20 @@ _SPACE = re.compile(r"\s+")
 # shapes a stranger can send: thousands of attributes in one tag, elements nested
 # thousands deep, thousands of siblings that each hold something, bold left open
 # again and again, a long run of stray "<" or "&". At 1 MB those take from 20 seconds
-# to minutes, holding up the mail worker (or, sending, the whole app). An email past
-# any of these limits is shown as plain text instead, like Gmail's "message clipped".
-# Real mail is far inside them (Gmail itself clips at 102 KB); together they keep the
-# slowest page that fits to about a second here (see test_mail_parse.py).
-MAX_HTML = 256 * 1024
-# Every "<", "&" and NUL starts a tag or a new piece of text, so this also caps how
-# badly anything not counted below can go: about two seconds.
-_MAX_MARKS = 20_000
-_MAX_ATTR_WORK = 2_000_000  # attributes in a tag, squared, summed over the tags
-_MAX_DEPTH_WORK = 1_500_000  # elements open at each tag, summed over the tags
-_MAX_WIDTH_WORK = 40_000_000  # for each element, its children times those with children
+# to minutes. So cleaning runs in a child process with a time limit (``clean.py``),
+# and an email it can't finish shows as plain text, like Gmail's "message clipped".
+# ``html_fits`` only turns away, without trying, what would plainly run out of time:
+# each limit is about where the worst page of its kind takes that long here, and far
+# above real mail (sloppy HTML included; see test_mail_parse.py).
+MAX_HTML = 1024 * 1024
+_MAX_MARKS = 200_000  # "<", "&" and NUL: each starts a tag or a new piece of text
+_MAX_ATTR_WORK = 50_000_000  # attributes in a tag, squared, summed over the tags
+_MAX_DEPTH_WORK = 60_000_000  # elements open at each tag, summed over the tags
+_MAX_WIDTH_WORK = 150_000_000  # for each element, its children times those with children
 # A formatting tag that's closed by the block around it, not by its own end tag, is
 # copied into every later block (bold, then a hundred paragraphs: a hundred bolds),
 # which costs the most of all.
-_MAX_FORMAT_WORK = 50_000  # such formatting tags at each tag, summed over the tags
+_MAX_FORMAT_WORK = 200_000  # such formatting tags at each tag, summed over the tags
 _FORMATTING = frozenset("a b big code em font i nobr s small strike strong tt u".split())
 # Opening one of these closes a paragraph, and the formatting inside it.
 _CLOSES_P = frozenset(
@@ -131,7 +130,7 @@ def _sub_tags(pattern: re.Pattern[str], replacement: str, raw: str) -> str:
     return pattern.sub(replacement, raw[:end]) + raw[end:]
 
 
-from . import invites  # noqa: E402
+from . import clean  # noqa: E402
 
 
 @dataclass
@@ -178,8 +177,8 @@ def html_to_text(raw: str) -> str:
 
 
 def html_fits(raw: str) -> bool:
-    """Whether ``safe_html`` can clean this quickly. One pass over the tags, guessing
-    on the high side how much work html5lib will do."""
+    """Whether ``safe_html`` is worth trying in the time it's given. One pass over
+    the tags, guessing on the high side how much work html5lib will do."""
     if len(raw) > MAX_HTML or raw.count("<") + raw.count("&") + raw.count("\x00") > _MAX_MARKS:
         return False
     attr_work = depth_work = width_work = format_work = depth = copied = 0
@@ -307,6 +306,9 @@ def message_id_of(raw_headers: bytes) -> str:
 
 
 def parse(raw: bytes) -> Parsed:
+    # Here rather than at the top, so the cleaning child (clean.py) starts quickly.
+    from . import invites
+
     msg: EmailMessage = email.message_from_bytes(raw, policy=policy.default)  # type: ignore[assignment]
     out = Parsed()
     out.message_id = _clean_header(msg.get("Message-ID"))[:500]
@@ -353,10 +355,9 @@ def parse(raw: bytes) -> Parsed:
                     continue
             attachments.append({"part": index, "name": _clean_header(name)[:255] or "attachment", "mime": kind[:120], "size": len(payload)})
     out.text = plain or html_to_text(rich)
-    if rich and html_fits(rich):
-        out.html = safe_html(rich, inline)
-    else:
-        out.html_clipped = bool(rich)
+    cleaned = clean.safe_html_in_time(rich, inline) if rich and html_fits(rich) else None
+    out.html = cleaned or ""
+    out.html_clipped = bool(rich) and cleaned is None
     out.attachments = attachments[:100]
     out.snippet = _SPACE.sub(" ", _strip_quoted(out.text))[:240].strip()
     return out

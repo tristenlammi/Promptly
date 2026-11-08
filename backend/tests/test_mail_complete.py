@@ -73,6 +73,33 @@ def test_a_draft_too_big_to_clean_quickly_goes_as_plain_text():
     assert m.get_body(("plain",)).get_content().startswith("Hi there")
 
 
+async def test_sending_a_draft_slow_to_clean_doesnt_hold_up_the_app(client, db, monkeypatch):  # noqa: F811
+    from app.mail import clean
+
+    monkeypatch.setattr(clean, "TIMEOUT", 1.0)
+    u = await mk_user(db, "owner")
+    account = await mk_account(db, u)
+    slow = "".join(f"<b x={i}>" for i in range(6000))  # fits the quick check, takes ~7 s
+    ticks = 0
+
+    async def tick() -> None:
+        nonlocal ticks
+        while True:
+            await asyncio.sleep(0.05)
+            ticks += 1
+
+    ticker = asyncio.create_task(tick())
+    try:
+        sent = await client.post("/api/mail/send", json={"account_id": str(account.id), "to": ["a@example.com"], "subject": "s", "text": "Plain words", "html": slow}, headers=H(u))
+    finally:
+        ticker.cancel()
+    assert sent.status_code == 202
+    assert ticks >= 10  # a second of cleaning, and the app kept going all the while
+    item = await db.get(MailOutbox, __import__("uuid").UUID(sent.json()["id"]))
+    rich = _parsed(item.raw.encode("utf-8", "surrogateescape")).get_body(("html",)).get_content()
+    assert rich.startswith("Plain words") and "<b" not in rich
+
+
 async def test_an_email_too_big_to_clean_is_kept_as_text_and_says_so(client, db):  # noqa: F811
     u = await mk_user(db, "owner")
     account = await mk_account(db, u)
