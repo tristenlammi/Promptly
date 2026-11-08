@@ -25,6 +25,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - `scripts/stack.sh` (and `scripts/stack.ps1`) runs a separate copy of Promptly for a worktree on its own port (`up`, `down`, `ls`, `e2e`), with its own containers, images, data and throwaway secrets, so testing a branch never touches the main app.
 
 ### Fixed
+- Mail: a very large or tangled HTML email could still tie up the mail worker for minutes while it was cleaned. Cleaning now stops after 3 seconds, and an email it can't finish shows as plain text, with a note saying so. Sending works the same way, so a draft like that no longer holds up the app.
 - Workspaces: two board edits close together (adding a card, then dragging it to Done) could leave the board's text in chat search out of date, because both tried to create the workspace's Boards folder at once and one crashed. Making a workspace folder is now safe when two requests race, for every folder kind.
 
 ## [0.31.0] - 2026-11-08
