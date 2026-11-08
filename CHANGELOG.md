@@ -23,6 +23,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 - Passwords: a passkey PIN, asked every time you sign in with a passkey or make one, in the browser extension and on Android. You choose it the first time, it syncs to all your devices, and it can be changed in Settings. Five wrong in a row lock the vault until the master password.
+- Passwords: "Find stray passwords", in Security check, finds passwords, keys, Wi-Fi passwords, recovery codes and 2FA setup keys left in plain text in your own Mail, Files and Photos. "Save to vault" fills in a new item, then offers to move the original to Trash; "Ignore" hides one for good. It runs when you ask and checks new mail and files hourly.
 
 ### Changed
 - Passwords on Firefox: clicking a login in the menu under a login box opens the toolbar panel with it at the top, ready to fill with one more click, and the save bar's button opens the panel to save. Before, the menu and bar there only said to use the toolbar.

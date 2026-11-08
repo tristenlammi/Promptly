@@ -187,3 +187,21 @@ A page can detect the wrapper: `navigator.credentials.get.toString()` isn't nati
 - **Your device** compares the list with the vault, and keeps what you decide (not an account, deleting, gone) in the vault, encrypted. The server never learns which sites you have logins for, or which rows you hid.
 - **The deletion request** is a draft in Mail, so the server sees it as it sees any draft you write, and a site you send it to learns you want to leave. The draft's text travels in the part of the link after `#`, which isn't sent to the server or kept in its logs. Nothing is sent without you pressing Send.
 - **What's in an email is untrusted.** A forged welcome email can add a site to the list. The worst it does is show a row you can hide. Links from the list go to the site's own domain, its account settings, or your own Mail.
+
+## Find stray passwords
+
+Security check can look for passwords and other secrets left in plain text in your own Mail, Files and Photos (D-STRAY-1 to 8).
+
+**What's read.** Your server reads what it already holds: the text of your mail (not Trash or Spam), the text of your own files as Drive's search index has it (or a small text file such as a `.env` straight from disk), and the words read out of your own photos. Nothing shared with you, and nobody else's. The vault isn't read: the server can't. Nothing goes to an AI model, and the patterns are plain rules in `backend/app/passwords/stray.py`.
+
+**What's kept.** Where something was found (which message or file), what kind of thing it is, and how many, in `pw_stray_findings`. Not the secret, not a hash of it, and not the masked preview, which is worked out again from the source each time you look. A stolen database dump shows which of your messages and files hold something that looks like a secret. It already holds those messages and files, so that's no new exposure. Logs get counts only.
+
+**What leaves the server.** The list shows a masked hint, such as `pa••••rd`: four characters of an 8-character or longer secret. The whole secret comes back only when you open one finding, with `no-store`, so the browser doesn't cache it. Saving it makes a vault item that's encrypted on your device like any other. A 2FA setup QR in a photo is read on your device, not the server.
+
+**When it runs.** When you press "Find stray passwords", and once an hour for everyone with a vault, reading only what's new since last time. It's on for every vault owner without asking, since it reads nothing the server doesn't already hold.
+
+**Devices.** A browser extension, phone or Windows app sees mail findings only if it was connected with codes from Mail turned on. That consent used to give one-time codes, sign-in links and security-mail subjects. **It now also gives passwords found in your mail**, which is more than it did before.
+
+**Acting on one.** "Move the original to Trash" moves that message to its mailbox's Trash, or that file or photo to Files' Trash. It can be got back from there until the Trash is emptied. A copy may still exist elsewhere: a sent message in the recipient's mailbox, another mail app's cache, a backup. Changing the password is the only sure fix for one that's been sitting in plain text.
+
+**Limits.** It's pattern matching. It misses passwords written in an unusual way, in images with no readable text, in mail attachments, and in files Drive hasn't read the text of. It can also flag something that isn't a secret, which is what Ignore is for.

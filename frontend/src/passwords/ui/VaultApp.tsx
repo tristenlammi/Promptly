@@ -447,7 +447,8 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
   const f = /^(folder|tag|item|vault)\/(.+)$/.exec(route);
   if (route === "codes") content = <CodesScreen />;
   else if (route === "generator") content = <GeneratorScreen />;
-  else if (route === "security") content = <SecurityScreen />;
+  // "stray" is the Security check scrolled to Find stray passwords, for the extension's link.
+  else if (route === "security" || route === "stray") content = <SecurityScreen />;
   else if (route === "shared") content = <SharedScreen />;
   else if (route === "sends") content = <SendsScreen />;
   else if (route === "bookmarks") content = <BookmarksScreen />;

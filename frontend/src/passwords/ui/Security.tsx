@@ -7,6 +7,7 @@ import { ChangePassword, DuplicatesPanel, MailAlerts, RotationQueue, SurvivalPan
 import type { Item } from "../core/model";
 import { MailAccounts } from "./MailAccounts";
 import { Button, Callout, errorText, Spinner, useVault } from "./kit";
+import { StrayPanel } from "./Stray";
 
 function Row({ item, detail }: { item: Item; detail?: string }) {
   const { go } = useVault();
@@ -90,6 +91,7 @@ export function SecurityScreen() {
       <MailAlerts onChange={setChanging} />
       <MailAccounts />
       <DuplicatesPanel />
+      <StrayPanel />
       <p className="text-sm text-[var(--text-muted)]">Worked out on this device. For breaches, only the first five characters of each password's hash go out, through your server.</p>
       <label className="flex items-center gap-2 text-sm text-[var(--text)]">
         <input type="checkbox" checked={breach} onChange={(e) => setBreach(e.target.checked)} />
