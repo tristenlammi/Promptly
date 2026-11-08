@@ -190,6 +190,9 @@ class NavigationActivity : ComponentActivity() {
         val voice by Voice.state.collectAsState()
         val said by Voice.reply.collectAsState()
         val addedStop by Nav.addedStop.collectAsState()
+        val noSignal by Nav.noSignal.collectAsState()
+        val source by Nav.routeSource.collectAsState()
+        val offRoute by Nav.offRoute.collectAsState()
         var addingStop by remember { mutableStateOf(false) }
         val askMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
             if (ok) Voice.press(applicationContext)
@@ -229,9 +232,20 @@ class NavigationActivity : ComponentActivity() {
                     val adds = if (h.hazard.delayMinutes >= 1) ", +${h.hazard.delayMinutes} min" else ""
                     Pill("${h.hazard.label} $distance$adds", Color(0xFFB3261E), Color.White)
                 }
-                trafficNow?.let { t ->
+                if (noSignal) {
+                    // Traffic, warnings and faster routes wait for signal; nothing's queued.
+                    Pill("No signal · no traffic info", MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.onSurface)
+                } else trafficNow?.let { t ->
                     val text = if (t.addsMinutes >= 1) "Traffic adds ${t.addsMinutes} min" else "No traffic delays"
                     Pill(text, if (t.addsMinutes >= 5) Color(0xFFB45309) else MaterialTheme.colorScheme.surface, if (t.addsMinutes >= 5) Color.White else MaterialTheme.colorScheme.onSurface)
+                }
+                if (source == RouteSource.PHONE) {
+                    SmallPill("Offline route")
+                }
+                // No signal and no downloaded map under you: the route still draws, on a plain map.
+                val at = state.location
+                if (noSignal && at != null && !org.promptly.sync.maps.offline.MapTiles.coversOffline(at.coordinates.lat, at.coordinates.lng)) {
+                    SmallPill("No offline map here")
                 }
                 (camera as? CameraAlert.Ahead)?.let { c ->
                     Pill("Speed camera ${c.metres} m", Color(0xFFB3261E), Color.White)
@@ -254,7 +268,8 @@ class NavigationActivity : ComponentActivity() {
                     if (voice == Voice.State.HEARD || voice == Voice.State.THINKING) Color(0xFFD97757) else MaterialTheme.colorScheme.surface,
                     if (voice == Voice.State.HEARD || voice == Voice.State.THINKING) Color.White else MaterialTheme.colorScheme.onSurface,
                     Modifier.clickable {
-                        if (!Voice.allowed(context)) askMic.launch(Manifest.permission.RECORD_AUDIO)
+                        // With no signal it answers straight away (it needs your server), so no mic.
+                        if (!Voice.allowed(context) && org.promptly.sync.maps.offline.Offline.online(context)) askMic.launch(Manifest.permission.RECORD_AUDIO)
                         else Voice.press(context)
                     },
                 )
@@ -266,6 +281,14 @@ class NavigationActivity : ComponentActivity() {
             when {
                 message != null ->
                     Pill(message, Color(0xFF3A3A3A), Color.White, Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 8.dp))
+                // Off the route where the phone has no map data to find a new one with.
+                offRoute != null ->
+                    Pill(
+                        offRoute!!,
+                        Color(0xFF3A3A3A),
+                        Color.White,
+                        Modifier.align(Alignment.TopCenter).safeDrawingPadding().padding(top = 8.dp, start = 24.dp, end = 24.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                    )
                 // After a wrong turn, while the new way is worked out.
                 state.isCalculatingNewRoute == true ->
                     Pill(
@@ -362,6 +385,17 @@ private fun Pill(text: String, background: Color, foreground: Color, modifier: M
         fontWeight = FontWeight.SemiBold,
         fontSize = 15.sp,
         modifier = modifier.clip(RoundedCornerShape(50)).background(background).padding(horizontal = 14.dp, vertical = 8.dp),
+    )
+}
+
+/** A quiet note: where the route came from, or that there's no map here. */
+@Composable
+private fun SmallPill(text: String) {
+    Text(
+        text,
+        color = Color.White,
+        fontSize = 13.sp,
+        modifier = Modifier.clip(RoundedCornerShape(50)).background(Color(0xFF5F6368)).padding(horizontal = 10.dp, vertical = 5.dp),
     )
 }
 

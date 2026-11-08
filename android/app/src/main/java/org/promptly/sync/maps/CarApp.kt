@@ -70,6 +70,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -195,6 +196,17 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             invalidate()
         }
         Nav.faster.onEach { invalidate() }.launchIn(scope)
+        // No signal: once a session, say the map and directions now come from the phone.
+        var toldOffline = false
+        combine(Nav.noSignal, Nav.routeSource) { none, source -> none || source == RouteSource.PHONE }.onEach { offline ->
+            if (offline && !toldOffline) {
+                toldOffline = true
+                CarToast.makeText(carContext, "No signal: using your offline map", CarToast.LENGTH_LONG).show()
+            }
+            invalidate()
+        }.launchIn(scope)
+        // Off the route with nothing downloaded there: what to do, on the screen as well.
+        Nav.offRoute.onEach { said -> if (said != null) CarToast.makeText(carContext, said, CarToast.LENGTH_LONG).show() }.launchIn(scope)
         // What the assistant said, on the screen as well.
         Voice.reply.onEach { said ->
             if (said != null) {
@@ -338,6 +350,11 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
 
     /** The car's own microphone, only when you press its button. */
     private fun askFromCar() {
+        if (!org.promptly.sync.maps.offline.Offline.online(carContext)) {
+            // The assistant needs your server: no signal is said plainly (Voice.press), with no mic.
+            Voice.press(carContext)
+            return
+        }
         if (!Voice.allowed(carContext)) {
             CarToast.makeText(carContext, "Allow the microphone on your phone first", CarToast.LENGTH_LONG).show()
             return

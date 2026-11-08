@@ -79,12 +79,25 @@ object Maps {
      *  or the one-time code the web app just sent along. */
     suspend fun signIn(context: Context, server: String?, code: String?) = withContext(Dispatchers.IO) {
         val usable = account(context)?.let { a ->
-            (server == null || a.server == server.trimEnd('/')) && runCatching { get(context, "/api/maps/config") }.isSuccess
+            (server == null || a.server == server.trimEnd('/')) && signedIn(context)
         } ?: false
         if (usable) return@withContext
         if (server == null || code == null) throw IOException("Open this from P Maps.")
         val account = Api.claim(PairLink(server.trimEnd('/'), code), Api.deviceName())
         Store(context).account = account
+    }
+
+    /** Whether this phone's sign-in works. With no signal it can't be checked, and the
+     *  phone carries on with what it has (offline maps need no server); only the server
+     *  saying no (401, 403) means signing in again. */
+    private fun signedIn(context: Context): Boolean {
+        val server = server(context) ?: return false
+        return try {
+            val (code, _) = call(context, CAR_TIMEOUT_SECONDS) { url("$server/api/maps/config") }
+            code !in listOf(401, 403)
+        } catch (e: IOException) {
+            true
+        }
     }
 
     /** What you said, as sound or tapped words, and what to do about it. */
@@ -182,7 +195,8 @@ object Maps {
     /** Speed cameras within a few metres of this route. */
     suspend fun cameras(context: Context, shape: String): List<Camera> = withContext(Dispatchers.IO) {
         val body = JSONObject().put("shapes", JSONArray().put(shape))
-        val rows = send(context, "POST", "/api/maps/cameras/along", body).getJSONArray("cameras")
+        // Quick: with no answer, the cameras downloaded for offline use stand in.
+        val rows = send(context, "POST", "/api/maps/cameras/along", body, DRIVING_TIMEOUT_SECONDS / 2).getJSONArray("cameras")
         List(rows.length()) { i ->
             val c = rows.getJSONObject(i)
             Camera(c.getDouble("lat"), c.getDouble("lon"), c.optDouble("maxspeed").takeUnless { it.isNaN() })

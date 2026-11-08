@@ -34,7 +34,10 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import org.json.JSONObject
+import org.promptly.sync.maps.offline.Offline
+import org.promptly.sync.maps.offline.OfflineCameras
 import uniffi.ferrostar.CourseFiltering
+import uniffi.ferrostar.RouteDeviation
 import uniffi.ferrostar.GeographicCoordinate
 import uniffi.ferrostar.NavigationControllerConfig
 import uniffi.ferrostar.RouteDeviationTracking
@@ -73,7 +76,7 @@ object Nav {
     private lateinit var app: Context
     private var core: FerrostarCore? = null
     private var model: TripModel? = null
-    private var routes: ServerRoutes? = null
+    private var routes: HybridRouteProvider? = null
     // Lives as long as the app: watches the one trip for both screens.
     private val watching = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var tts: AndroidTtsObserver? = null
@@ -133,6 +136,20 @@ object Nav {
     private val _cameraWarning = MutableSharedFlow<CameraAlert.Ahead>(extraBufferCapacity = 2)
     val cameraWarning = _cameraWarning.asSharedFlow()
 
+    /** Where the last route came from: the screens say "Offline route" when it was the phone. */
+    private val _routeSource = MutableStateFlow<RouteSource?>(null)
+    val routeSource = _routeSource.asStateFlow()
+
+    /** Your server can't be reached (no signal, mostly): traffic, warnings and the assistant
+     *  are paused, and directions carry on from the phone. */
+    private val _noSignal = MutableStateFlow(false)
+    val noSignal = _noSignal.asStateFlow()
+
+    /** Off the route, with no new one to be had offline: what to do, in words. */
+    private val _offRoute = MutableStateFlow<String?>(null)
+    val offRoute = _offRoute.asStateFlow()
+    private var offRouteSaid = false
+
     @Volatile private var cameras: List<Camera> = emptyList()
     private val warned = mutableSetOf<Camera>()
     private val closestSoFar = mutableMapOf<Camera, Float>()
@@ -176,7 +193,7 @@ object Nav {
      *  driving screen and the car's always show the same trip; [options] are the ones
      *  the next route is asked for with. */
     fun viewModel(options: TripOptions = lastOptions ?: TripOptions()): TripModel {
-        val provider = routes ?: ServerRoutes(app).also { routes = it }
+        val provider = provider()
         provider.options = options
         lastOptions = options
         model?.let { return it }
@@ -228,6 +245,11 @@ object Nav {
             if (wasNavigating && !navigating && state.tripState is TripState.Complete) arrivedNow()
             wasNavigating = navigating
             state.location?.let { lastFix = it }
+            // Back on the route (or the trip's over): the "head back" note has done its job.
+            if (state.routeDeviation !is RouteDeviation.Deviation && _offRoute.value != null) {
+                _offRoute.value = null
+                offRouteSaid = false
+            }
             if (navigating) {
                 state.routeGeometry?.let(::routeIs)
                 state.location?.let { onLocation(it.coordinates.lat, it.coordinates.lng) }
@@ -245,12 +267,22 @@ object Nav {
         org.promptly.sync.maps.offline.MapTiles.saveTrip(app, line.map { it.lat to it.lng })
         cameraJob?.cancel()
         cameraJob = watching.launch(Dispatchers.IO + keepDriving) {
-            val shape = Maps.encodeShape(line.map { it.lat to it.lng })
+            val points = line.map { it.lat to it.lng }
+            val downloaded = java.io.File(Offline.store(app).baseDir, "cameras.json")
+            // No signal: the cameras downloaded with your offline areas, matched on the phone.
+            fun onPhone(): Boolean {
+                if (!downloaded.isFile) return false
+                cameras = OfflineCameras.along(OfflineCameras.all(downloaded), points)
+                Log.i(TAG, "Cameras from the phone: ${cameras.size} on this route")
+                return true
+            }
+            if (!Offline.online(app) && onPhone()) return@launch
             try {
-                cameras = Maps.cameras(app, shape)
+                cameras = Maps.cameras(app, Maps.encodeShape(points))
             } catch (e: java.io.IOException) {
-                // Keep the last ones, and ask again in a minute.
                 Log.w(TAG, "Couldn't fetch cameras: ${e.message}")
+                if (onPhone()) return@launch
+                // Keep the last ones, and ask again in a minute.
                 delay(60_000)
                 withContext(Dispatchers.Main) { if (camerasFor == key) camerasFor = null }
             }
@@ -331,6 +363,8 @@ object Nav {
                 Log.w(TAG, "Couldn't start the trip", e)
                 _error.value = when {
                     e is IllegalStateException -> e.message
+                    e is OfflineRouteUnavailable && e.outside -> "No signal, and this trip goes outside your offline areas. Try again when there's signal."
+                    e is OfflineRouteUnavailable -> "No signal, and there's no way there within your offline areas. Try again when there's signal."
                     e is com.stadiamaps.ferrostar.core.InvalidStatusCodeException && e.statusCode == 422 -> "No route from here to there."
                     else -> "Couldn't get a route. Check your connection."
                 }
@@ -496,7 +530,32 @@ object Nav {
         dismissArrival()
     }
 
-    private fun provider(): ServerRoutes = routes ?: ServerRoutes(app).also { routes = it }
+    private fun provider(): HybridRouteProvider = routes ?: HybridRouteProvider(app, ::routed, ::unrouted).also { routes = it }
+
+    /** A route arrived, from the server or the phone. */
+    private fun routed(source: RouteSource, reroute: Boolean) {
+        Log.i(TAG, "Route from the ${source.name.lowercase()}${if (reroute) " after a wrong turn" else ""}")
+        _routeSource.value = source
+        _noSignal.value = source == RouteSource.PHONE
+        _offRoute.value = null
+        offRouteSaid = false
+    }
+
+    /** No route from the server, and the phone can't make one here. */
+    private fun unrouted(e: OfflineRouteUnavailable, reroute: Boolean) {
+        Log.i(TAG, "No route offline: ${e.message} ${e.missing}")
+        _noSignal.value = true
+        if (!reroute) return
+        // Ferrostar asks again as you drive, and picks you up when you're back on the route.
+        _offRoute.value = OFF_ROUTE
+        if (!offRouteSaid) {
+            offRouteSaid = true
+            speak(OFF_ROUTE)
+        }
+    }
+
+    /** Off the route, with nothing downloaded to find a new one with. */
+    const val OFF_ROUTE = "You're off the route. Head back to it, and I'll find a new one when there's signal."
 
     private fun viaPoint(p: ThroughPoint): Waypoint {
         // Its direction of travel, so it lands on the right side of the road.
@@ -669,7 +728,12 @@ object Nav {
                     // Incident checks are scarce: every 10 minutes, not every traffic check.
                     val checkWarnings = System.currentTimeMillis() - lastWarningCheck >= 600_000
                     if (checkWarnings) body.put("warnings", true)
-                    runCatching {
+                    if (!Offline.online(app)) {
+                        // No signal: nothing to ask, nothing queued. Said on the screen.
+                        _noSignal.value = true
+                        _traffic.value = null
+                        _faster.value = null
+                    } else runCatching {
                         val answer = Maps.send(app, "POST", "/api/maps/traffic/route", body)
                         val found = answer.optJSONObject("traffic")
                         _traffic.value = found?.let {
@@ -686,10 +750,19 @@ object Nav {
                             lastWarningCheck = System.currentTimeMillis()
                             answer.optJSONArray("incidents")?.let { takeHazards(it, progress.distanceRemaining) }
                         }
-                    }.onFailure { Log.w(TAG, "Traffic check failed: ${it.message}") }
+                        _noSignal.value = false
+                    }.onFailure {
+                        Log.w(TAG, "Traffic check failed: ${it.message}")
+                        // Couldn't reach the server at all (not an answer it gave): no signal.
+                        if (it is java.io.IOException && it.message?.startsWith("Server said") != true) {
+                            _noSignal.value = true
+                            _traffic.value = null
+                        }
+                    }
                 }
-                // No position yet means no faster-route check: try again soon.
-                delay(if (vm.navigationUiState.value.location == null || !asked) 15_000 else 180_000)
+                // No position yet means no faster-route check: try again soon. No signal: look
+                // again soon, so traffic's back shortly after the signal is.
+                delay(if (vm.navigationUiState.value.location == null || !asked || _noSignal.value) 15_000 else 180_000)
             }
         }
     }
@@ -702,6 +775,11 @@ object Nav {
                 val state = vm.navigationUiState.value
                 val at = state.location
                 if (!state.isNavigating() || at == null) break
+                if (!Offline.online(app)) {
+                    // Paused: the next point goes when there's signal again.
+                    delay(15_000)
+                    continue
+                }
                 val body = JSONObject()
                     .put("lat", at.coordinates.lat)
                     .put("lon", at.coordinates.lng)
@@ -716,6 +794,11 @@ object Nav {
 
     fun stop() {
         _addedStop.value = null
+        _routeSource.value = null
+        _offRoute.value = null
+        _noSignal.value = false
+        // The offline engine's memory back, until the next trip needs it.
+        runCatching { Offline.router(app).release() }
         liveJob?.cancel()
         trafficJob?.cancel()
         _traffic.value = null

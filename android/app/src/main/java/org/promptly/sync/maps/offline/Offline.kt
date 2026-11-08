@@ -60,6 +60,13 @@ object Offline {
         store ?: OfflineStore(File(context.applicationContext.filesDir, "maps-offline")).also { store = it }
     }
 
+    @Volatile private var router: LocalRouter? = null
+
+    /** Offline directions from the downloaded squares (one engine for the app). */
+    fun router(context: Context): LocalRouter = router ?: synchronized(this) {
+        router ?: store(context).let { s -> LocalRouter(s, File(s.root, "valhalla.json")) }.also { router = it }
+    }
+
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences("maps-offline", Context.MODE_PRIVATE)
 
     var Context.wifiOnly: Boolean

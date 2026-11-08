@@ -186,9 +186,10 @@ dependencies {
     implementation("org.maplibre.compose:maplibre-compose-android:0.13.0")
     implementation("androidx.car.app:app:1.7.0")
     implementation("io.github.rallista:car-app-compose:0.0.2")
-    // P Maps offline (WP-M0 spike): Valhalla 3.9.0 on the phone, MIT. Debug builds only
-    // until WP-M5 ships offline routing; pin it with maps/Dockerfile's Valhalla.
-    debugImplementation("io.github.rallista:valhalla-mobile:0.6.4")
+    // P Maps offline routing: Valhalla 3.9.0 on the phone (MIT), reading the server's
+    // 3.9.1 tiles (checked in WP-M0). Bump it together with maps/Dockerfile's Valhalla.
+    // Its native library follows the ABI filters above: arm64 only in release.
+    implementation("io.github.rallista:valhalla-mobile:0.6.4")
 
     // The car's rules are checked when a template is built, so build them in a test.
     testImplementation("junit:junit:4.13.2")

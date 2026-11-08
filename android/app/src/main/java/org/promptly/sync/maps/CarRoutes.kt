@@ -55,6 +55,13 @@ import org.maplibre.compose.sources.GeoJsonData
 import org.maplibre.compose.sources.rememberGeoJsonSource
 import org.maplibre.compose.util.MaplibreComposable
 import org.promptly.sync.R
+import org.promptly.sync.maps.offline.Offline
+import com.stadiamaps.ferrostar.core.location.toUserLocation
+import uniffi.ferrostar.GeographicCoordinate
+import uniffi.ferrostar.RouteRequest
+import uniffi.ferrostar.Waypoint
+import uniffi.ferrostar.WaypointKind
+import uniffi.ferrostar.createValhallaRequestGenerator
 import java.io.IOException
 import java.util.Locale
 
@@ -67,6 +74,8 @@ data class CarRoute(
     /** (lon, lat), the order the map wants. */
     val line: List<Pair<Double, Double>>,
     val through: List<ThroughPoint>,
+    /** Worked out on the phone (no signal): no traffic in it. */
+    val offline: Boolean = false,
 )
 
 /** Where you're thinking of going: still looking, or the ways there. */
@@ -102,6 +111,12 @@ object CarPreview {
                 throw e
             } catch (e: NoFix) {
                 giveUp("Waiting for GPS. Try again in a moment.")
+            } catch (e: OfflineRouteUnavailable) {
+                Log.w(TAG, "No route offline", e)
+                giveUp(
+                    if (e.outside) "No signal, and this trip goes outside your offline areas."
+                    else "No signal, and there's no way there within your offline areas.",
+                )
             } catch (e: Exception) {
                 Log.w(TAG, "Couldn't get a route", e)
                 giveUp(if (e.message?.contains("422") == true) "No route from here to there." else "Couldn't get a route. Check your connection.")
@@ -140,7 +155,11 @@ object CarPreview {
     fun clear() {
         asking?.cancel()
         _plan.value = null
+        // Not driving: the offline engine's memory back until it's needed again.
+        if (!Nav.onTrip()) runCatching { Offline.router(appContext ?: return).release() }
     }
+
+    private var appContext: Context? = null
 
     /** Off the route screen and on the road, the way you picked. */
     fun go() {
@@ -154,13 +173,90 @@ object CarPreview {
         withTimeoutOrNull(12_000) { Nav.locationProvider.locationUpdates(1000L).first { System.currentTimeMillis() - it.time < 60_000 } }
             ?: withTimeoutOrNull(8_000) { Nav.locationProvider.locationUpdates(1000L).first() }
 
+    /** The ways there: your server's (with traffic), or with no signal the phone's own,
+     *  from the downloaded squares (up to three, no traffic). */
     private suspend fun routesTo(context: Context, here: Location, stop: Stop, options: TripOptions): List<CarRoute> = withContext(Dispatchers.IO) {
+        appContext = context.applicationContext
         val stops = JSONArray()
             .put(JSONObject().put("lat", here.latitude).put("lon", here.longitude).put("name", "Your location"))
             .put(JSONObject().put("lat", stop.lat).put("lon", stop.lon).put("name", stop.name))
         val body = JSONObject().put("stops", stops).put("mode", "drive")
             .put("avoid_tolls", options.tolls).put("avoid_highways", options.highways).put("avoid_ferries", options.ferries)
-        parseRoutes(Maps.send(context, "POST", "/api/maps/route", body, Maps.DRIVING_TIMEOUT_SECONDS))
+        val problem = if (!Offline.online(context)) IOException("No connection") else try {
+            return@withContext parseRoutes(Maps.send(context, "POST", "/api/maps/route", body, PREVIEW_TIMEOUT_SECONDS))
+        } catch (e: IOException) {
+            // "Server said 422" is an answer (no route), not a missing server.
+            if (e.message?.startsWith("Server said 4") == true && e.message?.startsWith("Server said 401") != true) throw e
+            e
+        }
+        Log.i(TAG, "Route preview from the phone: ${problem.message}")
+        phoneRoutes(context, here, stop, options)
+    }
+
+    /** How long the preview waits for your server before the phone answers. */
+    private const val PREVIEW_TIMEOUT_SECONDS = 10L
+
+    /** Up to three ways there from Valhalla on the phone, asked the same way as the server. */
+    private fun phoneRoutes(context: Context, here: Location, stop: Stop, options: TripOptions): List<CarRoute> {
+        val ask = ServerRoutes.requestOptions(options).put("alternates", 2)
+        val generator = createValhallaRequestGenerator("https://promptly.invalid/route", ServerRoutes.profileOf(options), ask.toString())
+        val request = generator.generateRequest(here.toUserLocation(), listOf(Waypoint(coordinate = GeographicCoordinate(stop.lat, stop.lon), kind = WaypointKind.BREAK)))
+            as? RouteRequest.HttpPost ?: throw IOException("Unexpected route request")
+        val cells = HybridRouting.cellsOf(listOf(here.latitude to here.longitude, stop.lat to stop.lon))
+        val answer = try {
+            Offline.router(context).route(String(request.body), cells)
+        } catch (e: org.promptly.sync.maps.offline.LocalRouter.MissingSquares) {
+            throw OfflineRouteUnavailable(true, e.cells, e)
+        } catch (e: org.promptly.sync.maps.offline.LocalRouter.NoRoute) {
+            throw OfflineRouteUnavailable(false, emptyList(), e)
+        }
+        return parsePhoneRoutes(JSONObject(answer))
+    }
+
+    /** Valhalla's OSRM-style answer (with alternates) as the car's route rows. The first
+     *  is the one the phone would pick anyway; the others carry a few points along
+     *  them, so starting the trip follows the one you chose. */
+    internal fun parsePhoneRoutes(body: JSONObject): List<CarRoute> {
+        val rows = body.optJSONArray("routes") ?: return emptyList()
+        return List(rows.length()) { i ->
+            val r = rows.getJSONObject(i)
+            val legs = r.optJSONArray("legs") ?: JSONArray()
+            val via = (0 until legs.length()).mapNotNull { legs.getJSONObject(it).optString("summary").takeIf { s -> s.isNotBlank() } }
+                .firstOrNull()?.split(",")?.first()?.trim()
+            val line = decodeShape(r.optString("geometry"))
+            CarRoute(
+                seconds = r.optDouble("duration", 0.0).toInt(),
+                km = r.optDouble("distance", 0.0) / 1000.0,
+                via = via,
+                addsMinutes = 0,
+                line = line,
+                through = if (i == 0) emptyList() else throughPoints(line),
+                offline = true,
+            )
+        }
+    }
+
+    /** A few points along a route ((lon, lat) line), with the way you're going at each,
+     *  so a new request lands on the same road in the same direction. */
+    internal fun throughPoints(line: List<Pair<Double, Double>>): List<ThroughPoint> {
+        if (line.size < 3) return emptyList()
+        val along = DoubleArray(line.size)
+        for (i in 1 until line.size) {
+            along[i] = along[i - 1] + org.promptly.sync.maps.offline.TripCache.distance(line[i - 1].second, line[i - 1].first, line[i].second, line[i].first)
+        }
+        val total = along.last()
+        if (total < 1000) return emptyList()
+        return listOf(0.25, 0.5, 0.75).map { f ->
+            // The point that far along, on its stretch of road, and that stretch's direction.
+            val want = total * f
+            val i = along.indexOfFirst { it >= want }.coerceIn(1, line.size - 1)
+            val (aLon, aLat) = line[i - 1]
+            val (bLon, bLat) = line[i]
+            val part = if (along[i] > along[i - 1]) (want - along[i - 1]) / (along[i] - along[i - 1]) else 0.0
+            val x = (bLon - aLon) * Math.cos(Math.toRadians(aLat))
+            val heading = ((Math.toDegrees(Math.atan2(x, bLat - aLat)) + 360) % 360).toInt()
+            ThroughPoint(aLat + (bLat - aLat) * part, aLon + (bLon - aLon) * part, heading)
+        }
     }
 
     internal fun parseRoutes(body: JSONObject): List<CarRoute> {
@@ -289,6 +385,7 @@ internal object CarTemplates {
             if (route.seconds > fastest + 60) "${Math.round((route.seconds - fastest) / 60.0)} min longer" else null,
             if (route.addsMinutes >= 1) "${route.addsMinutes} min of traffic" else null,
             avoid,
+            if (route.offline) "offline route" else null,
         ).joinToString(" · ")
         if (notes.isNotEmpty()) row.addText(notes)
         return row.build()

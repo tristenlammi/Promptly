@@ -33,6 +33,8 @@ import kotlin.math.sqrt
 object Voice {
     private const val TAG = "PromptlyVoice"
     private const val UNHEARD = "Sorry, I didn't catch that."
+    private const val NO_SIGNAL_DRIVING = "No signal. I can't help with that right now, but directions keep going."
+    private const val NO_SIGNAL = "No signal. I can't help with that right now."
     const val SAMPLE_RATE = 16000
 
     enum class State { OFF, HEARD, THINKING }
@@ -79,9 +81,15 @@ object Voice {
             wanted = false
             return
         }
+        val app = context.applicationContext
+        // The assistant needs your server: with no signal, say so rather than listen.
+        if (!org.promptly.sync.maps.offline.Offline.online(app)) {
+            Nav.init(app)
+            answered(app, if (Nav.onTrip()) NO_SIGNAL_DRIVING else NO_SIGNAL, offline = true)
+            return
+        }
         if (!pressed.compareAndSet(false, true)) return
         wanted = true
-        val app = context.applicationContext
         Nav.init(app)
         Nav.hush()
         thread(name = "assistant-button") {
@@ -256,7 +264,12 @@ object Voice {
         } catch (e: Exception) {
             Log.w(TAG, "Couldn't reach the server", e)
             val refused = e.message.orEmpty().let { "said 401" in it || "said 403" in it || "Not signed in" in it }
-            answered(context, if (refused) "This phone needs linking to your Promptly again." else "Sorry, I can't reach your server.", offline = true)
+            val words = when {
+                refused -> "This phone needs linking to your Promptly again."
+                !org.promptly.sync.maps.offline.Offline.online(context) -> if (Nav.onTrip()) NO_SIGNAL_DRIVING else NO_SIGNAL
+                else -> "Sorry, I can't reach your server."
+            }
+            answered(context, words, offline = true)
         } finally {
             setState(was)
         }

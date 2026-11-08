@@ -33,6 +33,9 @@ object Cells {
         return buildList { for (y in y0 until y1) for (x in x0 until x1) add("${x}_$y") }
     }
 
+    /** The square a point is in. */
+    fun of(lat: Double, lon: Double): String = "${floor(lon).toInt()}_${floor(lat).toInt()}"
+
     /** The Valhalla level-0 (motorway, 4-degree) tile a square sits in, as `areas.py::l0_of`. */
     fun level0(cell: String): Int {
         val c = parse(cell) ?: throw IllegalArgumentException("Not a square: $cell")
