@@ -454,26 +454,16 @@ async def test_sharing_push_leave_and_remove(client, people, pushes, live, db):
 
 
 async def test_sharing_hook_refuses_blocked_people(client, people, db):
-    """The one hook (access.sharing_refused) reads ``user_blocks`` once the
-    shared blocks groundwork exists; here the table is stood in for."""
-    from sqlalchemy import text
+    """The one hook (access.sharing_refused) asks ``people.blocks.either``:
+    a block either way round stops sharing."""
+    from app.people.blocks import UserBlock
 
     ann, bob, _ = people
-    made = not await db.scalar(text("SELECT to_regclass('public.user_blocks') IS NOT NULL"))
-    if made:
-        await db.execute(text("CREATE TABLE user_blocks (blocker_id uuid NOT NULL, blocked_id uuid NOT NULL, PRIMARY KEY (blocker_id, blocked_id))"))
-    await db.execute(text("INSERT INTO user_blocks (blocker_id, blocked_id) VALUES (:a, :b)"), {"a": bob.id, "b": ann.id})
+    db.add(UserBlock(blocker_id=bob.id, blocked_id=ann.id))
     await db.commit()
-    try:
-        n = await new_note(client, ann)
-        r = await client.post(f"/api/notes/{n['id']}/members", headers=H(ann), json={"user_ids": [str(bob.id)]})
-        assert r.status_code == 400 and "can't share" in r.json()["detail"]
-    finally:
-        if made:
-            await db.execute(text("DROP TABLE user_blocks"))
-        else:
-            await db.execute(text("DELETE FROM user_blocks WHERE blocker_id = :a"), {"a": bob.id})
-        await db.commit()
+    n = await new_note(client, ann)
+    r = await client.post(f"/api/notes/{n['id']}/members", headers=H(ann), json={"user_ids": [str(bob.id)]})
+    assert r.status_code == 400 and "can't share" in r.json()["detail"]
 
 
 async def test_bulk(client, people, live):

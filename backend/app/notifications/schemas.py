@@ -6,6 +6,9 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+#: "HH:MM", 24-hour.
+_CLOCK = r"^([01]\d|2[0-3]):[0-5]\d$"
+
 
 class SubscribePayload(BaseModel):
     """Shape the frontend sends after a successful
@@ -53,6 +56,22 @@ class PreferencesSchema(BaseModel):
     passwords: bool = True
     mail: bool = True
     notes: bool = True
+    # Quiet hours (0320) — "HH:MM" in the person's own time zone.
+    quiet_enabled: bool = False
+    quiet_start: str = "22:00"
+    quiet_end: str = "07:00"
+    # A different pair for Friday and Saturday nights (periods ending on a
+    # Saturday or Sunday); off = same times every night.
+    quiet_weekend: bool = False
+    quiet_weekend_start: str | None = None
+    quiet_weekend_end: str | None = None
+    # Categories set to "Daily summary" instead of instant.
+    summary_categories: list[str] = Field(default_factory=list)
+    # Read-only context for the settings page.
+    summary_capable: list[str] = Field(default_factory=list)
+    summary_time: str = "08:00"
+    timezone: str = "UTC"
+    quiet_now: bool = False
 
 
 class PreferencesUpdate(BaseModel):
@@ -74,6 +93,13 @@ class PreferencesUpdate(BaseModel):
     passwords: bool | None = None
     mail: bool | None = None
     notes: bool | None = None
+    quiet_enabled: bool | None = None
+    quiet_start: str | None = Field(default=None, pattern=_CLOCK)
+    quiet_end: str | None = Field(default=None, pattern=_CLOCK)
+    quiet_weekend: bool | None = None
+    quiet_weekend_start: str | None = Field(default=None, pattern=_CLOCK)
+    quiet_weekend_end: str | None = Field(default=None, pattern=_CLOCK)
+    summary_categories: list[str] | None = Field(default=None, max_length=32)
 
 
 class NotificationActor(BaseModel):

@@ -18,10 +18,11 @@ from __future__ import annotations
 import uuid
 
 from fastapi import HTTPException, status
-from sqlalchemy import exists, or_, select, text
+from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
+from app.people import blocks
 
 from .models import Note, NoteMember
 
@@ -77,23 +78,9 @@ async def sharing_refused(db: AsyncSession, a: uuid.UUID, b: uuid.UUID) -> bool:
     """True when ``a`` and ``b`` mustn't share a note: either has blocked the
     other. **The single hook** for sharing rules between two people.
 
-    Blocks are shared groundwork (``user_blocks`` / ``app/people/blocks.py``,
-    migrations 0320+), built on another branch. Until that table exists this
-    answers False; once it does, the query below applies with no change
-    here. When ``app/people/blocks.py`` lands, this body can become a call to
-    its helper — nothing else in Notes needs to change.
+    Blocks are the shared ``user_blocks`` (``app/people/blocks.py``, 0321).
     """
-    present = await db.scalar(text("SELECT to_regclass('public.user_blocks') IS NOT NULL"))
-    if not present:
-        return False
-    hit = await db.scalar(
-        text(
-            "SELECT 1 FROM user_blocks WHERE (blocker_id = :a AND blocked_id = :b) "
-            "OR (blocker_id = :b AND blocked_id = :a) LIMIT 1"
-        ),
-        {"a": a, "b": b},
-    )
-    return hit is not None
+    return await blocks.either(db, a, b)
 
 
 __all__ = ["can_open", "is_member", "load", "not_found", "participants", "sharing_refused", "visible_predicate"]

@@ -9,7 +9,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0261_notes_core"
-down_revision = "0260_pw_browsersync"
+down_revision = "0321_user_blocks"
 branch_labels = None
 depends_on = None
 

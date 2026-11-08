@@ -23,7 +23,42 @@ export interface NotificationPreferences {
   passwords: boolean;
   mail: boolean;
   notes: boolean;
+  /** Quiet hours, "HH:MM" in your own time zone (one setting for all of Promptly). */
+  quiet_enabled: boolean;
+  quiet_start: string;
+  quiet_end: string;
+  /** A different pair for Friday and Saturday nights. */
+  quiet_weekend: boolean;
+  quiet_weekend_start: string | null;
+  quiet_weekend_end: string | null;
+  /** Categories set to "Daily summary" instead of instant. */
+  summary_categories: string[];
+  /** Read-only: which categories can be set to "Daily summary". */
+  summary_capable: string[];
+  /** Read-only: when the summary goes (the Today summary time). */
+  summary_time: string;
+  /** Read-only: the time zone quiet hours use. */
+  timezone: string;
+  /** Read-only: quiet hours are on right now. */
+  quiet_now: boolean;
 }
+
+/** The on/off switches (the master switch and one per category). */
+export type NotificationSwitch =
+  | "enabled"
+  | "export_ready"
+  | "import_done"
+  | "shared_message"
+  | "task_complete"
+  | "mention"
+  | "assignment"
+  | "invite"
+  | "item_reminder"
+  | "room_message"
+  | "calendar"
+  | "passwords"
+  | "mail"
+  | "notes";
 
 export interface NotificationRow {
   id: string;

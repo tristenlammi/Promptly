@@ -110,6 +110,65 @@ CATEGORIES: tuple[str, ...] = (
 )
 
 
+@dataclass(frozen=True)
+class Rule:
+    """How a category behaves with quiet hours and the daily summary.
+
+    ``holdable`` — quiet hours may hold it (sent when they end). Anything
+    urgent or about safety says False and always gets through.
+    ``summary`` — offered as "Daily summary" in Account → Notifications.
+    ``app`` / ``one`` / ``many`` — how held pushes are counted ("3 new
+    messages in Rooms"). ``kinds`` — per-kind nouns for an app whose pushes
+    carry ``extra={"kind": …}`` (Porch: posts, comments…).
+    ``url`` — where a collapsed push opens."""
+
+    holdable: bool
+    app: str = ""
+    one: str = "notification"
+    many: str = "notifications"
+    url: str = "/"
+    summary: bool = False
+    kinds: tuple[tuple[str, str, str], ...] = ()
+
+
+# THE central list: every category says whether quiet hours may hold it.
+# Always through: calendar reminders, Passwords, admin/security alerts, the
+# test push and item reminders (medication, habits — asked for at a time).
+# A new category (Calls' ringing ``call``, Porch, Notes, Forms) adds itself
+# here; an import-time check below fails if one is missing.
+RULES: dict[str, Rule] = {
+    "export_ready": Rule(True, one="export ready", many="exports ready", url="/files"),
+    "import_done": Rule(True, one="import finished", many="imports finished", url="/"),
+    "shared_message": Rule(True, one="message in a shared chat", many="messages in shared chats", url="/"),
+    "task_complete": Rule(True, one="automation result", many="automation results", url="/"),
+    "mention": Rule(True, one="mention", many="mentions", url="/"),
+    "assignment": Rule(True, one="assignment", many="assignments", url="/"),
+    "invite": Rule(True, one="invite", many="invites", url="/"),
+    "email_brief": Rule(True, one="email digest", many="email digests", url="/mail"),
+    "email_action": Rule(True, app="Mail", one="important email", many="important emails", url="/mail"),
+    "system_alert": Rule(False),
+    "item_reminder": Rule(False),
+    "room_message": Rule(True, app="Rooms", one="new message", many="new messages", url="/rooms", summary=True),
+    "calendar": Rule(False),
+    "mail": Rule(True, app="Mail", one="new email", many="new emails", url="/mail", summary=True),
+    "passwords": Rule(False),
+    "test": Rule(False),
+    # Notes: someone shared a note with you. Nothing urgent (reminders
+    # come as ``item_reminder``), so quiet hours may hold it.
+    "notes": Rule(True, app="Notes", one="shared note", many="shared notes", url="/notes"),
+}
+_missing = set(CATEGORIES) - set(RULES)
+assert not _missing, f"notification categories without a quiet-hours rule: {_missing}"
+
+#: Categories a person can set to "Daily summary".
+SUMMARY_CATEGORIES: tuple[str, ...] = tuple(c for c, r in RULES.items() if r.summary and r.holdable)
+
+
+def rule_for(category: str) -> Rule:
+    """Unknown categories are treated as urgent: never held."""
+    return RULES.get(category) or Rule(False)
+
+
 # Session factory — dispatch runs outside of a request so we reuse
 # the app-wide ``SessionLocal`` factory directly. Each dispatch
 # call opens its own short-lived session via the factory's
@@ -157,6 +216,7 @@ async def notify_user(
     workspace_id: UUID | None = None,
     inbox: bool = True,
     extra: dict[str, Any] | None = None,
+    summary: bool = False,
 ) -> None:
     """Schedule a push for every active subscription on ``user_id`` and
     write the durable inbox row.
@@ -166,7 +226,13 @@ async def notify_user(
     user whose request incidentally triggered it. The inbox row is
     written regardless of push preferences (those gate the nudge, not
     the record); ``test`` pushes are the one category that never
-    persists."""
+    persists.
+
+    Pass ``actor_user_id`` for anything a person did: a push (and inbox
+    row) from someone the recipient has blocked, or who has blocked them,
+    is dropped. ``summary=True`` holds it for the daily summary whatever
+    the category's setting (an app's own per-kind "Daily summary" switch);
+    quiet hours may also hold it (see :data:`RULES`)."""
     payload = PushPayload(
         title=title, body=body, url=url, tag=tag, category=category, extra=extra
     )
@@ -177,6 +243,7 @@ async def notify_user(
         actor_user_id=actor_user_id,
         workspace_id=workspace_id,
         inbox=inbox,
+        summary=summary,
     )
     # Check for a loop up front rather than letting ``spawn`` report it:
     # ``spawn`` closes the coroutine when there's none, and this path wants
@@ -213,11 +280,21 @@ async def _dispatch(
     actor_user_id: UUID | None = None,
     workspace_id: UUID | None = None,
     inbox: bool = True,
+    summary: bool = False,
 ) -> dict[str, int]:
     """Write the inbox row and push to every device. Returns what happened
-    to the pushes: ``{"delivered", "failed", "removed"}``."""
-    outcome = {"delivered": 0, "failed": 0, "removed": 0}
+    to the pushes: ``{"delivered", "failed", "removed", "held", "blocked"}``."""
+    outcome = {"delivered": 0, "failed": 0, "removed": 0, "held": 0, "blocked": 0}
     async with _session_maker() as db:
+        # 0) Blocks (D7): nothing at all from someone the recipient blocked,
+        #    or who blocked them — not the push, not the inbox row. Central,
+        #    so every app that passes ``actor_user_id`` gets it.
+        if actor_user_id is not None and actor_user_id != user_id:
+            from app.people.blocks import either
+
+            if await either(db, user_id, actor_user_id):
+                outcome["blocked"] = 1
+                return outcome
         # 1) Durable inbox row first — it must land even when the user
         #    has push muted or owns no subscriptions.
         # ``inbox=False``: a push only (a chat message — the app is its own
@@ -271,94 +348,147 @@ async def _dispatch(
             except Exception:
                 logger.exception("inbox row write failed")
                 await db.rollback()
-        # Read VAPID material from the DB rather than ``settings`` —
-        # the bootstrap auto-generates a keypair on first boot and
-        # admins can rotate via Admin → Settings without touching
-        # ``.env``. Static env vars are still mirrored into the same
-        # column at boot if set, so existing deployments behave
-        # identically.
-        app_settings_row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
-        vapid_private = app_settings_row.vapid_private_key if app_settings_row else None
-        vapid_contact = (
-            app_settings_row.vapid_contact if app_settings_row else None
-        ) or "mailto:admin@localhost"
-        if not vapid_private:
-            # Should never happen on a healthy install; log loud enough
-            # to surface in Admin → Console without spamming.
-            logger.warning("push dispatch skipped: VAPID private key not configured")
+        vapid = await _vapid(db)
+        if vapid is None:
             return outcome
 
         prefs = await _get_prefs(db, user_id)
         if not _should_send(prefs, category):
             return outcome
 
-        subs = (
-            (
-                await db.execute(
-                    select(PushSubscription).where(
-                        PushSubscription.user_id == user_id
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-        if not subs:
+        if not await _has_subscriptions(db, user_id):
             return outcome
 
-        # pywebpush is sync + blocking. Ship the per-subscription
-        # send into a thread so one slow push service doesn't stall
-        # the event loop for other work. They run concurrently via
-        # ``asyncio.gather``.
-        send_tasks = [
-            asyncio.to_thread(
-                _send_one,
-                endpoint=sub.endpoint,
-                p256dh=sub.p256dh,
-                auth=sub.auth,
-                payload_json=payload.to_json(),
-                vapid_private_key=vapid_private,
-                vapid_contact=vapid_contact,
-            )
-            for sub in subs
-        ]
-        results = await asyncio.gather(*send_tasks, return_exceptions=True)
+        # 2) Quiet hours / daily summary: hold it for later instead.
+        from app.notifications import quiet
 
-        dead_ids: list[UUID] = []
-        live_ids: list[UUID] = []
-        for sub, res in zip(subs, results):
-            if isinstance(res, _PushGone):
-                dead_ids.append(sub.id)
-            elif isinstance(res, Exception):
-                logger.warning(
-                    "push send failed for subscription %s: %s", sub.id, res
-                )
-            else:
-                live_ids.append(sub.id)
+        reason = await quiet.hold_reason(db, prefs, category, summary=summary)
+        if reason is not None:
+            await quiet.hold(
+                db, user_id=user_id, category=category, payload=payload,
+                actor_user_id=actor_user_id, reason=reason,
+            )
+            await db.commit()
+            outcome["held"] = 1
+            return outcome
 
-        now = datetime.now(timezone.utc)
-        if dead_ids:
-            await db.execute(
-                delete(PushSubscription).where(
-                    PushSubscription.id.in_(dead_ids)
-                )
-            )
-            logger.info(
-                "pruned %d dead push subscription(s) for user %s",
-                len(dead_ids),
-                user_id,
-            )
-        if live_ids:
-            await db.execute(
-                update(PushSubscription)
-                .where(PushSubscription.id.in_(live_ids))
-                .values(last_used_at=now)
-            )
-        await db.commit()
-        outcome["delivered"] = len(live_ids)
-        outcome["removed"] = len(dead_ids)
-        outcome["failed"] = len(subs) - len(live_ids) - len(dead_ids)
+        sent = await deliver(db, user_id, payload, vapid=vapid)
+        outcome.update(sent)
         return outcome
+
+
+async def _vapid(db: AsyncSession) -> tuple[str, str] | None:
+    """(private key, contact) — or None when push isn't set up.
+
+    Read from the DB rather than ``settings`` — the bootstrap
+    auto-generates a keypair on first boot and admins can rotate via
+    Admin → Settings without touching ``.env``. Static env vars are
+    still mirrored into the same column at boot if set, so existing
+    deployments behave identically."""
+    app_settings_row = await db.get(AppSettings, SINGLETON_APP_SETTINGS_ID)
+    vapid_private = app_settings_row.vapid_private_key if app_settings_row else None
+    vapid_contact = (
+        app_settings_row.vapid_contact if app_settings_row else None
+    ) or "mailto:admin@localhost"
+    if not vapid_private:
+        # Should never happen on a healthy install; log loud enough
+        # to surface in Admin → Console without spamming.
+        logger.warning("push dispatch skipped: VAPID private key not configured")
+        return None
+    return vapid_private, vapid_contact
+
+
+async def _has_subscriptions(db: AsyncSession, user_id: UUID) -> bool:
+    got = await db.execute(
+        select(PushSubscription.id).where(PushSubscription.user_id == user_id).limit(1)
+    )
+    return got.first() is not None
+
+
+async def deliver(
+    db: AsyncSession,
+    user_id: UUID,
+    payload: PushPayload,
+    *,
+    vapid: tuple[str, str] | None = None,
+) -> dict[str, int]:
+    """Push ``payload`` to every device ``user_id`` has, now — no
+    preference, block or quiet-hours checks (the callers made them).
+    Prunes dead subscriptions and commits. Used by :func:`_dispatch` and by
+    the release of held pushes (``notifications/loops.py``)."""
+    outcome = {"delivered": 0, "failed": 0, "removed": 0}
+    if vapid is None:
+        vapid = await _vapid(db)
+        if vapid is None:
+            return outcome
+    vapid_private, vapid_contact = vapid
+    subs = (
+        (
+            await db.execute(
+                select(PushSubscription).where(
+                    PushSubscription.user_id == user_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not subs:
+        return outcome
+
+    # pywebpush is sync + blocking. Ship the per-subscription
+    # send into a thread so one slow push service doesn't stall
+    # the event loop for other work. They run concurrently via
+    # ``asyncio.gather``.
+    send_tasks = [
+        asyncio.to_thread(
+            _send_one,
+            endpoint=sub.endpoint,
+            p256dh=sub.p256dh,
+            auth=sub.auth,
+            payload_json=payload.to_json(),
+            vapid_private_key=vapid_private,
+            vapid_contact=vapid_contact,
+        )
+        for sub in subs
+    ]
+    results = await asyncio.gather(*send_tasks, return_exceptions=True)
+
+    dead_ids: list[UUID] = []
+    live_ids: list[UUID] = []
+    for sub, res in zip(subs, results):
+        if isinstance(res, _PushGone):
+            dead_ids.append(sub.id)
+        elif isinstance(res, Exception):
+            logger.warning(
+                "push send failed for subscription %s: %s", sub.id, res
+            )
+        else:
+            live_ids.append(sub.id)
+
+    now = datetime.now(timezone.utc)
+    if dead_ids:
+        await db.execute(
+            delete(PushSubscription).where(
+                PushSubscription.id.in_(dead_ids)
+            )
+        )
+        logger.info(
+            "pruned %d dead push subscription(s) for user %s",
+            len(dead_ids),
+            user_id,
+        )
+    if live_ids:
+        await db.execute(
+            update(PushSubscription)
+            .where(PushSubscription.id.in_(live_ids))
+            .values(last_used_at=now)
+        )
+    await db.commit()
+    outcome["delivered"] = len(live_ids)
+    outcome["removed"] = len(dead_ids)
+    outcome["failed"] = len(subs) - len(live_ids) - len(dead_ids)
+    return outcome
 
 
 async def send_test_push(user_id: UUID) -> dict[str, int]:

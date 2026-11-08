@@ -111,7 +111,7 @@ async def _announce(account_id: uuid.UUID, messages: list[MailMessage]) -> None:
     now = datetime.now(timezone.utc)
     fresh = [m for m in messages if not m.seen and now - m.sent_at < ANNOUNCE_WITHIN]
     if len(fresh) > MAX_ANNOUNCED:
-        await notify_user(user_id=account.user_id, category="mail", title=f"{len(fresh)} new emails", body=account.email, url="/mail", tag=f"mail-{account.id}", inbox=False)
+        await notify_user(user_id=account.user_id, category="mail", title=f"{len(fresh)} new emails", body=account.email, url="/mail", tag=f"mail-{account.id}", inbox=False, extra={"count": len(fresh)})
         return
     for m in fresh:
         await notify_user(
