@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-09
+
 ### Added
 - Forms (groundwork): a form is a new kind of file. It can be made blank or from six ready templates (RSVP, sign-up sheet, feedback, contact details, event registration, order form), copied, saved as a template, shared with people who can edit it or see its answers, trashed (which stops it taking answers) and restored (still closed), and downloaded as a .zip of its questions and answers.
 - Forms: the form builder. Make a form from the new Forms app (blank or from a template), from New ▸ Form in Files, or from the Files home. Every kind of question (short answer, paragraph, multiple choice, checkboxes, dropdown, linear scale, rating, date, time, file upload), plus text, pictures and sections, with "go to section based on answer", places per option for sign-up sheets, answer rules, a colour, header picture and font for each form, and a live preview that works just like the real form. Drag questions to reorder them, or use Move up and Move down; duplicate, delete and undo. It saves as you go, even with the form open in two tabs or while you're offline.
