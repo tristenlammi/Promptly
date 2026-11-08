@@ -41,7 +41,6 @@ from .models import (
     NoteAttachment,
     NoteItem,
     NoteMember,
-    NoteReminder,
     NoteUserState,
     NoteVersion,
 )
@@ -782,7 +781,7 @@ async def add_members(db: AsyncSession, user: User, note: Note, user_ids: list[u
         if u is None or u.disabled:
             raise bad("Pick people who use this Promptly.")
         if await access.sharing_refused(db, note.owner_id, uid):
-            raise bad(f"You can't share this note with {u.username}.")
+            raise bad(await access.refusal(db, note.owner_id, u))
         new.append(uid)
     if len(have) + len(new) > MAX_MEMBERS:
         raise bad(f"A note can be shared with up to {MAX_MEMBERS} people.")
@@ -809,7 +808,9 @@ async def remove_member(db: AsyncSession, user: User, note: Note, member_id: uui
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="They don't have this note.")
     await db.delete(m)
     await db.execute(delete(NoteUserState).where(NoteUserState.note_id == note.id, NoteUserState.user_id == member_id))
-    await db.execute(delete(NoteReminder).where(NoteReminder.note_id == note.id, NoteReminder.user_id == member_id))
+    from .reminders import clear_for
+
+    await clear_for(db, member_id, note.id)
     await db.execute(
         delete(TagAssignment).where(
             TagAssignment.user_id == member_id, TagAssignment.entity_kind == "note", TagAssignment.entity_id == str(note.id)
@@ -847,6 +848,9 @@ async def purge(db: AsyncSession, notes: list[Note]) -> int:
     ids = [n.id for n in notes]
     if not ids:
         return 0
+    from .reminders import clear_all
+
+    await clear_all(db, ids)
     await db.execute(
         delete(TagAssignment).where(TagAssignment.entity_kind == "note", TagAssignment.entity_id.in_([str(i) for i in ids]))
     )
@@ -928,9 +932,9 @@ async def _cards(db: AsyncSession, user: User, notes: list[Note]) -> tuple[list[
             a["images"] = n
         else:
             a["audio"], a["audio_ms"] = n, int(ms or 0)
-    reminders = set(
-        (await db.execute(select(NoteReminder.note_id).where(NoteReminder.user_id == user.id, NoteReminder.note_id.in_(ids)))).scalars()
-    )
+    from .reminders import live_for
+
+    reminders = await live_for(db, user, ids)
     labels = await _labels(db, user, ids)
     covers = await A.covers(db, user, ids) if any(a.get("images") for a in att.values()) else {}
 
@@ -963,6 +967,7 @@ async def _cards(db: AsyncSession, user: User, notes: list[Note]) -> tuple[list[
             "attachments": att.get(n.id, {"images": 0, "audio": 0, "audio_ms": 0}),
             "covers": covers.get(n.id, []),
             "has_reminder": n.id in reminders,
+            "reminder": reminders.get(n.id),
             "changed": bool(st and st.seen_seq < n.change_seq and n.edited_by not in (None, user.id)),
             "revision": n.revision,
             "change_seq": n.change_seq,
@@ -992,7 +997,6 @@ async def full_out(db: AsyncSession, user: User, note: Note) -> dict[str, Any]:
     items = await items_of(db, note.id)
     atts = await A.for_note(db, user, note)
     mems = await members_of(db, note)
-    rem = await db.get(NoteReminder, (note.id, user.id))
     out.update({
         "snippet": None,
         "body_doc": note.body_doc,
@@ -1003,7 +1007,6 @@ async def full_out(db: AsyncSession, user: User, note: Note) -> dict[str, Any]:
         "members": [
             {"user_id": str(m.user_id), "added_by": str(m.added_by) if m.added_by else None, "added_at": m.added_at} for m in mems
         ],
-        "reminder": {"tasks_file_id": str(rem.tasks_file_id), "task_id": rem.task_id} if rem else None,
         "can": {
             "edit": note.trashed_at is None,
             "share": note.owner_id == user.id and note.trashed_at is None,
@@ -1014,6 +1017,13 @@ async def full_out(db: AsyncSession, user: User, note: Note) -> dict[str, Any]:
     people.update(uuid.UUID(a["added_by"]) for a in atts if a["added_by"])
     out["users"] = await users_map(db, people)
     return out
+
+
+async def _reminder_ids(db: AsyncSession, user: User) -> list[uuid.UUID]:
+    """Notes with a reminder of yours that's still to come (read from Tasks)."""
+    from .reminders import live_note_ids
+
+    return await live_note_ids(db, user) or [uuid.UUID(int=0)]
 
 
 def _encode_cursor(view: str, key: list[Any]) -> str:
@@ -1064,7 +1074,7 @@ async def list_cards(
         elif view == "archive":
             stmt = stmt.where(st.archived_at.is_not(None))
         else:
-            stmt = stmt.where(exists().where(NoteReminder.note_id == Note.id, NoteReminder.user_id == user.id))
+            stmt = stmt.where(Note.id.in_(await _reminder_ids(db, user)))
     if color:
         if color not in COLORS:
             raise bad("Pick one of the note colours.")
@@ -1091,7 +1101,7 @@ async def list_cards(
         elif type_ == "shared":
             stmt = stmt.where(or_(Note.owner_id != user.id, exists().where(NoteMember.note_id == Note.id)))
         else:
-            stmt = stmt.where(exists().where(NoteReminder.note_id == Note.id, NoteReminder.user_id == user.id))
+            stmt = stmt.where(Note.id.in_(await _reminder_ids(db, user)))
     if q and q.strip():
         term = q.strip()[:200]
         pat = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"

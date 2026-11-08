@@ -139,19 +139,23 @@ export function PeoplePicker({
           const on = !!u && isSel(u.id);
           const sub = !u ? "Not on Promptly" : p.name !== u.username ? `@${u.username}` : null;
           return (
-            <li key={p.key} id={`${listId}-${i}`} role="option" aria-selected={on} aria-disabled={!u} data-idx={i}>
-              <button
-                type="button"
-                disabled={!u}
-                tabIndex={-1}
-                onClick={() => u && toggle(u)}
-                onMouseMove={() => setActive(i)}
-                className={cn(
-                  "flex min-h-12 w-full items-center gap-2.5 px-3 py-1.5 text-left focus-visible:outline-none",
-                  u ? "hover:bg-[var(--hover)]" : "cursor-default opacity-60",
-                  i === active && u && "bg-[var(--hover)]",
-                )}
-              >
+            // The option itself is what you click (the search box keeps
+            // focus via aria-activedescendant): no button nested inside it.
+            <li
+              key={p.key}
+              id={`${listId}-${i}`}
+              role="option"
+              aria-selected={on}
+              aria-disabled={!u}
+              data-idx={i}
+              onClick={() => u && toggle(u)}
+              onMouseMove={() => setActive(i)}
+              className={cn(
+                "flex min-h-12 w-full items-center gap-2.5 px-3 py-1.5 text-left",
+                u ? "cursor-pointer hover:bg-[var(--hover)]" : "cursor-default opacity-60",
+                i === active && u && "bg-[var(--hover)]",
+              )}
+            >
                 <PersonAvatar person={p} size={32} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm text-[var(--text)]">
@@ -168,7 +172,6 @@ export function PeoplePicker({
                     {on && <Check className="h-3.5 w-3.5" />}
                   </span>
                 )}
-              </button>
             </li>
           );
         })}

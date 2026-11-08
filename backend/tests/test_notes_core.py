@@ -463,7 +463,7 @@ async def test_sharing_hook_refuses_blocked_people(client, people, db):
     await db.commit()
     n = await new_note(client, ann)
     r = await client.post(f"/api/notes/{n['id']}/members", headers=H(ann), json={"user_ids": [str(bob.id)]})
-    assert r.status_code == 400 and "can't share" in r.json()["detail"]
+    assert r.status_code == 400 and "can't be added" in r.json()["detail"]
 
 
 async def test_bulk(client, people, live):

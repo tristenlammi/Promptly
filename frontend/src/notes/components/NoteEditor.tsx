@@ -1,8 +1,9 @@
-import { Archive, ArchiveRestore, ArrowLeft, ArrowDownAZ, CheckSquare, CloudOff, ListX, Mic, MoreVertical, Palette, Pin, Square, Tag, Trash2, Type } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, ArrowDownAZ, BellPlus, CheckSquare, CloudOff, ListX, Mic, MoreVertical, Palette, Pin, Square, Tag, Trash2, Type, UserPlus, Users } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { PhotoItem } from "@/api/photos";
 import { tagColor } from "@/api/tags";
+import { UserAvatar } from "@/components/shared/UserAvatar";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
@@ -18,6 +19,8 @@ import { BodyEditor, type BodyEditorHandle } from "./BodyEditor";
 import { ListEditor } from "./ListEditor";
 import { ColorGrid, LabelChooser } from "./pickers";
 import { MenuItem, Pop } from "./Pop";
+import { ReminderChip, ReminderPicker } from "./Reminder";
+import { ShareDialog } from "./ShareDialog";
 
 function edited(n: Note, me: string | null, users: Record<string, { username: string }>): string {
   const d = new Date(n.updated_at);
@@ -65,8 +68,10 @@ export function NoteEditor({
   const isDraft = useNotes((s) => !!s.drafts[id]);
   const trashed = !!note.trashed_at;
   const editable = !trashed;
-  const [pop, setPop] = useState<null | "color" | "labels" | "more">(null);
+  const [pop, setPop] = useState<null | "color" | "labels" | "more" | "remind">(null);
+  const [sharing, setSharing] = useState(false);
   const colorBtn = useRef<HTMLButtonElement>(null);
+  const remindBtn = useRef<HTMLButtonElement>(null);
   const labelBtn = useRef<HTMLButtonElement>(null);
   const moreBtn = useRef<HTMLButtonElement>(null);
   const body = useRef<BodyEditorHandle>(null);
@@ -75,6 +80,12 @@ export function NoteEditor({
   const images = atts.filter((a) => a.kind === "image");
   const recordings = atts.filter((a) => a.kind === "audio");
   const [recording, setRecording] = useState(startWith === "record" && !note.trashed_at);
+
+  // Opening a note someone else changed clears its "changed" dot (and
+  // keeps it clear while their changes arrive here).
+  useEffect(() => {
+    if (!isDraft && note.changed && !note.trashed_at) notesActions.me(id, { seen: true });
+  }, [id, isDraft, note.changed, note.change_seq, note.trashed_at]);
 
   // ---------------------------------------------------------- title + body
   const [title, setTitle] = useState(note.title);
@@ -196,6 +207,16 @@ export function NoteEditor({
 
   const offline = pending && (sync === "offline" || sync === "retrying" || sync === "signed_out");
 
+  // Who it's shared with (shown on the note; opens the share dialog).
+  const people = note.is_owner ? note.member_ids : [note.owner_id, ...note.member_ids.filter((u) => u !== me)];
+  const nameOf = (uid: string) => users[uid]?.username ?? "someone";
+  const sharedShort = note.is_owner
+    ? `Shared with ${people.length === 1 ? nameOf(people[0]) : `${people.length} people`}`
+    : `${nameOf(note.owner_id)}'s note`;
+  const sharedWords = note.is_owner
+    ? `Shared with ${people.map(nameOf).join(", ")}. Change who has it`
+    : `Shared with you by ${nameOf(note.owner_id)}${people.length > 1 ? `, with ${people.slice(1).map(nameOf).join(", ")}` : ""}. See who has it`;
+
   return (
     <div
       data-color={note.color}
@@ -315,6 +336,7 @@ export function NoteEditor({
               editable={editable}
               autoFocus={editable && autoFocus === "body"}
               placeholder={variant === "composer" ? "Take a note…" : "Note"}
+              theirName={note.edited_by && note.edited_by !== me ? users[note.edited_by]?.username : undefined}
               onChange={(doc, base) => {
                 bodyNext.current = doc;
                 bodyBase.current = base;
@@ -349,6 +371,36 @@ export function NoteEditor({
           </div>
         )}
 
+        {(note.reminder || people.length > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5 pb-3">
+            {note.reminder && (
+              <ReminderChip
+                reminder={note.reminder}
+                className="h-7"
+                onOpen={editable ? () => setPop("remind") : undefined}
+                onRemove={editable ? () => notesActions.remind(id, null) : undefined}
+              />
+            )}
+            {people.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSharing(true)}
+                aria-label={sharedWords}
+                title={sharedWords}
+                className="inline-flex h-7 min-w-0 max-w-full items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--note-text)_9%,transparent)] pl-1 pr-2.5 text-xs note-hover"
+              >
+                <span className="flex -space-x-1">
+                  {people.slice(0, 4).map((uid) => {
+                    const u = users[uid];
+                    return <UserAvatar key={uid} name={u?.username ?? "?"} userId={uid} avatarUrl={u?.avatar_url} color={u?.color} size={20} className="ring-2 ring-[var(--note-bg)]" />;
+                  })}
+                </span>
+                <span className="truncate">{sharedShort}</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {note.labels.length > 0 && (
           <div className="flex flex-wrap gap-1.5 pb-3">
             {note.labels.map((l) => (
@@ -369,6 +421,29 @@ export function NoteEditor({
       <div className={cn("flex shrink-0 items-center gap-0.5 px-2 pb-2 pt-1", variant === "page" && "pb-[calc(8px+env(safe-area-inset-bottom,0px))]")}>
         {editable && (
           <>
+            <button
+              ref={remindBtn}
+              type="button"
+              aria-label={note.reminder ? "Change reminder" : "Remind me"}
+              title="Remind me"
+              aria-expanded={pop === "remind"}
+              onClick={() => setPop(pop === "remind" ? null : "remind")}
+              className={footerBtn}
+            >
+              <BellPlus className="h-[18px] w-[18px]" />
+            </button>
+            <button
+              type="button"
+              aria-label={note.is_owner ? "Share" : "People on this note"}
+              title={note.is_owner ? "Share" : "People"}
+              onClick={() => {
+                flush();
+                setSharing(true);
+              }}
+              className={footerBtn}
+            >
+              {note.is_owner ? <UserPlus className="h-[18px] w-[18px]" /> : <Users className="h-[18px] w-[18px]" />}
+            </button>
             <button ref={colorBtn} type="button" aria-label="Colour" title="Colour" aria-expanded={pop === "color"} onClick={() => setPop(pop === "color" ? null : "color")} className={footerBtn}>
               <Palette className="h-[18px] w-[18px]" />
             </button>
@@ -421,6 +496,8 @@ export function NoteEditor({
           }}
         />
       )}
+      {pop === "remind" && <ReminderPicker note={note} anchor={remindBtn.current} onClose={() => setPop(null)} />}
+      {sharing && <ShareDialog note={note} onClose={() => setSharing(false)} onLeft={onClose} />}
       {pop === "color" && (
         <Pop anchor={colorBtn.current} label="Note colour" onClose={() => setPop(null)} width={248}>
           <ColorGrid value={note.color} onPick={(c) => noteOps.color([id], c)} />

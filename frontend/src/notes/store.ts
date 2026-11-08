@@ -21,11 +21,11 @@ import { tagsApi } from "@/api/tags";
 import { apiErrorMessage } from "@/utils/apiError";
 import { toast } from "@/store/toastStore";
 
-import { notesApi } from "./api";
+import { notesApi, type Members } from "./api";
 import { notesDb } from "./db";
 import { mergeFields } from "./merge";
 import { applyOp, coalesce, grouped, type Base, type ItemFields, type MeFields, type NoteFields, type Op, type QueuedOp } from "./ops";
-import { isEmptyNote, uuid, type DocNode, type Known, type Note, type NoteAttachment, type NoteItem, type NoteKind, type NoteLabel, type NoteUser } from "./types";
+import { isEmptyNote, uuid, type DocNode, type Known, type Note, type NoteAttachment, type NoteItem, type NoteKind, type NoteLabel, type NoteUser, type ReminderIn } from "./types";
 
 export type SyncState = "idle" | "saving" | "offline" | "retrying" | "signed_out";
 
@@ -41,6 +41,9 @@ interface NotesState {
   loaded: { main: boolean; trash: boolean };
   loadError: string | null;
   sync: SyncState;
+  /** Notes someone else took away from you (removed you, or deleted it)
+   *  while you had them: the last copy, so you can keep one. */
+  lost: Record<string, Note>;
 }
 
 export const useNotes = create<NotesState>(() => ({
@@ -54,6 +57,7 @@ export const useNotes = create<NotesState>(() => ({
   loaded: { main: false, trash: false },
   loadError: null,
   sync: "idle",
+  lost: {},
 }));
 
 const get = () => useNotes.getState();
@@ -128,6 +132,7 @@ function withState(full: Note, card: Note): Note {
     labels: card.labels,
     changed: card.changed,
     has_reminder: card.has_reminder,
+    reminder: card.reminder,
     shared: card.shared,
     member_ids: card.member_ids,
   };
@@ -173,11 +178,24 @@ function drop(ids: string[]) {
   if (uid && dropped.length) void notesDb.deleteOps(uid, dropped.map((q) => q.seq));
 }
 
+/** A note that was shared with you went (you were removed, or its owner
+ *  deleted it): keep its last copy for "Keep a copy", then drop it. */
+function lose(ids: string[]) {
+  const s = get();
+  const lost = { ...s.lost };
+  for (const id of ids) {
+    const n = s.notes[id] ?? s.known[id]?.note;
+    if (n && n.is_owner === false && !s.known[id]?.partial) lost[id] = n;
+  }
+  set({ lost });
+  drop(ids);
+}
+
 // ------------------------------------------------------------------ start
 
 export async function initNotes(uid: string): Promise<void> {
   if (get().uid === uid) return;
-  set({ uid, ready: false, known: {}, outbox: [], notes: {}, drafts: {}, loaded: { main: false, trash: false }, sync: "idle" });
+  set({ uid, ready: false, known: {}, outbox: [], notes: {}, drafts: {}, loaded: { main: false, trash: false }, sync: "idle", lost: {} });
   const [ks, ops, drafts] = await Promise.all([
     notesDb.loadKnown(uid),
     notesDb.loadOutbox(uid),
@@ -303,7 +321,7 @@ export async function fetchNote(id: string): Promise<"ok" | "gone" | "offline"> 
     return "ok";
   } catch (e) {
     if (status(e) === 404) {
-      drop([id]);
+      lose([id]);
       return "gone";
     }
     return "offline";
@@ -327,7 +345,7 @@ export function onLiveEvent(ev: { type: string; id: string; change_seq?: number 
   if (ev.type === "gone") {
     const k = get().known[ev.id];
     // Your own note going to Trash also comes as "note" — "gone" is final.
-    if (k) drop([ev.id]);
+    if (k) lose([ev.id]);
     return;
   }
   const k = get().known[ev.id];
@@ -516,6 +534,12 @@ async function send(q: QueuedOp): Promise<void> {
       landed(q, n);
       return;
     }
+    case "reminder": {
+      const n = op.reminder ? await notesApi.setReminder(op.id, op.reminder) : await notesApi.clearReminder(op.id);
+      addUsers(n.users);
+      landed(q, n);
+      return;
+    }
     case "transcribe":
       try {
         const n = await notesApi.transcribe(op.id, op.aid);
@@ -632,7 +656,7 @@ export async function flush(): Promise<void> {
         const msg = apiErrorMessage(e);
         if (code === 404) {
           const wasMine = get().known[q.op.id]?.note.is_owner;
-          drop([q.op.id]);
+          lose([q.op.id]);
           toast.error(wasMine === false ? "This note isn't shared with you any more." : "That note isn't here any more.");
         } else {
           const later = q.op.k === "create" ? get().outbox.filter((x) => x.op.id === q.op.id) : [q];
@@ -825,7 +849,110 @@ export const notesActions = {
   transcribe(id: string, aid: string) {
     enqueue({ k: "transcribe", id, aid });
   },
+  /** Your reminder (a task in your Tasks); null takes it off. A note still
+   *  being written is kept first (the reminder needs it on the server). */
+  remind(id: string, reminder: ReminderIn | null) {
+    keepDraft(id);
+    enqueue({ k: "reminder", id, reminder });
+  },
 };
+
+// ------------------------------------------------------------------ sharing
+// Sharing needs the server's answer (who can be added), so it isn't queued.
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** The note is on the server (a new one is sent first). False: offline. */
+async function onServer(id: string): Promise<boolean> {
+  if (get().drafts[id]) keepDraft(id);
+  for (let i = 0; i < 60; i++) {
+    const k = get().known[id];
+    if (k && !k.local) return true;
+    if (!k && !get().outbox.some((q) => q.op.id === id)) return false;
+    if (i === 0) kick();
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+    await sleep(200);
+  }
+  return false;
+}
+
+function applyMembers(id: string, m: Members) {
+  addUsers(m.users);
+  learnState(id, { members: m.members, member_ids: m.members.map((x) => x.user_id), shared: m.members.length > 0 });
+}
+
+export class ShareError extends Error {}
+
+/** Who the note is shared with, fresh from the server (null: offline or gone). */
+export async function loadMembers(id: string): Promise<Members | null> {
+  const k = get().known[id];
+  if (!k || k.local) return null;
+  try {
+    const m = await notesApi.members(id);
+    applyMembers(id, m);
+    return m;
+  } catch {
+    return null;
+  }
+}
+
+/** Share the note with these people (the owner). Throws :class:`ShareError`
+ *  with words for the person (someone can't be added, no connection). */
+export async function shareNote(id: string, userIds: string[]): Promise<Members> {
+  if (!(await onServer(id))) throw new ShareError("You're offline. Connect to share this note.");
+  try {
+    const m = await notesApi.share(id, userIds);
+    applyMembers(id, m);
+    return m;
+  } catch (e) {
+    throw new ShareError(isOfflineError(e) ? "You're offline. Connect to share this note." : apiErrorMessage(e));
+  }
+}
+
+/** The owner takes someone off the note. */
+export async function unshareNote(id: string, userId: string): Promise<void> {
+  try {
+    const r = await notesApi.unshare(id, userId);
+    if ("members" in r) applyMembers(id, r);
+  } catch (e) {
+    throw new ShareError(isOfflineError(e) ? "You're offline. Connect to change who has this note." : apiErrorMessage(e));
+  }
+}
+
+/** You leave someone else's note: it goes from your notes at once. */
+export async function leaveNote(id: string): Promise<void> {
+  const me = get().uid;
+  if (!me) return;
+  try {
+    await notesApi.unshare(id, me);
+  } catch (e) {
+    if (status(e) !== 404) throw new ShareError(isOfflineError(e) ? "You're offline. Connect to leave this note." : apiErrorMessage(e));
+  }
+  drop([id]);
+}
+
+/** "Keep a copy" of a note that was taken away: a new note of your own
+ *  with its words and list (pictures and recordings were theirs). */
+export function keepCopy(id: string): string | null {
+  const n = get().lost[id];
+  if (!n) return null;
+  const items = grouped(n.items);
+  const ids = new Map(items.map((i) => [i.id, uuid()]));
+  const copy = newDraft(n.kind, {
+    title: n.title,
+    body_doc: n.body_doc ?? null,
+    body_text: n.body_text ?? "",
+    color: n.color,
+    items: items.map((i) => ({ ...i, id: ids.get(i.id) as string, parent_id: i.parent_id ? ids.get(i.parent_id) ?? null : null, checked_by: null, created_by: null })),
+    items_total: items.length,
+    items_checked: items.filter((i) => i.checked).length,
+  });
+  if (!closeDraft(copy)) keepDraft(copy);
+  const lost = { ...get().lost };
+  delete lost[id];
+  set({ lost });
+  return copy;
+}
 
 /** Where a new item goes: right after ``afterId`` among the list's own order. */
 function positionFor(items: NoteItem[], afterId: string | null, _parent: string | null): number {
@@ -840,7 +967,7 @@ function positionFor(items: NoteItem[], afterId: string | null, _parent: string 
 
 /** Wiped on sign-out with the rest of a person's data. */
 export function resetNotes(): void {
-  set({ uid: null, ready: false, known: {}, outbox: [], notes: {}, drafts: {}, users: {}, loaded: { main: false, trash: false }, sync: "idle" });
+  set({ uid: null, ready: false, known: {}, outbox: [], notes: {}, drafts: {}, users: {}, loaded: { main: false, trash: false }, sync: "idle", lost: {} });
 }
 
 /** Typing not yet handed to the store (list items wait a moment), per

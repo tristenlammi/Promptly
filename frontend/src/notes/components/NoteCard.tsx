@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, CheckCircle2, Circle, CloudOff, Mic, MoreVertical, Image as ImageIcon, Palette, Pin, PinOff, RotateCcw, Trash2, Users } from "lucide-react";
+import { Archive, ArchiveRestore, BellPlus, CheckCircle2, Circle, CloudOff, Mic, MoreVertical, Image as ImageIcon, Palette, Pin, PinOff, RotateCcw, Trash2, UserPlus, Users } from "lucide-react";
 import { memo, useRef, useState } from "react";
 
 import { tagColor } from "@/api/tags";
@@ -9,6 +9,7 @@ import { grouped } from "../ops";
 import { attachmentCounts, displayTitle, type Note, type NoteUser } from "../types";
 import { localUrl, usePendingCounts } from "../uploads";
 import { ColorGrid } from "./pickers";
+import { ReminderChip } from "./Reminder";
 import { MenuItem, Pop } from "./Pop";
 
 export interface CardActions {
@@ -21,6 +22,10 @@ export interface CardActions {
   labels: (id: string, anchor: HTMLElement) => void;
   restore: (id: string) => void;
   forever: (id: string) => void;
+  /** "Remind me" (a popover under ``anchor``). */
+  remind: (id: string, anchor: HTMLElement) => void;
+  /** Who has it (the share dialog). */
+  share: (id: string) => void;
 }
 
 function duration(ms: number): string {
@@ -53,6 +58,7 @@ export const NoteCard = memo(function NoteCard({
 }) {
   const [pop, setPop] = useState<null | "color" | "more">(null);
   const colorBtn = useRef<HTMLButtonElement>(null);
+  const remindBtn = useRef<HTMLButtonElement>(null);
   const moreBtn = useRef<HTMLButtonElement>(null);
   const title = note.title.trim();
   const name = displayTitle(note);
@@ -72,6 +78,7 @@ export const NoteCard = memo(function NoteCard({
   const text = note.kind === "text" ? (note.body_text ?? note.snippet ?? "") : "";
   const empty = !title && !text.trim() && !shown.length && !note.items_checked && !counts.images && !counts.audio;
   const owner = users[note.owner_id];
+  const editor = note.edited_by ? users[note.edited_by]?.username : undefined;
 
   const tool = "flex h-8 w-8 items-center justify-center rounded-full note-muted note-hover hover:text-[var(--note-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]";
 
@@ -132,8 +139,9 @@ export const NoteCard = memo(function NoteCard({
         {empty && <p className="note-muted text-sm italic">Empty note</p>}
         {covers.length > 0 && <span className="sr-only">{counts.images === 1 ? "1 picture" : `${counts.images} pictures`}</span>}
 
-        {(note.labels.length > 0 || moreImages > 0 || counts.audio > 0) && (
+        {(note.labels.length > 0 || moreImages > 0 || counts.audio > 0 || !!note.reminder) && (
           <div className="flex flex-wrap gap-1">
+            {note.reminder && !trash && <ReminderChip reminder={note.reminder} />}
             {moreImages > 0 && (
               <span className="inline-flex h-6 items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--note-text)_9%,transparent)] px-2 text-xs">
                 <ImageIcon className="h-3 w-3" aria-hidden /> {covers.length ? `+${moreImages}` : moreImages}
@@ -155,14 +163,25 @@ export const NoteCard = memo(function NoteCard({
           </div>
         )}
         {people.length > 0 && (
-          <div className="flex items-center gap-1" aria-label={note.is_owner ? "Shared" : `Shared by ${owner?.username ?? "someone"}`}>
-            <Users className="h-3.5 w-3.5 note-muted" aria-hidden />
-            <span className="flex -space-x-1">
+          <div className="flex min-w-0 items-center gap-1">
+            <span className="sr-only">
+              {note.is_owner
+                ? `Shared with ${people.map((u) => users[u]?.username ?? "someone").join(", ")}`
+                : `Shared with you by ${owner?.username ?? "someone"}`}
+            </span>
+            <Users className="h-3.5 w-3.5 shrink-0 note-muted" aria-hidden />
+            <span className="flex -space-x-1" aria-hidden>
               {people.slice(0, 5).map((uid) => {
                 const u = users[uid];
                 return <UserAvatar key={uid} name={u?.username ?? "?"} userId={uid} avatarUrl={u?.avatar_url} color={u?.color} size={20} className="ring-2 ring-[var(--note-bg)]" />;
               })}
             </span>
+            {note.changed && !trash && (
+              <span data-note-changed="" className="ml-auto flex min-w-0 items-center gap-1 pl-1 text-[11px] font-medium">
+                <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-[var(--accent)]" />
+                <span className="truncate">{editor ? `${editor} made changes` : "New changes"}</span>
+              </span>
+            )}
           </div>
         )}
         {pending && (
@@ -218,6 +237,12 @@ export const NoteCard = memo(function NoteCard({
             </>
           ) : (
             <>
+              <button ref={remindBtn} type="button" className={tool} aria-label={`Remind me about ${name}`} title="Remind me" onClick={() => remindBtn.current && actions.remind(note.id, remindBtn.current)}>
+                <BellPlus className="h-4 w-4" />
+              </button>
+              <button type="button" className={tool} aria-label={note.is_owner ? `Share ${name}` : `People on ${name}`} title={note.is_owner ? "Share" : "People"} onClick={() => actions.share(note.id)}>
+                {note.is_owner ? <UserPlus className="h-4 w-4" /> : <Users className="h-4 w-4" />}
+              </button>
               <button ref={colorBtn} type="button" className={tool} aria-label={`Colour of ${name}`} title="Colour" aria-expanded={pop === "color"} onClick={() => setPop(pop === "color" ? null : "color")}>
                 <Palette className="h-4 w-4" />
               </button>

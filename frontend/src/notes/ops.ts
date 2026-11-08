@@ -6,10 +6,10 @@
  * and applying one twice to a note gives the same note — which is what lets
  * a sent change stay on screen until the refreshed note arrives.
  */
-import { attachmentCounts, docText, textDoc, type DocNode, type Note, type NoteAttachment, type NoteItem, type NoteKind, type NoteLabel } from "./types";
+import { attachmentCounts, displayTitle, docText, textDoc, type DocNode, type Note, type NoteAttachment, type NoteItem, type NoteKind, type NoteLabel, type NoteReminder, type ReminderIn } from "./types";
 
 export type ItemFields = { text?: string; checked?: boolean; parent_id?: string | null; position?: number };
-export type MeFields = { pinned?: boolean; archived?: boolean; position?: number };
+export type MeFields = { pinned?: boolean; archived?: boolean; position?: number; seen?: boolean };
 export type NoteFields = { title?: string; body_doc?: DocNode | null; color?: string; kind?: NoteKind; list_opts?: Record<string, boolean> };
 export type Base = { title: string; body_doc: DocNode | null; color: string };
 
@@ -29,7 +29,9 @@ export type Op =
   // A picture or recording already in Drive (uploaded, or from Photos) goes in the note.
   | { k: "attach"; id: string; att: NoteAttachment }
   | { k: "detach"; id: string; aid: string; kind: "image" | "audio" }
-  | { k: "transcribe"; id: string; aid: string };
+  | { k: "transcribe"; id: string; aid: string }
+  // Your reminder (a task in your Tasks); null takes it off.
+  | { k: "reminder"; id: string; reminder: ReminderIn | null };
 
 export interface QueuedOp {
   seq: number;
@@ -148,6 +150,10 @@ export function applyOp(note: Note | null, op: Op): Note | null {
         if (op.fields.pinned) n.archived = false;
       }
       if (op.fields.position !== undefined) n.position = op.fields.position;
+      if (op.fields.seen) {
+        n.changed = false;
+        n.seen_seq = n.change_seq;
+      }
       return n;
     }
     case "labels":
@@ -178,12 +184,29 @@ export function applyOp(note: Note | null, op: Op): Note | null {
         attachments: op.kind === "image" ? { ...c, images: Math.max(0, c.images - 1) } : { ...c, audio: Math.max(0, c.audio - 1) },
       };
     }
+    case "reminder":
+      return { ...note, has_reminder: !!op.reminder, reminder: op.reminder ? reminderPreview(note, op.reminder) : null };
     case "transcribe": {
       const a = note.attachments;
       if (!Array.isArray(a)) return note;
       return { ...note, attachments: a.map((x) => (x.id === op.aid ? { ...x, transcript_state: "pending" as const } : x)) };
     }
   }
+}
+
+/** A reminder as it will be, until the server's (with its task) is back. */
+export function reminderPreview(note: Note, r: ReminderIn): NoteReminder {
+  const prev = note.reminder;
+  const at = new Date(`${r.due}T${r.time ?? "09:00"}:00`);
+  return {
+    ...r,
+    at: Number.isNaN(at.getTime()) ? null : at.toISOString(),
+    task_file_id: prev?.task_file_id ?? "",
+    task_id: prev?.task_id ?? "",
+    title: prev?.title ?? displayTitle(note),
+    href: prev?.href ?? "",
+    local: true,
+  };
 }
 
 /** Show or hide checkboxes, as the server does: lines ↔ items. */
@@ -221,6 +244,7 @@ export function coalesce(prev: Op, next: Op): Op | null {
   if (prev.k === "item_add" && next.k === "item_patch" && prev.item.id === next.iid) return { ...prev, item: { ...prev.item, ...next.fields } };
   if (prev.k === "me" && next.k === "me") return { ...prev, fields: { ...prev.fields, ...next.fields } };
   if (prev.k === "labels" && next.k === "labels") return next;
+  if (prev.k === "reminder" && next.k === "reminder") return next;
   return null;
 }
 

@@ -27,6 +27,8 @@ people on the note through their live stream (ids only).
     DELETE /notes/{id}/attachments/{aid}    out of the note (the file stays in Drive)
     POST   /notes/{id}/attachments/{aid}/transcribe   try the words again
     GET|PUT /notes/admin/transcription      the admin's switch for transcribing voice notes
+    PUT    /notes/{id}/reminder             {due, time?, repeat?} — your reminder (a task in your Tasks)
+    DELETE /notes/{id}/reminder             take your reminder off (its open task goes too)
 """
 from __future__ import annotations
 
@@ -43,7 +45,7 @@ from app.auth.deps import get_current_user, require_admin
 from app.auth.models import User
 from app.database import get_db
 
-from . import access, events, push, service, transcription
+from . import access, events, push, reminders, service, transcription
 from . import attachments as attach
 from .body import BodyError
 from .models import Note
@@ -479,6 +481,34 @@ async def remove_member(
     if member_id == user.id:
         return {"left": True}
     return await _members_out(db, note)
+
+
+# ------------------------------------------------------------------ reminders
+
+
+@router.put("/{note_id}/reminder")
+async def put_reminder(
+    note_id: uuid.UUID, body: reminders.ReminderIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)
+) -> dict:
+    """Your own reminder on the note: a task in your Tasks, linked to it."""
+    note = await access.load(db, user, note_id)
+    try:
+        await reminders.set_reminder(db, user, note, body)
+    except HTTPException:
+        await db.rollback()
+        raise
+    await db.commit()
+    await _tell_me(user, note)
+    return {"note": await service.full_out(db, user, note)}
+
+
+@router.delete("/{note_id}/reminder")
+async def delete_reminder(note_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    note = await access.load(db, user, note_id)
+    await reminders.clear_reminder(db, user, note.id)
+    await db.commit()
+    await _tell_me(user, note)
+    return {"note": await service.full_out(db, user, note)}
 
 
 # ------------------------------------------------------------------ versions

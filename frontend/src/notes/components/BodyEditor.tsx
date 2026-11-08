@@ -8,6 +8,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 
 import { cn } from "@/utils/cn";
 
+import { mergeDocs } from "../merge";
 import { blockId, docText, type DocNode } from "../types";
 
 /**
@@ -78,6 +79,27 @@ function norm(doc: DocNode | null | undefined): string {
   return JSON.stringify(blocks.length ? blocks : null);
 }
 
+/** Where the cursor is, as (block id, offset in it) — blocks keep their
+ *  ids through a merge, so the cursor can stay in the same sentence. */
+function caret(editor: Editor): { id: string | null; off: number; pos: number } | null {
+  if (!editor.isFocused) return null;
+  const { from } = editor.state.selection;
+  const $p = editor.state.doc.resolve(from);
+  if ($p.depth < 1) return { id: null, off: 0, pos: from };
+  return { id: ($p.node(1).attrs.id as string | null) ?? null, off: from - $p.start(1), pos: from };
+}
+
+function restore(editor: Editor, at: ReturnType<typeof caret>) {
+  if (!at) return;
+  let target: number | null = null;
+  if (at.id) {
+    editor.state.doc.forEach((node, pos) => {
+      if (target === null && node.attrs.id === at.id) target = pos + 1 + Math.min(at.off, node.content.size);
+    });
+  }
+  editor.commands.setTextSelection(target ?? Math.min(at.pos, editor.state.doc.content.size));
+}
+
 export const BodyEditor = forwardRef<
   BodyEditorHandle,
   {
@@ -92,8 +114,16 @@ export const BodyEditor = forwardRef<
     toolbar?: "focus" | "never";
     className?: string;
     label?: string;
+    /** Who made a change that arrives while you're typing (for the line a
+     *  clash leaves: "Sam changed this while you were editing"). */
+    theirName?: string;
   }
->(function BodyEditor({ value, onChange, editable = true, placeholder = "Note", autoFocus, toolbar = "focus", className, label = "Note text" }, ref) {
+>(function BodyEditor({ value, onChange, editable = true, placeholder = "Note", autoFocus, toolbar = "focus", className, label = "Note text", theirName }, ref) {
+  const theirNameRef = useRef(theirName);
+  theirNameRef.current = theirName;
+  // Everything this editor has sent out lately: a body coming back equal
+  // to one of them is our own save (maybe an older one), not someone else's.
+  const sent = useRef<string[]>([]);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   // What the editor last sent out (or was given): a value coming back
@@ -104,6 +134,10 @@ export const BodyEditor = forwardRef<
   const base = useRef<DocNode | null>(value ?? null);
   const dirty = useRef(false);
   const [focused, setFocused] = useState(false);
+  const remember = (n: string) => {
+    sent.current.push(n);
+    if (sent.current.length > 200) sent.current.shift();
+  };
 
   const editor = useEditor({
     extensions: [
@@ -132,6 +166,7 @@ export const BodyEditor = forwardRef<
       const empty = ed.isEmpty;
       const out = empty ? null : json;
       lastOut.current = norm(out);
+      remember(lastOut.current);
       dirty.current = true;
       onChangeRef.current(out, base.current);
     },
@@ -150,15 +185,35 @@ export const BodyEditor = forwardRef<
       base.current = value ?? null;
       return;
     }
-    // Someone else's change while you're typing: your save merges with it
-    // (from ``base``), and the merged body comes back here.
-    if (dirty.current && editor.isFocused) return;
+    if (sent.current.includes(incoming)) {
+      // An older save of ours coming back (newer typing is on its way):
+      // what's on screen grew out of it.
+      base.current = value ?? null;
+      return;
+    }
+    const at = caret(editor);
+    if (dirty.current) {
+      // Someone else's change while you have typing they haven't got: put
+      // the two together here, block by block (a block you both changed
+      // keeps both), and send the result on from their version.
+      const mine = editor.isEmpty ? null : (editor.getJSON() as DocNode);
+      const merged = mergeDocs(base.current, value ?? null, mine, theirNameRef.current ?? "Someone");
+      base.current = value ?? null;
+      editor.commands.setContent((merged as object) ?? EMPTY, { emitUpdate: false });
+      restore(editor, at);
+      const m = norm(merged);
+      lastOut.current = m;
+      if (m === incoming) dirty.current = false;
+      else {
+        remember(m);
+        onChangeRef.current(merged, value ?? null);
+      }
+      return;
+    }
     lastOut.current = incoming;
     base.current = value ?? null;
-    dirty.current = false;
-    const { from } = editor.state.selection;
     editor.commands.setContent((value as object) ?? EMPTY, { emitUpdate: false });
-    if (editor.isFocused) editor.commands.setTextSelection(Math.min(from, editor.state.doc.content.size));
+    restore(editor, at);
   }, [editor, value]);
 
   useEffect(() => {

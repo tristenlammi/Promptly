@@ -1,7 +1,7 @@
 /** The Notes API (``/api/notes``, ``backend/app/notes/router.py``). */
 import { apiClient } from "@/api/client";
 
-import type { DocNode, Note, NoteItem, NoteKind, NoteLabel, NoteUser, NoteView } from "./types";
+import type { DocNode, Note, NoteItem, NoteKind, NoteLabel, NoteUser, NoteView, ReminderIn } from "./types";
 
 export interface Page {
   notes: Note[];
@@ -101,6 +101,29 @@ export const notesApi = {
     const { data } = await apiClient.post<{ note: Note }>(`/notes/${id}/attachments/${aid}/transcribe`);
     return data.note;
   },
+  /** Your reminder: a task in your Tasks, linked to the note. */
+  async setReminder(id: string, body: ReminderIn): Promise<Note> {
+    const { data } = await apiClient.put<{ note: Note }>(`/notes/${id}/reminder`, body);
+    return data.note;
+  },
+  async clearReminder(id: string): Promise<Note> {
+    const { data } = await apiClient.delete<{ note: Note }>(`/notes/${id}/reminder`);
+    return data.note;
+  },
+  async members(id: string): Promise<Members> {
+    const { data } = await apiClient.get<Members>(`/notes/${id}/members`);
+    return data;
+  },
+  /** Share with people on this server (the owner only). */
+  async share(id: string, userIds: string[]): Promise<Members> {
+    const { data } = await apiClient.post<Members>(`/notes/${id}/members`, { user_ids: userIds });
+    return data;
+  },
+  /** The owner takes someone off; your own id = Leave. */
+  async unshare(id: string, userId: string): Promise<Members | { left: true }> {
+    const { data } = await apiClient.delete<Members | { left: true }>(`/notes/${id}/members/${userId}`);
+    return data;
+  },
   async transcription(): Promise<TranscriptionStatus> {
     const { data } = await apiClient.get<TranscriptionStatus>("/notes/admin/transcription");
     return data;
@@ -110,6 +133,13 @@ export const notesApi = {
     return data;
   },
 };
+
+/** Who a note is shared with. */
+export interface Members {
+  owner_id: string;
+  members: { user_id: string; added_by: string | null; added_at: string }[];
+  users: Record<string, NoteUser>;
+}
 
 /** The admin's switch for transcribing voice notes. */
 export interface TranscriptionStatus {

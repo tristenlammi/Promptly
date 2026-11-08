@@ -5,7 +5,7 @@
  */
 
 export type NoteKind = "text" | "list";
-export type NoteView = "home" | "archive" | "trash";
+export type NoteView = "home" | "archive" | "trash" | "reminders";
 
 export interface NoteItem {
   id: string;
@@ -70,6 +70,28 @@ export interface NoteAttachment {
   local?: { url: string | null; state: "uploading" | "waiting" | "failed"; progress: number; error?: string | null };
 }
 
+export type ReminderRepeat = "daily" | "weekly" | "monthly" | "yearly";
+
+/** What you ask for: a day, a time (or all day), maybe a repeat. */
+export interface ReminderIn {
+  due: string;
+  time: string | null;
+  repeat: ReminderRepeat | null;
+}
+
+/** Your reminder on a note, read live from its task in your Tasks
+ *  (``backend/app/notes/reminders.py``). Only open tasks show. */
+export interface NoteReminder extends ReminderIn {
+  /** The moment it's due (ISO, with your time zone). */
+  at: string | null;
+  task_file_id: string;
+  task_id: string;
+  title: string;
+  href: string;
+  /** Only on this device: not saved yet. */
+  local?: boolean;
+}
+
 export interface CardCover {
   id: string;
   thumb: string | null;
@@ -116,6 +138,9 @@ export interface Note {
   /** Full note: whether this server transcribes recordings. */
   transcription?: boolean;
   has_reminder: boolean;
+  /** Your own reminder (a task in your Tasks), if it's still to come. */
+  reminder?: NoteReminder | null;
+  /** Someone else changed it since you last opened it. */
   changed: boolean;
   revision: number;
   change_seq: number;

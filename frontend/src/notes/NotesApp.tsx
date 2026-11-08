@@ -1,4 +1,5 @@
 import {
+  AlarmClock,
   Archive,
   ArchiveRestore,
   CloudOff,
@@ -42,15 +43,17 @@ import { NoteEditor } from "./components/NoteEditor";
 import { NoteGrid } from "./components/NoteGrid";
 import { ColorGrid, LabelChooser } from "./components/pickers";
 import { Pop } from "./components/Pop";
+import { ReminderPicker, reminderMoment, reminderWhen } from "./components/Reminder";
+import { ShareDialog } from "./components/ShareDialog";
 import { useNotesLive } from "./live";
 import "./notes.css";
 import { takeSharedText } from "./shareStash";
-import { closeDraft, fetchNote, initNotes, loadLists, loadTrash, newDraft, notesActions, searchServer, useNote, useNotes } from "./store";
+import { closeDraft, fetchNote, initNotes, keepCopy, loadLists, loadTrash, newDraft, notesActions, searchServer, useNote, useNotes } from "./store";
 import { addFiles, initUploads, kindOf } from "./uploads";
 import { attachmentCounts, COLOR_NAMES, docText, NOTE_COLORS, textDoc, type Note, type NoteLabel } from "./types";
 import { toast } from "@/store/toastStore";
 
-type Place = { view: "home" | "archive" | "trash" | "label"; label?: string };
+type Place = { view: "home" | "archive" | "trash" | "reminders" | "label"; label?: string };
 
 function parse(path: string): { place: Place; noteId: string | null } {
   const rest = path.replace(/^\/notes\/?/, "");
@@ -58,6 +61,7 @@ function parse(path: string): { place: Place; noteId: string | null } {
   if (a === "n" && b) return { place: { view: "home" }, noteId: b };
   if (a === "archive") return { place: { view: "archive" }, noteId: null };
   if (a === "trash") return { place: { view: "trash" }, noteId: null };
+  if (a === "reminders") return { place: { view: "reminders" }, noteId: null };
   if (a === "label" && b) return { place: { view: "label", label: decodeURIComponent(b) }, noteId: null };
   return { place: { view: "home" }, noteId: null };
 }
@@ -73,11 +77,13 @@ const TYPE_CHIPS = [
   { key: "shared", label: "Shared" },
   { key: "image", label: "Images" },
   { key: "voice", label: "Voice" },
+  { key: "reminder", label: "Reminders" },
 ] as const;
 
 function matchesType(n: Note, type: string): boolean {
   if (type === "list") return n.kind === "list";
   if (type === "shared") return n.shared || !n.is_owner;
+  if (type === "reminder") return !!n.reminder;
   const c = attachmentCounts(n);
   if (type === "image") return c.images > 0;
   if (type === "voice") return c.audio > 0;
@@ -97,6 +103,8 @@ const isLabel = (l: Pick<NoteLabel, "id" | "name">, key: string | undefined) =>
 const hasLabel = (n: Note, key: string | undefined) => !!key && n.labels.some((l) => isLabel(l, key));
 
 const byOrder = (a: Note, b: Note) => a.position - b.position || a.id.localeCompare(b.id);
+const byReminder = (a: Note, b: Note) =>
+  (a.reminder ? reminderMoment(a.reminder).getTime() : 0) - (b.reminder ? reminderMoment(b.reminder).getTime() : 0) || byOrder(a, b);
 
 /**
  * ``/notes`` — Promptly Notes, Keep-style: quick notes and checklists as a
@@ -122,6 +130,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   const users = useNotes((s) => s.users);
   const outbox = useNotes((s) => s.outbox);
   const sync = useNotes((s) => s.sync);
+  const lost = useNotes((s) => s.lost);
 
   const { place: routePlace, noteId } = parse(location.pathname);
   // With a note open over the grid (desktop), the grid stays where it was.
@@ -139,6 +148,12 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   const [serverHits, setServerHits] = useState<{ q: string; ids: Set<string> } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const layout: "grid" | "list" = (settings?.notes_view as "grid" | "list" | undefined) ?? "grid";
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (place.view !== "reminders") return;
+    const t = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, [place.view]);
 
   useEffect(() => {
     if (!uid) return;
@@ -251,6 +266,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       });
     } else if (place.view === "trash") list = all.filter((n) => n.trashed_at && n.is_owner);
     else if (place.view === "archive") list = live.filter((n) => n.archived);
+    else if (place.view === "reminders") return live.filter((n) => n.reminder).sort(byReminder);
     else if (place.view === "label") list = live.filter((n) => hasLabel(n, place.label));
     else list = live.filter((n) => !n.archived);
     if (place.view === "trash" && !searching) return list.sort((a, b) => (b.trashed_at ?? "").localeCompare(a.trashed_at ?? ""));
@@ -260,6 +276,16 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   const sections = useMemo(() => {
     if (place.view === "trash" && !searching) return [{ key: "trash", notes: visible }];
     if (searching) return [{ key: "results", notes: visible }];
+    if (place.view === "reminders") {
+      const at = new Date(now);
+      const groups: { key: string; title: string; notes: Note[] }[] = [
+        { key: "overdue", title: "Overdue", notes: [] },
+        { key: "today", title: "Today", notes: [] },
+        { key: "upcoming", title: "Upcoming", notes: [] },
+      ];
+      for (const n of visible) groups.find((g) => g.key === reminderWhen(n.reminder!, at))!.notes.push(n);
+      return groups.filter((g) => g.notes.length);
+    }
     const active = visible.filter((n) => !n.archived);
     const archived = visible.filter((n) => n.archived);
     const pinned = active.filter((n) => n.pinned);
@@ -269,7 +295,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     out.push({ key: "others", title: pinned.length ? "Others" : undefined, notes: place.view === "archive" ? [...others, ...archived] : others });
     if (place.view === "label" && archived.length) out.push({ key: "archived", title: "Archived", notes: archived });
     return out;
-  }, [visible, place.view, searching]);
+  }, [visible, place.view, searching, now]);
 
   const order = useMemo(() => sections.flatMap((s) => s.notes.map((n) => n.id)), [sections]);
 
@@ -302,6 +328,8 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   }, [from, noBack, navigate, place]);
 
   const [labelFor, setLabelFor] = useState<{ ids: string[]; anchor: HTMLElement } | null>(null);
+  const [remindFor, setRemindFor] = useState<{ id: string; anchor: HTMLElement } | null>(null);
+  const [shareFor, setShareFor] = useState<string | null>(null);
   const actions: CardActions = useMemo(
     () => ({
       open: (id) => openNote(id),
@@ -324,6 +352,8 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       labels: (id, el) => setLabelFor({ ids: [id], anchor: el }),
       restore: (id) => noteOps.restore([id]),
       forever: (id) => noteOps.forever([id]),
+      remind: (id, el) => setRemindFor({ id, anchor: el }),
+      share: (id) => setShareFor(id),
     }),
     [openNote, order],
   );
@@ -393,6 +423,13 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   const openFull = open && (useNotes.getState().drafts[open.id] || !useNotes.getState().known[open.id]?.partial);
 
   const editorPage = isPhone && noteId;
+  /** "Keep a copy" of a note that's no longer shared with you. */
+  const keep = (id: string | null) => {
+    const copy = id ? keepCopy(id) : null;
+    if (!copy) return;
+    toast.success("Kept a copy in your notes");
+    navigate(`/notes/n/${copy}`, { replace: true, state: { from: "/notes" } });
+  };
 
   // ------------------------------------------------------------ pieces
   const pending = outbox.filter((x) => !x.landed).length;
@@ -409,6 +446,9 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     <nav aria-label="Notes" className="flex flex-col gap-0.5 py-2">
       <RailLink to="/notes" active={!searching && place.view === "home"} icon={Lightbulb} onNavigate={() => setDrawer(false)}>
         Notes
+      </RailLink>
+      <RailLink to="/notes/reminders" active={!searching && place.view === "reminders"} icon={AlarmClock} onNavigate={() => setDrawer(false)}>
+        Reminders
       </RailLink>
       {labels.length > 0 && <p className="mt-3 px-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Labels</p>}
       {labels.map((l) => (
@@ -441,7 +481,17 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     </nav>
   );
 
-  const title = searching ? "Search" : place.view === "archive" ? "Archive" : place.view === "trash" ? "Trash" : place.view === "label" ? currentLabel?.name ?? "Label" : "Notes";
+  const title = searching
+    ? "Search"
+    : place.view === "archive"
+      ? "Archive"
+      : place.view === "trash"
+        ? "Trash"
+        : place.view === "reminders"
+          ? "Reminders"
+          : place.view === "label"
+            ? currentLabel?.name ?? "Label"
+            : "Notes";
 
   const searchBox = (
     <div className="relative min-w-0 flex-1">
@@ -599,6 +649,8 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       return <Empty icon={Trash2} title="No notes in the Trash" body="Notes you delete stay here for 30 days." />;
     }
     if (place.view === "archive") return <Empty icon={Archive} title="Archived notes appear here" body="Archive a note to put it away without deleting it." />;
+    if (place.view === "reminders")
+      return <Empty icon={AlarmClock} title="Notes with reminders appear here" body="Tap the bell on a note to be reminded about it. Reminders go in your Tasks too, with Done and Snooze on the reminder." />;
     if (place.view === "label") return <Empty icon={Tag} title="No notes with this label" body={currentLabel ? `Notes you label “${currentLabel.name}” appear here.` : "This label isn't on any of your notes."} />;
     return <Empty icon={Lightbulb} title="Notes you add appear here" body={isPhone ? "Tap + to write one, or the list button for a checklist." : "Click “Take a note…” above to write one."} />;
   })();
@@ -674,7 +726,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
             actions={actions}
             layout={layout}
             trash={place.view === "trash" && !searching}
-            onMove={searching || place.view === "trash" ? undefined : onMove}
+            onMove={searching || place.view === "trash" || place.view === "reminders" ? undefined : onMove}
           />
         )}
       </div>
@@ -717,14 +769,16 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
             <NoteEditor key={open.id} note={open} variant="page" onClose={closeNote} autoFocus={openFocus} startWith={openRecord} />
           </div>
         ) : (
-          <NoteMissing state={openState} onBack={closeNote} />
+          <NoteMissing state={openState} onBack={closeNote} lost={!!(noteId && lost[noteId])} onKeep={() => keep(noteId)} />
         ))}
       {!editorPage && noteId && open && openFull && <NoteDialog key={open.id} note={open} onClose={closeNote} autoFocus={openFocus} startWith={openRecord} />}
       {!editorPage && noteId && !(open && openFull) && (openState === "loading" || openState === "gone" || !open) && (
-        <NoteMissingDialog state={openState} onBack={closeNote} />
+        <NoteMissingDialog state={openState} onBack={closeNote} lost={!!(noteId && lost[noteId])} onKeep={() => keep(noteId)} />
       )}
       {narrow && drawer && <Drawer onClose={() => setDrawer(false)}>{rail}</Drawer>}
       {labelPop}
+      {remindFor && notes[remindFor.id] && <ReminderPicker note={notes[remindFor.id]} anchor={remindFor.anchor} onClose={() => setRemindFor(null)} />}
+      {shareFor && notes[shareFor] && <ShareDialog note={notes[shareFor]} onClose={() => setShareFor(null)} />}
       {!embedded && (
         <>
           <InstallFromLink appName="Promptly Notes" iconSrc="/item-icons/notes-192.png" description="Your notes and lists, as their own app." />
@@ -780,7 +834,10 @@ function Empty({ icon: Icon, title, body, action }: { icon: React.ComponentType<
   );
 }
 
-function NoteMissing({ state, onBack }: { state: "idle" | "loading" | "gone"; onBack: () => void }) {
+const LOST_TITLE = "This note isn't shared with you any more";
+const LOST_BODY = "Its owner took you off it, or deleted it. You can keep a copy of what you last saw.";
+
+function NoteMissing({ state, onBack, lost, onKeep }: { state: "idle" | "loading" | "gone"; onBack: () => void; lost?: boolean; onKeep?: () => void }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex h-14 items-center px-2 pt-safe">
@@ -788,7 +845,18 @@ function NoteMissing({ state, onBack }: { state: "idle" | "loading" | "gone"; on
           ← Notes
         </button>
       </div>
-      {state === "gone" ? (
+      {lost ? (
+        <Empty
+          icon={Lightbulb}
+          title={LOST_TITLE}
+          body={LOST_BODY}
+          action={
+            <button type="button" onClick={onKeep} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white">
+              Keep a copy
+            </button>
+          }
+        />
+      ) : state === "gone" ? (
         <Empty icon={Lightbulb} title="This note isn't here any more" body="It was deleted, or it's no longer shared with you." />
       ) : state === "loading" ? (
         <div className="flex items-center justify-center gap-2 py-24 text-sm text-[var(--text-muted)]" role="status">
@@ -801,7 +869,7 @@ function NoteMissing({ state, onBack }: { state: "idle" | "loading" | "gone"; on
   );
 }
 
-function NoteMissingDialog({ state, onBack }: { state: "idle" | "loading" | "gone"; onBack: () => void }) {
+function NoteMissingDialog({ state, onBack, lost, onKeep }: { state: "idle" | "loading" | "gone"; onBack: () => void; lost?: boolean; onKeep?: () => void }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onBack();
     window.addEventListener("keydown", onKey);
@@ -811,7 +879,23 @@ function NoteMissingDialog({ state, onBack }: { state: "idle" | "loading" | "gon
     <div className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[12vh]">
       <button type="button" aria-label="Close" onClick={onBack} className="fixed inset-0 bg-black/45" />
       <div role="dialog" aria-modal="true" aria-label="Note" className="relative w-full max-w-md rounded-xl bg-[var(--surface)] p-2 shadow-[var(--shadow-lg)]">
-        {state === "loading" ? (
+        {lost ? (
+          <Empty
+            icon={Lightbulb}
+            title={LOST_TITLE}
+            body={LOST_BODY}
+            action={
+              <div className="flex flex-wrap justify-center gap-2">
+                <button type="button" onClick={onBack} className="rounded-full px-4 py-2 text-sm font-medium hover:bg-[var(--hover)]">
+                  Back to notes
+                </button>
+                <button type="button" onClick={onKeep} className="rounded-full bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white">
+                  Keep a copy
+                </button>
+              </div>
+            }
+          />
+        ) : state === "loading" ? (
           <div className="flex items-center justify-center gap-2 py-12 text-sm text-[var(--text-muted)]" role="status">
             <Loader2 className="h-4 w-4 animate-spin" /> Opening the note…
           </div>

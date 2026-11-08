@@ -83,4 +83,16 @@ async def sharing_refused(db: AsyncSession, a: uuid.UUID, b: uuid.UUID) -> bool:
     return await blocks.either(db, a, b)
 
 
-__all__ = ["can_open", "is_member", "load", "not_found", "participants", "sharing_refused", "visible_predicate"]
+async def refusal(db: AsyncSession, owner_id: uuid.UUID, other: User) -> str:
+    """What the owner is told when :func:`sharing_refused` says no. Kind,
+    and it never tells anyone they've been blocked: only the person who
+    did the blocking hears about it (and how to undo it)."""
+    if await blocks.has_blocked(db, owner_id, other.id):
+        return (
+            f"You've blocked {other.username}, so you can't share notes with them. "
+            "You can unblock them in Account → Security → Blocked people."
+        )
+    return f"{other.username} can't be added to this note."
+
+
+__all__ = ["can_open", "is_member", "load", "not_found", "participants", "refusal", "sharing_refused", "visible_predicate"]
