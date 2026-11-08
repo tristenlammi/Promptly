@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-09
+
 ### Added
 - Forms (groundwork): a form is a new kind of file. It can be made blank or from six ready templates (RSVP, sign-up sheet, feedback, contact details, event registration, order form), copied, saved as a template, shared with people who can edit it or see its answers, trashed (which stops it taking answers) and restored (still closed), and downloaded as a .zip of its questions and answers.
 - Forms: the form builder. Make a form from the new Forms app (blank or from a template), from New ▸ Form in Files, or from the Files home. Every kind of question (short answer, paragraph, multiple choice, checkboxes, dropdown, linear scale, rating, date, time, file upload), plus text, pictures and sections, with "go to section based on answer", places per option for sign-up sheets, answer rules, a colour, header picture and font for each form, and a live preview that works just like the real form. Drag questions to reorder them, or use Move up and Move down; duplicate, delete and undo. It saves as you go, even with the form open in two tabs or while you're offline.
@@ -79,6 +81,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Voice channels on Android phones with the Promptly app: tapping Join in P Rooms hands the channel to the app, which keeps you in it with the screen off or while you use other apps, through Bluetooth earbuds, a car or the loudspeaker. Its notification says who's talking and has Mute, Deafen and Leave; the channel page stays the remote control and still shows cameras and streams while it's open. Spoken directions from P Maps play over the channel, and "Still there?" asks on the phone too. Needs the new app version; iPhones and phones without the app keep the page awake instead, as before.
 
 ### Changed
+- Phone parts of this release arrive with the next Promptly phone app update: downloading offline map areas on the phone, the Android Auto improvements, and keeping a voice channel going in the background on Android. Until then you can save offline areas on the web (your phone downloads them once it has the new app), and voice channels on a phone join from the page.
 <!-- P Maps offline (maps-offline) -->
 - P Maps in the car uses the avoid choices (tolls, highways, ferries) of your last drive started on the phone, and the route list says so.
 - P Maps: a trip started on the phone with avoid options now shows on the car's screen too, and wrong turns get the new road's speed cameras.
