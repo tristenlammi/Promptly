@@ -4620,7 +4620,8 @@ def _link_to_response(link: FileShareLink) -> ShareLinkResponse:
         access_count=link.access_count,
         last_accessed_at=link.last_accessed_at,
         created_at=link.created_at,
-        path=f"/s/{link.token}",
+        # A form's answer link opens the answer page (Forms WP-F1.3).
+        path=f"/f/{link.token}" if link.resource_type == "form" else f"/s/{link.token}",
     )
 
 
@@ -4862,6 +4863,12 @@ async def list_my_share_links(
 
             a = await db.get(Album, link.resource_id)
             name = a.title if a is not None else None
+        elif link.resource_type == "form":
+            # A form's answer link (Forms WP-F1.3), named by the form's title.
+            f = await db.get(UserFile, link.resource_id)
+            if f is not None:
+                name = (f.filename or "").removesuffix(".form") or "Untitled form"
+                trashed = f.trashed_at is not None
         else:
             d = await db.get(FileFolder, link.resource_id)
             if d is not None:

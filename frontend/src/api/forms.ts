@@ -277,6 +277,21 @@ export const formsApi = {
     const { data } = await apiClient.get<{ forms: FormCard[] }>(`/forms`, { params: { scope } });
     return data.forms;
   },
+  /** The answer link (``/f/<token>``): made the first time; ``reset`` replaces it (the old one stops working). */
+  async makeLink(fileId: string, reset = false): Promise<FormView> {
+    const { data } = await apiClient.post<FormView>(`/forms/${fileId}/link`, { reset });
+    return data;
+  },
+  /** Turn the answer link off. */
+  async turnOffLink(fileId: string): Promise<FormView> {
+    const { data } = await apiClient.delete<FormView>(`/forms/${fileId}/link`);
+    return data;
+  },
+  /** Send the form to people on this server (a notification that opens it). */
+  async send(fileId: string, userIds: string[]): Promise<{ sent: number }> {
+    const { data } = await apiClient.post<{ sent: number }>(`/forms/${fileId}/send`, { user_ids: userIds });
+    return data;
+  },
   /** A new form in your Forms folder: blank, a built-in template, or one you saved. */
   async create(payload: { template?: string; template_id?: string; title?: string } = {}): Promise<FileItem> {
     const { data } = await apiClient.post<{ file: FileItem }>(`/forms`, payload);

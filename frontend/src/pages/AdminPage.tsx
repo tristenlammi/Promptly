@@ -10,12 +10,13 @@ import {
   Settings2,
   Terminal,
   Users,
-  Users2, KeyRound } from "lucide-react";
+  Users2, KeyRound, ClipboardList } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { BackupsPanel } from "@/components/admin/BackupsPanel";
+import { FormsAdminPanel } from "@/components/admin/FormsAdminPanel";
 import { PasswordsPanel } from "@/components/admin/PasswordsPanel";
 import { StoragePanel } from "@/components/admin/StoragePanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
@@ -38,7 +39,9 @@ type TabId =
   | "passwords"
   | "storage"
   | "models"
-  | "connectors";
+  | "connectors"
+  // Forms (WP-F1.3)
+  | "forms";
 
 interface TabDef {
   id: TabId;
@@ -104,6 +107,12 @@ const TABS: TabDef[] = [
     label: "Passwords",
     icon: <KeyRound className="h-3.5 w-3.5" />,
     subtitle: "Policy for Passwords. No one here can read a vault.",
+  },
+  {
+    id: "forms",
+    label: "Forms",
+    icon: <ClipboardList className="h-3.5 w-3.5" />,
+    subtitle: "Answers from people without an account, link forms and reports.",
   },
   {
     id: "storage",
@@ -184,6 +193,7 @@ export function AdminPage() {
             {tab === "backups" && <BackupsPanel />}
             {tab === "passwords" && <PasswordsPanel />}
             {tab === "storage" && <StoragePanel />}
+            {tab === "forms" && <FormsAdminPanel />}
             {tab === "settings" && <AppSettingsPanel />}
           </div>
         </div>

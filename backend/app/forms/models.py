@@ -13,6 +13,7 @@ the form itself is a :class:`Form` that points at it through ``file_id``.
   updated under the form's row lock so the last place can't be taken twice.
 * :class:`FormUpload` — a respondent's file, staged until submit.
 * :class:`FormNotify` — each person's notification choice per form.
+* :class:`FormReport` — "Report this form" from the answer page.
 """
 from __future__ import annotations
 
@@ -154,4 +155,15 @@ class FormNotify(Base):
     last_push_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
-__all__ = ["Form", "FormNotify", "FormOptionCount", "FormResponse", "FormUpload"]
+class FormReport(Base):
+    """"Report this form" from the answer page (0295): no IP, no account."""
+
+    __tablename__ = "form_reports"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    form_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("forms.id", ondelete="CASCADE"), nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+__all__ = ["Form", "FormNotify", "FormOptionCount", "FormReport", "FormResponse", "FormUpload"]

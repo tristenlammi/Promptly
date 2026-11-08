@@ -215,7 +215,68 @@ async def apply_settings(db: AsyncSession, form: Form, changes: dict[str, Any]) 
         if k in SETTING_FIELDS:
             setattr(form, k, v)
     form.updated_at = datetime.now(timezone.utc)
+    if "audience" in changes:
+        # The link's mode follows who can answer (Shared links shows it).
+        shell = await db.get(UserFile, form.file_id)
+        link = await live_link(db, shell) if shell is not None else None
+        if link is not None:
+            link.access_mode = _link_mode(form)
     return form
+
+
+# --------------------------------------------------------------------
+# The answer link (WP-F1.3)
+# --------------------------------------------------------------------
+def _link_mode(form: Form) -> str:
+    # ``file_share_links.access_mode``: invite = people on this server,
+    # public = anyone with the link. The form's own ``audience`` is what
+    # the answer side checks; this keeps the two in step.
+    return "public" if form.audience == "link" else "invite"
+
+
+async def make_link(db: AsyncSession, shell: UserFile, form: Form, *, by: User, reset: bool = False) -> FileShareLink:
+    """The form's answer link: the live one, or a new one. ``reset`` turns
+    the old one off first, so it stops working at once. It's a
+    ``FileShareLink`` with ``resource_type="form"``: nothing that serves
+    files reads it, and opening it never grants access to the form.
+    Flushed, not committed."""
+    import secrets
+
+    current = await live_link(db, shell)
+    if current is not None and not reset:
+        return current
+    now = datetime.now(timezone.utc)
+    if current is not None:
+        await turn_off_links(db, shell, now=now)
+    link = FileShareLink(
+        resource_type="form",
+        resource_id=shell.id,
+        created_by=by.id,
+        token=secrets.token_urlsafe(32),
+        access_mode=_link_mode(form),
+        role="view",
+    )
+    db.add(link)
+    await db.flush()
+    return link
+
+
+async def turn_off_links(db: AsyncSession, shell: UserFile, *, now: datetime | None = None) -> int:
+    """Turn off every live answer link of ``shell``'s form."""
+    now = now or datetime.now(timezone.utc)
+    rows = (
+        await db.execute(
+            select(FileShareLink).where(
+                FileShareLink.resource_type == "form",
+                FileShareLink.resource_id == shell.id,
+                FileShareLink.revoked_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    for link in rows:
+        link.revoked_at = now
+    await db.flush()
+    return len(rows)
 
 
 # --------------------------------------------------------------------
@@ -534,6 +595,10 @@ async def purge_forms(db: AsyncSession, shell_ids: list[uuid.UUID]) -> list[User
     if not shell_ids:
         return []
     await db.execute(delete(Form).where(Form.file_id.in_(shell_ids)))
+    # Their answer links go too (Shared links would list them as deleted).
+    await db.execute(
+        delete(FileShareLink).where(FileShareLink.resource_type == "form", FileShareLink.resource_id.in_(shell_ids))
+    )
     return list(
         (
             await db.execute(
@@ -567,7 +632,9 @@ __all__ = [
     "form_view",
     "from_template",
     "live_link",
+    "make_link",
     "purge_forms",
+    "turn_off_links",
     "refresh_shell",
     "save_definition",
     "settings_of",

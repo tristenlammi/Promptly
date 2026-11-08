@@ -150,7 +150,9 @@ async def _load_live_link(
             select(FileShareLink).where(FileShareLink.token == token)
         )
     ).scalar_one_or_none()
-    if row is None:
+    if row is None or row.resource_type == "form":
+        # A form's answer link is answered through /api/f only: nothing here
+        # serves the form, and opening it never grants access (Forms).
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found"
         )

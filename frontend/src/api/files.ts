@@ -331,7 +331,7 @@ export type ShareAccessMode = "public" | "invite";
 /** What people with a link can do (WP-6.6). Comment / edit links are always
  *  "Specific people" — editing is never anonymous. */
 export type ShareLinkRole = "view" | "comment" | "edit";
-export type ShareResourceType = "file" | "folder" | "album";
+export type ShareResourceType = "file" | "folder" | "album" | "form";
 
 export interface ShareLinkCreatePayload {
   access_mode: ShareAccessMode;

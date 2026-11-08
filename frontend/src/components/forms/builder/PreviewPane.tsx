@@ -93,6 +93,7 @@ export function PreviewPane({
           assetUrls={assetUrls}
           mode="preview"
           showRemaining={settings.show_remaining}
+          askEmail={settings.audience === "link" && settings.collect_email}
           notice={
             settings.audience === "link"
               ? "Don't put passwords or bank details in a form."

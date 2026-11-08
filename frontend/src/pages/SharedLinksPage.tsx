@@ -101,7 +101,15 @@ function LinkRow({ link, onRevoke }: { link: OwnedShareLink; onRevoke: () => voi
           )}
         </div>
         <div className="text-xs text-[var(--text-muted)]">
-          {link.resource_type === "folder" ? "Folder" : link.resource_type === "album" ? "Album" : "File"}
+          {link.resource_type === "folder"
+            ? "Folder"
+            : link.resource_type === "album"
+              ? "Album"
+              : link.resource_type === "form"
+                ? link.access_mode === "public"
+                  ? "Form link · anyone can answer"
+                  : "Form link · people on this server"
+                : "File"}
           {link.has_password ? " · password" : ""}
           {link.expires_at ? ` · expires ${formatRelativeTime(link.expires_at)}` : " · no expiry"}
           {` · opened ${link.access_count} time${link.access_count === 1 ? "" : "s"}`}

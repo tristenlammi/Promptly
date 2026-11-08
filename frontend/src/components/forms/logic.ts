@@ -6,7 +6,8 @@ import { BRANCHING_KINDS, isQuestion, sectionsOf, type SectionInfo } from "./mod
  * What answers look like, how a respondent moves through the sections,
  * and what makes an answer acceptable. The preview and the answer page use
  * this (through ``FormRenderer``); the server walks the same path again on
- * submit (WP-F1.3), so these rules must match it.
+ * submit (``backend/app/forms/answering.py``), so these rules must match it —
+ * ``backend/tests/data/forms_path_cases.json`` holds the cases both sides run.
  *
  * Answer values, by question kind:
  * - short_text, paragraph: string
@@ -145,17 +146,30 @@ export function problemWith(item: FormItem, v: AnswerValue | undefined): string 
         : cfg.include_time
           ? /^\d{2}-\d{2}T\d{2}:\d{2}$/
           : /^\d{2}-\d{2}$/;
-      return re.test(s) ? null : "Pick a full date.";
+      if (!re.test(s)) return "Pick a full date.";
+      // A real day (the server checks the same): month 1–12, a day the
+      // month has (a leap year when there's no year, for 29 February).
+      const [datePart, timePart] = s.split("T");
+      const bits = datePart.split("-").map(Number);
+      const [y, m, d] = cfg.include_year ? bits : [2024, ...bits];
+      if (y < 1 || m < 1 || m > 12 || d < 1 || d > new Date(y, m, 0).getDate()) return "Pick a full date.";
+      if (timePart && !clockOk(timePart)) return "Pick a time.";
+      return null;
     }
     case "time": {
       const cfg = item.config as import("@/api/forms").TimeConfig;
       const s = String(v);
       if (cfg.mode === "duration") return /^\d{1,3}:[0-5]\d:[0-5]\d$/.test(s) ? null : "Enter hours, minutes and seconds.";
-      return /^\d{2}:\d{2}$/.test(s) ? null : "Pick a time.";
+      return /^\d{2}:\d{2}$/.test(s) && clockOk(s) ? null : "Pick a time.";
     }
     default:
       return null;
   }
+}
+
+function clockOk(hhmm: string): boolean {
+  const [h, m] = hhmm.split(":").map(Number);
+  return h < 24 && m < 60;
 }
 
 /** Problems in one section, by question id. */

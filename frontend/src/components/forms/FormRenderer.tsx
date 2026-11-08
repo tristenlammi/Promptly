@@ -60,9 +60,17 @@ export interface FormRendererProps {
   onAnswersChange?: (answers: Answers) => void;
   /** The slim line under the title ("Answering as Sam", a preview note). */
   notice?: ReactNode;
-  onSubmit: (answers: Answers, path: number[]) => void | Promise<void>;
+  onSubmit: (answers: Answers, path: number[], email?: string) => void | Promise<void>;
   submitting?: boolean;
   submitError?: string | null;
+  /** The Submit button's words ("Save changes" when changing an answer). */
+  submitLabel?: string;
+  /** Ask for an email address on the first page (link forms that collect one). */
+  askEmail?: boolean;
+  initialEmail?: string;
+  onEmailChange?: (email: string) => void;
+  /** Problems the server found, by question id ("_email" for the email box). */
+  fieldErrors?: Record<string, string> | null;
   /** The file question's control (the answer page's uploader). */
   renderUpload?: (item: FormItem<"file_upload">, value: string[], onChange: (ids: string[]) => void) => ReactNode;
   footer?: ReactNode;
@@ -82,6 +90,11 @@ export function FormRenderer({
   onSubmit,
   submitting,
   submitError,
+  submitLabel = "Submit",
+  askEmail,
+  initialEmail,
+  onEmailChange,
+  fieldErrors,
   renderUpload,
   footer,
   className,
@@ -91,6 +104,7 @@ export function FormRenderer({
   const [path, setPath] = useState<number[]>([0]);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [announce, setAnnounce] = useState("");
+  const [email, setEmail] = useState(initialEmail ?? "");
   const [seed] = useState(() => Math.floor(Math.random() * 1e9));
   const top = useRef<HTMLDivElement>(null);
   const formId = useId();
@@ -113,24 +127,47 @@ export function FormRenderer({
 
   const scrollTop = () => top.current?.scrollIntoView({ block: "start", behavior: "smooth" });
 
+  const showProblems = (probs: Record<string, string>) => {
+    const ids = Object.keys(probs);
+    const n = ids.length;
+    setAnnounce(n === 1 ? "One question needs attention." : `${n} questions need attention.`);
+    window.setTimeout(() => {
+      const el = document.getElementById(`${formId}-${ids[0]}`);
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      const field = el?.querySelector<HTMLElement>("input, textarea, select, button");
+      field?.focus({ preventScroll: true });
+    }, 30);
+  };
+
   const check = (): boolean => {
     const probs = sectionProblems(section, answers);
+    if (askEmail && current === 0) {
+      const e = emailProblem(email);
+      if (e) probs[EMAIL_ID] = e;
+    }
     setErrors(probs);
-    const ids = Object.keys(probs);
-    if (ids.length) {
-      const n = ids.length;
-      setAnnounce(n === 1 ? "One question needs attention." : `${n} questions need attention.`);
-      window.setTimeout(() => {
-        const el = document.getElementById(`${formId}-${ids[0]}`);
-        el?.scrollIntoView({ block: "center", behavior: "smooth" });
-        const field = el?.querySelector<HTMLElement>("input, textarea, select, button");
-        field?.focus({ preventScroll: true });
-      }, 30);
+    if (Object.keys(probs).length) {
+      showProblems(probs);
       return false;
     }
     setAnnounce("");
     return true;
   };
+
+  // Problems the server found (a place just taken, a check it made): shown
+  // under their question when it's on this page.
+  useEffect(() => {
+    if (!fieldErrors || !Object.keys(fieldErrors).length) return;
+    const here = Object.fromEntries(
+      Object.entries(fieldErrors).filter(
+        ([id]) => (id === EMAIL_ID && askEmail && current === 0) || section.items.some((q) => q.id === id)
+      )
+    );
+    if (!Object.keys(here).length) return;
+    setErrors((e) => ({ ...e, ...here }));
+    showProblems(here);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fieldErrors]);
 
   const goNext = () => {
     if (!check()) return;
@@ -145,7 +182,7 @@ export function FormRenderer({
   };
   const submit = () => {
     if (!check()) return;
-    void onSubmit(answers, path.map((i) => Math.min(i, sections.length - 1)));
+    void onSubmit(answers, path.map((i) => Math.min(i, sections.length - 1)), askEmail ? email.trim() : undefined);
   };
   const clear = () => {
     setAnswers({});
@@ -233,6 +270,19 @@ export function FormRenderer({
           {announce}
         </div>
 
+        {askEmail && current === 0 && (
+          <EmailCard
+            domId={`${formId}-${EMAIL_ID}`}
+            value={email}
+            error={errors[EMAIL_ID]}
+            onChange={(v) => {
+              setEmail(v);
+              onEmailChange?.(v);
+              if (errors[EMAIL_ID]) setErrors((e) => Object.fromEntries(Object.entries(e).filter(([k]) => k !== EMAIL_ID)));
+            }}
+          />
+        )}
+
         {section.items.length === 0 && !section.item && (
           <div className="pf-card px-4 py-6 text-center text-sm sm:px-6" style={{ color: "var(--pf-muted)" }}>
             {mode === "preview" ? "Add a question and it shows here." : "There's nothing to fill in on this page."}
@@ -282,7 +332,7 @@ export function FormRenderer({
           <ClearMenu onClear={clear} disabled={Object.keys(answers).length === 0} />
           {isLast ? (
             <button type="button" className="pf-btn pf-btn-primary" onClick={submit} disabled={submitting}>
-              {submitting ? "Sending…" : "Submit"}
+              {submitting ? "Sending…" : submitLabel}
             </button>
           ) : (
             <button type="button" className="pf-btn pf-btn-primary" onClick={goNext}>
@@ -292,6 +342,63 @@ export function FormRenderer({
         </div>
       </div>
       {footer && <div className="mx-auto w-full max-w-[42rem] px-4 pb-6 pt-2 text-center text-xs" style={{ color: "var(--pf-muted)" }}>{footer}</div>}
+    </div>
+  );
+}
+
+const EMAIL_ID = "_email";
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function emailProblem(v: string): string | null {
+  const s = v.trim();
+  if (!s) return "Enter your email address.";
+  return s.length > 254 || !EMAIL_RE.test(s) ? "Enter an email like name@example.com." : null;
+}
+
+/** "Your email" on a link form that asks for one (typed, not checked). */
+function EmailCard({
+  domId,
+  value,
+  error,
+  onChange,
+}: {
+  domId: string;
+  value: string;
+  error?: string;
+  onChange: (v: string) => void;
+}) {
+  const errId = `${domId}-err`;
+  return (
+    <div id={domId} className="pf-card px-4 py-4 sm:px-6" style={error ? { borderColor: "var(--pf-error)" } : undefined}>
+      <div className="flex flex-col gap-3">
+        <label htmlFor={`${domId}-field`} className="text-[17px] font-medium leading-snug">
+          Your email
+          <span style={{ color: "var(--pf-error)" }}>
+            {" "}
+            <span aria-hidden="true">*</span>
+            <span className="sr-only">(required)</span>
+          </span>
+        </label>
+        <input
+          id={`${domId}-field`}
+          className="pf-input"
+          type="email"
+          inputMode="email"
+          autoComplete="email"
+          maxLength={254}
+          placeholder="name@example.com"
+          value={value}
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errId : undefined}
+          aria-required
+          onChange={(e) => onChange(e.target.value)}
+        />
+        {error && (
+          <p id={errId} className="flex items-center gap-1.5 text-sm font-medium" style={{ color: "var(--pf-error)" }}>
+            <span aria-hidden="true">!</span> {error}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

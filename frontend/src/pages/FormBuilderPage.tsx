@@ -11,6 +11,7 @@ import {
   Loader2,
   MoreHorizontal,
   Palette,
+  Send,
   Share2,
   Star,
   Trash2,
@@ -26,6 +27,7 @@ import { FormRenderer } from "@/components/forms/FormRenderer";
 import { LookPanel } from "@/components/forms/builder/LookPanel";
 import { PreviewPane } from "@/components/forms/builder/PreviewPane";
 import { QuestionsTab } from "@/components/forms/builder/QuestionsTab";
+import { SendDialog } from "@/components/forms/builder/SendDialog";
 import { SettingsTab } from "@/components/forms/builder/SettingsTab";
 import { Menu, MenuItem, Switch, iconBtnCls } from "@/components/forms/builder/ui";
 import { useFormDoc, type FormDoc, type SaveStatus } from "@/components/forms/builder/useFormDoc";
@@ -119,6 +121,7 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
   const [previewOpen, setPreviewOpen] = useState(() => !isPhone && window.innerWidth >= 1280);
   const [lookOpen, setLookOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
 
   useEffect(() => {
     document.title = `${doc.def.title || "Untitled form"} · Forms`;
@@ -171,6 +174,7 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
             onPreview={() => setPreviewOpen((o) => !o)}
             onLook={() => setLookOpen(true)}
             onShare={() => setShareOpen(true)}
+            onSend={() => setSendOpen(true)}
             onFile={(f) => {
               setFile(f);
               invalidateFileQueries(qc);
@@ -259,6 +263,25 @@ function Builder({ fileId, initial, info }: { fileId: string; initial: FormView;
       <Sheet open={lookOpen} onClose={() => setLookOpen(false)} title="Look" size="lg">
         <LookPanel doc={doc} fileId={fileId} />
       </Sheet>
+      {canEdit && (
+        <SendDialog
+          open={sendOpen}
+          onClose={() => setSendOpen(false)}
+          fileId={fileId}
+          view={viewForPanels}
+          onView={(v) => setView({ ...v, form: { ...v.form, definition: doc.def } })}
+          isOwner={view.is_owner}
+          onAccepting={setAccepting}
+          onOpenSettings={() => {
+            setSendOpen(false);
+            setTab("settings");
+          }}
+          onShare={() => {
+            setSendOpen(false);
+            setShareOpen(true);
+          }}
+        />
+      )}
       {view.is_owner && (
         <ShareGrantsModal
           open={shareOpen}
@@ -394,6 +417,7 @@ function BuilderActions({
   onPreview,
   onLook,
   onShare,
+  onSend,
   onFile,
   onTrashed,
   navigateTo,
@@ -408,6 +432,7 @@ function BuilderActions({
   onPreview: () => void;
   onLook: () => void;
   onShare: () => void;
+  onSend: () => void;
   onFile: (f: FileItem) => void;
   onTrashed: () => void;
   navigateTo: (path: string) => void;
@@ -492,13 +517,18 @@ function BuilderActions({
         </button>
       )}
       {isOwner && !isPhone && (
+        <button type="button" className={iconBtnCls} onClick={onShare} title="Add collaborators" aria-label="Share">
+          <Share2 className="h-4 w-4" />
+        </button>
+      )}
+      {canEdit && (
         <button
           type="button"
-          onClick={onShare}
-          className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white hover:opacity-90"
+          onClick={onSend}
+          className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--accent)] px-3 text-sm font-medium text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg)]"
         >
-          <Share2 className="h-4 w-4" />
-          Share
+          <Send className="h-4 w-4" aria-hidden="true" />
+          Send
         </button>
       )}
       <Menu label="More" icon={<MoreHorizontal className="h-4 w-4" />}>

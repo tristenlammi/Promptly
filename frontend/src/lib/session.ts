@@ -23,7 +23,13 @@ const USER_SCOPED_KEYS = [
   "promptly.autoCompact",
   "promptly.ws.contextBannerDismissed",
 ];
-const USER_SCOPED_PREFIXES = ["promptly.ws.recents.", "promptly.journal-draft."];
+const USER_SCOPED_PREFIXES = [
+  "promptly.ws.recents.",
+  "promptly.journal-draft.",
+  // Forms: answers being written, and ones waiting to be sent (per person).
+  "promptly.form-draft.",
+  "promptly.form-pending.",
+];
 const LAST_USER_KEY = "promptly.last-user";
 
 function purgeUserData(): void {

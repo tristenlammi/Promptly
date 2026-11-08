@@ -12,6 +12,9 @@ downloaded like any office file. These routes are the builder's:
 * ``PATCH /{file_id}/settings``
 * ``POST /{file_id}/assets`` — a picture for the header, a question or an
   option; ``POST /{file_id}/assets/from-file`` copies one from Photos/Files. ``GET /{file_id}/assets/{asset_id}`` serves it by a signed link.
+* ``POST /{file_id}/link`` (make, or ``reset``) / ``DELETE /{file_id}/link``
+  (turn off) — the answer link ``/f/<token>`` (WP-F1.3);
+  ``POST /{file_id}/send`` — send it to people on this server.
 
 Every route checks :mod:`app.forms.access`; anything you can't open is a
 404, never a 403.
@@ -50,7 +53,7 @@ async def _view(db: AsyncSession, shell: UserFile, form, access: str, user: User
         "access": access,
         "is_owner": shell.user_id == user.id,
         "form": service.form_view(shell, form),
-        # Answer links are made in WP-F1.3 (Send); shown here once one exists.
+        # The answer link (Send, WP-F1.3), for people who can change the form.
         "link": (
             {
                 "token": link.token,
@@ -340,6 +343,89 @@ async def asset_from_file(
         fh.close()
     await db.commit()
     return {"id": str(row.id), "url": service.asset_url(shell.id, row.id)}
+
+
+# --------------------------------------------------------------------
+# The answer link and Send (WP-F1.3)
+# --------------------------------------------------------------------
+class _LinkRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # Turn the current link off and make a new one.
+    reset: bool = False
+
+
+@router.post("/{file_id:uuid}/link")
+async def make_link(
+    file_id: uuid.UUID,
+    payload: _LinkRequest | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """The form's answer link (``/f/<token>``): made the first time,
+    replaced with ``reset`` (the old one stops working at once)."""
+    shell, form, access = await load_form(db, file_id, user, need="edit", lock=True)
+    await service.make_link(db, shell, form, by=user, reset=bool(payload and payload.reset))
+    await db.commit()
+    await db.refresh(form)
+    return await _view(db, shell, form, access, user)
+
+
+@router.delete("/{file_id:uuid}/link")
+async def turn_off_link(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Turn the answer link off: it says "doesn't exist" from now on."""
+    shell, form, access = await load_form(db, file_id, user, need="edit", lock=True)
+    await service.turn_off_links(db, shell)
+    await db.commit()
+    await db.refresh(form)
+    return await _view(db, shell, form, access, user)
+
+
+class _SendRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    user_ids: list[uuid.UUID] = Field(min_length=1, max_length=50)
+
+
+@router.post("/{file_id:uuid}/send")
+async def send_to_people(
+    file_id: uuid.UUID,
+    payload: _SendRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Send the form to people on this server: each gets a notification
+    that opens the answer page. It never gives them the form itself."""
+    from app.notifications.dispatch import notify_user
+
+    shell, form, _access = await load_form(db, file_id, user, need="edit", lock=True)
+    link = await service.make_link(db, shell, form, by=user)
+    token = link.token
+    await db.commit()
+    ids = list(dict.fromkeys(payload.user_ids))
+    people = (
+        await db.execute(select(User).where(User.id.in_(ids), User.disabled.is_(False)))
+    ).scalars().all()
+    title = (form.definition or {}).get("title") or "Untitled form"
+    sent = 0
+    for person in people:
+        if person.id == user.id:
+            continue
+        await notify_user(
+            user_id=person.id,
+            category="invite",
+            title=f"{user.username} sent you a form",
+            body=f"“{title}”. Tap to fill it in.",
+            url=f"/f/{token}",
+            tag=f"form-send:{form.id}",
+            actor_user_id=user.id,
+        )
+        sent += 1
+    return {"sent": sent}
 
 
 @router.get("/{file_id:uuid}/assets/{asset_id:uuid}")
