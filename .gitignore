@@ -46,6 +46,9 @@ backend/alembic/versions/*.pyc
 # top-level ./data/ runtime dir — an unanchored ``data/`` also matched
 # nested source dirs like frontend/src/data/, silently dropping files.
 /data/
+# Per-stack state from scripts/stack.sh (rendered compose file, throwaway
+# secrets, port) — one folder per isolated test stack.
+/.stacks/
 
 # Legacy named-volume directory names (kept for cleanup of
 # earlier installs that may still have them lying around).
