@@ -154,8 +154,10 @@ RULES: dict[str, Rule] = {
     "passwords": Rule(False),
     # Calls: a ringing call is never held (it'd be over by morning), nor is
     # the push that stops it ringing on your other devices.
-    # A missed call during quiet hours is held (calls/ring.py holds it
-    # itself, as this rule never does): "2 missed calls in Calls".
+    # Calls ring through quiet hours. Someone who chose "Don't ring me
+    # during quiet hours" gets no ring, and the missed call is held
+    # (calls/ring.py holds it itself, as this rule never does): "2 missed
+    # calls in Calls".
     "call": Rule(False, app="Calls", one="call", many="calls", url="/rooms/calls", kinds=(("call_missed", "missed call", "missed calls"),)),
     "test": Rule(False),
 }

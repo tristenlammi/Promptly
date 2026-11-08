@@ -1407,7 +1407,7 @@ async def test_a_call_started_on_a_phone_hands_off_to_the_app(client, db, lk, jo
     assert (await client.post("/api/calls/session/refresh", json={"session": j["session"]})).status_code == 404
 
 
-async def _quiet_night(db, monkeypatch, user, ring_through=False):
+async def _quiet_night(db, monkeypatch, user, hold=False):
     import app.notifications.quiet as q
     from zoneinfo import ZoneInfo
 
@@ -1420,16 +1420,27 @@ async def _quiet_night(db, monkeypatch, user, ring_through=False):
         prefs = PushPreferences(user_id=user.id)
         db.add(prefs)
     prefs.quiet_enabled = True
-    prefs.call_ring_through = ring_through
+    prefs.call_quiet_hold = hold
     await db.commit()
 
 
-async def test_quiet_hours_calls_dont_ring_and_the_missed_call_waits(client, db, lk, jobs, events, pushes, monkeypatch):
+async def test_calls_ring_through_quiet_hours_unless_you_hold_them(client, db, lk, jobs, events, pushes, monkeypatch):
     from app.notifications.models import PushHeld
 
     w = await world(client, db)
+    # By default calls always get through quiet hours (the owner's decision).
     await _quiet_night(db, monkeypatch, w.ben)
     pushes.clear()
+    cid = (await start(client, w.ann, w.dm))["call"]["id"]
+    assert kinds(pushes, w.ben) == ["call_ring"]
+    assert await run_timeout(jobs, cid) == "missed"
+    assert kinds(pushes, w.ben)[-1] == "call_missed"
+    assert (await db.execute(select(PushHeld).where(PushHeld.user_id == w.ben.id))).scalars().all() == []
+
+    # "Don't ring me during quiet hours".
+    await _quiet_night(db, monkeypatch, w.ben, hold=True)
+    pushes.clear()
+    events.clear()
     cid = (await start(client, w.ann, w.dm))["call"]["id"]
     # No ring push and no ring on Ben's open pages; it still rings out on the server.
     assert kinds(pushes, w.ben) == []
@@ -1444,16 +1455,16 @@ async def test_quiet_hours_calls_dont_ring_and_the_missed_call_waits(client, db,
 
     assert quiet.phrase("call", [held]) == "1 missed call in Calls"
 
-    # "Let calls ring during quiet hours": they ring.
-    await _quiet_night(db, monkeypatch, w.ben, ring_through=True)
+    # Turned off again: they ring.
+    await _quiet_night(db, monkeypatch, w.ben, hold=False)
     pushes.clear()
     await start(client, w.ann, w.dm)
     assert kinds(pushes, w.ben) == ["call_ring"]
 
 
-async def test_preferences_have_the_ring_through_switch(client, db):
+async def test_preferences_have_the_quiet_hold_switch(client, db):
     w = await world(client, db)
     r = await client.get("/api/notifications/preferences", headers=H(w.ann))
-    assert r.status_code == 200 and r.json()["call_ring_through"] is False
-    r = await client.patch("/api/notifications/preferences", headers=H(w.ann), json={"call_ring_through": True})
-    assert r.status_code == 200 and r.json()["call_ring_through"] is True
+    assert r.status_code == 200 and r.json()["call_quiet_hold"] is False
+    r = await client.patch("/api/notifications/preferences", headers=H(w.ann), json={"call_quiet_hold": True})
+    assert r.status_code == 200 and r.json()["call_quiet_hold"] is True

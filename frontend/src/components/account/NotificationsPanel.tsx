@@ -383,12 +383,12 @@ export function NotificationsPanel() {
                     <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
                       <input
                         type="checkbox"
-                        checked={prefs.call_ring_through ?? false}
-                        disabled={prefsBusy === "call_ring_through"}
-                        onChange={(e) => toggle("call_ring_through", e.target.checked)}
-                        data-testid="call-ring-through"
+                        checked={prefs.call_quiet_hold ?? false}
+                        disabled={prefsBusy === "call_quiet_hold"}
+                        onChange={(e) => toggle("call_quiet_hold", e.target.checked)}
+                        data-testid="call-quiet-hold"
                       />
-                      Let calls ring during quiet hours
+                      Don&apos;t ring me during quiet hours (you&apos;ll see who called when they end)
                     </label>
                   ) : null
                 }
@@ -469,7 +469,7 @@ function QuietHours({
     <div className="mb-4 overflow-hidden rounded-md border border-[var(--border)]">
       <CategoryRow
         title="Quiet hours"
-        subtitle="Notifications wait until quiet hours end, then arrive together. Calendar reminders, item reminders, Passwords and admin alerts always get through. Calls don't ring (you'll see who called) unless you let them under Calls."
+        subtitle="Notifications wait until quiet hours end, then arrive together. Calls, Calendar reminders, item reminders, Passwords and admin alerts always get through (calls can be held too, under Calls)."
         checked={prefs.quiet_enabled}
         busy={busy}
         onChange={(v) => onSave({ quiet_enabled: v })}

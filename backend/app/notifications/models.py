@@ -143,9 +143,10 @@ class PushPreferences(Base):
     call: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
-    # Calls (0284): ring even during quiet hours (off: a call in your quiet
-    # hours doesn't ring; you hear about the missed call when they end).
-    call_ring_through: Mapped[bool] = mapped_column(
+    # Calls (0284): calls ring through quiet hours unless this is on ("Don't
+    # ring me during quiet hours"): then a call in your quiet hours doesn't
+    # ring, and you hear about the missed call when they end.
+    call_quiet_hold: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
     # Quiet hours (0320), in the person's own time zone. One setting for all

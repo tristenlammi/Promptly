@@ -12,8 +12,8 @@
 //  - The other side's phone holding the call ("On hold").
 //  - Data saver says video is lowered.
 //  - A missed call's notification opens that call in the Calls tab.
-//  - Quiet hours: "Let calls ring during quiet hours" in Account →
-//    Notifications.
+//  - Quiet hours: calls ring through by default; "Don't ring me during
+//    quiet hours" in Account → Notifications.
 // The real app is checked on a phone (see the WP-D5 report's owner checks).
 // Needs the calls service in the stack (scripts/stack.sh up <name> --with
 // calls); skipped without it.
@@ -374,26 +374,26 @@ test.describe("DM calls polish (WP-D5)", () => {
     await expect.poll(async () => (await (await bob.request.get("/api/calls/missed", { headers: { Authorization: bobAuth } })).json()).count, { timeout: 15_000 }).toBe(0);
   });
 
-  test("quiet hours: let calls ring through, from Account → Notifications", async () => {
+  test("quiet hours: calls ring through by default; Don't ring me during quiet hours, from Account → Notifications", async () => {
     // (The settings need Web Push, so a service worker.)
     const bob = await person("bob", { serviceWorkers: "allow" });
     const auth = await bearer(bob);
-    const on = await bob.request.patch("/api/notifications/preferences", { headers: { Authorization: auth }, data: { quiet_enabled: true, call_ring_through: false } });
+    const on = await bob.request.patch("/api/notifications/preferences", { headers: { Authorization: auth }, data: { quiet_enabled: true, call_quiet_hold: false } });
     expect(on.ok()).toBe(true);
     await bob.goto("/account/notifications");
-    const box = bob.getByTestId("call-ring-through");
+    const box = bob.getByTestId("call-quiet-hold");
     await expect(box).toBeVisible({ timeout: 20_000 });
     await expect(box).not.toBeChecked();
-    await expect(bob.getByText("Let calls ring during quiet hours")).toBeVisible();
+    await expect(bob.getByText("Don't ring me during quiet hours", { exact: false })).toBeVisible();
     await box.check();
     await expect
-      .poll(async () => (await (await bob.request.get("/api/notifications/preferences", { headers: { Authorization: auth } })).json()).call_ring_through, { timeout: 10_000 })
+      .poll(async () => (await (await bob.request.get("/api/notifications/preferences", { headers: { Authorization: auth } })).json()).call_quiet_hold, { timeout: 10_000 })
       .toBe(true);
     // Quiet hours off: nothing to let through, so it's not offered.
-    await bob.request.patch("/api/notifications/preferences", { headers: { Authorization: auth }, data: { quiet_enabled: false, call_ring_through: false } });
+    await bob.request.patch("/api/notifications/preferences", { headers: { Authorization: auth }, data: { quiet_enabled: false, call_quiet_hold: false } });
     await bob.reload();
     await expect(bob.getByText("Calls", { exact: true })).toBeVisible({ timeout: 20_000 });
-    await expect(bob.getByTestId("call-ring-through")).toHaveCount(0);
+    await expect(bob.getByTestId("call-quiet-hold")).toHaveCount(0);
     expect(stamp).toBeTruthy();
   });
 });

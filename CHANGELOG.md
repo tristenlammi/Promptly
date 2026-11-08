@@ -63,7 +63,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Video calls on Android phones with the app: your phone's own camera in the call (on and off, switch front and back), everyone's video on the app's call screen, working over the lock screen, and picture-in-picture when you leave the call screen. Locking the phone pauses your camera and it comes back when you unlock. The conversation's page can turn the app's camera on and off and switch it too.
 - Call tones: the through tone when they answer, a tone when the connection drops and when it's back, a soft tone while the other person has you on hold, and one when the call ends. While the connection drops the call says "Reconnecting…", or "You're offline" when there's no network, and carries on by itself (also when a phone moves from Wi-Fi to mobile data).
 - Calls on a weak connection, or with Data saver on: video is taken and sent smaller, and the call says so. On Android, mobile data takes the middle quality and Android's Data Saver the lowest.
-- Account → Notifications → Calls: "Let calls ring during quiet hours".
+- Account → Notifications → Calls: "Don't ring me during quiet hours". Calls still ring through quiet hours unless you turn this on; then a call in your quiet hours rings out to a missed call, and you're told about it when quiet hours end.
 
 ### Changed
 <!-- Calls (voice channels), WP-V1 -->
@@ -71,7 +71,6 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Calls (voice channels), WP-V5 -->
 - Voice & video settings use Promptly's own colour (terracotta) for sliders, switches, focus rings and the selected options, also inside Rooms. Push to talk now says what to do in a game: voice activity keeps working while you play, with a "Use voice activity instead" link.
 <!-- Calls (DM calls), WP-D5 -->
-- Calls and quiet hours: during your quiet hours a call no longer rings you (unless you let calls ring through). It rings out to a missed call, and you're told about it when quiet hours end.
 - A missed call's notification now opens that call in the Calls tab (call back, message, or every call with them), rather than the conversation.
 
 ### Fixed

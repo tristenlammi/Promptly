@@ -56,8 +56,8 @@ class PreferencesSchema(BaseModel):
     passwords: bool = True
     mail: bool = True
     call: bool = True
-    # Calls: ring even during quiet hours (0284).
-    call_ring_through: bool = False
+    # Calls: don't ring during quiet hours (0284; off = calls always ring).
+    call_quiet_hold: bool = False
     # Quiet hours (0320) — "HH:MM" in the person's own time zone.
     quiet_enabled: bool = False
     quiet_start: str = "22:00"
@@ -95,7 +95,7 @@ class PreferencesUpdate(BaseModel):
     passwords: bool | None = None
     mail: bool | None = None
     call: bool | None = None
-    call_ring_through: bool | None = None
+    call_quiet_hold: bool | None = None
     quiet_enabled: bool | None = None
     quiet_start: str | None = Field(default=None, pattern=_CLOCK)
     quiet_end: str | None = Field(default=None, pattern=_CLOCK)

@@ -6,9 +6,10 @@ in the conversation ("Call · 12 min", "Missed call").
 
 * a Web Push in the ``call`` category: ``Urgency: high`` (wakes a dozing
   phone) and ``TTL: 45`` (a ring that can't arrive in 45 s is pointless).
-  Dispatch never holds it (``dispatch.RULES["call"]`` is ``Rule(False)``);
-  during your quiet hours it doesn't ring at all unless you let calls ring
-  through (``rings_quietly``), and the missed call is held until they end.
+  Dispatch never holds it (``dispatch.RULES["call"]`` is ``Rule(False)``):
+  calls ring through quiet hours, unless you chose "Don't ring me during
+  quiet hours" (``rings_quietly``); then it doesn't ring at all, and the
+  missed call is held until they end.
   A block either way drops it (``actor_user_id``). The service worker shows
   it to every open tab with a ringtone; on Android, the app's
   ``Delegation`` turns a ``call:`` notification into a full-screen ring;
@@ -47,14 +48,15 @@ ICON = "/item-icons/rooms-192.png"
 
 
 async def rings_quietly(db: AsyncSession, user_id: uuid.UUID) -> bool:
-    """It's this person's quiet hours and they haven't let calls ring
-    through (Account → Notifications): a call doesn't ring them; the
-    missed call is told when quiet hours end (Calls WP-D5)."""
+    """It's this person's quiet hours and they chose "Don't ring me during
+    quiet hours" (Account → Notifications; off by default, as calls always
+    get through): a call doesn't ring them, and the missed call is told
+    when quiet hours end (Calls WP-D5)."""
     from app.notifications import quiet
     from app.notifications.models import PushPreferences
 
     prefs = await db.get(PushPreferences, user_id)
-    if prefs is None or not prefs.quiet_enabled or prefs.call_ring_through:
+    if prefs is None or not prefs.quiet_enabled or not prefs.call_quiet_hold:
         return False
     user = await db.get(User, user_id)
     return quiet.is_quiet(prefs, quiet._now(), quiet.zone_of(user.settings if user is not None else None))
