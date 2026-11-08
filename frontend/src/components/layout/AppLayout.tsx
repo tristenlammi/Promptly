@@ -75,6 +75,14 @@ export function AppLayout() {
           return;
         }
       }
+      // Ctrl/Cmd+Shift+Space: Talk to Promptly (WP-T4). In a chat it talks
+      // in that chat; anywhere else it starts a new one.
+      if (mod && e.shiftKey && !e.altKey && e.code === "Space") {
+        e.preventDefault();
+        const inChat = /^\/chat(\/|$)/.test(window.location.pathname);
+        navigate(inChat ? `${window.location.pathname}?talk=1` : "/chat?talk=1");
+        return;
+      }
       // Ctrl/Cmd+Shift+O — start a new chat (mirrors ChatGPT).
       if (mod && e.shiftKey && !e.altKey && (e.key === "o" || e.key === "O")) {
         e.preventDefault();

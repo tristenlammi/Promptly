@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Loader2, Sparkle, Volume2 } from "lucide-react";
+import { AudioLines, Check, Loader2, Sparkle, Volume2 } from "lucide-react";
 
 import { authApi } from "@/api/auth";
 import { Button } from "@/components/shared/Button";
@@ -175,6 +175,152 @@ export function VoicePanel() {
           mispronounce English. All run on your own server.
         </p>
       </div>
+      <TalkSettings />
     </section>
+  );
+}
+
+type TalkKey = "tts_speed" | "talk_turn_mode" | "talk_interrupt" | "talk_captions" | "talk_save";
+
+/** How Talk behaves (WP-T4). Saved in ``users.settings`` like the voice,
+ *  so it follows you to the phone and every browser. */
+function TalkSettings() {
+  const settings = useAuthStore((s) => s.user?.settings);
+  const patchSettings = useAuthStore((s) => s.patchSettings);
+  const setUser = useAuthStore((s) => s.setUser);
+  const [busy, setBusy] = useState<TalkKey | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const storedSpeed = typeof settings?.tts_speed === "number" ? settings.tts_speed : 1;
+  const [speed, setSpeed] = useState(storedSpeed);
+  useEffect(() => setSpeed(storedSpeed), [storedSpeed]);
+
+  const save = async (key: TalkKey, value: string | number | boolean) => {
+    const previous = settings?.[key];
+    setError(null);
+    setBusy(key);
+    patchSettings({ [key]: value });
+    try {
+      setUser(await authApi.updatePreferences({ [key]: value }));
+    } catch (err) {
+      patchSettings({ [key]: previous as never });
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const choice = (
+    key: TalkKey,
+    label: string,
+    hint: string,
+    options: [string | boolean, string][],
+    current: string | boolean
+  ) => (
+    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-[var(--text)]" id={`talk-${key}`}>
+          {label}
+        </p>
+        <p className="text-xs text-[var(--text-muted)]">{hint}</p>
+      </div>
+      <div
+        role="radiogroup"
+        aria-labelledby={`talk-${key}`}
+        className="inline-flex shrink-0 self-start rounded-lg border border-[var(--border)] p-0.5 sm:self-auto"
+      >
+        {options.map(([value, text]) => (
+          <button
+            key={String(value)}
+            type="button"
+            role="radio"
+            aria-checked={current === value}
+            disabled={busy !== null}
+            onClick={() => void save(key, value)}
+            className={cn(
+              "rounded-md px-3 py-1 text-xs font-medium transition",
+              current === value ? "bg-[var(--accent)] text-white" : "text-[var(--text)] hover:bg-[var(--hover)]"
+            )}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4 border-t border-[var(--border)] px-4 py-4">
+      <div className="flex items-center gap-2">
+        <AudioLines className="h-4 w-4 text-[var(--text-muted)]" />
+        <h4 className="text-sm font-semibold">Talk</h4>
+        {busy && <Loader2 className="h-3 w-3 animate-spin text-[var(--text-muted)]" />}
+      </div>
+      <p className="text-xs text-[var(--text-muted)]">
+        Talk is a spoken conversation: tap the orb next to the message box and just talk.
+      </p>
+      <label className="block">
+        <span className="flex items-center justify-between text-sm font-medium text-[var(--text)]">
+          Speaking speed
+          <span className="text-xs font-normal text-[var(--text-muted)]">{speed.toFixed(2).replace(/0$/, "")}×</span>
+        </span>
+        <input
+          type="range"
+          min={0.9}
+          max={1.3}
+          step={0.05}
+          value={speed}
+          disabled={busy !== null}
+          onChange={(e) => setSpeed(Number(e.target.value))}
+          onPointerUp={() => void save("tts_speed", speed)}
+          onKeyUp={() => void save("tts_speed", speed)}
+          className="mt-1 w-full accent-[var(--accent)]"
+        />
+      </label>
+      {choice(
+        "talk_turn_mode",
+        "How you take turns",
+        "Hands-free answers when you pause. Tap to talk is better in noisy places.",
+        [
+          ["hands_free", "Hands-free"],
+          ["tap", "Tap to talk"],
+        ],
+        settings?.talk_turn_mode === "tap" ? "tap" : "hands_free"
+      )}
+      {choice(
+        "talk_interrupt",
+        "Interrupting",
+        "Talk over it to stop it, or only stop it with a tap (handy on loud speakers).",
+        [
+          ["talk", "Talk over it"],
+          ["tap", "Tap to interrupt"],
+        ],
+        settings?.talk_interrupt === "tap" ? "tap" : "talk"
+      )}
+      {choice(
+        "talk_captions",
+        "Captions",
+        "Your words and its words on screen as they're said.",
+        [
+          [true, "On"],
+          [false, "Off"],
+        ],
+        settings?.talk_captions !== false
+      )}
+      {choice(
+        "talk_save",
+        "Save voice conversations",
+        "For Talk started outside a chat. Temporary ones are gone in an hour and never go into memory.",
+        [
+          ["chat", "Like any chat"],
+          ["temporary", "Temporary"],
+        ],
+        settings?.talk_save === "temporary" ? "temporary" : "chat"
+      )}
+      {error && (
+        <p role="alert" className="text-xs text-[var(--danger)]">
+          Couldn't save that: {error}
+        </p>
+      )}
+    </div>
   );
 }

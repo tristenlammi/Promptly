@@ -308,3 +308,39 @@ async def test_a_new_web_conversation_follows_the_temporary_setting(db, user, pr
     assert str(conv.id) == conv_id and conv.temporary_mode == "one_hour" and conv.expires_at is not None
     assert conv.title == "Hello"
 
+
+async def test_ping_is_answered_at_once_and_a_picked_voice_speaks_next(db, user, conversation, sidecars, talk_app, monkeypatch):  # noqa: F811
+    """WP-T4: the web times the connection with ``ping``, and a voice picked
+    on the Talk screen is used from the next thing it says."""
+    use_model(monkeypatch, Model(["First answer.", "Second answer."]))
+    c = await open_talk(talk_app, user, conversation)
+    await c.send({"type": "ping", "t": 12345})
+    pong = await c.find("pong")
+    assert pong["t"] == 12345
+    live = await sidecars.live()
+    await live.say(1, "Hello there")
+    await c.find("reply", done=True)
+    await c.expect("state", state="listening", timeout=15)
+    assert sidecars.tts_bodies[-1].get("voice") != "bm_george"
+
+    await c.send({"type": "prefs", "voice": "bm_george", "speed": 9})
+    await c.send({"type": "prefs", "voice": "not a voice!"})  # ignored
+    await live.say(2, "And again")
+    await c.expect("reply", done=True, timeout=15)
+    await c.expect("state", state="listening", timeout=15)
+    assert sidecars.tts_bodies[-1]["voice"] == "bm_george"
+    assert sidecars.tts_bodies[-1]["speed"] == 1.3
+    await finish(c)
+
+
+async def test_account_voice_saves_the_talk_settings(db, user, http):
+    r = await http.patch(
+        "/api/auth/me/preferences",
+        json={"tts_speed": 1.1, "talk_turn_mode": "tap", "talk_interrupt": "tap", "talk_captions": False, "talk_save": "temporary"},
+        headers=bearer(user),
+    )
+    assert r.status_code == 200, r.text
+    body = (await http.get("/api/talk/config", headers=bearer(user))).json()
+    assert body["prefs"] == {"voice": None, "speed": 1.1, "save": "temporary", "turn_mode": "tap", "interrupt": "tap", "captions": False}
+    bad = await http.patch("/api/auth/me/preferences", json={"tts_speed": 3}, headers=bearer(user))
+    assert bad.status_code == 422

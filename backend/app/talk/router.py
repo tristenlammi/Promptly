@@ -215,8 +215,15 @@ async def talk_socket(ws: WebSocket) -> None:
                 parsed = json.loads(text)
             except ValueError:
                 continue
-            if isinstance(parsed, dict):
-                session.client_message(parsed)
+            if not isinstance(parsed, dict):
+                continue
+            if parsed.get("type") == "ping":
+                # Answered here, not by the session's actor, so the round
+                # trip measures the connection (the web's weak-connection
+                # check), not how busy the conversation is.
+                await transport.send_json({"type": "pong", "t": parsed.get("t")})
+                continue
+            session.client_message(parsed)
     except (WebSocketDisconnect, RuntimeError):
         pass
     finally:

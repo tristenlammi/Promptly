@@ -18,7 +18,9 @@ Client -> server, JSON text
     ``mute``, ``unmute``, ``interrupt {played_ms?}`` (stop it talking; say how
     much you played if you know), ``end_turn`` (tap to talk: I've finished),
     ``confirm {answer: yes|no}`` (the Yes / No buttons under a question),
-    ``text {words}`` (Type instead), ``bye``.
+    ``text {words}`` (Type instead), ``prefs {voice?, speed?}`` (a voice
+    picked mid-conversation: used from the next thing it says), ``ping {t}``
+    (answered at once with ``pong {t}``, to time the connection), ``bye``.
 Client -> server, binary
     4-byte big-endian sequence number + one Opus packet, or PCM16 mono 16 kHz.
 

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
+  AudioLines,
   CalendarPlus,
   CheckSquare,
   FileText,
@@ -167,9 +168,26 @@ export function usePaletteActions(
     };
   }, [cmd, query, navigate]);
 
+  // Talk to Promptly (WP-T4): on an empty palette, or when you look for it.
+  const talkRow = useMemo<PaletteAction | null>(() => {
+    const t = query.trim().toLowerCase();
+    if (cmd || (t && !"talk to promptly voice speak".split(" ").some((w) => w.startsWith(t) || t.startsWith(w)))) return null;
+    return {
+      key: "talk",
+      icon: <AudioLines className="h-4 w-4" />,
+      title: "Talk to Promptly",
+      detail: "A spoken conversation in a new chat · Ctrl+Shift+Space",
+      sure: false,
+      run: async () => {
+        navigate("/chat?talk=1");
+        return true;
+      },
+    };
+  }, [cmd, query, navigate]);
+
   const actions = useMemo(
-    () => [...(doRow ? [doRow] : []), ...createRows, ...(mapRow ? [mapRow] : [])],
-    [doRow, createRows, mapRow],
+    () => [...(doRow ? [doRow] : []), ...createRows, ...(mapRow ? [mapRow] : []), ...(talkRow ? [talkRow] : [])],
+    [doRow, createRows, mapRow, talkRow],
   );
 
   /** Tab on the Do row: the next file to write to. */

@@ -987,9 +987,10 @@ export function InputBar({
     </button>
   );
 
-  // Mobile: when the input is empty the send slot is dead weight (send is
-  // disabled without text) — surface voice mode there instead, ChatGPT-
-  // style. Typing swaps it back to send; streaming still shows stop.
+  // The Talk orb, the one obvious way to start talking (WP-T4). On the
+  // phone it takes the send slot while the input is empty (send is disabled
+  // without text); typing swaps it back to send, streaming shows stop. On a
+  // desktop it sits beside Send.
   const talkOrb = onVoiceMode ? (
     <button
       type="button"
@@ -999,8 +1000,8 @@ export function InputBar({
         "promptly-voice-orb inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white",
         "transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
       )}
-      aria-label="Voice mode — talk hands-free"
-      title="Voice mode — talk hands-free"
+      aria-label="Talk to Promptly"
+      title="Talk to Promptly"
     >
       <AudioLines className="h-4 w-4" />
     </button>
@@ -1470,7 +1471,7 @@ export function InputBar({
                             className="flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-[var(--text)] transition hover:bg-[var(--hover)] focus:bg-[var(--hover)] focus:outline-none disabled:opacity-50"
                           >
                             <AudioLines className="h-4 w-4 text-[var(--text-muted)]" />
-                            Talk — voice mode
+                            Talk to Promptly
                           </button>
                         )}
                         {onSubchat && (
@@ -1553,6 +1554,7 @@ export function InputBar({
                   </button>
                 )}
                 {dictateButton}
+                {talkOrb}
                 {sendOrStop}
               </div>
             </div>

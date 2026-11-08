@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -43,7 +44,7 @@ from typing import Any
 from app.auth.models import User
 
 from . import confirm, fastpath, links, readback, reply as chat, tools as voice_tools
-from .access import VoicePrefs, record_turn
+from .access import SPEEDS, VoicePrefs, record_turn
 from .audio import FRAME_MS, TTS_SAMPLE_RATE, Playhead, split_seq, with_seq
 from .protocol import CLOSE_UNAVAILABLE, PROTOCOL_VERSION, Hello, Transport
 from .speech import Piece, SpeechSplitter, heard_raw
@@ -65,6 +66,8 @@ MODEL_FAILED = "Sorry, I couldn't get an answer just now."
 SPEECH_AHEAD_MS = 3000
 
 _END = object()
+# A Kokoro voice id, as Account -> Voice stores it (``auth/schemas.py``).
+_VOICE_ID = re.compile(r"[a-z]{2}_[a-z]+")
 
 
 @dataclass
@@ -447,6 +450,15 @@ class TalkSession:
                 if r is not None and not r.cancelled and not r.played:
                     await self._barge_in(r)
                 await self._settle(self.asking, said == "yes", UserTurn(text=said, speech_end=time.monotonic(), typed=True))
+        elif kind == "prefs":
+            # A voice picked on the Talk screen (it's saved to the account
+            # separately): the next thing said uses it.
+            voice = msg.get("voice")
+            if isinstance(voice, str) and _VOICE_ID.fullmatch(voice.strip().lower()):
+                self.prefs.voice = voice.strip().lower()
+            speed = msg.get("speed")
+            if isinstance(speed, (int, float)) and not isinstance(speed, bool):
+                self.prefs.speed = min(SPEEDS[1], max(SPEEDS[0], float(speed)))
         elif kind == "bye":
             await self._close("bye")
         elif kind == "hello":
