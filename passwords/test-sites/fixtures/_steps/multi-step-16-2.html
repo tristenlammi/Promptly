@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brightmarket Sign-In</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#ffffff;--fg:#222222;--soft:#666666;--line:#d8d8d8;--accent:#00587a;--card:#f7f9fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Arial, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+.legal-line{text-align:center;padding:30px 12px;font-size:.8em;color:var(--soft)}
+.bm{max-width:350px;margin:24px auto}.bm-logo{text-align:center;font-weight:700;font-size:1.5em;margin-bottom:14px}.bm-box{border:1px solid var(--line);border-radius:8px;padding:20px 26px}
+.bm-box h1{font-size:1.6em;font-weight:400}.bm-lbl{display:block;font-weight:700;font-size:.85em;margin:10px 0 2px}.bm-in{width:100%}
+.bm-btn{position:relative;display:block;margin:14px 0;background:#f7ca00;border-radius:8px;text-align:center;padding:6px}.bm-btn input{position:absolute;inset:0;width:100%;height:100%;opacity:.01;cursor:pointer}.bm-btn span{color:#111}
+.bm-small{font-size:.8em}.bm-div{text-align:center;color:var(--soft);font-size:.8em;margin:20px 0 8px}
+</style>
+
+</head>
+<body>
+
+<main class="wrap">
+<div class="bm"><div class="bm-logo">brightmarket</div><div class="bm-box"><h1>Sign in</h1>
+<p><span id="bm-who"></span> <a href="/fixtures/multi-step-16.html">Change</a></p>
+<form name="signIn" id="bm2" method="post" novalidate action="/fixtures/_steps/multi-step-16-3.html"><input type="hidden" name="appActionToken" value="pmQ2j3F0x1"><input type="hidden" name="appAction" value="SIGNIN"><input type="hidden" name="workflowState" value="eyJ6aXAiOiJERUYifQ"><input type="hidden" name="email" id="bm-email-carrier">
+<div style="display:flex;justify-content:space-between"><label for="ap_password" class="bm-lbl">Password</label><a href="#" class="bm-small">Forgot your password?</a></div>
+<input type="password" id="ap_password" name="password" autocomplete="current-password" maxlength="1024" class="bm-in auth-autofill-password auth-required-field">
+<span class="bm-btn"><input id="signInSubmit" type="submit" aria-labelledby="auth-signin-button-announce"><span id="auth-signin-button-announce">Sign in</span></span>
+<label class="bm-small" style="font-weight:400"><input type="checkbox" name="rememberMe" value="true"> Keep me signed in. <a href="#">Details</a></label></form></div></div>
+</main>
+<div class="legal-line">&copy; 2026 Brightmarket, all rights reserved &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a> &middot; <a href="#">Accessibility</a></div>
+
+
+<script>
+(function(){var K="flow:ms16";
+var S={};try{S=JSON.parse(sessionStorage.getItem(K)||'{}');}catch(e){}
+var F={"password":"#ap_password"};
+function save(){sessionStorage.setItem(K,JSON.stringify(S));}
+Object.keys(F).forEach(function(r){var el=document.querySelector(F[r]);if(!el)return;S[r]=S[r]||'';save();el.addEventListener('input',function(){S[r]=el.value;save();});});
+window.__fixture={state:function(){return S;}};
+document.getElementById('bm-who').textContent=S.username||'';document.getElementById('bm-email-carrier').value=S.username||'';
+var go=function(ev){if(ev)ev.preventDefault();location.href="/fixtures/_steps/multi-step-16-3.html";};var b=document.querySelector("#bm2");if(b){if(b.tagName==='FORM'){b.addEventListener('submit',go);}else{b.addEventListener('click',go);}}
+})();
+</script>
+</body>
+</html>

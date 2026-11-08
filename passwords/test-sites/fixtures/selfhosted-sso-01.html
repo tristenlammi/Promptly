@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Login - Gatekeep</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f6f2fb;--fg:#241a33;--soft:#6a5c80;--line:#dcd2ea;--accent:#6b3fb5;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, Helvetica, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+.gk{max-width:380px;margin:80px auto;text-align:center}.gk-f{position:relative;margin:18px 0;text-align:left}.gk-f input{width:100%;padding:16px 14px;border:0;background:transparent;position:relative}
+.gk-f label{position:absolute;left:14px;top:16px;color:#777;pointer-events:none;transform-origin:left top;transition:transform .15s}.gk-f.up label{transform:translate(-2px,-24px) scale(.75)}
+.gk-f fieldset{position:absolute;inset:-5px 0 0;margin:0;padding:0 8px;border:1px solid #aaa;border-radius:4px;pointer-events:none}.gk-f fieldset legend{visibility:hidden;font-size:.75em;padding:0;max-width:0}.gk-f.up fieldset legend{max-width:100%;padding:0 4px}
+.gk-otp{display:flex;gap:8px;justify-content:center}.gk-otp input{width:42px;height:48px;text-align:center;font-size:1.3em}
+</style>
+
+</head>
+<body>
+
+<div class="gk"><h1>Sign in</h1><div id="gk-view"></div></div>
+
+
+
+<script>
+var S={username:'',password:'',otp:''};window.__fixture={state:function(){return S;}};
+function bind(el,key){el.addEventListener('input',function(){S[key]=el.value;});}
+var v=document.getElementById('gk-view');
+function out(id,name,label,type,ac){return '<div class="gk-f"><input id="'+id+'" name="'+name+'" type="'+type+'" autocomplete="'+ac+'"><label for="'+id+'">'+label+'</label><fieldset aria-hidden="true"><legend><span>'+label+'</span></legend></fieldset></div>';}
+function lift(i){var w=i.parentNode;var up=function(){w.classList.toggle('up',document.activeElement===i||!!i.value);};i.addEventListener('focus',up);i.addEventListener('blur',up);i.addEventListener('input',up);up();}
+v.innerHTML='<form id="gk-form" onsubmit="return false">'+out('username-textfield','username','Username','text','username')+out('password-textfield','password','Password','password','current-password')+'<label style="font-weight:400;display:block;text-align:left"><input type="checkbox" id="remember-checkbox"> Remember me</label><p><button type="submit" id="sign-in-button">Sign in</button></p><p><a href="#">Reset password?</a></p></form>';
+['username-textfield','password-textfield'].forEach(function(id,k){var i=document.getElementById(id);lift(i);bind(i,k?'password':'username');});
+document.getElementById('gk-form').addEventListener('submit',function(){if(!S.username||!S.password)return;setTimeout(function(){
+ v.innerHTML='<h2>One-Time Password</h2><p>Enter the six digits from your app.</p><div class="gk-otp" id="gk-otp"></div><p><button type="button">Use a security key instead</button></p>';
+ var box=document.getElementById('gk-otp');for(var k=0;k<6;k++){var i=document.createElement('input');i.setAttribute('maxlength','1');i.setAttribute('inputmode','numeric');i.setAttribute('aria-label','Please enter OTP character '+(k+1));i.id='otp-'+k;box.appendChild(i);}
+ var all=[].slice.call(box.querySelectorAll('input'));all.forEach(function(i,k){i.addEventListener('input',function(){S.otp=all.map(function(x){return x.value;}).join('');if(i.value&&all[k+1])all[k+1].focus();});});
+ all[0].focus();box.setAttribute('data-ready','1');},300);});
+</script>
+</body>
+</html>

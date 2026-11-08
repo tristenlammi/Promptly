@@ -22,6 +22,8 @@ if (!w.__promptlyContent && self.origin !== "null") {
   main();
 }
 
+const FIELD_TAGS = ["INPUT", "SELECT", "TEXTAREA"];
+
 function isPassword(role: string): boolean {
   return role === "password" || role === "new-password" || role === "current-password";
 }
@@ -200,6 +202,10 @@ function main() {
       analyze();
       publish();
       if (menuField && !menuField.isConnected) closeMenu();
+      // A box that took focus before it was ready: if it still has focus, now's its turn.
+      const waiting = focusWaiting;
+      focusWaiting = null;
+      if (waiting && inlineMenu && !host && waiting.isConnected && focusedBox(document.activeElement) === waiting && roleOf(waiting)?.el === waiting && fieldIsFillable(waiting).ok) openMenu(waiting);
     }, wait);
   };
 
@@ -207,9 +213,15 @@ function main() {
 
   const observer = new MutationObserver((records) => {
     if (pending) return;
+    let looked = 0;
     for (const r of records) {
       if (r.type === "attributes") {
-        if (dirty || ["INPUT", "SELECT", "TEXTAREA", "FORM"].includes((r.target as Element).tagName)) return schedule();
+        const t = r.target as Element;
+        if (dirty || ["INPUT", "SELECT", "TEXTAREA", "FORM"].includes(t.tagName)) return schedule();
+        // A step or a dialog shown by a class or a hidden attribute on the box around its
+        // fields, with nothing added. Only a few looks per batch: animations change styles
+        // many times a second.
+        if (r.attributeName !== "style" && looked++ < 20 && t.querySelector?.("input,select,textarea")) return schedule();
         continue;
       }
       for (const n of r.addedNodes) {
@@ -222,8 +234,17 @@ function main() {
   });
 
   function startObserving() {
-    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["type", "style", "class", "hidden", "disabled"] });
+    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["type", "style", "class", "hidden", "disabled", "aria-hidden", "inert", "open"] });
   }
+
+  // A step that slides or fades in is still see-through when its fields are added, and the
+  // end of the animation changes no attribute. Its end is the moment to look again.
+  const settled = (e: Event) => {
+    const t = e.target as Element | null;
+    if (e.isTrusted && t?.nodeType === 1 && (FIELD_TAGS.includes(t.tagName) || t.querySelector?.("input,select,textarea"))) schedule();
+  };
+  document.addEventListener("transitionend", settled, true);
+  document.addEventListener("animationend", settled, true);
 
   // Routes that change with no field added or removed. schedule() is the same budget.
   // pushState can't be seen from here: the background tells us, from webNavigation.
@@ -236,6 +257,9 @@ function main() {
     inlineMenu = !!r?.r?.inlineMenu;
     analyze();
     publish();
+    // A page that focused its own box before we were ready: that focus was its moment.
+    const active = focusedBox(document.activeElement);
+    if (active && inlineMenu && !host) menuFor(active);
     if (r?.r?.pendingSave) arrived(r.r.submittedKind ?? "signin");
   }
 
@@ -358,18 +382,54 @@ function main() {
     guard = { shownAt: moved ? performance.now() : guard.shownAt, rect: { left: b.left, top: b.top, width: b.width, height: b.height } };
   }
 
-  function onFocus(e: Event) {
-    // A page can dispatch a focus event any time it likes.
-    if (!e.isTrusted || !inlineMenu) return;
-    const target = (e.composedPath()[0] ?? e.target) as Element;
-    if (!target || !["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName)) return;
-    if (Date.now() - lastAnalysis > 1500) analyze();
+  /** The box that really has focus. From out here a closed shadow root shows only its
+   *  host, so look inside the roots we can reach. */
+  function focusedBox(start: Element | null): Element | null {
+    let n = start;
+    for (let i = 0; i < 8 && n && !FIELD_TAGS.includes(n.tagName); i++) {
+      const inner = dom.shadowRoot?.(n)?.activeElement ?? null;
+      if (!inner || inner === n) break;
+      n = inner;
+    }
+    return n && FIELD_TAGS.includes(n.tagName) ? n : null;
+  }
+
+  // A box that got focus before we knew what it was: a sign-in step that slides in and
+  // focuses its password box as it arrives. The next look at the page settles it.
+  let focusWaiting: Element | null = null;
+
+  function menuFor(target: Element) {
+    // A box we haven't seen classified may be new: look again rather than trust a reading
+    // taken while it was still sliding in or hidden. A known box keeps the cheaper rule.
+    if (!roleOf(target) ? Date.now() - lastAnalysis > 50 : Date.now() - lastAnalysis > 1500) analyze();
     const f = roleOf(target);
-    if (!f || f.el !== target) return;
+    if (!f || f.el !== target) {
+      focusWaiting = target;
+      schedule();
+      return;
+    }
+    focusWaiting = null;
     if (host && menuField === target) return;
     // Only into visible fields a person could have chosen.
     if (!fieldIsFillable(target).ok) return;
     openMenu(target);
+  }
+
+  function onFocus(e: Event) {
+    // A page can dispatch a focus event any time it likes.
+    if (!e.isTrusted || !inlineMenu) return;
+    const target = focusedBox((e.composedPath()[0] ?? e.target) as Element);
+    if (!target) return;
+    menuFor(target);
+  }
+
+  /** A press on the box that already has focus fires no focus event: a page that focused
+   *  its own box first would otherwise never get the menu. */
+  function onPress(e: Event) {
+    if (!e.isTrusted || !inlineMenu || host) return;
+    const target = focusedBox((e.composedPath()[0] ?? e.target) as Element);
+    if (!target || focusedBox(document.activeElement) !== target) return;
+    menuFor(target);
   }
 
   function onBlurOrEscape(e: Event) {
@@ -388,6 +448,7 @@ function main() {
   }
 
   document.addEventListener("focusin", onFocus, true);
+  document.addEventListener("pointerdown", onPress, true);
   document.addEventListener("focusout", onBlurOrEscape, true);
   document.addEventListener("keydown", onBlurOrEscape, true);
   window.addEventListener("pagehide", closeMenu);

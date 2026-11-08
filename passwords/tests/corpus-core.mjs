@@ -35,6 +35,26 @@ export const VALUES = {
   company: "Fixture Pty Ltd",
 };
 
+/**
+ * Starts the set's own server. The main corpus reads PW_SITES_PORTS itself. A hold-out set
+ * listens on one port, the first of PW_SITES_PORTS when given, else its own default.
+ */
+export async function startSites(start) {
+  const first = Number((process.env.PW_SITES_PORTS ?? "").split(",")[0]) || undefined;
+  const server = path.basename(SITES) === "test-sites" ? await start() : await start(first);
+  return { server, port: server.ports?.[0] ?? server.port };
+}
+
+/** Names a results file after the set, so runs on different sets don't overwrite each other. */
+export const SET_NAME = path.basename(SITES);
+
+/** Two roles that get the same value, so mixing them up puts nothing wrong in a box. */
+const SAME_VALUE = [["username", "email"], ["new-password", "confirm-password"], ["password", "current-password"], ["otp", "otp-digit"]];
+const sameValue = (a, b) => a === b || SAME_VALUE.some((g) => g.includes(a) && g.includes(b));
+
+/** PW_GUARD=1: a field the fill guard refuses fails the fixture, and the fill respects the guard. */
+export const GUARD = process.env.PW_GUARD === "1";
+
 const normalise = (s) => String(s ?? "").replace(/[\s/-]/g, "");
 
 export async function runCorpus(driver, { filter, port = 8101, log = console.log } = {}) {
@@ -44,6 +64,10 @@ export async function runCorpus(driver, { filter, port = 8101, log = console.log
   for (const f of list) {
     const problems = [];
     let falseFill = false;
+    // A value in the wrong box on a page that does have a form: a username in a card field,
+    // the old password in a confirm box. Worse than a miss, so counted on its own.
+    const wrong = [];
+    const guarded = [];
     try {
       await driver.goto(`http://${f.host ?? "localhost"}:${port}${f.path}`);
       for (let i = 0; i < f.steps.length; i++) {
@@ -74,10 +98,25 @@ export async function runCorpus(driver, { filter, port = 8101, log = console.log
         const sameKind = a.kind === step.kind || (a.kind === "password-next" && step.kind === "signin" && step.expected.length === 1);
         if (!sameKind) problems.push(`step ${i + 1}: kind ${a.kind}, wanted ${step.kind}`);
         for (const m of a.missing) problems.push(`step ${i + 1}: fixture element missing ${JSON.stringify(m)}`);
+        // Whatever else the driver checked (the extension runner: inline menu, strict report).
+        for (const p of a.problems ?? []) problems.push(`step ${i + 1}: ${p}`);
         // A login's identifier fills the same either way, so these two are one answer.
         const sameId = (x, y) => x === y || (["username", "email"].includes(x) && ["username", "email"].includes(y));
-        for (const r of a.roles) if (!sameId(r.got, r.want)) problems.push(`step ${i + 1}: ${JSON.stringify(r.selector)} got ${r.got}, wanted ${r.want}`);
-        for (const e of a.extras) problems.push(`step ${i + 1}: extra field ${e}`);
+        for (const r of a.roles) {
+          if (sameId(r.got, r.want)) continue;
+          problems.push(`step ${i + 1}: ${JSON.stringify(r.selector)} got ${r.got}, wanted ${r.want}`);
+          if (r.got && !String(r.got).startsWith("other-form:") && !sameValue(r.got, r.want)) wrong.push(`${JSON.stringify(r.selector)} as ${r.got}`);
+        }
+        for (const e of a.extras) {
+          problems.push(`step ${i + 1}: extra field ${e}`);
+          // The login's own username box, still on screen on a later step, gets the same account's
+          // username again: a miss in the scoring, but nothing wrong goes in.
+          const sameLogin = /^(username|email):/.test(e) && ["signin", "password-next"].includes(a.kind);
+          if (!sameLogin) wrong.push(`extra ${e}`);
+        }
+        // The extension's fill guard (guard.ts) on top of the classifier. Counted apart unless
+        // PW_GUARD=1, so the score stays comparable with runs made before it was measured.
+        for (const g of a.guarded ?? []) (GUARD ? problems : guarded).push(`step ${i + 1}: the fill guard refuses ${g}`);
         if (a.honeypotHit.length) {
           falseFill = true;
           problems.push(`step ${i + 1}: honeypot chosen ${a.honeypotHit.join(",")}`);
@@ -88,7 +127,7 @@ export async function runCorpus(driver, { filter, port = 8101, log = console.log
         // The real client fills an identifier under either name.
         if (roleVals.email && !roleVals.username) roleVals.username = roleVals.email;
         if (roleVals.username && !roleVals.email) roleVals.email = roleVals.username;
-        await driver.fill(target, roleVals);
+        await driver.fill(target, roleVals, GUARD);
         // The other frames of a spread-out form.
         for (const [k, list] of byFrame) {
           if (k === JSON.stringify(target)) continue;
@@ -96,7 +135,7 @@ export async function runCorpus(driver, { filter, port = 8101, log = console.log
           const other = await driver.analyze(chain, list, []);
           for (const m of other.missing) problems.push(`step ${i + 1}: fixture element missing ${JSON.stringify(m)}`);
           for (const r of other.roles) if (r.got !== r.want) problems.push(`step ${i + 1}: ${JSON.stringify(r.selector)} got ${r.got}, wanted ${r.want}`);
-          await driver.fill(chain, roleVals);
+          await driver.fill(chain, roleVals, GUARD);
         }
         await driver.settle();
 
@@ -130,7 +169,8 @@ export async function runCorpus(driver, { filter, port = 8101, log = console.log
     } catch (e) {
       problems.push(`error: ${String(e?.message ?? e).split("\n")[0]}`);
     }
-    results.push({ id: f.id, category: f.category, negative: !!f.negative, ok: problems.length === 0, falseFill, problems });
+    if (wrong.length) problems.push(`wrong fill: ${wrong.join(", ")}`);
+    results.push({ id: f.id, category: f.category, negative: !!f.negative, ok: problems.length === 0, falseFill, wrongFill: wrong.length > 0, guarded, problems });
   }
   return report(results, log);
 }
@@ -148,10 +188,13 @@ function report(results, log) {
   const positive = results.filter((r) => !r.negative);
   const negative = results.filter((r) => r.negative);
   const falseFills = results.filter((r) => r.falseFill);
+  const wrongFills = results.filter((r) => r.wrongFill);
+  const guardedRuns = results.filter((r) => r.guarded?.length);
   log(`\n${"category".padEnd(20)} pass/total`);
   for (const [c, n] of [...byCat].sort()) log(`${c.padEnd(20)} ${n.ok}/${n.total}`);
   log(`\nFixtures: ${ok}/${total} (${((ok / total) * 100).toFixed(1)}%)`);
-  log(`Positive: ${positive.filter((r) => r.ok).length}/${positive.length}. Negative: ${negative.filter((r) => r.ok).length}/${negative.length}. False fills: ${falseFills.length}.`);
+  log(`Positive: ${positive.filter((r) => r.ok).length}/${positive.length}. Negative: ${negative.filter((r) => r.ok).length}/${negative.length}. False fills: ${falseFills.length}. Wrong fills on positive pages: ${wrongFills.length}.`);
+  if (!GUARD) log(`Fill guard would refuse a field (not counted above): ${guardedRuns.length}${guardedRuns.length ? ": " + guardedRuns.map((r) => r.id).join(", ") : ""}.`);
   for (const r of results.filter((x) => !x.ok)) log(`  FAIL ${r.id}: ${r.problems.slice(0, 4).join("; ")}`);
-  return { total, ok, percent: (ok / total) * 100, falseFills: falseFills.length, results };
+  return { total, ok, percent: (ok / total) * 100, falseFills: falseFills.length, wrongFills: wrongFills.length, results };
 }

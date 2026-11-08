@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arcwave AX3000</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#ffffff;--fg:#222222;--soft:#666666;--line:#d8d8d8;--accent:#00587a;--card:#f7f9fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Arial, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+.aw{max-width:380px;margin:90px auto;text-align:center}.aw-pw{position:relative}.aw-pw input{width:100%;padding:10px 40px 10px 12px}.aw-eye{position:absolute;right:6px;top:6px;background:none;color:#666;padding:4px}.aw-btn{width:100%;margin-top:16px;padding:10px;text-transform:uppercase}.aw-foot{margin-top:30px;font-size:.85em;color:#777}
+</style>
+
+</head>
+<body>
+
+<div class="aw"><h2>Arcwave AX3000 Wi-Fi 6 Router</h2><p>Please enter the local password of the router.</p><form id="aw-form" onsubmit="return false"><div class="aw-pw"><input type="password" id="local-pwd-tb" class="text-text password-text" maxlength="32" placeholder="Local password"><button type="button" class="aw-eye" aria-label="Show">&#128065;</button></div>
+<button type="submit" class="aw-btn" id="aw-login">Log in</button></form><p><a href="#">Forgot password?</a></p><div class="aw-foot">Firmware 1.3.2 &middot; Wireless 2.4 GHz / 5 GHz &middot; <a href="#">Quick Setup</a> &middot; <a href="#">Download the Arcwave app</a></div></div>
+
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"password":q("#local-pwd-tb")};}};</script>
+
+</body>
+</html>

@@ -10,6 +10,7 @@ import { assemble, chromeDecoys, registry } from './kit.mjs';
 
 import './signin.mjs';
 import './stepped.mjs';
+import './bigtech.mjs';
 import './modal.mjs';
 import './shadow.mjs';
 import './iframe.mjs';
@@ -21,6 +22,7 @@ import './language.mjs';
 import './late.mjs';
 import './payment.mjs';
 import './negative.mjs';
+import './selfhosted.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'fixtures');

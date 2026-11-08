@@ -25,6 +25,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed
+- Passwords in the browser: the menu under a login box now opens on the password step of sign-ins that show it in the same page, the way the big account providers do, and on any box the page focuses by itself before the extension is ready. Clicking a box that already has focus opens it too.
+- Passwords in the browser: fewer wrong offers. An email box elsewhere on a page no longer counts as a sign-in because of a Log in button above it, nothing behind an open dialog is offered, and strength testers, webhook secrets and Wi-Fi settings pages aren't treated as logins.
+- Passwords in the browser: better at login screens of self-hosted apps (NAS, home automation, hypervisors, routers, dashboards), arrow-only Next buttons, buttons named only for screen readers, and see-through submit buttons laid over styled ones.
+- Passwords in the browser: on a change-password form, the confirm box is the one whose label says so, and a card's security code is found from the words beside it.
 - Passwords in the browser: with a passkey saved for the site, the panel now says to press the site's own button, such as Continue, rather than that the page isn't asking for one.
 - Passwords on Chrome and Chromium browsers: a copied 2FA code, or the timed clear of a copied secret, could be lost because the extension's hidden clipboard page closed too soon.
 - Passwords: the menu under a login box fits its rows, so it no longer leaves an empty dark block over the page, and an ordinary click on a row fills straight away. A click that comes as the menu opens is still ignored, now 0.3 s instead of 0.5 s, and the note says why in plain words.

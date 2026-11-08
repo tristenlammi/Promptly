@@ -17,7 +17,7 @@ Against the plan's definition of done (section 0.3):
 
 Three things matter most:
 
-1. **Autofill on pages it hasn't seen is well short of the target.** The target was 95% with no false fills. Three blind sets scored 68.3%, 63.3% and 90.0%, and the last two had false fills.
+1. **Autofill on pages it hasn't seen is well short of the target.** The target was 95% with no false fills. Three blind sets scored 68.3%, 63.3% and 90.0%, and the last two had false fills. A later pass (D-AUTOFILL) fixed the inline menu on multi-step sign-ins and the last known false fill, but no blind set has been scored since.
 2. **A lot needs a real device.** Android Chrome autofill and most of the Windows desktop integration have never run. Your Google passkey sign-in is the only real-site use.
 3. **No human has audited it.** AI reviews found real, serious bugs, including three critical ones in the crypto. That suggests more are there.
 
@@ -101,6 +101,25 @@ Scored by the corpus harness, against forms written from scratch. **The blind fi
 - Each set was written fresh and scored once before anyone read its failures. Blind runs were on Chromium only.
 - Fixes made after set 3 aren't reflected in its score. Those spent sets later scored 58/60 and 55/60 (sets 1 and 2), but those are tuned numbers now, so they say little.
 - A false fill here means the classifier offered to fill a form it shouldn't, or chose a honeypot. It's scored by the classifier, and the fill guards still apply on top.
+
+**After the autofill pass (D-AUTOFILL-1 to 5).** All three blind sets are spent, so these are tuned numbers. A fourth blind set, written separately, is the real test. "Before" is the code at `2dd13b4`, "after" is this work, both on the same harness. The tuned corpus is now 184 fixtures; its 23 new ones were written by someone who knew the classifier.
+
+| Set | Browser | Before | After | False fills before / after | Wrong fills after |
+|---|---|---|---|---|---|
+| Tuned corpus, 184 | Chromium | 178/184 | 184/184 | 4 / 0 | 0 |
+| Tuned corpus, 184 | Firefox | 178/184 | 184/184 | 4 / 0 | 0 |
+| Spent set 1 | Chromium | 58/60 | 58/60 | 0 / 0 | 0 |
+| Spent set 1 | Firefox | 58/60 | 58/60 | 0 / 0 | 0 |
+| Spent set 2 | Chromium | 56/60 | 57/60 | 0 / 0 | 0 |
+| Spent set 2 | Firefox | 56/60 | 57/60 | 0 / 0 | 0 |
+| Spent set 3 | Chromium | 57/60 | 58/60 | 1 / 0 | 0 |
+| Spent set 3 | Firefox | 57/60 | 58/60 | 1 / 0 | 0 |
+
+- Of the 8 false fills in the three first blind runs, 7 were already fixed before this pass and the last (an email box behind a Log in button, set 3) is fixed now. Each shape also has a fresh negative in the tuned corpus.
+- The remaining misses on the spent sets: four can't pass as written (the fixture's state is only set on a later click, a wait on a hidden trap, and select boxes with no option for the test country or year); a phone-plus-PIN sign-up is left alone on purpose; a "Deliver to" name box is missed.
+- "Wrong fills" is new: a value put in a box meant for something else on a page that does have a form. None, on any set.
+- New runner, `corpus-extension.mjs`: the extension's own content script, with the inline menu and the toolbar's strict report. Chromium only, before → after: tuned 141/184 → 182/184, spent set 1 51/60 → 57/60, set 2 46/60 → 55/60, set 3 48/60 → 57/60. False fills 4, 0, 0, 1 → 0 on every set. Before, the menu didn't open on 38 of the tuned fixtures, mostly the later step of a multi-step flow; that is the likely cause of the Google password-step report. The two misses left on the tuned corpus are the guard's nested shadow roots.
+- The fill guard (`guard.ts`, not changed here) refuses boxes in nested shadow roots and an OTP box drawn with transparent text: 2 tuned fixtures and 4 on the spent sets. See D-AUTOFILL-5.
 
 **Public sites, read-only.** 112 login pages were loaded and classified, with nothing typed, clicked or submitted, and no page contents saved.
 

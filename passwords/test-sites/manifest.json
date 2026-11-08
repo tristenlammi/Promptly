@@ -1347,6 +1347,264 @@
     }
   },
   {
+    "id": "multi-step-13",
+    "category": "multi-step",
+    "description": "Account-provider style, no form element: identifier box with a floating label and a hidden password trap, Next shows a progress bar and greys the step, the password step is rendered at once but kept hidden until the answer comes back, then the URL changes by pushState and the step slides in with the account as a chip, a visually hidden username carrier, Show password, and the box focused by the page once the slide ends.",
+    "path": "/fixtures/multi-step-13.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "wait": "#identifierId",
+        "expected": [
+          {
+            "selector": "#identifierId",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hiddenPassword"
+        ],
+        "advance": {
+          "click": "#idNext"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#ow[data-settled=\"pwd\"]",
+        "expected": [
+          {
+            "selector": "#pwField",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hiddenIdent"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "multi-step-14",
+    "category": "multi-step",
+    "description": "Enterprise-provider style: one form with autocomplete=off holds every step. The identifier section is set display:none (its value kept) when the password section shows, an identity banner with a Back arrow names the account, the same submit input turns from Next into Sign in, and a Stay signed in? step with Yes and No follows in the same form.",
+    "path": "/fixtures/multi-step-14.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#i0116",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#idSIButton9"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#f1[data-step=\"pwd\"]",
+        "expected": [
+          {
+            "selector": "#i0118",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#idSIButton9"
+        }
+      },
+      {
+        "kind": "none",
+        "wait": "#f1[data-step=\"kmsi\"]",
+        "expected": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "multi-step-15",
+    "category": "multi-step",
+    "description": "Device-maker style: the sign-in widget is a frame from another site (b.localhost). The password box is in the frame from the start but collapsed, aria-hidden and tabindex=-1; the round arrow button (aria-label only) reveals it under a still-editable username; then six one-digit verification boxes replace the form in the same frame.",
+    "path": "/fixtures/multi-step-15.html",
+    "host": "a.localhost",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "wait": "#auth-frame",
+        "expected": [
+          {
+            "selector": "#account_name_text_field",
+            "role": "username",
+            "frame": [
+              "#auth-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ],
+        "advance": {
+          "click": "#sign-in",
+          "frame": [
+            "#auth-frame"
+          ]
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "body[data-frame-stage=\"pw\"]",
+        "expected": [
+          {
+            "selector": "#account_name_text_field",
+            "role": "username",
+            "frame": [
+              "#auth-frame"
+            ]
+          },
+          {
+            "selector": "#password_text_field",
+            "role": "password",
+            "frame": [
+              "#auth-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ],
+        "advance": {
+          "click": "#sign-in",
+          "frame": [
+            "#auth-frame"
+          ]
+        }
+      },
+      {
+        "kind": "otp",
+        "wait": "body[data-frame-stage=\"code\"]",
+        "expected": [
+          {
+            "selector": "#d1",
+            "role": "otp-digit",
+            "frame": [
+              "#auth-frame"
+            ]
+          },
+          {
+            "selector": "#d2",
+            "role": "otp-digit",
+            "frame": [
+              "#auth-frame"
+            ]
+          },
+          {
+            "selector": "#d3",
+            "role": "otp-digit",
+            "frame": [
+              "#auth-frame"
+            ]
+          },
+          {
+            "selector": "#d4",
+            "role": "otp-digit",
+            "frame": [
+              "#auth-frame"
+            ]
+          },
+          {
+            "selector": "#d5",
+            "role": "otp-digit",
+            "frame": [
+              "#auth-frame"
+            ]
+          },
+          {
+            "selector": "#d6",
+            "role": "otp-digit",
+            "frame": [
+              "#auth-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password",
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "multi-step-16",
+    "category": "multi-step",
+    "description": "Big-shop style over three real pages. Page one: an email-or-mobile box and a Continue submit input whose text comes only from aria-labelledby. Page two: the email as text with a Change link and a hidden input, the password, Keep me signed in. Page three: a two-step verification code in a type=tel box with maxlength 20 and autocomplete=off, labelled Enter OTP.",
+    "path": "/fixtures/multi-step-16.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#ap_email",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "goto": "/fixtures/_steps/multi-step-16-2.html"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#ap_password",
+        "expected": [
+          {
+            "selector": "#ap_password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "goto": "/fixtures/_steps/multi-step-16-3.html"
+        }
+      },
+      {
+        "kind": "otp",
+        "wait": "#auth-mfa-otpcode",
+        "expected": [
+          {
+            "selector": "#auth-mfa-otpcode",
+            "role": "otp",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password",
+      "otp": "otp"
+    }
+  },
+  {
     "id": "modal-01",
     "category": "modal",
     "description": "Native dialog element opened with showModal by a Log in button; the form is in the DOM but not rendered until then.",
@@ -5497,5 +5755,539 @@
         ]
       }
     ]
+  },
+  {
+    "id": "negative-loginbutton-01",
+    "category": "negative",
+    "description": "Weather site: a header with a place search and a Sign in button that opens nothing yet, and lower down an alerts box asking for an email with no button of its own and no newsletter wording.",
+    "path": "/fixtures/negative-loginbutton-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#qw-find",
+          "#qw-alerts"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-giftcard-02",
+    "category": "negative",
+    "description": "Gift card balance: one long number box named cardNumber with a 16-digit example and a Check balance button, no PIN and no name.",
+    "path": "/fixtures/negative-giftcard-02.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#gc-no"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-secret-01",
+    "category": "negative",
+    "description": "Webhook settings: a payload URL, a number of retries and a signing secret in an empty masked box with a Regenerate button, saved with Save changes. Not a login.",
+    "path": "/fixtures/negative-secret-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#hook-url",
+          "#hook-retries",
+          "#hook-secret"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-quiz-01",
+    "category": "negative",
+    "description": "Class quiz join screen: six one-digit boxes for the game PIN shown on the board, and a nickname box, with a Join button.",
+    "path": "/fixtures/negative-quiz-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#q1",
+          "#q2",
+          "#q3",
+          "#q4",
+          "#q5",
+          "#q6",
+          "#q-nick"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-strength-01",
+    "category": "negative",
+    "description": "Password strength checker page: one masked box with a meter under it and a Check button, and text telling people not to type a real password.",
+    "path": "/fixtures/negative-strength-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#try-pw"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-pincode-01",
+    "category": "negative",
+    "description": "Product page: a six-digit delivery pincode checker (numeric, maxlength 6) with a Check button, and a quantity box next to Add to cart.",
+    "path": "/fixtures/negative-pincode-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#pin-check",
+          "#qty"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "negative-wifi-03",
+    "category": "negative",
+    "description": "Router Wireless page with no word wifi in the heading: Network Name, a Security select (WPA2/WPA3), a masked Password and Save. Changes the network, not a login.",
+    "path": "/fixtures/negative-wifi-03.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#w-name",
+          "#w-sec",
+          "#w-key"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "selfhosted-nas-01",
+    "category": "selfhosted",
+    "description": "NAS admin page on an IP and port: full-screen wallpaper, a centred panel asking for the account first with a round arrow button, then the password in the same panel with the account name above it, a Back link and Stay signed in. No labels, placeholders only.",
+    "path": "/fixtures/selfhosted-nas-01.html",
+    "host": "127.0.0.1",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "wait": "#ds-user",
+        "expected": [
+          {
+            "selector": "#ds-user",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#ds-next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#dsp[data-step=\"pw\"]",
+        "expected": [
+          {
+            "selector": "#ds-pass",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "selfhosted-homeauto-01",
+    "category": "selfhosted",
+    "description": "Home-automation hub login: fields inside custom elements (light DOM) with floating labels, \"Logging in to http://127.0.0.1\" above, a Keep me logged in switch (role=switch button), a Log in button, then a two-factor step asking for the authenticator code in the same card.",
+    "path": "/fixtures/selfhosted-homeauto-01.html",
+    "host": "127.0.0.1",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#hs-p",
+        "expected": [
+          {
+            "selector": "#hs-u",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#hs-p",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#hs-login"
+        }
+      },
+      {
+        "kind": "otp",
+        "wait": "#flow[data-step=\"mfa\"]",
+        "expected": [
+          {
+            "selector": "#hs-c",
+            "role": "otp",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password",
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "selfhosted-hypervisor-01",
+    "category": "selfhosted",
+    "description": "Hypervisor web UI: a desktop-toolkit login window over a grey mask, generated ids like textfield-1012-inputEl, labels with for and a trailing colon, a read-only Realm combobox already showing a value, a Language combobox, Save User name, and a Login button that is a link-styled element with role=button.",
+    "path": "/fixtures/selfhosted-hypervisor-01.html",
+    "host": "127.0.0.1",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#textfield-1012-inputEl",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#textfield-1013-inputEl",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "selfhosted-media-01",
+    "category": "selfhosted",
+    "description": "Media server: a Please sign in page with user cards and Manual Login, Quick Connect and Forgot Password buttons and no inputs; Manual Login shows a User box and a Password box with Remember me and a Sign In button.",
+    "path": "/fixtures/selfhosted-media-01.html",
+    "host": "127.0.0.1",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "advance": {
+          "click": "#rh-manual"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#txtManualPassword",
+        "expected": [
+          {
+            "selector": "#txtManualName",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#txtManualPassword",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "selfhosted-metrics-01",
+    "category": "selfhosted",
+    "description": "Metrics dashboard login: Welcome heading, a controlled username box (placeholder \"email or username\", aria-label \"Username input field\") and password box (id current-password), Log in, Forgot your password?, then a divider and two Sign in with OAuth buttons. The page keeps its own model and ignores a bare value set.",
+    "path": "/fixtures/selfhosted-metrics-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#ld-user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#current-password",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "selfhosted-container-01",
+    "category": "selfhosted",
+    "description": "Container manager: a loading spinner, then the app renders Log in to your account with ng-model style attributes, a Username and Password with icons in front, a Login button, and an OAuth login link; the version and a Forgot password note sit under the card.",
+    "path": "/fixtures/selfhosted-container-01.html",
+    "host": "127.0.0.1",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#password",
+        "expected": [
+          {
+            "selector": "#username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#password",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "selfhosted-git-01",
+    "category": "selfhosted",
+    "description": "Git forge sign-in page with the site header (search box, Explore, Register and Sign In links), a hidden CSRF input, Username or Email Address, Password, Remember this device, Sign In, Forgot password?, Need an account? Register now, and a Sign in with OpenID button.",
+    "path": "/fixtures/selfhosted-git-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#user_name",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "selfhosted-router-01",
+    "category": "selfhosted",
+    "description": "Router firmware admin page on an IP address: Authorization Required, \"Please enter your username and password\", the username box already holding root, Login and Reset buttons, and a status bar naming the router, its firmware and its wireless network.",
+    "path": "/fixtures/selfhosted-router-01.html",
+    "host": "127.0.0.1",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#luci_username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#luci_password",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "selfhosted-router-02",
+    "category": "selfhosted",
+    "description": "Consumer router web page: a lone password box (\"Local password\") with an eye toggle and a LOG IN button; the page around it names the router, the Wi-Fi band and a Quick Setup link, and never says sign in.",
+    "path": "/fixtures/selfhosted-router-02.html",
+    "host": "127.0.0.1",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "password-next",
+        "expected": [
+          {
+            "selector": "#local-pwd-tb",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "password": "password"
+    }
+  },
+  {
+    "id": "selfhosted-dns-01",
+    "category": "selfhosted",
+    "description": "Network-wide ad blocker admin on an IP address: a sidebar with Dashboard, Query Log and Settings links, and in the main area a Login box with one password field, Remember me for 7 days, and a Log in button. No username anywhere.",
+    "path": "/fixtures/selfhosted-dns-01.html",
+    "host": "127.0.0.1",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "password-next",
+        "expected": [
+          {
+            "selector": "#loginpw",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "password": "password"
+    }
+  },
+  {
+    "id": "selfhosted-cloud-01",
+    "category": "selfhosted",
+    "description": "Self-hosted file cloud: Log in to Cumulo heading, \"Account name or email\" and Password with a show toggle, hidden requesttoken and timezone inputs, a Log in submit input, Forgot password? and Log in with a device; a background picture behind the card.",
+    "path": "/fixtures/selfhosted-cloud-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#password",
+            "role": "password",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "selfhosted-sso-01",
+    "category": "selfhosted",
+    "description": "Self-hosted single sign-on portal: outlined fields whose label floats (a label element) over a fieldset/legend outline with pointer-events:none, Remember me, Sign in and Reset password?; then a One-Time Password step with six one-digit boxes.",
+    "path": "/fixtures/selfhosted-sso-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#username-textfield",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#password-textfield",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "advance": {
+          "click": "#sign-in-button"
+        }
+      },
+      {
+        "kind": "otp",
+        "wait": "#gk-otp[data-ready=\"1\"]",
+        "expected": [
+          {
+            "selector": "#otp-0",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#otp-1",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#otp-2",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#otp-3",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#otp-4",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#otp-5",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password",
+      "otp": "otp"
+    }
   }
 ]

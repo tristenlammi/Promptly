@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quaywright</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#eef1f5;--fg:#1b2430;--soft:#5a6778;--line:#cfd6df;--accent:#2c5fb3;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+.qw{max-width:420px;margin:80px auto}.qw-card{background:var(--card);border-radius:8px;padding:30px;box-shadow:0 1px 6px rgba(0,0,0,.15)}.qw-ig{display:flex;align-items:center;border:1px solid var(--line);border-radius:6px;margin:10px 0}.qw-ig i{width:36px;text-align:center;font-style:normal;color:var(--soft)}.qw-ig input{flex:1;border:0}.qw-spin{text-align:center;margin-top:120px}
+</style>
+
+</head>
+<body>
+
+<div id="qw-root"><p class="qw-spin">Loading&hellip;</p></div>
+
+
+
+<script>
+var S={username:'',password:''};window.__fixture={state:function(){return S;}};
+function bind(el,key){el.addEventListener('input',function(){S[key]=el.value;});}
+setTimeout(function(){document.getElementById('qw-root').innerHTML='<div class="qw"><div class="qw-card"><h2>Log in to your account</h2><form name="authForm" id="qw-form" onsubmit="return false" class="simple-box-form"><div class="qw-ig"><i aria-hidden="true">&#128100;</i><input type="text" class="form-control" id="username" name="username" ng-model="$ctrl.formValues.Username" placeholder="Enter your username" auto-focus data-cy="auth-username"></div><div class="qw-ig"><i aria-hidden="true">&#128274;</i><input type="password" class="form-control" id="password" name="password" ng-model="$ctrl.formValues.Password" placeholder="Enter your password" data-cy="auth-password"></div><p><button type="submit" class="btn-primary" data-cy="auth-login">Login</button> <a href="#">Login with OAuth</a></p></form></div><p class="muted">Quaywright 2.19 &middot; Forgot your password? Ask your administrator.</p></div>';
+bind(document.getElementById('username'),'username');bind(document.getElementById('password'),'password');document.getElementById('username').focus();},700);
+</script>
+</body>
+</html>

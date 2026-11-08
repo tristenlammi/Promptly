@@ -545,3 +545,83 @@ describe("fill asks before every box", () => {
     expect(swapped.value).toBe("");
   });
 });
+
+// General rules taken from the blind sets' failures. Each is written as its own small page,
+// not a copy of any fixture.
+describe("lessons from the blind sets", () => {
+  const kinds = () => analyzePage(document, DOM).forms.filter((f) => f.fields.length).map((f) => f.kind);
+
+  it("a lone email box isn't the start of a sign-in because of a Log in button above it", () => {
+    set(`<div id="app"><div><b>Site</b><input type="search" placeholder="Search"><button type="button">Log in</button></div><p>News</p><div><span>Alerts for your area</span><input type="email" name="email" placeholder="you@example.test"></div></div>`);
+    expect(kinds()).toEqual([]);
+  });
+
+  it("the same box with its own Continue after it still is", () => {
+    set(`<div><h1>Sign in</h1><input type="email" name="email" autocomplete="username"><button type="button">Continue</button></div>`);
+    expect(analyzePage(document, DOM).best?.kind).toBe("email-first");
+  });
+
+  it("an account box that calls itself the username, with only an arrow button named Next", () => {
+    set(`<div><div>nas01</div><input name="username" placeholder="Account" autocomplete="username"><button type="button" aria-label="Next">&rarr;</button></div>`);
+    expect(analyzePage(document, DOM).best?.kind).toBe("email-first");
+  });
+
+  it("nothing behind an open modal: an inert page can't be typed into", () => {
+    set(`<div inert><form><input name="user"><input type="password" name="pw"><button>Log in</button></form></div>`);
+    expect(kinds()).toEqual([]);
+  });
+
+  it("a password strength tester isn't a sign-in", () => {
+    set(`<div><h1>How strong is your password?</h1><form><input type="password" placeholder="Type an example"><button>Check</button></form></div>`);
+    expect(kinds()).toEqual([]);
+  });
+
+  it("a lone password with a Save button on a settings page isn't one either", () => {
+    set(`<form><h2>Backups</h2><input type="password" name="archive_pw"><button>Save</button></form>`);
+    expect(kinds()).toEqual([]);
+  });
+
+  it("but a lone password asked for in any wording is", () => {
+    set(`<dialog open><h2>You've been away a while</h2><form><input type="password" aria-label="Password"><button>Carry on</button></form></dialog>`);
+    expect(analyzePage(document, DOM).best?.kind).toBe("password-next");
+  });
+
+  it("a masked signing secret on a webhook page is configuration, and a web address isn't a username", () => {
+    set(`<form><h1>Webhook</h1><label for="u">Payload URL</label><input id="u" name="url" type="url"><label for="r">Retries</label><input id="r" type="number" value="3"><label for="s">Signing secret</label><input id="s" type="password"><button>Save changes</button></form>`);
+    expect(kinds()).toEqual([]);
+  });
+
+  it("a secret key beside a username is a login", () => {
+    set(`<form><h1>Sign in</h1><label for="a">Username</label><input id="a" name="accessKey"><label for="k">Secret key</label><input id="k" type="password" name="secretKey"><button>Login</button></form>`);
+    expect(analyzePage(document, DOM).best?.kind).toBe("signin");
+  });
+
+  it("a wireless settings page sets a network, whatever its heading says", () => {
+    set(`<form><h1>Wireless</h1><label for="n">Network Name</label><input id="n" name="ssid_5g" value="home-7F"><label for="sec">Security</label><select id="sec"><option>WPA2-PSK</option><option>WPA3-SAE</option></select><label for="k">Password</label><input id="k" type="password"><button>Save</button></form>`);
+    expect(kinds()).toEqual([]);
+  });
+
+  it("a router's own admin login is still a login", () => {
+    set(`<form><h2>Authorization Required</h2><p>Router gw01</p><label for="u">Username</label><input id="u" name="luci_username" value="root"><label for="p">Password</label><input id="p" type="password" name="luci_password"><input type="submit" value="Login"></form>`);
+    expect(analyzePage(document, DOM).best?.fields.map((f) => f.role)).toEqual(["username", "password"]);
+  });
+
+  it("a button named only by aria-labelledby is read", () => {
+    set(`<form><h1>Sign in</h1><input type="email" name="email" autocomplete="username"><span><input type="submit" id="go" aria-labelledby="go-t"><span id="go-t">Continue</span></span></form>`);
+    const best = analyzePage(document, DOM).best;
+    expect(best?.kind).toBe("email-first");
+    expect(best?.submit?.id).toBe("go");
+  });
+
+  it("a confirm box is the one whose words say so, not the one named pass2", () => {
+    set(`<form><h1>Update your sign-in secret</h1><div><span>Existing</span><input name="pass1" type="password" autocomplete="new-password"></div><div><span>Replacement</span><input name="pass2" type="password" autocomplete="current-password"></div><div><span>Replacement again</span><input name="pass3" type="password"></div><button>Update</button></form>`);
+    expect(analyzePage(document, DOM).best?.fields.map((f) => `${(f.el as HTMLInputElement).name}=${f.role}`)).toEqual(["pass1=current-password", "pass2=new-password", "pass3=confirm-password"]);
+  });
+
+  it("a text box captioned as the digits on the back of the card is its security code", () => {
+    set(`<form><h2>Make a donation</h2><div><div>Card number</div><input name="pan" autocomplete="cc-number"></div><div><div>3 digits on the back of your card</div><input name="sc" type="text" maxlength="4"></div><button>Send my gift</button></form>`);
+    const best = analyzePage(document, DOM).best;
+    expect(best?.kind).toBe("card");
+    expect(best?.fields.find((f) => (f.el as HTMLInputElement).name === "sc")?.role).toBe("card-cvv");
+  });
+});

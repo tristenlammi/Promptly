@@ -10,11 +10,11 @@ const require = createRequire(path.join(here, "../../e2e/package.json"));
 const { chromium, webkit } = require("@playwright/test");
 
 await import("./build-autofill-bundle.mjs");
-const { runCorpus } = await import("./corpus-core.mjs");
+const { runCorpus, startSites, SET_NAME } = await import("./corpus-core.mjs");
 const { start } = await import(pathToFileURL(path.resolve(here, process.env.PW_SITES ?? "../test-sites", "server.mjs")).href);
 
 const bundle = fs.readFileSync(path.join(here, ".cache", "autofill.js"), "utf8");
-const server = await start();
+const { server, port } = await startSites(start);
 const engine = process.env.PW_BROWSER === "webkit" ? webkit : chromium;
 const browser = await engine.launch({ headless: true });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 860 } });
@@ -54,9 +54,9 @@ const driver = {
     }
     return out.filter(Boolean);
   },
-  async fill(chain, values) {
+  async fill(chain, values, guard) {
     const frame = await frameOf(chain);
-    return frame.evaluate((v) => window.__af.fill(v), values);
+    return frame.evaluate(([v, g]) => window.__af.fill(v, g), [values, !!guard]);
   },
   async state(chain) {
     // State usually lives in the frame with the form, sometimes on the top page.
@@ -69,9 +69,9 @@ const driver = {
   },
 };
 
-const res = await runCorpus(driver, { filter: process.argv[2], port: Number(process.env.PW_SITES_PORT ?? 8101) });
+const res = await runCorpus(driver, { filter: process.argv[2], port });
 await browser.close();
 await server.close();
 fs.mkdirSync(path.join(here, ".cache"), { recursive: true });
-fs.writeFileSync(path.join(here, ".cache", `corpus-${process.env.PW_SITES ? "holdout-" : ""}${process.env.PW_BROWSER ?? "chromium"}.json`), JSON.stringify(res, null, 1));
+fs.writeFileSync(path.join(here, ".cache", `corpus-${SET_NAME}-${process.env.PW_BROWSER ?? "chromium"}.json`), JSON.stringify(res, null, 1));
 process.exitCode = res.percent >= 95 && res.falseFills === 0 ? 0 : 1;

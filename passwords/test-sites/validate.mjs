@@ -9,8 +9,8 @@ const ROOT = dirname(fileURLToPath(import.meta.url));
 
 const ROLES = new Set(['username', 'email', 'password', 'new-password', 'confirm-password', 'current-password', 'otp', 'otp-digit', 'card-number', 'card-name', 'card-exp', 'card-exp-month', 'card-exp-year', 'card-cvv', 'first-name', 'last-name', 'full-name', 'address1', 'address2', 'city', 'state', 'postcode', 'country', 'phone', 'company']);
 const KINDS = new Set(['signin', 'email-first', 'password-next', 'signup', 'change-password', 'otp', 'card', 'identity', 'search', 'newsletter', 'none']);
-const HOSTS = new Set(['localhost', 'a.localhost', 'b.localhost', 'other.localhost']);
-const MINIMUMS = { signin: 15, 'email-first': 6, 'multi-step': 10, modal: 6, shadow: 8, iframe: 8, framework: 12, otp: 10, signup: 6, 'change-password': 6, honeypot: 5, language: 12, late: 6, card: 6, identity: 4, negative: 20 };
+const HOSTS = new Set(['localhost', 'a.localhost', 'b.localhost', 'other.localhost', '127.0.0.1']);
+const MINIMUMS = { signin: 15, 'email-first': 6, 'multi-step': 10, modal: 6, shadow: 8, iframe: 8, framework: 12, otp: 10, signup: 6, 'change-password': 6, honeypot: 5, language: 12, late: 6, card: 6, identity: 4, negative: 20, selfhosted: 9 };
 const BANNED = /\b(google|gmail|microsoft|outlook|office ?365|azure|okta|paypal|amazon|apple|icloud|facebook|instagram|twitter|linkedin|github|stripe|shopify|netflix|spotify|yahoo|dropbox|slack|adobe|ebay|visa|mastercard|amex|bitwarden|1password|lastpass)\b/i;
 
 const errors = [];

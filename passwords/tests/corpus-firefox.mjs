@@ -11,11 +11,11 @@ const { Builder, By } = require("selenium-webdriver");
 const firefox = require("selenium-webdriver/firefox");
 
 await import("./build-autofill-bundle.mjs");
-const { runCorpus } = await import("./corpus-core.mjs");
+const { runCorpus, startSites, SET_NAME } = await import("./corpus-core.mjs");
 const { start } = await import(pathToFileURL(path.resolve(here, process.env.PW_SITES ?? "../test-sites", "server.mjs")).href);
 
 const bundle = fs.readFileSync(path.join(here, ".cache", "autofill.js"), "utf8");
-const server = await start();
+const { server, port } = await startSites(start);
 const options = new firefox.Options().addArguments("-headless");
 const d = await new Builder().forBrowser("firefox").setFirefoxOptions(options).build();
 await d.manage().window().setRect({ width: 1280, height: 860, x: 0, y: 0 });
@@ -70,9 +70,9 @@ const driver = {
     await d.switchTo().defaultContent();
     return out;
   },
-  async fill(chain, values) {
+  async fill(chain, values, guard) {
     await enter(chain);
-    return asyncRun("(v) => window.__af.fill(v)", values);
+    return asyncRun("(v, g) => window.__af.fill(v, g)", values, !!guard);
   },
   async state(chain) {
     await enter(chain);
@@ -89,8 +89,8 @@ const driver = {
   },
 };
 
-const res = await runCorpus(driver, { filter: process.argv[2], port: Number(process.env.PW_SITES_PORT ?? 8101) });
+const res = await runCorpus(driver, { filter: process.argv[2], port });
 await d.quit();
 await server.close();
-fs.writeFileSync(path.join(here, ".cache", "corpus-firefox.json"), JSON.stringify(res, null, 1));
+fs.writeFileSync(path.join(here, ".cache", `corpus-${SET_NAME}-firefox.json`), JSON.stringify(res, null, 1));
 process.exitCode = res.percent >= 95 && res.falseFills === 0 ? 0 : 1;
