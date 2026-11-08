@@ -6,14 +6,14 @@ so "where did I used to work?" still has an answer and a wrong guess can be put 
 Chats already here count as read: nothing is sent to a model for them unless you ask.
 
 Revision ID: 0255_memory_lifecycle
-Revises: 0260_pw_browsersync
+Revises: 0253_mail_folder_labels
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 revision = "0255_memory_lifecycle"
-down_revision = "0260_pw_browsersync"
+down_revision = "0253_mail_folder_labels"
 branch_labels = None
 depends_on = None
 

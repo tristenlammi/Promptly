@@ -293,7 +293,7 @@ Left open from those reviews:
 
 **Merge**
 
-- Merged with `main` at v0.30.0 (the memory upgrade and Mail multi-select) on 8 November. The last run below is on the merged code. The memory upgrade's `0255_memory_lifecycle` was rechained after this branch's migrations.
+- Merged with `main` at v0.30.0 (the memory upgrade and Mail multi-select) on 8 November. The last run below is on the merged code. This branch's migrations now start after the memory upgrade's `0255_memory_lifecycle`, so a database already at v0.30.0 upgrades straight on.
 
 ## What wasn't built
 

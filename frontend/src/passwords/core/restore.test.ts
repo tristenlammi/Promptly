@@ -47,7 +47,8 @@ describe.skipIf(!process.env.PW_STACK_URL || !process.env.PW_RESTORE)("a restore
   afterAll(() => {
     spawnSync("docker", ["rm", "-f", NAME]);
     spawnSync("docker", ["exec", PG, "psql", "-U", "promptly", "-d", "postgres", "-c", `DROP DATABASE IF EXISTS ${DB}`]);
-  });
+    // Removing a running backend container can take a while on a busy machine.
+  }, 60_000);
 
   it("unlocks and reads back, with a new SECRET_KEY", async () => {
     const [u] = makeUsers("restored");

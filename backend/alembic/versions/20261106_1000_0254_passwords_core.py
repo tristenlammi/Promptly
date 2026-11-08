@@ -1,14 +1,14 @@
 """Promptly Passwords: the vault's tables. All crypto material is opaque here.
 
 Revision ID: 0254_passwords_core
-Revises: 0253_mail_folder_labels
+Revises: 0255_memory_lifecycle (released in v0.30.0 first)
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 revision = "0254_passwords_core"
-down_revision = "0253_mail_folder_labels"
+down_revision = "0255_memory_lifecycle"
 branch_labels = None
 depends_on = None
 
