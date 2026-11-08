@@ -402,8 +402,8 @@ class RememberTool(Tool):
                 return ToolResult(
                     content=(
                         "Not saved: this turn included content from outside the "
-                        "conversation (a web page, search results, a connector or "
-                        "a file), so memory is only written when the user asks. "
+                        "conversation (a web page, search results, a connector, "
+                        "a file or a workspace), so memory is only written when the user asks. "
                         f"They've been offered \"{content}\" to save with one click."
                     ),
                     meta={

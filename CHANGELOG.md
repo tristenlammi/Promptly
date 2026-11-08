@@ -51,6 +51,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Calls: a 1:1 call no longer ends when one side's connection drops for a moment and comes back (for example moving from Wi-Fi to mobile data). A connection now has 15 seconds to come back before it counts as hanging up.
 <!-- Calls (DM calls), WP-D2 -->
 - Voice channels: reloading the page, or joining the same channel on another device, could drop you straight back out when the old connection's goodbye arrived late.
+- Chat: workspace notes, boards, sheets and files that the chat reads on its own before answering now count as outside content, the same as when it opens them with a tool, so text someone else wrote there can't make it save to memory, change your calendar or files, or post for you without you asking. The same goes for @-mentioned files and chats, a custom model's documents, and files attached earlier in the chat.
 
 ## [0.33.0] - 2026-11-09
 
