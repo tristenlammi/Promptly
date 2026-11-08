@@ -97,7 +97,6 @@ val FIELDS = mapOf(
     "document" to listOf(FieldDef("documentType", "Type"), FieldDef("documentNumber", "Number", true), FieldDef("expiresOn", "Expires (YYYY-MM-DD)")),
 )
 
-private val MATCHES = listOf(null to "This site and its subdomains", "host" to "Exact host", "exact" to "Exact URL", "prefix" to "Starts with", "regex" to "Pattern", "never" to "Never")
 
 @Composable
 fun ItemListScreen(client: VaultClient, onOpen: (String) -> Unit, onNew: () -> Unit, onSync: () -> Unit, syncing: Boolean, banner: String?) {
@@ -640,6 +639,8 @@ fun ItemEditorScreen(client: VaultClient, id: String?, kind: String, prefillUrl:
     var folderId by remember { mutableStateOf(start.str("folderId")) }
     var folderMenu by remember { mutableStateOf(false) }
     val urls = remember { mutableStateListOf<LoginUrl>().apply { addAll(start.urls); if (id == null && prefillUrl != null) add(LoginUrl(prefillUrl)) } }
+    // How the websites match a page. Null, or an older item with none, is Auto.
+    var itemMatch by remember { mutableStateOf(start.match) }
     val custom = remember { mutableStateListOf<CustomField>().apply { addAll(start.customFields) } }
     val extra = remember { mutableStateOf(FIELDS[k]?.associate { it.key to (start.str(it.key) ?: "") } ?: emptyMap()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -659,6 +660,7 @@ fun ItemEditorScreen(client: VaultClient, id: String?, kind: String, prefillUrl:
             .with("folderId" to folderId?.let { JsonPrimitive(it) })
             .with("tags" to tags.split(',').map { it.trim() }.filter { it.isNotEmpty() }.let { list -> if (list.isEmpty()) null else buildJsonArray { list.forEach { add(JsonPrimitive(it)) } } })
         if (k == "login") body = body.withText("password", password).withUrls(urls.filter { it.url.isNotBlank() })
+            .with("match" to itemMatch?.takeIf { it != "auto" }?.let { JsonPrimitive(it) })
         if (k == "login" || k == "totp") {
             val cfg = try {
                 val t = totpText.trim()
@@ -722,6 +724,23 @@ fun ItemEditorScreen(client: VaultClient, id: String?, kind: String, prefillUrl:
                 TextButton(onClick = { showPw = !showPw }) { Text(if (showPw) "Hide" else "Show") }
             }
             Text("Websites and apps", style = MaterialTheme.typography.labelLarge)
+            run {
+                var open by remember { mutableStateOf(false) }
+                val chosen = Match.ITEM_MATCHES.firstOrNull { it.first == (itemMatch ?: "auto") } ?: Match.ITEM_MATCHES[0]
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Match websites: ${chosen.second}", Modifier.weight(1f))
+                    TextButton(onClick = { open = true }, Modifier.testTag("edit-item-match")) { Text("Change") }
+                    DropdownMenu(open, { open = false }) {
+                        Match.ITEM_MATCHES.forEach { (m, l, _) ->
+                            DropdownMenuItem({ Text(l + if (chosen.first == m) " (now)" else "") }, {
+                                itemMatch = m.takeIf { it != "auto" }
+                                open = false
+                            }, Modifier.testTag("edit-item-match-$m"))
+                        }
+                    }
+                }
+                Text(chosen.third, style = MaterialTheme.typography.bodySmall)
+            }
             urls.forEachIndexed { i, u ->
                 val app = Match.parseAppUrl(u.url)
                 if (app != null) {
@@ -735,7 +754,7 @@ fun ItemEditorScreen(client: VaultClient, id: String?, kind: String, prefillUrl:
                         OutlinedTextField(u.url, { urls[i] = u.copy(url = it) }, singleLine = true, modifier = Modifier.weight(1f).testTag("edit-url-$i"))
                         TextButton(onClick = { menu = true }) { Text("Match") }
                         DropdownMenu(menu, { menu = false }) {
-                            MATCHES.forEach { (m, l) -> DropdownMenuItem({ Text(l + if (u.match == m) " (now)" else "") }, { urls[i] = u.copy(match = m); menu = false }) }
+                            Match.URL_MATCHES.forEach { (m, l) -> DropdownMenuItem({ Text(l + if (u.match == m) " (now)" else "") }, { urls[i] = u.copy(match = m); menu = false }) }
                         }
                         TextButton(onClick = { urls.removeAt(i) }) { Text("Remove") }
                     }

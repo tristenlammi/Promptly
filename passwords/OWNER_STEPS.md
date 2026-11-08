@@ -61,7 +61,7 @@ Everything below needs hardware, a real browser or a real site, which I couldn't
 Set it up first: Settings → Passwords and accounts, pick Promptly as the autofill service and the Credential Manager provider, and in Chrome set Autofill to "using another service".
 
 - Chrome autofill: an ordinary login fills, including on a long form you've scrolled. This is the biggest gap, because Chrome on the emulator was blocked by its terms screen (and I'm not allowed to accept those).
-- A login saved for `https://nas.example:5001` isn't suggested, and Search asks first.
+- A login saved for `https://nas.example:5001` is now suggested on `nas.example` in Chrome, since Chrome doesn't tell autofill the port (D-MATCH-3). Two logins on `zyx.` and `abc.` of one domain: each site shows only its own, and saving a new password on one doesn't change the other.
 - App autofill in a few real apps.
 - A banking app that signs in through its own WebView: expect the "showing a web page" question unless the site's saved on that login.
 - A real passkey on a real site through Credential Manager, both creating and signing in.
@@ -96,6 +96,7 @@ The checklist's install section needs a real install. Automated tests used the d
 - Never lock on Firefox: restart with a signed build. Tests could only simulate the restart.
 - On Chrome and Helium, copy a 2FA code and check that it arrives and then clears on time. The fix for lost clipboard writes is a timing pause (D76), so tell me if you ever see one fail.
 - Brave, Vivaldi and Opera aren't on this machine, so they're untested. Edge ran an earlier version of the code, and only the main extension tests.
+- Site matching (D-MATCH-1 to D-MATCH-6), on your own self-hosted services: each subdomain should offer only its own login, with the others under "Other logins for <domain>" in the toolbar panel. A login you saved with no port should fill on any port of that host. If a big site you use stops offering a login, edit it and pick Same domain under Match websites, and tell me which site.
 - Filling on the release (non-test) extension build was only smoke tested, because the tests drive hooks that release builds don't have.
 
 ## 5. Trial with low-value accounts for a few weeks

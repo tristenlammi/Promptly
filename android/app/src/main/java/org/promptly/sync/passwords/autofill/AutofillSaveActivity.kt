@@ -64,13 +64,20 @@ class AutofillSaveActivity : FragmentActivity() {
         }
     }
 
+    /** The login this save updates: same username, and saved for exactly this host and port, as in
+     *  the extension (D51). A login on another host of the same domain, or one saved for another
+     *  port, is a different service: a new login is saved beside it instead (D-MATCH-4). */
     private fun sameAccount(save: PendingSaves.Save, item: Item): Boolean {
         val u = item.body.username ?: ""
-        return (save.username ?: "") == u && hitsTarget(save.target, item)
+        if ((save.username ?: "") != u) return false
+        return when (val t = save.target) {
+            is FillTarget.Web -> t.matchItems(listOf(item)).firstOrNull()?.let { Match.isExactKind(it.kind) } == true
+            is FillTarget.App -> hitsTarget(t, item)
+        }
     }
 
     private fun hitsTarget(t: FillTarget, item: Item): Boolean = when (t) {
-        is FillTarget.Web -> Match.matchItems(listOf(item), t.url).isNotEmpty()
+        is FillTarget.Web -> t.matchItems(listOf(item)).isNotEmpty()
         is FillTarget.App -> item.body.urls.any { u -> Match.parseAppUrl(u.url)?.let { it.pkg == t.pkg && it.cert == t.cert } == true }
     }
 

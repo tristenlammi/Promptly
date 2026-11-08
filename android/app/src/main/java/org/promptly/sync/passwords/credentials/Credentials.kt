@@ -128,7 +128,8 @@ fun credentialLookalike(items: Collection<Item>, caller: Caller): String? {
 fun passwordsFor(client: VaultClient, caller: Caller): List<Item> {
     val origin = caller.origin
     val logins = client.allItems().filter { it.body.kind == "login" && !it.body.password.isNullOrEmpty() && !it.body.archived }
-    if (origin != null) return Match.matchItems(logins, "$origin/").map { it.item }
+    // Another service's login on the same domain only when this one has none (D-MATCH-1).
+    if (origin != null) return Match.offered(Match.matchItems(logins, "$origin/")).map { it.item }
     val cert = caller.cert ?: return emptyList()
     return logins.filter { item ->
         item.body.urls.any { u ->
@@ -136,7 +137,7 @@ fun passwordsFor(client: VaultClient, caller: Caller): List<Item> {
             if (a != null) a.pkg == caller.pkg && a.cert == cert
             else {
                 val base = Match.hostOf(u.url)?.let { Match.baseDomain(it) }
-                base != null && u.match != "never" && AssetLinks.cached(caller.pkg, cert, base) == true
+                base != null && Match.modeOf(u, item.body.match) != "never" && AssetLinks.cached(caller.pkg, cert, base) == true
             }
         }
     }

@@ -31,8 +31,10 @@ data class IndexEntry(
     val urls: List<LoginUrl>,
     val reprompt: Boolean,
     val hasTotp: Boolean,
+    /** The item's own match setting (Match.kt). Null is Auto. */
+    val match: String? = null,
     /** Per URL, where a lookup finds it: base domain, "*" for pattern modes, "" for none. */
-    val keys: List<String> = AutofillIndex.keysOf(urls),
+    val keys: List<String> = AutofillIndex.keysOf(urls, match),
 )
 
 /** The index arranged for a fill request: a hash lookup, so its cost doesn't grow with the
@@ -94,19 +96,22 @@ object AutofillIndex {
             i.id, b.kind,
             if (withNames) b.title else null,
             if (withNames) b.username ?: b.str("email") else null,
-            b.urls, b.reprompt, b.totp != null,
+            b.urls, b.reprompt, b.totp != null, b.match,
         )
     }
 
     private val keyCache = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    private fun keyOf(u: LoginUrl): String = when {
-        u.url.startsWith(Match.APP_SCHEME) || u.match == "never" -> ""
-        u.match == "regex" || u.match == "exact" || u.match == "prefix" -> "*"
-        else -> keyCache.getOrPut(u.url) { Match.hostOf(u.url)?.let { Match.baseDomain(it) ?: it } ?: "" }
+    private fun keyOf(u: LoginUrl, itemMatch: String?): String {
+        val mode = Match.modeOf(u, itemMatch)
+        return when {
+            u.url.startsWith(Match.APP_SCHEME) || mode == "never" -> ""
+            mode == "regex" || mode == "exact" || mode == "prefix" -> "*"
+            else -> keyCache.getOrPut(u.url) { Match.hostOf(u.url)?.let { Match.baseDomain(it) ?: it } ?: "" }
+        }
     }
 
-    fun keysOf(urls: List<LoginUrl>): List<String> = urls.map { keyOf(it) }
+    fun keysOf(urls: List<LoginUrl>, itemMatch: String? = null): List<String> = urls.map { keyOf(it, itemMatch) }
 
     /** Debounced: a sync can change a thousand items at once. */
     fun rebuild(context: Context, client: VaultClient) {
@@ -143,6 +148,7 @@ object AutofillIndex {
             if (e.username != null) put("u", e.username)
             put("r", e.reprompt)
             put("o", e.hasTotp)
+            if (e.match != null) put("m", e.match)
             put("l", JsonArray(e.urls.map { it.toJson() }))
             put("b", JsonArray(e.keys.map { kotlinx.serialization.json.JsonPrimitive(it) }))
         })
@@ -153,7 +159,7 @@ object AutofillIndex {
         IndexEntry(
             o.str("i") ?: return@mapNotNull null, o.str("k") ?: "login", o.str("t"), o.str("u"),
             (o["l"] as? JsonArray)?.mapNotNull { u -> (u as? JsonObject)?.let { x -> x.str("url")?.let { LoginUrl(it, x.str("match")) } } } ?: emptyList(),
-            o.bool("r") ?: false, o.bool("o") ?: false,
+            o.bool("r") ?: false, o.bool("o") ?: false, o.str("m"),
             (o["b"] as? JsonArray)?.map { (it as kotlinx.serialization.json.JsonPrimitive).content } ?: emptyList(),
         )
     }
@@ -184,7 +190,14 @@ object AutofillIndex {
     /** All the sites in the index, for the Digital Asset Links candidates. */
     fun vaultDomains(lookup: IndexLookup): Set<String> = lookup.byKey.keys
 
-    class Hit(val entry: IndexEntry, val rank: Int, val downgrade: Boolean)
+    /** `kind` says how a page matched; null for an app. A SIBLING is another service's login on
+     *  the page's domain, offered only when there's nothing for this one (Match.offered). */
+    class Hit(val entry: IndexEntry, val rank: Int, val downgrade: Boolean, val kind: Match.Kind? = null) {
+        val primary: Boolean get() = kind == null || Match.isPrimary(kind)
+    }
+
+    /** This page's own logins, or when there are none, the other services' on its domain. */
+    fun offered(hits: List<Hit>): List<Hit> = hits.filter { it.primary }.ifEmpty { hits }
 
     /** The saved site this page only looks like, if any. A page that a login is really saved for
      *  isn't a lookalike, as in the extension. For an app the domain is only its claim, and a linked
@@ -216,17 +229,20 @@ object AutofillIndex {
                 val candidates = LinkedHashSet<IndexEntry>()
                 for (k in keys) lookup.byKey[k]?.let { candidates += it }
                 candidates += lookup.patterned
+                // Every login with an address on this page's domain is in here, so Auto sees what the
+                // whole vault would show it (match.ts pageContext).
+                val ctx = Match.pageContext(candidates.flatMap { e -> e.urls.map { u -> u.url to Match.modeOf(u, e.match) } }, target.url)
                 for (e in candidates) {
                     var best: Match.Kind? = null
                     var savedHttps = false
                     for (u in e.urls) {
-                        val k = Match.matchUrl(u, target.url) ?: continue
+                        val k = Match.matchUrl(u, target.url, e.match, ctx, target.portKnown) ?: continue
                         if (best == null || k.rank < best.rank) {
                             best = k
                             savedHttps = u.url.startsWith("https://") || !u.url.contains("://")
                         }
                     }
-                    if (best != null) hits += Hit(e, best.rank, !target.schemeKnown || (target.scheme == "http" && savedHttps))
+                    if (best != null) hits += Hit(e, best.rank, !target.schemeKnown || (target.scheme == "http" && savedHttps), best)
                 }
             }
             is FillTarget.App -> {

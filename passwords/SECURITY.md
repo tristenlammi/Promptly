@@ -81,11 +81,13 @@ Limits we accept and state plainly:
 - No remote code. The extension never loads code from the server.
 - A content script runs in a page's process. Treat it as less trusted than the background. Secrets reach it only at fill time and only for fields it has checked.
 - Inline UI runs in an extension iframe the page can't read. Each published DOM-clickjacking variant has a test. These checks raise the bar; they're not a proof. As the researcher says, there's no simple complete protection. The safest setting is to fill only from the toolbar popup, offered as "on click" mode. Each click is judged inside our frame by IntersectionObserver v2, which only Chromium has, so Firefox fills from the toolbar popup only. The menu has to have been in view for 300 ms before a click counts. It was 500 ms, and was cut at the owner's request because ordinary clicks were refused (D77): that's less margin against a page that gets someone clicking fast where the menu is about to appear.
+- Which logins a page gets (D-MATCH-1 to D-MATCH-6). A login is offered on its own host, and on other hosts of the same registrable domain unless the vault shows they're separate services; those are listed apart, and filled only when picked. **A login saved with no port is offered on every port of its host** (D-MATCH-3). That's weaker than before for a host where different people run services on different ports: save the port, or choose Exact host and port, to keep a login to one. Updating a saved password and filling on page load still need the exact host and port. IP addresses and single names only ever match themselves. A lookalike of a saved site is never offered a login; the panel and menu now say so, naming the real site.
 - Passkey wrapper: runs in the page's MAIN world because that's the only way to intercept `navigator.credentials`. The page can tamper with anything there, so all trust decisions happen in the isolated world.
 
 ## Android
 
 - `AutofillService` trusts `webDomain` only from known browsers, verified by signing certificate. Apps are matched by package plus signing certificate through Digital Asset Links.
+- `webDomain` carries no port, so autofill can't tell `nas.home:5001` from `nas.home`. Logins saved for any port of that host are offered there, each picked by hand, and the save screen only updates a login saved for exactly that host (D-MATCH-3, D-MATCH-4).
 - No Accessibility service, by design.
 - Keystore-wrapped keys, biometric gate, invalidated when biometrics change. `FLAG_SECURE` on secret screens. `allowBackup="false"`.
 

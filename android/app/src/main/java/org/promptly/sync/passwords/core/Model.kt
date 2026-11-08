@@ -162,6 +162,9 @@ class ItemBody(val fields: Map<String, JsonElement>) {
             }
         } ?: emptyList()
 
+    /** How this login's websites match a page, unless an address says otherwise (Match.kt). None: "auto". */
+    val match: String? get() = str("match")
+
     val tags: List<String> get() = (fields["tags"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList()
 
     val customFields: List<CustomField>

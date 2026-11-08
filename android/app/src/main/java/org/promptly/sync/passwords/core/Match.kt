@@ -1,6 +1,7 @@
-// Which saved logins belong to a page or an app (plan 6.2). Mirrors match.ts for the
-// web rules, and adds the Android-only `androidapp://` entries: a package name plus its
-// signing certificate, saved with match "never" so web clients ignore them.
+// Which saved logins belong to a page or an app (plan 6.2). A port of match.ts, whose header
+// has the rules (DECISIONS.md D-MATCH-1 to D-MATCH-5), and adds the Android-only `androidapp://`
+// entries: a package name plus its signing certificate, saved with match "never" so web clients
+// ignore them. match-vectors.json keeps the two clients in step.
 package org.promptly.sync.passwords.core
 
 import kotlinx.serialization.json.Json
@@ -113,51 +114,164 @@ object Match {
         return "${x.scheme}://${x.host}$port$path$q"
     }
 
-    /** The same port, and no saved port means the scheme's default: another port on the same
-     *  host is often a different program. */
-    private fun portsMatch(savedUrl: String, page: HttpUrl): Boolean {
-        val u = parseSaved(savedUrl) ?: return true
-        return portOf(u) == portOf(page)
+    /** The same port: a saved address with no port means the page's default one. */
+    private fun samePort(saved: HttpUrl, page: HttpUrl): Boolean = portOf(saved) == portOf(page)
+
+    /** The choices for a whole item, in the order the editor shows them: value, label, hint. */
+    val ITEM_MATCHES = listOf(
+        Triple("auto", "Auto", "This host first. Other hosts on the same domain too, unless they have logins of their own."),
+        Triple("base", "Same domain", "Any host on the same domain, like Bitwarden's default."),
+        Triple("host", "Exact host", "Only this host, on any port if the address has none."),
+        Triple("port", "Exact host and port", "Only this host, and only on this port."),
+        Triple("prefix", "Starts with", "Only pages whose address starts with this one."),
+        Triple("never", "Never", "Never offered on a website. Search for it to fill by hand."),
+    )
+
+    /** Per address: null follows the item's setting. */
+    val URL_MATCHES: List<Pair<String?, String>> = listOf<Pair<String?, String>>(null to "As the login") +
+        ITEM_MATCHES.map { it.first to it.second } + listOf("exact" to "Exact address", "regex" to "Regular expression")
+
+    private val KNOWN = setOf("auto", "base", "host", "port", "prefix", "exact", "regex", "never")
+
+    /** The rule one address follows: its own, else the item's, else Auto. Something this version
+     *  doesn't know, from a newer client, gets the strictest host rule rather than a looser one. */
+    fun modeOf(saved: LoginUrl, itemMatch: String? = null): String {
+        val m = saved.match ?: itemMatch ?: "auto"
+        return if (m in KNOWN) m else "port"
     }
 
-    enum class Kind(val rank: Int) { EXACT(0), HOST(1), REGEX(2), PREFIX(2), BASE(3), SHARED(4) }
+    /** www.example.com and example.com are one site to Auto. Not www.github.io and github.io,
+     *  which belong to different people: the www. only goes when the domain stays the same. */
+    fun hostKey(host: String): String {
+        if (!host.startsWith("www.")) return host
+        val rest = host.substring(4)
+        val b = baseDomain(rest)
+        return if (b != null && b == baseDomain(host)) rest else host
+    }
 
-    fun matchUrl(saved: LoginUrl, pageUrl: String): Kind? {
+    /** Where a site usually signs everyone in. A login saved there is for the whole domain. */
+    private val SIGN_IN = setOf("login", "logon", "signin", "sign-in", "account", "accounts", "auth", "sso", "id", "identity", "idp", "secure", "passport")
+
+    /** Whether a login saved at `saved` is for the whole of `page`'s domain, not one service on it:
+     *  it's the domain itself, a host above the page, or a sign-in host above the page. */
+    private fun domainWide(saved: String, page: String, base: String): Boolean {
+        if (saved == base || page.endsWith(".$saved")) return true
+        val dot = saved.indexOf('.')
+        if (dot < 0) return false
+        val label = saved.substring(0, dot)
+        val rest = saved.substring(dot + 1)
+        return label in SIGN_IN && (rest == page || page.endsWith(".$rest")) && (rest == base || rest.endsWith(".$base"))
+    }
+
+    /** What the rest of the vault says about this page, for Auto. `exactHere`: some login is saved
+     *  for this very host and port. `hostsUnderBase`: how many hosts on the page's domain have
+     *  logins. ALONE judges a login by itself, as if it were the only one. */
+    data class PageContext(val exactHere: Boolean, val hostsUnderBase: Int) {
+        companion object {
+            val ALONE = PageContext(false, 1)
+        }
+    }
+
+    /** `entries` is every address of every login that could be offered, with the rule it follows. */
+    fun pageContext(entries: Iterable<Pair<String, String>>, pageUrl: String): PageContext {
+        val page = pageUrl.toHttpUrlOrNull() ?: return PageContext.ALONE
+        val pageHost = page.host.lowercase()
+        val pageKey = hostKey(pageHost)
+        val pageBase = baseDomain(pageHost)
+        var exactHere = false
+        val hosts = HashSet<String>()
+        for ((url, mode) in entries) {
+            if (mode == "never" || mode == "regex") continue
+            val s = parseSaved(url) ?: continue
+            val h = s.host.lowercase()
+            val k = hostKey(h)
+            if (k == pageKey && samePort(s, page)) exactHere = true
+            if (pageBase != null && (h == pageBase || h.endsWith(".$pageBase")) && baseDomain(h) == pageBase) hosts += k
+        }
+        return PageContext(exactHere, hosts.size)
+    }
+
+    /** Every address of these logins, with the rule each follows. */
+    fun webEntries(items: Collection<Item>): List<Pair<String, String>> {
+        val out = ArrayList<Pair<String, String>>()
+        for (item in items) {
+            if (item.deleted || item.body.archived || item.body.kind != "login") continue
+            for (u in item.body.urls) out += u.url to modeOf(u, item.body.match)
+        }
+        return out
+    }
+
+    /** How a match came about, best first. ANYPORT is the right host on a port the saved address
+     *  didn't name. SIBLING is another host on the same domain that the vault says is a separate
+     *  service: offered apart, under "Other logins for <domain>". */
+    enum class Kind(val rank: Int) { EXACT(0), HOST(1), REGEX(2), PREFIX(2), ANYPORT(3), BASE(4), SHARED(5), SIBLING(6) }
+
+    /** A match that's offered as this site's, rather than listed apart. */
+    fun isPrimary(k: Kind) = k != Kind.SIBLING
+
+    /** Good enough to update a saved password from this page: the same host and port, or the exact address. */
+    fun isExactKind(k: Kind) = k == Kind.HOST || k == Kind.EXACT
+
+    /** As match.ts. `pagePortKnown` is false when the asker gave a host with no port, as Android's
+     *  `webDomain` does: then a login saved with a port on this very host still shows, as ANYPORT. */
+    fun matchUrl(saved: LoginUrl, pageUrl: String, itemMatch: String? = null, ctx: PageContext = PageContext.ALONE, pagePortKnown: Boolean = true): Kind? {
         val page = pageUrl.toHttpUrlOrNull() ?: return null
         if (page.username.isNotEmpty() || page.password.isNotEmpty()) return null
-        val mode = saved.match ?: "base"
+        val mode = modeOf(saved, itemMatch)
         when (mode) {
             "never" -> return null
             "regex" -> return if (regexMatches(saved.url, page)) Kind.REGEX else null
             "exact" -> return if (normalize(saved.url) == normalize(pageUrl)) Kind.EXACT else null
             "prefix" -> return if (prefixMatches(saved.url, page)) Kind.PREFIX else null
         }
-        val savedHost = hostOf(saved.url) ?: return null
+        val s = parseSaved(saved.url) ?: return null
+        val savedHost = s.host.lowercase()
         val pageHost = page.host.lowercase()
-        if (!portsMatch(saved.url, page)) return null
-        if (savedHost == pageHost) return Kind.HOST
-        if (mode == "host") return null
-        // IP addresses and single-label hosts only ever match exactly.
+        val auto = mode == "auto"
+        val savedKey = if (auto) hostKey(savedHost) else savedHost
+        val pageKey = if (auto) hostKey(pageHost) else pageHost
+        val portOk = samePort(s, page)
+        if (savedKey == pageKey) {
+            if (portOk) return Kind.HOST
+            // The same machine on a port the address didn't name (D-MATCH-3). Not for "port", and
+            // in Auto it steps aside for a login saved for this very port.
+            if (mode == "port") return null
+            if (portOf(s) != null && pagePortKnown) return null
+            // With the page's port unknown, "a login for this very port" is only a guess, so it
+            // doesn't push this one aside.
+            return if (auto && ctx.exactHere && pagePortKnown) Kind.SIBLING else Kind.ANYPORT
+        }
+        if (mode == "host" || mode == "port") return null
+        // Another host: on the saved port, or the default one. IP addresses and single names have
+        // no domain, so they stop here.
+        if (!portOk) return null
         val savedBase = baseDomain(savedHost) ?: return null
         val pageBase = baseDomain(pageHost) ?: return null
-        if (savedBase == pageBase) return Kind.BASE
+        if (savedBase == pageBase) {
+            if (!auto) return Kind.BASE
+            if (ctx.exactHere) return Kind.SIBLING
+            if (domainWide(savedKey, pageKey, savedBase)) return Kind.BASE
+            return if (ctx.hostsUnderBase <= 1) Kind.BASE else Kind.SIBLING
+        }
         if (pageBase in sharedWith(savedBase)) return Kind.SHARED
         return null
     }
 
     class Candidate(val item: Item, val kind: Kind, val downgrade: Boolean)
 
-    /** Best matches first: exact host, then recently used. `downgrade` is a saved
-     *  https login on an http page, which only fills after a confirmation. */
-    fun matchItems(items: Collection<Item>, pageUrl: String, recent: Map<String, Long> = emptyMap()): List<Candidate> {
+    /** Best matches first: exact host, then recently used. `downgrade` is a saved https login on
+     *  an http page, which only fills after a confirmation. Logins Auto judges to be for another
+     *  service on the domain come last, as SIBLING. */
+    fun matchItems(items: Collection<Item>, pageUrl: String, recent: Map<String, Long> = emptyMap(), pagePortKnown: Boolean = true): List<Candidate> {
         val page = pageUrl.toHttpUrlOrNull() ?: return emptyList()
+        val ctx = pageContext(webEntries(items), pageUrl)
         val out = ArrayList<Candidate>()
         for (item in items) {
             if (item.deleted || item.body.archived || item.body.kind != "login") continue
             var best: Kind? = null
             var savedHttps = false
             for (u in item.body.urls) {
-                val k = matchUrl(u, pageUrl) ?: continue
+                val k = matchUrl(u, pageUrl, item.body.match, ctx, pagePortKnown) ?: continue
                 if (best == null || k.rank < best.rank) {
                     best = k
                     savedHttps = u.url.startsWith("https://") || !u.url.contains("://")
@@ -171,6 +285,13 @@ object Match {
                 .thenBy { it.item.body.title },
         )
     }
+
+    /** What a list offers: this site's own logins, or when there are none, the other services'
+     *  on its domain, which are then shown as "Other logins for ...". */
+    fun offered(list: List<Candidate>): List<Candidate> = list.filter { isPrimary(it.kind) }.ifEmpty { list }
+
+    /** What "Other logins for ..." names: the page's domain, or its host if it has none. */
+    fun siteName(host: String): String = host.lowercase().let { baseDomain(it) ?: it }
 
     // ---- Lookalike check (plan 5.13), the same rules as match.ts ----
 

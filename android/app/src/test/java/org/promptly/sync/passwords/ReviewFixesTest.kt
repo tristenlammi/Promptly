@@ -53,12 +53,14 @@ class ReviewFixesTest {
         val v = Json.parseToJsonElement(File(Fixtures.frontend.parentFile, "android/app/src/test/cross/match-vectors.json").readText()).jsonObject
         val match = v.getValue("match").jsonArray
         assertTrue(match.size >= 50)
+        assertTrue(match.size >= 100)
         for (e in match) {
             val c = e.jsonObject
             val want = c["want"].takeIf { it !is JsonNull }?.jsonPrimitive?.content
             val saved = LoginUrl(c.getValue("url").jsonPrimitive.content, c["mode"]?.jsonPrimitive?.content)
             val page = c.getValue("page").jsonPrimitive.content
-            assertEquals("$saved on $page", want, Match.matchUrl(saved, page)?.name?.lowercase())
+            val item = c["item"]?.jsonPrimitive?.content
+            assertEquals("$saved ($item) on $page", want, Match.matchUrl(saved, page, item)?.name?.lowercase())
         }
         for (e in v.getValue("host").jsonArray) {
             val c = e.jsonObject
@@ -76,11 +78,19 @@ class ReviewFixesTest {
         val saved = LoginUrl("https://bank.example")
         val onPort = web("bank.example:8443")
         assertEquals("bank.example", onPort.host)
-        assertEquals(0, hits(saved, onPort).size)
-        assertEquals(1, hits(LoginUrl("https://bank.example:8443"), onPort).size)
-        // Android's webDomain has no port, so a login saved for one isn't offered on a guess.
-        assertEquals(0, hits(LoginUrl("https://bank.example:8443"), web("bank.example")).size)
-        assertEquals(1, hits(saved, web("bank.example")).size)
+        assertTrue(onPort.portKnown)
+        // No saved port: its host on any port (D-MATCH-3), below an exact match.
+        assertEquals(Match.Kind.ANYPORT, hits(saved, onPort).single().kind)
+        assertEquals(Match.Kind.HOST, hits(LoginUrl("https://bank.example:8443"), onPort).single().kind)
+        assertEquals(0, hits(LoginUrl("https://bank.example:9443"), onPort).size)
+        assertEquals(0, hits(LoginUrl("https://bank.example", "port"), onPort).size)
+        // Android's webDomain has no port. A login saved with one, for this very host, is still
+        // offered, below one saved with none.
+        assertFalse(web("bank.example").portKnown)
+        assertEquals(Match.Kind.ANYPORT, hits(LoginUrl("https://bank.example:8443"), web("bank.example")).single().kind)
+        assertEquals(Match.Kind.HOST, hits(saved, web("bank.example")).single().kind)
+        assertEquals(0, hits(LoginUrl("https://app.bank.example:8443"), web("bank.example")).size)
+        assertEquals(0, hits(LoginUrl("https://bank.example:8443", "port"), web("bank.example")).size)
     }
 
     @Test fun anAwkwardRegexCantStallAFill() {

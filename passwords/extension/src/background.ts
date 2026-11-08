@@ -1807,7 +1807,7 @@ async function handleTest(m: { op: string; [k: string]: unknown }): Promise<unkn
       packRules = null;
       return { rules: (await shippedPack()).length };
     case "items":
-      return client!.allItems().map((i) => ({ id: i.id, title: i.body.title, username: i.body.username, password: i.body.password, pendingPassword: i.body.pendingPassword, tags: i.body.tags ?? [], urls: i.body.urls ?? [], history: i.body.passwordHistory?.length ?? 0 }));
+      return client!.allItems().map((i) => ({ id: i.id, title: i.body.title, username: i.body.username, password: i.body.password, pendingPassword: i.body.pendingPassword, tags: i.body.tags ?? [], urls: i.body.urls ?? [], match: i.body.match, history: i.body.passwordHistory?.length ?? 0 }));
     case "patchItem": {
       const it = client!.get(m.id as string);
       if (!it) throw new Error("No such item");

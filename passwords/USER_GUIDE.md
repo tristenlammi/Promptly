@@ -22,7 +22,10 @@ Install the extension from your server's Install page, connect it to your server
 - Click a field to see your logins for that site, or use the toolbar button.
 - **The toolbar button is the safest way:** a page can't touch or cover it.
 - If the extension gets a form wrong, open the toolbar button, then This page, then Show me which boxes to fill here. It remembers.
-- If it warns that a site looks like another one you have a login for, believe it and look at the address.
+- If it warns that a site looks like another one you have a login for, believe it and look at the address. Nothing is offered there.
+- Logins for different services on one domain stay apart. On zyx.example.org you get the zyx login, and the one for abc.example.org is under "Other logins for example.org" in the toolbar panel.
+- A website saved with no port works on any port of that host, so `nas.home` covers `nas.home:5001`. Save it with a port, like `nas.home:5001`, to keep it to that port.
+- To change how a login matches, edit it and pick **Match websites**. Auto suits nearly everything. Same domain offers it on every host of the domain. Exact host keeps it to one host. Exact host and port keeps it to one host and port. Starts with keeps it to addresses that start with the one saved. Never stops it being offered; you can still search for it. Each website can have its own setting too.
 - Cards and addresses always ask first.
 
 Settings has more: filling only when you click the toolbar button, a short PIN for the browser, and offering codes from your Promptly Mail.

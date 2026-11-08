@@ -116,9 +116,11 @@ class CoreTest {
 
     @Test fun rankingAndHttpDowngrade() {
         val exact = login("host", LoginUrl("https://www.example.com"))
-        val base = login("base", LoginUrl("https://example.com"))
+        val base = login("base", LoginUrl("https://accounts.example.com"))
         val out = Match.matchItems(listOf(base, exact), "https://www.example.com/x")
         assertEquals(listOf("host", "base"), out.map { it.item.id })
+        // The page has a login of its own, so the other host's is listed apart.
+        assertEquals(listOf(Match.Kind.HOST, Match.Kind.SIBLING), out.map { it.kind })
         val down = Match.matchItems(listOf(login("a", LoginUrl("https://example.com"))), "http://example.com/")
         assertTrue(down.single().downgrade)
         val up = Match.matchItems(listOf(login("a", LoginUrl("http://example.com"))), "http://example.com/")

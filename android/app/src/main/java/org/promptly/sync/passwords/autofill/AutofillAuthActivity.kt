@@ -208,7 +208,7 @@ class AutofillAuthActivity : FragmentActivity() {
             if (lookalikeCleared) return null
             val c = Pw.client() ?: return null
             val host = when (val t = target) {
-                is FillTarget.Web -> if (item != null && Match.matchItems(listOf(item), t.url).isNotEmpty()) return null else t.host
+                is FillTarget.Web -> if (item != null && t.matchItems(listOf(item)).isNotEmpty()) return null else t.host
                 is FillTarget.App -> {
                     if (item != null && !spillsTo(t, item.body.urls)) return null
                     t.claimedDomain?.substringBefore(':') ?: return null
@@ -225,7 +225,7 @@ class AutofillAuthActivity : FragmentActivity() {
                 return
             }
             val t = target
-            val onPage = (t as? FillTarget.Web)?.let { Match.matchItems(listOf(item), it.url).firstOrNull() }
+            val onPage = (t as? FillTarget.Web)?.matchItems(listOf(item))?.firstOrNull()
             val isMatch = when (t) {
                 is FillTarget.Web -> onPage != null || mode == MODE_CARD || mode == MODE_IDENTITY
                 is FillTarget.App -> mode == MODE_CARD || mode == MODE_IDENTITY || appLinked(item, t)
@@ -490,7 +490,7 @@ class AutofillAuthActivity : FragmentActivity() {
                 a.pkg == t.pkg && a.cert == cert
             } else {
                 val base = Match.hostOf(u.url)?.let { Match.baseDomain(it) }
-                base != null && u.match != "never" && AssetLinks.cached(t.pkg, cert, base) == true
+                base != null && Match.modeOf(u, item.body.match) != "never" && AssetLinks.cached(t.pkg, cert, base) == true
             }
         }
     }
@@ -499,7 +499,7 @@ class AutofillAuthActivity : FragmentActivity() {
     private fun siteLinksApp(item: Item, t: FillTarget.App): Boolean {
         val cert = t.cert ?: return false
         return item.body.urls.any { u ->
-            if (u.url.startsWith(Match.APP_SCHEME) || u.match == "never") return@any false
+            if (u.url.startsWith(Match.APP_SCHEME) || Match.modeOf(u, item.body.match) == "never") return@any false
             val base = Match.hostOf(u.url)?.let { Match.baseDomain(it) } ?: return@any false
             AssetLinks.check(t.pkg, cert, base) == true
         }
