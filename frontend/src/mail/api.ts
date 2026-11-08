@@ -224,7 +224,7 @@ export const mailApi = {
   async removeAccount(id: string) {
     await apiClient.delete(`/mail/accounts/${id}`);
   },
-  async send(body: { account_id: string; to: string[]; cc: string[]; bcc: string[]; subject: string; text: string; html?: string; reply_to_message?: string; forward_of?: string; files?: OutgoingFile[]; file_ids?: string[] }) {
+  async send(body: { account_id: string; to: string[]; cc: string[]; bcc: string[]; subject: string; text: string; html?: string; reply_to_message?: string; forward_of?: string; files?: OutgoingFile[]; file_ids?: string[]; from_alias?: string }) {
     return (await apiClient.post<{ id: string; undo_seconds: number }>("/mail/send", body)).data;
   },
   async retrySend(id: string) {

@@ -190,7 +190,7 @@ A page can detect the wrapper: `navigator.credentials.get.toString()` isn't nati
 
 ## Find stray passwords
 
-Security check can look for passwords and other secrets left in plain text in your own Mail, Files and Photos (D107 to 8).
+Security check can look for passwords and other secrets left in plain text in your own Mail, Files and Photos (D107 to D114).
 
 **What's read.** Your server reads what it already holds: the text of your mail (not Trash or Spam), the text of your own files as Drive's search index has it (or a small text file such as a `.env` straight from disk), and the words read out of your own photos. Nothing shared with you, and nobody else's. The vault isn't read: the server can't. Nothing goes to an AI model, and the patterns are plain rules in `backend/app/passwords/stray.py`.
 
@@ -205,3 +205,19 @@ Security check can look for passwords and other secrets left in plain text in yo
 **Acting on one.** "Move the original to Trash" moves that message to its mailbox's Trash, or that file or photo to Files' Trash. It can be got back from there until the Trash is emptied. A copy may still exist elsewhere: a sent message in the recipient's mailbox, another mail app's cache, a backup. Changing the password is the only sure fix for one that's been sitting in plain text.
 
 **Limits.** It's pattern matching. It misses passwords written in an unusual way, in images with no readable text, in mail attachments, and in files Drive hasn't read the text of. It can also flag something that isn't a secret, which is what Ignore is for.
+
+## Aliases on your own domain
+
+An alias like `shop.k7m2@yourdomain.com` reaches you through a catch-all at your mail provider. Promptly Mail then sorts it. So some of this has to live on the server in plain text, and that's weaker than the rest of the vault:
+
+- **The server keeps every alias address**, which domain and mailbox it belongs to, whether it's on, and when it was turned off. Mail needs the address to know which alias an email was for.
+- **It keeps the vault item's id** that each alias is linked to. The id is opaque: the server can't read the item, so it doesn't learn the site's address or the login's name from it.
+- **It keeps which sender domains mailed each alias**, with counts and dates, and the first sender an alias heard from. Mail was already on the server, but this ties it to an alias and an item id. Put together, someone with the database can usually guess which sites you have accounts at, from who mails each alias. Plain logins don't give the server that.
+- **The word at the start** is a random word by default. If you choose "the site's name", the address itself names the site, for the server and for anyone who sees the address.
+- **The leak flag is a guess.** It compares the sender's domain on the From line, which can be forged, with the first sender (on the server) or the login's own websites (in the vault, which the server never sees). It isn't checked against DKIM or SPF. A mismatch can be a newsletter service; a match can be a forgery.
+- **Turning an alias off doesn't refuse mail.** A mail client can't. The sender sees it delivered, your provider stores it, and Promptly moves it to Trash or your chosen folder once it sees it. Another mail app may show it first, and while the mail-worker is stopped it stays in your Inbox.
+- **Forgetting an alias doesn't stop its mail.** The catch-all still delivers it. Anyone can also make up addresses on your domain and reach you; mail to an address Promptly didn't make is left alone and not counted.
+- **Replying from an alias** puts the alias on the From line and the Message-ID. The envelope sender stays your mailbox's own address, because that's what your provider lets you send as, so a recipient who looks at the hidden headers (Return-Path, Received) can usually see your real address. Some providers rewrite the From line or refuse; the setup check finds out and Mail says so.
+- **The setup check** sends one test email from your mailbox to a random address on the domain, then moves it to Trash. It can run once a minute per domain, since the domain is whatever was typed.
+- **Turning an alias on or off from Mail** needs only your Promptly sign-in, not the vault, like Mail's own rules. Making aliases, setting up domains and seeing what each alias got need the vault unlocked, and a connected device needs the mail scope to see the counts.
+- **In the extension**, a new alias fills only into frames of the top page's own site. An address isn't a secret, but a third-party frame has no use for it.

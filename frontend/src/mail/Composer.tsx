@@ -10,6 +10,7 @@ import { useSelectedModel } from "@/store/modelStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
+import { FromAliasRow } from "./Aliases";
 import { mailApi, personName, type OutgoingFile, type Person } from "./api";
 
 const MAX_FILES_BYTES = 25 * 1024 * 1024;
@@ -28,6 +29,9 @@ export interface Draft {
   quoting?: string;
   files?: OutgoingFile[];
   fromFiles?: { id: string; name: string }[];
+  // A reply to mail sent to one of your aliases goes out from that alias.
+  from_alias?: string;
+  from_alias_note?: string;
 }
 
 function draftKey(d: Draft): string {
@@ -137,6 +141,7 @@ export function Composer({ draft, accounts, onClose, onSent }: {
   const [subject, setSubject] = useState(saved.subject ?? draft.subject);
   const [files, setFiles] = useState<OutgoingFile[]>(draft.files ?? []);
   const [fromFiles, setFromFiles] = useState(draft.fromFiles ?? []);
+  const [fromAlias, setFromAlias] = useState(draft.from_alias ?? "");
   const [choosing, setChoosing] = useState(false);
   const [sending, setSending] = useState(false);
   const [asking, setAsking] = useState(false);
@@ -209,7 +214,7 @@ export function Composer({ draft, accounts, onClose, onSent }: {
       const html = editor?.getHTML() ?? "";
       const sent = await mailApi.send({
         account_id: account, to: people, cc: addresses(cc), bcc: addresses(bcc), subject, text: editor?.getText({ blockSeparator: "\n\n" }) ?? "", html,
-        reply_to_message: draft.reply_to, forward_of: draft.forward_of, files, file_ids: fromFiles.map((f) => f.id),
+        reply_to_message: draft.reply_to, forward_of: draft.forward_of, files, file_ids: fromFiles.map((f) => f.id), from_alias: fromAlias || undefined,
       });
       saveDraft(draft, null);
       onSent(sent.id, sent.undo_seconds, { ...draft, account_id: account, to, cc, bcc, subject, html, files, fromFiles });
@@ -235,7 +240,13 @@ export function Composer({ draft, accounts, onClose, onSent }: {
         </div>
       </div>
       <div className="promptly-scroll min-h-0 flex-1 divide-y divide-[var(--border)] overflow-y-auto px-4">
-        {accounts.length > 1 && (
+        {draft.from_alias && (
+          <div>
+            <FromAliasRow alias={draft.from_alias} accountEmail={accounts.find((a) => a.id === account)?.email ?? ""} value={fromAlias} onChange={setFromAlias} />
+            {fromAlias && draft.from_alias_note && <p className="pb-2 text-xs text-[#C9A227]">{draft.from_alias_note}</p>}
+          </div>
+        )}
+        {accounts.length > 1 && !draft.from_alias && (
           <label className="flex items-center gap-2 text-sm text-[var(--text-muted)]">
             <span className="w-8 shrink-0">From</span>
             <select value={account} onChange={(e) => setAccount(e.target.value)} className="min-w-0 flex-1 bg-transparent py-2 text-sm text-[var(--text)] outline-none">

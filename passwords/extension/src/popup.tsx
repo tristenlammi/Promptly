@@ -450,7 +450,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
           )
         )}
         {tab === "codes" && <CodesTab query={q} {...rowProps} />}
-        {tab === "generator" && <Generator host={pageHost(tabInfo?.url ?? "") ?? undefined} />}
+        {tab === "generator" && <Generator host={pageHost(tabInfo?.url ?? "") ?? undefined} tabId={tabInfo?.id} />}
         {tab === "bookmarks" && <BookmarksTab query={q} />}
         {tab === "more" && <MoreTab preview={state.preview} setMessage={setMessage} />}
       </main>
@@ -1037,7 +1037,7 @@ function RepromptBox({ onPass, onCancel }: { onPass: () => void; onCancel: () =>
   );
 }
 
-function Generator({ host }: { host?: string }) {
+function Generator({ host, tabId }: { host?: string; tabId?: number }) {
   const [mode, setMode] = useState<"password" | "passphrase" | "pin" | "username">("password");
   const [value, setValue] = useState("");
   const [note, setNote] = useState("");
@@ -1072,7 +1072,70 @@ function Generator({ host }: { host?: string }) {
         </button>
       </div>
       {note && <p role="status" className="text-xs">{note}</p>}
+      {tabId !== undefined && <NewAlias tabId={tabId} />}
       <PlusAddress host={host} />
+    </div>
+  );
+}
+
+type AliasDomainRow = { id: string; domain: string; status: string; word_style: string };
+
+/** shop.k7m2@yourdomain.com: a new address on your own domain for this sign-up. */
+function NewAlias({ tabId }: { tabId: number }) {
+  const [domains, setDomains] = useState<AliasDomainRow[] | null>(null);
+  const [chosen, setChosen] = useState("");
+  const [custom, setCustom] = useState("");
+  const [made, setMade] = useState<{ address: string; filled: boolean } | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    call<AliasDomainRow[]>({ t: "aliasDomains" }).then((d) => {
+      setDomains(d);
+      setChosen((c) => c || (d.find((x) => x.status === "ok") ?? d[0])?.id || "");
+    }).catch(() => setDomains([]));
+  }, []);
+  if (!domains?.length) return null;
+  const domain = domains.find((d) => d.id === chosen) ?? domains[0];
+  return (
+    <div className="flex flex-col gap-1 border-t pt-2 text-xs">
+      <span className="font-medium">An alias for this sign-up</span>
+      <div className="flex gap-1">
+        {domains.length > 1 && (
+          <select className="input" aria-label="Alias domain" value={domain.id} onChange={(e) => setChosen(e.target.value)}>
+            {domains.map((d) => <option key={d.id} value={d.id}>@{d.domain}</option>)}
+          </select>
+        )}
+        {domain.word_style === "custom" && <input className="input" aria-label="Alias word" placeholder="Word" value={custom} onChange={(e) => setCustom(e.target.value)} />}
+      </div>
+      <button
+        className="btn"
+        data-testid="new-alias"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError("");
+          try {
+            const r = await call<{ ok: boolean; address?: string; filled?: boolean; reason?: string }>({ t: "aliasNew", tabId, domainId: domain.id, custom });
+            if (r.ok && r.address) setMade({ address: r.address, filled: !!r.filled });
+            else setError("Couldn't make an alias. Is the vault unlocked?");
+          } catch {
+            setError("Couldn't make an alias.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        New alias @{domain.domain}
+      </button>
+      {made && (
+        <>
+          <code data-testid="alias-address" className="break-all font-mono">{made.address}</code>
+          <p className="text-[var(--text-muted)]">{made.filled ? "Filled in, and saved with this site's new login." : "Saved with this site's new login. There was no email box to fill, so copy it."}</p>
+          <button className="btn" onClick={() => navigator.clipboard.writeText(made.address)}>Copy alias</button>
+        </>
+      )}
+      {domain.status !== "ok" && <p className="text-[var(--text-muted)]">{domain.domain} hasn't passed its check yet.</p>}
+      {error && <p className="err">{error}</p>}
     </div>
   );
 }

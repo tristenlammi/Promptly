@@ -72,6 +72,33 @@ A site decides when it asks for a passkey, and nothing can make it ask. When a p
 
 **Emergency access** lets someone you trust ask for your vault if you can't reach it. You get a push and an email, and you can refuse. If you don't refuse before the wait runs out, it opens. Choose someone you'd trust with all of it. It covers your own vault and vaults you made and haven't shared; once you remove someone, they stay removed on all your devices.
 
+## Aliases on your own domain
+
+An alias is a different email address for each login, like `shop.k7m2@yourdomain.com`. If a site leaks or sells it, you'll see who, and you can turn that one address off without changing the rest.
+
+You need a domain you own (a subdomain like `mail.yourdomain.com` is fine, and keeps your main domain's mail as it is) and a mailbox connected in Promptly Mail.
+
+**1. At your mail provider**, add the domain and turn on a **catch-all**, so mail to anything at that domain lands in your mailbox. The provider tells you which DNS records (MX, and usually SPF and DKIM) to add at whoever sells you the domain. Some common setups, in general terms:
+
+- **Google Workspace**: add the domain to your Workspace, then set up a catch-all route to your user in the Admin console's Gmail routing settings. To reply from an alias, add the domain as a "send mail as" address in Gmail.
+- **Microsoft 365**: there's no simple catch-all switch. It takes a mail flow rule in the Exchange admin centre. A subdomain at another provider can be easier.
+- **Fastmail**: add the domain and turn on its catch-all. Add a sending identity for the domain (a wildcard one if offered) to reply from aliases.
+- **Proton Mail, Zoho Mail, iCloud+ custom domains**: paid plans let you add a domain and turn on catch-all, or "allow all incoming". Sending from an alias usually needs each address added.
+- **A forwarding service** (Cloudflare Email Routing and similar): a catch-all rule that forwards to your mailbox works. Replying from an alias then needs your mailbox provider to allow that domain as a sender.
+- **Your own mail server**: a catch-all mapping for the domain to your user, and permission for that user to send as the domain.
+
+**2. In Passwords → Aliases**, add the domain, pick the mailbox it lands in, and press **Run the check**. Promptly sends a test from that mailbox to a random address on the domain and waits for it. It also notes whether your provider kept the alias as the sender. The test goes to Trash by itself.
+
+**3. Make an alias** with **New alias** under the username in a login, or in the browser extension's Generator while you're on a sign-up page, which also fills it in. Choose how aliases start in the domain's settings: a random word (the default), the site's name (easier to read, but it names the site to anyone who sees it), a word you type, or no word. You can choose the random part's length and the separator too.
+
+**In Mail**, an email sent to an alias says which alias and links to its login. Each alias in Passwords → Aliases shows how many emails it's had and when the last came.
+
+**A warning** appears when an alias gets mail from a sender that doesn't look like its site. That's often a sign it was sold or leaked, but it can be the site's newsletter service. Press **This sender is fine**, or turn the alias off.
+
+**Turning an alias off** moves its new mail to Trash, or a folder you choose for the domain. Mail clients can't refuse mail, so the sender won't know, and your provider still gets it. Forgetting an alias doesn't stop its mail either.
+
+**Replying** to mail that came to an alias sends from that alias, if your provider allows it. If it doesn't, Mail says so and replies from your mailbox's own address. Even from an alias, hidden headers can show your real address.
+
 ## Staying safe
 
 **How long it stays unlocked** is your choice, in the toolbar panel under More or in Settings: from 1 minute to 12 hours, when the browser closes, or never. Never means no password after a restart, and it also means anyone who can open that browser has your passwords and can sign in with your passkeys. It's reasonable on a computer only you use, with its disk encrypted and its own login. It stays unlocked until you press Lock, and removing the device from another one locks it the next time it's online.

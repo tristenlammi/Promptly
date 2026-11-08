@@ -67,6 +67,8 @@ export type PageRequest =
   | { t: "bookmarkExport" }
   | { t: "plusBase" }
   | { t: "plusAddress"; email: string; host?: string | null }
+  | { t: "aliasDomains" }
+  | { t: "aliasNew"; tabId: number; domainId?: string; custom?: string }
   | { t: "clipWatch"; text: string }
   | { t: "clipClear" }
   /** Firefox: what the on-page menu picked, and whether a page opened this panel (D78). */

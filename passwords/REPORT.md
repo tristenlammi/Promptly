@@ -102,7 +102,7 @@ Scored by the corpus harness, against forms written from scratch. **The blind fi
 - Fixes made after set 3 aren't reflected in its score. Those spent sets later scored 58/60 and 55/60 (sets 1 and 2), but those are tuned numbers now, so they say little.
 - A false fill here means the classifier offered to fill a form it shouldn't, or chose a honeypot. It's scored by the classifier, and the fill guards still apply on top.
 
-**After the autofill pass (D102 to 5).** All three blind sets are spent, so these are tuned numbers. A fourth blind set, written separately, is the real test. "Before" is the code at `2dd13b4`, "after" is this work, both on the same harness. The tuned corpus is now 184 fixtures; its 23 new ones were written by someone who knew the classifier.
+**After the autofill pass (D102 to D106).** All three blind sets are spent, so these are tuned numbers. A fourth blind set, written separately, is the real test. "Before" is the code at `2dd13b4`, "after" is this work, both on the same harness. The tuned corpus is now 184 fixtures; its 23 new ones were written by someone who knew the classifier.
 
 | Set | Browser | Before | After | False fills before / after | Wrong fills after |
 |---|---|---|---|---|---|

@@ -128,6 +128,16 @@ Point a reviewer at [CRYPTO_SPEC.md](CRYPTO_SPEC.md), [SECURITY.md](SECURITY.md)
 
 Admin → Passwords → "Show the Preview warning". Do this only after steps 5 to 7.
 
+## Aliases on your own domain
+
+Built and tested against a throwaway GreenMail, never against a real provider. To try it:
+
+1. Pick a subdomain you don't use, like `alias.yourdomain.com`. Using a subdomain leaves your main domain's mail alone.
+2. At your mail provider, add the subdomain with a catch-all into a mailbox that's connected in Promptly Mail, and add the DNS records it asks for. `USER_GUIDE.md` has general notes for common providers.
+3. In Passwords → Aliases, add the subdomain and run the check. It should say "Working" within a minute or two. If it says the provider changes or refuses the sender, replying from aliases won't work until you add the domain as a send-as address.
+4. Make an alias for a low-value sign-up from the item editor and from the extension's Generator, and check that Mail shows the alias on its email, that turning it off sends new mail to Trash, and that a reply goes out from the alias.
+5. After merge, run `cd e2e && npx playwright test --config passwords.config.ts aliases.spec.ts` on the stack. It wasn't run here.
+
 ## Known follow-ups
 
 - **Fill the list of account deletion pages.** "Delete account" in Security check can link straight to a site's deletion page from JustDeleteMe's list (MIT), but the data file ships empty because downloading it needed your go-ahead. To fill it, pick the latest commit of https://github.com/jdm-contrib/jdm and run `python backend/scripts/update_deletion_sites.py --commit <sha>`, then check `backend/app/passwords/data/deletion_sites.json` and commit it. Until then it links to the site's account settings instead.

@@ -26,7 +26,7 @@ from app.net.internal_hosts import may_reach_private_network
 
 from app.notifications.dispatch import notify_user
 
-from . import imap, parse, rules, search, triage
+from . import aliases, imap, parse, rules, search, triage
 from .models import MailAccount, MailFolder, MailMessage, MailOp, MailOutbox, MailSnooze
 
 logger = logging.getLogger("promptly.mail.worker")
@@ -95,11 +95,12 @@ async def _announce(account_id: uuid.UUID, messages: list[MailMessage]) -> None:
 
 
 async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[int, list[bytes], bytes]], announce: bool = False) -> None:
-    parsed = await asyncio.to_thread(lambda: [(uid, flags, parse.parse(raw)) for uid, flags, raw in items])
+    parsed = await asyncio.to_thread(lambda: [(uid, flags, parse.parse(raw), aliases.recipients(raw)) for uid, flags, raw in items])
     arrived: list[MailMessage] = []
+    sent_to: dict[uuid.UUID, list[str]] = {}
     async with SessionLocal() as db:
         # Oldest first, so replies find the conversation their parent started.
-        for uid, flags, found in sorted(parsed, key=lambda row: row[2].sent_at):
+        for uid, flags, found, said in sorted(parsed, key=lambda row: row[2].sent_at):
             lowered = {f.lower() for f in flags}
             state = {"seen": b"\\seen" in lowered, "flagged": b"\\flagged" in lowered, "answered": b"\\answered" in lowered}
             # Something you moved here: the same message, now with its real number.
@@ -130,8 +131,11 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
                 logger.warning("Skipped an email that couldn't be saved: %s", type(e).__name__)
                 continue
             arrived.append(message)
+            sent_to[message.id] = said
         folder = await db.get(MailFolder, folder_id)
-        quiet = await rules.apply_to_new(db, account_id, folder, arrived)
+        # Aliases first: mail for one that's off leaves before any rule sees it.
+        filed = await aliases.on_arrival(db, account_id, folder, [(m, sent_to[m.id]) for m in arrived], fresh=announce)
+        quiet = filed | await rules.apply_to_new(db, account_id, folder, [m for m in arrived if m.id not in filed])
         if folder.role == "inbox" and arrived:
             # A reply brings a snoozed conversation straight back.
             await db.execute(delete(MailSnooze).where(MailSnooze.account_id == account_id, MailSnooze.thread_key.in_({m.thread_key for m in arrived})))

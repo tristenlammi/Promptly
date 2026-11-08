@@ -5,6 +5,7 @@ import { openPasskeyUnlock, type PasskeyUnlock } from "../core/connections";
 import {
   Activity,
   Archive,
+  AtSign,
   CreditCard,
   FileKey2,
   Folder,
@@ -30,6 +31,7 @@ import {
   X,
   Bookmark,
 } from "lucide-react";
+import { AliasesScreen } from "./Aliases";
 import { BookmarksScreen } from "./Bookmarks";
 import { lazy, type ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -223,6 +225,7 @@ const SECTIONS: { id: string; label: string; icon: ReactNode; filter?: Filter }[
 const TOOLS: { id: string; label: string; icon: ReactNode }[] = [
   { id: "codes", label: "2FA codes", icon: <ShieldCheck className="h-4 w-4" /> },
   { id: "generator", label: "Generator", icon: <Wand2 className="h-4 w-4" /> },
+  { id: "aliases", label: "Aliases", icon: <AtSign className="h-4 w-4" /> },
   { id: "security", label: "Security check", icon: <ShieldCheck className="h-4 w-4" /> },
   { id: "shared", label: "Shared vaults", icon: <Users className="h-4 w-4" /> },
   { id: "sends", label: "Sends", icon: <Send className="h-4 w-4" /> },
@@ -447,6 +450,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
   const f = /^(folder|tag|item|vault)\/(.+)$/.exec(route);
   if (route === "codes") content = <CodesScreen />;
   else if (route === "generator") content = <GeneratorScreen />;
+  else if (route === "aliases") content = <AliasesScreen />;
   // "stray" is the Security check scrolled to Find stray passwords, for the extension's link.
   else if (route === "security" || route === "stray") content = <SecurityScreen />;
   else if (route === "shared") content = <SharedScreen />;
