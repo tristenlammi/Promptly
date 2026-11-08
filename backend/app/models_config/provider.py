@@ -665,9 +665,9 @@ def _detect_reasoning_by_id(provider_type: str, model_id: str) -> bool:
     # OpenAI reasoning families (o-series, gpt-5 thinking).
     if any(p in mid for p in ("o1", "o3", "o4", "gpt-5")):
         return True
-    # Anthropic extended thinking (Claude 3.7+ / 4).
+    # Anthropic extended thinking (Claude 3.7+ / 4 / 5). Not 3.5: "claude-3-5-sonnet".
     if "claude" in mid and any(
-        t in mid for t in ("3.7", "3-7", "-4", "opus-4", "sonnet-4", "haiku-4")
+        t in mid for t in ("3.7", "3-7", "-4", "opus-4", "sonnet-4", "haiku-4", "opus-5", "sonnet-5", "haiku-5", "fable-5")
     ):
         return True
     # Google Gemini thinking.

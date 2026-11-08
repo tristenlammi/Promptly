@@ -127,6 +127,27 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords on Android: filter by tag, rename and delete folders, site icons you can turn on per vault, merge logins saved twice, and the passkey directory in the Security check.
 - Passwords on Android: Sends show their name and can copy their link again, or post it in Rooms or by Mail. Name an emergency contact and ask for access from the phone. A dropped attachment upload picks up where it stopped.
 
+## [0.30.0] - 2026-11-08
+
+### Fixed
+- Claude 5 models (Opus, Sonnet, Haiku and Fable 5) weren't recognised as thinking models when the provider's model list didn't say so, so a short reply could come back empty after the thinking used up its length limit.
+- Memory: Undo on a fact that had been changed deleted it. It now puts back what it said.
+- Memory: temporary chats could write to memory. They can't any more.
+- Mail: an email with crafted HTML (for example thousands of unclosed `<img` or `<script` tags) could tie up the mail worker for minutes per megabyte. Its HTML is now cleaned in linear time, with the same result as before.
+
+### Added
+- Memory: learns from whole chats once they go quiet, instead of a filter on each message that missed most of what people say. "Remember this" and corrections still apply straight away. Health and other sensitive details wait for your approval.
+- Memory: the AI can search your past chats. Temporary chats and chats with memory paused stay out.
+- Memory: facts are found by their exact words as well as by meaning, so names and numbers like "Parcel 7534" work, even with no embedder.
+- Memory: facts have dates and history. A fact can end on a date, what it used to say is kept, and one that's no longer true is retired where you can restore it. The limit goes from 200 facts to 2,000.
+- Memory: a project's facts stay in its workspace, while who you are applies everywhere.
+- Memory: nightly upkeep retires what's over, merges duplicates, and writes a short profile from your facts that's always in front of the AI.
+- Memory: "my wife" finds facts about Alex, using the names in your Contacts and Photos.
+- Memory: optionally learn from Mail, Calendar and Health. Off by default, one switch each, and everything is a suggestion you approve, with a link back to where it was found.
+- Memory: a button to go back through the last 90 days of chats, and a scorecard (`scripts/memory_scorecard.sh`) that measures how well it remembers.
+- Mail: select several emails to act on together. Ctrl-click picks them one by one, Shift-click picks everything between two, and Ctrl+A picks the whole list. Delete, archive, label, snooze, star or mark them from the bar above the list, by right-click, by key, or by dragging them.
+- Mail: Mark all as read, by right-clicking a folder, a label, an email or the list. It covers everything unread there, including what hasn't loaded yet.
+
 ## [0.29.0] - 2026-11-06
 
 ### Changed

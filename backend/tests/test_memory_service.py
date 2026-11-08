@@ -229,7 +229,7 @@ async def test_eviction_prefers_the_least_recently_useful(db, user):
     await db.commit()
 
     survivors = [
-        m.id for m in (await db.execute(select(UserMemory))).scalars().all()
+        m.id for m in (await db.execute(select(UserMemory).where(UserMemory.status == "active"))).scalars().all()
     ]
     assert stale.id not in survivors
     assert rare_but_recent.id in survivors
@@ -250,7 +250,7 @@ async def test_eviction_protects_rows_written_this_pass(db, user):
     await db.commit()
 
     survivors = [
-        m.id for m in (await db.execute(select(UserMemory))).scalars().all()
+        m.id for m in (await db.execute(select(UserMemory).where(UserMemory.status == "active"))).scalars().all()
     ]
     assert fresh.id in survivors
     assert old.id not in survivors
@@ -765,7 +765,7 @@ async def test_capture_rewrites_a_contradicted_fact_in_place(
     rows = (await db.execute(select(UserMemory))).scalars().all()
     assert [r.content for r in rows] == ["User works at Globex"]
     assert rows[0].id == stale.id
-    assert saved == [{"id": str(stale.id), "content": "User works at Globex"}]
+    assert saved == [{"id": str(stale.id), "content": "User works at Globex", "previous": {"content": "User works at Acme", "category": None}}]
 
 
 async def test_capture_deletes_a_retracted_fact(
@@ -779,7 +779,7 @@ async def test_capture_deletes_a_retracted_fact(
         [{"op": "delete", "id": str(doomed.id)}],
     )
 
-    assert (await db.execute(select(UserMemory))).scalars().all() == []
+    assert (await db.execute(select(UserMemory).where(UserMemory.status == "active"))).scalars().all() == []
     # A deletion isn't a save — surfacing it in the "saved to memory" chip
     # would be actively misleading. It's reported as a removal instead,
     # shown with an Undo (R-267).
@@ -870,7 +870,7 @@ async def test_capture_evicts_at_the_cap_rather_than_dropping_the_new_fact(
     )
 
     assert [s["content"] for s in saved] == ["User just moved to Berlin"]
-    rows = (await db.execute(select(UserMemory))).scalars().all()
+    rows = (await db.execute(select(UserMemory).where(UserMemory.status == "active"))).scalars().all()
     assert len(rows) == MAX_MEMORIES
 
 
@@ -1177,7 +1177,7 @@ async def _contents(user) -> list[str]:
 
     async with SessionLocal() as s:
         return sorted(
-            (await s.execute(select(UserMemory.content).where(UserMemory.user_id == user.id))).scalars()
+            (await s.execute(select(UserMemory.content).where(UserMemory.user_id == user.id, UserMemory.status == "active"))).scalars()
         )
 
 

@@ -141,8 +141,8 @@ async def add_label(db: AsyncSession, label_id: uuid.UUID, account_id: uuid.UUID
     await db.execute(statement.on_conflict_do_update(index_elements=["account_id", "thread_key"], set_={"label_id": label_id}))
 
 
-async def clear_label(db: AsyncSession, account_id: uuid.UUID, thread_key: str) -> None:
-    await db.execute(delete(MailThreadLabel).where(MailThreadLabel.account_id == account_id, MailThreadLabel.thread_key == thread_key))
+async def clear_labels(db: AsyncSession, account_id: uuid.UUID, thread_keys: list[str]) -> None:
+    await db.execute(delete(MailThreadLabel).where(MailThreadLabel.account_id == account_id, MailThreadLabel.thread_key.in_(thread_keys)))
 
 
 async def file_away(db: AsyncSession, account_id: uuid.UUID, label_id: uuid.UUID, messages: Iterable[MailMessage], roles: tuple[str, ...] | None = ("inbox",)) -> None:

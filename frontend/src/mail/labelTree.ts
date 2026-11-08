@@ -26,6 +26,12 @@ const parts = (name: string) => name.split("/").map((p) => p.trim()).filter(Bool
 
 export const shortName = (name: string) => parts(name).at(-1) ?? name;
 
+/** The labels nested anywhere under this one. */
+export function labelsInside(labels: MailLabel[], path: string): MailLabel[] {
+  const start = `${path.toLowerCase()}/`;
+  return labels.filter((l) => parts(l.name).join("/").toLowerCase().startsWith(start));
+}
+
 /** Every label in order, each one followed by what's inside it. */
 export function labelRows(labels: MailLabel[]): LabelRow[] {
   const root: Node = { path: "", name: "", label: null, children: new Map() };

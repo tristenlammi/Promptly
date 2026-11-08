@@ -121,6 +121,11 @@ def build_tools_system_prompt(
             "about the user, or that "
             "you don't have something personal, call `recall`."
         )
+        guidelines.append(
+            "- When they refer to something from an earlier conversation, or "
+            "before saying you don't remember something they told you, call "
+            "`search_past_chats`."
+        )
     if "code" in categories:
         guidelines.append(
             "- After `code_interpreter` runs, interpret the results briefly "

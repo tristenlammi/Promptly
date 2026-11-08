@@ -333,6 +333,8 @@ class FindPersonTool(Tool):
 
     async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         from app.auth.models import User
+        from app.memory.people import facts_about
+        from app.memory.service import resolve_memory_mode
         from app.people.directory import Person, complete, directory
         from app.people.router import _events, _hits, _rooms
 
@@ -381,6 +383,10 @@ class FindPersonTool(Tool):
                     if addr:
                         bits.append(f"address: {addr}")
                 bits.append(f"contact {c.get('id')} in Contacts file {p.file_id}")
+            if detailed and resolve_memory_mode(ctx.user) != "off":
+                remembered = await facts_about(ctx.db, ctx.user, p)
+                if remembered:
+                    bits.append("remembered: " + "; ".join(remembered))
             if detailed and p.user is not None and p.user.id != ctx.user.id:
                 try:
                     evs = await _events(ctx.db, ctx.user, p.user)

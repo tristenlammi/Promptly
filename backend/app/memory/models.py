@@ -12,7 +12,10 @@ from datetime import datetime
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from typing import Any
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -84,5 +87,47 @@ class UserMemory(UUIDPKMixin, TimestampMixin, Base):
     embed_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content_hash: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
+    # active | retired | suggested | dismissed (see constants).
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active", server_default="active")
+    # When it stopped being true, and why: replaced, no_longer_true, expired, stale,
+    # merged, capacity. A retired fact can be put back.
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    retired_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("user_memories.id", ondelete="SET NULL"), nullable=True)
+    # True until this date: a trip, a booking. Retired by itself after that.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # A fact about a project applies in that workspace. Empty means everywhere.
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=True)
+    # Where a suggestion came from, for the link back: {"kind", "id", "title"}.
+    source_ref: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    # Learned in the background and not mentioned to you yet.
+    unannounced: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+
     def __repr__(self) -> str:
         return f"<UserMemory id={self.id} user={self.user_id} src={self.source}>"
+
+
+class UserMemoryVersion(UUIDPKMixin, Base):
+    """What a fact used to say, up to the moment it changed."""
+
+    __tablename__ = "user_memory_versions"
+
+    memory_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("user_memories.id", ondelete="CASCADE"), nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    replaced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # user | chat | capture | upkeep
+    changed_by: Mapped[str] = mapped_column(String(16), nullable=False, default="user", server_default="user")
+
+
+class UserMemoryProfile(Base):
+    """A short description of someone, written from their facts each night."""
+
+    __tablename__ = "user_memory_profiles"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(32), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # What each fact said when this was written, to notice one that has since gone.
+    source_hashes: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")

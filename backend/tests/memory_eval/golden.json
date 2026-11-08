@@ -1,0 +1,1326 @@
+{
+ "_about": "The memory scorecard's test set. Everyone here is made up. Matching is by lowercase word fragments, so it costs no extra model calls and a run is repeatable. Groups in 'expect' are all required; inside a group any fragment will do.",
+ "persona": [
+  {
+   "text": "User's name is Jordan Reyes",
+   "category": "identity"
+  },
+  {
+   "text": "User is a physiotherapist",
+   "category": "identity"
+  },
+  {
+   "text": "User runs a clinic called Harbour Physio in Tamsin Bay",
+   "category": "identity"
+  },
+  {
+   "text": "User lives in Tamsin Bay",
+   "category": "identity"
+  },
+  {
+   "text": "User's pronouns are they/them",
+   "category": "identity"
+  },
+  {
+   "text": "User's birthday is 3 May",
+   "category": "identity"
+  },
+  {
+   "text": "User is married to Alex",
+   "category": "identity"
+  },
+  {
+   "text": "User has two children, Mia who is 9 and Leo who is 6",
+   "category": "identity"
+  },
+  {
+   "text": "User's sister Priya lives in Wellington and loves pottery",
+   "category": "context"
+  },
+  {
+   "text": "User's mother Rosa has a hip replacement booked",
+   "category": "context"
+  },
+  {
+   "text": "User's brother Sam works as an electrician",
+   "category": "context"
+  },
+  {
+   "text": "User's business partner at the clinic is Dana Whitlock",
+   "category": "context"
+  },
+  {
+   "text": "User's accountant is Felix Moore",
+   "category": "context"
+  },
+  {
+   "text": "User has a border collie called Biscuit who takes joint tablets twice a day",
+   "category": "context"
+  },
+  {
+   "text": "User is vegetarian",
+   "category": "preferences"
+  },
+  {
+   "text": "User's son Leo is allergic to peanuts",
+   "category": "context"
+  },
+  {
+   "text": "User has type 1 diabetes",
+   "category": "context"
+  },
+  {
+   "text": "User is allergic to penicillin",
+   "category": "context"
+  },
+  {
+   "text": "User prefers metric units",
+   "category": "preferences"
+  },
+  {
+   "text": "User prefers short answers without bullet points",
+   "category": "preferences"
+  },
+  {
+   "text": "User dislikes exclamation marks in writing",
+   "category": "preferences"
+  },
+  {
+   "text": "User prefers Australian English spelling",
+   "category": "preferences"
+  },
+  {
+   "text": "User uses Cliniko for patient records",
+   "category": "preferences"
+  },
+  {
+   "text": "User uses Xero for the clinic's bookkeeping",
+   "category": "preferences"
+  },
+  {
+   "text": "User drives a white Toyota Hilux",
+   "category": "context"
+  },
+  {
+   "text": "User's home wifi router is a Unifi Dream Machine",
+   "category": "context"
+  },
+  {
+   "text": "User is buying Parcel 7534, a block of land on Quarry Road",
+   "category": "projects"
+  },
+  {
+   "text": "User's builder for the new house is Marrow Constructions",
+   "category": "projects"
+  },
+  {
+   "text": "User's house plans include a separate studio for telehealth",
+   "category": "projects"
+  },
+  {
+   "text": "User is training for the Tamsin Bay half marathon in September",
+   "category": "projects"
+  },
+  {
+   "text": "User runs on Tuesday and Thursday mornings",
+   "category": "projects"
+  },
+  {
+   "text": "User is writing a home exercise guide for shoulder patients",
+   "category": "projects"
+  },
+  {
+   "text": "User is learning Spanish with an eye on a trip to Oaxaca",
+   "category": "projects"
+  },
+  {
+   "text": "User is building a Python script that imports Cliniko exports into Postgres",
+   "category": "projects"
+  },
+  {
+   "text": "User's clinic is closed on Fridays",
+   "category": "context"
+  },
+  {
+   "text": "User's clinic has four treatment rooms",
+   "category": "context"
+  },
+  {
+   "text": "User charges $110 for a standard consult",
+   "category": "context"
+  },
+  {
+   "text": "User's favourite coffee is a long black from Kettle & Crumb",
+   "category": "preferences"
+  },
+  {
+   "text": "User plays bass in a covers band called The Late Fees",
+   "category": "context"
+  },
+  {
+   "text": "User's band rehearses on Wednesday nights",
+   "category": "context"
+  },
+  {
+   "text": "User supports the Tamsin Bay Tigers in rugby league",
+   "category": "context"
+  },
+  {
+   "text": "User reads mostly science fiction, especially Ursula Le Guin",
+   "category": "preferences"
+  },
+  {
+   "text": "User's parents emigrated from Chile",
+   "category": "context"
+  },
+  {
+   "text": "User studied at the University of Otago",
+   "category": "identity"
+  },
+  {
+   "text": "User is afraid of flying",
+   "category": "context"
+  },
+  {
+   "text": "User grows tomatoes and chillies in raised beds",
+   "category": "context"
+  },
+  {
+   "text": "User's daughter Mia plays cello",
+   "category": "context"
+  },
+  {
+   "text": "User's son Leo goes to Greenwood Primary",
+   "category": "context"
+  },
+  {
+   "text": "User wants to retire from clinical work by 55",
+   "category": "projects"
+  },
+  {
+   "text": "User's PBS number starts with 88 and is kept in Xero",
+   "category": "context"
+  }
+ ],
+ "captured": [
+  {
+   "id": "family-allergy",
+   "turns": [
+    [
+     "My wife is allergic to peanuts, so nothing with satay please. Can you suggest a dinner for tonight?",
+     "How about a Thai green curry made without peanuts?"
+    ]
+   ],
+   "expect": [
+    [
+     "peanut"
+    ]
+   ]
+  },
+  {
+   "id": "kids",
+   "turns": [
+    [
+     "We have two kids, Mia and Leo. Any ideas for a rainy Saturday?",
+     "A museum trip or a baking session would suit them both."
+    ]
+   ],
+   "expect": [
+    [
+     "mia"
+    ]
+   ]
+  },
+  {
+   "id": "sibling",
+   "turns": [
+    [
+     "Sam is my brother and he's coming to stay next month. What should I cook for a crowd?",
+     "A big lasagne is hard to beat."
+    ]
+   ],
+   "expect": [
+    [
+     "sam",
+     "brother"
+    ]
+   ]
+  },
+  {
+   "id": "car",
+   "turns": [
+    [
+     "I bought a Tesla Model 3 last week. How often does it need servicing?",
+     "Tesla has no fixed schedule; it mostly needs tyre rotations and cabin filters."
+    ]
+   ],
+   "expect": [
+    [
+     "tesla"
+    ]
+   ]
+  },
+  {
+   "id": "condition",
+   "turns": [
+    [
+     "I have type 1 diabetes, so what's a good snack for a long hike?",
+     "Nuts and a fast-acting glucose source are a good pair."
+    ]
+   ],
+   "expect": [
+    [
+     "diabet"
+    ]
+   ]
+  },
+  {
+   "id": "diet",
+   "turns": [
+    [
+     "I'm vegetarian. What's a filling lunch that isn't a salad?",
+     "Try a lentil dal with flatbread."
+    ]
+   ],
+   "expect": [
+    [
+     "vegetarian"
+    ]
+   ]
+  },
+  {
+   "id": "anniversary",
+   "turns": [
+    [
+     "Our anniversary is 14 March. Where should I book in Melbourne?",
+     "Somewhere with a tasting menu would feel special."
+    ]
+   ],
+   "expect": [
+    [
+     "anniversary"
+    ],
+    [
+     "14",
+     "march"
+    ]
+   ]
+  },
+  {
+   "id": "school",
+   "turns": [
+    [
+     "My daughter's school is Greenwood. Does it matter that the uniform shop is closed?",
+     "You could order online instead."
+    ]
+   ],
+   "expect": [
+    [
+     "greenwood"
+    ]
+   ]
+  },
+  {
+   "id": "truck",
+   "turns": [
+    [
+     "I drive a Hilux. What tyres suit gravel roads?",
+     "All-terrain tyres are the usual choice."
+    ]
+   ],
+   "expect": [
+    [
+     "hilux"
+    ]
+   ]
+  },
+  {
+   "id": "land",
+   "turns": [
+    [
+     "Lot 7534 is the block we bought in Ballarat. What do I check before signing with a builder?",
+     "Check soil reports and any covenant on the land."
+    ]
+   ],
+   "expect": [
+    [
+     "7534"
+    ]
+   ]
+  },
+  {
+   "id": "business",
+   "turns": [
+    [
+     "I run a gym in Geelong. How do I word a price rise?",
+     "Be plain about the reason and give notice."
+    ]
+   ],
+   "expect": [
+    [
+     "gym"
+    ]
+   ]
+  },
+  {
+   "id": "allergy",
+   "turns": [
+    [
+     "I'm allergic to penicillin, so what should I tell a new GP?",
+     "Tell them at the start, and mention the reaction you had."
+    ]
+   ],
+   "expect": [
+    [
+     "penicillin"
+    ]
+   ]
+  },
+  {
+   "id": "moved",
+   "turns": [
+    [
+     "We moved to Ballarat. How do I change my licence address?",
+     "You can do it online through your state's transport site."
+    ]
+   ],
+   "expect": [
+    [
+     "ballarat"
+    ]
+   ]
+  },
+  {
+   "id": "tone",
+   "turns": [
+    [
+     "Can you make the tone less formal? I hate exclamation marks.",
+     "Sure, here it is without them."
+    ]
+   ],
+   "expect": [
+    [
+     "exclamation"
+    ]
+   ]
+  },
+  {
+   "id": "birthday",
+   "turns": [
+    [
+     "My birthday is 3 May. What's a good star sign joke for a card?",
+     "Taurus jokes about stubbornness always land."
+    ]
+   ],
+   "expect": [
+    [
+     "3 may",
+     "may 3",
+     "birthday"
+    ]
+   ]
+  },
+  {
+   "id": "new-job",
+   "turns": [
+    [
+     "I got a new job at Atlassian. What should I do in my first week?",
+     "Meet your team and learn how decisions get made."
+    ]
+   ],
+   "expect": [
+    [
+     "atlassian"
+    ]
+   ]
+  },
+  {
+   "id": "pet",
+   "turns": [
+    [
+     "Our dog Biscuit needs tablets twice a day. How do I stop him spitting them out?",
+     "Hide them in a bit of cheese."
+    ]
+   ],
+   "expect": [
+    [
+     "biscuit"
+    ]
+   ]
+  },
+  {
+   "id": "format",
+   "turns": [
+    [
+     "No, shorter. And never use bullet points with me.",
+     "Understood."
+    ]
+   ],
+   "expect": [
+    [
+     "bullet"
+    ]
+   ]
+  },
+  {
+   "id": "spread-over-turns",
+   "turns": [
+    [
+     "Can you help me plan a trip?",
+     "Of course. Where to?"
+    ],
+    [
+     "Oaxaca, I've been learning Spanish for it.",
+     "Lovely. When are you thinking?"
+    ],
+    [
+     "Probably next autumn, but I'm scared of flying so I need a plan for that.",
+     "A short course can help, and so can direct flights."
+    ]
+   ],
+   "expect": [
+    [
+     "spanish",
+     "oaxaca"
+    ],
+    [
+     "fly"
+    ]
+   ]
+  },
+  {
+   "id": "said-in-passing",
+   "turns": [
+    [
+     "What's a polite way to tell a patient they missed their appointment? I'm a physio, for context.",
+     "Keep it friendly and offer a new time."
+    ]
+   ],
+   "expect": [
+    [
+     "physio"
+    ]
+   ]
+  },
+  {
+   "id": "project",
+   "turns": [
+    [
+     "I'm writing a book about tide pools. How long should a chapter be?",
+     "Around 3,000 to 5,000 words suits popular non-fiction."
+    ]
+   ],
+   "expect": [
+    [
+     "tide pool",
+     "book"
+    ]
+   ]
+  },
+  {
+   "id": "tool",
+   "turns": [
+    [
+     "Everything at the clinic lives in Cliniko. Can it export to CSV?",
+     "Yes, reports can be exported as CSV."
+    ]
+   ],
+   "expect": [
+    [
+     "cliniko"
+    ]
+   ]
+  },
+  {
+   "id": "plan-dated",
+   "turns": [
+    [
+     "I'm flying to Tokyo on 12 December. What should I pack?",
+     "Layers, as December can be cold there."
+    ]
+   ],
+   "expect": [
+    [
+     "tokyo"
+    ]
+   ]
+  },
+  {
+   "id": "spanish-language",
+   "turns": [
+    [
+     "Me llamo Lucía y trabajo como enfermera. ¿Qué zapatos me recomiendas para turnos largos?",
+     "Unos zapatos con buena amortiguación."
+    ]
+   ],
+   "expect": [
+    [
+     "luc"
+    ],
+    [
+     "nurse",
+     "enfermera"
+    ]
+   ]
+  },
+  {
+   "id": "skip-question",
+   "turns": [
+    [
+     "What's the capital of Peru?",
+     "Lima."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "peru",
+    "lima"
+   ]
+  },
+  {
+   "id": "skip-task",
+   "turns": [
+    [
+     "Rewrite this sentence so it's shorter: the meeting has been moved to a later time.",
+     "The meeting has moved."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "meeting"
+   ]
+  },
+  {
+   "id": "skip-mood",
+   "turns": [
+    [
+     "I'm exhausted today, can you give me a quick dinner idea?",
+     "Eggs on toast."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "exhaust",
+    "tired"
+   ]
+  },
+  {
+   "id": "skip-someone-else",
+   "turns": [
+    [
+     "This article says the CEO of Acme loves sailing. Summarise it in one line.",
+     "Acme's CEO loves sailing."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "sailing"
+   ]
+  },
+  {
+   "id": "skip-secret",
+   "turns": [
+    [
+     "My wifi password is correcthorsebattery, can you tell me how to change it on a Unifi?",
+     "Open the Network app and go to WiFi settings."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "correcthorse"
+   ]
+  },
+  {
+   "id": "skip-hypothetical",
+   "turns": [
+    [
+     "If I were a vegan, what would I eat for protein?",
+     "Tofu, lentils and tempeh."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "vegan"
+   ]
+  }
+ ],
+ "found": [
+  {
+   "id": "exact-number",
+   "query": "What's still outstanding on Parcel 7534?",
+   "expect": [
+    [
+     "7534"
+    ]
+   ]
+  },
+  {
+   "id": "exact-business-name",
+   "query": "Draft a note to Marrow Constructions about the delay.",
+   "expect": [
+    [
+     "marrow"
+    ]
+   ]
+  },
+  {
+   "id": "person-by-name",
+   "query": "What should I get Priya for her birthday?",
+   "expect": [
+    [
+     "pottery"
+    ]
+   ]
+  },
+  {
+   "id": "person-accountant",
+   "query": "I need to send something to Felix before the end of the financial year.",
+   "expect": [
+    [
+     "felix"
+    ]
+   ]
+  },
+  {
+   "id": "person-dana",
+   "query": "How should I raise the rent split with Dana?",
+   "expect": [
+    [
+     "dana"
+    ]
+   ]
+  },
+  {
+   "id": "dinner-all-constraints",
+   "query": "Plan a week of family dinners for me.",
+   "expect": [
+    [
+     "vegetarian"
+    ],
+    [
+     "peanut"
+    ]
+   ]
+  },
+  {
+   "id": "travel-fear",
+   "query": "Help me plan getting to Mexico next year.",
+   "expect": [
+    [
+     "fly"
+    ],
+    [
+     "oaxaca"
+    ]
+   ]
+  },
+  {
+   "id": "antibiotic",
+   "query": "The GP wants to put me on amoxicillin for a chest infection. Anything I should mention?",
+   "expect": [
+    [
+     "penicillin"
+    ]
+   ]
+  },
+  {
+   "id": "food-condition",
+   "query": "What should I eat before my long run on Sunday?",
+   "expect": [
+    [
+     "diabet"
+    ]
+   ]
+  },
+  {
+   "id": "race",
+   "query": "Build me a training plan for the next ten weeks.",
+   "expect": [
+    [
+     "half marathon"
+    ]
+   ]
+  },
+  {
+   "id": "my-dog",
+   "query": "He keeps spitting out his medicine, any tricks?",
+   "history": [
+    "My dog is driving me mad."
+   ],
+   "expect": [
+    [
+     "biscuit"
+    ]
+   ]
+  },
+  {
+   "id": "short-follow-up",
+   "query": "Yes, do that.",
+   "history": [
+    "Can you check my Postgres import script for Cliniko exports?",
+    "Add better error handling to the import."
+   ],
+   "expect": [
+    [
+     "python",
+     "postgres"
+    ]
+   ]
+  },
+  {
+   "id": "writing-style",
+   "query": "Write an email telling patients about our new opening hours.",
+   "expect": [
+    [
+     "exclamation",
+     "australian",
+     "short answers"
+    ]
+   ]
+  },
+  {
+   "id": "clinic-hours",
+   "query": "When can a patient book in with me next week?",
+   "expect": [
+    [
+     "friday"
+    ]
+   ]
+  },
+  {
+   "id": "car-tyres",
+   "query": "What tyres should I fit to my ute?",
+   "expect": [
+    [
+     "hilux"
+    ]
+   ]
+  },
+  {
+   "id": "band",
+   "query": "Can I do Wednesday night drinks with the neighbours?",
+   "expect": [
+    [
+     "rehears"
+    ]
+   ]
+  },
+  {
+   "id": "kid-school",
+   "query": "Who do I call about Leo's excursion form?",
+   "expect": [
+    [
+     "greenwood"
+    ]
+   ]
+  },
+  {
+   "id": "kid-music",
+   "query": "Find a good music teacher for my daughter.",
+   "expect": [
+    [
+     "cello"
+    ]
+   ]
+  },
+  {
+   "id": "bookkeeping",
+   "query": "How do I record the new treatment table purchase?",
+   "expect": [
+    [
+     "xero"
+    ]
+   ]
+  },
+  {
+   "id": "books",
+   "query": "Recommend me something to read on holiday.",
+   "expect": [
+    [
+     "le guin",
+     "science fiction"
+    ]
+   ]
+  },
+  {
+   "id": "garden",
+   "query": "What should I plant next spring?",
+   "expect": [
+    [
+     "tomato"
+    ]
+   ]
+  },
+  {
+   "id": "what-language",
+   "query": "Quiero practicar español conmigo durante el viaje.",
+   "expect": [
+    [
+     "spanish"
+    ]
+   ]
+  },
+  {
+   "id": "footy",
+   "query": "How did my team go on the weekend?",
+   "expect": [
+    [
+     "tigers"
+    ]
+   ]
+  },
+  {
+   "id": "router",
+   "query": "My internet keeps dropping at home.",
+   "expect": [
+    [
+     "unifi"
+    ]
+   ]
+  },
+  {
+   "id": "family-mother",
+   "query": "What can I do to help Mum after her surgery?",
+   "expect": [
+    [
+     "rosa"
+    ]
+   ]
+  }
+ ],
+ "corrected": [
+  {
+   "id": "new-employer",
+   "facts": [
+    "User works at Acme as a designer"
+   ],
+   "turns": [
+    [
+     "I left Acme last month and started at Canva. How do I update my LinkedIn?",
+     "Change your current role and add a short summary."
+    ]
+   ],
+   "current": [
+    [
+     "canva"
+    ]
+   ],
+   "gone": [
+    "works at acme"
+   ]
+  },
+  {
+   "id": "no-longer-tool",
+   "facts": [
+    "User uses Vim as their main editor"
+   ],
+   "turns": [
+    [
+     "I don't use Vim any more, I've moved to VS Code. Which extensions do I need for Python?",
+     "Python and Pylance."
+    ]
+   ],
+   "current": [
+    [
+     "vs code",
+     "vscode"
+    ]
+   ],
+   "gone": [
+    "uses vim"
+   ]
+  },
+  {
+   "id": "moved-house",
+   "facts": [
+    "User lives in Tamsin Bay"
+   ],
+   "turns": [
+    [
+     "We've moved to Ballarat now. Where's a good place to get a coffee?",
+     "Try the cafes on Sturt Street."
+    ]
+   ],
+   "current": [
+    [
+     "ballarat"
+    ]
+   ],
+   "gone": [
+    "lives in tamsin"
+   ]
+  },
+  {
+   "id": "changed-diet",
+   "facts": [
+    "User is vegetarian"
+   ],
+   "turns": [
+    [
+     "I've started eating fish again. Any easy salmon recipes?",
+     "Pan-fried salmon with lemon is quick."
+    ]
+   ],
+   "current": [
+    [
+     "fish",
+     "salmon",
+     "pescatarian"
+    ]
+   ],
+   "gone": [
+    "user is vegetarian"
+   ]
+  },
+  {
+   "id": "race-switched",
+   "facts": [
+    "User is training for a half marathon in September"
+   ],
+   "turns": [
+    [
+     "I've pulled out of the half marathon, my knee's gone. What can I do instead for fitness?",
+     "Swimming and cycling are gentle on the knee."
+    ]
+   ],
+   "current": [],
+   "gone": [
+    "training for a half marathon"
+   ]
+  },
+  {
+   "id": "sold-car",
+   "facts": [
+    "User drives a white Toyota Hilux"
+   ],
+   "turns": [
+    [
+     "Sold the Hilux, I'm driving a Rav4 now. Does it need premium fuel?",
+     "No, regular unleaded is fine."
+    ]
+   ],
+   "current": [
+    [
+     "rav4"
+    ]
+   ],
+   "gone": [
+    "drives a white toyota hilux"
+   ]
+  },
+  {
+   "id": "preference-flip",
+   "facts": [
+    "User prefers short answers"
+   ],
+   "turns": [
+    [
+     "Actually, I'd like longer, more detailed answers from now on. What's a sourdough starter?",
+     "A sourdough starter is a live culture of flour and water..."
+    ]
+   ],
+   "current": [
+    [
+     "long",
+     "detail"
+    ]
+   ],
+   "gone": [
+    "prefers short"
+   ]
+  },
+  {
+   "id": "name-fix",
+   "facts": [
+    "User goes by Jo"
+   ],
+   "turns": [
+    [
+     "Please stop calling me Jo, it's Jordan. Anyway, what's a good stretch for a tight neck?",
+     "Try a slow chin tuck."
+    ]
+   ],
+   "current": [
+    [
+     "jordan"
+    ]
+   ],
+   "gone": []
+  },
+  {
+   "id": "project-finished",
+   "facts": [
+    "User is writing a home exercise guide for shoulder patients"
+   ],
+   "turns": [
+    [
+     "The shoulder guide is finally finished and printed. What should I work on next?",
+     "Maybe a matching guide for knees."
+    ]
+   ],
+   "current": [],
+   "gone": [
+    "is writing a home exercise guide"
+   ]
+  },
+  {
+   "id": "kept-unrelated",
+   "facts": [
+    "User is allergic to penicillin",
+    "User drives a white Toyota Hilux"
+   ],
+   "turns": [
+    [
+     "I bought new tyres for the Hilux today. How long until I rotate them?",
+     "Around every 10,000 km."
+    ]
+   ],
+   "current": [
+    [
+     "penicillin"
+    ],
+    [
+     "hilux"
+    ]
+   ],
+   "gone": []
+  }
+ ],
+ "unanswered": [
+  {
+   "id": "code-not-food",
+   "query": "Why does my for loop in Rust say the value was moved?",
+   "not_injected": [
+    "peanut",
+    "vegetarian",
+    "birthday",
+    "collie"
+   ]
+  },
+  {
+   "id": "history-not-family",
+   "query": "What caused the fall of the Roman Republic?",
+   "not_injected": [
+    "peanut",
+    "diabet",
+    "hilux",
+    "tomato"
+   ]
+  },
+  {
+   "id": "math-not-clinic",
+   "query": "What's the derivative of x squared times sin x?",
+   "not_injected": [
+    "clinic",
+    "cello",
+    "penicillin",
+    "hilux"
+   ]
+  },
+  {
+   "id": "space",
+   "query": "How far away is the Andromeda galaxy?",
+   "not_injected": [
+    "peanut",
+    "penicillin",
+    "hilux",
+    "cello"
+   ]
+  },
+  {
+   "id": "regex",
+   "query": "Write a regex that matches an IPv4 address.",
+   "not_injected": [
+    "peanut",
+    "cello",
+    "birthday"
+   ]
+  },
+  {
+   "id": "law",
+   "query": "What is the difference between a misdemeanour and a felony?",
+   "not_injected": [
+    "diabet",
+    "tomato",
+    "cello"
+   ]
+  },
+  {
+   "id": "translate",
+   "query": "Translate 'where is the train station' into German.",
+   "not_injected": [
+    "peanut",
+    "penicillin",
+    "hilux"
+   ]
+  },
+  {
+   "id": "weather-science",
+   "query": "Why is the sky blue?",
+   "not_injected": [
+    "peanut",
+    "penicillin",
+    "cello",
+    "hilux"
+   ]
+  },
+  {
+   "id": "ask-unknown-pet",
+   "query": "What's my cat's name?",
+   "abstain": true,
+   "not_injected": []
+  },
+  {
+   "id": "ask-unknown-blood",
+   "query": "What's my blood type?",
+   "abstain": true,
+   "not_injected": []
+  },
+  {
+   "id": "ask-unknown-boss",
+   "query": "What's my boss's phone number?",
+   "abstain": true,
+   "not_injected": []
+  },
+  {
+   "id": "ask-unknown-shoe",
+   "query": "What's my shoe size?",
+   "abstain": true,
+   "not_injected": []
+  },
+  {
+   "id": "ask-unknown-flight",
+   "query": "What time does my flight to Lisbon leave?",
+   "abstain": true,
+   "not_injected": []
+  },
+  {
+   "id": "ask-unknown-wedding",
+   "query": "Which day did I get married?",
+   "abstain": true,
+   "not_injected": []
+  }
+ ],
+ "past_chats": {
+  "chats": [
+   {
+    "id": "starter",
+    "turns": [
+     [
+      "My sourdough starter smells like nail polish remover, is it dead?",
+      "No, it's just hungry. Feed it twice a day for three days."
+     ]
+    ]
+   },
+   {
+    "id": "tax",
+    "turns": [
+     [
+      "Can I claim the treatment table on my tax?",
+      "Yes, as an instant asset write-off if it's under the threshold."
+     ]
+    ]
+   },
+   {
+    "id": "kitchen",
+    "turns": [
+     [
+      "Which benchtop should we pick for the new kitchen?",
+      "Engineered stone costs less, but porcelain handles heat better."
+     ],
+     [
+      "Let's go with porcelain then.",
+      "Good choice for a busy kitchen."
+     ]
+    ]
+   },
+   {
+    "id": "speech",
+    "turns": [
+     [
+      "Help me write a toast for Priya's wedding.",
+      "Start with the story about the pottery kiln, then finish on a wish for them both."
+     ]
+    ]
+   },
+   {
+    "id": "vpn",
+    "turns": [
+     [
+      "The clinic's WireGuard tunnel keeps dropping every few hours.",
+      "Set PersistentKeepalive to 25 on the peer behind NAT."
+     ]
+    ]
+   },
+   {
+    "id": "knee",
+    "turns": [
+     [
+      "My left knee aches on the downhill parts of my runs.",
+      "Shorten your stride on descents and strengthen your quads."
+     ]
+    ]
+   },
+   {
+    "id": "gift",
+    "turns": [
+     [
+      "What should I buy Alex for our tenth anniversary?",
+      "Tin is the traditional tenth; a custom tin print could be lovely."
+     ]
+    ]
+   },
+   {
+    "id": "unrelated",
+    "turns": [
+     [
+      "Convert 3 cups of flour to grams.",
+      "About 375 grams."
+     ]
+    ]
+   }
+  ],
+  "questions": [
+   {
+    "id": "exact-word",
+    "query": "wireguard",
+    "expect": "vpn"
+   },
+   {
+    "id": "by-topic",
+    "query": "what we decided about the kitchen benchtop",
+    "expect": "kitchen"
+   },
+   {
+    "id": "person",
+    "query": "Priya wedding toast",
+    "expect": "speech"
+   },
+   {
+    "id": "symptom",
+    "query": "knee pain running",
+    "expect": "knee"
+   },
+   {
+    "id": "bread",
+    "query": "sourdough starter",
+    "expect": "starter"
+   },
+   {
+    "id": "gift",
+    "query": "anniversary present for Alex",
+    "expect": "gift"
+   },
+   {
+    "id": "said-differently",
+    "query": "bread culture smelling odd",
+    "expect": "starter"
+   },
+   {
+    "id": "nothing-there",
+    "query": "kayak roof racks",
+    "expect": null
+   }
+  ]
+ }
+}

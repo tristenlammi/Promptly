@@ -6,7 +6,7 @@ Two jobs:
    facts into a system-prompt block, always including pinned facts first,
    then filling remaining slots with the top-K retrieved (or recency) facts.
 2. **Capture** — :func:`capture_memories` runs a cheap, bounded headless
-   extraction over the latest turn (gated by :func:`should_attempt_capture`
+   extraction over the latest turn (only for :func:`wants_saving_now`
    so ordinary turns cost nothing) and persists any genuinely new facts via
    a reconciliation pass that can add, update, or delete existing rows.
 """
@@ -19,7 +19,7 @@ import re
 from datetime import datetime, timezone
 from typing import Final
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.app_settings.defaults import load_effective_defaults
@@ -30,7 +30,12 @@ from app.custom_models.embedding import (
     vector_literal,
 )
 from app.chat.semantic_search import EmbeddingConfig, get_embedding_config
+from app.memory import recall
 from app.memory.constants import (
+    ACTIVE,
+    DISMISSED,
+    RETIRED,
+    SUGGESTED,
     MAX_CONTENT_CHARS,
     MAX_MEMORIES,
     MAX_PINNED_MEMORIES,
@@ -38,13 +43,59 @@ from app.memory.constants import (
     MEMORY_CATEGORIES,
     SEMANTIC_DUP_THRESHOLD,
 )
-from app.memory.models import UserMemory
+from app.memory.models import UserMemory, UserMemoryProfile, UserMemoryVersion
 from app.models_config.models import ModelProvider
 from app.models_config.provider import ChatMessage, model_router
 
 logger = logging.getLogger("promptly.memory")
 
 _VALID_CATEGORIES: frozenset[str] = frozenset(MEMORY_CATEGORIES)
+
+
+# For the places that look after the whole store, rather than a particular chat.
+EVERYWHERE: Final = object()
+
+
+def in_use(user_id, workspace=EVERYWHERE) -> list:
+    """Facts that count right now: not retired or waiting for approval, not past their
+    date, and for a chat, either general or about that chat's workspace."""
+    conditions = [
+        UserMemory.user_id == user_id,
+        UserMemory.status == ACTIVE,
+        or_(UserMemory.expires_at.is_(None), UserMemory.expires_at > func.now()),
+    ]
+    if workspace is not EVERYWHERE:
+        conditions.append(
+            UserMemory.workspace_id.is_(None) if workspace is None
+            else or_(UserMemory.workspace_id.is_(None), UserMemory.workspace_id == workspace)
+        )
+    return conditions
+
+
+def fact_hash(content: str) -> str:
+    return hashlib.md5(content.encode("utf-8"), usedforsecurity=False).hexdigest()
+
+
+async def profile_is_stale(db: AsyncSession, profile: UserMemoryProfile) -> bool:
+    """A new fact can wait for tonight. One it mentions that's gone or changed can't."""
+    if not profile.source_hashes:
+        return False
+    rows = (await db.execute(select(UserMemory.id, UserMemory.content).where(*in_use(profile.user_id, None)))).all()
+    current = {str(fact_id): fact_hash(content) for fact_id, content in rows}
+    return any(current.get(fact_id) != digest for fact_id, digest in profile.source_hashes.items())
+
+
+def retire(row: UserMemory, reason: str, superseded_by=None) -> None:
+    row.status = RETIRED
+    row.valid_until = datetime.now(timezone.utc)
+    row.retired_reason = reason
+    row.superseded_by = superseded_by
+    row.pinned = False
+
+
+def keep_version(db: AsyncSession, row: UserMemory, changed_by: str) -> None:
+    """Call before changing a fact's words, so what it said isn't lost."""
+    db.add(UserMemoryVersion(memory_id=row.id, content=row.content, category=row.category, changed_by=changed_by))
 
 
 def resolve_memory_mode(user) -> str:
@@ -185,164 +236,23 @@ async def embed_memory_row(
 # ----------------------------------------------------------------------
 # Capture pre-filter
 # ----------------------------------------------------------------------
-# Running an extra model call after every single turn would be wasteful,
-# so we only attempt capture when the user's message looks like it might
-# contain something durable: an explicit "remember…" request, or a
-# first-person statement of identity / preference / situation. Ordinary
-# Q&A turns ("what's the capital of France?") match nothing and skip the
-# extraction entirely — zero added cost.
-_CAPTURE_HINT_RE: Final[re.Pattern[str]] = re.compile(
-    r"""
-    \b(
-        # Explicit save requests (any phrasing)
-        remember\s+(that|this|my|i|to|me|the|we)
-      | don'?t\s+forget
-      | note\s+that
-      | keep\s+in\s+mind
-      | for\s+(future|next\s+time|reference)
-      | from\s+now\s+on
-      | store\s+this
-      | save\s+this
-      | make\s+a\s+note
-
-        # First-person identity/preference
-      | call\s+me
-      | my\s+name\s+is
-      | i\s?'?\s?a?m\s+(a|an)\b
-      | i\s+(prefer|like|love|hate|use|work|live|need|want|always|usually|never)\b
-      | i\s?'?\s?m\s+(working|building|using|learning|studying|based)
-      | my\s+(favou?rite|preferred|goal|job|role|team|stack|company|timezone|pronouns|project)
-
-        # Second-person (assistant noting something about the user)
-      | you\s+(are|were|have|prefer|use|work|like|need|always|usually|never)\b
-      | your\s+(name|role|job|team|stack|project|goal|company|timezone)\s+is
-
-        # Collective "we" — often about the project/team
-      | we\s+(use|prefer|chose|decided|standardis|settled\s+on|are\s+using|are\s+building)
-      | we'?\s*re\s+(using|building|migrating|moving|switching)
-
-        # Passive / project context
-      | (the\s+)?(project|app|system|repo|codebase|stack|database)\s+is\s+(called|named|built|using|based)
-
-        # Corrections, negations, and changes of state. The reconciliation
-        # pass can already rewrite and delete stale facts, but it only ever
-        # ran on turns that looked like assertions — so "I use Vim" was
-        # captured and "I don't use Vim any more" was not, and the store
-        # accumulated confidently-wrong facts with no way to retract them.
-        # These are the backstop for turns where the `remember` / `forget`
-        # tools aren't available (Tools toggle off).
-      | (i|we)\s+(no\s+longer|don'?t|do\s+not|used\s+to|never)\s
-      | not\s+(any\s?more|anymore|any\s+longer)
-      | (i|we)'?\s*(ve|m)?\s*(switched|moved|changed|migrated|left|quit|renamed)\b
-      | (stop|quit|don'?t)\s+(calling|call|using|use|suggesting|suggest|assuming|assume)
-      | (forget|disregard|ignore)\s+(that|what|the|my|about)
-      | scratch\s+that
-      | that'?s\s+(wrong|no\s+longer|not\s+right|outdated)
-      | actually,?\s+(i|we|my|it'?s)
-      | correction[:,\s]
-      | i\s+was\s+wrong
-    )\b
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
-
-# Multilingual capture hints (Memory follow-ups). The English pattern
-# above carries the fine-grained coverage; this companion covers explicit
-# save requests and first-person identity/preference statements in the
-# other major languages so non-English users get auto-capture at all.
-# Same philosophy: a cheap hint, not a parser — implicit phrasings in
-# these languages may still miss, but "remember…" / "my name is…" fire.
-# NOTE: no \b anchors — word boundaries don't exist for CJK scripts.
-_CAPTURE_HINT_INTL_RE: Final[re.Pattern[str]] = re.compile(
-    r"""
-    (
-        # Spanish
-        recu[eé]rda | acu[eé]rdate | no\s+olvides | me\s+llamo
-      | soy\s+(un|una)\s | prefiero\s | trabajo\s+(en|como)\s
-        # French
-      | souviens[- ]toi | rappelle[- ]toi | n'oublie\s+pas
-      | je\s+m'appelle | je\s+suis\s+(un|une)\s | je\s+pr[eé]f[eè]re\s
-      | je\s+travaille\s
-        # German
-      | merk\s+dir | vergiss\s+nicht | denk\s+daran | ich\s+hei[ßs]e
-      | ich\s+bin\s+(ein|eine)\s | ich\s+bevorzuge\s | ich\s+arbeite\s
-        # Portuguese
-      | lembre[- ]se | n[aã]o\s+esque[cç]a | me\s+chamo | eu\s+sou\s
-      | eu\s+prefiro\s | eu\s+trabalho\s
-        # Italian
-      | ricordati? | non\s+dimenticare | mi\s+chiamo | io\s+sono\s
-      | preferisco\s | lavoro\s+(in|come)\s
-        # Dutch
-      | onthoud\s | vergeet\s+niet | ik\s+heet\s | ik\s+ben\s+een\s
-        # Russian / Ukrainian
-      | запомни | не\s+забудь | меня\s+зовут | я\s+работаю | я\s+предпочитаю
-      | запам['’]?ятай | мене\s+звати | я\s+працюю
-        # Polish
-      | zapami[eę]taj | nie\s+zapomnij | mam\s+na\s+imi[eę] | pracuj[eę]\s+jako
-        # Turkish
-      | hat[iı]rla | unutma | benim\s+ad[iı]m | olarak\s+[cç]al[iı][sş][iı]yorum
-        # Arabic
-      | تذكر | لا\s+تنس | اسمي | أعمل
-        # Hindi
-      | याद\s+रख | मेरा\s+नाम | मैं\s+काम
-        # Chinese (simplified + traditional)
-      | 记住 | 記住 | 别忘 | 別忘 | 我叫 | 我是 | 我喜欢 | 我喜歡 | 我在.{0,6}工作
-        # Japanese
-      | 覚えて | 忘れないで | 私の名前 | 私は
-        # Korean
-      | 기억해 | 잊지\s*마 | 제\s*이름은 | 저는
-        # Vietnamese
-      | nhớ\s+r[aằ]ng | tên\s+tôi\s+là | tôi\s+là\s | tôi\s+thích\s
-        # Indonesian / Malay
-      | ingatlah\s | jangan\s+lupa | nama\s+saya | saya\s+(suka|bekerja)\s
-
-        # Corrections / negations, mirroring the English additions above.
-        # A store that can only learn and never unlearn is worse in every
-        # language, and the assertion bias was the same in all of them.
-        # Spanish
-      | ya\s+no\s | olv[ií]da\s+(que|lo)
-        # Portuguese
-      | j[aá]\s+n[ãa]o\s | esque[cç]a\s+(que|o)
-        # Italian
-      | non\s+\S{1,12}\s+pi[uù]\s | dimentica\s+(che|il)
-        # French
-      | ne\s+\S{1,12}\s+plus\s | oublie\s+(que|ça|ce)
-        # German
-      | nicht\s+mehr | vergiss\s+(dass|das)
-        # Dutch
-      | niet\s+meer | vergeet\s+dat
-        # Russian / Ukrainian
-      | больше\s+не | забудь\s+(что|о) | б[іi]льше\s+не
-        # Polish
-      | ju[zż]\s+nie | zapomnij\s+[oż]
-        # Chinese / Japanese / Korean
-      | 不再 | 已经不 | 已經不 | 忘记 | 忘記
-      | もう\S{0,4}ない | 忘れて
-      | 더\s?이상 | 잊어
-        # Vietnamese / Turkish / Arabic / Hindi
-      | kh[ôo]ng\s+c[òo]n | qu[êe]n\s
-      | art[iı]k\s+\S{1,12}\s+de[gğ]il | unut\s
-      | لم\s+أعد | انس\s
-      | अब\s+नहीं | भूल\s+जा
-    )
-    """,
-    re.IGNORECASE | re.VERBOSE,
-)
-
 _MAX_USER_CHARS: Final[int] = 4000
 _MAX_ASSISTANT_CHARS: Final[int] = 2000
-_MAX_EXTRACT_TOKENS: Final[int] = 500
+# Well over what a few facts need: a reply that hits the limit can come back empty.
+_MAX_EXTRACT_TOKENS: Final[int] = 1200
 
 
-def should_attempt_capture(user_text: str | None) -> bool:
-    """Cheap gate — only run the extraction model when the turn plausibly
-    contains a durable fact. Keeps cost at zero for normal Q&A turns."""
-    if not user_text:
-        return False
-    return bool(
-        _CAPTURE_HINT_RE.search(user_text)
-        or _CAPTURE_HINT_INTL_RE.search(user_text)
-    )
+def chat_may_write_memory(conversation) -> bool:
+    """A paused chat stays out of memory, and so does a temporary one: a chat that
+    deletes itself mustn't leave anything behind."""
+    return not conversation.memory_capture_paused and conversation.temporary_mode is None
+
+
+def wants_saving_now(user_text: str | None) -> bool:
+    """Everything else is learned once the chat has gone quiet (``capture.py``). "Remember
+    this" and "that's wrong" can't wait: the very next message may rely on them."""
+    text_ = user_text or ""
+    return is_explicit_memory_request(text_) or bool(CORRECTION_RE.search(text_))
 
 
 # Credential shapes that must never reach durable storage. Memory rows
@@ -415,6 +325,7 @@ def build_memory_prompt(
     *,
     total: int | None = None,
     can_recall: bool = False,
+    profile: str | None = None,
 ) -> str | None:
     """Render saved facts into a system-prompt block, or ``None`` when the
     user has no memories. Phrased as background knowledge with an explicit
@@ -433,8 +344,11 @@ def build_memory_prompt(
     confidently and incompletely, with no idea anything is missing.
     """
     kept = [m for m in memories if m.content and m.content.strip()]
+    about = f"About the user: {profile.strip()}" if profile and profile.strip() else None
     if not kept:
-        return None
+        if about is None:
+            return None
+        return about + "\n\nTreat this as background you already know; don't recite it."
 
     header = (
         "Saved memory about the user (durable facts from past "
@@ -451,6 +365,7 @@ def build_memory_prompt(
             else ", so don't imply this is everything you know."
         )
     lines = [
+        *([about, ""] if about else []),
         header,
         "",
         "Each line notes when it was learned, and whether the user stated "
@@ -468,6 +383,8 @@ def build_memory_prompt(
             if learned
             else f" ({origin})"
         )
+        if m.expires_at is not None:
+            stamp += f" (until {m.expires_at.strftime('%-d %b %Y')})"
         lines.append(f"- {m.content.strip()}{stamp}")
     lines.append("")
     lines.append(
@@ -479,14 +396,14 @@ def build_memory_prompt(
 
 
 async def load_memories(
-    db: AsyncSession, user_id, *, limit: int = MAX_MEMORIES
+    db: AsyncSession, user_id, *, limit: int = MAX_MEMORIES, workspace=EVERYWHERE
 ) -> list[UserMemory]:
     """Most-recent-first slice of a user's memories (capped)."""
     rows = (
         (
             await db.execute(
                 select(UserMemory)
-                .where(UserMemory.user_id == user_id)
+                .where(*in_use(user_id, workspace))
                 .order_by(UserMemory.created_at.desc())
                 .limit(limit)
             )
@@ -498,7 +415,7 @@ async def load_memories(
 
 
 async def load_pinned_memories(
-    db: AsyncSession, user_id
+    db: AsyncSession, user_id, workspace=EVERYWHERE
 ) -> list[UserMemory]:
     """Pinned facts for a user, newest first, capped.
 
@@ -521,7 +438,7 @@ async def load_pinned_memories(
         (
             await db.execute(
                 select(UserMemory)
-                .where(UserMemory.user_id == user_id, UserMemory.pinned.is_(True))
+                .where(*in_use(user_id, workspace), UserMemory.pinned.is_(True))
                 .order_by(UserMemory.created_at.desc())
                 .limit(MAX_PINNED_MEMORIES)
             )
@@ -532,12 +449,12 @@ async def load_pinned_memories(
     return list(rows)
 
 
-async def count_memories(db: AsyncSession, user_id) -> int:
+async def count_memories(db: AsyncSession, user_id, workspace=EVERYWHERE) -> int:
     return int(
         await db.scalar(
             select(func.count())
             .select_from(UserMemory)
-            .where(UserMemory.user_id == user_id)
+            .where(*in_use(user_id, workspace))
         )
         or 0
     )
@@ -556,6 +473,7 @@ async def retrieve_relevant_memories(
     cfg: EmbeddingConfig | None = None,
     exclude_ids: set | None = None,
     strict: bool = False,
+    workspace=EVERYWHERE,
 ) -> list[UserMemory]:
     """Return up to ``k`` memories most relevant to ``query`` by cosine
     similarity, falling back to most-recent-first when embeddings aren't
@@ -584,9 +502,26 @@ async def retrieve_relevant_memories(
             return []
         return [m for m in rows if m.id not in _excl][:k]
 
-    if cfg is None or not cleaned:
-        rows = await load_memories(db, user_id, limit=k + len(_excl))
-        return _fallback(rows)
+    if not cleaned:
+        return _fallback(await load_memories(db, user_id, limit=k + len(_excl), workspace=workspace))
+
+    # By the words in them. This doesn't need an embedder, so it's also the answer
+    # when there isn't one working.
+    all_facts = (await db.execute(select(UserMemory.id, UserMemory.content).where(*in_use(user_id, workspace)))).all()
+    by_words = [fact_id for fact_id, _score in recall.keyword_ranking(cleaned, [(r[0], r[1]) for r in all_facts]) if fact_id not in _excl]
+
+    async def _by_ids(ids: list) -> list[UserMemory]:
+        rows = (await db.execute(select(UserMemory).where(UserMemory.id.in_(ids)))).scalars().all()
+        found = {m.id: m for m in rows}
+        return [found[i] for i in ids if i in found]
+
+    async def _without_meaning() -> list[UserMemory]:
+        if by_words:
+            return await _by_ids(by_words[:k])
+        return _fallback(await load_memories(db, user_id, limit=k + len(_excl), workspace=workspace))
+
+    if cfg is None:
+        return await _without_meaning()
 
     try:
         vectors = await embed_texts(
@@ -601,16 +536,20 @@ async def retrieve_relevant_memories(
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("memory retrieval embed failed user=%s: %s", user_id, exc)
-        rows = await load_memories(db, user_id, limit=k + len(_excl))
-        return _fallback(rows)
+        return await _without_meaning()
     if not vectors:
-        rows = await load_memories(db, user_id, limit=k + len(_excl))
-        return _fallback(rows)
+        return await _without_meaning()
 
     col = f"embedding_{cfg.dim}"
     # Over-fetch so the usage-aware re-rank below has candidates to promote
     # and excluded ids don't starve the result.
-    fetch_k = max(k * 2, k + len(_excl) + 5)
+    fetch_k = max(k * 3, k + len(_excl) + 5)
+    scope = ""
+    scope_params: dict = {}
+    if workspace is not EVERYWHERE:
+        scope = "AND workspace_id IS NULL" if workspace is None else "AND (workspace_id IS NULL OR workspace_id = :ws)"
+        if workspace is not None:
+            scope_params["ws"] = workspace
     sql = text(
         f"""
         SELECT id,
@@ -619,6 +558,8 @@ async def retrieve_relevant_memories(
                last_used_at
         FROM user_memories
         WHERE user_id = :uid AND {col} IS NOT NULL AND embed_model = :em
+          AND status = 'active' AND (expires_at IS NULL OR expires_at > now())
+          {scope}
         ORDER BY dist
         LIMIT :k
         """
@@ -633,29 +574,27 @@ async def retrieve_relevant_memories(
             rows_raw = (
                 await db.execute(
                     sql,
-                    {"uid": user_id, "qvec": vector_literal(vectors[0]), "k": fetch_k, "em": cfg.model_id},
+                    {"uid": user_id, "qvec": vector_literal(vectors[0]), "k": fetch_k, "em": cfg.model_id, **scope_params},
                 )
             ).all()
     except Exception as exc:  # noqa: BLE001
         logger.warning("memory retrieval query failed user=%s: %s", user_id, exc)
-        rows = await load_memories(db, user_id, limit=k + len(_excl))
-        return _fallback(rows)
+        return await _without_meaning()
 
-    # Usage-aware re-rank (Dynamics batch): cosine relevance dominates, but
-    # facts that keep proving useful get a small, bounded boost — enough to
-    # win near-ties, never enough to beat a genuinely on-topic fact.
+    # Usage-aware re-rank (Dynamics batch): relevance dominates, but facts that keep
+    # proving useful get a small, bounded boost — enough to win near-ties, never
+    # enough to beat a genuinely on-topic fact.
     now = datetime.now(timezone.utc)
 
-    def _rank(row) -> float:
-        _rid, dist, times_used, last_used_at = row
-        score = 1.0 - float(dist)
-        score += 0.004 * min(int(times_used or 0), 20)  # ≤ +0.08 lifetime
+    def _boost(row) -> float:
+        _rid, _dist, times_used, last_used_at = row
+        boost = 1.0 + 0.002 * min(int(times_used or 0), 20)  # ≤ +4% lifetime
         if last_used_at is not None:
             if last_used_at.tzinfo is None:
                 last_used_at = last_used_at.replace(tzinfo=timezone.utc)
             if (now - last_used_at).days <= 14:
-                score += 0.03  # recently useful
-        return score
+                boost += 0.015  # recently useful
+        return boost
 
     # Nearest isn't the same as relevant: with a handful of facts the top-k
     # were injected into every chat however unrelated ("allergic to
@@ -664,22 +603,14 @@ async def retrieve_relevant_memories(
         r for r in rows_raw
         if r[0] not in _excl and 1.0 - float(r[1]) >= _MIN_MEMORY_SIMILARITY
     ]
-    candidates.sort(key=_rank, reverse=True)
-    ids = [r[0] for r in candidates][:k]
+    boosts = {r[0]: _boost(r) for r in candidates}
+    fused = recall.fuse([r[0] for r in candidates], by_words)
+    ids = sorted(fused, key=lambda i: fused[i] * boosts.get(i, 1.0), reverse=True)[:k]
     if not ids and any(r[0] not in _excl for r in rows_raw):
         return []  # facts are embedded, just none on topic — inject nothing
     if not ids:
-        rows = await load_memories(db, user_id, limit=k + len(_excl))
-        return _fallback(rows)
-
-    fetched = (
-        (await db.execute(select(UserMemory).where(UserMemory.id.in_(ids))))
-        .scalars()
-        .all()
-    )
-    # Preserve the cosine ordering (SQL IN doesn't guarantee it).
-    by_id = {m.id: m for m in fetched}
-    return [by_id[i] for i in ids if i in by_id]
+        return _fallback(await load_memories(db, user_id, limit=k + len(_excl), workspace=workspace))
+    return await _by_ids(ids)
 
 
 async def build_memory_system_prompt(
@@ -689,6 +620,8 @@ async def build_memory_system_prompt(
     query: str | None = None,
     k: int = MAX_MEMORIES,
     can_recall: bool = False,
+    workspace_id=None,
+    viewer=None,
 ) -> tuple[str | None, list[UserMemory]]:
     """Load, render, and stamp usage for a chat turn's system-prompt block.
 
@@ -702,7 +635,12 @@ async def build_memory_system_prompt(
     Phase 3.1: stamps ``times_used`` / ``last_used_at`` on every injected
     fact as a best-effort UPDATE (never fails the chat turn on error).
     """
-    pinned = await load_pinned_memories(db, user_id)
+    if viewer is not None and query:
+        # "my wife" also finds a fact that only says "Alex".
+        from app.memory.people import widen_query
+
+        query = await widen_query(db, viewer, query)
+    pinned = await load_pinned_memories(db, user_id, workspace_id)
     pinned_ids = {m.id for m in pinned}
     # Pinned facts used to consume the whole budget: ten pins drove
     # ``remaining_k`` to zero, so semantic retrieval never ran and the
@@ -718,6 +656,7 @@ async def build_memory_system_prompt(
             query=query,
             k=remaining_k,
             exclude_ids=pinned_ids,
+            workspace=workspace_id,
         )
     else:
         retrieved = []
@@ -745,9 +684,13 @@ async def build_memory_system_prompt(
 
     # The count is what lets the block admit it's a selection. One
     # indexed COUNT, and only when something was actually injected.
-    total = await count_memories(db, user_id) if all_memories else 0
+    total = await count_memories(db, user_id, workspace_id) if all_memories else 0
+    profile = await db.get(UserMemoryProfile, user_id)
+    # A profile written from a fact that has since gone or changed mustn't keep saying it.
+    if profile is not None and await profile_is_stale(db, profile):
+        profile = None
     return (
-        build_memory_prompt(all_memories, total=total, can_recall=can_recall),
+        build_memory_prompt(all_memories, total=total, can_recall=can_recall, profile=profile.content if profile else None),
         all_memories,
     )
 
@@ -758,41 +701,60 @@ async def build_memory_system_prompt(
 # the stale fact in place instead of stacking a duplicate. Phase 2.1 adds
 # category tagging to each add/update op.
 _CATEGORY_LIST = " | ".join(MEMORY_CATEGORIES)
+OPERATION_RULES: Final[str] = (
+    "Operations:\n"
+    '  {"op": "add", "text": "<new durable fact>", "category": "<cat>", "confidence": "high"|"low"} — '
+    "a genuinely new fact not already covered by the existing list. Set "
+    'confidence to "high" ONLY when you are certain this is true of the user and '
+    'still useful later. Use "low" for anything borderline — low-confidence adds '
+    "are automatically discarded.\n"
+    '  {"op": "update", "id": "<existing id>", "text": "<rewritten fact>", "category": "<cat>"} '
+    "— when the conversation refines or CONTRADICTS an existing fact (e.g. the "
+    "user switched their main language, sold their car, started eating fish); "
+    "rewrite that fact in place to say what's true now.\n"
+    '  {"op": "delete", "id": "<existing id>"} — when an existing fact is no '
+    "longer true and has no replacement (e.g. they pulled out of a race, finished "
+    "a project).\n\n"
+    'On an add or update, set "until": "YYYY-MM-DD" when it\'s only true up to a '
+    "date, such as a trip or a booking. Work the date out from when it was said; a "
+    "date with no year is the next time that date comes round. "
+    "Plans like these are worth keeping, with their date.\n"
+    'On an add, set "sensitive": true for health, medical or mental health details, '
+    "allergies, sexuality, religion, politics, or money troubles; it will be offered "
+    "to the user to approve rather than saved.\n\n"
+    f"Categories (use exactly one per add/update): {_CATEGORY_LIST}\n"
+    "  identity = name, role, occupation, location, pronouns, family\n"
+    "  preferences = tools, languages, formats, style, units, food\n"
+    "  projects = active work, goals, ongoing builds, plans\n"
+    "  context = other durable background facts\n\n"
+    "Keep durable, reusable facts about the USER and the people close to them: who "
+    "they are, what they do and own, tools they use, stable preferences, ongoing "
+    "projects, dated plans, and explicit 'remember this' requests.\n"
+    "Never keep: the answer to their question, one-off task details, moods ('I'm "
+    "tired today'), or passwords, card or ID numbers, even when asked. Don't repeat "
+    "facts already present and unchanged.\n\n"
+    "Write each fact as a single concise third-person statement starting with "
+    "'User ' (e.g. 'User is a Rust developer'), and keep names and numbers exactly "
+    "as given. Only use ids that appear in the existing list. If nothing should "
+    "change, output []."
+)
+
 _RECONCILE_SYSTEM_PROMPT: Final[str] = (
     "You maintain a long-term memory of durable facts about a user for an "
     "AI assistant. You are given the latest exchange between the user and "
     "the assistant, plus the user's EXISTING saved facts (each with an id). "
     "Decide how the exchange should change memory and output ONLY a JSON "
-    "array of operation objects.\n\n"
-    "Operations:\n"
-    '  {"op": "add", "text": "<new durable fact>", "category": "<cat>", "confidence": "high"|"low"} — '
-    "a genuinely new fact not already covered by the existing list. Set "
-    "confidence to \"high\" ONLY when you are certain this fact is durable "
-    "and will still be relevant weeks from now. Use \"low\" for anything "
-    "borderline — low-confidence adds are automatically discarded.\n"
-    '  {"op": "update", "id": "<existing id>", "text": "<rewritten fact>", "category": "<cat>"} '
-    "— when the exchange refines or CONTRADICTS an existing fact (e.g. the "
-    "user switched their main language); rewrite that fact in place.\n"
-    '  {"op": "delete", "id": "<existing id>"} — when an existing fact is no '
-    "longer true and has no replacement.\n\n"
-    f"Categories (use exactly one per add/update): {_CATEGORY_LIST}\n"
-    "  identity = name, role, occupation, location, pronouns\n"
-    "  preferences = tools, languages, formats, style, units\n"
-    "  projects = active work, goals, ongoing builds\n"
-    "  context = other durable background facts\n\n"
-    "Capture durable, reusable facts about the USER: their name or what to "
-    "call them, role/profession, tools/languages/frameworks, stable "
-    "preferences (tone, format, units), ongoing projects, and explicit "
-    "'remember this' requests.\n"
-    "Do NOT capture (always use confidence 'low' or omit): one-off task "
-    "details, the answer to their question, transient state, time-bound "
-    "statements ('I'm tired today', 'I'm in a meeting'), emotional states, "
-    "sensitive data they didn't ask you to remember (passwords, full "
-    "card/ID numbers), or facts already present AND unchanged.\n\n"
-    "Write each fact as a single concise third-person statement starting "
-    "with 'User ' (e.g. 'User is a Rust developer'). Only use ids that "
-    "appear in the existing list. If nothing should change, output []."
+    "array of operation objects.\n\n" + OPERATION_RULES
 )
+
+
+def _until(value) -> datetime | None:
+    """The end of that day. Nonsense, or a day that's already gone, counts as no date."""
+    try:
+        day = datetime.strptime(str(value).strip()[:10], "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return day if day > datetime.now(timezone.utc) else None
 
 
 def _parse_ops(raw: str, valid_ids: set[str]) -> list[dict]:
@@ -832,19 +794,30 @@ def _parse_ops(raw: str, valid_ids: set[str]) -> list[dict]:
             # to capture secrets, and this is the part that doesn't depend
             # on the model having listened.
             if txt and confidence == "high" and not looks_sensitive(txt):
-                ops.append({"op": "add", "text": txt[:MAX_CONTENT_CHARS], "category": category})
+                added = {"op": "add", "text": txt[:MAX_CONTENT_CHARS], "category": category}
+                if item.get("until"):
+                    # A plan that's already over isn't worth keeping.
+                    until = _until(item["until"])
+                    if until is None:
+                        continue
+                    added["until"] = until
+                if item.get("sensitive") is True:
+                    added["sensitive"] = True
+                ops.append(added)
         elif op == "update":
             mid = str(item.get("id") or "")
             txt = (item.get("text") or "").strip()
             if mid in valid_ids and txt and not looks_sensitive(txt):
-                ops.append(
-                    {
-                        "op": "update",
-                        "id": mid,
-                        "text": txt[:MAX_CONTENT_CHARS],
-                        "category": category,
-                    }
-                )
+                changed = {
+                    "op": "update",
+                    "id": mid,
+                    "text": txt[:MAX_CONTENT_CHARS],
+                    "category": category,
+                }
+                until = _until(item["until"]) if item.get("until") else None
+                if until is not None:
+                    changed["until"] = until
+                ops.append(changed)
         elif op == "delete":
             mid = str(item.get("id") or "")
             if mid in valid_ids:
@@ -852,8 +825,11 @@ def _parse_ops(raw: str, valid_ids: set[str]) -> list[dict]:
     return ops
 
 
+parse_ops = _parse_ops
+
+
 async def _nearest_similarity(
-    db: AsyncSession, user_id, cfg: EmbeddingConfig, candidate: str
+    db: AsyncSession, user_id, cfg: EmbeddingConfig, candidate: str, workspace=EVERYWHERE
 ) -> float:
     """Best cosine similarity (0–1) between ``candidate`` and any of the
     user's existing embedded memories. ``0.0`` when nothing is embedded or
@@ -874,11 +850,19 @@ async def _nearest_similarity(
     if not vectors:
         return 0.0
     col = f"embedding_{cfg.dim}"
+    # A fact that's only true in another workspace doesn't make this one a repeat.
+    scope = ""
+    params: dict = {}
+    if workspace is not EVERYWHERE:
+        scope = "AND workspace_id IS NULL" if workspace is None else "AND (workspace_id IS NULL OR workspace_id = :ws)"
+        if workspace is not None:
+            params["ws"] = workspace
     sql = text(
         f"""
         SELECT 1 - ({col} <=> CAST(:qvec AS vector({cfg.dim}))) AS sim
         FROM user_memories
-        WHERE user_id = :uid AND {col} IS NOT NULL AND embed_model = :em
+        WHERE user_id = :uid AND {col} IS NOT NULL AND embed_model = :em AND status <> 'retired'
+          {scope}
         ORDER BY {col} <=> CAST(:qvec AS vector({cfg.dim}))
         LIMIT 1
         """
@@ -886,7 +870,7 @@ async def _nearest_similarity(
     try:
         row = (
             await db.execute(
-                sql, {"uid": user_id, "qvec": vector_literal(vectors[0]), "em": cfg.model_id}
+                sql, {"uid": user_id, "qvec": vector_literal(vectors[0]), "em": cfg.model_id, **params}
             )
         ).first()
     except Exception:  # noqa: BLE001
@@ -910,6 +894,7 @@ async def _evict_for_capture(
     """
     stmt = select(UserMemory).where(
         UserMemory.user_id == user_id,
+        UserMemory.status == ACTIVE,
         UserMemory.source == "auto",
         UserMemory.pinned.is_(False),
     )
@@ -929,12 +914,12 @@ async def _evict_for_capture(
     if row is None:
         return False
     logger.info(
-        "memory cap: evicting auto fact id=%s uses=%d user=%s",
+        "memory cap: retiring auto fact id=%s uses=%d user=%s",
         row.id,
         row.times_used,
         user_id,
     )
-    await db.delete(row)
+    retire(row, "capacity")
     return True
 
 
@@ -998,7 +983,7 @@ async def resolve_memory_model(
     return None
 
 
-_CORRECTION_RE: Final[re.Pattern[str]] = re.compile(
+CORRECTION_RE: Final[re.Pattern[str]] = re.compile(
     r"\b(no longer|not any ?more|anymore|actually|i stopped|i've stopped|i switched|"
     r"i've switched|i moved|i've moved|that's wrong|that is wrong|not true|"
     r"correction|forget (that|it)|update (that|my))\b",
@@ -1015,6 +1000,7 @@ async def capture_memories(
     source_conversation_id,
     provider: ModelProvider,
     model_id: str,
+    workspace_id=None,
 ) -> list[dict]:
     """Extract durable facts from the latest turn and persist the new ones.
 
@@ -1043,18 +1029,15 @@ async def capture_memories(
     provider, model_id = resolved
 
     cfg = await get_embedding_config(db)
-    total = await count_memories(db, user_id)
 
     # Show the model the existing facts most RELATED to this turn (with
     # ids) so it can update/contradict them rather than stack duplicates.
     # Falls back to most-recent when embeddings are off. Bounded so the
     # prompt stays cheap regardless of store size.
     related = await retrieve_relevant_memories(
-        db, user_id, query=user_text, k=15, cfg=cfg
+        db, user_id, query=user_text, k=15, cfg=cfg, workspace=workspace_id
     )
-    existing_keys = {_normalise(m.content) for m in related}
     valid_ids = {str(m.id) for m in related}
-    by_id = {str(m.id): m for m in related}
 
     if related:
         existing_block = "\n".join(
@@ -1064,6 +1047,7 @@ async def capture_memories(
         existing_block = "(none yet)"
 
     payload = (
+        f"Today is {datetime.now(timezone.utc):%Y-%m-%d}.\n\n"
         f"EXISTING FACTS:\n{existing_block}\n\n"
         f"LATEST EXCHANGE:\nUser said:\n{user_text}"
     )
@@ -1087,9 +1071,76 @@ async def capture_memories(
         return []
 
     ops = _parse_ops("".join(chunks), valid_ids)
+    results = await apply_ops(
+        db,
+        user_id=user_id,
+        ops=ops,
+        related=related,
+        existing_keys=await existing_keys_for_capture(db, user_id, related),
+        cfg=cfg,
+        source_conversation_id=source_conversation_id,
+        workspace_id=workspace_id,
+        corrects=is_explicit_memory_request(user_text) or bool(CORRECTION_RE.search(user_text or "")),
+        explicit=is_explicit_memory_request(user_text),
+        changed_by="chat",
+    )
+    if results:
+        await db.commit()
+    return results
+
+
+async def take_unannounced(db: AsyncSession, user_id) -> dict | None:
+    """What was learned in the background since you last heard, once."""
+    rows = (await db.execute(
+        select(UserMemory).where(UserMemory.user_id == user_id, UserMemory.unannounced.is_(True)).order_by(UserMemory.created_at).limit(50)
+    )).scalars().all()
+    if not rows:
+        return None
+    learned = [m.content for m in rows if m.status == ACTIVE]
+    waiting = sum(m.status == SUGGESTED for m in rows)
+    await db.execute(
+        update(UserMemory).where(UserMemory.id.in_([m.id for m in rows])).values(unannounced=False, updated_at=UserMemory.updated_at)
+    )
+    await db.commit()
+    return {"facts": learned[:5], "count": len(learned), "suggested": waiting}
+
+
+async def related_facts(db: AsyncSession, user_id, query: str, *, cfg, workspace=EVERYWHERE, k: int = 25) -> list[UserMemory]:
+    """The facts a capture pass should see, so it can change them rather than repeat them."""
+    return await retrieve_relevant_memories(db, user_id, query=query[-3000:], k=k, cfg=cfg, workspace=workspace)
+
+
+async def existing_keys_for_capture(db: AsyncSession, user_id, related: list[UserMemory]) -> set[str]:
+    """Also what's waiting for approval or was turned down: don't offer those again."""
+    waiting = (await db.execute(select(UserMemory.content).where(UserMemory.user_id == user_id, UserMemory.status.in_((SUGGESTED, DISMISSED))))).scalars().all()
+    return {_normalise(m.content) for m in related} | {_normalise(c) for c in waiting}
+
+
+async def apply_ops(
+    db: AsyncSession,
+    *,
+    user_id,
+    ops: list[dict],
+    related: list[UserMemory],
+    existing_keys: set[str],
+    cfg,
+    source_conversation_id,
+    workspace_id,
+    corrects: bool,
+    explicit: bool,
+    changed_by: str,
+    max_new: int = MAX_NEW_PER_TURN,
+    announce: bool = False,
+) -> list[dict]:
+    """Make a capture pass's changes. Flushes and leaves the commit to the caller.
+
+    Returns ``{"id", "content"}`` for what was added, plus ``previous`` for what was
+    changed and ``removed`` for what was retired, so each can be shown with an Undo.
+    """
     if not ops:
         return []
-
+    by_id = {str(m.id): m for m in related}
+    total = await count_memories(db, user_id)
     # Separate tracking: updates know their id immediately (the row already
     # exists); new rows get their id after flush().
     saved_updates: list[dict] = []
@@ -1101,8 +1152,6 @@ async def capture_memories(
     # user wrote themselves only when this message corrects them ("I no
     # longer use Vim", "actually…"). Capture used to quietly rewrite or
     # delete both (R-267/R-292).
-    corrects = is_explicit_memory_request(user_text) or bool(_CORRECTION_RE.search(user_text or ""))
-
     def _protected(row: UserMemory) -> bool:
         if row.pinned:
             return True
@@ -1116,7 +1165,7 @@ async def capture_memories(
                 removed.append(
                     {"id": str(row.id), "content": row.content, "category": row.category, "removed": True}
                 )
-                await db.delete(row)
+                retire(row, "no_longer_true")
             elif row is not None:
                 logger.info("memory capture: left protected fact %s alone (delete)", row.id)
             continue
@@ -1130,15 +1179,20 @@ async def capture_memories(
             new_text = op["text"]
             if _normalise(new_text) == _normalise(row.content):
                 continue  # no real change
+            before = {"content": row.content, "category": row.category}
+            keep_version(db, row, changed_by)
             row.content = new_text
             # Update category if the model provided one.
             if op.get("category"):
                 row.category = op["category"]
+            if op.get("until"):
+                row.expires_at = op["until"]
+            row.unannounced = announce
             updated_rows.append(row)
-            saved_updates.append({"id": str(row.id), "content": new_text})
+            saved_updates.append({"id": str(row.id), "content": new_text, "previous": before})
             continue
         # add
-        if len(new_rows) >= MAX_NEW_PER_TURN:
+        if len(new_rows) >= max_new:
             continue
         fact = op["text"]
         if _is_duplicate(fact, list(existing_keys)):
@@ -1147,16 +1201,13 @@ async def capture_memories(
         # substring check would miss ("User is a dev" vs "User works as a
         # software engineer"). Only when embeddings are configured.
         if cfg is not None and (
-            await _nearest_similarity(db, user_id, cfg, fact)
+            await _nearest_similarity(db, user_id, cfg, fact, workspace_id)
             >= SEMANTIC_DUP_THRESHOLD
         ):
             continue
-        # At the fact cap, evict the least-valuable auto fact instead of
-        # dropping the new one — memory keeps renewing rather than freezing
-        # at its oldest facts. Runs after the dup checks so a skipped
-        # candidate never costs an eviction. Skips the add when nothing is
-        # evictable (all pinned/manual).
-        if total + len(new_rows) >= MAX_MEMORIES:
+        waits_for_you = bool(op.get("sensitive")) and not explicit
+        # At the backstop, the least useful inferred fact is retired to make room.
+        if not waits_for_you and total + len(new_rows) >= MAX_MEMORIES:
             if new_rows:
                 await db.flush()  # assign ids so eviction can protect them
             protect = [
@@ -1165,44 +1216,41 @@ async def capture_memories(
             if not await _evict_for_capture(db, user_id, protect_ids=protect):
                 continue
             total -= 1
+        category = op.get("category")
         row = UserMemory(
             user_id=user_id,
             content=fact,
             source="auto",
             source_conversation_id=source_conversation_id,
-            category=op.get("category"),
+            category=category,
+            status=SUGGESTED if waits_for_you else ACTIVE,
+            expires_at=op.get("until"),
+            # Who you are applies everywhere; what you're doing here applies here.
+            workspace_id=workspace_id if category in ("projects", "context", None) and not waits_for_you else None,
+            unannounced=announce or waits_for_you,
         )
         db.add(row)
         new_rows.append(row)
         existing_keys.add(_normalise(fact))
 
-    if new_rows or updated_rows:
+    if new_rows or updated_rows or removed:
         try:
             await db.flush()
         except Exception:  # noqa: BLE001
             logger.exception("Memory persist flush failed user=%s", user_id)
             return []
-        # After flush, new_rows have their DB-assigned ids.
-        saved_new = [{"id": str(r.id), "content": r.content} for r in new_rows]
-        # (Re-)embed added + updated facts so retrieval stays accurate.
-        # Best-effort; ``cfg`` was resolved once above. Never fatal.
-        if cfg is not None:
-            try:
-                for row in (*new_rows, *updated_rows):
-                    await embed_memory_row(db, row, cfg)
-            except Exception:  # noqa: BLE001
-                logger.warning(
-                    "memory embed-on-capture failed user=%s", user_id
-                )
-    else:
-        saved_new = []
-
-    # Commit here, whatever was applied: a capture that only deleted
-    # ("I no longer use Vim") returned nothing, so the caller never
-    # committed and the delete was rolled back (R-270).
-    if removed or new_rows or updated_rows:
-        await db.commit()
-    return saved_updates + saved_new + removed
+    # After flush, new_rows have their DB-assigned ids.
+    saved_new = [{"id": str(r.id), "content": r.content} for r in new_rows if r.status == ACTIVE]
+    suggested = [{"id": str(r.id), "content": r.content, "suggested": True} for r in new_rows if r.status == SUGGESTED]
+    # (Re-)embed added + updated facts so retrieval stays accurate.
+    # Best-effort; ``cfg`` was resolved once above. Never fatal.
+    if cfg is not None:
+        try:
+            for row in (*new_rows, *updated_rows):
+                await embed_memory_row(db, row, cfg)
+        except Exception:  # noqa: BLE001
+            logger.warning("memory embed-on-capture failed user=%s", user_id)
+    return saved_updates + saved_new + suggested + removed
 
 
 # ----------------------------------------------------------------------
@@ -1245,7 +1293,7 @@ _CUT_OFF_MSG: Final[str] = (
 )
 
 
-def _answer_cut_off(raw: str) -> bool:
+def answer_cut_off(raw: str) -> bool:
     """True when the model started a JSON array but it doesn't parse —
     almost always the token cap biting mid-answer. Treating that as
     "nothing to do" told the user everything was tidy when it wasn't
@@ -1306,7 +1354,7 @@ def _parse_merge_ops(raw: str, valid_ids: set[str]) -> list[dict]:
     return ops
 
 
-async def consolidate_memories(db: AsyncSession, *, user_id) -> dict:
+async def consolidate_memories(db: AsyncSession, *, user_id, limit: int = MAX_MEMORIES, changed_by: str = "user", unattended: bool = False) -> dict:
     """Merge near-duplicate facts across the user's whole store.
 
     Returns ``{"merged_groups": int, "removed": int, "changes": [...]}``
@@ -1318,7 +1366,10 @@ async def consolidate_memories(db: AsyncSession, *, user_id) -> dict:
     (this is a user-triggered action — errors should be visible).
     Flushes but does not commit.
     """
-    rows = await load_memories(db, user_id)
+    rows = await load_memories(db, user_id, limit=limit)
+    if unattended:
+        # Nobody's watching, so only what it worked out itself, and what applies everywhere.
+        rows = [m for m in rows if m.source == "auto" and not m.pinned and m.workspace_id is None]
     if len(rows) < 2:
         return {"merged_groups": 0, "removed": 0, "changes": []}
 
@@ -1357,9 +1408,15 @@ async def consolidate_memories(db: AsyncSession, *, user_id) -> dict:
 
     by_id = {str(m.id): m for m in rows}
     raw = "".join(chunks)
-    if _answer_cut_off(raw):
+    if answer_cut_off(raw):
         raise ValueError(_CUT_OFF_MSG)
     ops = _parse_merge_ops(raw, set(by_id))
+    # Merging across a boundary would carry a project's facts everywhere, and a lasting
+    # fact merged into a dated one would end on that date.
+    ops = [
+        op for op in ops
+        if len({by_id[i].workspace_id for i in op["ids"]}) == 1 and len({by_id[i].expires_at for i in op["ids"]}) == 1
+    ]
     if not ops:
         return {"merged_groups": 0, "removed": 0, "changes": []}
 
@@ -1376,6 +1433,7 @@ async def consolidate_memories(db: AsyncSession, *, user_id) -> dict:
             key=lambda m: (not m.pinned, -m.times_used, m.created_at or _epoch),
         )[0]
         merged_texts = [m.content for m in group]
+        keep_version(db, keep, changed_by)
         keep.content = op["text"]
         if op["category"]:
             keep.category = op["category"]
@@ -1383,7 +1441,7 @@ async def consolidate_memories(db: AsyncSession, *, user_id) -> dict:
         keep.times_used = max(m.times_used for m in group)
         for m in group:
             if m.id != keep.id:
-                await db.delete(m)
+                retire(m, "merged", superseded_by=keep.id)
                 removed += 1
         kept_rows.append(keep)
         changes.append(
@@ -1501,7 +1559,7 @@ async def plan_memory_edits(
 
     by_id = {str(m.id): m for m in rows}
     raw = "".join(chunks)
-    if _answer_cut_off(raw):
+    if answer_cut_off(raw):
         raise ValueError(_CUT_OFF_MSG)
     ops = _parse_ops(raw, set(by_id))
 
@@ -1579,6 +1637,7 @@ async def apply_memory_edits(
             content = (op.get("after") or "").strip()[:MAX_CONTENT_CHARS]
             if row is None or not content or looks_sensitive(content):
                 continue
+            keep_version(db, row, "user")
             row.content = content
             category = op.get("category")
             if category in MEMORY_CATEGORIES:

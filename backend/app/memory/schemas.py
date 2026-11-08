@@ -54,3 +54,26 @@ class MemoryResponse(BaseModel):
     last_used_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    status: str = "active"
+    valid_until: datetime | None = None
+    retired_reason: str | None = None
+    expires_at: datetime | None = None
+    workspace_id: uuid.UUID | None = None
+    source_ref: dict | None = None
+
+
+class MemoryVersionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    content: str
+    category: str | None
+    replaced_at: datetime
+    changed_by: str
+
+
+class MemoryProfileResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    content: str
+    generated_at: datetime

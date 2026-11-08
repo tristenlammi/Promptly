@@ -189,3 +189,24 @@ class Tool(abc.ABC):
         self, ctx: ToolContext, args: dict[str, Any]
     ) -> ToolResult:  # pragma: no cover — abstract
         ...
+
+
+# Tools whose output is text from outside the user's own words — web pages,
+# search results, other members' workspace content, files, sub-agents, and
+# every connector (MCP) tool. A turn that ran one is "untrusted" (R-019).
+UNTRUSTED_CONTENT_TOOLS = frozenset(
+    {
+        "fetch_url", "web_search", "deep_research", "run_agents",
+        "read_workspace_item", "query_board_cards", "code_interpreter",
+        # File text — including files other people shared (WP-5.2/5.3).
+        "search_my_files", "read_file", "list_my_files",
+        # Other people's messages in Rooms.
+        "read_room",
+        # An earlier reply may repeat a web page or a file.
+        "search_past_chats",
+    }
+)
+
+
+def reads_outside_content(tool_name: str) -> bool:
+    return tool_name in UNTRUSTED_CONTENT_TOOLS or tool_name.startswith("mcp__")

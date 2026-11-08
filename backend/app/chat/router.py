@@ -115,6 +115,7 @@ from app.chat.stream_runner import (
     stop_session,
 )
 from app.chat.personal_context import build_personal_context_prompt
+from app.chat.tools.base import reads_outside_content
 from app.chat.semantic_search import (
     embed_query,
     get_embedding_config,
@@ -124,8 +125,10 @@ from app.memory.constants import RETRIEVAL_K as MEMORY_RETRIEVAL_K
 from app.memory.service import (
     build_memory_system_prompt,
     capture_memories,
+    chat_may_write_memory,
+    take_unannounced,
     resolve_memory_mode as _resolve_memory_mode,
-    should_attempt_capture,
+    wants_saving_now,
 )
 from app.chat.titler import fallback_title, generate_conversation_title
 from app.chat.versioning import (
@@ -1348,6 +1351,9 @@ async def update_conversation(
         cleaned = (payload.system_prompt or "").strip()
         conv.system_prompt = cleaned or None
     if "memory_capture_paused" in payload.model_fields_set and payload.memory_capture_paused is not None:
+        # Turning it back on covers what's said from now on, not what was said meanwhile.
+        if conv.memory_capture_paused and not payload.memory_capture_paused:
+            conv.memory_private_until = datetime.now(timezone.utc)
         conv.memory_capture_paused = payload.memory_capture_paused
     # "Keep this chat" — promote a temporary chat to a permanent one.
     # Only clearing is allowed; we never let a PATCH turn a normal chat
@@ -1359,6 +1365,9 @@ async def update_conversation(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="A chat can only be made permanent, not temporary.",
             )
+        # Kept from now on: what was said while temporary stays out of memory.
+        if conv.temporary_mode is not None:
+            conv.memory_private_until = datetime.now(timezone.utc)
         conv.temporary_mode = None
         conv.expires_at = None
     # Phase P1 — workspace reassignment. Only honour the field when the
@@ -1493,6 +1502,11 @@ async def branch_conversation(
         # ephemeral path; the frontend also deletes proactively on close.
         temporary_mode="ephemeral" if payload.ephemeral else None,
         expires_at=(now + timedelta(hours=24)) if payload.ephemeral else None,
+        # What's copied here is someone's earlier words, maybe private ones or another
+        # member's. Only what's said in the branch from now on counts.
+        memory_capture_paused=src.memory_capture_paused,
+        memory_captured_through=now,
+        memory_private_until=now,
     )
     db.add(branch)
     await db.flush()  # need branch.id for the message rows
@@ -3589,23 +3603,6 @@ def _cap_tool_content(tool_cap: int | None, content: str) -> str:
     )
 
 
-# Tools whose output is text from outside the user's own words — web pages,
-# search results, other members' workspace content, files, sub-agents, and
-# every connector (MCP) tool. A turn that ran one is "untrusted" (R-019).
-UNTRUSTED_CONTENT_TOOLS = frozenset(
-    {
-        "fetch_url", "web_search", "deep_research", "run_agents",
-        "read_workspace_item", "query_board_cards", "code_interpreter",
-        # File text — including files other people shared (WP-5.2/5.3).
-        "search_my_files", "read_file", "list_my_files",
-        # Other people's messages in Rooms.
-        "read_room",
-    }
-)
-
-
-def reads_outside_content(tool_name: str) -> bool:
-    return tool_name in UNTRUSTED_CONTENT_TOOLS or tool_name.startswith("mcp__")
 
 
 def _frame_untrusted(content: str, tool_name: str) -> str:
@@ -5694,6 +5691,8 @@ async def _stream_generator(
                 # call this turn — the memory category rides on the Tools
                 # toggle, so it isn't always there.
                 can_recall="memory" in enabled_categories,
+                workspace_id=conv.workspace_id,
+                viewer=user,
             )
             if memory_block:
                 turn_context.append(memory_block)
@@ -5990,6 +5989,7 @@ async def _stream_generator(
                     leaf_id = target.id
                 else:
                     msg = Message(
+                        read_outside_content=bool(turn_state.get("untrusted")),
                         conversation_id=conv_id,
                         role="assistant",
                         content=body,
@@ -6701,6 +6701,7 @@ async def _stream_generator(
             conv.updated_at = datetime.now(timezone.utc)
         else:
             assistant = Message(
+                read_outside_content=bool(turn_state.get("untrusted")),
                 conversation_id=conv.id,
                 role="assistant",
                 content=full,
@@ -6880,10 +6881,12 @@ async def _stream_generator(
             memory_mode == "auto"
             # Phase 9 — per-conversation pause skips capture while still
             # injecting previously-saved memories.
-            and not conv.memory_capture_paused
+            and chat_may_write_memory(conv)
+            # In a shared chat, this reply answers other people's words too.
+            and conv.visibility != "workspace"
             and trig_row is not None
             and (trig_row.content or "").strip()
-            and should_attempt_capture(trig_row.content)
+            and wants_saving_now(trig_row.content)
         ):
             try:
                 async with asyncio.timeout(_MEMORY_CAPTURE_TIMEOUT_S):
@@ -6897,10 +6900,11 @@ async def _stream_generator(
                         source_conversation_id=conv.id,
                         provider=provider,
                         model_id=ctx["model_id"],
+                        workspace_id=conv.workspace_id,
                     )
                 # Removals are shown with an Undo of their own.
                 memory_removed = [c for c in captured if c.get("removed")]
-                memory_saved.extend(c for c in captured if not c.get("removed"))
+                memory_saved.extend(c for c in captured if not c.get("removed") and not c.get("suggested"))
             except TimeoutError:
                 logger.warning("Memory capture timed out for user=%s", user.id)
             except Exception:  # noqa: BLE001
@@ -6918,6 +6922,8 @@ async def _stream_generator(
                     "event": "memory_saved",
                     "facts": [m["content"] for m in memory_saved],
                     "ids": [m["id"] for m in memory_saved],
+                    # What a changed fact said before, so Undo can put it back.
+                    "previous": {m["id"]: m["previous"] for m in memory_saved if m.get("previous")},
                     "count": len(memory_saved),
                 }
             )
@@ -6928,11 +6934,21 @@ async def _stream_generator(
                 {
                     "event": "memory_removed",
                     "facts": [
-                        {"content": m["content"], "category": m.get("category")}
+                        {"id": m["id"], "content": m["content"], "category": m.get("category")}
                         for m in memory_removed
                     ],
                 }
             )
+        # What it worked out from your earlier chats since you last heard.
+        if memory_enabled:
+            try:
+                learned = await take_unannounced(db, user.id)
+            except Exception:  # noqa: BLE001 — never worth losing the rest of the turn
+                logger.exception("Couldn't check what memory learned")
+                await db.rollback()
+                learned = None
+            if learned:
+                yield _sse({"event": "memory_learned", **learned})
 
         # Auto-title the conversation after the first successful exchange.
         # Anything the user has already renamed is left untouched.
@@ -7511,6 +7527,9 @@ async def import_conversations(
         try:
             async with db.begin_nested():
                 conv = Conversation(
+                    # Someone else's AI wrote half of this. Read only if you ask, and
+                    # then only for what you said.
+                    memory_captured_through=datetime.now(timezone.utc),
                     id=conv_id,
                     user_id=user_id,
                     title=title,

@@ -293,8 +293,7 @@ Left open from those reviews:
 
 **Merge**
 
-- `main` has moved on. Nothing here has been tested on top of it.
-- The memory upgrade's `0255_memory_lifecycle` will clash with this branch's `0255_passwords_hardening`, as `OWNER_STEPS.md` explains.
+- Merged with `main` at v0.30.0 (the memory upgrade and Mail multi-select) on 8 November. The last run below is on the merged code. The memory upgrade's `0255_memory_lifecycle` was rechained after this branch's migrations.
 
 ## What wasn't built
 

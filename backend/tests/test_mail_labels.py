@@ -972,3 +972,138 @@ async def test_older_mail_stops_for_the_day_well_before_gmails_limit(client, db,
     c.logout()
     assert len(await _rows(db, account)) == 2
 
+
+async def _unread_in(client, u, role="inbox"):  # noqa: F811
+    return sum(t["unread"] for t in (await client.get(f"/api/mail/threads?role={role}", headers=H(u))).json()["threads"])
+
+
+async def test_mark_all_as_read_covers_the_place_and_nowhere_else(client, db):  # noqa: F811
+    u = await mk_user(db, "owner")
+    account = await mk_account(db, u)
+    numbered = [await _numbered(db, account, n, f"Inbox {n}") for n in (11, 12, 13)]
+    inbox = await db.scalar(select(MailFolder).where(MailFolder.account_id == account.id, MailFolder.role == "inbox"))
+    assert all(m.folder_id == inbox.id for m in numbered)
+    archive = await _archive(db, account)
+    archived = await _numbered(db, account, 19, "Filed away")
+    archived.folder_id = archive.id
+    await db.commit()
+
+    got = await client.post("/api/mail/mark-all-read", json={"role": "inbox"}, headers=H(u))
+    assert got.status_code == 200 and got.json() == {"marked": 3}
+    assert await _unread_in(client, u) == 0
+    assert await _unread_in(client, u, "archive") == 1
+
+    # It reaches the mailbox too, as one change.
+    ops = (await db.execute(select(MailOp).where(MailOp.account_id == account.id))).scalars().all()
+    assert [(op.kind, op.folder_path, sorted(op.uids)) for op in ops] == [("seen", inbox.path, [11, 12, 13])]
+
+    # Nothing left: nothing happens.
+    assert (await client.post("/api/mail/mark-all-read", json={"role": "inbox"}, headers=H(u))).json() == {"marked": 0}
+
+
+async def test_mark_all_as_read_leaves_a_snoozed_or_labelled_email_out_of_the_inbox(client, db):  # noqa: F811
+    u = await mk_user(db, "owner")
+    account = await mk_account(db, u)
+    await _numbered(db, account, 11, "Plain")
+    snoozed = await _numbered(db, account, 12, "For later")
+    labelled = await _numbered(db, account, 13, "Filed")
+    until = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    await client.put(f"/api/mail/threads/{account.id}/{snoozed.thread_key}/snooze", json={"until": until}, headers=H(u))
+    label = await _label(client, u)
+    await client.put(f"/api/mail/threads/{account.id}/{labelled.thread_key}/labels/{label}", headers=H(u))
+
+    assert (await client.post("/api/mail/mark-all-read", json={"role": "inbox"}, headers=H(u))).json() == {"marked": 1}
+    assert await _unread_in(client, u, "snoozed") == 1
+    assert (await client.get("/api/mail/overview", headers=H(u))).json()["labels"][0]["unread"] == 1
+
+    # A label is marked through its own id.
+    assert (await client.post("/api/mail/mark-all-read", json={"labels": [label]}, headers=H(u))).json() == {"marked": 1}
+    assert (await client.get("/api/mail/overview", headers=H(u))).json()["labels"][0]["unread"] == 0
+    assert await _unread_in(client, u, "snoozed") == 1
+
+
+async def test_mark_all_as_read_keeps_to_the_chosen_mailbox(client, db):  # noqa: F811
+    u = await mk_user(db, "owner")
+    one = await mk_account(db, u)
+    two = await mk_account(db, u, email="second@example.com")
+    await mk_message(db, one)
+    await mk_message(db, two)
+    got = await client.post("/api/mail/mark-all-read", json={"role": "inbox", "account": str(one.id)}, headers=H(u))
+    assert got.json() == {"marked": 1}
+    assert await _unread_in(client, u) == 1
+
+
+async def test_many_at_once_stay_yours(client, db):  # noqa: F811
+    owner = await mk_user(db, "owner")
+    other = await mk_user(db, "other")
+    account = await mk_account(db, owner)
+    m = await mk_message(db, account)
+    theirs = await mk_account(db, other, email="theirs@example.com")
+    t = await mk_message(db, theirs)
+    label = await _label(client, owner)
+    refs = [{"account_id": str(account.id), "key": m.thread_key}, {"account_id": str(theirs.id), "key": t.thread_key}]
+
+    # One that isn't yours stops the lot, including the one that is.
+    assert (await client.post("/api/mail/threads/action", json={"threads": refs, "action": "read"}, headers=H(owner))).status_code == 404
+    assert (await client.put(f"/api/mail/labels/{label}/threads", json={"threads": refs}, headers=H(owner))).status_code == 404
+    await db.refresh(m)
+    assert m.seen is False
+    assert (await client.put(f"/api/mail/labels/{label}/threads", json={"threads": refs[:1]}, headers=H(other))).status_code == 404
+
+    # Someone else's mail can't be marked by naming their mailbox.
+    assert (await client.post("/api/mail/mark-all-read", json={"role": "inbox", "account": str(account.id)}, headers=H(other))).json() == {"marked": 0}
+    assert (await client.post("/api/mail/mark-all-read", json={"labels": [label]}, headers=H(other))).status_code == 404
+    await db.refresh(m)
+    assert m.seen is False
+
+    assert (await client.post("/api/mail/threads/action", json={"threads": [], "action": "read"}, headers=H(owner))).status_code == 422
+    too_many = [refs[0]] * 501
+    assert (await client.post("/api/mail/threads/action", json={"threads": too_many, "action": "read"}, headers=H(owner))).status_code == 422
+
+
+async def test_many_at_once_go_to_the_mailbox_as_one_change(client, db):  # noqa: F811
+    u = await mk_user(db, "owner")
+    account = await mk_account(db, u)
+    rows = [await _numbered(db, account, n, f"Email {n}") for n in (11, 12, 13)]
+    db.add(MailFolder(account_id=account.id, path="Trash", name="Trash", role="trash"))
+    await db.commit()
+    refs = [{"account_id": str(account.id), "key": m.thread_key} for m in rows]
+
+    assert (await client.post("/api/mail/threads/action", json={"threads": refs[:2], "action": "read"}, headers=H(u))).status_code == 204
+    assert await _unread_in(client, u) == 1
+    assert (await client.post("/api/mail/threads/action", json={"threads": refs, "action": "trash"}, headers=H(u))).status_code == 204
+    assert (await client.get("/api/mail/threads?role=inbox", headers=H(u))).json()["threads"] == []
+    assert len((await client.get("/api/mail/threads?role=trash", headers=H(u))).json()["threads"]) == 3
+
+    ops = (await db.execute(select(MailOp).where(MailOp.account_id == account.id).order_by(MailOp.created_at))).scalars().all()
+    assert [(op.kind, len(op.uids)) for op in ops] == [("seen", 2), ("move", 3)]
+
+
+async def test_many_into_a_label_and_back_out(client, db):  # noqa: F811
+    u = await mk_user(db, "owner")
+    account = await mk_account(db, u)
+    rows = [await _numbered(db, account, n, f"Email {n}") for n in (11, 12)]
+    label = await _label(client, u)
+    refs = [{"account_id": str(account.id), "key": m.thread_key} for m in rows]
+    assert (await client.put(f"/api/mail/labels/{label}/threads", json={"threads": refs}, headers=H(u))).status_code == 204
+    assert len((await client.get(f"/api/mail/threads?label={label}", headers=H(u))).json()["threads"]) == 2
+    assert (await client.get("/api/mail/threads?role=inbox", headers=H(u))).json()["threads"] == []
+    assert (await client.post("/api/mail/threads/action", json={"threads": refs, "action": "inbox"}, headers=H(u))).status_code == 204
+    assert len((await client.get("/api/mail/threads?role=inbox", headers=H(u))).json()["threads"]) == 2
+    assert (await client.get(f"/api/mail/threads?label={label}", headers=H(u))).json()["threads"] == []
+
+
+@live
+async def test_mark_all_as_read_reaches_the_mailbox(client, db, server):  # noqa: F811
+    u = await mk_user(db, "markall")
+    account = await _live_account(db, u)
+    for n in range(3):
+        _deliver(account.email, f"Unread {n}")
+    await _sync(account)
+    assert (await client.post("/api/mail/mark-all-read", json={"role": "inbox"}, headers=H(u))).json() == {"marked": 3}
+    await _worker_pass(account)
+    c = await asyncio.to_thread(_connect, account)
+    c.select_folder("INBOX", readonly=True)
+    assert c.search(["UNSEEN"]) == []
+    c.logout()
+

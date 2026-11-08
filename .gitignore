@@ -116,3 +116,6 @@ frontend/public/excalidraw-assets/
 promptly-recovery-kit.txt
 e2e/playwright-report-passwords/
 e2e/test-results-passwords/
+
+# The memory scorecard's latest results
+backend/tests/memory_eval/last_run.json

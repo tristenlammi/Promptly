@@ -239,6 +239,24 @@ index_import_job.__name__ = INDEX_IMPORT
 run_import_job.__name__ = RUN_IMPORT
 
 
+async def memory_capture_sweep(ctx) -> dict[str, int]:
+    from app.memory.capture import sweep
+
+    return await sweep()
+
+
+async def memory_nightly(ctx) -> dict[str, int]:
+    from app.memory.upkeep import nightly
+
+    return await nightly()
+
+
+async def memory_learning(ctx) -> dict[str, int]:
+    from app.memory.learning import nightly
+
+    return {"suggested": await nightly()}
+
+
 class WorkerSettings:
     functions = [
         # Never retried by arq: a run interrupted mid-way is closed out by
@@ -265,6 +283,10 @@ class WorkerSettings:
         # app.tasks.media_worker), on their own queue.
     ]
     cron_jobs = [
+        # Learn from chats that have gone quiet, then look after memory overnight.
+        cron(memory_capture_sweep, minute=set(range(0, 60, 5)), run_at_startup=False, unique=True, timeout=1800),
+        cron(memory_nightly, hour=3, minute=5, run_at_startup=False, unique=True, timeout=3600),
+        cron(memory_learning, hour=4, minute=5, run_at_startup=False, unique=True, timeout=3600),
         # 02:00 nightly database dump, then 03:30 storage housekeeping, so
         # anything purged today is still in last night's dump.
         cron(nightly_backup, hour=2, minute=0, run_at_startup=False, unique=True),

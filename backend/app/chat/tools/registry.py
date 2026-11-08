@@ -25,6 +25,7 @@ from app.chat.tools.generate_image import GenerateImageTool
 from app.chat.tools.generate_pdf import GeneratePdfTool
 from app.chat.tools.items import ListMyItemsTool, ReadItemTool, UseItemTool
 from app.chat.tools.memory import ForgetTool, RecallTool, RememberTool
+from app.chat.tools.past_chats import SearchPastChatsTool
 from app.chat.tools.photos import InspectPhotosTool, ProposePhotoActionTool, RefinePhotoResultsTool, SearchPhotosTool
 from app.chat.tools.query_board import QueryBoardCardsTool
 from app.chat.tools.read_workspace_item import ReadWorkspaceItemTool
@@ -89,6 +90,7 @@ REGISTRY: list[Tool] = [
     RememberTool(),
     ForgetTool(),
     RecallTool(),
+    SearchPastChatsTool(),
     # Ask your photos (category "photos", PH-4) — with the Tools toggle, for
     # anyone with a photo library.
     SearchPhotosTool(),

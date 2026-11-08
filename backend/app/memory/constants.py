@@ -11,10 +11,17 @@ from typing import Final
 # enough that the injected block stays cheap even at the row cap.
 MAX_CONTENT_CHARS: Final[int] = 600
 
-# Hard cap on how many facts we keep per user. The injection block and
-# the management list both honour this; the manual-create endpoint 409s
-# when full so the prompt overhead can't grow unbounded.
-MAX_MEMORIES: Final[int] = 200
+# A backstop, not a budget: only the few facts a question needs are ever put in
+# front of the model, so a long memory costs nothing per turn. Past this the least
+# useful inferred fact is retired, not deleted.
+MAX_MEMORIES: Final[int] = 2000
+
+# A fact in use; one that has stopped being true, kept for the record; one waiting
+# for you to approve; one you turned down, kept so it isn't suggested again.
+ACTIVE: Final[str] = "active"
+RETIRED: Final[str] = "retired"
+SUGGESTED: Final[str] = "suggested"
+DISMISSED: Final[str] = "dismissed"
 
 # Most a single turn's extraction pass may add. Stops a chatty turn from
 # flooding the store with near-duplicate trivia.

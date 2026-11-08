@@ -16,6 +16,36 @@ export interface Memory {
   last_used_at: string | null;
   created_at: string;
   updated_at: string;
+  /** active, retired (no longer true), or suggested (waiting for you to approve). */
+  status: "active" | "retired" | "suggested" | "dismissed";
+  valid_until: string | null;
+  retired_reason: string | null;
+  /** True up to this date: a trip, a booking. */
+  expires_at: string | null;
+  /** A fact about a project applies in that workspace. Empty means everywhere. */
+  workspace_id: string | null;
+  /** Where a suggestion came from. */
+  source_ref: { kind: string; id?: string; title?: string; url?: string } | null;
+}
+
+export interface MemoryVersion {
+  id: string;
+  content: string;
+  category: string | null;
+  replaced_at: string;
+  changed_by: string;
+}
+
+export interface MemoryProfile {
+  content: string;
+  generated_at: string;
+}
+
+export interface MemoryLearning {
+  mail: boolean;
+  calendar: boolean;
+  health: boolean;
+  mail_allowed: boolean;
 }
 
 export interface MemoryImportResult {
@@ -65,6 +95,48 @@ export const MEMORY_CATEGORIES: { value: string; label: string }[] = [
 ];
 
 export const memoryApi = {
+  async suggestions(): Promise<Memory[]> {
+    return (await apiClient.get<Memory[]>("/memory/suggestions")).data;
+  },
+  async approve(id: string): Promise<Memory> {
+    return (await apiClient.post<Memory>(`/memory/${id}/approve`)).data;
+  },
+  async dismiss(id: string): Promise<void> {
+    await apiClient.post(`/memory/${id}/dismiss`);
+  },
+  async past(): Promise<Memory[]> {
+    return (await apiClient.get<Memory[]>("/memory/past")).data;
+  },
+  async restore(id: string): Promise<Memory> {
+    return (await apiClient.post<Memory>(`/memory/${id}/restore`)).data;
+  },
+  async history(id: string): Promise<MemoryVersion[]> {
+    return (await apiClient.get<MemoryVersion[]>(`/memory/${id}/history`)).data;
+  },
+  async restoreVersion(id: string, versionId: string): Promise<Memory> {
+    return (await apiClient.post<Memory>(`/memory/${id}/history/${versionId}/restore`)).data;
+  },
+  async peopleLinks(): Promise<Record<string, string[]>> {
+    return (await apiClient.get<Record<string, string[]>>("/memory/people-links")).data;
+  },
+  async profile(): Promise<MemoryProfile | null> {
+    return (await apiClient.get<MemoryProfile | null>("/memory/profile")).data;
+  },
+  async rebuildProfile(): Promise<MemoryProfile | null> {
+    return (await apiClient.post<MemoryProfile | null>("/memory/profile/rebuild")).data;
+  },
+  async readOlderChats(): Promise<number> {
+    return (await apiClient.post<{ chats: number }>("/memory/read-older-chats")).data.chats;
+  },
+  async learning(): Promise<MemoryLearning> {
+    return (await apiClient.get<MemoryLearning>("/memory/learning")).data;
+  },
+  async setLearning(choices: Pick<MemoryLearning, "mail" | "calendar" | "health">): Promise<MemoryLearning> {
+    return (await apiClient.put<MemoryLearning>("/memory/learning", choices)).data;
+  },
+  async checkLearning(): Promise<number> {
+    return (await apiClient.post<{ suggested: number }>("/memory/learning/check")).data.suggested;
+  },
   async list(): Promise<Memory[]> {
     const { data } = await apiClient.get<Memory[]>("/memory");
     return data;
