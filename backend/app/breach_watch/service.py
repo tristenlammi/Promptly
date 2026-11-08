@@ -3,7 +3,7 @@
 Uses Have I Been Pwned's ``breachedaccount`` API (v3) with a key the admin buys and
 sets in Admin, Passwords. No key, no checks. Each person turns it on for themselves:
 their addresses go from this server to HIBP, and that's theirs to agree to
-(passwords/DECISIONS.md, D-ALERTS-3).
+(passwords/DECISIONS.md, D123).
 
 Checked: the account's own address and the person's connected Mail accounts. An arq
 job works through them every ten minutes, no faster than the key's requests per

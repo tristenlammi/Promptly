@@ -146,7 +146,7 @@ These need a paid Have I Been Pwned key. Without one, nothing is sent anywhere.
 2. Copy the key: 32 characters, 0-9 and a-f.
 3. Admin, Passwords, "Breach alerts for email addresses": paste it and press Save key. It should show your plan's name. If it says it couldn't check, the next run tries again. If it says the key isn't valid, copy it again.
 4. In Passwords, Security check, Breaches: turn it on for yourself. It shows the addresses it will send first. The first check runs within ten minutes.
-5. Tell the people on your server it's there. It's off for each of them until they turn it on (D-ALERTS-3).
+5. Tell the people on your server it's there. It's off for each of them until they turn it on (D123).
 
 **Tests to run once this branch is on the stack:** from `e2e/`, `npx playwright test -c passwords.config.ts passwords-tests/alerts.spec.ts`, and the changed test in `passwords-tests/gaps.spec.ts` ("a typed document can get its Calendar reminder too"). They set no HIBP key and never reach HIBP.
 
