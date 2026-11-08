@@ -13,7 +13,7 @@ import logging
 import os
 import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import aiosmtplib
 from sqlalchemy import delete, func, select, update
@@ -43,7 +43,17 @@ BACKFILL_BATCH = 100
 # Older mail comes in gradually, up to this much per folder. Postgres holds the
 # text of everything, so a big mailbox takes real disk space.
 HISTORY_PER_FOLDER = int(os.environ.get("MAIL_HISTORY_PER_FOLDER", "20000"))
+# Gmail shuts off IMAP for a while past 2500 MB downloaded in a day, so older mail
+# stops well short and carries on tomorrow. Your new mail isn't held back by it.
+BACKFILL_BYTES_PER_DAY = int(os.environ.get("MAIL_BACKFILL_BYTES_PER_DAY", str(1024 * 1024 * 1024)))
+# Most of All Mail comes in as older mail, which counts against that.
+INITIAL_FROM_ALL_MAIL = 100
 ANNOUNCE_WITHIN = timedelta(days=1)
+# New mail can reach All Mail just before we look in the Inbox.
+JUST_ARRIVED = timedelta(minutes=30)
+# Looked up one at a time, so archiving thousands elsewhere is caught up on gradually.
+REHOME_PER_PASS = 200
+NUMBERS_PER_PASS = 50
 MAX_ANNOUNCED = 3
 
 
@@ -52,6 +62,22 @@ def _server(account: MailAccount, owner_private: bool) -> imap.Server:
         account.imap_host, account.imap_port, account.imap_security, account.username,
         decrypt_secret(account.secret_encrypted), owner_private, account.cert_pin,
     )
+
+
+# Today's downloads per mailbox. Starting over if the worker restarts is fine: it's a
+# margin well below the real limit, not an exact count.
+_downloaded: dict[uuid.UUID, tuple[date, int]] = {}
+
+
+def _count_download(account_id: uuid.UUID, size: int) -> None:
+    today = datetime.now(timezone.utc).date()
+    day, total = _downloaded.get(account_id, (today, 0))
+    _downloaded[account_id] = (today, size + (total if day == today else 0))
+
+
+def _enough_for_today(account_id: uuid.UUID) -> bool:
+    _count_download(account_id, 0)
+    return _downloaded[account_id][1] >= BACKFILL_BYTES_PER_DAY
 
 
 async def _set_status(account_id: uuid.UUID, status: str, detail: str = "", synced: bool = False) -> None:
@@ -99,6 +125,7 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
     arrived: list[MailMessage] = []
     sent_to: dict[uuid.UUID, list[str]] = {}
     async with SessionLocal() as db:
+        folder = await db.get(MailFolder, folder_id)
         # Oldest first, so replies find the conversation their parent started.
         for uid, flags, found, said in sorted(parsed, key=lambda row: row[2].sent_at):
             lowered = {f.lower() for f in flags}
@@ -111,6 +138,18 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
                 )
             if moved is not None:
                 moved.uid = uid
+                continue
+            # Put back here from All Mail, elsewhere: the same email, not a second one.
+            archived = None
+            if found.message_id and folder.role != "all":
+                archived = await db.scalar(
+                    select(MailMessage).join(MailFolder, MailFolder.id == MailMessage.folder_id)
+                    .where(MailMessage.account_id == account_id, MailFolder.role == "all", MailMessage.message_id == found.message_id).limit(1)
+                )
+            if archived is not None:
+                archived.folder_id, archived.uid, archived.seen, archived.flagged, archived.answered = folder_id, uid, state["seen"], state["flagged"], state["answered"]
+                if folder.role == "inbox" and datetime.now(timezone.utc) - archived.sent_at < JUST_ARRIVED:
+                    arrived.append(archived)
                 continue
             exists = await db.scalar(select(MailMessage.id).where(MailMessage.folder_id == folder_id, MailMessage.uid == uid))
             if exists:
@@ -132,7 +171,6 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
                 continue
             arrived.append(message)
             sent_to[message.id] = said
-        folder = await db.get(MailFolder, folder_id)
         # Aliases first: mail for one that's off leaves before any rule sees it.
         filed = await aliases.on_arrival(db, account_id, folder, [(m, sent_to[m.id]) for m in arrived], fresh=announce)
         quiet = filed | await rules.apply_to_new(db, account_id, folder, [m for m in arrived if m.id not in filed])
@@ -145,16 +183,45 @@ async def _store(account_id: uuid.UUID, folder_id: uuid.UUID, items: list[tuple[
         await _announce(account_id, [m for m in arrived if m.id not in quiet])
 
 
+async def _new_to_us(client, account_id: uuid.UUID, folder_id: uuid.UUID, uids: list[int]) -> list[int]:
+    """All Mail holds everything again, so only what we don't have in another folder,
+    found out without downloading the rest."""
+    headers = await asyncio.to_thread(imap.message_id_headers, client, uids)
+    ids = {uid: parse.message_id_of(raw) for uid, raw in headers.items()}
+    wanted = []
+    async with SessionLocal() as db:
+        have = (await db.execute(
+            select(MailMessage).where(MailMessage.account_id == account_id, MailMessage.message_id.in_({m for m in ids.values() if m}))
+        )).scalars().all()
+        by_id = {m.message_id: m for m in have}
+        for uid in uids:
+            message_id = ids.get(uid)
+            if message_id is None:
+                continue
+            row = by_id.get(message_id)
+            if row is None or not message_id:
+                wanted.append(uid)
+            elif row.folder_id == folder_id and row.uid is None:
+                # Archived from here, and this is its number.
+                row.uid = uid
+        await db.commit()
+    return wanted
+
+
 async def _copy(client, account_id: uuid.UUID, folder_id: uuid.UUID, uids: list[int], announce: bool = False) -> None:
     """A batch at a time, saved as it goes, so a big folder needs little memory and
     picks up where it left off if it's interrupted."""
     async with SessionLocal() as db:
         held = set((await db.execute(select(MailMessage.uid).where(MailMessage.folder_id == folder_id, MailMessage.uid.in_(uids)))).scalars())
+        folder = await db.get(MailFolder, folder_id)
     wanted = [u for u in uids if u not in held]
+    if wanted and folder.role == "all":
+        wanted = await _new_to_us(client, account_id, folder_id, wanted)
     if not wanted:
         return
     for batch in await asyncio.to_thread(imap.batches, client, wanted):
         items = await asyncio.to_thread(imap.fetch_messages, client, batch)
+        _count_download(account_id, sum(len(raw) for _, _, raw in items))
         await _store(account_id, folder_id, items, announce=announce)
 
 
@@ -172,7 +239,8 @@ async def _sync_folder(client, account_id: uuid.UUID, folder: MailFolder) -> Non
             await db.execute(update(MailFolder).where(MailFolder.id == folder.id).values(oldest_uid=0))
             await db.commit()
         last_uid = 0
-    uids = await asyncio.to_thread(imap.new_uids, client, last_uid, INITIAL_PER_FOLDER if last_uid == 0 else PER_SYNC)
+    first_time = INITIAL_FROM_ALL_MAIL if folder.role == "all" else INITIAL_PER_FOLDER
+    uids = await asyncio.to_thread(imap.new_uids, client, last_uid, first_time if last_uid == 0 else PER_SYNC)
     if uids:
         await _copy(client, account_id, folder.id, uids, announce=known)
         last_uid = max(last_uid, max(uids))
@@ -182,7 +250,7 @@ async def _sync_folder(client, account_id: uuid.UUID, folder: MailFolder) -> Non
             values["oldest_uid"] = min(uids) if uids else 1
         await db.execute(update(MailFolder).where(MailFolder.id == folder.id).values(**values))
         rows = (await db.execute(
-            select(MailMessage.id, MailMessage.uid, MailMessage.seen, MailMessage.flagged, MailMessage.answered)
+            select(MailMessage.id, MailMessage.uid, MailMessage.seen, MailMessage.flagged, MailMessage.answered, MailMessage.message_id)
             .where(MailMessage.folder_id == folder.id, MailMessage.uid.is_not(None))
             .order_by(MailMessage.uid.desc()).limit(FLAG_WINDOW)
         )).all()
@@ -195,9 +263,7 @@ async def _sync_folder(client, account_id: uuid.UUID, folder: MailFolder) -> Non
     flags = await asyncio.to_thread(imap.flags_of, client, [r.uid for r in rows if r.uid in remote])
     async with SessionLocal() as db:
         lowest = min(r.uid for r in rows)
-        gone = [r.id for r in rows if r.uid not in remote and r.uid >= lowest]
-        if gone:
-            await db.execute(delete(MailMessage).where(MailMessage.id.in_(gone)))
+        gone = [r for r in rows if r.uid not in remote and r.uid >= lowest]
         for r in rows:
             if r.uid not in flags:
                 continue
@@ -205,12 +271,57 @@ async def _sync_folder(client, account_id: uuid.UUID, folder: MailFolder) -> Non
             state = (b"\\seen" in lowered, b"\\flagged" in lowered, b"\\answered" in lowered)
             if state != (r.seen, r.flagged, r.answered):
                 await db.execute(update(MailMessage).where(MailMessage.id == r.id).values(seen=state[0], flagged=state[1], answered=state[2]))
+        await _gone_from(client, db, account_id, folder, gone)
+        await db.commit()
+
+
+async def _gone_from(client, db, account_id: uuid.UUID, folder: MailFolder, gone: list) -> None:
+    """No longer in this folder. Where All Mail is the archive it may only have been
+    archived, or had its label taken off, somewhere else. In which case it's still yours."""
+    archive = await rules.archive_folder(db, account_id)
+    if archive is None or archive.role != "all" or folder.role == "all":
+        if gone:
+            await db.execute(delete(MailMessage).where(MailMessage.id.in_([r.id for r in gone])))
+        return
+    for r in gone[:REHOME_PER_PASS]:
+        elsewhere = r.message_id and await db.scalar(
+            select(MailMessage.id).where(MailMessage.account_id == account_id, MailMessage.message_id == r.message_id, MailMessage.id != r.id).limit(1)
+        )
+        uid = None if elsewhere else await asyncio.to_thread(imap.find_uid, client, archive.path, r.message_id)
+        taken = uid and await db.scalar(select(MailMessage.id).where(MailMessage.folder_id == archive.id, MailMessage.uid == uid))
+        if uid and not taken:
+            await db.execute(update(MailMessage).where(MailMessage.id == r.id).values(folder_id=archive.id, uid=uid))
+        else:
+            # In the Trash, say, where it'll be copied like anything else. Or deleted for good.
+            await db.execute(delete(MailMessage).where(MailMessage.id == r.id))
+
+
+async def _learn_archive_numbers(client, account_id: uuid.UUID, folder: MailFolder) -> None:
+    """An email keeps its old number in All Mail when archived, so it never shows up as
+    new. With its number, we can see if it's later deleted somewhere else."""
+    async with SessionLocal() as db:
+        if await db.scalar(select(MailOp.id).where(MailOp.account_id == account_id).limit(1)):
+            return
+        rows = (await db.execute(
+            select(MailMessage).where(MailMessage.folder_id == folder.id, MailMessage.uid.is_(None), MailMessage.message_id != "").limit(NUMBERS_PER_PASS)
+        )).scalars().all()
+        for row in rows:
+            uid = await asyncio.to_thread(imap.find_uid, client, folder.path, row.message_id)
+            if uid and not await db.scalar(select(MailMessage.id).where(MailMessage.folder_id == folder.id, MailMessage.uid == uid)):
+                row.uid = uid
         await db.commit()
 
 
 def _connection_lost(e: Exception) -> bool:
     """Nothing more can be done on this connection, as opposed to one folder being a problem."""
     return isinstance(e, (OSError, imaplib.IMAP4.abort))
+
+
+def _copied(folder: MailFolder, folders: list[MailFolder]) -> bool:
+    """All Mail is a view of the other folders, unless it's the only archive there is."""
+    if folder.role == "all":
+        return not any(f.role == "archive" for f in folders)
+    return folder.role not in imap.SKIP_ROLES
 
 
 def _never_copied(folder: MailFolder) -> bool:
@@ -223,11 +334,14 @@ async def _sync_folders(client, account_id: uuid.UUID, every: bool) -> None:
     those after it: it's tried again next time."""
     async with SessionLocal() as db:
         folders = (await db.execute(select(MailFolder).where(MailFolder.account_id == account_id))).scalars().all()
-    for folder in sorted(folders, key=lambda f: (f.role != "inbox", f.role != "other")):
-        if folder.role in imap.SKIP_ROLES or not (every or folder.role == "inbox" or _never_copied(folder)):
+    # All Mail last, so what's in the others doesn't get copied from it first.
+    for folder in sorted(folders, key=lambda f: (f.role == "all", f.role != "inbox", f.role != "other")):
+        if not _copied(folder, folders) or not (every or folder.role == "inbox" or _never_copied(folder)):
             continue
         try:
             await _sync_folder(client, account_id, folder)
+            if folder.role == "all":
+                await _learn_archive_numbers(client, account_id, folder)
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001 — the path alone: it can name people
@@ -238,10 +352,13 @@ async def _sync_folders(client, account_id: uuid.UUID, every: bool) -> None:
 
 async def _backfill(client, account_id: uuid.UUID) -> None:
     """A little more of your older mail, so search reaches back. One folder at a time."""
+    if _enough_for_today(account_id):
+        return
     async with SessionLocal() as db:
-        folders = (await db.execute(select(MailFolder).where(MailFolder.account_id == account_id, MailFolder.last_uid > 0, MailFolder.oldest_uid != 1))).scalars().all()
-    for folder in sorted(folders, key=lambda f: f.role != "inbox"):
-        if folder.role in imap.SKIP_ROLES:
+        every_folder = (await db.execute(select(MailFolder).where(MailFolder.account_id == account_id))).scalars().all()
+    folders = [f for f in every_folder if f.last_uid > 0 and f.oldest_uid != 1]
+    for folder in sorted(folders, key=lambda f: (f.role == "all", f.role != "inbox")):
+        if not _copied(folder, every_folder):
             continue
         async with SessionLocal() as db:
             held = await db.scalar(select(func.count()).select_from(MailMessage).where(MailMessage.folder_id == folder.id))

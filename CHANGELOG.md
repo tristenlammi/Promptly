@@ -125,6 +125,21 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords on Android: filter by tag, rename and delete folders, site icons you can turn on per vault, merge logins saved twice, and the passkey directory in the Security check.
 - Passwords on Android: Sends show their name and can copy their link again, or post it in Rooms or by Mail. Name an emergency contact and ask for access from the phone. A dropped attachment upload picks up where it stopped.
 
+## [0.29.0] - 2026-11-06
+
+### Changed
+- Mail: on Gmail, Archive now holds everything you've ever archived, and search reaches it, because All Mail is copied in gradually without downloading or showing anything twice. Archiving, deleting or moving an email in Gmail's own app is followed here too, instead of the email disappearing from Promptly.
+- Mail: copying older mail stops at 1 GB a day per mailbox and carries on the next day, well short of Gmail's 2500 MB limit, which would shut off your mail for a while. Set `MAIL_BACKFILL_BYTES_PER_DAY` to change it.
+- Mail: on Gmail, a label called Archive is now just a label, and archiving goes to All Mail.
+
+## [0.28.1] - 2026-11-06
+
+### Fixed
+- Mail: on Gmail, what you archive now shows in Archive. It went to All Mail, but Archive only looked for a folder called Archive, so it always looked empty.
+- Mail: a delete or archive now goes through as soon as you open another view or leave the app, instead of waiting out the undo time. Closing the app in those 5 seconds used to lose it, and Trash looked empty if you went straight there.
+- Mail: a conversation that's only in Sent or Drafts can now be deleted or archived. Nothing used to happen, and it came straight back.
+- Mail: an old label that's only called Trash or similar, like Gmail's [Imap]/Trash, is no longer mistaken for the mailbox's real one.
+
 ## [0.28.0] - 2026-11-06
 
 ### Fixed

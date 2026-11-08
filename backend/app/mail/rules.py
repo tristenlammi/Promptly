@@ -17,7 +17,7 @@ from .models import MailAccount, MailFolder, MailLabel, MailMessage, MailOp, Mai
 # What a label never shows, and what a rule never looks at.
 HIDDEN_FROM_LABELS = {"trash", "spam", "drafts"}
 NOT_FOR_RULES = HIDDEN_FROM_LABELS | {"sent"}
-_STAY_PUT = {"sent", "drafts"}
+STAY_PUT = {"sent", "drafts"}
 
 
 def normalise(kind: str, value: str) -> str | None:
@@ -114,14 +114,14 @@ async def archive_folder(db: AsyncSession, account_id: uuid.UUID) -> MailFolder 
     return next((f for f in folders if f.role == "archive"), folders[0] if folders else None)
 
 
-def move(db: AsyncSession, folders: dict[uuid.UUID, MailFolder], messages: Iterable[MailMessage], target: MailFolder) -> None:
+def move(db: AsyncSession, folders: dict[uuid.UUID, MailFolder], messages: Iterable[MailMessage], target: MailFolder, even_sent: bool = False) -> None:
     """Moved here at once. The mailbox follows through ``mail_ops``."""
     by_folder: dict[uuid.UUID, list[MailMessage]] = {}
     for m in messages:
         by_folder.setdefault(m.folder_id, []).append(m)
     for folder_id, rows in by_folder.items():
         source = folders[folder_id]
-        if source.role in _STAY_PUT or folder_id == target.id:
+        if (source.role in STAY_PUT and not even_sent) or folder_id == target.id:
             continue
         uids = [m.uid for m in rows if m.uid is not None]
         if uids:
@@ -159,7 +159,8 @@ async def apply_to_new(db: AsyncSession, account_id: uuid.UUID, folder: MailFold
     """Runs as mail arrives. A reply follows its conversation to its label. Otherwise
     a rule takes mail newer than itself, so older mail coming in later stays where it
     is. Returns what a rule filed, which doesn't need to interrupt anyone."""
-    if not messages or folder.role in NOT_FOR_RULES:
+    # What's in All Mail is your archive coming in, not mail arriving.
+    if not messages or folder.role in NOT_FOR_RULES or folder.role == "all":
         return set()
     owner = select(MailAccount.user_id).where(MailAccount.id == account_id).scalar_subquery()
     found = (await db.execute(select(MailRule).where(MailRule.user_id == owner).order_by(MailRule.created_at))).scalars().all()

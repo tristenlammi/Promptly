@@ -233,6 +233,13 @@ async def _folder_ids(db: AsyncSession, accounts: list[uuid.UUID], role: str | N
     query = select(MailFolder.id).where(MailFolder.account_id.in_(accounts))
     if folder_id:
         query = query.where(MailFolder.id == folder_id)
+    elif role == "archive":
+        # Gmail has no Archive: what you archive there is in All Mail.
+        rows = (await db.execute(
+            select(MailFolder.id, MailFolder.account_id, MailFolder.role).where(MailFolder.account_id.in_(accounts), MailFolder.role.in_(("archive", "all")))
+        )).all()
+        own_archive = {r.account_id for r in rows if r.role == "archive"}
+        return [r.id for r in rows if r.role == "archive" or r.account_id not in own_archive]
     elif role:
         query = query.where(MailFolder.role == role)
     return list((await db.execute(query)).scalars())
@@ -296,6 +303,15 @@ async def threads(
     # A label is its own place: what's under one isn't in the Inbox or Archive too.
     if not label and role in ("inbox", "archive") and not query:
         where += " AND (account_id, thread_key) NOT IN (SELECT account_id, thread_key FROM mail_thread_labels)"
+    # All Mail holds the older emails of conversations that are in your Inbox or under
+    # a label too. As on Gmail, those conversations are there, not in the archive.
+    if not label and role == "archive" and not query:
+        where += (
+            " AND (folder_id NOT IN (SELECT id FROM mail_folders WHERE role = 'all') OR NOT EXISTS ("
+            "SELECT 1 FROM mail_messages other JOIN mail_folders place ON place.id = other.folder_id "
+            "WHERE other.account_id = mail_messages.account_id AND other.thread_key = mail_messages.thread_key "
+            "AND (place.role = 'inbox' OR place.label_id IS NOT NULL)))"
+        )
     if needs_reply:
         where += " AND " + _NEEDS_REPLY
     if label:
@@ -452,7 +468,10 @@ async def act(account_id: uuid.UUID, key: str, body: ThreadAction, db: AsyncSess
         target = await rules.archive_folder(db, account_id)
     if target is None:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="This mailbox doesn't have that folder.")
-    rules.move(db, folders, messages, target)
+    # Your sent copies normally stay in Sent. But if that's all there is, there's
+    # nothing else to move, and it would just come straight back.
+    only_yours = all(folders[m.folder_id].role in rules.STAY_PUT or m.folder_id == target.id for m in messages)
+    rules.move(db, folders, messages, target, even_sent=only_yours and body.action != "inbox")
     # Moving it somewhere else takes it out of its label.
     await rules.clear_label(db, account_id, key)
     await db.commit()
