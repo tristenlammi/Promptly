@@ -131,6 +131,12 @@ def _strip_quoted(text: str) -> str:
     return "\n".join(lines) or text
 
 
+def message_id_of(raw_headers: bytes) -> str:
+    """Read the same way as ``parse``, so the two can be compared."""
+    msg = email.message_from_bytes(raw_headers, policy=policy.default)
+    return _clean_header(msg.get("Message-ID"))[:500]
+
+
 def parse(raw: bytes) -> Parsed:
     msg: EmailMessage = email.message_from_bytes(raw, policy=policy.default)  # type: ignore[assignment]
     out = Parsed()

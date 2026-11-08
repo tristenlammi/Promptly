@@ -70,7 +70,9 @@ _NAMES = {
     "junk email": "spam", "archive": "archive", "archives": "archive", "all mail": "all",
 }
 # Views of mail that lives in another folder: copying them would show it twice.
+# The exception is All Mail where there's no Archive, as on Gmail: see worker._copied.
 SKIP_ROLES = {"all", "starred"}
+GMAIL_FOLDERS = ("[Gmail]/", "[Google Mail]/")
 
 
 class MailError(Exception):
@@ -182,22 +184,39 @@ def connect(server: Server) -> IMAPClient:
     return client
 
 
-def role_of(flags: tuple[bytes, ...], path: str) -> str:
+def _marked_role(flags: tuple[bytes, ...]) -> str | None:
     for flag in flags:
         role = _SPECIAL.get(flag.lower())
         if role:
             return role
+    return None
+
+
+def role_of(flags: tuple[bytes, ...], path: str) -> str:
+    role = _marked_role(flags)
+    if role:
+        return role
     leaf = re.split(r"[/.]", path)[-1].strip().lower()
     return "inbox" if path.upper() == "INBOX" else _NAMES.get(leaf, "other")
 
 
 def folders(client: IMAPClient) -> list[dict[str, str]]:
     out = []
-    for flags, delimiter, path in client.list_folders():
+    listed = client.list_folders()
+    # The server says which is its Trash. A label that's only called Trash, like
+    # Gmail's old [Imap]/Trash, is just a label then, or mail could be sent there instead.
+    marked = {_marked_role(flags) for flags, _, _ in listed}
+    # On Gmail, All Mail is the archive. A label called Archive is only a label.
+    if any(_marked_role(flags) == "all" and path.startswith(GMAIL_FOLDERS) for flags, _, path in listed):
+        marked.add("archive")
+    for flags, delimiter, path in listed:
         if any(f.lower() == b"\\noselect" for f in flags):
             continue
         separator = delimiter.decode() if isinstance(delimiter, bytes) else (delimiter or "/")
-        out.append({"path": path, "name": path.split(separator)[-1] if separator else path, "role": role_of(flags, path)})
+        role = role_of(flags, path)
+        if role in marked and not _marked_role(flags):
+            role = "other"
+        out.append({"path": path, "name": path.split(separator)[-1] if separator else path, "role": role})
     return out
 
 
@@ -266,6 +285,16 @@ def flags_of(client: IMAPClient, uids: list[int]) -> dict[int, list[bytes]]:
     for start in range(0, len(uids), 500):
         for uid, row in client.fetch(uids[start : start + 500], ["FLAGS"]).items():
             out[uid] = list(row.get(b"FLAGS", ()))
+    return out
+
+
+def message_id_headers(client: IMAPClient, uids: list[int]) -> dict[int, bytes]:
+    """Just enough of each email to tell whether we've already got it."""
+    out: dict[int, bytes] = {}
+    for start in range(0, len(uids), 500):
+        for uid, row in client.fetch(uids[start : start + 500], ["BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]"]).items():
+            # Servers don't all echo the field list back the same way.
+            out[uid] = next((value for key, value in row.items() if key.startswith(b"BODY[HEADER.FIELDS")), b"") or b""
     return out
 
 

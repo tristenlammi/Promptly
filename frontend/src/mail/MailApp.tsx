@@ -91,6 +91,8 @@ export function MailApp() {
   const accounts = useMemo(() => overview?.accounts ?? [], [overview]);
   const location = useLocation();
   const undoTimer = useRef<number | null>(null);
+  // Moves still inside their undo time, by conversation: call one to send it now.
+  const waiting = useRef(new Map<string, (closing?: boolean) => void>());
   const [prefill, setPrefill] = useState<string | null>(null);
   const [eventFor, setEventFor] = useState<(Open & { subject: string }) | null>(null);
   const labels = useMemo(() => overview?.labels ?? [], [overview]);
@@ -192,8 +194,14 @@ export function MailApp() {
     const id = `${row.account_id}/${row.key}`;
     leave(id);
     setOpen((o) => (o && o.key === row.key ? null : o));
-    const timer = window.setTimeout(() => {
-      setUndo(null);
+    const send = (closing = false) => {
+      window.clearTimeout(timer);
+      waiting.current.delete(id);
+      setUndo((u) => (u?.timer === timer ? null : u));
+      if (closing) {
+        mailApi.actAsPageCloses(row.account_id, row.key, action);
+        return;
+      }
       void (async () => {
         try {
           await mailApi.act(row.account_id, row.key, action);
@@ -207,17 +215,41 @@ export function MailApp() {
           stay(id);
         }
       })();
-    }, UNDO_MS);
+    };
+    const timer = window.setTimeout(() => send(), UNDO_MS);
+    waiting.current.set(id, send);
     setUndo({
       label,
       timer,
       run: () => {
         window.clearTimeout(timer);
+        waiting.current.delete(id);
         stay(id);
         setUndo(null);
       },
     });
   }, [qc, leave, stay]);
+
+  // Going to look for it means you've finished with Undo, and it has to be there.
+  useEffect(() => {
+    for (const send of [...waiting.current.values()]) send();
+  }, [view.role, view.label, view.account]);
+
+  // Closing the app or leaving it on a phone mustn't lose what you just did.
+  useEffect(() => {
+    const closing = () => {
+      for (const send of [...waiting.current.values()]) send(true);
+    };
+    const hiddenNow = () => {
+      if (document.visibilityState === "hidden") closing();
+    };
+    window.addEventListener("pagehide", closing);
+    document.addEventListener("visibilitychange", hiddenNow);
+    return () => {
+      window.removeEventListener("pagehide", closing);
+      document.removeEventListener("visibilitychange", hiddenNow);
+    };
+  }, []);
 
   /** Into a label, or back to the Inbox, straight away: undo puts it back where it was. */
   const moveNow = useCallback(async (row: Open & { labels: string[] }, labelId: string | null, words: string, cameFrom: "inbox" | "archive" | "trash", fromLabel?: string) => {
