@@ -190,7 +190,7 @@ test("Firefox: popup fills the page", async () => {
   await closeTabs();
 });
 
-// ---- The on-page menu hands off to the toolbar panel (D-FIREFOX-1, D-FIREFOX-2) -----------
+// ---- The on-page menu hands off to the toolbar panel (D78, D79) -----------
 // A click in the menu never fills on Firefox. It opens the toolbar panel with that login at
 // the top. WebDriver can't see the real panel, so these open the same page in a tab, aimed
 // at the site's tab, as the other popup tests do.

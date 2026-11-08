@@ -28,7 +28,7 @@ Three things matter most:
 | Items, folders, tags, history, reprompt | Yes | Yes | Yes | Yes |
 | Generators, strength meter | Yes | Yes | Yes, with a smaller strength port (A18) | Yes |
 | 2FA codes | Yes | Yes | Yes | Yes. Codes are typed or copied by auto-type |
-| Autofill | None: the web page doesn't fill, by design | Yes. On Firefox the on-page menu hands off to the toolbar panel, which fills (D49, D-FIREFOX-1) | Yes, autofill service | Auto-type |
+| Autofill | None: the web page doesn't fill, by design | Yes. On Firefox the on-page menu hands off to the toolbar panel, which fills (D49, D78) | Yes, autofill service | Auto-type |
 | Passkeys | Listed only, plus vault unlock by passkey | Create and use on both | Create and use through Credential Manager | Listed only |
 | Sharing, Secure Send, emergency access | Yes | Yes, on the vault page | Yes | Yes |
 | Security check | Yes | Yes, on the vault page | Yes | Yes |
@@ -256,7 +256,7 @@ Left open from those reviews:
 - **Attachment streaming** goes straight to disk only on Chromium. Firefox and WebKit hold the whole file in memory (D60).
 - **Bookmarks** need an unlocked vault, and aren't on Android or in the Windows backup.
 - **Imported attachments** aren't in a Bitwarden export.
-- **Firefox's on-page menu** doesn't fill or save itself, as Firefox has no trustworthy visibility check. A click on a login there opens the toolbar panel with it at the top, and one more click fills (D49, D-FIREFOX-1, D-FIREFOX-2).
+- **Firefox's on-page menu** doesn't fill or save itself, as Firefox has no trustworthy visibility check. A click on a login there opens the toolbar panel with it at the top, and one more click fills (D49, D78, D79).
 - **Lookalike sites:** rows are removed rather than warned about (D49).
 - **Custom ports:** a login saved with no port matches the default port only, so self-hosted services on other ports need their address edited (D51).
 - **Android:** no "teach it once" and no live refresh of the browser allowlist. The other small gaps are in the "Not built" section of `ANDROID_NOTES.md`.

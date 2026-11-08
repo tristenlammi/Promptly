@@ -37,7 +37,7 @@ function button(text: string, onClick: () => void, primary = false, gated = true
   return b;
 }
 
-/** Firefox (D-FIREFOX-1): this bar can't tell whether it's really showing, so Save here
+/** Firefox (D78): this bar can't tell whether it's really showing, so Save here
  *  doesn't save. It opens the toolbar panel, which asks the same question where a page
  *  can't cover it. The background opens it (Firefox 149 and later); before that, this says
  *  where to click. */

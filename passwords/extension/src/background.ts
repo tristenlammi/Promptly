@@ -1600,7 +1600,7 @@ async function tokenOwner(tabId: number, kind: "ownsMenu" | "ownsSave", token: u
   return owners.length === 1 && owners[0].origin !== "null" ? owners[0] : null;
 }
 
-// ---- Firefox: the on-page menu hands off to the toolbar panel (D-FIREFOX-1) -------------
+// ---- Firefox: the on-page menu hands off to the toolbar panel (D78) -------------
 // Firefox has no reading that tells us the menu is really showing (press.ts), so a click
 // there never fills. It opens the toolbar panel with the login it named at the top, and
 // the fill is one more click there, where a page can't cover anything. What the menu
@@ -1609,7 +1609,7 @@ async function tokenOwner(tabId: number, kind: "ownsMenu" | "ownsSave", token: u
 /** How long a pick waits for the panel. */
 const HANDOFF_MS = 60_000;
 /** How long after a page's menu or save bar opened the panel that the panel asks for a
- *  deliberate press (D-FIREFOX-2). Generous: a person takes a second or two at most. */
+ *  deliberate press (D79). Generous: a person takes a second or two at most. */
 const PAGE_OPENED_MS = 10_000;
 
 type Handoff = { itemId: string | null; host: string; at: number };
@@ -1681,7 +1681,7 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
   }
   // Firefox has no way to tell this menu is really showing (press.ts), and "on click" means
   // no inline menu at all. The menu says so, and this holds whatever it says. On Firefox
-  // the menu may list logins and open the panel, and nothing else (D-FIREFOX-1).
+  // the menu may list logins and open the panel, and nothing else (D78).
   if (await fillsOnClickOnly()) return { ok: false, reason: "popup", locked: false, candidates: [] };
   if (__ENGINE__ === "firefox" && m.t !== "menuList" && m.t !== "menuOpenPopup") return { ok: false, reason: "popup", locked: false, candidates: [] };
   const owner = await tokenOwner(tabId, "ownsMenu", m.token);
@@ -1755,7 +1755,7 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
 }
 
 async function handleSave(m: SaveRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
-  // Firefox: Save opens the toolbar panel, which asks the same question (D-FIREFOX-1). The
+  // Firefox: Save opens the toolbar panel, which asks the same question (D78). The
   // panel's marked careful before anything waits or the token's checked, like the menu's,
   // so it's careful whoever asked.
   if (m.t === "saveOpenPopup") return __ENGINE__ === "firefox" && sender.tab?.id !== undefined ? openPanelFromPage() : null;

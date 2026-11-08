@@ -13,8 +13,8 @@ import { ext, type Candidate, type FillOutcome, pageHost, type StateOut } from "
 declare const __TEST_BUILD__: boolean;
 declare const __ENGINE__: string;
 
-// ---- Firefox: when a page got this panel opened (D-FIREFOX-2) -----------------------------
-// On Firefox a click in the on-page menu or save bar opens this panel (D-FIREFOX-1). A page
+// ---- Firefox: when a page got this panel opened (D79) -----------------------------
+// On Firefox a click in the on-page menu or save bar opens this panel (D78). A page
 // can't cover it, but it can get it opened under a still cursor between the two clicks of
 // a double click, so the second lands here. For a while after a page opened it, a click
 // counts only once the panel's been up for half a second and the person has moved the
@@ -310,7 +310,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
   const [tab, setTab] = useState<Tab>("vault");
   const [adding, setAdding] = useState(false);
   const [reprompt, setReprompt] = useState<{ pass: () => void } | null>(null);
-  // Firefox: the login picked in the menu on the page (D-FIREFOX-1).
+  // Firefox: the login picked in the menu on the page (D78).
   const [picked, setPicked] = useState<Candidate | null>(null);
 
   useEffect(() => {

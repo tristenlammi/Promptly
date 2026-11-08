@@ -68,7 +68,7 @@ export type PageRequest =
   | { t: "plusAddress"; email: string; host?: string | null }
   | { t: "clipWatch"; text: string }
   | { t: "clipClear" }
-  /** Firefox: what the on-page menu picked, and whether a page opened this panel (D-FIREFOX-1). */
+  /** Firefox: what the on-page menu picked, and whether a page opened this panel (D78). */
   | { t: "handoffFor"; tabId: number };
 
 export type FillOutcome =

@@ -1,6 +1,6 @@
 // Was a press on a surface the page can't cover still meant for that surface? The toolbar
 // panel can't be hidden or covered by a page, but on Firefox a page can get it opened (a
-// click in our on-page menu opens it, D-FIREFOX-1). Then the second click of a double
+// click in our on-page menu opens it, D78). Then the second click of a double
 // click, aimed at the page, can land on the panel as it appears under a still cursor:
 // Paulos Yibelo's "DoubleClickjacking" (2024). So once a page has opened the panel, a
 // press only counts when the panel has been up for a short while and the person has

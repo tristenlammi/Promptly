@@ -37,7 +37,7 @@ function row(text: string, sub: string, onClick: () => void, name?: string): HTM
   return b;
 }
 
-/** Firefox (D-FIREFOX-1): this frame can't tell whether it's really showing, so a press here
+/** Firefox (D78): this frame can't tell whether it's really showing, so a press here
  *  never fills. It opens the toolbar panel, with this login at the top, where a page can't
  *  cover anything and one more click fills. Told to the background first, so the panel
  *  finds it. The background opens the panel: Firefox gives a frame in a page no action
