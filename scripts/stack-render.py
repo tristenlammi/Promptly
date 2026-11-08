@@ -45,6 +45,9 @@ EXTRAS = {
     "search": ["searxng"],
     "maps": [],
     "maps-full": ["maps"],
+    # Calls (voice channels): the bridged LiveKit variant. Its media ports
+    # aren't published (only nginx is); a browser on this PC still connects.
+    "calls": ["livekit-desktop"],
 }
 # What `--e2e` adds: what the e2e suite exercises beyond the core.
 E2E_EXTRAS = ["media", "photos-ml", "maps", "convert"]
@@ -147,6 +150,17 @@ def write_env(path: Path) -> dict[str, str]:
         if "=" in line and not line.lstrip().startswith("#"):
             k, v = line.split("=", 1)
             env[k.strip()] = v.strip()
+    # Added after the first stacks were made, so appended to an existing file.
+    later = {
+        # Calls: the LiveKit key pair (the backend and livekit-desktop read it).
+        "LIVEKIT_API_KEY": "API" + secrets.token_hex(8),
+        "LIVEKIT_API_SECRET": secrets.token_hex(32),
+    }
+    add = {k: v for k, v in later.items() if not env.get(k)}
+    if add:
+        with path.open("a", encoding="utf-8") as f:
+            f.write("".join(f"{k}={v}\n" for k, v in add.items()))
+        env.update(add)
     return env
 
 
