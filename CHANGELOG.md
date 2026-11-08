@@ -33,6 +33,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: breach alerts for your email addresses, from Have I Been Pwned. An admin adds a paid HIBP key in Admin, Passwords; each person turns alerts on for themselves on the Security check, which shows the breaches each address is in and the change helper for logins at those sites. New breaches arrive as a notification.
 
 ### Changed
+- Passwords: the browser extension and the Windows app are now version 0.2.0, with the Passwords changes in this release.
 - Passwords on Firefox: clicking a login in the menu under a login box opens the toolbar panel with it at the top, ready to fill with one more click, and the save bar's button opens the panel to save. Before, the menu and bar there only said to use the toolbar.
 - Passwords: a site is told you were verified only after the passkey PIN, not just for an unlocked vault and a click, and Android asks for the PIN instead of a fingerprint before using a passkey.
 - Passwords: logins for different services on one domain stay apart. On zyx.example.org only the zyx login is offered, and the abc.example.org one is listed under "Other logins for example.org". A login saved at a site's sign-in host, like accounts.example.com, still fills across the domain.
