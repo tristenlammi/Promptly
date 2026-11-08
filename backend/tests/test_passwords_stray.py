@@ -280,6 +280,20 @@ async def test_ignore_is_for_good(client, db, uploads):
     assert (await client.get("/api/passwords/stray/count", headers=a.h)).json() == {"count": 0}
 
 
+async def test_a_subject_holding_the_secret_is_masked_in_the_list(client, db, uploads):
+    a = await setup_vault(client, await make_user(db))
+    account, f = await _mailbox(db, a.user)
+    db.add(_mail(account, f["inbox"], uid=1, subject="Your Wi-Fi password is Blue-Otter-42!", body="See you Saturday."))
+    await db.commit()
+    await _scan(db, a.user)
+    r = await client.get("/api/passwords/stray", headers=a.h)
+    (x,) = r.json()["findings"]
+    assert x["kind"] == "wifi" and "Blue-Otter-42!" not in r.text
+    assert x["where"]["title"] == f"Your Wi-Fi password is Bl{DOT * 4}2!"
+    # Opened, it's all there.
+    assert (await client.get(f"/api/passwords/stray/{x['id']}", headers=a.h)).json()["secrets"][0]["value"] == "Blue-Otter-42!"
+
+
 async def test_a_finding_whose_source_changed_goes(client, db, uploads):
     a = await setup_vault(client, await make_user(db))
     note = await _file(db, uploads, a.user, "wifi.txt", b"x", content_text="Wi-Fi password: blue-otter-42")

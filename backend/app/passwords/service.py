@@ -253,6 +253,13 @@ async def _loop() -> None:
                 await sweep(db)
         except Exception:  # noqa: BLE001 — the loop must outlive one bad sweep
             logger.exception("Passwords sweep failed")
+        try:
+            # Stray passwords: what's new in Mail, Files and Photos since the last hour.
+            from app.passwords.stray_scan import tick
+
+            await tick()
+        except Exception:  # noqa: BLE001
+            logger.exception("Stray password pass failed")
 
 
 def start_password_loops() -> asyncio.Task:

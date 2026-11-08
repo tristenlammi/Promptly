@@ -38,7 +38,6 @@ logger = logging.getLogger("promptly.passwords.stray")
 router = APIRouter(route_class=_QuietRoute, dependencies=[Depends(require_enabled)])
 
 SOURCES = ("mail", "file", "photo")
-SCAN_JOB = "pw_stray_scan_job"
 BATCH = 200
 # On demand: as long as it takes on most mailboxes. What's left over, the hourly pass picks up.
 FULL_BUDGET = 20 * 60.0
@@ -286,7 +285,7 @@ async def _mail_batch(db: AsyncSession, user_id: uuid.UUID, cursor: list[str] | 
     found = 0
     for m, folder in rows:
         src = _mail_source(m, folder)
-        found += await _record(db, user_id, "mail", m.id, _hits(src))
+        found += await _record(db, user_id, "mail", m.id, await asyncio.to_thread(_hits, src))
         cursor = [m.sent_at.isoformat(), str(m.id)]
     return cursor, len(rows), found
 
@@ -311,7 +310,7 @@ async def _file_batch(db: AsyncSession, user_id: uuid.UUID, cursor: list[str] | 
     rows = (await db.execute(q.order_by(UserFile.modified_at, UserFile.id).limit(limit))).scalars().all()
     found = 0
     for f in rows:
-        found += await _record(db, user_id, "file", f.id, _hits(await _file_source(f)))
+        found += await _record(db, user_id, "file", f.id, await asyncio.to_thread(_hits, await _file_source(f)))
         cursor = [f.modified_at.isoformat(), str(f.id)]
     return cursor, len(rows), found
 
@@ -329,7 +328,7 @@ async def _photo_batch(db: AsyncSession, user_id: uuid.UUID, cursor: list[str] |
     rows = (await db.execute(text(sql + "ORDER BY t.created_at, t.file_id LIMIT :n"), params)).all()
     found = 0
     for file_id, words, at in rows:
-        found += await _record(db, user_id, "photo", file_id, stray.scan_photo(words or ""))
+        found += await _record(db, user_id, "photo", file_id, await asyncio.to_thread(stray.scan_photo, words or ""))
         cursor = [at.isoformat(), str(file_id)]
     return cursor, len(rows), found
 
@@ -358,7 +357,9 @@ async def scan_user(db: AsyncSession, user_id: uuid.UUID, *, full: bool = False,
     a pass cut short carries on from there next time."""
     st = await _state(db, user_id)
     cursors: dict[str, Any] = {} if full else {k: v for k, v in (st.cursors or {}).items() if k in SOURCES}
-    await _save(db, user_id, cursors=cursors, started_at=_now())
+    # Only a requested run counts as "scanning" on screen; the hourly pass is quiet.
+    if full:
+        await _save(db, user_id, cursors=cursors, started_at=_now())
     deadline = time.monotonic() + budget
     scanned = found = 0
     caught_up = True
@@ -378,22 +379,34 @@ async def scan_user(db: AsyncSession, user_id: uuid.UUID, *, full: bool = False,
             if n < size:
                 break
         scanned += done
-    await _save(db, user_id, cursors={**cursors, "caught_up": caught_up}, finished_at=_now())
+    end = {**cursors, "caught_up": caught_up, "last_at": _now().isoformat()}
+    if full:
+        await _save(db, user_id, cursors=end, finished_at=_now())
+    else:
+        await _save(db, user_id, cursors=end)
     # Counts only: never what was found, or where.
     logger.info("stray scan: user=%s full=%s read=%d kinds_found=%d caught_up=%s", user_id, full, scanned, found, caught_up)
     return {"scanned": scanned, "found": found, "caught_up": caught_up}
 
 
 async def run_scan_job(user_id: str) -> None:
-    """The arq job behind "Find stray passwords"."""
+    """What "Find stray passwords" starts, in the background of the API process."""
     from app.database import SessionLocal
 
+    uid = uuid.UUID(user_id)
     async with SessionLocal() as db:
-        await scan_user(db, uuid.UUID(user_id), full=True, budget=FULL_BUDGET)
+        try:
+            await scan_user(db, uid, full=True, budget=FULL_BUDGET)
+        except Exception:
+            # Say it's over, so the screen stops waiting. What was read so far is kept.
+            await db.rollback()
+            await _save(db, uid, finished_at=_now())
+            logger.warning("stray scan: requested pass failed for user=%s", uid, exc_info=True)
 
 
 async def tick() -> int:
-    """Hourly, for everyone with a vault: whatever arrived since last time, a few seconds each."""
+    """Hourly, for everyone with a vault: whatever arrived since last time, a few seconds
+    each. Run from the Passwords sweep loop (``service._loop``)."""
     from app.database import SessionLocal
     from app.passwords.models import PwAccount
 
@@ -416,14 +429,9 @@ async def tick() -> int:
 
 
 async def enqueue_scan(user_id: uuid.UUID) -> None:
-    try:
-        from app.tasks.queue import get_pool
-
-        pool = await get_pool()
-        await pool.enqueue_job(SCAN_JOB, str(user_id), _job_id=f"pw-stray-{user_id}-{int(time.time())}")
-        return
-    except Exception:  # noqa: BLE001 - never lose the request
-        logger.warning("stray scan: queue unavailable, scanning in the API process", exc_info=True)
+    """In the API process, not the arq worker: ``app/tasks`` runs automations, and a test
+    keeps it from importing anything of Passwords (D-STRAY-9). The pattern matching runs
+    in a thread, so it doesn't hold up requests."""
     from app.background import spawn
 
     spawn(run_scan_job(str(user_id)), name=f"pw_stray_{user_id}")
@@ -485,17 +493,34 @@ def _scanning(st: PwStrayState | None) -> bool:
     return st.finished_at is None or st.finished_at < st.requested_at
 
 
+def _last_scan(st: PwStrayState | None) -> datetime | None:
+    if st is None:
+        return None
+    raw = (st.cursors or {}).get("last_at")
+    hourly = datetime.fromisoformat(raw) if isinstance(raw, str) else None
+    return max((t for t in (st.finished_at, hourly) if t is not None), default=None)
+
+
+def _masked_title(title: str, hits: list[stray.Hit]) -> str:
+    """A subject can be the secret ("Your Wi-Fi password is …"): the list shows it masked."""
+    for h in hits:
+        for value in h.value.splitlines():
+            if len(value) >= 4 and value in title:
+                title = title.replace(value, stray.mask(value))
+    return title
+
+
 def _out(row: PwStrayFinding, src: Source, hits: list[stray.Hit]) -> FindingOut:
     return FindingOut(
         id=row.id, source=row.source, kind=row.kind, hits=sum(h.count for h in hits), label=hits[0].label,
-        preview=stray.preview(hits[0]), where=Where(title=src.title, detail=src.detail, at=src.at), found_at=row.found_at,
+        preview=stray.preview(hits[0]), where=Where(title=_masked_title(src.title, hits), detail=src.detail, at=src.at), found_at=row.found_at,
     )
 
 
 async def _current(db: AsyncSession, row: PwStrayFinding) -> tuple[Source, list[stray.Hit]] | None:
     """The finding as its source stands now. One that's no longer there is dropped."""
     src = await load_source(db, row.user_id, row.source, row.source_id)
-    hits = [h for h in _hits(src) if h.kind == row.kind] if src else []
+    hits = [h for h in await asyncio.to_thread(_hits, src) if h.kind == row.kind] if src else []
     if not hits:
         await db.delete(row)
         return None
@@ -524,7 +549,7 @@ async def list_stray(response: Response, session: VaultSession = Depends(require
     st = await db.get(PwStrayState, uid)
     return StrayOut(
         count=total, ignored=ignored, scanning=_scanning(st), caught_up=bool(st and (st.cursors or {}).get("caught_up")),
-        last_scan_at=st.finished_at if st else None, mail_hidden=not mail_ok, findings=out,
+        last_scan_at=_last_scan(st), mail_hidden=not mail_ok, findings=out,
     )
 
 
@@ -639,4 +664,4 @@ async def trash_stray(finding_id: str, session: VaultSession = Depends(require_s
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-__all__ = ["router", "scan_user", "run_scan_job", "tick", "PwStrayFinding", "PwStrayState", "SCAN_JOB"]
+__all__ = ["router", "scan_user", "run_scan_job", "tick", "PwStrayFinding", "PwStrayState"]
