@@ -21,6 +21,12 @@ speech never race each other. The pieces around it:
   filter) or a backchannel like "mm", or a stop word on its own. The audio
   stops, the reply is cancelled, and the saved message is cut back to what
   you heard, marked ``voice.interrupted``.
+* **Doing things** (WP-T3): a turn first goes to your command library
+  (``fastpath.py``: no model when a command matches). The model gets the
+  voice tools (``tools.py``); a change it asks for is held and read back
+  (``ask``), and the next thing you say (or tap) answers it: a strict yes
+  runs it through ``chat/approvals.py``, a bare no leaves it, anything else
+  ("no, Friday") goes to the model with the change it was about to make.
 
 The session lives in process memory (single worker, like the chat streams)
 and for ``RESUME_S`` after the socket drops, so a reconnect picks it up.
@@ -36,12 +42,12 @@ from typing import Any
 
 from app.auth.models import User
 
-from . import links, reply as chat
+from . import confirm, fastpath, links, readback, reply as chat, tools as voice_tools
 from .access import VoicePrefs, record_turn
 from .audio import FRAME_MS, TTS_SAMPLE_RATE, Playhead, split_seq, with_seq
 from .protocol import CLOSE_UNAVAILABLE, PROTOCOL_VERSION, Hello, Transport
 from .speech import Piece, SpeechSplitter, heard_raw
-from .words import asks_to_stop, barges_in, is_goodbye, just_stop_or_thanks, real_words, without_wake_word
+from .words import asks_to_stop, barges_in, echo_mask, is_goodbye, just_stop_or_thanks, real_words, tokens, without_wake_word
 
 logger = logging.getLogger("promptly.talk")
 
@@ -84,6 +90,10 @@ class UserTurn:
     stt_ms: int | None = None
     typed: bool = False
     pending: bool = False  # saved, its answer held back while they say more
+    commands_checked: bool = False
+    # A change they were asked to confirm and answered with something else
+    # ("no, Friday"): the model gets it as context (WP-T3).
+    pending_action: dict[str, Any] | None = None
 
 
 @dataclass
@@ -110,6 +120,11 @@ class Reply:
     failed_say: str | None = None  # the model failed: say this instead
     barge_ins: int = 0
     pieces_started: int = 0
+    fast_path: bool = False  # said without the model (a command, an answer to a yes/no)
+    tool_ms: int = 0
+    tool_started: dict[str, float] = field(default_factory=dict)
+    ask: dict[str, Any] | None = None  # a change held for a yes in this reply
+    cards: list[dict[str, Any]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         self.release.set()
@@ -157,6 +172,33 @@ def chat_speech(raw: str) -> str:
     from .speech import to_speech
 
     return to_speech(raw)
+
+
+@dataclass
+class Ask:
+    """A question waiting for a yes: a held change (``approval``) or a command
+    to run (``command``)."""
+
+    kind: str  # "approval" | "command"
+    question: str
+    turn: UserTurn
+    reply: Reply | None = None  # the reply that asks it
+    message_id: uuid.UUID | None = None
+    call_id: str | None = None
+    tool: str | None = None
+    arguments: dict[str, Any] | None = None
+    hit: fastpath.Hit | None = None
+    timer: asyncio.Task | None = None
+
+    @property
+    def approval_id(self) -> str:
+        if self.kind == "approval":
+            return f"{self.message_id}:{self.call_id}"
+        return f"command:{self.hit.command_id if self.hit else ''}"
+
+
+# Device actions a phone may be sent, by the ``hello.caps`` entry they need.
+_ACTION_CAPS = {"set_timer": "timer", "set_alarm": "alarm", "dial": "dial", "message": "message", "open_app": "open_app", "go": "navigate"}
 
 
 # Live sessions by id: for resume, and the server's live-slot count.
@@ -212,6 +254,7 @@ class TalkSession:
         self._attached = asyncio.Event()
         self._resume_timer: asyncio.Task | None = None
         self._side: set[asyncio.Task] = set()
+        self.asking: Ask | None = None
 
     # ------------------------------------------------------------ lifecycle
     async def start(self, transport: Transport) -> None:
@@ -350,6 +393,10 @@ class TalkSession:
             if self.stt is not None:
                 await self.stt.command("reset")
             await self._forget_heard()
+        elif kind == "approval_decided":
+            await self._decided_elsewhere(data["decision"])
+        elif kind == "ask_expired":
+            await self._ask_expired(data["ask"])
         elif kind == "end":
             await self._close(data.get("reason") or "bye")
 
@@ -390,8 +437,16 @@ class TalkSession:
                 self.last_activity = time.monotonic()
                 await self._typed(words)
         elif kind == "confirm":
-            # Nothing waits for a yes yet: spoken approvals arrive with WP-T3.
-            await self._error("nothing_to_confirm", None, show="There's nothing waiting for a yes or no.")
+            # The Yes / No buttons on the Talk screen: the same as saying it.
+            said = msg.get("answer")
+            if self.asking is None:
+                await self._error("nothing_to_confirm", None, show="There's nothing waiting for a yes or no.")
+            elif said in ("yes", "no"):
+                self.last_activity = time.monotonic()
+                r = self.reply
+                if r is not None and not r.cancelled and not r.played:
+                    await self._barge_in(r)
+                await self._settle(self.asking, said == "yes", UserTurn(text=said, speech_end=time.monotonic(), typed=True))
         elif kind == "bye":
             await self._close("bye")
         elif kind == "hello":
@@ -400,6 +455,14 @@ class TalkSession:
     async def _typed(self, words: str) -> None:
         now = time.monotonic()
         typed = UserTurn(text=words, speech_end=now, typed=True)
+        if self.asking is not None:
+            said = confirm.answer(words)
+            if said is not None:
+                r = self.reply
+                if r is not None and not r.cancelled and not r.played:
+                    await self._barge_in(r)
+                await self._settle(self.asking, said == "yes", typed)
+                return
         r = self.reply
         if r is not None and not r.cancelled:
             if r.unheard and not r.turn.typed and r.turn.message_id is not None:
@@ -511,6 +574,8 @@ class TalkSession:
 
     async def _on_final(self, h: Heard, text: str, now: float) -> None:
         self.last_activity = now
+        if self.asking is not None and await self._answered(h, text):
+            return
         r = self.reply
         if h.over_speech:
             if not h.barged:
@@ -559,6 +624,10 @@ class TalkSession:
         return {"spoken": True, "stt_ms": turn.stt_ms}
 
     async def _new_turn(self, turn: UserTurn) -> None:
+        if self.asking is not None:
+            # Not a yes (that was caught before here): whatever was waiting
+            # doesn't happen, and these words are what they want instead.
+            await self._drop_ask(self.asking, turn)
         try:
             await chat.check_quotas(self.connection, self.user)
             turn.voice = self._spoken_meta(turn)
@@ -580,19 +649,42 @@ class TalkSession:
         prev.endpoint_ms = more.endpoint_ms
         prev.stt_ms = more.stt_ms
         prev.voice = {"spoken": True, "stt_ms": more.stt_ms, "joined": True}
+        prev.commands_checked = False  # the whole of it may be a command
         await chat.extend_user_turn(self.conv, self.user, prev.message_id, prev.text, prev.voice)
         await self.send({"type": "heard", "text": prev.text, "message_id": None if self.conv.ephemeral else str(prev.message_id)})
         await self._answer(prev)
 
     async def _answer(self, turn: UserTurn) -> None:
-        """Start the reply (speculatively: they may yet carry on)."""
+        """Answer a turn: from the command library if it's a command, else
+        start the reply (speculatively: they may yet carry on)."""
         if any(h.real and not h.over_speech for h in self.heard.values()):
             # They're already saying more: wait for it, then answer it all.
             turn.pending = True
             return
         turn.pending = False
+        if not turn.commands_checked and turn.pending_action is None:
+            if any(not h.over_speech for h in self.heard.values()):
+                # A command does something that can't be thrown away like
+                # an unheard answer: wait until this sound turns out to be
+                # nothing (or more of the same turn).
+                turn.pending = True
+                return
+            turn.commands_checked = True
+            try:
+                hit = await fastpath.match(self.user, turn.text)
+            except Exception:  # noqa: BLE001 - fail open: the model still answers
+                logger.exception("talk: command matching failed")
+                hit = None
+            if hit is not None:
+                await self._command(turn, hit)
+                return
+        await self._start_model(turn)
+
+    async def _start_model(self, turn: UserTurn) -> None:
         try:
-            stream = await chat.start_reply(self.conv, self.user, turn.message_id, self.connection)
+            stream = await chat.start_reply(
+                self.conv, self.user, turn.message_id, self.connection, talk=self._talk_info(turn)
+            )
         except chat.TurnRefused as e:
             await self._error("refused", e.say)
             await self._set_state("listening")
@@ -608,12 +700,271 @@ class TalkSession:
         ]
         await self._set_state("thinking")
 
+    def _talk_info(self, turn: UserTurn) -> dict[str, Any]:
+        """What the chat generator needs to give this turn the voice tools."""
+        info: dict[str, Any] = {
+            "device": self.hello.device,
+            "caps": list(self.hello.caps),
+            "driving": bool((self.hello.trip or {}).get("to")),
+        }
+        if turn.pending_action:
+            info["pending"] = turn.pending_action
+        return info
+
+    # ------------------------------------------------------------ the fast path
+    async def _command(self, turn: UserTurn, hit: fastpath.Hit) -> None:
+        if hit.ask_first:
+            await self._ask_command(turn, hit)
+            return
+        await self._run_command(turn, hit)
+
+    async def _ask_command(self, turn: UserTurn, hit: fastpath.Hit) -> None:
+        ask = Ask(kind="command", question=hit.question(), turn=turn, hit=hit)
+        self.asking = ask
+        ask.reply = await self._speak(ask.question, turn, message_id=None)
+        await self.send({"type": "ask", "question": ask.question, "approval_id": ask.approval_id, "expires_in": int(confirm.ASK_TTL_S)})
+
+    async def _run_command(self, turn: UserTurn, hit: fastpath.Hit, timing: UserTurn | None = None) -> None:
+        await self._set_state("thinking")
+        ran = await fastpath.run(self.user, hit, turn.text)
+        if ran.prompt is not None:
+            # A saved prompt: ask the model that, as the / menu would.
+            if ran.prompt.strip() and turn.message_id is not None:
+                turn.text = ran.prompt.strip()[:4000]
+                turn.voice = {**(turn.voice or {}), "command": hit.name}
+                await chat.extend_user_turn(self.conv, self.user, turn.message_id, turn.text, turn.voice)
+            await self._start_model(turn)
+            return
+        message_id = None
+        if turn.message_id is not None:
+            message_id = await chat.add_reply(
+                self.conv,
+                self.user,
+                turn.message_id,
+                ran.say,
+                tool_calls=[ran.tool_call] if ran.tool_call else None,
+                voice={"spoken": True, "interrupted": False, "fast_path": True},
+            )
+        await self._speak(ran.say, timing or turn, message_id=message_id)
+
+    async def _speak(self, text: str, turn: UserTurn, *, message_id: uuid.UUID | None) -> Reply:
+        """Say something that didn't come from the model (a command's reply,
+        a read-back's outcome), through the same speech and playback.
+        ``turn`` is what it answers: its timings go into ``talk_metrics``."""
+        current = self.reply
+        if current is not None and not current.cancelled:
+            await self._barge_in(current)
+        # Its own turn record, so nothing joins onto it or answers it again.
+        said = UserTurn(
+            text=turn.text,
+            speech_end=turn.speech_end,
+            endpoint_ms=turn.endpoint_ms,
+            stt_ms=turn.stt_ms,
+            typed=turn.typed,
+        )
+        r = Reply(turn=said, stream=None, started=time.monotonic(), fast_path=True)
+        r.generated = True
+        r.message_id = message_id
+        for piece in [*r.splitter.feed(text), *r.splitter.finish()]:
+            r.pieces.append(piece)
+            r.piece_q.put_nowait(piece)
+        r.piece_q.put_nowait(None)
+        if self.heard:
+            r.release.clear()
+        self.reply = r
+        r.tasks = [
+            asyncio.create_task(self._make_speech(r), name="talk-tts"),
+            asyncio.create_task(self._play(r), name="talk-play"),
+        ]
+        await self._set_state("thinking")
+        await self.send(
+            {
+                "type": "reply",
+                "text": r.caption(),
+                "message_id": None if self.conv.ephemeral or message_id is None else str(message_id),
+                "done": True,
+            }
+        )
+        return r
+
+    # ------------------------------------------------------------ yes or no
+    def _own_words(self, text: str) -> str:
+        """What they said, without its own voice coming back."""
+        r = self.reply
+        source = r if (r is not None and not r.cancelled) else self.last_reply
+        spoken = source.echo_window() if source is not None else ""
+        heard = tokens(text)
+        mask = echo_mask(heard, tokens(spoken))
+        return " ".join(w for w, echo in zip(heard, mask) if not echo)
+
+    async def _answered(self, h: Heard, text: str) -> bool:
+        """A final while a question waits: a yes or a bare no answers it,
+        even said over the question (a "yes" is a backchannel otherwise).
+        Anything else is a new turn, which drops the question."""
+        ask = self.asking
+        if ask is None:
+            return False
+        said = confirm.answer(self._own_words(text))
+        if said is None:
+            return False
+        r = self.reply
+        if r is not None and not r.cancelled and not r.played:
+            await self._barge_in(r)
+        now = time.monotonic()
+        answer = UserTurn(
+            text=text,
+            speech_end=h.speech_end or now,
+            endpoint_ms=h.endpoint_ms,
+            stt_ms=int((now - (h.speech_end or now)) * 1000),
+        )
+        await self._settle(ask, said == "yes", answer)
+        return True
+
+    def _clear_ask(self, ask: Ask) -> None:
+        if self.asking is ask:
+            self.asking = None
+        if ask.timer is not None:
+            ask.timer.cancel()
+            ask.timer = None
+        if ask.kind == "approval" and ask.message_id is not None and ask.call_id:
+            from app.chat import approvals
+
+            approvals.unwatch(ask.message_id, ask.call_id)
+
+    async def _settle(self, ask: Ask, yes: bool, answer: UserTurn | None = None) -> None:
+        """Their yes or no (spoken, or the Talk screen's buttons). ``answer``
+        is that yes or no, for the timings of what's said next."""
+        self._clear_ask(ask)
+        said_to = answer or UserTurn(text="", speech_end=time.monotonic(), typed=True)
+        if ask.kind == "command":
+            await self.send({"type": "ask_done", "approval_id": ask.approval_id, "outcome": "approved" if yes else "declined"})
+            if yes and ask.hit is not None:
+                await self._run_command(ask.turn, ask.hit, timing=said_to)
+            elif ask.hit is not None and ask.hit.suggestion:
+                # "No" to a guess: answer what they really said (R-165).
+                await self._start_model(ask.turn)
+            else:
+                await self._speak(readback.DECLINED, said_to, message_id=None)
+            return
+        from app.chat import approvals
+        from app.database import SessionLocal
+
+        await self._set_state("thinking")
+        started = time.monotonic()
+        try:
+            async with SessionLocal() as db:
+                me = await db.get(User, self.user.id)
+                if me is None:
+                    raise approvals.ApprovalError(404, "Your account is no longer available.")
+                decision = await approvals.decide(db, me, ask.message_id, ask.call_id, yes, request=self.connection)
+        except approvals.ApprovalError as e:
+            outcome = "expired" if e.detail == approvals.EXPIRED else "failed"
+            await self.send({"type": "ask_done", "approval_id": ask.approval_id, "outcome": outcome})
+            say = e.detail if e.status_code != 404 else "That's gone, so nothing was done."
+            await self._speak(say, said_to, message_id=None)
+            return
+        await self._after_decision(ask, decision, said_to, tool_ms=int((time.monotonic() - started) * 1000))
+
+    async def _after_decision(self, ask: Ask, decision: Any, said_to: UserTurn, *, tool_ms: int | None = None) -> None:
+        await self.send(
+            {
+                "type": "ask_done",
+                "approval_id": ask.approval_id,
+                "outcome": decision.outcome,
+                "message_id": None if self.conv.ephemeral else str(decision.message_id),
+            }
+        )
+        if decision.device_action:
+            await self._device_action(decision.device_action)
+        if decision.say:
+            r = await self._speak(decision.say, said_to, message_id=None)
+            r.tool_ms = tool_ms or 0
+
+    async def _decided_elsewhere(self, decision: Any) -> None:
+        """The card in the chat was tapped while Talk waited on it."""
+        ask = self.asking
+        if (
+            ask is None
+            or ask.kind != "approval"
+            or ask.message_id != decision.message_id
+            or ask.call_id != decision.call_id
+        ):
+            return
+        self._clear_ask(ask)
+        if decision.outcome == "expired":
+            await self.send({"type": "ask_done", "approval_id": ask.approval_id, "outcome": "expired"})
+            return
+        await self._after_decision(ask, decision, UserTurn(text="", speech_end=time.monotonic(), typed=True))
+
+    async def _drop_ask(self, ask: Ask, turn: UserTurn) -> None:
+        """They said something other than yes or no: nothing is done, and if
+        it was a change, the model hears what it was ("no, I meant Friday")."""
+        self._clear_ask(ask)
+        await self.send({"type": "ask_done", "approval_id": ask.approval_id, "outcome": "declined"})
+        if ask.kind != "approval":
+            return
+        await self._decline_quietly(ask)
+        turn.pending_action = {"question": ask.question, "tool": ask.tool, "arguments": ask.arguments or {}}
+
+    def _start_ask_clock(self, ask: Ask) -> None:
+        """20 seconds to answer, from when the question has been said."""
+        if ask.timer is not None or self.asking is not ask:
+            return
+
+        async def _later() -> None:
+            try:
+                await asyncio.sleep(confirm.ASK_TTL_S)
+            except asyncio.CancelledError:
+                return
+            self.post("ask_expired", ask=ask)
+
+        ask.timer = asyncio.create_task(_later())
+
+    async def _ask_expired(self, ask: Ask) -> None:
+        if self.asking is not ask:
+            return
+        self._clear_ask(ask)
+        if ask.kind == "approval":
+            from app.chat import approvals
+            from app.database import SessionLocal
+
+            try:
+                async with SessionLocal() as db:
+                    me = await db.get(User, self.user.id)
+                    if me is not None:
+                        await approvals.expire(db, me, ask.message_id, ask.call_id)
+            except Exception:  # noqa: BLE001 - the card's own expiry backs this up
+                logger.exception("talk: couldn't mark a question expired")
+        await self.send({"type": "ask_done", "approval_id": ask.approval_id, "outcome": "expired"})
+
+    async def _decline_quietly(self, ask: Ask) -> None:
+        from app.chat import approvals
+        from app.database import SessionLocal
+
+        try:
+            async with SessionLocal() as db:
+                me = await db.get(User, self.user.id)
+                if me is not None:
+                    await approvals.decide(db, me, ask.message_id, ask.call_id, False, request=self.connection, say_outcome=False)
+        except Exception:  # noqa: BLE001 - expired or decided: either way, not done
+            pass
+
+    async def _device_action(self, action: dict[str, Any]) -> None:
+        """Something for the phone to do, only if it said it can."""
+        cap = _ACTION_CAPS.get(str(action.get("type")))
+        if cap is not None and cap in self.hello.caps:
+            await self.send({"type": "action", "action": action})
+
     async def _abandon(self, r: Reply) -> None:
         """Throw an answer away unheard (speculative start, cancelled)."""
         r.cancelled = True
         await self._stop_tasks(r)
         if self.reply is r:
             self.reply = None
+        if r.stream is None:
+            # Not the model's: a command's reply, or what a yes did. What it
+            # said has already happened, so there's nothing to answer again.
+            return
         r.turn.pending = True
         await chat.discard(r.stream, self.conv, r.turn.message_id)
         logger.info("talk: speculative answer dropped, they carried on")
@@ -634,7 +985,7 @@ class TalkSession:
         cut = r.heard_offset(heard_ms)
         content = r.splitter.raw[:cut].rstrip() or INTERRUPTED_NOTHING
         message_id = r.message_id
-        if not r.generated:
+        if not r.generated and r.stream is not None:
             message_id = await chat.stop(r.stream) or await chat.latest_reply_for(self.conv, r.turn.message_id)
         if message_id is not None:
             await chat.mark_reply(
@@ -688,9 +1039,12 @@ class TalkSession:
                 r.piece_q.put_nowait(piece)
             await self.send({"type": "reply", "text": r.caption()})
         elif ev.get("event") == "tool_started":
-            label = ev.get("label") or ev.get("name")
-            if isinstance(label, str):
-                await self.send({"type": "tool", "label": label[:120]})
+            name = str(ev.get("name") or "")
+            r.tool_started[str(ev.get("id") or name)] = time.monotonic()
+            label = ev.get("label") or voice_tools.label(name) or "Working on it"
+            await self.send({"type": "tool", "label": str(label)[:120], "name": name})
+        elif ev.get("event") == "tool_finished":
+            await self._tool_finished(r, ev)
         elif "error" in ev and not ev.get("done"):
             r.failed_say = MODEL_FAILED
             await self._error("model", MODEL_FAILED, show=str(ev.get("error"))[:300])
@@ -721,6 +1075,64 @@ class TalkSession:
                     "done": True,
                 }
             )
+            shown_id = None if self.conv.ephemeral or r.message_id is None else str(r.message_id)
+            for card in r.cards:
+                await self.send({"type": "card", "message_id": shown_id, **card})
+            if r.ask is not None and r.message_id is not None:
+                await self._ask_approval(r)
+
+    async def _tool_finished(self, r: Reply, ev: dict[str, Any]) -> None:
+        """A tool the model ran: its time, a held change, a phone action, a card."""
+        t0 = r.tool_started.pop(str(ev.get("id") or ev.get("name") or ""), None)
+        if t0 is not None:
+            r.tool_ms += int((time.monotonic() - t0) * 1000)
+        meta = ev.get("meta") or {}
+        if meta.get("approval") == "pending" and meta.get("native"):
+            r.ask = {
+                "call_id": str(ev.get("id") or ""),
+                "question": str(meta.get("question") or ""),
+                "tool": meta.get("tool"),
+                "arguments": meta.get("arguments") if isinstance(meta.get("arguments"), dict) else {},
+            }
+            return
+        action = meta.get("device_action")
+        if ev.get("ok") and isinstance(action, dict):
+            await self._device_action(action)
+        card = voice_tools.card_of(ev)
+        if card is not None:
+            r.cards.append(card)
+
+    async def _ask_approval(self, r: Reply) -> None:
+        """The reply ended with a read-back: wait for the answer."""
+        from app.chat import approvals
+
+        held = r.ask or {}
+        if self.asking is not None:
+            self._clear_ask(self.asking)
+        ask = Ask(
+            kind="approval",
+            question=held.get("question") or "",
+            turn=r.turn,
+            reply=r,
+            message_id=r.message_id,
+            call_id=held.get("call_id"),
+            tool=held.get("tool"),
+            arguments=held.get("arguments") or {},
+        )
+        self.asking = ask
+        approvals.watch(ask.message_id, ask.call_id, lambda d: self.post("approval_decided", decision=d))
+        await self.send(
+            {
+                "type": "ask",
+                "question": ask.question,
+                "approval_id": ask.approval_id,
+                "message_id": None if self.conv.ephemeral else str(ask.message_id),
+                "call_id": ask.call_id,
+                "expires_in": int(confirm.ASK_TTL_S),
+            }
+        )
+        if r.played or r.cancelled:
+            self._start_ask_clock(ask)
 
     async def _make_speech(self, r: Reply) -> None:
         """Kokoro, piece by piece, into the frame queue."""
@@ -814,6 +1226,8 @@ class TalkSession:
 
     async def _finish(self, r: Reply) -> None:
         """One answered turn: its timings (no words) into ``talk_metrics``."""
+        if self.asking is not None and self.asking.reply is r:
+            self._start_ask_clock(self.asking)
         t = r.turn
         await record_turn(
             user_id=self.user.id,
@@ -825,6 +1239,8 @@ class TalkSession:
             ttft_ms=None if r.first_delta is None else int((r.first_delta - r.started) * 1000),
             first_audio_ms=None if r.first_audio is None else int((r.first_audio - t.speech_end) * 1000),
             barge_ins=r.barge_ins,
+            fast_path=r.fast_path,
+            tool_ms=r.tool_ms or None,
         )
 
     # ------------------------------------------------------------ helpers
@@ -866,6 +1282,12 @@ class TalkSession:
         self.end_reason = reason
         if self._resume_timer is not None:
             self._resume_timer.cancel()
+        if self.asking is not None:
+            # Over before it was answered: nothing is done.
+            ask = self.asking
+            self._clear_ask(ask)
+            if ask.kind == "approval" and not self.conv.ephemeral:
+                await self._decline_quietly(ask)
         r = self.reply
         if r is not None and not r.cancelled:
             if r.unheard:

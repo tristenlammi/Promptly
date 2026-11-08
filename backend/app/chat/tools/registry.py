@@ -130,6 +130,14 @@ REGISTRY: list[Tool] = [
     PostToRoomTool(),
 ]
 
+# Talk (WP-T3): the phone's own actions (timer, alarm, call, text, open an
+# app, directions), category "device". Offered only on a spoken turn whose
+# phone said it can do them (``hello.caps``); see ``app/talk/tools.py``
+# and ``device.py``.
+from app.chat.tools.device import DEVICE_TOOLS  # noqa: E402
+
+REGISTRY.extend(DEVICE_TOOLS)
+
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the
 # registry on every model-emitted call. Built once at import time and
 # kept private so callers go through ``get_tool`` and we have one place

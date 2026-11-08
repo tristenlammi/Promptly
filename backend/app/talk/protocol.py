@@ -17,7 +17,8 @@ Client -> server, JSON text
     interrupt_mode: talk|tap, trip?}`` first, within 10 s.
     ``mute``, ``unmute``, ``interrupt {played_ms?}`` (stop it talking; say how
     much you played if you know), ``end_turn`` (tap to talk: I've finished),
-    ``confirm {answer: yes|no}``, ``text {words}`` (Type instead), ``bye``.
+    ``confirm {answer: yes|no}`` (the Yes / No buttons under a question),
+    ``text {words}`` (Type instead), ``bye``.
 Client -> server, binary
     4-byte big-endian sequence number + one Opus packet, or PCM16 mono 16 kHz.
 
@@ -27,10 +28,20 @@ Server -> client, JSON text
     muted}``, ``partial {text}`` (your words so far), ``heard {text,
     message_id}`` (what was taken as your turn), ``reply {text, message_id?}``
     (its words so far, cleaned for speech), ``spoken {chars}`` (how much of
-    ``reply.text`` has started playing), ``tool {label}``, ``card {kind,
-    message_id, meta}``, ``ask {question, approval_id, expires_in}``,
-    ``action {type, ...}``, ``stop_audio``, ``error {code, say, show}``,
-    ``bye {reason}``.
+    ``reply.text`` has started playing), ``tool {label, name}`` (a tool is
+    running: "Checking your calendar"), ``card {kind, message_id, meta}``
+    (something to look at from a tool: a map, photos, an event link),
+    ``ask {question, approval_id, message_id?, call_id?, expires_in}`` (a
+    change or a command waiting for a yes: answer by saying it, or with
+    ``confirm``; a held change is also a card in the chat, and tapping that
+    decides it too), ``ask_done {approval_id, outcome:
+    approved|declined|failed|expired}``, ``action {action: {type, ...}}``
+    (for the phone, only kinds its ``hello.caps`` listed: ``set_timer
+    {seconds, label?}``, ``set_alarm {hour, minute, label?}``, ``dial
+    {name?, number?}``, ``message {name?, number?, text?}``, ``open_app
+    {app}``, ``go {stop: {lat, lon, name}}`` for ``navigate``; the same
+    shapes ``/api/assistant`` returns), ``stop_audio``,
+    ``error {code, say, show}``, ``bye {reason}``.
 Server -> client, binary
     4-byte sequence number + one 20 ms frame of speech at 24 kHz (an Opus
     packet, or 960 bytes of PCM16 mono), sent at playing pace.

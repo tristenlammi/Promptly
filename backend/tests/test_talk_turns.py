@@ -270,8 +270,9 @@ async def test_carrying_on_after_a_pause_joins_the_turn(db, user, conversation, 
     assert rows[0].content == "Add the dentist to my calendar on Thursday morning."
     assert rows[0].voice["joined"] is True
     assert rows[1].content == "Added for Thursday morning." and rows[1].parent_id == rows[0].id
-    # Two model calls: the first was dropped unheard, the second had it all.
-    assert len(model.calls) == 2 and model.cancelled == 1
+    # One answer: the first start was dropped unheard (cancelled, or on a
+    # busy box dropped before it reached the model), the second had it all.
+    assert len(model.calls) - model.cancelled == 1 and len(model.calls) <= 2
     assert "Thursday morning" in model.last_user_text()
     assert sidecars.spoken == ["Added for Thursday morning."]
     await finish(c)

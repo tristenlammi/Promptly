@@ -210,8 +210,19 @@ async def extend_user_turn(conv: ConvInfo, user: User, message_id: uuid.UUID, te
         await db.commit()
 
 
-async def start_reply(conv: ConvInfo, user: User, user_message_id: uuid.UUID, connection: Any):
-    """Start the chat generator on this turn; returns its StreamSession."""
+async def start_reply(
+    conv: ConvInfo,
+    user: User,
+    user_message_id: uuid.UUID,
+    connection: Any,
+    *,
+    talk: dict[str, Any] | None = None,
+):
+    """Start the chat generator on this turn; returns its StreamSession.
+
+    ``talk`` turns on the voice tools (WP-T3, ``app/talk/tools.py``):
+    ``{device, caps, driving, pending?}``, where ``pending`` is a change they
+    were just asked to confirm and didn't say yes to ("no, Friday")."""
     from app.chat.router import start_spoken_reply
     from app.chat.service import enqueue_stream
 
@@ -231,13 +242,15 @@ async def start_reply(conv: ConvInfo, user: User, user_message_id: uuid.UUID, co
             "user_message_id": str(user_message_id),
             "provider_id": str(provider_id),
             "model_id": model_id,
-            # Voice turns skip search and tools in the generator for now;
-            # WP-T3 brings back a voice allowlist with a spoken yes for writes.
+            # No forced search and none of the typed chat's tools: a Talk
+            # turn gets the voice allowlist instead (``talk`` below), with
+            # a spoken yes for anything that changes something.
             "web_search_mode": "off",
             "temperature": 0.7,
             "max_tokens": None,
             "tools_enabled": False,
             "voice": True,
+            "talk": talk or {"device": "web", "caps": []},
             "reasoning_effort": reasoning,
         },
     )
@@ -341,3 +354,34 @@ async def forget_conversation(conv: ConvInfo) -> None:
         await db.delete(row)
         await db.commit()
     logger.info("talk: phone conversation removed (%d messages)", len(ids))
+
+
+async def add_reply(
+    conv: ConvInfo,
+    user: User,
+    user_message_id: uuid.UUID,
+    content: str,
+    *,
+    tool_calls: list[dict[str, Any]] | None = None,
+    voice: dict[str, Any] | None = None,
+) -> uuid.UUID | None:
+    """A reply that didn't come from the model (a command that ran on the fast
+    path), saved after the turn it answers, like any reply."""
+    async with SessionLocal() as db:
+        row = await db.get(Conversation, conv.id)
+        if row is None:
+            return None
+        msg = Message(
+            conversation_id=row.id,
+            role="assistant",
+            content=content,
+            parent_id=user_message_id,
+            tool_calls=tool_calls or None,
+            voice=voice,
+        )
+        db.add(msg)
+        await db.flush()
+        row.active_leaf_message_id = msg.id
+        row.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        return msg.id

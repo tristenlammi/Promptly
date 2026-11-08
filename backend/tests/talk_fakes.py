@@ -22,7 +22,7 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 
-from app.models_config.provider import FinishEvent, TextDelta, UsageEvent
+from app.models_config.provider import FinishEvent, TextDelta, ToolCallDelta, UsageEvent
 
 FRAME = 960  # 20 ms of PCM16 at 24 kHz
 FRAMES_PER_WORD = 2
@@ -172,14 +172,18 @@ class FakeSidecars:
 
 class Model:
     """The provider, scripted: each call takes the next reply (or repeats the
-    last), after ``ttft`` seconds, a word at a time."""
+    last), after ``ttft`` seconds, a word at a time. A reply that's a dict
+    (``{"tool": name, "args": {...}}``) or a list of them calls those tools
+    instead (WP-T3)."""
 
-    def __init__(self, replies: list[str], *, ttft: float = 0.05, per_word: float = 0.0) -> None:
+    def __init__(self, replies: list[Any], *, ttft: float = 0.05, per_word: float = 0.0) -> None:
         self.replies = list(replies)
         self.ttft = ttft
         self.per_word = per_word
         self.calls: list[list[dict[str, Any]]] = []
+        self.kwargs: list[dict[str, Any]] = []
         self.cancelled = 0
+        self._call_ids = 0
 
     async def __call__(self, **kwargs):
         messages = kwargs.get("messages") or []
@@ -189,7 +193,15 @@ class Model:
             yield FinishEvent(reason="stop")
             return
         self.calls.append(messages)
+        self.kwargs.append(kwargs)
         text = self.replies.pop(0) if len(self.replies) > 1 else self.replies[0]
+        if isinstance(text, (dict, list)):
+            await asyncio.sleep(self.ttft)
+            for i, call in enumerate(text if isinstance(text, list) else [text]):
+                self._call_ids += 1
+                yield ToolCallDelta(index=i, id=f"call_{self._call_ids}", name=call["tool"], arguments=json.dumps(call.get("args") or {}))
+            yield FinishEvent(reason="tool_calls")
+            return
         done = False
         try:
             await asyncio.sleep(self.ttft)
@@ -204,6 +216,12 @@ class Model:
         finally:
             if not done:
                 self.cancelled += 1
+
+    def tools_offered(self, call: int = -1) -> set[str]:
+        return {t["function"]["name"] for t in (self.kwargs[call].get("tools") or [])}
+
+    def system(self, call: int = -1) -> str:
+        return str(self.kwargs[call].get("system") or "")
 
     def last_user_text(self, call: int = -1) -> str:
         msgs = [m for m in self.calls[call] if _role(m) == "user"]
