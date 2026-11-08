@@ -54,3 +54,21 @@ export function PhotosAppShell() {
   );
 
 }
+
+/**
+ * ``/photos/*`` opened from inside Promptly (a browser tab, the installed
+ * Promptly window): the same pages inside Promptly's layout (App.tsx wraps
+ * this in AppLayout), at the same address, so the browser still offers to
+ * install Promptly Photos from here.
+ */
+export function PhotosInPromptly() {
+  const location = useLocation();
+  if (location.pathname === APP_PHOTOS_BASE) {
+    return <Navigate replace to={{ pathname: `${APP_PHOTOS_BASE}/`, search: location.search, hash: location.hash }} />;
+  }
+  return (
+    <PhotosBaseProvider base={APP_PHOTOS_BASE}>
+      <PhotosShell />
+    </PhotosBaseProvider>
+  );
+}

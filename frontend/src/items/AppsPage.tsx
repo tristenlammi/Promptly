@@ -24,6 +24,7 @@ import { useNavigate } from "react-router-dom";
 
 import { extractError } from "@/components/files/helpers";
 import { TopNav } from "@/components/layout/TopNav";
+import { rememberLaunchedApp } from "@/lib/appLaunch";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
@@ -424,7 +425,12 @@ export function AppOpen() {
     let live = true;
     itemsApi
       .openApp(kind)
-      .then(({ file_id }) => live && navigate(`/app/${file_id}/`, { replace: true }))
+      .then(({ file_id }) => {
+        if (!live) return;
+        // Launched from its home-screen icon: this window is that app.
+        rememberLaunchedApp(`open:${kind}`, `app:${file_id}`);
+        navigate(`/app/${file_id}/`, { replace: true });
+      })
       .catch((err) => live && setFailed(extractError(err)));
     return () => {
       live = false;

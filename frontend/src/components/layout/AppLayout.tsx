@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef } from "react";
+import { Suspense, useEffect, useRef, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 
@@ -9,6 +9,7 @@ import { SearchPalette } from "@/components/chat/SearchPalette";
 import { UploadProgressPanel } from "@/components/files/UploadProgressPanel";
 import { UploadQueueWatcher } from "@/components/files/UploadQueueWatcher";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { appKeyFor } from "@/lib/appLaunch";
 import { useComposerStore } from "@/store/composerStore";
 import { authApi } from "@/api/auth";
 import { useAuthStore } from "@/store/authStore";
@@ -19,7 +20,10 @@ import { NetworkStatusToast } from "./NetworkStatusToast";
 import { WelcomeAppsDialog } from "./WelcomeAppsDialog";
 import { Sidebar } from "./Sidebar";
 
-export function AppLayout() {
+/** ``children`` stands in for the route's ``<Outlet>`` — for a page that
+ *  also runs on its own as an installed app and is wrapped here only when
+ *  it's open inside Promptly (App.tsx's gates). */
+export function AppLayout({ children }: { children?: ReactNode } = {}) {
   const isMobile = useIsMobile();
   // Desktop-only: the sidebar stays as you left it, on every page and device
   // (saved to your account), until you change it.
@@ -185,8 +189,8 @@ export function AppLayout() {
               </div>
             }
           >
-            <Outlet />
-            <InstallFromLink appName="Promptly" iconSrc="/pwa-192.png" description="Promptly as its own app, with its own icon and window." />
+            {children ?? <Outlet />}
+            <LayoutInstallCard />
           </Suspense>
         </RouteBoundary>
       </main>
@@ -202,4 +206,34 @@ export function AppLayout() {
       <UploadProgressPanel />
     </div>
   );
+}
+
+/** The install card for ``?install=1``, named for whichever app this
+ *  address installs as (the page links that app's manifest, and the browser
+ *  installs whatever it links). An Item Store app's page shows its own. */
+const INSTALL_CARDS: Record<string, { appName: string; iconSrc: string; description: string }> = {
+  promptly: { appName: "Promptly", iconSrc: "/pwa-192.png", description: "Promptly as its own app, with its own icon and window." },
+  rooms: {
+    appName: "Promptly Rooms",
+    iconSrc: "/item-icons/rooms-192.png",
+    description: "Chat with your family and friends — spaces, rooms and messages as their own app.",
+  },
+  calendar: {
+    appName: "Promptly Calendar",
+    iconSrc: "/item-icons/calendar-192.png",
+    description: "Your calendar, shared with family and friends, as its own app.",
+  },
+  mail: { appName: "Mail", iconSrc: "/item-icons/mail-192.png", description: "All your mailboxes in one calm place, as its own app." },
+  maps: { appName: "P Maps", iconSrc: "/item-icons/maps-192.png", description: "Maps and directions on your own Promptly, as its own app." },
+  photos: {
+    appName: "Promptly Photos",
+    iconSrc: "/pwa-photos-192.png",
+    description: "Your photo library as its own app — its own icon and window, no Promptly menus.",
+  },
+};
+
+function LayoutInstallCard() {
+  const { pathname } = useLocation();
+  const card = INSTALL_CARDS[appKeyFor(pathname)];
+  return card ? <InstallFromLink {...card} /> : null;
 }

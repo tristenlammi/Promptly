@@ -3,7 +3,8 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-
 
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useIsMobile } from "@/hooks/useIsMobile";
-import { launchedAppKey } from "@/lib/installPrompt";
+import { PromptlyNavDrawer } from "@/components/layout/PromptlyNavDrawer";
+import { isOwnAppWindow } from "@/lib/appLaunch";
 import { ToastViewport } from "@/components/shared/ToastViewport";
 import { UpdateBanner } from "@/components/layout/UpdateBanner";
 import { ConfirmHost } from "@/components/shared/ConfirmDialog";
@@ -233,15 +234,23 @@ const RoomsApp = lazyWithRetry(
   "RoomsApp"
 );
 
-/** Rooms is its own app on a phone and when launched as the installed
- *  Rooms app; in a desktop browser (or the installed Promptly window) it
- *  sits inside Promptly's layout, sidebar and all. */
+/** Rooms on its own only as the installed Rooms app. Anywhere else (a
+ *  browser tab, the installed Promptly window) it's inside Promptly: in its
+ *  layout on a big screen, and full screen with Promptly's menu on a phone. */
 function RoomsGate() {
   const isMobile = useIsMobile();
-  if (isMobile || launchedAppKey() === "rooms") {
+  if (isOwnAppWindow("rooms")) {
     return (
       <Suspense fallback={<FullScreenLoading />}>
         <RoomsApp />
+      </Suspense>
+    );
+  }
+  if (isMobile) {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <RoomsApp promptlyNav />
+        <PromptlyNavDrawer />
       </Suspense>
     );
   }
@@ -258,14 +267,23 @@ const MapsApp = lazyWithRetry(
   "MapsApp"
 );
 
-/** Maps fills the screen on a phone and as an installed app; on a desktop
- *  browser it sits inside Promptly's layout. */
+/** Maps fills the screen on a phone (with Promptly's menu, unless it's the
+ *  installed Maps app) and as an installed app; on a big screen inside
+ *  Promptly it sits in Promptly's layout. */
 function MapsGate() {
   const isMobile = useIsMobile();
-  if (isMobile || launchedAppKey() === "maps") {
+  if (isOwnAppWindow("maps")) {
     return (
       <Suspense fallback={<FullScreenLoading />}>
         <MapsApp />
+      </Suspense>
+    );
+  }
+  if (isMobile) {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <MapsApp promptlyNav />
+        <PromptlyNavDrawer />
       </Suspense>
     );
   }
@@ -288,7 +306,7 @@ const MailApp = lazyWithRetry(
 /** Mail sits inside Promptly's layout; only the installed Mail app shows
  *  it on its own. */
 function MailGate() {
-  if (launchedAppKey() === "mail") {
+  if (isOwnAppWindow("mail")) {
     return (
       <Suspense fallback={<FullScreenLoading />}>
         <div className="h-[100dvh]"><MailApp /></div>
@@ -301,7 +319,7 @@ function MailGate() {
 /** Calendar sits inside Promptly's layout (desktop and phone browsers);
  *  only the installed Calendar app shows it on its own. */
 function CalendarGate() {
-  if (launchedAppKey() === "calendar") {
+  if (isOwnAppWindow("calendar")) {
     return (
       <Suspense fallback={<FullScreenLoading />}>
         <CalendarApp />
@@ -315,6 +333,47 @@ const PhotosAppShell = lazyWithRetry(
   () => import("@/components/photos/PhotosAppShell").then((m) => ({ default: m.PhotosAppShell })),
   "PhotosAppShell"
 );
+const PhotosInPromptly = lazyWithRetry(
+  () => import("@/components/photos/PhotosAppShell").then((m) => ({ default: m.PhotosInPromptly })),
+  "PhotosInPromptly"
+);
+
+/** ``/photos``: on its own only as the installed Photos app; anywhere else
+ *  the same pages inside Promptly's layout (the address, and so the Photos
+ *  install, stay). */
+function PhotosGate() {
+  if (isOwnAppWindow("photos")) {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <PhotosAppShell />
+      </Suspense>
+    );
+  }
+  return (
+    <AppLayout>
+      <PhotosInPromptly />
+    </AppLayout>
+  );
+}
+
+/** ``/app/<file>/``: an Item Store app on its own only when this window is
+ *  that installed app; opened from inside Promptly it keeps the layout. */
+function ItemAppGate() {
+  const { pathname } = useLocation();
+  const key = /^\/app\/([^/]+)/.exec(pathname)?.[1];
+  if (key && isOwnAppWindow(`app:${key}`)) {
+    return (
+      <Suspense fallback={<FullScreenLoading />}>
+        <ItemAppPage />
+      </Suspense>
+    );
+  }
+  return (
+    <AppLayout>
+      <ItemAppPage inPromptly />
+    </AppLayout>
+  );
+}
 
 /** The Photos pages, relative to wherever Photos is mounted —
  *  ``/files/photos`` (inside Files) or ``/photos`` (the standalone app).
@@ -648,25 +707,13 @@ export default function App() {
           </Suspense>
         }
       />
-      {/* An item file installed as its own app: no Promptly chrome at all. */}
-      <Route
-        path="/app/:fileId/*"
-        element={
-          <Suspense fallback={<FullScreenLoading />}>
-            <ItemAppPage />
-          </Suspense>
-        }
-      />
+      {/* An item file installed as its own app: no Promptly chrome at all
+          there; opened from inside Promptly, in Promptly's layout. */}
+      <Route path="/app/:fileId/*" element={<ItemAppGate />} />
       {/* Promptly Photos installed as its own app: the same Photos pages
-          as /files/photos, without Promptly's sidebar or the Files rail. */}
-      <Route
-        path="/photos"
-        element={
-          <Suspense fallback={<FullScreenLoading />}>
-            <PhotosAppShell />
-          </Suspense>
-        }
-      >
+          as /files/photos, without Promptly's sidebar or the Files rail.
+          Opened from inside Promptly, in Promptly's layout. */}
+      <Route path="/photos" element={<PhotosGate />}>
         {photoPageRoutes()}
       </Route>
       {/* Promptly Rooms (spaces + messages): on its own on a phone and in

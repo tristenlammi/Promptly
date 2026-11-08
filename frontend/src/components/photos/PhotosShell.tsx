@@ -6,6 +6,7 @@ import { PhotoSettingsDialog } from "@/components/photos/PhotoSettingsDialog";
 import { PhotosAppTabs } from "@/components/photos/PhotosAppTabs";
 import { usePhotosBase, usePhotosPath } from "@/components/photos/photosPath";
 import { RouteBoundary } from "@/components/system/RouteBoundary";
+import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { UnderstandingStatus } from "@/components/photos/UnderstandingStatus";
 import { useUploadStore } from "@/store/uploadStore";
@@ -86,6 +87,8 @@ export function PhotosShell({ app = false }: { app?: boolean } = {}) {
       {/* One row that never wraps: the title, the menu (scrolling sideways
           on a narrow window), then Upload — in the same place on every page. */}
       <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-2.5">
+        {/* Inside Promptly, its menu (phones; the sidebar is there on a big screen). */}
+        {!app && <PromptlyMenuButton className="-ml-2" />}
         {/* The page's heading on the timeline; elsewhere the page below has
             its own (Albums, People…). */}
         {onTimeline ? (

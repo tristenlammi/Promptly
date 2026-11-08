@@ -11,6 +11,7 @@ import { useIsMobile } from "@/hooks/useIsMobile";
 import { ItemButton, Sheet } from "@/items/ui";
 import "@/items/ui/items.css";
 import { toast } from "@/store/toastStore";
+import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
 
 import { AgendaView } from "./components/AgendaView";
@@ -72,6 +73,9 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
   const isPhone = useIsMobile(767);
   // Below this the calendars panel becomes a sheet (Promptly's own sidebar is beside us).
   const narrow = useIsMobile(1023);
+  // Inside Promptly at phone width its sidebar is a drawer (AppLayout's).
+  const drawerNav = useIsMobile();
+  const openPromptlyNav = useUIStore((s) => s.openMobileNav);
   const { data: b, isLoading, isError, refetch } = useBootstrap();
   const calMap = useCalendarsMap(b?.calendars);
 
@@ -361,6 +365,14 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
         void openById(ev.event_id);
       }}
       standalone={!embedded}
+      onPromptlyMenu={
+        embedded && drawerNav
+          ? () => {
+              setSide(false);
+              openPromptlyNav();
+            }
+          : undefined
+      }
     />
   );
 

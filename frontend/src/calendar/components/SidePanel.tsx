@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, Cake, Check, CircleCheck, Dumbbell, Globe, Mail, MoreHorizontal, PartyPopper, Plane, Plus, Receipt, Rss, Share2, Stethoscope, UtensilsCrossed } from "lucide-react";
+import { ArrowLeft, Cake, Check, CircleCheck, Dumbbell, Globe, Mail, Menu, MoreHorizontal, PartyPopper, Plane, Plus, Receipt, Rss, Share2, Stethoscope, UtensilsCrossed } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { calendarApi, type CalEvent, type Calendar, type CalendarBootstrap, type CalendarPrefs, type RsvpStatus } from "@/api/calendar";
@@ -23,6 +23,7 @@ export function SidePanel({
   onSubscribe,
   onOpenInvite,
   standalone,
+  onPromptlyMenu,
 }: {
   b: CalendarBootstrap;
   cursor: Date;
@@ -32,6 +33,8 @@ export function SidePanel({
   onSubscribe: () => void;
   onOpenInvite: (ev: CalEvent) => void;
   standalone: boolean;
+  /** Inside Promptly on a phone: open Promptly's menu (its header has no room). */
+  onPromptlyMenu?: () => void;
 }) {
   // Someone's own calendar they shared with me goes under "Other people's".
   const theirs = (c: Calendar) => c.personal && c.owner_id !== b.me.id;
@@ -40,6 +43,16 @@ export function SidePanel({
   const own = b.calendars.find((c) => c.personal && c.owner_id === b.me.id);
   return (
     <div className="flex flex-col gap-5">
+      {onPromptlyMenu && (
+        <button
+          type="button"
+          onClick={onPromptlyMenu}
+          className="-mb-2 flex h-10 items-center gap-2 rounded-lg px-2 text-left text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)]"
+        >
+          <Menu className="h-4 w-4 text-[var(--text-muted)]" />
+          Promptly menu
+        </button>
+      )}
       <MiniMonth selected={cursor} onPick={onPick} />
       <section className="flex flex-col gap-0.5">
         <div className="flex items-center justify-between pl-1">

@@ -1,10 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Download, Home, Loader2, MessageSquarePlus, MessagesSquare, Plus, Search, Settings, X } from "lucide-react";
+import { Bell, Download, Loader2, MessageSquarePlus, MessagesSquare, Plus, Search, Settings, X } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { Link, Navigate, useLocation, useMatch, useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useMatch, useNavigate } from "react-router-dom";
 
 import { roomsApi, type Bootstrap, type Space } from "@/api/rooms";
 import { NetworkStatusToast } from "@/components/layout/NetworkStatusToast";
+import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { InstallFromLink } from "@/components/pwa/InstallFromLink";
 import { usePushSubscription } from "@/hooks/usePushSubscription";
 import { useIsMobile } from "@/hooks/useIsMobile";
@@ -46,13 +47,9 @@ function writeLS(key: string, v: unknown) {
   }
 }
 
-/** Rooms inside Promptly's own layout (desktop browser): Promptly's
- *  sidebar is right there, so no "Back to Promptly" buttons of our own. */
-const EmbeddedContext = createContext(false);
-
-function isStandalone() {
-  return typeof window !== "undefined" && window.matchMedia?.("(display-mode: standalone)").matches;
-}
+/** Rooms full screen on a phone but inside Promptly (not the installed Rooms
+ *  app): Promptly's menu button opens its drawer (App.tsx's RoomsGate). */
+const PromptlyNavContext = createContext(false);
 
 /** The phone's visible area — keeps the composer above the on-screen keyboard. */
 function useVisualViewport(enabled: boolean) {
@@ -76,10 +73,13 @@ function useVisualViewport(enabled: boolean) {
 }
 
 /**
- * ``/rooms/*`` — Promptly Rooms as its own app (own manifest, scope
- * ``/rooms/``): spaces of text rooms + direct messages. No Promptly chrome.
+ * ``/rooms/*`` — Promptly Rooms: spaces of text rooms + direct messages.
+ * As the installed Rooms app (own manifest, scope ``/rooms/``) there's no
+ * Promptly chrome. Inside Promptly it's ``embedded`` in Promptly's layout on
+ * a big screen, or full screen with Promptly's menu button (``promptlyNav``)
+ * on a phone.
  */
-export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
+export function RoomsApp({ embedded = false, promptlyNav = false }: { embedded?: boolean; promptlyNav?: boolean } = {}) {
   const location = useLocation();
   const navigate = useNavigate();
   const isPhone = useIsMobile(767);
@@ -332,7 +332,7 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
   const newRoomSpace = b?.spaces.find((s) => s.id === newRoomIn) ?? null;
 
   return (
-    <EmbeddedContext.Provider value={embedded}>
+    <PromptlyNavContext.Provider value={promptlyNav}>
     <div
       style={embedded ? undefined : rootStyle}
       className={cn(
@@ -374,7 +374,7 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
         </>
       )}
     </div>
-    </EmbeddedContext.Provider>
+    </PromptlyNavContext.Provider>
   );
 }
 
@@ -439,7 +439,7 @@ function Rail({
   onCreateSpace: () => void;
   onSearch: () => void;
 }) {
-  const embedded = useContext(EmbeddedContext);
+  const promptlyNav = useContext(PromptlyNavContext);
   const plainBtn =
     "flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--surface)] text-[var(--text-muted)] transition hover:bg-[var(--item-accent)] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]";
   return (
@@ -470,11 +470,7 @@ function Rail({
         <button type="button" aria-label="Search all rooms" title="Search all rooms" onClick={onSearch} className={plainBtn}>
           <Search className="h-5 w-5" />
         </button>
-        {!isStandalone() && !embedded && (
-          <Link to="/" aria-label="Back to Promptly" title="Back to Promptly" className={plainBtn}>
-            <Home className="h-5 w-5" />
-          </Link>
-        )}
+        {promptlyNav && <PromptlyMenuButton className="h-11 w-11 rounded-xl" />}
       </div>
     </nav>
   );
@@ -597,18 +593,14 @@ function PhoneHome({
   onNewRoom: (id: string) => void;
   onSearch: () => void;
 }) {
-  const embedded = useContext(EmbeddedContext);
+  const promptlyNav = useContext(PromptlyNavContext);
   const navigate = useNavigate();
   const spaceMentions = Object.values(t.spaces).reduce((n, s) => n + s.mentions, 0);
   const iconBtn = "flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <header className="flex h-14 shrink-0 items-center gap-1 px-2">
-        {!isStandalone() && !embedded && (
-          <Link to="/" aria-label="Back to Promptly" className={iconBtn}>
-            <Home className="h-5 w-5" />
-          </Link>
-        )}
+        {promptlyNav && <PromptlyMenuButton className="h-11 w-11 rounded-xl" />}
         <h1 className="flex-1 px-2 text-lg font-bold text-[var(--text)]">Rooms</h1>
         <button type="button" aria-label="Search all rooms" onClick={onSearch} className={iconBtn}>
           <Search className="h-5 w-5" />
