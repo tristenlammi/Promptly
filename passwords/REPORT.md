@@ -70,39 +70,33 @@ Everything ran against the isolated stack on `:8092`, with throwaway accounts. N
 
 ### Last run
 
-The last full pass ran at commit `12899df`. It found one real bug, in the Chromium clipboard, and one test that needed changing for Firefox (see below). Both were fixed in `1535c51`, and the suites that fix can affect were rerun there. Each row says which commit it ran at.
+The last full pass ran on the merged code, at commit `d7d0832`, which has the whole round plus `main` at v0.30.0. Two things changed after it, in `9fa2a2a`: the order of the migrations, checked on its own (next paragraph), and a longer cleanup timeout in the restore test. Neither changes the app's code.
 
 | Suite | How | Result |
 |---|---|---|
-| Vault core unit | Vitest in Node (at `12899df`) | 248 passed, 24 skipped. The 24 need the stack and are the next row |
-| Core against the stack, including the canary test | Vitest (at `12899df`) | Integration 22 passed, restore 1 passed |
-| TypeScript and frontend build | `tsc`, `npm run build` (at `12899df`, the build again at `1535c51`) | Clean |
-| Extension on real Chrome 156 | Playwright through DevTools (at `1535c51`) | 225 passed, no reruns. At `12899df` it was 197 passed, 1 failed and 27 not run: the clipboard bug below |
-| Lock setting on real Chrome and Helium | `lock-choice.spec.ts`, with real browser restarts (at `1535c51`) | 15 of 15 on each. Chrome's 15 are part of the 225 |
-| Extension on real Firefox 159 | Selenium, geckodriver (at `1535c51`) | 23 of 23. At `12899df` it was 22 of 23: the test change below |
-| Web vault on real Firefox 159 | Selenium, geckodriver (at `12899df`) | 4 of 4 |
-| Web vault, Chromium and WebKit | Playwright (at `12899df`) | First run 79 passed, 4 failed, 3 skipped. All four were on WebKit and passed when rerun one at a time |
-| Windows app | `tauri-driver` and WebView2 driver, Hello mocked (at `12899df`) | 23 of 23 |
-| Windows Rust | `cargo test`, `clippy` (at `12899df`) | 99 passed, clippy clean |
-| Main Promptly e2e | `npx playwright test`, Maps stubbed (at `12899df`) | 174 passed, 1 skipped, no reruns, in 10.0 minutes |
-| Backend pytest, whole | Full run (at `d3c5a34`, backend unchanged since) | 2487 passed, 31 skipped, 0 failed, in 36:59 |
-| Android JVM | Gradle, against the stack (at `0690722`) | 302 of 302 |
-| Android instrumented | AVD `PromptlyTest`, API 36, x86_64 (at `39daf37`, no Android app code changed since) | 142 run, 0 failed, 139 exercised, 3 skipped by the script. Those 3 ran on their own, next two rows |
-| Android biometric | Real Keystore key and system prompt, emulated fingerprint | 2 of 2 |
-| Android SMS consent | Real Play services sheet, `adb emu sms send` | 1 of 1 |
-| Android release build with R8 | Emulator build signed with a throwaway key, driven by adb | Passed, see below |
-| Android lint | `lintVitalRelease` (at `39daf37`) | Passes. `lintDebug` has 12 errors, all in older code outside Passwords |
-| Release files | Extension build, `web-ext lint`, published downloads (at `1535c51`). Installer and frontend image (at `12899df`; the fix doesn't touch the installer's code) | All built. `web-ext lint` 0 errors, 4 warnings. Installer 2,827,454 bytes, extension zips 1,556,297 and 1,555,592 bytes. The installer was built, never installed |
+| Vault core and frontend unit | Vitest in Node | 384 passed |
+| Core against the stack, including the canary test | Vitest | Integration 22 passed, restore 1 passed. The restore run's cleanup hook timed out under load after the test passed, so the timeout went up to 60 s in `9fa2a2a` |
+| TypeScript and frontend build | `tsc`, `npm run build` | Clean |
+| Main Promptly e2e | `npx playwright test`, Maps stubbed | 197 passed, 1 skipped, no reruns, in 12.0 minutes |
+| Extension on real Chrome | Playwright through DevTools | 240 passed. `browsersync.spec.ts:77` failed while setting up and stopped the 4 after it; all 5 passed when rerun |
+| Extension speed, 5,001 items | Same | Popup search box at 61 ms and this site's row at 87 ms with the worker running; 298 and 326 ms on the first open after the worker was killed. Search through the background 1.9 ms. Import 14.3 s, unlock 1.6 s, heap 65 MB |
+| Lock setting on Helium | `lock-choice.spec.ts`, with real browser restarts | 15 of 15 |
+| Firefox | Selenium, geckodriver | Extension 32 of 32, tabs and history 4 of 4, web vault 4 of 4 |
+| Web vault, Chromium and WebKit | Playwright | 93 passed, 4 failed, 3 skipped, in 1.3 hours. All four were on WebKit and passed when rerun, see below |
+| Windows app | `tauri-driver` and WebView2 driver, Hello mocked | 23 of 23 |
+| Windows Rust | `cargo test`, `clippy` | 99 passed, clippy clean |
+| Backend pytest, whole | Full run on its own database | 2704 passed, 52 skipped, 0 failed, in 51:56 |
+| Android JVM | Gradle, against the stack | 331 of 331 |
+| Android instrumented, biometric, SMS consent, R8 release build | Emulator | **Not rerun this round.** They last ran at `39daf37`, before this round's Android changes (sent tabs, lookalike warning). The JVM tests cover those, a real device hasn't |
+| Release files | Extension build, `web-ext lint --self-hosted`, published downloads | All built. `web-ext lint` 0 errors, 4 warnings. Installer 0.2.0 at 2,847,031 bytes, extension zips 1,601,290 and 1,600,852 bytes. The installer was built, never installed |
 
-**The clipboard bug the last pass found.** On Chromium, a copied 2FA code could never arrive, or the timed clear of a copied secret could fail to happen, while the extension believed the write had worked. The hidden page doing the write closed straight away, and that appears to lose it. A secret left on the clipboard past its time is the part that matters. It's in the extension's existing code, not from the lock changes: the test also failed when I put `0690722`'s code back, though that same code had passed in its own full run, so it depends on timing. Now the page stays open 300 ms (D76). With that, the code arrived in 4 runs of 4 and the full suite passed. The cause inside Chromium is inferred from behaviour, and a pause lowers the risk without ruling it out. Firefox doesn't use that page. This fix hasn't had an independent review.
+**The migration order.** `9fa2a2a` moved the Passwords migrations after v0.30.0's memory upgrade, because the dev database is already at `0255_memory_lifecycle`. Both paths were checked on scratch databases: an empty database to `0260_pw_browsersync`, and one stopped at `0255_memory_lifecycle` to the same head (7 upgrades, all 31 tables there). `alembic heads` shows one head.
 
-**The Firefox test change.** The failing test asked for the lock's result from the vault tab that the lock reloads, so the answer didn't get back. It started failing after the review fixes, which send the reload before the lock finishes. The app was doing what it should. The test now waits for the locked screen, then asks.
-
-**The four WebKit failures.** They timed out under load: `connections.spec.ts:225`, `gaps.spec.ts:171`, `mainapp.spec.ts:33` and `sharing.spec.ts:161`. The same four failed at `0690722` and `12899df`, and each time passed when rerun one at a time. The run before those, at `35f803b`, had a different failing set, with `xss.spec.ts:27` failing twice in a row there and passing since. I treated these as WebKit on Windows being slow and didn't find a root cause. So that XSS test on WebKit has a mixed record, though it passes every time on Chromium.
-
-**The Android release build check.** On that R8 build: pairing link, connect, create a vault, add a login, lock and unlock, an inline autofill chip into the test app, a password through Credential Manager, a passkey refused with no asset links, the Wi-Fi QR, the Security check, a shared vault and a Send. No crashes were logged. My script needed fixing for screens added since it was written, so it took several attempts, and none of the failures were in the app. It's a smoke test of the common path, on x86_64. Nothing has run on arm64, which is what phones use.
+**The four WebKit failures.** They timed out under load: `connections.spec.ts:109`, `gaps.spec.ts:171`, `installapps.spec.ts:13` and `sharing.spec.ts:161`, and passed when rerun. `gaps:171` and `sharing:161` have failed this way in every full run since `0690722`. `connections:109` and `installapps:13` are new to the list; `installapps` is a new test and passes on Chromium every time. I treated these as WebKit on Windows being slow under a long run and didn't find a root cause.
 
 **The 3 skipped web tests.** Two need Chromium's virtual authenticator and don't apply on WebKit. Offline navigation can't be driven in Playwright WebKit on Windows, so offline isn't tested on WebKit.
+
+Earlier passes are in git history: the clipboard fix (D76) and the Firefox lock test change came from the pass at `12899df`.
 
 ### Autofill
 
