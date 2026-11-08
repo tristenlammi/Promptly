@@ -41,6 +41,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Call tones: the through tone when they answer, a tone when the connection drops and when it's back, a soft tone while the other person has you on hold, and one when the call ends. While the connection drops the call says "Reconnecting…", or "You're offline" when there's no network, and carries on by itself (also when a phone moves from Wi-Fi to mobile data).
 - Calls on a weak connection, or with Data saver on: video is taken and sent smaller, and the call says so. On Android, mobile data takes the middle quality and Android's Data Saver the lowest.
 - Account → Notifications → Calls: "Don't ring me during quiet hours". Calls still ring through quiet hours unless you turn this on; then a call in your quiet hours rings out to a missed call, and you're told about it when quiet hours end.
+- Passwords: a Duplicates page in the vault's sidebar, with a count, finds logins saved twice (same site and username) and ones that are probably the same (same site and password, another username or none), all on your device. Pick which to keep and Merge (the others go to Trash for 30 days, with Undo), mark a group Not a duplicate (remembered in your encrypted vault), or Merge all sure duplicates at once.
 
 ### Changed
 <!-- Calls (DM calls), WP-D5 -->
