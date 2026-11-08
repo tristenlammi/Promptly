@@ -40,8 +40,19 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Notes: if someone takes you off a note while you have it open, it says so and offers Keep a copy.
 - Notifications: quiet hours for all of Promptly (Account → Notifications), with start and end in your own time zone and different times on Friday and Saturday nights if you like. Notifications wait and arrive together when quiet hours end; calls, Calendar reminders, item reminders, Passwords and admin alerts always get through. Rooms and Mail can go in a daily summary instead, one push of counts at your Today summary time. And you can block someone from their profile or your 1:1 conversation: neither of you can message the other one-to-one, you get no notifications about what they do, and they aren't told. Account → Blocked people lists them, with Unblock.
 - `scripts/stack.sh` (and `scripts/stack.ps1`) runs a separate copy of Promptly for a worktree on its own port (`up`, `down`, `ls`, `e2e`), with its own containers, images, data and throwaway secrets, so testing a branch never touches the main app.
+- Notes: a Notes card on Today with your pinned notes (a list says how many items are left) and voice notes still being turned into words.
+- Notes: Ctrl+K finds your notes by their title, words, list items and what was said in their recordings, including notes shared with you.
+- Notes: type [[ (or @ after a space) in a note to link anything you can open: another note, a task, an event, a file, a person. Clicking the link opens it, and the other note shows where it was mentioned. Notes can be linked the same way from documents, chats, journal entries and room messages.
+- Notes in chat: "add oat milk and eggs to my shopping list" puts them on your note called Shopping or Groceries (your own or one shared with you), or on the Shopping list in Tasks when you don't have one, and the reply says which. Chat can also find, read and make notes and tick items off. It won't change your notes in a reply that read a web page, a file or someone else's words.
+- Notes: AI in a note's ⋯ menu. Tidy up, Make a list and Suggest a title show what they'd do first, nothing changes until you choose Use this, and Undo puts the note back. Only offered when an AI model is available to you.
+- Notes: Make an event opens a new Calendar event filled in from the note, with the day, time and place read by AI when a model is available.
+- Notes: Turn into tasks adds a list's unticked items, or the to-dos AI finds in a text note, to the Tasks list you pick, each linked to the note, with Undo.
+- Notes: Send to… posts a note card in a room or to a person. Only people the note is shared with can open it; everyone else sees "This note isn't shared with you".
+- Notes: Make a copy (pictures and recordings come too) and Open as document (the note's words become a Document in your Files, and the note keeps a card that opens it), each with Undo.
+- Calendar: a link to `/calendar?new=1` with a title, notes, place, day and times opens a new event filled in.
 
 ### Fixed
+- Notes: a note put back the way it was (an earlier version, or Undo) sometimes kept showing the newer words in an open note until it was reopened.
 - Notes: list tick boxes were plain white squares in dark mode; they now match the cards in both themes.
 - People picker (sharing in Notes, Files, Calendar, Rooms): each person in the list was a button inside a list option, which screen readers announce badly; the option itself is now what you pick.
 - Notes: a label's page opened while the label was new on the device stopped working once it was saved; it now keeps working.

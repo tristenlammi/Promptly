@@ -405,14 +405,18 @@ async def clean_changes(raw: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-async def patch(db: AsyncSession, user: User, note: Note, base_revision: int, changes: dict[str, Any]) -> bool:
+async def patch(
+    db: AsyncSession, user: User, note: Note, base_revision: int, changes: dict[str, Any], *, reason: str = "edit"
+) -> bool:
     """Save title / body / colour / kind / list options. Returns whether
-    anything changed. Raises :class:`Stale` for an out-of-date save."""
+    anything changed. Raises :class:`Stale` for an out-of-date save.
+    ``reason="ai"``: an AI proposal being applied, so the note as it was is
+    always kept as a version first (not just once per 10 minutes)."""
     if not _differs(note, changes):
         return False  # nothing new — also a retry whose answer was lost
     if base_revision != note.revision:
         raise Stale(note)
-    await save_version(db, note, user)
+    await save_version(db, note, user, reason="ai" if reason == "ai" else "edit")
     new_kind = changes.pop("kind", note.kind)
     if new_kind != note.kind:
         await _convert(db, user, note, new_kind)
@@ -1007,6 +1011,8 @@ async def full_out(db: AsyncSession, user: User, note: Note) -> dict[str, Any]:
         "members": [
             {"user_id": str(m.user_id), "added_by": str(m.added_by) if m.added_by else None, "added_at": m.added_at} for m in mems
         ],
+        # Open as document: the card that opens it (None if you can't).
+        "document": await _document_card(db, user, note),
         "can": {
             "edit": note.trashed_at is None,
             "share": note.owner_id == user.id and note.trashed_at is None,
@@ -1017,6 +1023,12 @@ async def full_out(db: AsyncSession, user: User, note: Note) -> dict[str, Any]:
     people.update(uuid.UUID(a["added_by"]) for a in atts if a["added_by"])
     out["users"] = await users_map(db, people)
     return out
+
+
+async def _document_card(db: AsyncSession, user: User, note: Note) -> dict[str, Any] | None:
+    from .convert import document_card
+
+    return await document_card(db, user, note)
 
 
 async def _reminder_ids(db: AsyncSession, user: User) -> list[uuid.UUID]:

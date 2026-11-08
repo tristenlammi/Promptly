@@ -10,7 +10,7 @@ import { attachmentCounts, displayTitle, docText, textDoc, type DocNode, type No
 
 export type ItemFields = { text?: string; checked?: boolean; parent_id?: string | null; position?: number };
 export type MeFields = { pinned?: boolean; archived?: boolean; position?: number; seen?: boolean };
-export type NoteFields = { title?: string; body_doc?: DocNode | null; color?: string; kind?: NoteKind; list_opts?: Record<string, boolean> };
+export type NoteFields = { title?: string; body_doc?: DocNode | null; color?: string; kind?: NoteKind; list_opts?: Record<string, boolean>; checkpoint?: "ai" };
 export type Base = { title: string; body_doc: DocNode | null; color: string };
 
 export type Op =

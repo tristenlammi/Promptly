@@ -29,6 +29,11 @@ people on the note through their live stream (ids only).
     GET|PUT /notes/admin/transcription      the admin's switch for transcribing voice notes
     PUT    /notes/{id}/reminder             {due, time?, repeat?} — your reminder (a task in your Tasks)
     DELETE /notes/{id}/reminder             take your reminder off (its open task goes too)
+    POST   /notes/{id}/ai/{action}          tidy|to_list|title|to_tasks|to_event → a proposal (nothing saved)
+    POST   /notes/{id}/copy                 {client_id} — Make a copy (yours)
+    POST   /notes/{id}/to-document          {folder_id?} — Open as document (owner); DELETE = undo
+    GET    /notes/to-tasks/lists            the lists in your Tasks
+    POST   /notes/{id}/to-tasks             {list?, tasks} — Turn into tasks; POST …/undo {file_id, task_ids}
 """
 from __future__ import annotations
 
@@ -46,7 +51,9 @@ from app.auth.models import User
 from app.database import get_db
 
 from . import access, events, push, reminders, service, transcription
+from . import ai as note_ai
 from . import attachments as attach
+from . import convert
 from .body import BodyError
 from .models import Note
 
@@ -99,6 +106,9 @@ class NotePatch(BaseModel):
     color: str | None = Field(default=None, max_length=16)
     kind: Literal["text", "list"] | None = None
     list_opts: dict[str, bool] | None = None
+    # "ai": an AI proposal being applied — the note as it was is kept as a
+    # version first.
+    checkpoint: Literal["ai"] | None = None
 
 
 class ItemAdd(BaseModel):
@@ -148,6 +158,14 @@ class TranscriptionIn(BaseModel):
     on: bool
 
 
+class CopyIn(BaseModel):
+    client_id: uuid.UUID
+
+
+class ToDocumentIn(BaseModel):
+    folder_id: uuid.UUID | None = None
+
+
 class BulkIn(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
     action: Literal["pin", "unpin", "archive", "unarchive", "color", "label", "unlabel", "trash"]
@@ -176,6 +194,12 @@ async def list_notes(
 @router.get("/labels")
 async def labels(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     return {"labels": await service.label_counts(db, user)}
+
+
+@router.get("/to-tasks/lists")
+async def task_lists(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """The lists in your Tasks, for "Turn into tasks"."""
+    return await convert.task_lists(db, user)
 
 
 # ------------------------------------------------------------------ admin
@@ -309,9 +333,10 @@ async def patch_note(note_id: uuid.UUID, body: NotePatch, db: AsyncSession = Dep
     note = await access.load(db, user, note_id, lock=True)
     raw = body.model_dump(exclude_unset=True)
     raw.pop("base_revision", None)
+    checkpoint = raw.pop("checkpoint", None)
     try:
         changes = await service.clean_changes(raw)
-        changed = await service.patch(db, user, note, body.base_revision, changes)
+        changed = await service.patch(db, user, note, body.base_revision, changes, reason=checkpoint or "edit")
     except service.Stale as e:
         # Nothing was written yet, and the row is locked: this is the latest.
         detail = {
@@ -656,3 +681,104 @@ async def delete_forever(note_id: uuid.UUID, db: AsyncSession = Depends(get_db),
     await db.commit()
     await events.publish(people, events.gone_event(note_id))
     return {"deleted": True}
+
+
+# ------------------------------------------------------------------ across Promptly (N1.5)
+
+
+@router.post("/{note_id}/ai/{action}")
+async def ai_proposal(
+    note_id: uuid.UUID,
+    action: Literal["tidy", "to_list", "title", "to_tasks", "to_event"],
+    body: note_ai.AiIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """A proposal for the note — nothing is saved. The app shows it and,
+    if the person uses it, applies it with the normal calls."""
+    note = await access.load(db, user, note_id)
+    return {"proposal": await note_ai.propose(db, user, note, action, body, request=request)}
+
+
+@router.post("/{note_id}/copy", status_code=status.HTTP_201_CREATED)
+async def copy_note(
+    note_id: uuid.UUID, body: CopyIn, response: Response, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Make a copy: a new note of your own (pictures and recordings too)."""
+    note = await access.load(db, user, note_id)
+    try:
+        copy, created = await convert.make_copy(db, user, note, body.client_id)
+    except BodyError as e:
+        await db.rollback()
+        raise _body_error(e) from e
+    except HTTPException:
+        await db.rollback()
+        raise
+    skipped = getattr(copy, "_skipped_attachments", 0)
+    await db.commit()
+    if created:
+        await convert.after_copy(copy)
+        await _tell_me(user, copy)
+    else:
+        response.status_code = status.HTTP_200_OK
+    return {"note": await service.full_out(db, user, copy), "skipped_attachments": skipped}
+
+
+@router.post("/{note_id}/to-document", status_code=status.HTTP_201_CREATED)
+async def to_document(
+    note_id: uuid.UUID, body: ToDocumentIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Open as document (the owner): a Document with the note's words; the
+    note shows a card that opens it and goes to your archive."""
+    note = await access.load(db, user, note_id, lock=True)
+    if note.doc_file_id is not None and await convert.document_card(db, user, note) is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This note is already a document.")
+    try:
+        row = await convert.to_document(db, user, note, body.folder_id)
+    except HTTPException:
+        await db.rollback()
+        raise
+    await db.commit()
+    await _tell_all(db, note)
+    return {"note": await service.full_out(db, user, note), "document": await convert.document_card(db, user, note), "file_id": str(row.id)}
+
+
+@router.delete("/{note_id}/to-document")
+async def undo_to_document(note_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Undo Open as document: the document goes to Trash, the note comes back."""
+    note = await access.load(db, user, note_id, lock=True)
+    try:
+        changed = await convert.undo_document(db, user, note)
+    except HTTPException:
+        await db.rollback()
+        raise
+    await db.commit()
+    if changed:
+        await _tell_all(db, note)
+    return {"note": await service.full_out(db, user, note)}
+
+
+@router.post("/{note_id}/to-tasks", status_code=status.HTTP_201_CREATED)
+async def to_tasks(
+    note_id: uuid.UUID, body: convert.ToTasksIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Turn into tasks: in your own Tasks, on the list you picked, linked to the note."""
+    note = await access.load(db, user, note_id)
+    try:
+        out = await convert.to_tasks(db, user, note, body)
+    except HTTPException:
+        await db.rollback()
+        raise
+    await db.commit()
+    return out
+
+
+@router.post("/{note_id}/to-tasks/undo")
+async def undo_to_tasks(
+    note_id: uuid.UUID, body: convert.UndoTasksIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    note = await access.load(db, user, note_id)
+    n = await convert.undo_tasks(db, user, note, body)
+    await db.commit()
+    return {"removed": n}

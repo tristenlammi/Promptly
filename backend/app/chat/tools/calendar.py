@@ -98,8 +98,9 @@ async def _calendar_id(ctx: ToolContext, name: str | None) -> uuid.UUID | None:
 
 
 def _untrusted(ctx: ToolContext) -> None:
-    if ctx.turn and ctx.turn.get("untrusted"):
-        raise ToolError("Not changing the calendar on a turn that read outside content — ask the user to confirm in a new message.")
+    from app.chat.tools.base import guard_write
+
+    guard_write(ctx, "changing the calendar")
 
 
 def _fmt_occ(o: dict, tz_name: str, users: dict, cal_names: dict) -> str:

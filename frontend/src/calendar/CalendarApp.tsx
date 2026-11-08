@@ -286,6 +286,36 @@ export function CalendarApp({ embedded = false }: { embedded?: boolean } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inviteId, shareMine, b ? 1 : 0]);
 
+  // Made elsewhere — a note's "Make an event", a widget's + —
+  // ``?new=1&title=&description=&location=&date=YYYY-MM-DD&start=HH:MM&end=HH:MM&all_day=1``
+  // opens the new-event sheet filled in, to check and save.
+  const wantNew = params.get("new");
+  useEffect(() => {
+    if (!wantNew || !b) return;
+    const p = new URLSearchParams(params);
+    const next = new URLSearchParams(params);
+    for (const k of ["new", "title", "description", "location", "date", "start", "end", "all_day"]) next.delete(k);
+    setParams(next, { replace: true });
+    const clock = (v: string | null) => (v && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : null);
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(p.get("date") ?? "") ? (p.get("date") as string) : null;
+    const day = date ? new Date(`${date}T00:00:00`) : null;
+    const from = clock(p.get("start"));
+    const to = clock(p.get("end"));
+    const valid = day && !Number.isNaN(day.getTime());
+    const allDay = !!valid && (p.get("all_day") === "1" || !from);
+    const start = valid ? (allDay ? day : new Date(`${date}T${from}:00`)) : defaultStart(cursor);
+    const end = valid && !allDay && to ? new Date(`${date}T${to}:00`) : undefined;
+    if (valid) setCursor(startOfDay(start));
+    const text = (k: string, n: number) => (p.get(k) ?? "").slice(0, n) || undefined;
+    setEditor({
+      mode: "new",
+      start,
+      allDay,
+      prefill: { title: text("title", 200), description: text("description", 5000), location: text("location", 300), end },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantNew, b ? 1 : 0]);
+
   // Keyboard (desktop): t d w m a ← → c, q quick add, / search.
   useEffect(() => {
     if (isPhone) return;

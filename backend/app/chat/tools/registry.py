@@ -32,6 +32,7 @@ from app.chat.tools.read_workspace_item import ReadWorkspaceItemTool
 from app.chat.tools.run_agents import RunAgentsTool
 from app.chat.tools.search_my_files import SearchMyFilesTool
 from app.chat.tools.web_search import WebSearchTool
+from app.chat.tools.notes import AddToNoteTool, CreateNoteTool, FindNotesTool, ReadNoteTool, TickNoteItemsTool  # Notes
 from app.chat.tools.workspace_write import (
     ProposeBoardCardsTool,
     ProposeBoardUpdatesTool,
@@ -128,6 +129,13 @@ REGISTRY: list[Tool] = [
     # Rooms (category "rooms"): for people in a space or conversation.
     ReadRoomTool(),
     PostToRoomTool(),
+    # Notes (category "notes", app/notes): find, read, make, add to, tick —
+    # with the Tools toggle, for everyone. Writes go through guard_write.
+    FindNotesTool(),
+    ReadNoteTool(),
+    CreateNoteTool(),
+    AddToNoteTool(),
+    TickNoteItemsTool(),
 ]
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the

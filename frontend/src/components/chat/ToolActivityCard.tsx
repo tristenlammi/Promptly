@@ -27,6 +27,7 @@ import {
   Clock,
   MapPin,
   Navigation,
+  StickyNote,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -206,6 +207,37 @@ const TOOL_INFO: Record<
     once: true,
     noun: (n) => (n === 1 ? "photo change" : "photo changes"),
     icon: Images,
+  },
+  // Notes (app/notes).
+  find_notes: {
+    verb: "Looking through your notes",
+    past: "looked through your notes",
+    noun: (n) => (n === 1 ? "search" : "searches"),
+    icon: StickyNote,
+  },
+  read_note: {
+    verb: "Reading a note",
+    past: "read",
+    noun: (n) => (n === 1 ? "note" : "notes"),
+    icon: StickyNote,
+  },
+  create_note: {
+    verb: "Making a note",
+    past: "made",
+    noun: (n) => (n === 1 ? "note" : "notes"),
+    icon: StickyNote,
+  },
+  add_to_note: {
+    verb: "Adding to a note",
+    past: "added to",
+    noun: (n) => (n === 1 ? "note" : "notes"),
+    icon: StickyNote,
+  },
+  tick_note_items: {
+    verb: "Ticking off items",
+    past: "ticked items on",
+    noun: (n) => (n === 1 ? "list" : "lists"),
+    icon: StickyNote,
   },
 };
 

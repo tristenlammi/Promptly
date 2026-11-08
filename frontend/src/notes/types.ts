@@ -150,6 +150,8 @@ export interface Note {
   edited_by: string | null;
   trashed_at: string | null;
   doc_file_id: string | null;
+  /** Full note: "Open as document" made this document (null if you can't open it). */
+  document?: { id: string; title: string; href: string } | null;
   // Full note only.
   members?: { user_id: string; added_by: string | null; added_at: string }[];
   can?: { edit: boolean; share: boolean; delete: boolean; leave: boolean };
@@ -265,4 +267,28 @@ export function isEmptyNote(n: Pick<Note, "title" | "kind" | "body_doc" | "items
   if (n.kind === "list") return !n.items.some((i) => i.text.trim());
   const text = n.body_doc !== undefined ? docText(n.body_doc) : n.body_text ?? n.snippet ?? "";
   return !text.trim();
+}
+
+/** What AI in a note proposes (``POST /notes/{id}/ai/{action}``): nothing is
+ *  saved until the person uses it. */
+export type AiAction = "tidy" | "to_list" | "title" | "to_tasks" | "to_event";
+export type AiProposal =
+  | { action: "tidy"; text: string; body_doc: DocNode | null }
+  | { action: "to_list"; items: string[] }
+  | { action: "title"; title: string }
+  | { action: "to_tasks"; tasks: ProposedTask[] }
+  | {
+      action: "to_event";
+      title: string;
+      date: string | null;
+      start: string | null;
+      end: string | null;
+      all_day: boolean;
+      location: string;
+      description: string;
+    };
+export interface ProposedTask {
+  title: string;
+  due: string | null;
+  time: string | null;
 }

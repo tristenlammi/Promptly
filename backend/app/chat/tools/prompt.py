@@ -165,6 +165,7 @@ def build_tools_system_prompt(
                 ("maps, directions and chargers", "maps_search/maps_directions/maps_chargers"),
                 ("where they've been (their timeline)", "timeline_day/timeline_visits"),
                 ("Tasks, Budget, Trips, Meal planner/recipes/groceries, Workouts, Habits, Journal, Contacts", "list_my_items → read_item/use_item"),
+                ("Notes (notes and checklists, the shopping list)", "find_notes/read_note/create_note/add_to_note"),
                 ("people", "find_person"),
                 ("Rooms", "read_room/post_to_room"),
                 ("photos", "search_photos"),
@@ -185,6 +186,11 @@ def build_tools_system_prompt(
                 if "use_item" in present and "my_day" in present
                 else ""
             )
+        )
+    if "notes" in categories:
+        guidelines.append(
+            "- \"Add X to my shopping list\" → `add_to_note` with note 'shopping list' (their Shopping/Groceries "
+            "note, else the Shopping list in Tasks); say where it went."
         )
     if "agents" in categories:
         guidelines.append(

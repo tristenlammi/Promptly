@@ -9,6 +9,7 @@ import {
   Images,
   Lock,
   Plane,
+  StickyNote,
   type LucideIcon,
 } from "lucide-react";
 import { lazy, Suspense, useState } from "react";
@@ -35,6 +36,7 @@ const ICONS: Record<ShareKind, LucideIcon> = {
   task: CheckSquare,
   recipe: ChefHat,
   trip: Plane,
+  note: StickyNote,
 };
 
 export const shareKey = (messageId: string) => ["rooms", "share-card", messageId] as const;
@@ -73,7 +75,11 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-medium text-[var(--text)]">Shared item</span>
           <span className="block text-xs text-[var(--text-muted)]">
-            {isError ? "Couldn't load this." : `You don't have access to ${data?.label ?? label ?? "it"}.`}
+            {isError
+              ? "Couldn't load this."
+              : kind === "note"
+                ? "This note isn't shared with you."
+                : `You don't have access to ${data?.label ?? label ?? "it"}.`}
           </span>
         </span>
       </div>

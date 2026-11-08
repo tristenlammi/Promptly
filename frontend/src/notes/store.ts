@@ -985,6 +985,26 @@ export function runFlushers(noteId: string): void {
   for (const fn of [...(flushers.get(noteId) ?? [])]) fn();
 }
 
+/** Every change to the note made on this device has reached the server
+ *  (false: offline, or still waiting after a while). */
+export async function sentAll(id: string): Promise<boolean> {
+  for (let i = 0; i < 75; i++) {
+    const s = get();
+    if (!s.drafts[id] && !s.outbox.some((q) => q.op.id === id && !q.landed) && !s.known[id]?.local) return true;
+    if (i === 0) kick();
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
+    await sleep(200);
+  }
+  return false;
+}
+
+/** A whole note the server just made or changed outside the outbox (Make a
+ *  copy, Open as document): on this device at once. */
+export function receive(note: Note): void {
+  addUsers(note.users);
+  learn([note], false);
+}
+
 /** Hooks. */
 export const useNote = (id: string | null | undefined) => useNotes((s) => (id ? s.drafts[id] ?? s.notes[id] : undefined));
 export const usePendingCount = () => useNotes((s) => s.outbox.filter((q) => !q.landed).length);

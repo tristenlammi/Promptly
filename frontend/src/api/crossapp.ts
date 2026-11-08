@@ -7,7 +7,9 @@ import type { FileItem } from "@/api/files";
  * photo album and Budget spending, and the grocery list → Tasks.
  */
 
-export type ShareKind = "file" | "folder" | "photo" | "album" | "task" | "recipe" | "trip";
+export type ShareKind = "file" | "folder" | "photo" | "album" | "task" | "recipe" | "trip"
+  // A note in Notes.
+  | "note";
 
 /** What's being shared: ``id`` is the thing; tasks, recipes and trips also
  *  name the app file they live in (``file_id``). */

@@ -210,3 +210,22 @@ UNTRUSTED_CONTENT_TOOLS = frozenset(
 
 def reads_outside_content(tool_name: str) -> bool:
     return tool_name in UNTRUSTED_CONTENT_TOOLS or tool_name.startswith("mcp__")
+
+
+def guard_write(ctx: ToolContext, doing: str, *, own_attachments_ok: bool = False) -> None:
+    """The one rule for chat tools that change something for the user (add an
+    event, post to a room, run an app action, write a note): not on a turn
+    that read outside content (R-019) — the person asks again in a new
+    message. ``doing`` finishes "Not … on a turn that read outside content"
+    ("changing the calendar"). ``own_attachments_ok`` lets a write through
+    when the only outside content is files the person attached themselves
+    (a health document they asked to log).
+
+    Every write tool goes through here, so how such turns are handled can
+    change in one place."""
+    turn = ctx.turn
+    if not turn or not turn.get("untrusted"):
+        return
+    if own_attachments_ok and turn.get("own_attachments_only"):
+        return
+    raise ToolError(f"Not {doing} on a turn that read outside content — ask the user to confirm in a new message.")

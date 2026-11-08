@@ -26,6 +26,10 @@ type Pick =
 
 /** Where the thing lives, for the "who can open it" line. */
 const HOME: Partial<Record<ShareTarget["kind"], string>> = { task: "Tasks", recipe: "Meal Planner", trip: "Trip Planner" };
+/** Who can open it, said for kinds that are shared on their own (a note). */
+const WHO: Partial<Record<ShareTarget["kind"], string>> = {
+  note: "Only people this note is shared with can open it — others see that a note was shared.",
+};
 
 function dmName(memberIds: string[] | undefined, b: Bootstrap): string {
   const others = (memberIds ?? []).filter((id) => id !== b.me.id).map((id) => b.users[id]?.username ?? "Someone");
@@ -222,7 +226,9 @@ function SendTo({ onClose, target, canGrant }: { onClose: () => void; target: Sh
         </label>
       ) : (
         <p className="mt-3 text-xs text-[var(--text-muted)]">
-          {home
+          {WHO[target.kind]
+            ? WHO[target.kind]
+            : home
             ? `Only people you've shared your ${home} with can open it — others see that it was shared.`
             : "Only people who already have access can open it — others see that it was shared."}
         </p>

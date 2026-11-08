@@ -4,8 +4,11 @@ import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import { Placeholder } from "@tiptap/extensions";
 import { Bold, Heading1, Heading2, Italic, Link2, RemoveFormatting, Underline } from "lucide-react";
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
+import { connectionsApi, linkPath } from "@/api/connections";
+import { WikiLinkExtension, type WikiTarget } from "@/components/files/documents/WikiLinkExtension";
 import { cn } from "@/utils/cn";
 
 import { mergeDocs } from "../merge";
@@ -117,8 +120,33 @@ export const BodyEditor = forwardRef<
     /** Who made a change that arrives while you're typing (for the line a
      *  clash leaves: "Sam changed this while you were editing"). */
     theirName?: string;
+    /** This note's id: it isn't offered when linking with ``[[``. */
+    noteId?: string;
   }
->(function BodyEditor({ value, onChange, editable = true, placeholder = "Note", autoFocus, toolbar = "focus", className, label = "Note text", theirName }, ref) {
+>(function BodyEditor({ value, onChange, editable = true, placeholder = "Note", autoFocus, toolbar = "focus", className, label = "Note text", theirName, noteId }, ref) {
+  const navigate = useNavigate();
+  // ``[[`` (or ``@`` after a space) links anything you can open — another
+  // note, a task, an event, a file, a person — as an in-app ``/link/…``
+  // link, which the server records as a mention.
+  const selfRef = useRef(noteId);
+  selfRef.current = noteId;
+  const wiki = useMemo(
+    () =>
+      WikiLinkExtension.configure({
+        items: async (q: string): Promise<WikiTarget[]> => {
+          if (!q.trim()) return [];
+          try {
+            const found = await connectionsApi.search(q.trim(), 6);
+            return found
+              .filter((t) => !(t.kind === "note" && t.id === selfRef.current))
+              .map((t) => ({ id: t.id, kind: t.label, refId: null, title: t.title, workspaceId: "", href: linkPath(t) }));
+          } catch {
+            return [];
+          }
+        },
+      }),
+    [],
+  );
   const theirNameRef = useRef(theirName);
   theirNameRef.current = theirName;
   // Everything this editor has sent out lately: a body coming back equal
@@ -156,6 +184,7 @@ export const BodyEditor = forwardRef<
       }),
       Placeholder.configure({ placeholder }),
       BlockIds,
+      wiki,
     ],
     content: (value as object) ?? EMPTY,
     editable,
@@ -185,9 +214,11 @@ export const BodyEditor = forwardRef<
       base.current = value ?? null;
       return;
     }
-    if (sent.current.includes(incoming)) {
+    if (dirty.current && sent.current.includes(incoming)) {
       // An older save of ours coming back (newer typing is on its way):
-      // what's on screen grew out of it.
+      // what's on screen grew out of it. (With nothing unsent, a body we
+      // once had coming back is a real change — an Undo or an earlier
+      // version restored — and is shown.)
       base.current = value ?? null;
       return;
     }
@@ -228,6 +259,16 @@ export const BodyEditor = forwardRef<
   return (
     <div
       className={cn("note-body", className)}
+      onClick={(e) => {
+        // A link to something in Promptly (a ``[[`` mention) opens it.
+        const a = (e.target as HTMLElement).closest<HTMLAnchorElement>("a[href^='/']");
+        const href = a?.getAttribute("href");
+        if (!a || !href || href.startsWith("//") || e.button !== 0) return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+        if (window.getSelection()?.isCollapsed === false) return;
+        e.preventDefault();
+        navigate(href);
+      }}
       onFocus={() => setFocused(true)}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);

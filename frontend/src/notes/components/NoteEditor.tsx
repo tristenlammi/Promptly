@@ -1,15 +1,20 @@
-import { Archive, ArchiveRestore, ArrowLeft, ArrowDownAZ, BellPlus, CheckSquare, CloudOff, ListX, Mic, MoreVertical, Palette, Pin, Square, Tag, Trash2, Type, UserPlus, Users } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, ArrowDownAZ, BellPlus, CalendarPlus, CheckSquare, CloudOff, Copy, FileText, Heading, ListTodo, ListX, Mic, MoreVertical, Palette, Pin, Send, Sparkles, Square, Tag, Trash2, Type, UserPlus, Users, WandSparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import type { PhotoItem } from "@/api/photos";
 import { tagColor } from "@/api/tags";
+import { SendToSheet } from "@/components/share/SendToSheet";
 import { UserAvatar } from "@/components/shared/UserAvatar";
+import { useAvailableModels } from "@/hooks/useProviders";
+import { useEditorModel } from "@/lib/editorModel";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 import { noteOps } from "../actions";
+import { makeCopy, openAsDocument } from "../across";
 import { notesActions, runFlushers, useNotes } from "../store";
-import { textDoc, uuid, type DocNode, type Note, type NoteAttachment, type NoteLabel } from "../types";
+import { displayTitle, textDoc, uuid, type DocNode, type Note, type NoteAttachment, type NoteLabel } from "../types";
 import { addFiles, cancelUpload, retryUpload, useNoteAttachments } from "../uploads";
 import { AddImageButton } from "./AddImage";
 import { AudioPlayer } from "./AudioPlayer";
@@ -17,6 +22,7 @@ import { NoteImages } from "./NoteImages";
 import { Recorder } from "./Recorder";
 import { BodyEditor, type BodyEditorHandle } from "./BodyEditor";
 import { ListEditor } from "./ListEditor";
+import { AiSheet, EventSheet, TasksSheet } from "./NoteTools";
 import { ColorGrid, LabelChooser } from "./pickers";
 import { MenuItem, Pop } from "./Pop";
 import { ReminderChip, ReminderPicker } from "./Reminder";
@@ -70,6 +76,30 @@ export function NoteEditor({
   const editable = !trashed;
   const [pop, setPop] = useState<null | "color" | "labels" | "more" | "remind">(null);
   const [sharing, setSharing] = useState(false);
+  // Across Promptly (N1.5): an AI proposal, Turn into tasks, Make an event, Send to….
+  const [tool, setTool] = useState<null | "tidy" | "to_list" | "title" | "tasks" | "event" | "send">(null);
+  const [busyTool, setBusyTool] = useState<null | "copy" | "document">(null);
+  const navigate = useNavigate();
+  useAvailableModels();
+  const model = useEditorModel();
+  const hasModel = !!model.providerId && !!model.modelId;
+  // A fresh voice note with no title: offer a title, once (per note, per device).
+  const offerKey = `notes-title-offer:${id}`;
+  const [titleOfferGone, setTitleOfferGone] = useState(() => {
+    try {
+      return localStorage.getItem(offerKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const dismissTitleOffer = () => {
+    setTitleOfferGone(true);
+    try {
+      localStorage.setItem(offerKey, "1");
+    } catch {
+      /* private mode: it just comes back next time */
+    }
+  };
   const colorBtn = useRef<HTMLButtonElement>(null);
   const remindBtn = useRef<HTMLButtonElement>(null);
   const labelBtn = useRef<HTMLButtonElement>(null);
@@ -202,6 +232,34 @@ export function NoteEditor({
     noteOps.label([id], l, on);
   };
 
+  // ---------------------------------------------------------- across Promptly
+  const pick = (t: NonNullable<typeof tool>) => {
+    flush();
+    setPop(null);
+    if (t === "title") dismissTitleOffer();
+    setTool(t);
+  };
+  const offerTitle =
+    editable && hasModel && !isDraft && !titleOfferGone && !title.trim() && recordings.some((a) => a.transcript_state === "done" && !!a.transcript);
+  const copyNote = async () => {
+    if (busyTool) return;
+    flush();
+    setPop(null);
+    setBusyTool("copy");
+    const copy = await makeCopy(note);
+    setBusyTool(null);
+    if (copy) navigate(`/notes/n/${copy}`, { replace: true, state: { from: "/notes" } });
+  };
+  const toDocument = async () => {
+    if (busyTool) return;
+    flush();
+    setPop(null);
+    setBusyTool("document");
+    const href = await openAsDocument(note);
+    setBusyTool(null);
+    if (href) navigate(href);
+  };
+
   const footerBtn =
     "flex h-9 w-9 items-center justify-center rounded-full note-muted note-hover hover:text-[var(--note-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] disabled:opacity-40";
 
@@ -327,6 +385,17 @@ export function NoteEditor({
             </button>
           )}
         </div>
+        {offerTitle && (
+          <div className="mb-1 flex flex-wrap items-center gap-1.5 text-xs">
+            <button type="button" onClick={() => pick("title")} className="inline-flex h-7 items-center gap-1.5 rounded-full bg-[color-mix(in_srgb,var(--note-text)_9%,transparent)] px-3 font-medium note-hover">
+              <Sparkles className="h-3.5 w-3.5" aria-hidden />
+              Suggest a title
+            </button>
+            <button type="button" onClick={dismissTitleOffer} className="h-7 rounded-full px-2 note-muted note-hover">
+              No thanks
+            </button>
+          </div>
+        )}
 
         <div className="mt-1 pb-3" data-note-editor={id}>
           {note.kind === "text" ? (
@@ -337,6 +406,7 @@ export function NoteEditor({
               autoFocus={editable && autoFocus === "body"}
               placeholder={variant === "composer" ? "Take a note…" : "Note"}
               theirName={note.edited_by && note.edited_by !== me ? users[note.edited_by]?.username : undefined}
+              noteId={id}
               onChange={(doc, base) => {
                 bodyNext.current = doc;
                 bodyBase.current = base;
@@ -398,6 +468,18 @@ export function NoteEditor({
                 <span className="truncate">{sharedShort}</span>
               </button>
             )}
+          </div>
+        )}
+
+        {note.document && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg bg-[color-mix(in_srgb,var(--note-text)_8%,transparent)] px-3 py-2 text-sm">
+            <FileText className="h-4 w-4 shrink-0" aria-hidden />
+            <span className="min-w-0 flex-1 truncate">
+              Continued as a document: <span className="font-medium">{note.document.title}</span>
+            </span>
+            <Link to={note.document.href} className="shrink-0 rounded-full px-3 py-1 font-medium note-hover">
+              Open
+            </Link>
           </div>
         )}
 
@@ -498,6 +580,20 @@ export function NoteEditor({
       )}
       {pop === "remind" && <ReminderPicker note={note} anchor={remindBtn.current} onClose={() => setPop(null)} />}
       {sharing && <ShareDialog note={note} onClose={() => setSharing(false)} onLeft={onClose} />}
+      {(tool === "tidy" || tool === "to_list" || tool === "title") && <AiSheet note={note} action={tool} onClose={() => setTool(null)} />}
+      {tool === "tasks" && <TasksSheet note={note} onClose={() => setTool(null)} />}
+      {tool === "event" && (
+        <EventSheet
+          note={note}
+          onClose={() => setTool(null)}
+          onGo={(href) => {
+            setTool(null);
+            flush();
+            navigate(href);
+          }}
+        />
+      )}
+      <SendToSheet open={tool === "send"} onClose={() => setTool(null)} target={{ kind: "note", id: note.id, title: displayTitle(note) }} canGrant={false} />
       {pop === "color" && (
         <Pop anchor={colorBtn.current} label="Note colour" onClose={() => setPop(null)} width={248}>
           <ColorGrid value={note.color} onPick={(c) => noteOps.color([id], c)} />
@@ -563,6 +659,42 @@ export function NoteEditor({
                   }}
                 >
                   Sort A–Z
+                </MenuItem>
+              )}
+            </>
+          )}
+          {editable && hasModel && !isDraft && note.kind === "text" && (
+            <>
+              <MenuItem icon={Sparkles} onClick={() => pick("tidy")}>
+                Tidy up
+              </MenuItem>
+              <MenuItem icon={WandSparkles} onClick={() => pick("to_list")}>
+                Make a list
+              </MenuItem>
+            </>
+          )}
+          {editable && hasModel && !isDraft && (
+            <MenuItem icon={Heading} onClick={() => pick("title")}>
+              Suggest a title
+            </MenuItem>
+          )}
+          {!isDraft && (
+            <>
+              <MenuItem icon={CalendarPlus} onClick={() => pick("event")}>
+                Make an event
+              </MenuItem>
+              <MenuItem icon={ListTodo} onClick={() => pick("tasks")}>
+                Turn into tasks
+              </MenuItem>
+              <MenuItem icon={Send} onClick={() => pick("send")}>
+                Send to…
+              </MenuItem>
+              <MenuItem icon={Copy} onClick={() => void copyNote()}>
+                {busyTool === "copy" ? "Making a copy…" : "Make a copy"}
+              </MenuItem>
+              {note.is_owner && !note.document && (
+                <MenuItem icon={FileText} onClick={() => void toDocument()}>
+                  {busyTool === "document" ? "Making a document…" : "Open as document"}
                 </MenuItem>
               )}
             </>

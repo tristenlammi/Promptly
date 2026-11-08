@@ -5121,6 +5121,8 @@ async def _stream_generator(
                     enabled_categories.add("items")
                 # The calendar: everyone has one.
                 enabled_categories.add("calendar")
+                # Notes (app/notes): everyone has them.
+                enabled_categories.add("notes")
                 # Across the apps (my_day, find_person, search_apps): everyone.
                 enabled_categories.add("apps")
                 # Mail: for anyone who's connected a mailbox.

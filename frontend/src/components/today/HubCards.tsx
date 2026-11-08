@@ -21,8 +21,10 @@ import {
   Navigation,
   Plane,
   Plus,
+  Loader2,
   Receipt,
   Sparkles,
+  StickyNote,
   Stethoscope,
   Users,
   UtensilsCrossed,
@@ -879,6 +881,50 @@ export function ComingCard({ coming, today }: { coming: TodayComing[]; today: st
             </div>
           ))}
         </div>
+      )}
+    </HubCard>
+  );
+}
+
+// -------------------------------------------------------------- notes
+
+/** Notes (app/notes): your pinned notes — a list says how much is left —
+ *  and voice notes whose words are still being worked out. */
+export function NotesCard({ n }: { n: NonNullable<Sections["notes"]> }) {
+  return (
+    <HubCard icon={StickyNote} title="Notes" to={n.url} open={n.more_pinned ? "All pinned" : "Open"}>
+      <ul aria-label="Pinned notes">
+        {n.pinned.map((c) => {
+          const detail = c.kind === "list" ? (c.total ? (c.left ? `${c.left} left` : "All ticked off") : "Empty list") : c.snippet;
+          return (
+            <li key={c.id}>
+              <Link to={c.url} state={{ from: "/today" }} className="flex items-start gap-2.5 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+                {c.kind === "list" ? (
+                  <ListChecks className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
+                ) : (
+                  <StickyNote className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-[var(--text)]">{c.title}</span>
+                  {detail && <span className="block truncate text-xs text-[var(--text-muted)]">{detail}{c.shared ? " · shared with you" : ""}</span>}
+                </span>
+              </Link>
+            </li>
+          );
+        })}
+      </ul>
+      {n.transcribing.length > 0 && (
+        <ul aria-label="Voice notes being transcribed" className={cn(n.pinned.length > 0 && "mt-1 border-t border-[var(--border)] pt-1")}>
+          {n.transcribing.map((t) => (
+            <li key={t.id}>
+              <Link to={t.url} state={{ from: "/today" }} className="flex items-center gap-2.5 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--text-muted)]" aria-hidden />
+                <span className="min-w-0 flex-1 truncate text-sm text-[var(--text)]">{t.title}</span>
+                <span className="shrink-0 text-xs text-[var(--text-muted)]">Transcribing…</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
       )}
     </HubCard>
   );

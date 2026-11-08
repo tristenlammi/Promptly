@@ -646,8 +646,9 @@ class PostToRoomTool(Tool):
         from app.auth.models import User
         from app.rooms import router as rooms_router
 
-        if ctx.turn and ctx.turn.get("untrusted"):
-            raise ToolError("Not posting on a turn that read outside content — ask the user to confirm in a new message.")
+        from app.chat.tools.base import guard_write
+
+        guard_write(ctx, "posting")
         body = str(args.get("message") or "").strip()
         if not body:
             raise ToolError("The message is empty.")

@@ -1,7 +1,7 @@
 /** The Notes API (``/api/notes``, ``backend/app/notes/router.py``). */
 import { apiClient } from "@/api/client";
 
-import type { DocNode, Note, NoteItem, NoteKind, NoteLabel, NoteUser, NoteView, ReminderIn } from "./types";
+import type { AiAction, AiProposal, DocNode, Note, NoteItem, NoteKind, NoteLabel, NoteUser, NoteView, ProposedTask, ReminderIn } from "./types";
 
 export interface Page {
   notes: Note[];
@@ -29,6 +29,8 @@ export interface NotePatch {
   color?: string;
   kind?: NoteKind;
   list_opts?: Record<string, boolean>;
+  /** An AI proposal being applied: the note as it was is kept as a version. */
+  checkpoint?: "ai";
 }
 
 export type BulkAction = "pin" | "unpin" | "archive" | "unarchive" | "color" | "label" | "unlabel" | "trash";
@@ -132,7 +134,65 @@ export const notesApi = {
     const { data } = await apiClient.put<TranscriptionStatus>("/notes/admin/transcription", { on });
     return data;
   },
+  async versions(id: string): Promise<NoteVersionRow[]> {
+    const { data } = await apiClient.get<{ versions: NoteVersionRow[] }>(`/notes/${id}/versions`);
+    return data.versions;
+  },
+  async restoreVersion(id: string, versionId: string): Promise<Note> {
+    const { data } = await apiClient.post<{ note: Note }>(`/notes/${id}/versions/${versionId}/restore`);
+    return data.note;
+  },
+  /** A proposal from the model — nothing is saved. */
+  async ai(id: string, action: AiAction, model: { provider_id: string; model_id: string }): Promise<AiProposal> {
+    const { data } = await apiClient.post<{ proposal: AiProposal }>(`/notes/${id}/ai/${action}`, model, { timeout: 150_000 });
+    return data.proposal;
+  },
+  /** Make a copy: a new note of your own. */
+  async copy(id: string, clientId: string): Promise<{ note: Note; skipped_attachments: number }> {
+    const { data } = await apiClient.post<{ note: Note; skipped_attachments: number }>(`/notes/${id}/copy`, { client_id: clientId });
+    return data;
+  },
+  async toDocument(id: string): Promise<{ note: Note; document: { id: string; title: string; href: string } | null; file_id: string }> {
+    const { data } = await apiClient.post(`/notes/${id}/to-document`, {});
+    return data;
+  },
+  async undoDocument(id: string): Promise<Note> {
+    const { data } = await apiClient.delete<{ note: Note }>(`/notes/${id}/to-document`);
+    return data.note;
+  },
+  async taskLists(): Promise<{ available: boolean; lists: { id: string; name: string; color?: string | null }[] }> {
+    const { data } = await apiClient.get("/notes/to-tasks/lists");
+    return data;
+  },
+  async toTasks(id: string, list: string | null, tasks: ProposedTask[]): Promise<ToTasksResult> {
+    const { data } = await apiClient.post<ToTasksResult>(`/notes/${id}/to-tasks`, { list, tasks });
+    return data;
+  },
+  async undoTasks(id: string, fileId: string, taskIds: string[]): Promise<number> {
+    const { data } = await apiClient.post<{ removed: number }>(`/notes/${id}/to-tasks/undo`, { file_id: fileId, task_ids: taskIds });
+    return data.removed;
+  },
 };
+
+/** An earlier version of a note (kept before edits, AI changes and restores). */
+export interface NoteVersionRow {
+  id: string;
+  revision: number;
+  reason: "edit" | "restore" | "ai";
+  made_by: string | null;
+  created_at: string;
+  title: string;
+  kind: string;
+  preview: string;
+}
+
+export interface ToTasksResult {
+  file_id: string;
+  task_ids: string[];
+  count: number;
+  list: string;
+  href: string;
+}
 
 /** Who a note is shared with. */
 export interface Members {
