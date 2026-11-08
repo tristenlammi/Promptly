@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, KeyRound, Mail, MessageCircle, Navigation, type LucideIcon } from "lucide-react";
+import { CalendarDays, House, KeyRound, Mail, MessageCircle, Navigation, type LucideIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { authApi } from "@/api/auth";
+import { porchApi } from "@/api/porch";
 import { extractError } from "@/components/files/helpers";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
@@ -28,7 +29,16 @@ export const BUILT_IN_APPS: NavApp[] = [
   { id: "mail", name: "Mail", icon: "/item-icons/mail-192.png", glyph: Mail, to: "/mail" },
   // Its own page: the route in App.tsx turns this into a full page load.
   { id: "passwords", name: "Passwords", icon: "/item-icons/passwords-192.png", glyph: KeyRound, to: "/passwords" },
+  // Porch (shown only to people it's turned on for: useBuiltInApps)
+  { id: "porch", name: "Porch", icon: "/item-icons/porch-192.png", glyph: House, to: "/porch" },
 ];
+
+/** The built-in apps this person can open: Porch only when the admin has it
+ *  on for them. */
+export function useBuiltInApps(): NavApp[] {
+  const { data: porch } = useQuery({ queryKey: ["porch", "available"], queryFn: porchApi.available, staleTime: 5 * 60_000 });
+  return useMemo(() => BUILT_IN_APPS.filter((a) => a.id !== "porch" || porch === true), [porch]);
+}
 
 /**
  * The apps this person pinned to their sidebar (``settings.nav_apps``) —
@@ -45,6 +55,7 @@ export function useNavApps() {
   const [saving, setSaving] = useState(false);
   const latestOrder = useRef(0);
   const pinned = useMemo(() => pinnedIds ?? [], [pinnedIds]);
+  const builtIn = useBuiltInApps();
   const { data: launcher } = useQuery({
     queryKey: ["apps-launcher"],
     queryFn: itemsApi.launcher,
@@ -53,12 +64,12 @@ export function useNavApps() {
   });
 
   const apps = useMemo(() => {
-    const all = new Map<string, NavApp>(BUILT_IN_APPS.map((a) => [a.id, a]));
+    const all = new Map<string, NavApp>(builtIn.map((a) => [a.id, a]));
     for (const a of launcher ?? []) {
       all.set(a.kind, { id: a.kind, name: a.name, icon: `/item-icons/${a.kind}-192.png`, glyph: itemIcon(a.icon), to: `/apps/${a.kind}` });
     }
     return pinned.map((id) => all.get(id)).filter((a): a is NavApp => Boolean(a));
-  }, [pinned, launcher]);
+  }, [pinned, launcher, builtIn]);
 
   const toggle = async (id: string) => {
     const previous = pinned;

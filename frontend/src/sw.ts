@@ -81,6 +81,7 @@ function manifestFor(path: string): string {
   if (/^\/maps(\/|$)/.test(path)) return "/maps.webmanifest";
   if (/^\/mail(\/|$)/.test(path)) return "/mail.webmanifest";
   if (/^\/photos(\/|$)/.test(path)) return "/photos.webmanifest";
+  if (/^\/porch(\/|$)/.test(path)) return "/porch.webmanifest";
   const app = /^\/app\/([0-9a-fA-F-]{36})/.exec(path);
   if (app) return `/api/items/app-manifest/${app[1]}.webmanifest`;
   return "/manifest.webmanifest";

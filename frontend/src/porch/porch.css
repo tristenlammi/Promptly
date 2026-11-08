@@ -1,0 +1,10 @@
+/* Porch's accent: Promptly's terracotta, deep enough that white words on it
+   are easy to read (WCAG AA) in light and dark. Set on <html> while Porch is
+   open, so sheets drawn in a portal wear it too. Text in the accent colour
+   uses --accent-text, which is tuned per theme already. */
+html[data-porch] {
+  --item-accent: #A84B2A;
+}
+html.dark[data-porch] {
+  --item-accent: #B4532F;
+}

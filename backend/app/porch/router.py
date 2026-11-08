@@ -17,17 +17,19 @@ from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
 from app.people import blocks
 
-from . import access, core, deps, groups, media, posts
+from . import access, core, deps, events, groups, media, posts
 from .deps import require_porch
 from .models import PorchGroup, PorchGroupMember, PorchProfile
 
 router = APIRouter()
 router.include_router(groups.router)
 router.include_router(posts.router)
+router.include_router(events.router)
 
 
 def _profile_out(p: PorchProfile, *, me: bool) -> dict[str, Any]:
@@ -45,6 +47,12 @@ def _profile_out(p: PorchProfile, *, me: bool) -> dict[str, Any]:
             last_groups=p.last_groups,
         )
     return out
+
+
+@router.get("/available")
+async def available(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Is Porch on for you? (The Apps tile asks; it never 404s.)"""
+    return {"available": await deps.allowed(db, user)}
 
 
 @router.get("/bootstrap")
@@ -131,6 +139,7 @@ async def profile(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: 
         **(_profile_out(prof, me=me) if prof is not None else {"bio": "", "birthday": None}),
     }
     if not me:
+        out["relation"] = await _relation(db, user, other)
         theirs = select(PorchGroupMember.group_id).where(PorchGroupMember.user_id == other.id, PorchGroupMember.status == "member")
         shared = (
             await db.execute(
@@ -145,6 +154,49 @@ async def profile(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: 
         ).scalars().all()
         out["shared_groups"] = [access.group_label(g) for g in shared]
     return out
+
+
+async def _relation(db: AsyncSession, viewer: User, other: User) -> dict[str, Any] | None:
+    """What they are to you ("Sam, your brother"), from your own Contacts
+    and Photos people. Only ever shown to you."""
+    from app.people.directory import Person, complete
+
+    try:
+        p = await complete(db, viewer, Person(user=other))
+    except Exception:  # noqa: BLE001 — a nicety; never fail the profile
+        core.logger.warning("porch relation lookup failed", exc_info=True)
+        return None
+    if not p.label and p.contact is None and p.person_id is None:
+        return None
+    return {"name": p.name, "label": p.label}
+
+
+@router.get("/people/suggested")
+async def suggested_people(db: AsyncSession = Depends(get_db), user: User = Depends(require_porch)) -> list[dict]:
+    """People you know (your Contacts and Photos people, matched to accounts
+    here) who have Porch: the first run's "Make a Family group?" card.
+    Only your own directory is read; nobody is ticked for you."""
+    from app.people.directory import directory
+
+    try:
+        people_ = await directory(db, user)
+    except Exception:  # noqa: BLE001
+        core.logger.warning("porch suggestions failed", exc_info=True)
+        return []
+    hidden = await blocks.hidden_ids(db, user.id)
+    seen: set[uuid.UUID] = set()
+    out: list[dict[str, Any]] = []
+    for p in people_:
+        u = p.user
+        if u is None or u.id == user.id or u.id in seen or u.id in hidden or u.disabled:
+            continue
+        if not await deps.allowed(db, u):
+            continue
+        seen.add(u.id)
+        out.append({"user": core.user_out(u), "label": p.label, "name": p.name})
+    # The people with a relationship first ("Wife", "Mum"), then by name.
+    out.sort(key=lambda d: (d["label"] is None, d["name"].lower()))
+    return out[:24]
 
 
 class ProfilePatch(BaseModel):

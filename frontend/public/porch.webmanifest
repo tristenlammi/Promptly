@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json.schemastore.org/web-manifest.json",
+  "name": "Porch",
+  "short_name": "Porch",
+  "description": "Share photos and news with the people on your own Promptly, through groups like Family and The Lads. Nobody outside a group sees its posts.",
+  "id": "/porch/",
+  "start_url": "/porch/?source=pwa",
+  "scope": "/porch/",
+  "display": "standalone",
+  "background_color": "#FAF9F7",
+  "theme_color": "#E0803A",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": [
+    "social",
+    "photo"
+  ],
+  "icons": [
+    {
+      "src": "/item-icons/porch-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/porch-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/item-icons/porch-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Groups",
+      "short_name": "Groups",
+      "url": "/porch/groups?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/item-icons/porch-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
+}

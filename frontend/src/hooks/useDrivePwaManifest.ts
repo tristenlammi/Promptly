@@ -70,6 +70,13 @@ export function useDrivePwaManifest(): void {
       setAppleMobileTitle("P Maps");
       return;
     }
+    if (location.pathname === "/porch" || location.pathname.startsWith("/porch/")) {
+      // Porch: its own app, scope ``/porch/``.
+      setManifestHref("/porch.webmanifest");
+      setAppleTouchIconHref("/item-icons/porch-apple-180.png");
+      setAppleMobileTitle("Porch");
+      return;
+    }
     const onCalendar =
       location.pathname === "/calendar" || location.pathname.startsWith("/calendar/");
     if (onCalendar) {
