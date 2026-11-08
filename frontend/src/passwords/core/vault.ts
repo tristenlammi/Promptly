@@ -21,6 +21,7 @@ import {
   wrapKeyset,
 } from "./keys";
 import { isSystem, type Item, type ItemBody, mergeBodies, newBody, searchText, touch, type TrustBook, type TrustEntry } from "./model";
+import { mergeCounters, named, nameContact, removeContact, signHome, type TrustState, verifyHome, withListed } from "./ownership";
 import { aesKey, KDF_FLOOR, type KdfParams, x25519Public } from "./primitives";
 import { deviceSafetyWords, identityWords } from "./safety";
 import type { CachedAccount, CachedItem, CachedVault, LocalStore } from "./store";
@@ -41,6 +42,8 @@ type Unlocked = {
 
 const SECRET_META = "secret_key";
 const DEVICE_KEY_META = "device_key";
+/** The vaults this device knows are this person's own. See `refreshOwnPins`. */
+const OWN_META = "own_vaults";
 
 export class WrongPasswordError extends Error {
   constructor() {
@@ -142,6 +145,8 @@ export class VaultClient {
     await this.cacheAccount(session, { setup: true });
     this.state = { keyset, authKey, userId, accountId, vaultKeys: new Map(), items: new Map(), search: new Map() };
     await this.store.setMeta("personal_vault", vaultId);
+    // Made here, so known for certain. The first sync signs it as theirs for their other devices.
+    await this.store.setMeta(OWN_META, [vaultId]);
     await this.sync();
     return { secretKey };
   }
@@ -360,6 +365,9 @@ export class VaultClient {
   /** Forget every key. The offline copy stays, encrypted. */
   async lock(): Promise<void> {
     this.book = { people: {}, accepted: [], contacts: [], generations: {} };
+    this.ownership = { contacts: {}, made: [], shared: [] };
+    this.ownVaultIds = new Set();
+    this.homeMissing = false;
     if (this.state) {
       this.state.keyset.x25519.fill(0);
       this.state.keyset.ed25519.fill(0);
@@ -514,16 +522,26 @@ export class VaultClient {
 
   private book: TrustBook = { people: {}, accepted: [], contacts: [], generations: {} };
 
-  private isOwnVault(v: { kind: string; grantedBy: string | null }): boolean {
-    const s = this.need();
-    return v.kind === "personal" && (!v.grantedBy || v.grantedBy === s.userId);
+  /** Their own vault: one this device pinned as theirs, still signed by them. What the server
+   *  calls a vault ("personal" or not) doesn't come into it: a shared vault they made has a grant
+   *  signed by them too, and every member of it holds its key. */
+  private isOwnVault(v: { id: string; grantedBy: string | null }): boolean {
+    return this.ownVaultIds.has(v.id) && this.selfGranted(v);
   }
 
-  /** A vault opens if it's your own, or you chose to accept it. What the server says about
-   *  who accepted what doesn't come into it. */
+  private selfGranted(v: { grantedBy: string | null }): boolean {
+    return !v.grantedBy || v.grantedBy === this.need().userId;
+  }
+
+  /** For other parts of the app that should only take things from this person's own vault. */
+  isOwn(vaultId: string): boolean {
+    return this.ownVaultIds.has(vaultId);
+  }
+
+  /** A vault opens if it's your own, or you made it, or you chose to accept it. What the server
+   *  says about who accepted what doesn't come into it. */
   private mayOpen(v: { id: string; kind: string; grantedBy: string | null }): boolean {
-    const s = this.need();
-    return this.isOwnVault(v) || !v.grantedBy || v.grantedBy === s.userId || this.book.accepted.includes(v.id);
+    return this.isOwnVault(v) || this.selfGranted(v) || this.book.accepted.includes(v.id);
   }
 
   /** Your own vault's only. A member of a shared vault could plant one there, naming themselves
@@ -538,19 +556,73 @@ export class VaultClient {
     return this.trustItems()[0];
   }
 
+  /** Pinned on this device; never from what the server calls a vault. */
   private ownVaultIds = new Set<string>();
+  /** One of them has no signed statement in it yet, so other devices can't tell it's theirs. */
+  private homeMissing = false;
+  /** Who's an emergency contact, and which vaults were made alone: synced beside the trust book. */
+  private ownership: Required<TrustState> = { contacts: {}, made: [], shared: [] };
+
+  /** Which vaults are theirs. Pinned at setup; carried over once from what this device already
+   *  trusted before this check existed; or proven by a statement signed with their identity key
+   *  inside the vault itself, which their other devices write. A server can relabel a shared
+   *  vault they made as "personal", and any member can write a trust book into it, but neither
+   *  can sign that statement. */
+  private async refreshOwnPins(): Promise<void> {
+    const s = this.need();
+    const vaults = await this.store.getVaults();
+    let pins = await this.store.getMeta<string[]>(OWN_META);
+    if (!pins) {
+      const first: string[] = [];
+      const synced = (await this.store.getMeta("last_sync")) !== undefined;
+      const before = await this.store.getMeta<string>("personal_vault");
+      if (before) first.push(before);
+      else if (synced) {
+        // A device from before: what it already took to be theirs. A new device has no history.
+        const was = vaults.filter((v) => v.kind === "personal" && this.selfGranted(v));
+        if (was.length === 1) first.push(was[0].id);
+      }
+      if (synced) {
+        // The vaults it already treated as made alone, for emergency access, once.
+        const local = (await this.store.getMeta<TrustState>("trust_state")) ?? {};
+        const made = vaults.filter((v) => !first.includes(v.id) && v.kind !== "personal" && this.selfGranted(v) && v.memberCount <= 1).map((v) => v.id);
+        await this.store.setMeta("trust_state", { ...local, made: [...new Set([...(local.made ?? []), ...made])] });
+      }
+      await this.store.setMeta(OWN_META, first);
+      pins = first;
+    }
+    const me = publicKeysOf(s.keyset).ed25519;
+    const byId = new Map(vaults.map((v) => [v.id, v]));
+    const signed = new Set<string>();
+    for (const item of s.items.values()) {
+      if (item.body.kind !== "trust" || signed.has(item.vaultId)) continue;
+      const v = byId.get(item.vaultId);
+      if (v && this.selfGranted(v) && verifyHome(item.body.homeSig, s.userId, v.id, me)) signed.add(v.id);
+    }
+    const known = pins;
+    const found = [...signed].filter((id) => !known.includes(id));
+    if (found.length) {
+      pins = [...pins, ...found];
+      await this.store.setMeta(OWN_META, pins);
+    }
+    this.ownVaultIds = new Set(pins);
+    this.homeMissing = pins.some((id) => {
+      const v = byId.get(id);
+      return !!v && !v.hidden && this.selfGranted(v) && !signed.has(id);
+    });
+  }
 
   /** Bring in what other devices decided. Union, and never a key change without a prompt. */
   private async mergeTrustBook(): Promise<void> {
+    await this.refreshOwnPins();
     const local = (await this.store.getMeta<Record<string, TrustEntry>>("trust")) ?? {};
-    this.ownVaultIds = new Set((await this.store.getVaults()).filter((v) => this.isOwnVault(v)).map((v) => v.id));
-    const books = this.trustItems().map((i) => i.body.trustBook!);
+    const items = this.trustItems();
+    const books = items.map((i) => i.body.trustBook!);
     const remote: TrustBook = {
       people: Object.assign({}, ...books.map((b) => b.people)),
       accepted: books.flatMap((b) => b.accepted ?? []),
       contacts: books.flatMap((b) => b.contacts ?? []),
       generations: {},
-      personalVaultId: books.find((b) => b.personalVaultId)?.personalVaultId,
     };
     for (const b of books) for (const [k, n] of Object.entries(b.generations ?? {})) remote.generations[k] = Math.max(remote.generations[k] ?? 0, n);
     const accepted = (await this.store.getMeta<string[]>("trust_accepted")) ?? [];
@@ -561,31 +633,44 @@ export class VaultClient {
       // Both keys: words compared on one pair say nothing about another with the same signing key.
       if (people[id] && e.verified) people[id] = { ...people[id], verified: people[id].ed25519 === e.ed25519 && people[id].x25519 === e.x25519 ? true : people[id].verified };
     }
+    // Contacts go by counter, so a removal on any device sticks. A plain list could only add.
+    const states: (TrustState | undefined)[] = [...items.map((i) => i.body.trustState as TrustState | undefined), await this.store.getMeta<TrustState>("trust_state"), this.ownership];
+    const counters = withListed(mergeCounters(...states.map((t) => t?.contacts)), [...remote.contacts, ...contacts]);
+    const union = (pick: (t: TrustState) => unknown) => [...new Set(states.flatMap((t) => (t && Array.isArray(pick(t)) ? (pick(t) as unknown[]).filter((x): x is string => typeof x === "string") : [])))];
+    this.ownership = { contacts: counters, made: union((t) => t.made), shared: union((t) => t.shared) };
     this.book = {
       people,
       accepted: [...new Set([...(remote?.accepted ?? []), ...accepted])],
-      contacts: [...new Set([...(remote?.contacts ?? []), ...contacts])],
+      contacts: named(counters),
       generations: { ...(remote?.generations ?? {}), ...generations },
-      personalVaultId: remote?.personalVaultId,
     };
     for (const [k, n] of Object.entries(remote?.generations ?? {})) this.book.generations[k] = Math.max(this.book.generations[k] ?? 0, n);
     await this.store.setMeta("trust", people);
   }
 
-  /** Saved locally now, and to the personal vault so other devices know too. */
+  /** Saved locally now, and to their own vault so other devices know too. With no vault known
+   *  for certain to be theirs yet, it stays on this device until there is one. */
   private async saveTrustBook(): Promise<void> {
+    this.book.contacts = named(this.ownership.contacts);
     await this.store.setMeta("trust", this.book.people);
     await this.store.setMeta("trust_accepted", this.book.accepted);
     await this.store.setMeta("trust_contacts", this.book.contacts);
     await this.store.setMeta("trust_generations", this.book.generations);
+    await this.store.setMeta("trust_state", this.ownership);
     if (!this.state) return;
+    const s = this.state;
     const item = this.trustItem();
-    const body = { ...(item?.body ?? newBody("trust", "trust-book")), trustBook: this.book };
+    const home = item?.vaultId ?? (await this.store.getVaults()).find((v) => this.isOwnVault(v) && !v.hidden)?.id;
+    if (!home) return;
+    const { people, accepted, contacts, generations } = this.book;
+    const body: ItemBody = {
+      ...(item?.body ?? newBody("trust", "trust-book")),
+      trustBook: { people, accepted, contacts, generations },
+      trustState: this.ownership,
+      homeSig: signHome(s.keyset.ed25519, s.userId, home),
+    };
     if (item) await this.update(item.id, body);
-    else {
-      const personal = (await this.store.getVaults()).find((v) => this.isOwnVault(v));
-      if (personal) await this.saveNew(personal.id, body);
-    }
+    else await this.saveNew(home, body);
   }
 
   async trustEntries(): Promise<Record<string, TrustEntry>> {
@@ -681,12 +766,14 @@ export class VaultClient {
     this.keyChanges.clear();
     this.roles.clear();
     const all = await this.store.getVaults();
-    const ownFirst = [...all.filter((v) => this.isOwnVault(v)), ...all.filter((v) => !this.isOwnVault(v))];
     // Their own vault has their decisions in it, so it opens before anything else is judged.
+    // Then the others they made, which open on their own signature and may prove one theirs.
     await this.mergeTrustBook();
+    const rank = (v: CachedVault) => (this.isOwnVault(v) ? 0 : this.selfGranted(v) ? 1 : 2);
+    const ownFirst = [...all].sort((a, b) => rank(a) - rank(b));
     let merged = false;
     for (const v of ownFirst) {
-      if (!merged && !this.isOwnVault(v)) {
+      if (!merged && rank(v) === 2) {
         merged = true;
         await this.mergeTrustBook();
       }
@@ -715,6 +802,7 @@ export class VaultClient {
         }
       }
     }
+    if (!merged) await this.mergeTrustBook();
     s.items.clear();
     s.search.clear();
     for (const item of fresh) this.index(item);
@@ -771,25 +859,43 @@ export class VaultClient {
       const remote = await this.api.vaults();
       const known = new Map((await this.store.getVaults()).map((v) => [v.id, v]));
       const seen = new Set<string>();
-      // Their own vault first: it holds what they've decided about the others. A "personal"
-      // vault not signed by them is somebody else's, whatever the server calls it.
-      const ordered = [...remote].map((rv) => (rv.kind === "personal" && rv.granted_by && rv.granted_by !== s.userId ? { ...rv, kind: "shared" as const } : rv));
-      ordered.sort((a, b) => Number(b.kind === "personal") - Number(a.kind === "personal"));
+      // Their own vault first: it holds what they've decided about the others. Then the rest
+      // they made, which may prove one theirs on a new device. What the server calls a vault
+      // doesn't decide any of this: a "personal" vault not signed by them is somebody else's,
+      // and one signed by them is only their own if this device knows it is (refreshOwnPins).
+      const selfSigned = (rv: { granted_by: string | null }) => !rv.granted_by || rv.granted_by === s.userId;
+      const ordered = [...remote].map((rv) => (rv.kind === "personal" && !selfSigned(rv) ? { ...rv, kind: "shared" as const } : rv));
+      const rank = (rv: { id: string; granted_by: string | null }) => (this.ownVaultIds.has(rv.id) ? 0 : selfSigned(rv) ? 1 : 2);
+      ordered.sort((a, b) => rank(a) - rank(b));
       let trustFresh = false;
-      for (const rv of ordered) {
-        if (!trustFresh && rv.kind !== "personal") {
+      for (const rv0 of ordered) {
+        if (!trustFresh && rank(rv0) === 2) {
           trustFresh = true;
           await this.mergeTrustBook();
         }
+        let rv = rv0;
         seen.add(rv.id);
         const prev = known.get(rv.id);
-        const next = this.cacheVault(rv, prev);
         // Your own vault's key is signed by you. Being told otherwise isn't a reason to believe it.
-        if (prev && this.isOwnVault(prev) && rv.granted_by && rv.granted_by !== s.userId) {
+        if (prev && this.isOwnVault(prev) && !selfSigned(rv)) {
           out.rollback.push(rv.id);
           this.rollbackWarnings.push(rv.id);
           continue;
         }
+        // And it stays your own vault, whatever it's called.
+        if (this.ownVaultIds.has(rv.id) && rv.kind !== "personal") {
+          out.rollback.push(rv.id);
+          this.rollbackWarnings.push(rv.id);
+          rv = { ...rv, kind: "personal" as const };
+        }
+        // Another vault of theirs turning "personal" is a server trying to pass a shared vault,
+        // whose key its members hold, off as their own. Kept as what it is, and warned about.
+        if (rv.kind === "personal" && this.ownVaultIds.size && !this.ownVaultIds.has(rv.id)) {
+          out.rollback.push(rv.id);
+          this.rollbackWarnings.push(rv.id);
+          rv = { ...rv, kind: "shared" as const };
+        }
+        const next = this.cacheVault(rv, prev);
         const highest = Math.max(prev?.memberGeneration ?? 0, this.book.generations[rv.id] ?? 0);
         // An older key brought back, or an older state: an old grant still has a good signature,
         // so this is the only thing that can catch it. Stay on what we have.
@@ -835,7 +941,14 @@ export class VaultClient {
       }
       // Only your own vault: what other devices decided still has to be read before saving over it.
       if (!trustFresh) await this.mergeTrustBook();
-      if (generationsMoved) await this.saveTrustBook();
+      else await this.refreshOwnPins();
+      // Sign their own vault as theirs, once, so their other devices can tell it from the rest.
+      const unsigned = this.homeMissing;
+      if (generationsMoved || unsigned) await this.saveTrustBook();
+      if (unsigned) {
+        const own = (await this.store.getVaults()).find((v) => this.isOwnVault(v) && !v.hidden);
+        if (own) await this.pushVault(own, out);
+      }
       for (const v of known.values()) {
         if (!seen.has(v.id) && this.isOwnVault(v)) {
           out.rollback.push(v.id);
@@ -1094,12 +1207,19 @@ export class VaultClient {
     return v;
   }
 
+  /** Where new things are saved. Their own vault, as this device knows it (refreshOwnPins). A new
+   *  device whose other devices haven't signed theirs yet goes on the one vault the server calls
+   *  personal, as before, but reads no trust book from it and seals nothing from it. */
   async personalVaultId(): Promise<string> {
     const vaults = await this.store.getVaults();
-    const pinned = (await this.store.getMeta<string>("personal_vault")) ?? this.book.personalVaultId;
-    const v = (pinned && vaults.find((x) => x.id === pinned && this.isOwnVault(x))) || vaults.find((x) => this.isOwnVault(x));
+    const preferred = await this.store.getMeta<string>("personal_vault");
+    const own = vaults.filter((x) => this.isOwnVault(x));
+    let v = own.find((x) => x.id === preferred) ?? own[0];
+    if (!v && !this.ownVaultIds.size) {
+      const labelled = vaults.filter((x) => x.kind === "personal" && this.selfGranted(x));
+      if (labelled.length === 1) v = labelled[0];
+    }
     if (!v) throw new Error("No personal vault");
-    if (!pinned) await this.store.setMeta("personal_vault", v.id);
     return v.id;
   }
 
@@ -1199,6 +1319,9 @@ export class VaultClient {
     const grant = await grantVaultKey({ userId: s.userId, keyset: s.keyset }, id, { userId: s.userId, x25519: pub.x25519 }, 1, raw);
     await this.api.createVault({ id, name: await sealField(key, id, "name", name), grant: { wrapped_key: b64u(grant.wrapped), signature: b64u(grant.signature) } });
     raw.fill(0);
+    // Made alone, so it counts as theirs for emergency access until anyone else is added.
+    if (!this.ownership.made.includes(id)) this.ownership.made.push(id);
+    await this.saveTrustBook();
     await this.sync();
     return id;
   }
@@ -1208,6 +1331,11 @@ export class VaultClient {
     const v = await this.cachedVault(vaultId);
     // Picking someone is the person's own act, and this is when their keys get remembered.
     const keys = await this.pin(userId);
+    // Someone else's logins can be in it from now on, so it's no longer only theirs to hand on.
+    if (!this.ownership.shared.includes(vaultId)) {
+      this.ownership.shared.push(vaultId);
+      await this.saveTrustBook();
+    }
     const raw = await this.rawVaultKey(v);
     const grant = await grantVaultKey({ userId: s.userId, keyset: s.keyset }, vaultId, { userId, x25519: fromB64u(keys.x25519) }, v.generation, raw);
     raw.fill(0);
@@ -1384,7 +1512,7 @@ export class VaultClient {
   /** The only way someone becomes a contact: this person, on one of their own devices. */
   async emergencyInvite(granteeId: string, waitDays: number): Promise<void> {
     await this.pin(granteeId);
-    if (!this.book.contacts.includes(granteeId)) this.book.contacts.push(granteeId);
+    nameContact(this.ownership.contacts, granteeId);
     await this.saveTrustBook();
     await this.api.request("POST", "/emergency", { grantee_id: granteeId, wait_days: waitDays });
   }
@@ -1409,7 +1537,8 @@ export class VaultClient {
       for (const vaultId of row.opened_vaults) await this.removeMembers(vaultId, [row.grantee_id]);
     }
     await this.api.request("DELETE", `/emergency/${row.id}`);
-    this.book.contacts = this.book.contacts.filter((c) => c !== row.grantee_id);
+    // Removed for good: the counter beats any device's older list of contacts.
+    if (row.grantor_id === s.userId) removeContact(this.ownership.contacts, row.grantee_id);
     await this.saveTrustBook();
     await this.sync();
   }
@@ -1421,8 +1550,11 @@ export class VaultClient {
   async refreshEmergency(): Promise<void> {
     const s = this.need();
     const rows = await this.emergencyList();
-    // Your own vaults only. Other people's logins in a shared vault aren't yours to hand on.
-    const mine = (await this.store.getVaults()).filter((v) => this.isOwnVault(v) || (!v.grantedBy || v.grantedBy === s.userId) && v.memberCount <= 1);
+    // Your own vaults only. Other people's logins in a shared vault aren't yours to hand on. Which
+    // vaults those are is decided on your devices: the vault you own, and ones you made that you've
+    // never added anyone to. A member count, or a label, from the server doesn't come into it.
+    const { made, shared } = this.ownership;
+    const mine = (await this.store.getVaults()).filter((v) => this.isOwnVault(v) || (this.selfGranted(v) && made.includes(v.id) && !shared.includes(v.id)));
     for (const row of rows) {
       if (row.grantor_id !== s.userId || row.state === "invited" || row.state === "opened" || row.state === "ended") continue;
       // A row in this list is only the server's word. Keys go to someone this person named,

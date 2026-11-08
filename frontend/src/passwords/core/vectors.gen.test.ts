@@ -79,6 +79,9 @@ it("writes vectors.json", async () => {
   const edPub = publicKeysOf({ x25519: recipientSk, ed25519: edSeed }).ed25519;
   const sigInput = signingInput("vault_key", [vaultId, userId, "1", sealedBlob]);
   const signature = ed25519Sign(edSeed, sigInput);
+  // "This vault is my own" (CRYPTO_SPEC.md section 6), written inside the person's own vault.
+  const homeInput = signingInput("personal_vault", [userId, vaultId]);
+  const homeSig = ed25519Sign(edSeed, homeInput);
 
   // A full item blob with deterministic nonces, built by hand from the spec's
   // layout so other languages can decrypt it.
@@ -206,6 +209,14 @@ it("writes vectors.json", async () => {
         fields: [vaultId, userId, "1", { hex: hex(sealedBlob) }],
         input_hex: hex(sigInput),
         sig_hex: hex(signature),
+      },
+      {
+        seed_hex: hex(edSeed),
+        pub_hex: hex(edPub),
+        purpose: "personal_vault",
+        fields: [userId, vaultId],
+        input_hex: hex(homeInput),
+        sig_hex: hex(homeSig),
       },
     ],
     keyset: { encoded_hex: hex(encodeKeyset(keyset)), x25519_pub_hex: hex(recipientPub), ed25519_pub_hex: hex(edPub) },
