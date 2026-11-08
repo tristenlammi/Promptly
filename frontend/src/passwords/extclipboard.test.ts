@@ -39,7 +39,14 @@ Object.defineProperty(globalThis.navigator, "clipboard", {
   },
 });
 
-const { clearClipboardIfOurs, watchClipboard, CLIP_ALARM } = await import("../../../passwords/extension/src/clipboard");
+// Loaded by a path the main app's type check doesn't follow: the extension has its own, with the
+// browser's types, and this tsconfig doesn't.
+const CLIPBOARD = "../../../passwords/extension/src/clipboard";
+const { clearClipboardIfOurs, watchClipboard, CLIP_ALARM } = (await import(/* @vite-ignore */ CLIPBOARD)) as {
+  clearClipboardIfOurs: () => Promise<void>;
+  watchClipboard: (text: string, seconds: number) => Promise<void>;
+  CLIP_ALARM: string;
+};
 
 describe("clearing a copied secret", () => {
   beforeEach(() => {

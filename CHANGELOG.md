@@ -26,6 +26,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed
+- Passwords: your devices now decide for themselves which vault is your own, instead of going by what the server calls it, so a server can no longer pass a shared vault off as your personal one. Your devices mark your own vault on their next sync.
+- Passwords: removing an emergency contact now holds on all your devices, and emergency access no longer covers vaults that other people's logins are in.
+- Passwords in the browser: the unlock PIN's five-try limit can't be got round by sending many tries at once, new PINs need 6 to 12 digits, a shorter old one is flagged to change, and a PIN stops working 8 hours after the vault locks.
+- Passwords in the browser: site rules are only taken from your own vault, not from a shared vault someone else can write to.
+- Passwords in the browser: a copied secret whose timed clear fails is tried again instead of being left on the clipboard.
+- Passwords in the browser: a key press in the menu under a login box counts only once a row has been selected for a moment.
+- Passwords: the per-address limit on wrong vault unlock tries now works.
+- Passwords on Android: saving from an app only offers to update a login saved for that same app, signed with the same certificate.
+- Passwords for Windows: the app's pages are kept more tightly to the vault on your own server, and the Windows app's PIN needs 6 to 12 digits.
 - Passwords in the browser: with a passkey saved for the site, the panel now says to press the site's own button, such as Continue, rather than that the page isn't asking for one.
 - Passwords on Chrome and Chromium browsers: a copied 2FA code, or the timed clear of a copied secret, could be lost because the extension's hidden clipboard page closed too soon.
 - Passwords: the menu under a login box fits its rows, so it no longer leaves an empty dark block over the page, and an ordinary click on a row fills straight away. A click that comes as the menu opens is still ignored, now 0.3 s instead of 0.5 s, and the note says why in plain words.

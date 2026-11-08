@@ -3,7 +3,12 @@
 // a row.
 import { describe, expect, it } from "vitest";
 
-import { KEY_DWELL_MS, keyPressCounts } from "../../../passwords/extension/src/press";
+// Loaded by a path the main app's type check doesn't follow (see extclipboard.test.ts).
+const PRESS = "../../../passwords/extension/src/press";
+const { KEY_DWELL_MS, keyPressCounts } = (await import(/* @vite-ignore */ PRESS)) as {
+  KEY_DWELL_MS: number;
+  keyPressCounts: (s: { typed: boolean; focusAt: number | null; now: number }) => boolean;
+};
 
 describe("a key press in the inline menu", () => {
   it("counts once a row has had focus a moment, with nothing typed into the menu", () => {

@@ -375,22 +375,22 @@ test("Hello with a mocked gate and real DPAPI: on, refused, then unlocks", async
   await el(By.css('nav[aria-label="Passwords"]'));
 });
 
-test("a short PIN unlocks for this run of the app, and wrong tries are counted", async () => {
+test("a PIN unlocks for this run of the app, and wrong tries are counted", async () => {
   await click(xp(`//nav[@aria-label="Passwords"]//button[contains(normalize-space(),"Settings")]`));
   const boxes = await driver.wait(async () => {
     const found = await driver.findElements(By.css('[data-testid="pin"] input[type="password"]'));
     return found.length === 2 ? found : null;
   }, 30000, "PIN boxes");
   await boxes[0].sendKeys(MASTER);
-  await boxes[1].sendKeys("4821");
+  await boxes[1].sendKeys("482193");
   await click(byText("button", "Set PIN"));
   await see("Remove my PIN");
   await click(xp(`//nav[@aria-label="Passwords"]//button[contains(normalize-space(),"Lock")]`));
   await see("Your vault is locked");
-  await fill(By.css('input[aria-label="PIN"]'), "0000");
+  await fill(By.css('input[aria-label="PIN"]'), "000000");
   await click(byText("button", "Use PIN"));
   await see("4 tries left");
-  await fill(By.css('input[aria-label="PIN"]'), "4821");
+  await fill(By.css('input[aria-label="PIN"]'), "482193");
   await click(byText("button", "Use PIN"));
   await el(By.css('nav[aria-label="Passwords"]'));
   await click(xp(`//nav[@aria-label="Passwords"]//button[contains(normalize-space(),"All items")]`));
