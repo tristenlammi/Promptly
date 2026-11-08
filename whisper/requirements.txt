@@ -14,3 +14,6 @@ python-multipart==0.0.20
 # but doesn't declare it as a dependency — pin it explicitly so the
 # import at startup doesn't blow up.
 requests==2.32.3
+# Talk's /live socket (WP-T1): a thin ctypes binding (BSD-3) over the
+# system libopus (Dockerfile), to decode Opus packets streamed in.
+opuslib==3.0.1

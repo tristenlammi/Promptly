@@ -23,6 +23,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 - Talking to Promptly (groundwork): a speed bench for the speech pipeline, `python -m app.talk.bench` (Whisper base/small per pass and as a live lane, Smart Turn, Kokoro to first audio, the voice model's first word), and an echo test page, `backend/app/talk/echo_test.html`, that shows whether a browser cancels its own playback. Nothing changes for users yet.
+- Talking to Promptly (groundwork): the speech services can now listen and speak live. Whisper hears a conversation as it happens, shows words as you say them, and knows when you've finished talking (about a fifth of a second after your last word) without cutting you off when you pause mid-thought; it uses the small `base` model for this, so dictation and meetings keep theirs. The voice service starts speaking about 0.3 s into a reply instead of after the whole sentence, and stops the moment it's interrupted. Not used by the app until Talk is switched on in a later update.
+
+### Changed
+- Read-aloud runs Kokoro on 4 threads (`TTS_THREADS`) instead of one per core, which was 2–3× slower when the server was busy.
 
 ## [0.31.0] - 2026-11-08
 
