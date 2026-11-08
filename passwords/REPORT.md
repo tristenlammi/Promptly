@@ -102,7 +102,7 @@ Scored by the corpus harness, against forms written from scratch. **The blind fi
 - Fixes made after set 3 aren't reflected in its score. Those spent sets later scored 58/60 and 55/60 (sets 1 and 2), but those are tuned numbers now, so they say little.
 - A false fill here means the classifier offered to fill a form it shouldn't, or chose a honeypot. It's scored by the classifier, and the fill guards still apply on top.
 
-**After the autofill pass (D-AUTOFILL-1 to 5).** All three blind sets are spent, so these are tuned numbers. A fourth blind set, written separately, is the real test. "Before" is the code at `2dd13b4`, "after" is this work, both on the same harness. The tuned corpus is now 184 fixtures; its 23 new ones were written by someone who knew the classifier.
+**After the autofill pass (D102 to 5).** All three blind sets are spent, so these are tuned numbers. A fourth blind set, written separately, is the real test. "Before" is the code at `2dd13b4`, "after" is this work, both on the same harness. The tuned corpus is now 184 fixtures; its 23 new ones were written by someone who knew the classifier.
 
 | Set | Browser | Before | After | False fills before / after | Wrong fills after |
 |---|---|---|---|---|---|
@@ -119,7 +119,7 @@ Scored by the corpus harness, against forms written from scratch. **The blind fi
 - The remaining misses on the spent sets: four can't pass as written (the fixture's state is only set on a later click, a wait on a hidden trap, and select boxes with no option for the test country or year); a phone-plus-PIN sign-up is left alone on purpose; a "Deliver to" name box is missed.
 - "Wrong fills" is new: a value put in a box meant for something else on a page that does have a form. None, on any set.
 - New runner, `corpus-extension.mjs`: the extension's own content script, with the inline menu and the toolbar's strict report. Chromium only, before → after: tuned 141/184 → 182/184, spent set 1 51/60 → 57/60, set 2 46/60 → 55/60, set 3 48/60 → 57/60. False fills 4, 0, 0, 1 → 0 on every set. Before, the menu didn't open on 38 of the tuned fixtures, mostly the later step of a multi-step flow; that is the likely cause of the Google password-step report. The two misses left on the tuned corpus are the guard's nested shadow roots.
-- The fill guard (`guard.ts`, not changed here) refuses boxes in nested shadow roots and an OTP box drawn with transparent text: 2 tuned fixtures and 4 on the spent sets. See D-AUTOFILL-5.
+- The fill guard (`guard.ts`, not changed here) refuses boxes in nested shadow roots and an OTP box drawn with transparent text: 2 tuned fixtures and 4 on the spent sets. See D106.
 
 **Public sites, read-only.** 112 login pages were loaded and classified, with nothing typed, clicked or submitted, and no page contents saved.
 

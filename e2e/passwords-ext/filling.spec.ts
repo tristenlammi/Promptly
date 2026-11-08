@@ -1098,7 +1098,7 @@ test("the popup bundle stays light, with no generator or site matching in it", a
   expect(js, "the Public Suffix List").not.toContain("amazonaws");
 });
 
-// ---- Steps that the page shows and focuses itself (D-AUTOFILL-1) -----------------------------
+// ---- Steps that the page shows and focuses itself (D102) -----------------------------
 
 test("the menu comes up on a password step that slides in and focuses itself, and on the box a page focused at load", async () => {
   await saved({ title: "Slide", url: "http://slide.localhost:8111", username: "slide@example.com", password: "Slide-Pw-1" });
