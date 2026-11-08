@@ -238,3 +238,17 @@ Same KDF limits as section 2.
 ## 12. Vectors
 
 `vectors.json` has RFC known answers (HKDF, AES-GCM, X25519, Ed25519, Argon2id), and our own formats generated from fixed inputs: Secret Key text, padding, root keys, blobs, sealed boxes, signatures (a vault key grant, and the `personal_vault` statement), keysets, item blobs, safety words, and a list of negative cases that must fail. Regenerate only with a format change. The `personal_vault` vector was added on 2026-11-08; regenerating left every other vector byte for byte as it was.
+
+## 13. Browser sync
+
+Open tabs, sent tabs, history and the reading list (SYNC.md). An addition, not a change: nothing above is different.
+
+```
+sync_key = HKDF(personal_vault_key, utf8(personal_vault_id), "promptly-pw/v1/browser-sync", 32)
+blob     = symmetric(sync_key, pad(json(record)), aad(personal_vault_id, kind || ":" || device || ":" || slot, "browser-sync"))
+```
+
+- `personal_vault_key` is the raw key of the current generation of this person's own personal vault, never a shared vault's.
+- `kind` is `tabs`, `history`, `reading` or `sent`. `device` is the device id the server stores with the record (the publishing browser for tabs and history, the receiving device for sent), or empty for the reading list. `slot` is empty for tabs, `YYYY-MM-DD` for a history day, and the record's own id for reading and sent.
+- Records are JSON with `"v": 1`; readers check the shape and refuse anything else, and only `http` and `https` addresses are used.
+- `frontend/src/passwords/core/browsersync.test.ts` and the Android `BrowserSyncTest.kt` open the same fixed sent-tab blob.

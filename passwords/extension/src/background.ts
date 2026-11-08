@@ -21,6 +21,7 @@ import { VaultClient } from "../../../frontend/src/passwords/core/vault";
 import { PIN_KEEP_AFTER_LOCK_MS, type PinRecord, UnlockPin } from "../../../frontend/src/passwords/core/unlockpin";
 import { canCheckClipboard, CLIP_ALARM, clearClipboardIfOurs, clipboardTest, watchClipboard, writeClipboard } from "./clipboard";
 import { BrowserBookmarks, VaultBookmarks } from "./bookmarks";
+import { addSyncMenus, browserSyncTick, handleBrowserSync, initBrowserSync, type SyncRequest } from "./browsersync";
 import { type Base, bookmarkHash, bookmarksHtml, reconcile, syncableUrl, validItem } from "../../../frontend/src/passwords/core/bookmarks";
 import { handlePasskey, offerRows, useOffer } from "./passkeys";
 import { packPublicKey } from "./rules-key";
@@ -236,6 +237,7 @@ ext.alarms.onAlarm.addListener(async (a) => {
   if (a.name === SYNC_ALARM && client?.unlocked) {
     await safeSync();
     await runBookmarks();
+    await browserSyncTick();
     await refreshDeviceRequests();
   }
 });
@@ -370,6 +372,8 @@ function listenToBookmarks() {
   }
 }
 listenToBookmarks();
+// Open tabs, sent tabs, history and the reading list (browsersync.ts, SYNC.md).
+initBrowserSync({ boot, client: () => client, store });
 
 // ---- A new device asking to join (plan 3.4) ----------------------------------------------
 
@@ -443,6 +447,7 @@ ext.runtime.onInstalled.addListener(() => {
   ext.contextMenus.removeAll(() => {
     ext.contextMenus.create({ id: "fill", title: "Fill from Promptly Passwords", contexts: ["editable"] });
     ext.contextMenus.create({ id: "generate", title: "Generate a password here", contexts: ["editable"] });
+    addSyncMenus();
   });
 });
 ext.permissions.onAdded?.addListener(() => applySiteAccess().catch(() => undefined));
@@ -1951,6 +1956,9 @@ ext.runtime.onMessage.addListener((msg: { t: string }, sender, reply) => {
   } else if (__TEST_BUILD__ && t === "test") {
     if (!isTrustedPage(sender)) return false;
     p = handleTest(msg as unknown as { op: string });
+  } else if (t.startsWith("bs:")) {
+    if (!isTrustedPage(sender)) return false;
+    p = handleBrowserSync(msg as SyncRequest);
   } else {
     if (!isTrustedPage(sender)) return false; // A content script can't ask for any of this.
     p = handlePage(msg as PageRequest);

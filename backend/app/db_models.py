@@ -110,6 +110,7 @@ from app.breach_watch.models import (  # noqa: F401
     BreachHit,
     BreachWatch,
 )
+from app.passwords.sync_models import PwSyncRecord, PwSyncState  # noqa: F401
 from app.maps.models import (  # noqa: F401
     MapLiveLocation,
     MapParked,

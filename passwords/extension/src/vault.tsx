@@ -14,6 +14,7 @@ import type { Platform } from "../../../frontend/src/passwords/ui/platform";
 import { JoinDevice } from "../../../frontend/src/passwords/ui/Unlock";
 import { VaultApp } from "../../../frontend/src/passwords/ui/VaultApp";
 import { nativeHello } from "./native";
+import { BrowserSyncSettings } from "./syncsettings";
 import { ext, type StateOut } from "./rpc";
 
 declare const __ENGINE__: string;
@@ -423,6 +424,7 @@ function Root() {
       fillControls: <ExtFilling />,
       clipboardControls: <ExtClipboard />,
       bookmarkControls: <BookmarkSettings />,
+      browserSyncControls: <BrowserSyncSettings />,
       // Through the desktop app's host, where it's installed and has registered this
       // extension. Otherwise it reports it's not available, and nothing's offered.
       hello: {

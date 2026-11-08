@@ -452,6 +452,7 @@ export function SettingsScreen() {
         <PasskeyPinPanel />
       </SettingsGroup>
       {platform.fillControls && <SettingsGroup title="Filling">{platform.fillControls}</SettingsGroup>}
+      {platform.browserSyncControls && <SettingsGroup title="Sync with this browser">{platform.browserSyncControls}</SettingsGroup>}
       <SettingsGroup title="Clipboard">
         <Label text="Clear copied secrets after this many seconds">
           <input className={inputClass} type="number" min={5} max={600} value={settings.clipboardSeconds} onChange={(e) => setSettings({ ...settings, clipboardSeconds: Math.min(600, Math.max(5, Number(e.target.value) || 30)) })} />

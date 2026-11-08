@@ -170,7 +170,7 @@ test("copying a password respects a reprompt, and searching finds it from any se
 
 test("bookmarks: the panel says how to turn it on, shows what's synced, and only opens web addresses", async () => {
   const pop = await panel();
-  await pop.getByRole("button", { name: "Bookmarks", exact: true }).click();
+  await pop.getByRole("button", { name: "Browse", exact: true }).click();
   await expect(pop.getByTestId("bookmarks-off")).toBeVisible();
   const opened = rig.ctx.waitForEvent("page");
   await pop.getByRole("button", { name: "Turn on bookmark sync" }).click();
@@ -196,7 +196,7 @@ test("bookmarks: the panel says how to turn it on, shows what's synced, and only
   await expect(link).toHaveAttribute("rel", /noopener/);
 
   const again = await panel();
-  await again.getByRole("button", { name: "Bookmarks", exact: true }).click();
+  await again.getByRole("button", { name: "Browse", exact: true }).click();
   await again.getByRole("button", { name: "Open folder Bookmarks bar" }).click();
   await again.getByRole("button", { name: "Open folder Reading" }).click();
   await expect(again.getByRole("button", { name: "Open bookmark A good read" })).toBeVisible();
@@ -218,7 +218,7 @@ test("bookmarks: with sync on the section is never blank, and says what's wrong 
   const helper = await rig.ctx.newPage();
   await helper.goto(`chrome-extension://${rig.extId}/test.html`);
   const pop = await panel();
-  await pop.getByRole("button", { name: "Bookmarks", exact: true }).click();
+  await pop.getByRole("button", { name: "Browse", exact: true }).click();
   const status = pop.getByTestId("bookmarks-status");
   await expect(status).toContainText("Sync is on");
   await expect(status).toContainText("This browser has 1 bookmark");
@@ -235,7 +235,7 @@ test("bookmarks: with sync on the section is never blank, and says what's wrong 
   // A sync that fails says so, in the panel.
   await testHook(rig, "bookmarkBreak", { error: "A made-up problem" });
   const broken = await panel();
-  await broken.getByRole("button", { name: "Bookmarks", exact: true }).click();
+  await broken.getByRole("button", { name: "Browse", exact: true }).click();
   await expect(broken.getByTestId("bookmarks-status")).toContainText("Bookmarks didn't sync: A made-up problem");
   await testHook(rig, "bookmarkBreak", { error: null });
   await broken.getByTestId("bookmarks-status").getByRole("button", { name: "Sync now" }).click();
@@ -253,13 +253,13 @@ test("bookmarks: with sync on the section is never blank, and says what's wrong 
   await testHook(rig, "bookmarkRun");
   // All of them gone at once stops and asks, in the panel too, and a yes goes ahead.
   const held = await panel();
-  await held.getByRole("button", { name: "Bookmarks", exact: true }).click();
+  await held.getByRole("button", { name: "Browse", exact: true }).click();
   await expect(held.getByTestId("bookmarks-held")).toBeVisible();
   await held.close();
   await helper.evaluate(() => chrome.runtime.sendMessage({ t: "bookmarkAnswer", go: true }));
   await testHook(rig, "bookmarkRun");
   const empty = await panel();
-  await empty.getByRole("button", { name: "Bookmarks", exact: true }).click();
+  await empty.getByRole("button", { name: "Browse", exact: true }).click();
   await expect(empty.getByText("No bookmarks yet.")).toBeVisible({ timeout: 30_000 });
   await expect(empty.getByTestId("bookmarks-status")).toContainText("This browser has 0 bookmarks");
   await shot(empty, "8-bookmarks-empty");

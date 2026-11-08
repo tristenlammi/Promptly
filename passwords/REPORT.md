@@ -39,6 +39,7 @@ Three things matter most:
 **Added during the build at your request, not in the plan:**
 
 - Bookmark sync across browsers (D62, `BOOKMARKS.md`).
+- Open tabs, sending a tab (to a browser or the Android app), opt-in history and a reading list across browsers (D-BROWSERSYNC-1 to 5, `SYNC.md`). Unit and backend tests pass; its e2e tests haven't run on the stack yet.
 - A five-section toolbar panel (D64).
 - Passkey offers, and a passkey window with no click when a saved passkey matches (D66, D71).
 - A lock setting for each browser, up to Never (D75).

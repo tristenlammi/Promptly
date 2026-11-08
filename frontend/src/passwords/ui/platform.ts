@@ -40,6 +40,8 @@ export type Platform = {
   clipboardControls?: ReactNode;
   /** Turning bookmark sync on and off: only a browser extension can reach a browser's bookmarks. */
   bookmarkControls?: ReactNode;
+  /** Open tabs, sending tabs, history and the reading list, for this browser (SYNC.md). */
+  browserSyncControls?: ReactNode;
   /** This platform decides when it locks, and shows its own setting. Otherwise the app's idle
    *  and sleep timers run, from the Settings screen's values. */
   lockControls?: ReactNode;

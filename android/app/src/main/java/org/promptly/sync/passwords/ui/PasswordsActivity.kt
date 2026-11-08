@@ -130,6 +130,8 @@ private fun Root(activity: PasswordsActivity) {
                 if (!Pw.prefs.setupGuideDone && SetupGuide.allOn(activity)) Pw.prefs.setupGuideDone = true
                 mutableStateOf(!Pw.prefs.setupGuideDone)
             }
+            // Tabs a browser sent here open once the vault is unlocked (passwords/SYNC.md).
+            LaunchedEffect(client) { org.promptly.sync.passwords.SentTabs.openWaiting(activity) }
             if (guide) Column(Modifier.fillMaxSize().safeDrawingPadding()) { SetupGuideScreen { guide = false } } else MainScreen(activity)
         }
     }

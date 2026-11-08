@@ -38,6 +38,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: a login saved with no port now fills on any port of the same host, such as nas.home:5001 or 192.168.1.10:8443. One saved with a port fills only on that port.
 - Passwords: on a site that only looks like one you have a login for, the toolbar panel and the menu under a login box now say so plainly, and still offer nothing.
 - Passwords: a new login on one service of a domain is saved beside the login for another service there, never over it, on Android too.
+- Passwords: the panel's Bookmarks section is now Browse, with bookmarks, tabs, the reading list and history.
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed
@@ -84,6 +85,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Added
 - Passwords: Security check lists "Accounts not in your vault", sites your own email says you have an account with and no login for, worked out on your device. Each has Add login, Not an account, and Delete account, which links to the site's deletion or account page and opens a ready-to-send deletion request in Mail as a draft.
 - Passwords: each login has a match setting: Auto, Same domain, Exact host, Exact host and port, Starts with, or Never. Set it in the item editor on the web, in the extension and on Android. Each website can still have its own.
+- Passwords in the browser: open tabs on your other browsers, sending a tab to another browser or your phone, synced history (off until turned on) and a reading list, between Chrome, Firefox and the others, end-to-end encrypted. Turn each on under Settings, "Sync with this browser"; the panel's Browse section and the vault's Tabs and history screen show them.
 - Passwords in the browser: choose how long the vault stays unlocked, from 1 minute to 12 hours, when the browser closes, or never, in the toolbar panel and in Settings.
 - Passwords on Android: security emails on the Security check, matched against your logins on the phone.
 - Passwords on Android: a change-password helper from the Security check, with a queue, a new password that waits until you confirm it, and autofill that offers the current and new password on the site's change form.

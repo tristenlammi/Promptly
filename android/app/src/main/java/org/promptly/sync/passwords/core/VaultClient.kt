@@ -1648,6 +1648,27 @@ class VaultClient(val api: VaultApi, val store: LocalStore, val keeper: SecretKe
         runCatching { sync() }
     }
 
+    /** Tabs a browser sent to this phone (passwords/SYNC.md, CRYPTO_SPEC section 13). Opened with
+     *  browser sync's key, which comes from the personal vault's key, so only this person's own
+     *  devices could have sent them. Only http and https come back. Each is acknowledged, so it
+     *  opens once, and one that doesn't open is dropped rather than left to pile up. */
+    fun takeSentTabs(): List<String> {
+        val vaultId = personalVaultId()
+        // Only a vault this phone knows is yours; the server's word that one is personal isn't enough.
+        if (vaultId !in ownVaultIds) return emptyList()
+        val key = browserSyncKey(vaultKey(cachedVault(vaultId)), vaultId)
+        try {
+            val out = mutableListOf<String>()
+            for (r in api.sentTabs()) {
+                openSentTab(key, vaultId, r.deviceId, r.slot, fromB64u(r.blob))?.let { out += it }
+                runCatching { api.ackSent(r.id) }
+            }
+            return out
+        } finally {
+            key.fill(0)
+        }
+    }
+
     fun sendRecords(): Map<String, SendRecords.Record> = SendRecords.of(allItems(includeSystem = true), personalVaultId())
 
     /** Remembered in your own vault, so the server never knows what any of them are called. */

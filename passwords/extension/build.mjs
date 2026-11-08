@@ -33,7 +33,8 @@ function manifest(engine) {
     icons: { 16: "icons/16.png", 32: "icons/32.png", 48: "icons/48.png", 128: "icons/128.png" },
     action: { default_popup: "popup.html", default_title: "Promptly Passwords", default_icon: { 16: "icons/16.png", 32: "icons/32.png" } },
     permissions: ["storage", "activeTab", "scripting", "alarms", "contextMenus", "idle", "webNavigation", "clipboardWrite", "nativeMessaging"],
-    optional_permissions: ["clipboardRead", "bookmarks"],
+    // tabs, history and notifications: browser sync, each asked for when its box is ticked (SYNC.md).
+    optional_permissions: ["clipboardRead", "bookmarks", "tabs", "history", "notifications"],
     optional_host_permissions: ["https://*/*", "http://*/*"],
     commands: COMMANDS,
     web_accessible_resources: [{ resources: ["menu.html", "save.html"], matches: ["<all_urls>"] }],
@@ -42,7 +43,7 @@ function manifest(engine) {
   if (TEST) base.host_permissions = ["<all_urls>"];
   // Chromium's prompt for this can't be clicked by a test, and the tests read the clipboard.
   if (TEST && engine === "chrome") {
-    base.permissions = [...base.permissions, "clipboardRead", "bookmarks"];
+    base.permissions = [...base.permissions, "clipboardRead", "bookmarks", "tabs", "history", "notifications", "readingList"];
     delete base.optional_permissions;
   }
   if (engine === "chrome") {
@@ -51,6 +52,8 @@ function manifest(engine) {
       minimum_chrome_version: "122",
       background: { service_worker: "background.js", type: "module" },
       permissions: [...base.permissions, "sidePanel", "offscreen"],
+      // Chromium only: Firefox has no reading list API, and would warn about the name.
+      ...(base.optional_permissions ? { optional_permissions: [...base.optional_permissions, "readingList"] } : {}),
       side_panel: { default_path: "vault.html" },
       web_accessible_resources: [{ ...base.web_accessible_resources[0], use_dynamic_url: true }],
     };

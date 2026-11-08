@@ -8,6 +8,7 @@ import { createRoot } from "react-dom/client";
 
 import { deliberateGate } from "../../../frontend/src/passwords/core/autofill/deliberate";
 import { nativeHello, nativeHelloStatus, toB64u } from "./native";
+import { BrowseTab } from "./popup-sync";
 import { ext, type Candidate, type FillOutcome, pageHost, type StateOut } from "./rpc";
 
 declare const __TEST_BUILD__: boolean;
@@ -295,7 +296,7 @@ const TABS: { id: Tab; label: string; icon: keyof typeof PATHS }[] = [
   { id: "vault", label: "Vault", icon: "key" },
   { id: "codes", label: "Codes", icon: "shield" },
   { id: "generator", label: "Generator", icon: "wand" },
-  { id: "bookmarks", label: "Bookmarks", icon: "bookmark" },
+  { id: "bookmarks", label: "Browse", icon: "bookmark" },
   { id: "more", label: "More", icon: "menu" },
 ];
 
@@ -397,7 +398,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
         <input
           className="input !pl-7"
           aria-label={tab === "bookmarks" ? "Search bookmarks" : "Search your vault"}
-          placeholder={tab === "bookmarks" ? "Search bookmarks" : "Search your vault"}
+          placeholder={tab === "bookmarks" ? "Search bookmarks, tabs and history" : "Search your vault"}
           autoFocus
           value={q}
           onChange={(e) => {
@@ -451,7 +452,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
         )}
         {tab === "codes" && <CodesTab query={q} {...rowProps} />}
         {tab === "generator" && <Generator host={pageHost(tabInfo?.url ?? "") ?? undefined} tabId={tabInfo?.id} />}
-        {tab === "bookmarks" && <BookmarksTab query={q} />}
+        {tab === "bookmarks" && <BrowseTab query={q} tab={tabInfo} bookmarks={<BookmarksTab query={q} />} />}
         {tab === "more" && <MoreTab preview={state.preview} setMessage={setMessage} />}
       </main>
 

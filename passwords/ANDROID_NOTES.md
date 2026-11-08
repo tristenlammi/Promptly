@@ -186,6 +186,10 @@ The same on both, so not differences: KDBX 3 and files needing a key file aren't
 
 A WebView gives no form at all on an `http` page, which matches "HTTP sites need a Chrome flag" in VERIFY_NOTES 14. So the http-downgrade confirm screen is tested by opening the sheet directly, and the real path needs a browser that passes http forms along.
 
+## Receiving a sent tab (browser sync, 2026-11-08)
+
+The smallest piece for "send a tab to the phone" (SYNC.md): `/alerts` now also counts tabs sent to this phone (`sent_tabs`), from the device token alone, so the 30-minute poll can say "A tab was sent to this phone" (notification 5) with no address. When the vault is unlocked, `SentTabs.openWaiting` asks `/browser-sync/sent`, opens each with browser sync's key (`core/BrowserSync.kt`, the same format as the TypeScript core, checked by a shared vector in `BrowserSyncTest`), opens only `http` and `https` in the default browser, and acknowledges each so it opens once. The phone doesn't share its own tabs or history, and can't send. Run: `BrowserSyncTest` 4 of 4 and `CoreTest` 54 of 54 on the JVM. Not run on an emulator or phone.
+
 ## Not built
 
 - **Secure Send:** opening someone's Send link goes to the web page. A Send made elsewhere and not synced yet shows as "Sent from another device", with no link to copy.

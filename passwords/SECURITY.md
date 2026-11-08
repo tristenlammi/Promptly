@@ -182,6 +182,23 @@ Otherwise, a page's quiet or no-click passkey request registers an offer, which 
 
 Bookmarks are encrypted items like any other, and only ones in your own vault count, so a member of a shared vault can't plant one in your browsers. Only `http` and `https` addresses are taken from the vault, so a bad item can't add a `javascript:` bookmark. A server can withhold, roll back or mark deleted these items as with any other. A rollback shows the usual warning, and a run that would empty one side, or delete a lot, stops and asks. The count of deletions runs over a day, so a hostile server can only take the 25, or 20%, a day it could also get from a person deleting that many, and they can be restored from "Recently deleted". It can't change what a bookmark points to. Each browser keeps a salted hash of each bookmark's fields on disk, next to the plain copy the browser itself keeps. Your bookmarks are readable on any device while the browser has them: this protects them on the server only.
 
+## Browser sync: tabs, sent tabs, history, reading list
+
+Encrypted with a key each device makes from the personal vault's key, so only this person's own unlocked devices can read or write it, and bound to its kind, device and slot (CRYPTO_SPEC section 13). The server sees, and keeps:
+
+- **Who and which device.** Which of your devices has a list of open tabs, which has history, and which device a sent tab is for. So it knows you sent something from one device to another, and when.
+- **Sizes and timing.** Each record's padded size and when it was written. A browser publishes a few seconds after its tabs change, so the timing says roughly when you open and close tabs. A history bucket says which day it's for, and its size bucket roughly how much you browsed that day. The number of reading list entries is visible.
+- **Never content.** No address, title, site or count of tabs inside a record.
+
+What a hostile server can do: withhold records, delete them, serve an older copy, or swap in another of your own records of the same kind, device and slot (an older list of tabs, for example). It can't make one up, change one, or move one to another device or day, because none of that would open. It can delay or drop a sent tab. Every client only ever opens `http` and `https` addresses from these records, so a bad record can't open a `javascript:` or `file:` address.
+
+Other things to know:
+
+- **History is off until it's turned on in a browser, and only covers visits from then on.** Private windows never reach it: neither Chrome nor Firefox records them in the history it reads. Excluded sites are left out before anything is encrypted. The server enforces the number of days kept, so even a browser that's gone can't leave old history there.
+- **A sent tab's notification names only the device it came from.** On Android the alert is a bare count from the 30-minute poll, with no vault session, and opening needs an unlock.
+- **On the device**, the reading list's comparison with Chromium's own list is kept as salted hashes. Turning sharing off removes that browser's list from the server at once. What this protects is the server's copy: anyone with an unlocked device sees all of it, as they would the vault.
+- A right-click Save or Send while locked waits in `storage.session` (memory only) until the next unlock.
+
 ## Passkeys in the extension
 
 A page can detect the wrapper: `navigator.credentials.get.toString()` isn't native, and on Chromium a stack trace shows the extension id. Without a gesture, the extension opens no window unless the vault's unlocked and holds a passkey for that site (D71). So such a site can notice the window, and at most every 30 seconds it can open it. It then needs the passkey PIN typed in it to sign in (D86), so the window opening tells such a site only that a passkey is here.

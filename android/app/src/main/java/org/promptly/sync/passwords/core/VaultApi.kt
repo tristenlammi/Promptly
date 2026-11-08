@@ -50,7 +50,10 @@ data class EmergencyOut(
 )
 
 /** Bare counts of what's waiting. They take only a device token, for a locked phone. */
-data class Alerts(val deviceRequests: Int, val invitations: Int, val emergency: Int)
+data class Alerts(val deviceRequests: Int, val invitations: Int, val emergency: Int, val sentTabs: Int = 0)
+
+/** A tab a browser sent to this phone (passwords/SYNC.md): a blob, opened by VaultClient.takeSentTabs. */
+data class SentRecord(val id: String, val deviceId: String?, val slot: String, val blob: String)
 
 data class SessionOut(val token: String, val accountId: String, val wrappedKeyset: String, val kdf: KdfParams, val salt: String, val x25519Pub: String, val ed25519Pub: String, val kitConfirmed: Boolean, val kitCheckedAt: String?, val userId: String)
 
@@ -322,8 +325,19 @@ class VaultApi(baseUrl: String, val auth: () -> String?, client: OkHttpClient? =
     /** A device token is enough, with no vault session: bare counts for a locked phone. */
     fun alerts(): Alerts {
         val o = obj(call("GET", "/alerts", noSession = true))
-        return Alerts(o.int("device_requests") ?: 0, o.int("invitations") ?: 0, o.int("emergency") ?: 0)
+        return Alerts(o.int("device_requests") ?: 0, o.int("invitations") ?: 0, o.int("emergency") ?: 0, o.int("sent_tabs") ?: 0)
     }
+
+    /** Tabs sent to this device. Needs a vault session; the server lists only this device's. */
+    fun sentTabs(): List<SentRecord> {
+        val o = obj(call("GET", "/browser-sync/sent"))
+        return ((o["records"] as? JsonArray) ?: JsonArray(emptyList())).map { e ->
+            val r = e as JsonObject
+            SentRecord(r.str("id")!!, r.str("device_id"), r.str("slot") ?: "", r.str("blob")!!)
+        }
+    }
+
+    fun ackSent(id: String) { call("DELETE", "/browser-sync/sent/$id") }
 
     fun changes(id: String, since: Int, limit: Int = 500): ChangesOut {
         val o = obj(call("GET", "/vaults/$id/changes?since=$since&limit=$limit"))
