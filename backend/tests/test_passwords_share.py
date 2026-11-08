@@ -231,13 +231,13 @@ async def test_alerts_are_bare_counts_for_a_locked_client(client, db):
     # Works with no vault session, because a locked app has none.
     empty = await client.get("/api/passwords/alerts", headers=bearer(b.user))
     assert empty.status_code == 200, empty.text
-    assert empty.json() == {"device_requests": 0, "invitations": 0, "emergency": 0}
+    assert empty.json() == {"device_requests": 0, "invitations": 0, "emergency": 0, "sent_tabs": 0}
     vault = await shared_vault(client, a)
     r = await client.post(f"/api/passwords/vaults/{vault}/members", headers=a.h, json={"user_id": str(b.user.id), "role": "view", "grant": grant()})
     assert r.status_code == 204, r.text
     r = await client.post("/api/passwords/emergency", headers=a.h, json={"grantee_id": str(b.user.id), "wait_days": 2})
     assert r.status_code == 201
     got = (await client.get("/api/passwords/alerts", headers=bearer(b.user))).json()
-    assert got == {"device_requests": 0, "invitations": 1, "emergency": 1}
+    assert got == {"device_requests": 0, "invitations": 1, "emergency": 1, "sent_tabs": 0}
     # Someone else's counts stay their own.
     assert (await client.get("/api/passwords/alerts", headers=bearer(a.user))).json()["invitations"] == 0
