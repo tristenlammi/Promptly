@@ -159,7 +159,8 @@ test("Firefox: its open tabs reach the web vault, and its own pages don't", asyn
 
   // The web vault in the same profile is a different device: it shows Firefox's tabs.
   await newTab(`${BASE}/passwords#/browser-sync`);
-  await see(driver, By.css('[data-testid="browser-sync-screen"], input[aria-label="Master password"]'), 60000);
+  // Either the screen, or the lock screen first (its box is labelled, not aria-labelled).
+  await see(driver, By.xpath('//*[@data-testid="browser-sync-screen"] | //label[.//span[normalize-space(.)="Master password"]]//input'), 60000);
   if ((await driver.findElements(By.css('[data-testid="browser-sync-screen"]'))).length === 0) {
     await fill(driver, labelled("Master password"), MASTER);
     await click(driver, button("Unlock"));

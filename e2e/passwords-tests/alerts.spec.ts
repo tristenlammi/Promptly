@@ -49,7 +49,7 @@ test("turning on an expiry reminder puts it on the Calendar and in Tasks, and it
   await page.getByRole("button", { name: "New", exact: true }).click();
   await page.getByRole("menuitem", { name: "Licence or ID" }).click();
   await page.getByLabel("Name", { exact: true }).fill("My passport PA1234567");
-  await page.getByLabel("Type", { exact: true }).fill("Passport");
+  await page.getByRole("textbox", { name: /^Type/ }).fill("Passport");
   await page.getByLabel("Number", { exact: true }).fill("PA1234567");
   await page.getByLabel("Expires", { exact: true }).fill("2031-05-20");
   await page.getByLabel("Remind me before the expiry date").check();

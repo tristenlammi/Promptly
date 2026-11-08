@@ -1,7 +1,11 @@
 // M6: the extension working. Plan section 7, 6.3, 6.4, 6.5.
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { expect, test, type Page } from "@playwright/test";
 
-import { addItem, bg, connect, launch, lockExt, makeUsers, menuFrame, popupFor, type Rig, signIn, siteA, startSite, unlockExt } from "./lib";
+import { addItem, BASE, bg, connect, launch, lockExt, makeUsers, MASTER, menuFrame, popupFor, type Rig, signIn, siteA, startSite, unlockExt } from "./lib";
 
 test.describe.configure({ mode: "serial" });
 
@@ -130,6 +134,42 @@ test("multi-step sign-in continues: username, password, then the 2FA code", asyn
   await page.waitForSelector("#code");
   await fill();
   await expect.poll(() => page.evaluate(() => (window as any).__state().code)).toMatch(/^\d{6}$/);
+  await page.close();
+});
+
+test("the vault's own pages get no inline menu and never offer to save the master password, but the same server's other pages still can", async () => {
+  // Control first: a login page on the server's own origin, outside /passwords, is offered as usual.
+  // Served by the test under /downloads/, which the app's service worker leaves to the network.
+  const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "passwords", "test-sites", "ext");
+  const stand = `${BASE}/downloads/pw-e2e/**`;
+  await rig.ctx.route(stand, (r) => {
+    const file = path.join(site, new URL(r.request().url()).pathname.replace(/^\/downloads\/pw-e2e\//, ""));
+    const body = fs.readFileSync(file, "utf8").replace("/ext/welcome.html", "/downloads/pw-e2e/welcome.html");
+    return r.fulfill({ contentType: "text/html; charset=utf-8", body });
+  });
+  const page = await rig.ctx.newPage();
+  await page.goto(`${BASE}/downloads/pw-e2e/login.html`);
+  await page.fill("#user", "own-origin@example.com");
+  await page.fill("#pass", "own-Origin-1");
+  await page.click("#go");
+  await page.waitForURL(/welcome/);
+  await expect.poll(() => !!page.frames().find((f) => f.url().includes("/save.html")), { timeout: 15_000 }).toBe(true);
+  const offered = page.frames().find((f) => f.url().includes("/save.html"))!;
+  await expect(offered.getByText("own-origin@example.com")).toBeVisible();
+  await page.waitForTimeout(LOOK_MS);
+  await offered.getByRole("button", { name: "Not now" }).click();
+  await rig.ctx.unroute(stand);
+
+  // The web vault's unlock: a password box and a button, but never offered.
+  await page.goto(`${BASE}/passwords`);
+  await page.getByLabel("Master password").click();
+  await page.waitForTimeout(1_500);
+  expect(menuFrame(page)).toBeUndefined();
+  await page.getByLabel("Master password").fill(MASTER);
+  await page.getByRole("button", { name: "Unlock", exact: true }).click();
+  await expect(page.getByRole("navigation", { name: "Passwords" })).toBeVisible({ timeout: 60_000 });
+  await page.waitForTimeout(6_000);
+  expect(page.frames().some((f) => f.url().includes("/save.html"))).toBe(false);
   await page.close();
 });
 

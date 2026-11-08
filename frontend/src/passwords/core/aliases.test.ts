@@ -109,6 +109,8 @@ describe("replying in Mail", () => {
     expect(replyAlias(info, ["m1", "m2"])?.address).toBe("shop.k7m2@alias.test");
     expect(replyAlias(info, ["m2"])).toBeNull();
     expect(replyAlias(undefined, ["m1"])).toBeNull();
+    // An empty answer, as from an older server, is no alias rather than a crash.
+    expect(replyAlias({} as ThreadAliases, ["m1"])).toBeNull();
   });
 
   it("says when the provider may not send as it", () => {

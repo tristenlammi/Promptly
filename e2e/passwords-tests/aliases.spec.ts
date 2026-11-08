@@ -80,6 +80,7 @@ test("an alias made in the item editor is saved with the login, counted, flagged
   await expect(card.getByTestId("domain-status")).toHaveText("Not checked yet");
 
   // Make an alias from the item editor: it becomes the username.
+  await nav(page, "All items");
   await page.getByRole("button", { name: "New", exact: true }).click();
   await page.getByRole("menuitem", { name: "Login" }).click();
   await page.getByLabel("Name", { exact: true }).fill("Shop");

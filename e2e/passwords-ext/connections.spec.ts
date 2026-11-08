@@ -240,7 +240,7 @@ test("a pending new password fills the new boxes, and the old one the current bo
 
   // The site said yes: now it's the password, and the old one's in history.
   await v.getByTestId("change-flow").getByRole("button", { name: "Yes, it's changed" }).click();
-  await v.getByRole("button", { name: "History" }).click();
+  await v.getByRole("button", { name: "History", exact: true }).click();
   await expect(v.getByRole("heading", { name: "Earlier passwords" })).toBeVisible();
   await v.close();
 });

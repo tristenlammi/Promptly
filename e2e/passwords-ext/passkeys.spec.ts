@@ -248,8 +248,8 @@ test("passkey PIN: a page asking again can't reset the count, and a right PIN do
 });
 
 test("passkey PIN: five wrong in a row lock the vault, and only the master password opens it", async () => {
-  // A short unlock PIN on this browser, to show it doesn't get round the lock.
-  await bg(rig, `const r = await chrome.runtime.sendMessage({ t: "setPin", pin: "7391" }); if (!r.ok) throw new Error(r.error);`);
+  // An unlock PIN on this browser, to show it doesn't get round the lock.
+  await bg(rig, `const r = await chrome.runtime.sendMessage({ t: "setPin", pin: "739148" }); if (!r.ok) throw new Error(r.error);`);
   const page = await rig.ctx.newPage();
   const { run, challenge, prompt } = await askForAna(page);
   for (const left of [4, 3, 2]) await wrongPin(prompt, `${left} tries left`);
@@ -261,7 +261,7 @@ test("passkey PIN: five wrong in a row lock the vault, and only the master passw
   expect(await stillWaiting(run)).toBe("waiting");
   expect(await bg<boolean>(rig, `return (await chrome.runtime.sendMessage({ t: "state" })).r.unlocked;`)).toBe(false);
   // Nothing shorter than the master password opens it now.
-  const quick = await bg<{ ok: boolean; error?: string }>(rig, `return await chrome.runtime.sendMessage({ t: "pinUnlock", pin: "7391" });`);
+  const quick = await bg<{ ok: boolean; error?: string }>(rig, `return await chrome.runtime.sendMessage({ t: "pinUnlock", pin: "739148" });`);
   expect(quick.ok).toBe(false);
   expect(quick.error).toContain("Five wrong passkey PINs");
   expect(await bg<boolean>(rig, `return (await chrome.runtime.sendMessage({ t: "state" })).r.unlocked;`)).toBe(false);

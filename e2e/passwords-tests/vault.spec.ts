@@ -75,7 +75,7 @@ test("items: add with 2FA, search, edit keeps history, trash and restore, surviv
   await page.getByRole("button", { name: "Edit" }).click();
   await page.getByLabel("Password", { exact: true }).fill("second-Pass-2");
   await page.getByRole("button", { name: "Save" }).click();
-  await page.getByRole("button", { name: "History" }).click();
+  await page.getByRole("button", { name: "History", exact: true }).click();
   await expect(page.getByText("Earlier passwords")).toBeVisible();
   await page.getByRole("button", { name: "Close" }).click();
 

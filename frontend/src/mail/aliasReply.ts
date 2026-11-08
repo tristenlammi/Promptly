@@ -22,9 +22,11 @@ export interface ThreadAliases {
 
 /** The alias a reply should come from: the one the newest email to an alias went to. */
 export function replyAlias(info: ThreadAliases | undefined, messageIds: string[]): ThreadAlias | null {
-  if (!info) return null;
+  // An empty or partial answer (an older server, an error page) means no alias, not a broken page.
+  if (!info?.aliases || !info.messages) return null;
   for (const id of [...messageIds].reverse()) {
-    const alias = info.aliases[info.messages[id]];
+    const aliasId = info.messages[id];
+    const alias = aliasId ? info.aliases[aliasId] : undefined;
     if (alias) return alias;
   }
   return null;

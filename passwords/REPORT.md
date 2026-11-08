@@ -17,9 +17,10 @@ Against the plan's definition of done (section 0.3):
 
 Three things matter most:
 
-1. **Autofill on pages it hasn't seen is well short of the target.** The target was 95% with no false fills. Three blind sets scored 68.3%, 63.3% and 90.0%, and the last two had false fills. A later pass (D-AUTOFILL) fixed the inline menu on multi-step sign-ins and the last known false fill, but no blind set has been scored since.
+1. **Autofill on pages it hasn't seen is close to the target, but doesn't meet it.** The target was 95% with no false fills. A fourth blind set, written separately and scored once, got 96.4% on Chromium and Firefox from the classifier, with 1 false fill and 1 wrong fill. Through the extension itself it got 92.9%. The code from before this round scored 95.2% on the same set, so most of the gain over the first three sets (68%, 63%, 90%) came earlier, and this set was easier than those. Details under [Autofill](#autofill).
 2. **A lot needs a real device.** Android Chrome autofill and most of the Windows desktop integration have never run. Your Google passkey sign-in is the only real-site use.
-3. **No human has audited it.** AI reviews found real, serious bugs, including three critical ones in the crypto. That suggests more are there.
+3. **No human has audited it.** AI reviews found real, serious bugs, including three critical ones in the crypto and, in the last round, a high one that could hand your personal vault's keys to a shared-vault member (F1, fixed). That suggests more are there.
+4. **The new features read your mail and files.** Stray passwords, Accounts not in your vault and Aliases run on the server over your own mail, files and photos, with plain rules and no AI. They've only met made-up mail. Some of them keep plain-text facts on the server, listed in [What this round gives up](#what-this-round-gives-up).
 
 ## What was built
 
@@ -39,13 +40,29 @@ Three things matter most:
 **Added during the build at your request, not in the plan:**
 
 - Bookmark sync across browsers (D62, `BOOKMARKS.md`).
-- Open tabs, sending a tab (to a browser or the Android app), opt-in history and a reading list across browsers (D128 to D132, `SYNC.md`). Unit and backend tests pass; its e2e tests haven't run on the stack yet.
 - A five-section toolbar panel (D64).
 - Passkey offers, and a passkey window with no click when a saved passkey matches (D66, D71).
 - A lock setting for each browser, up to Never (D75).
-- User verification from an unlocked vault plus a click (D74), since replaced by a passkey PIN every time (D86).
+- An inline menu that fits its rows and fills on an ordinary click, with no confirming step, and never submits the form (D77).
 
-D75 knowingly weakens what the plan asked for. `SECURITY.md` says how.
+**Added in the last round (8 November), one agent per item, then merged and tested together:**
+
+| What | Where | Decisions |
+|---|---|---|
+| **Self-hosted site matching.** `zyx.gymserver.org` and `abc.gymserver.org` each offer only their own login; the other shows under "Other logins for gymserver.org". A login saved with no port fills on any port of that host. Each login has a match setting (Auto, Same domain, Exact host, Exact host and port, Starts with, Never). IPs and single names (`http://nas`) only match themselves | Web, extension, Android | D89 to D94 |
+| **Lookalike warning.** `examp1e.com` is still never offered your `example.com` login, and now says so | Extension | D93 |
+| **A passkey PIN every time.** Every passkey sign-in and every new passkey asks for a PIN, synced as a verifier. Five wrong in a row lock the vault until the master password | Extension (Chromium, Firefox), Android | D86 to D88 |
+| **Firefox inline menu.** A click on a login there opens the toolbar panel with it at the top; one more click fills | Firefox | D78, D79 |
+| **Inline menu on pages it hadn't seen.** It opens on later steps of multi-step sign-ins, and the classifier took general rules from the spent blind sets | Extension | D102 to D106 |
+| **Find stray passwords** in your own mail, files and photos (including 2FA setup QR codes), with a masked preview, Save to vault and Move the original to Trash | Server finds, every client shows | D107 to D115 |
+| **Accounts not in your vault**, found from sign-up and security mail, with a Delete account helper that opens a deletion request as a Mail draft, never sent | Server finds, vault compares | D80 to D85 |
+| **Email aliases on your own domain**, through a catch-all at your mail provider, read by Promptly Mail: made from the item editor or the Generator, counted, flagged when a different company writes to one, turned off, replied from | Web, extension, Mail | D116 to D120 |
+| **Expiry reminders** for documents and cards, on your Calendar and in Tasks | Web, extension vault page, Windows | D121, D122, D127 |
+| **Breach alerts** from Have I Been Pwned, off until each person turns it on, and only once you've added a key | Server, web | D123 to D126 |
+| **Open tabs, Send tab, history (off by default) and a reading list** across browsers and to the Android app, encrypted | Extension, web, Android (sent tabs) | D128 to D132, `SYNC.md` |
+| **Review fixes**, F1 to F9 below | All | D95 to D101 |
+
+D75 knowingly weakens what the plan asked for, and so do parts of this round. `SECURITY.md` says how, and [What this round gives up](#what-this-round-gives-up) lists them.
 
 ## What was tested
 
@@ -121,6 +138,21 @@ Scored by the corpus harness, against forms written from scratch. **The blind fi
 - "Wrong fills" is new: a value put in a box meant for something else on a page that does have a form. None, on any set.
 - New runner, `corpus-extension.mjs`: the extension's own content script, with the inline menu and the toolbar's strict report. Chromium only, before → after: tuned 141/184 → 182/184, spent set 1 51/60 → 57/60, set 2 46/60 → 55/60, set 3 48/60 → 57/60. False fills 4, 0, 0, 1 → 0 on every set. Before, the menu didn't open on 38 of the tuned fixtures, mostly the later step of a multi-step flow; that is the likely cause of the Google password-step report. The two misses left on the tuned corpus are the guard's nested shadow roots.
 - The fill guard (`guard.ts`, not changed here) refuses boxes in nested shadow roots and an OTP box drawn with transparent text: 2 tuned fixtures and 4 on the spent sets. See D106.
+
+**Blind set 4, scored once (8 November).** 84 pages (68 positive, 16 negative), written by a separate agent that never saw the classifier's code or the autofill work, and kept away from it until scored. Scored once on each runner, then its failures were read. It's spent now.
+
+| Code | Runner | Score | Positives | Negatives | False fills | Wrong fills |
+|---|---|---|---|---|---|---|
+| This round | Classifier, Chromium | 81/84, 96.4% | 66/68 | 15/16 | 1 | 1 |
+| This round | Classifier, Firefox | 81/84, 96.4% | 66/68 | 15/16 | 1 | 1 |
+| This round | Extension content script, Chromium | 78/84, 92.9% | 63/68 | 15/16 | 1 | 1 |
+| Before this round (`2dd13b4`) | Classifier, Chromium | 80/84, 95.2% | 65/68 | 15/16 | 1 | not counted then |
+
+- **The 95%-with-no-false-fills target isn't met.** The classifier passes the 95% but has a false fill. Through the extension it's under 95%.
+- **This set was easier than the first three.** The old code scored 95.2% on it, against 68%, 63% and 90% on sets 1 to 3. So this round's classifier gain is one page (`h4-identity-01`, a "Deliver to" name box). The bigger gain from this round is the inline menu opening, which this classifier-only comparison doesn't show; through the extension, the tuned corpus went from 141 to 182 of 184.
+- The false fill, `h4-neg-08`: a page that isn't a login was offered a fill for a "next password" step. The wrong fill, `h4-signup-04`: a sign-up form read as a sign-in, so its new password box would get your saved password. The miss, `h4-identity-02`: a country picker left empty.
+- The extension's extra three, `h4-multi-03`, `h4-shadow-02` and `h4-selfhost-02`, are the fill guard refusing boxes in nested shadow roots (D106). One of them is in the style of a self-hosted app.
+- None of these four was fixed after scoring, so the numbers stand as measured. The run logs aren't in the repo.
 
 **Public sites, read-only.** 112 login pages were loaded and classified, with nothing typed, clicked or submitted, and no page contents saved.
 
@@ -277,11 +309,11 @@ Left open from those reviews:
 - **Bookmarks** need an unlocked vault, and aren't on Android or in the Windows backup.
 - **Imported attachments** aren't in a Bitwarden export.
 - **Firefox's on-page menu** doesn't fill or save itself, as Firefox has no trustworthy visibility check. A click on a login there opens the toolbar panel with it at the top, and one more click fills (D49, D78, D79).
-- **Lookalike sites:** rows are removed rather than warned about (D49).
-- **Custom ports:** a login saved with no port matches the default port only, so self-hosted services on other ports need their address edited (D51).
 - **Android:** no "teach it once" and no live refresh of the browser allowlist. The other small gaps are in the "Not built" section of `ANDROID_NOTES.md`.
 - **Never lock** is in the browser extension only. Web and Windows keep idle minutes.
-- **Passkey verification** has no real check behind it apart from the unlock and the click. Windows Hello in that window would be stronger, and isn't built. Android still asks for a biometric.
+- **Passkey PIN** is a PIN, as you chose, not Windows Hello or a biometric. Anyone who knows it and has the unlocked browser can use your passkeys. The Windows app lists passkeys only, so it has no PIN.
+- **Expiry reminders and breach alerts** aren't on Android, which keeps the older "Document expires soon" button and has no Breaches section.
+- **Deletion pages:** the JustDeleteMe list ships empty until you allow the download (see `OWNER_STEPS.md`), so Delete account links to a site's account settings for now.
 
 **Not built by decision**
 
@@ -300,6 +332,24 @@ Left open from those reviews:
 - **Rate limits are shared.** All test traffic goes through one nginx at 30 requests a second with a burst of 60, which caused some earlier test failures.
 - **Argon2 timing** came from this desktop and an x86_64 emulator, not a low-end phone.
 - **An independent stack.** Everything ran on the isolated test stack, not your running Promptly. Your real data was never touched.
+
+## What this round gives up
+
+Each of these was a deliberate trade, written into `SECURITY.md` and the decision named. Undo any of them if you'd rather not have it.
+
+| What | The cost | Decision |
+|---|---|---|
+| A login saved with no port is offered on every port of its host | On a host where strangers each run something on their own port, one of them is offered your login. It's still only filled when you pick it, never on page load, and never updated from another port. Saving a port, or Exact host and port, keeps the old rule | D91 |
+| The inline menu fills on an ordinary click 300 ms after it's fully in view, with no confirming step | A click less than 300 ms after the menu is fully in view doesn't count. It was 500 ms, so a page that slides the menu under someone's click as they make it has a slightly better chance | D77 |
+| Mail findings from Find stray passwords go to any device holding the Mail codes permission | That permission used to give codes, sign-in links and security mail subjects. Now it also gives passwords found in mail | D109 |
+| The stray list shows the first two and last two characters of a password of 8 or more | Four characters are on screen in the list. Nothing of the secret is stored on the server: the preview is worked out each time | D113 |
+| Aliases keep the alias address, its domain and mailbox, on or off, the linked item's id, and which sender domains wrote to it, in plain text on the server | Someone with the database can usually guess your sites from who mails each alias | D116 |
+| Expiry reminders put the label ("Passport") and the date on the server, in Calendar and Tasks | The server learns what kind of document it is and when it expires. Long digit runs and the item's own number are taken out. Off by default for each item | D121 |
+| Breach alerts send your chosen addresses to Have I Been Pwned and keep the breach names and dates for each on the server | An admin could read which breaches you're in. Off for each person until they turn it on | D123, D125 |
+| Accounts not in your vault keeps the sites found in your mail on the server | Nothing new to the server, which already has the mail. Your decisions about the rows stay in the vault | D80 |
+| Passkeys need a PIN, not the master password or a biometric | Weaker than a biometric against someone who's seen you type it. Five wrong in a row still lock the vault | D86 to D88 |
+
+Open tabs, history and the reading list are encrypted like the vault (D128), so the server can't read them; it does see how many there are, roughly how big, which device wrote them, and when.
 
 ## Security review, 2026-11-08
 

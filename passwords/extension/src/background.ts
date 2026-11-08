@@ -1443,7 +1443,10 @@ async function handleContent(m: ContentRequest, sender: chrome.runtime.MessageSe
       const host = hostOf(m.url) ?? "";
       const rule = await findRule(host);
       const pending = await pendingSave(tabId);
-      return { rule, pendingSave: !!pending && (sender.frameId ?? 0) === 0, submittedKind: pending?.submittedKind, unlocked: !!client?.unlocked, inlineMenu: !(await fillsOnClickOnly()) };
+      // No menu on the vault's own pages: nothing of ours belongs in its master password,
+      // Secret Key or PIN boxes, and a menu there sits over the page's own buttons.
+      const ownVault = isOwnVaultPage(sender.url ?? m.url);
+      return { rule, pendingSave: !!pending && (sender.frameId ?? 0) === 0, submittedKind: pending?.submittedKind, unlocked: !!client?.unlocked, inlineMenu: !ownVault && !(await fillsOnClickOnly()) };
     }
     case "captured":
       await onCaptured(tabId, sender, m.capture);
