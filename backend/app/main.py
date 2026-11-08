@@ -797,3 +797,7 @@ app.include_router(
 from app.notes.router import router as notes_router  # noqa: E402
 
 app.include_router(notes_router, prefix="/api/notes", tags=["notes"])
+# --- Notes widgets (app/widgets; the phone's home-screen widgets) ---
+from app.widgets.router import router as widgets_router  # noqa: E402
+
+app.include_router(widgets_router, prefix="/api/widgets", tags=["widgets"])

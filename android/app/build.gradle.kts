@@ -168,6 +168,12 @@ dependencies {
     implementation("androidx.car.app:app:1.7.0")
     implementation("io.github.rallista:car-app-compose:0.0.2")
 
+    // Notes widgets: the home-screen widgets (Agenda, Tasks, Notes) — Jetpack Glance,
+    // Apache-2.0, stable 1.2.0 (see the widgets package).
+    implementation("androidx.glance:glance-appwidget:1.2.0")
+    implementation("androidx.glance:glance-material3:1.2.0")
+    testImplementation("androidx.glance:glance-appwidget-testing:1.2.0")
+
     // The car's rules are checked when a template is built, so build them in a test.
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.7.0")
