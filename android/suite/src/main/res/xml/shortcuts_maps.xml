@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Long-press P Maps: the offline map (Drive) and Offline areas, native screens in the app module. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="maps_drive" android:enabled="true" android:icon="@mipmap/ic_maps"
+        android:shortcutShortLabel="@string/maps_drive">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.sync.maps.NavigationActivity" />
+    </shortcut>
+    <shortcut android:shortcutId="maps_offline" android:enabled="true" android:icon="@mipmap/ic_maps"
+        android:shortcutShortLabel="@string/maps_offline_areas">
+        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"
+            android:targetClass="org.promptly.sync.maps.offline.OfflineAreasActivity" />
+    </shortcut>
+</shortcuts>

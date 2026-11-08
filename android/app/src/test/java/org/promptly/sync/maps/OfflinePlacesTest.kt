@@ -19,9 +19,9 @@ import java.net.SocketTimeoutException
 import java.nio.file.Files
 import java.time.Instant
 
-/** WP-M6: search with the server first and the phone when it can't answer,
+/** WP-M6 and WP-M7: search with the server first and the phone when it can't answer,
  *  the places kept on the phone for no signal, "Save where I parked" with no signal,
- *  and reading addresses. */
+ *  reading addresses, and what the Drive screen is opened with. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class OfflinePlacesTest {
@@ -217,5 +217,20 @@ class OfflinePlacesTest {
         assertNull(AddressQuery.parse("12"))
         assertNull(AddressQuery.parse("2830 2831"))
         assertNull(AddressQuery.parse("Uralla Street"))
+    }
+
+    @Test
+    fun driveOpensOnAPlaceOrASearch() {
+        val to = DriveAsk.fromWebPath("/maps?to=-33.800000%2C151.200000%2CMum")!!
+        assertEquals(-33.8, to.place!!.lat, 1e-9)
+        assertEquals("Mum", to.place!!.name)
+        assertEquals("coffee", DriveAsk.fromWebPath("/maps?q=coffee")!!.query)
+        assertEquals("Dropped pin", DriveAsk.fromWebPath("/maps?to=-33.8,151.2")!!.place!!.name)
+        assertNull(DriveAsk.fromWebPath("/photos"))
+        assertNull(DriveAsk.fromWebPath(null))
+        assertNull(DriveAsk.fromWebPath("/maps"))
+        assertEquals("22 min", duration(1310))
+        assertEquals("1 h 5 min", duration(3900))
+        assertEquals("2 h", duration(7200))
     }
 }

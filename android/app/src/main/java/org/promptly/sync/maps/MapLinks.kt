@@ -132,6 +132,12 @@ class MapLinkActivity : ComponentActivity() {
     /** The P Maps web app at [path], in its own launcher if you have it on your
      *  home screen, else in Promptly's. */
     private fun openWeb(path: String) {
+        // No signal: P Maps' own offline map, showing the place, instead of a page that can't load.
+        if (Maps.server(this) != null && !org.promptly.sync.maps.offline.Offline.online(this) && DriveAsk.fromWebPath(path) != null) {
+            startActivity(Intent(this, NavigationActivity::class.java).putExtra(EXTRA_PATH, path))
+            finish()
+            return
+        }
         val maps = ComponentName(packageName, "org.promptly.app.MapsLauncher")
         val promptly = ComponentName(packageName, "org.promptly.app.PromptlyLauncher")
         val target = if (enabled(maps)) maps else promptly

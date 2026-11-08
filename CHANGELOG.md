@@ -38,6 +38,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Promptly for Android: P Maps finds routes on the phone when your server can't be reached (no signal, or it takes more than 6 seconds). Inside your offline areas you can start a trip, and a wrong turn gets a new route from the phone within a few seconds; the screen shows "Offline route", "No signal · no traffic info" and, where there's no downloaded map, "No offline map here"; speed cameras still warn, and Ask Promptly says plainly that it needs signal. Outside your areas it tells you to head back to the route, and picks you up when you do. Back in signal, routes come from your server again. In the car, a one-off "No signal: using your offline map" note, and the route list works offline too.
 - Promptly for Android: P Maps search works with no signal, on the phone and in the car: places by name ("Caltex Mudgee", nearest you first), street addresses with house numbers ("12 Macquarie St Dubbo", "3/12 …"), "fuel" or "the nearest servo", and your saved places, recents and usual routes, kept on the phone. Your server answers first; if it can't within 4 seconds, the phone does, and the results say they're offline ones.
 - Promptly for Android: Add stop with no signal lists fuel, food and the rest along the road ahead from your offline areas, with how far ahead each is.
+- Promptly for Android: opening P Maps with no signal now opens its own map, Drive, instead of a web page that can't load: your location, Where to?, Home, Work and your places, and a place's routes from your offline areas with Start. Long-press the P Maps icon for Drive and Offline areas. A map link from another app with no signal opens there too.
 
 ### Changed
 <!-- P Maps offline (maps-offline) -->
@@ -46,6 +47,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: on a weak signal, routes give up sooner with a clear message, and the car's map and saved places use the copies from last time instead of waiting.
 - P Maps: wrong turns check for road closures at most once every 5 minutes, so a bad day doesn't use up the day's closure checks (Admin → App settings explains this).
 - P Maps in the car: the route choice uses the newer car screen on cars that support it.
+- P Maps (Android): ending a trip (on the phone, in the car, or on arriving) goes back to P Maps' Drive map, ready for the next place, and a trip that can't start says why there.
 
 ### Fixed
 - Mail: a very large or tangled HTML email could still tie up the mail worker for minutes while it was cleaned. Cleaning now stops after 3 seconds, and an email it can't finish shows as plain text, with a note saying so. Sending works the same way, so a draft like that no longer holds up the app.
