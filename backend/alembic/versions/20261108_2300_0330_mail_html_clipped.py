@@ -2,13 +2,13 @@
 says so.
 
 Revision ID: 0330_mail_html_clipped
-Revises: 0260_pw_browsersync
+Revises: 0321_user_blocks
 """
 import sqlalchemy as sa
 from alembic import op
 
 revision = "0330_mail_html_clipped"
-down_revision = "0260_pw_browsersync"
+down_revision = "0321_user_blocks"
 branch_labels = None
 depends_on = None
 

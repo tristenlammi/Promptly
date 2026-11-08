@@ -22,6 +22,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ## [Unreleased]
 
 ### Added
+- Notifications: quiet hours for all of Promptly (Account → Notifications), with start and end in your own time zone and different times on Friday and Saturday nights if you like. Notifications wait and arrive together when quiet hours end; calls, Calendar reminders, item reminders, Passwords and admin alerts always get through. Rooms and Mail can go in a daily summary instead, one push of counts at your Today summary time. And you can block someone from their profile or your 1:1 conversation: neither of you can message the other one-to-one, you get no notifications about what they do, and they aren't told. Account → Blocked people lists them, with Unblock.
 - `scripts/stack.sh` (and `scripts/stack.ps1`) runs a separate copy of Promptly for a worktree on its own port (`up`, `down`, `ls`, `e2e`), with its own containers, images, data and throwaway secrets, so testing a branch never touches the main app.
 
 ### Fixed

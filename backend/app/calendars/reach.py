@@ -259,6 +259,8 @@ async def send_room_due(db: AsyncSession, now: datetime | None = None) -> int:
             room = (await db.execute(select(Room).where(Room.id == link.room_id).with_for_update())).scalar_one_or_none()
             if poster is None or poster.disabled or room is None or poster.id not in await rooms_core.member_ids(db, room):
                 continue
+            if await rooms_service.dm_refusal(db, room, poster.id):
+                continue  # a 1:1 conversation closed by a block
             going = (
                 await db.execute(select(func.count()).select_from(CalAttendee).where(CalAttendee.event_id == ev.id, CalAttendee.status == "going"))
             ).scalar_one()

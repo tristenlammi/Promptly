@@ -44,6 +44,10 @@ export interface Room {
   /** DMs: each member's AI consent. */
   ai_ok?: Record<string, boolean>;
   preview?: RoomPreview | null;
+  /** 1:1 conversations: you blocked the other person. */
+  blocked?: boolean;
+  /** 1:1 conversations: false when a block (either way) closed it. */
+  can_send?: boolean;
 }
 
 export interface Space {
