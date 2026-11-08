@@ -15,7 +15,7 @@ depends_on = None
 
 def upgrade() -> None:
     op.create_table(
-        "pw_mail_sites",
+        "mail_account_sites",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("account_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("mail_accounts.id", ondelete="CASCADE"), nullable=False),
@@ -28,9 +28,9 @@ def upgrade() -> None:
         sa.Column("message_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.UniqueConstraint("account_id", "domain", name="uq_pw_mail_site"),
     )
-    op.create_index("ix_pw_mail_sites_user_id", "pw_mail_sites", ["user_id"])
+    op.create_index("ix_mail_account_sites_user_id", "mail_account_sites", ["user_id"])
     op.create_table(
-        "pw_mail_scans",
+        "mail_account_scans",
         sa.Column("folder_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("mail_folders.id", ondelete="CASCADE"), primary_key=True),
         sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
         sa.Column("uidvalidity", sa.BigInteger(), nullable=False, server_default="0"),
@@ -38,11 +38,11 @@ def upgrade() -> None:
         sa.Column("lo_uid", sa.BigInteger(), nullable=False, server_default="0"),
         sa.Column("scanned_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.create_index("ix_pw_mail_scans_user_id", "pw_mail_scans", ["user_id"])
+    op.create_index("ix_mail_account_scans_user_id", "mail_account_scans", ["user_id"])
 
 
 def downgrade() -> None:
-    op.drop_index("ix_pw_mail_scans_user_id", table_name="pw_mail_scans")
-    op.drop_table("pw_mail_scans")
-    op.drop_index("ix_pw_mail_sites_user_id", table_name="pw_mail_sites")
-    op.drop_table("pw_mail_sites")
+    op.drop_index("ix_mail_account_scans_user_id", table_name="mail_account_scans")
+    op.drop_table("mail_account_scans")
+    op.drop_index("ix_mail_account_sites_user_id", table_name="mail_account_sites")
+    op.drop_table("mail_account_sites")

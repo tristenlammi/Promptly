@@ -19,7 +19,7 @@ from app.db_types import UUIDPKMixin
 class PwMailSite(UUIDPKMixin, Base):
     """One site per mailbox that mail says you have an account with."""
 
-    __tablename__ = "pw_mail_sites"
+    __tablename__ = "mail_account_sites"
     __table_args__ = (UniqueConstraint("account_id", "domain", name="uq_pw_mail_site"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -46,7 +46,7 @@ class PwMailScan(Base):
     A new ``uidvalidity`` means the folder was numbered again, and it's read again.
     """
 
-    __tablename__ = "pw_mail_scans"
+    __tablename__ = "mail_account_scans"
 
     folder_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("mail_folders.id", ondelete="CASCADE"), primary_key=True)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

@@ -268,6 +268,14 @@ async def _loop() -> None:
             await tick()
         except Exception:  # noqa: BLE001
             logger.exception("Stray password pass failed")
+        try:
+            # "Accounts not in your vault": new mail since the last hour, a slice per person. Here
+            # rather than on arq, which runs automations and may not import Passwords.
+            from app.passwords.accounts import refresh_all
+
+            await refresh_all()
+        except Exception:  # noqa: BLE001
+            logger.exception("Mail accounts pass failed")
 
 
 def start_password_loops() -> asyncio.Task:

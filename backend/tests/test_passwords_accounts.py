@@ -351,8 +351,12 @@ async def test_device_without_mail_scope_is_refused(client, db):
         _check_mail_scope(Session())
     assert getattr(e.value, "status_code", None) == 403
 
-def test_background_job_is_scheduled():
+def test_background_pass_runs_in_the_passwords_loop_not_arq():
+    """arq runs automations, which may not import Passwords (test_no_chat_tool_touches_the_vault)."""
+    import inspect
+
+    from app.passwords import service
     from app.tasks.worker import WorkerSettings
 
-    jobs = [c for c in WorkerSettings.cron_jobs if c.coroutine.__name__ == "pw_mail_accounts"]
-    assert len(jobs) == 1 and jobs[0].unique
+    assert "refresh_all" in inspect.getsource(service._loop)
+    assert not [c for c in WorkerSettings.cron_jobs if "pw_mail" in c.coroutine.__name__]
