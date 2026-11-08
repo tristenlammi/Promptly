@@ -120,7 +120,16 @@ export function FeedPage() {
         className="mx-4 mt-4 md:mx-0"
         icon={CheckCircle2}
         title="Your feed is empty"
-        text="You've unticked every group. Tick one above to see its posts."
+        text={
+          isPhone ? (
+            "You've unticked every group. Tick one above to see its posts."
+          ) : (
+            <>
+              You've unticked every group. Tick one <span className="lg:hidden">above</span>
+              <span className="hidden lg:inline">under “In your feed” on the left</span> to see its posts.
+            </>
+          )
+        }
       />
     );
   } else if (posts.length === 0) {
@@ -214,7 +223,8 @@ export function FeedPage() {
           </button>
         }
       />
-      <div className={cn("sticky top-0 z-10 bg-[var(--bg)]", isPhone && "border-b border-[var(--border)]")}>
+      {/* Phones and tablets: the chips. Wide screens tick groups in the left column instead. */}
+      <div className={cn("sticky top-0 z-10 bg-[var(--bg)] lg:hidden", isPhone && "border-b border-[var(--border)]")}>
         <GroupChips groups={b.groups} />
       </div>
       {fresh.length > 0 && (

@@ -23,7 +23,7 @@ import { usePorchEvents } from "./live";
 import { FeedPage } from "./pages/FeedPage";
 import { GroupPage } from "./pages/GroupPage";
 import { DiscoverRow, GroupsPage, InviteRow } from "./pages/GroupsPage";
-import { NewPostPage } from "./pages/NewPostPage";
+import { EditPostPage, NewPostPage } from "./pages/NewPostPage";
 import { PostPage } from "./pages/PostPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { SCROLLER_ID } from "./scroll";
@@ -33,6 +33,7 @@ type Route =
   | { page: "feed" }
   | { page: "groups" }
   | { page: "new" }
+  | { page: "edit"; id: string }
   | { page: "post"; id: string }
   | { page: "group"; id: string }
   | { page: "user"; id: string }
@@ -47,6 +48,8 @@ function parse(path: string): Route {
   if (p === "/porch/new") return { page: "new" };
   let m = new RegExp(`^/porch/p/${ID}$`).exec(p);
   if (m) return { page: "post", id: m[1] };
+  m = new RegExp(`^/porch/p/${ID}/edit$`).exec(p);
+  if (m) return { page: "edit", id: m[1] };
   m = new RegExp(`^/porch/g/${ID}$`).exec(p);
   if (m) return { page: "group", id: m[1] };
   m = new RegExp(`^/porch/u/${ID}$`).exec(p);
@@ -167,7 +170,10 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
       page = <GroupsPage />;
       break;
     case "new":
-      page = <NewPostPage />;
+      page = <NewPostPage key={location.search} />;
+      break;
+    case "edit":
+      page = <EditPostPage key={route.id} postId={route.id} />;
       break;
     case "post":
       page = <PostPage key={route.id} postId={route.id} />;
@@ -190,7 +196,8 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
             <Main id={SCROLLER_ID} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               {page}
             </Main>
-            <BottomBar b={b} route={route} />
+            {/* The composer is full screen on a phone. */}
+            {route.page !== "new" && route.page !== "edit" && <BottomBar b={b} route={route} />}
           </>
         ) : (
           <div className="flex min-h-0 flex-1">
@@ -287,8 +294,14 @@ function SideNav({ b, route, embedded }: { b: Bootstrap; route: Route; embedded:
       </Link>
 
       <div className="mt-4 flex items-center justify-between px-3 pb-1">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">In your feed</h2>
+        <h2 id="porch-feed-groups" className="text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+          <span className="hidden lg:inline">In your feed</span>
+          <span className="lg:hidden">Your groups</span>
+        </h2>
       </div>
+      {/* On wide screens these ticks are the feed's group picker (the chips
+          above the feed are for phones and tablets). */}
+      <div role="group" aria-labelledby="porch-feed-groups">
       <ul className="flex flex-col">
         {b.groups.map((g) => {
           const here = route.page === "group" && route.id === g.id;
@@ -300,7 +313,7 @@ function SideNav({ b, route, embedded }: { b: Bootstrap; route: Route; embedded:
                 aria-checked={!!g.in_feed}
                 aria-label={`${g.name} in your feed`}
                 onClick={() => setTicks({ [g.id]: !g.in_feed })}
-                className="flex h-10 w-9 shrink-0 items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+                className="hidden h-10 w-9 shrink-0 items-center justify-center rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] lg:flex"
               >
                 <span
                   aria-hidden
@@ -315,7 +328,7 @@ function SideNav({ b, route, embedded }: { b: Bootstrap; route: Route; embedded:
               <Link
                 to={`/porch/g/${g.id}`}
                 aria-current={here ? "page" : undefined}
-                className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl pr-2 text-sm text-[var(--text)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+                className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl pl-3 pr-2 text-sm text-[var(--text)] hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] lg:pl-0"
               >
                 <GroupTile group={g} size={24} />
                 <span className="truncate">{g.name}</span>
@@ -324,6 +337,7 @@ function SideNav({ b, route, embedded }: { b: Bootstrap; route: Route; embedded:
           );
         })}
       </ul>
+      </div>
       <Link to="/porch/groups#find" className={item(false)}>
         <Search className="h-[18px] w-[18px]" aria-hidden /> Find groups
       </Link>

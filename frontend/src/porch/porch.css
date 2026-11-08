@@ -8,3 +8,12 @@ html[data-porch] {
 html.dark[data-porch] {
   --item-accent: #B4532F;
 }
+
+/* A ticked group chip's words: the accent, a touch lighter on dark so it
+   stays above 4.5:1 on the chip's tinted fill. */
+html[data-porch] {
+  --porch-chip-text: var(--accent-text);
+}
+html.dark[data-porch] {
+  --porch-chip-text: #E8977A;
+}

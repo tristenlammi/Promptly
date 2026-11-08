@@ -35,7 +35,38 @@
       "purpose": "maskable"
     }
   ],
+  "share_target": {
+    "action": "/porch/share-target",
+    "method": "POST",
+    "enctype": "multipart/form-data",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url",
+      "files": [
+        {
+          "name": "media",
+          "accept": [
+            "image/*",
+            "video/*"
+          ]
+        }
+      ]
+    }
+  },
   "shortcuts": [
+    {
+      "name": "New post",
+      "short_name": "New post",
+      "url": "/porch/new?source=pwa-shortcut",
+      "icons": [
+        {
+          "src": "/item-icons/porch-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
     {
       "name": "Groups",
       "short_name": "Groups",

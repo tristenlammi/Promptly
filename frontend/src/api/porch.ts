@@ -1,4 +1,5 @@
 import { apiClient } from "@/api/client";
+import type { EditOps } from "@/api/photos";
 
 /**
  * Porch: photos and news shared through groups, between the people on this
@@ -77,11 +78,59 @@ export interface PorchMedia {
   width: number | null;
   height: number | null;
   thumbhash: string | null;
-  /** Your own posts only. */
+  /** Your own posts only: the library file and this post's crop / filter. */
   file_id?: string;
+  edit?: EditOps | null;
 }
 
 export type PostKind = "photo" | "video" | "text" | "poll" | "life_event";
+
+/** A link's preview, as the post keeps it (never an outside image). */
+export interface LinkSnapshot {
+  url: string;
+  title: string;
+  description: string;
+  site_name: string;
+}
+
+export interface PostPlace {
+  name: string;
+  lat: number | null;
+  lon: number | null;
+}
+
+/** One photo or video in a new or changed post: a new one by ``file_id``
+ *  (yours, in your Photos library), one already in the post by ``id``. */
+export interface MediaIn {
+  id?: string;
+  file_id?: string;
+  alt_text?: string;
+  /** This post's own crop / filter (``photos/edits`` ops); null: none. */
+  edit?: EditOps | null;
+}
+
+export interface NewPost {
+  kind: "photo" | "video" | "text" | "life_event";
+  body: string;
+  groups: "all" | string[];
+  media?: MediaIn[];
+  place?: PostPlace | null;
+  link?: LinkSnapshot | null;
+  life_event?: { type: LifeEventType; title: string; date: string } | null;
+  from_memory_id?: string | null;
+  mentions?: string[];
+}
+
+export type PostPatch = Partial<Pick<NewPost, "body" | "media" | "place" | "link" | "life_event" | "mentions">>;
+
+/** What Photos knows about a photo you're posting. */
+export interface ComposeFile {
+  file_id: string;
+  /** Photos' own description of it, for the alt text. */
+  caption: string | null;
+  /** The town it was taken in (never the exact spot). */
+  place: { name: string; address: string; lat: number; lon: number } | null;
+}
 export type LifeEventType = "new_baby" | "new_job" | "moved_house" | "engaged" | "graduated" | "other";
 
 export interface PorchPost {
@@ -91,8 +140,9 @@ export interface PorchPost {
   body: string;
   place: { name: string; lat: number | null; lon: number | null } | null;
   life_event: { type: LifeEventType; title: string; date: string } | null;
-  link: { url: string; title: string; description: string; site_name: string } | null;
-  mentions: string[];
+  link: LinkSnapshot | null;
+  /** The people it @mentions (each could see it when it was written). */
+  mentions: PorchUser[];
   groups: GroupLabel[];
   media: PorchMedia[];
   /** Every photo was since moved to the trash in Photos. */
@@ -211,7 +261,16 @@ export const porchApi = {
     const { data } = await apiClient.get<PorchPost>(`/porch/posts/${id}`);
     return data;
   },
-  async updatePost(id: string, patch: { body?: string }): Promise<PorchPost> {
+  async createPost(body: NewPost): Promise<PorchPost> {
+    const { data } = await apiClient.post<PorchPost>("/porch/posts", body);
+    return data;
+  },
+  /** Description and place for your photos, from Photos. */
+  async composeFiles(fileIds: string[]): Promise<ComposeFile[]> {
+    const { data } = await apiClient.post<{ files: ComposeFile[] }>("/porch/compose/files", { file_ids: fileIds });
+    return data.files;
+  },
+  async updatePost(id: string, patch: PostPatch): Promise<PorchPost> {
     const { data } = await apiClient.patch<PorchPost>(`/porch/posts/${id}`, patch);
     return data;
   },

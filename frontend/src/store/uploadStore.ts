@@ -125,8 +125,9 @@ interface UploadStoreState {
    *  and back preserves the user's choice. */
   panelCollapsed: boolean;
 
-  /** Enqueue one or more uploads. Kicks off the runner if idle. */
-  startUploads: (args: StartArgs) => void;
+  /** Enqueue one or more uploads. Kicks off the runner if idle. Returns
+   *  the new tasks' ids, in the order of ``files`` (to follow them). */
+  startUploads: (args: StartArgs) => string[];
   /** Abort an in-flight upload or drop a queued one. Idempotent. */
   cancelUpload: (id: string) => void;
   /** Remove a terminal task from the list (e.g. after the user hits
@@ -177,7 +178,7 @@ export const useUploadStore = create<UploadStoreState>((set, get) => ({
   panelCollapsed: false,
 
   startUploads: ({ files, scope, folderId, workspaceId, route, onConflict }) => {
-    if (files.length === 0) return;
+    if (files.length === 0) return [];
     const now = Date.now();
     const newTasks: UploadTask[] = files.map((f) => ({
       id: uid(),
@@ -205,6 +206,7 @@ export const useUploadStore = create<UploadStoreState>((set, get) => ({
     }
     set((s) => ({ tasks: [...s.tasks, ...newTasks] }));
     schedule();
+    return newTasks.map((t) => t.id);
   },
 
   cancelUpload: (id) => {

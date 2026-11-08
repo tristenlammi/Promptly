@@ -106,9 +106,11 @@ test("a private group: invite, accept, posts in the feed live — and invisible 
   await dana.goto(`/porch/p/${p1}`);
   await expect(dana.getByText("This post isn't available")).toBeVisible();
   await dana.goto("/porch/");
-  await expect(dana.getByRole("group", { name: "Groups in your feed" })).toBeVisible();
+  // On a wide screen the feed's groups are the left-hand ticks.
+  await expect(dana.getByRole("group", { name: "In your feed" })).toBeVisible();
   await expect(dana.getByText(first)).toHaveCount(0);
   await expect(dana.getByRole("button", { name: new RegExp(name) })).toHaveCount(0);
+  await expect(dana.getByRole("checkbox", { name: new RegExp(name) })).toHaveCount(0);
 
   // The post's own page; then Alice deletes it and it's gone for Bob.
   await bob.goto(`/porch/p/${p1}`);
@@ -170,11 +172,30 @@ test("a public group: found, joined in one tap, its older posts there at once", 
 test("the feed's ticks are saved: unticked stays unticked after a reload", async ({ bob }) => {
   const auth = await bearer(bob);
   await porchReady(bob, auth);
+  // A wide screen ticks groups in the left column (no chip row there).
+  await bob.goto("/porch/");
+  await expect(bob.getByRole("group", { name: "Groups in your feed" })).toBeHidden();
+  const ticks = bob.getByRole("group", { name: "In your feed" });
+  const box = ticks.getByRole("checkbox", { name: /Everyone/ });
+  await expect(box).toHaveAttribute("aria-checked", "true");
+  let saved = bob.waitForResponse((r) => r.url().includes("/api/porch/groups/") && r.url().endsWith("/me") && r.request().method() === "PATCH");
+  await box.click();
+  await expect(box).toHaveAttribute("aria-checked", "false");
+  expect((await saved).ok()).toBe(true);
+  await bob.reload();
+  await expect(ticks.getByRole("checkbox", { name: /Everyone/ })).toHaveAttribute("aria-checked", "false");
+  saved = bob.waitForResponse((r) => r.url().endsWith("/me") && r.request().method() === "PATCH");
+  await ticks.getByRole("checkbox", { name: /Everyone/ }).click();
+  await expect(ticks.getByRole("checkbox", { name: /Everyone/ })).toHaveAttribute("aria-checked", "true");
+  await saved;
+
+  // A phone or tablet ticks them as chips, saved the same way.
+  await bob.setViewportSize({ width: 820, height: 1000 });
   await bob.goto("/porch/");
   const chips = bob.getByRole("group", { name: "Groups in your feed" });
   const everyone = chips.getByRole("button", { name: /Everyone/ });
   await expect(everyone).toHaveAttribute("aria-pressed", "true");
-  const saved = bob.waitForResponse((r) => r.url().includes("/api/porch/groups/") && r.url().endsWith("/me") && r.request().method() === "PATCH");
+  saved = bob.waitForResponse((r) => r.url().includes("/api/porch/groups/") && r.url().endsWith("/me") && r.request().method() === "PATCH");
   await everyone.click();
   await expect(everyone).toHaveAttribute("aria-pressed", "false");
   expect((await saved).ok()).toBe(true);

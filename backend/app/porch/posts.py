@@ -50,7 +50,9 @@ async def posts_out(db: AsyncSession, viewer: User, posts: list[PorchPost]) -> l
     ids = [p.id for p in posts]
     labels = await access.labels(db, viewer, ids)
     medias = await media.live_media(db, ids)
-    people = await core.users_map(db, {p.author_id for p in posts})
+    mentioned = {uuid.UUID(m) for p in posts for m in (p.mentions or [])}
+    people = await core.users_map(db, {p.author_id for p in posts} | mentioned)
+    hidden = await blocks.hidden_ids(db, viewer.id) if mentioned else set()
     # "Admin of every group it's in" → may delete it.
     admin_of = {x.group.id for x in await access.my_groups(db, viewer) if x.is_admin}
     groups_of: dict[uuid.UUID, set[uuid.UUID]] = {pid: set() for pid in ids}
@@ -75,7 +77,9 @@ async def posts_out(db: AsyncSession, viewer: User, posts: list[PorchPost]) -> l
                 "place": p.place,
                 "life_event": p.life_event,
                 "link": p.link,
-                "mentions": p.mentions or [],
+                # The people it @mentions (each could see it when it was
+                # written), less anyone with a block either way with you.
+                "mentions": [people[m] for m in (p.mentions or []) if m in people and uuid.UUID(m) not in hidden],
                 "groups": labels.get(p.id, []),
                 "media": items,
                 # Every photo trashed in Photos since: "Photo removed".
@@ -246,6 +250,8 @@ class PostIn(BaseModel):
     link: LinkIn | None = None
     life_event: LifeEventIn | None = None
     from_memory_id: uuid.UUID | None = None
+    # @mentions: kept only for people who can see the post.
+    mentions: list[uuid.UUID] = Field(default_factory=list, max_length=50)
 
 
 class PostPatch(BaseModel):
@@ -254,6 +260,7 @@ class PostPatch(BaseModel):
     place: PlaceIn | None = None
     link: LinkIn | None = None
     life_event: LifeEventIn | None = None
+    mentions: list[uuid.UUID] | None = Field(default=None, max_length=50)
 
 
 def _life(ev: LifeEventIn | None) -> dict[str, Any] | None:
@@ -280,6 +287,16 @@ async def _audience(db: AsyncSession, user: User, groups: Literal["all"] | list[
     if set(want) - set(mine):
         raise core.not_found("Group")
     return want
+
+
+async def _mentions(db: AsyncSession, post: PorchPost, wanted: list[uuid.UUID]) -> list[str]:
+    """The @mentions worth keeping: people who can see the post (never its
+    author). Anyone else is dropped: the composer already told the poster
+    they can't see it and won't be told."""
+    if not wanted:
+        return []
+    audience = await access.audience_ids(db, post)
+    return [str(u) for u in dict.fromkeys(wanted) if u in audience and u != post.author_id]
 
 
 async def _new_media(db: AsyncSession, user: User, items: list[MediaIn]) -> dict[uuid.UUID, tuple[Any, Any]]:
@@ -314,9 +331,16 @@ async def create_post(body: PostIn, db: AsyncSession = Depends(get_db), user: Us
     group_ids = await _audience(db, user, body.groups)
     files = await _new_media(db, user, body.media)
     ordered = [files[m.file_id] for m in body.media if m.file_id is not None]
+    memory_id = body.from_memory_id
+    if memory_id is not None:
+        # "Share this memory": only one of your own memories is kept as the link.
+        from sqlalchemy import text as sql
+
+        mine = await db.scalar(sql("SELECT 1 FROM photo_memories WHERE id = :m AND user_id = :u"), {"m": memory_id, "u": user.id})
+        memory_id = memory_id if mine else None
     post = PorchPost(
         author_id=user.id, kind=_kind_for(body.kind, ordered), body=text_, place=_place(body.place), link=_link(body.link),
-        life_event=_life(body.life_event) if body.kind == "life_event" else None, from_memory_id=body.from_memory_id,
+        life_event=_life(body.life_event) if body.kind == "life_event" else None, from_memory_id=memory_id,
     )
     db.add(post)
     await db.flush()
@@ -325,6 +349,8 @@ async def create_post(body: PostIn, db: AsyncSession = Depends(get_db), user: Us
     for i, m in enumerate(body.media):
         row, fm = files[m.file_id]  # type: ignore[index]
         db.add(PorchPostMedia(post_id=post.id, position=i, file_id=row.id, alt_text=m.alt_text.strip(), edit=media.clean_edit(m.edit, media.is_video(row, fm))))
+    await db.flush()
+    post.mentions = await _mentions(db, post, body.mentions)
     prof = await core.profile(db, user.id)
     prof.last_groups = "all" if body.groups == "all" else [str(g) for g in group_ids]
     await db.commit()
@@ -353,6 +379,8 @@ async def update_post(post_id: uuid.UUID, body: PostPatch, db: AsyncSession = De
         post.life_event = _life(body.life_event)
     if body.media is not None:
         await _replace_media(db, user, post, body.media)
+    if body.mentions is not None:
+        post.mentions = await _mentions(db, post, body.mentions)
     if post.kind == "text" and not post.body and not post.link:
         raise core.bad("Write something first")
     post.edited_at = core.now()

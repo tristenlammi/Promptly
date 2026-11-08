@@ -112,23 +112,35 @@ registerRoute(
   })
 );
 
-// ----- Share target: "Share → Promptly Files" (R-211) -----
-// The installed Files app is a share target; the OS POSTs the shared files
-// here. Stash them and send the app to Files, which uploads them (the
-// upload needs the signed-in page — the worker has no token).
+// ----- Share targets: "Share → Promptly Files" (R-211), "Share → Porch" (WP-P1.4) -----
+// The installed Files and Porch apps are share targets; the OS POSTs what
+// was shared here. Stash it under that app's key and send the app there:
+// Files uploads the files, Porch opens the composer with them (the upload
+// needs the signed-in page — the worker has no token).
 self.addEventListener("fetch", (event: FetchEvent) => {
   const url = new URL(event.request.url);
-  if (event.request.method !== "POST" || url.pathname !== "/files/share-target") return;
+  if (event.request.method !== "POST") return;
+  const app = url.pathname === "/files/share-target" ? "files" : url.pathname === "/porch/share-target" ? "porch" : null;
+  if (!app) return;
   event.respondWith(
     (async () => {
       try {
         const form = await event.request.formData();
-        const files = form.getAll("files").filter((v): v is File => v instanceof File);
-        await stashSharedFiles(files);
+        const files = form.getAll(app === "porch" ? "media" : "files").filter((v): v is File => v instanceof File);
+        // Porch keeps the shared words and link as the caption.
+        const words =
+          app === "porch"
+            ? ["title", "text", "url"]
+                .map((k) => form.get(k))
+                .filter((v): v is string => typeof v === "string" && !!v.trim())
+                .filter((v, i, all) => all.indexOf(v) === i)
+                .join("\n")
+            : "";
+        await stashSharedFiles(files, app, words);
       } catch {
-        // Nothing usable arrived — still land the user in Files.
+        // Nothing usable arrived — still land the user in the app.
       }
-      return Response.redirect("/files/?shared=1", 303);
+      return Response.redirect(app === "porch" ? "/porch/new?shared=1" : "/files/?shared=1", 303);
     })()
   );
 });

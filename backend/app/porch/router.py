@@ -22,7 +22,7 @@ from app.auth.models import User
 from app.database import get_db
 from app.people import blocks
 
-from . import access, core, deps, events, groups, media, posts
+from . import access, compose, core, deps, events, groups, media, posts
 from .deps import require_porch
 from .models import PorchGroup, PorchGroupMember, PorchProfile
 
@@ -30,6 +30,7 @@ router = APIRouter()
 router.include_router(groups.router)
 router.include_router(posts.router)
 router.include_router(events.router)
+router.include_router(compose.router)
 
 
 def _profile_out(p: PorchProfile, *, me: bool) -> dict[str, Any]:

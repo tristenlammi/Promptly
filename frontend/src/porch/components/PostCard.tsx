@@ -17,11 +17,11 @@ import {
   UserX,
 } from "lucide-react";
 import { Fragment, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
-import { porchApi, type LifeEventType, type PorchPost } from "@/api/porch";
+import { porchApi, type LifeEventType, type PorchPost, type PorchUser } from "@/api/porch";
 import { confirm } from "@/components/shared/ConfirmDialog";
-import { ItemButton, Sheet, TextArea } from "@/items/ui";
+import { Sheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -41,10 +41,33 @@ export const LIFE_EVENTS: Record<LifeEventType, { label: string; icon: Component
 };
 
 const URL_RE = /(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]])/g;
+const AT_RE = /(@[\p{L}\p{N}._-]+)/gu;
 
-/** Plain text with web links made clickable (nothing else is interpreted). */
-export function RichText({ text }: { text: string }) {
+/** Words with @mentions of the people the post mentions linked to their profiles. */
+function Mentions({ text, people }: { text: string; people: Map<string, PorchUser> }) {
+  if (!people.size) return <>{text}</>;
+  const parts = text.split(AT_RE);
+  return (
+    <>
+      {parts.map((part, i) => {
+        const u = i % 2 === 1 ? people.get(part.slice(1).toLowerCase()) : undefined;
+        return u ? (
+          <Link key={i} to={`/porch/u/${u.id}`} className="font-medium text-[var(--accent-text)] hover:underline">
+            {part}
+          </Link>
+        ) : (
+          <Fragment key={i}>{part}</Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+/** Plain text with web links made clickable, and @mentions of ``mentions``
+ *  linked to their profiles (nothing else is interpreted). */
+export function RichText({ text, mentions = [] }: { text: string; mentions?: PorchUser[] }) {
   const parts = text.split(URL_RE);
+  const people = new Map(mentions.map((u) => [u.username.toLowerCase(), u]));
   return (
     <>
       {parts.map((part, i) =>
@@ -53,7 +76,7 @@ export function RichText({ text }: { text: string }) {
             {part}
           </a>
         ) : (
-          <Fragment key={i}>{part}</Fragment>
+          <Mentions key={i} text={part} people={people} />
         ),
       )}
     </>
@@ -61,7 +84,7 @@ export function RichText({ text }: { text: string }) {
 }
 
 /** A caption cut to three lines, with "more". */
-function Caption({ text, big, full }: { text: string; big?: boolean; full?: boolean }) {
+function Caption({ text, big, full, mentions }: { text: string; big?: boolean; full?: boolean; mentions: PorchUser[] }) {
   const ref = useRef<HTMLParagraphElement>(null);
   const [open, setOpen] = useState(!!full);
   const [long, setLong] = useState(false);
@@ -79,7 +102,7 @@ function Caption({ text, big, full }: { text: string; big?: boolean; full?: bool
           !open && "line-clamp-3",
         )}
       >
-        <RichText text={text} />
+        <RichText text={text} mentions={mentions} />
       </p>
       {long && !open && (
         <button type="button" onClick={() => setOpen(true)} className="mt-0.5 text-sm font-medium text-[var(--text-muted)] hover:text-[var(--text)]">
@@ -138,8 +161,8 @@ function LifeEventCard({ post }: { post: PorchPost }) {
  */
 export function PostCard({ post, full = false, media = true, className }: { post: PorchPost; full?: boolean; media?: boolean; className?: string }) {
   const [menu, setMenu] = useState(false);
-  const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const navigate = useNavigate();
   const qc = useQueryClient();
   const block = useBlock();
   const author = post.author;
@@ -148,7 +171,14 @@ export function PostCard({ post, full = false, media = true, className }: { post
   const who = author?.name ?? "Someone";
 
   const actions: MenuAction[] = [];
-  if (post.can_edit) actions.push({ label: "Edit words", icon: Pencil, onClick: () => setEditing(true) });
+  if (post.can_edit) {
+    actions.push({
+      label: "Edit post",
+      icon: Pencil,
+      hint: post.kind === "text" ? "Its words and place" : "Its words, photos and place",
+      onClick: () => navigate(`/porch/p/${post.id}/edit`),
+    });
+  }
   actions.push({
     label: "Copy link",
     icon: Link2,
@@ -239,7 +269,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
         </div>
       )}
 
-      {post.body && <Caption text={post.body} big={big} full={full} />}
+      {post.body && <Caption text={post.body} big={big} full={full} mentions={post.mentions} />}
       {post.link && <LinkCard link={post.link} />}
       {post.place && (
         <Link
@@ -251,51 +281,8 @@ export function PostCard({ post, full = false, media = true, className }: { post
       )}
 
       <ActionSheet open={menu} onClose={() => setMenu(false)} title={post.mine ? "Your post" : `${who}'s post`} actions={actions} />
-      {editing && <EditWordsSheet post={post} onClose={() => setEditing(false)} />}
       {saving && <SaveSheet post={post} onClose={() => setSaving(false)} />}
     </article>
-  );
-}
-
-function EditWordsSheet({ post, onClose }: { post: PorchPost; onClose: () => void }) {
-  const qc = useQueryClient();
-  const [body, setBody] = useState(post.body);
-  const [busy, setBusy] = useState(false);
-  const empty = !body.trim() && post.kind === "text" && !post.link;
-  const save = async () => {
-    setBusy(true);
-    try {
-      putPost(qc, post.id, await porchApi.updatePost(post.id, { body }));
-      toast.success("Post updated.");
-      onClose();
-    } catch (err) {
-      toast.error(apiErrorMessage(err, "Couldn't save your changes. Try again."));
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Sheet
-      open
-      onClose={onClose}
-      title="Edit words"
-      footer={
-        <div className="flex justify-end gap-2">
-          <ItemButton variant="ghost" onClick={onClose}>
-            Cancel
-          </ItemButton>
-          <ItemButton variant="primary" onClick={() => void save()} disabled={busy || empty || body === post.body}>
-            Save
-          </ItemButton>
-        </div>
-      }
-    >
-      <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-[var(--text-muted)]">What you wrote</span>
-        <TextArea data-autofocus value={body} onChange={(e) => setBody(e.target.value)} maxLength={5000} rows={6} />
-      </label>
-      <p className="mt-2 text-xs text-[var(--text-muted)]">It will say "edited". Who can see it stays the same.</p>
-    </Sheet>
   );
 }
 

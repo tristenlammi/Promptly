@@ -1,31 +1,48 @@
-import { PenSquare } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
+import { isAxiosError } from "axios";
+import { useSearchParams } from "react-router-dom";
 
-import { EmptyState, ItemButton } from "@/items/ui";
+import { porchApi } from "@/api/porch";
 
-import { Column, PageHeader } from "../components/ui";
+import { postKey } from "../cache";
+import { Composer } from "../components/composer/Composer";
+import { Column, LoadError, PageHeader, PostSkeleton } from "../components/ui";
+import { usePorch } from "../context";
+import { Unavailable } from "./PostPage";
 
-/**
- * BRANCH-ONLY STAND-IN (WP-P1.3). The composer is WP-P1.4 (docs/porch-build.md
- * §3.3), which replaces this file before Porch is merged or released. It must
- * never ship: P1.4 follows immediately on this branch.
- */
+/** ``/porch/new``: a new post (``?group=``, ``?memory=`` and ``?shared=1`` say where it came from). */
 export function NewPostPage() {
-  const navigate = useNavigate();
+  const [params] = useSearchParams();
+  return (
+    <Composer
+      start={{
+        group: params.get("group"),
+        memory: params.get("memory"),
+        shared: params.get("shared") === "1",
+      }}
+    />
+  );
+}
+
+/** ``/porch/p/:id/edit``: change your own post's words, photos, place. */
+export function EditPostPage({ postId }: { postId: string }) {
+  const { b } = usePorch();
+  const q = useQuery({
+    queryKey: postKey(postId),
+    queryFn: () => porchApi.post(postId),
+    retry: (n, err) => !(isAxiosError(err) && err.response?.status === 404) && n < 2,
+  });
+  if (q.data && q.data.author?.id === b.me.id) return <Composer key={postId} editing={q.data} />;
   return (
     <Column>
-      <PageHeader title="New post" back />
-      <EmptyState
-        className="mx-4 mt-4 md:mx-0"
-        icon={PenSquare}
-        title="The composer comes in the next step"
-        text="Posting photos and news is built in WP-P1.4, straight after this one."
-        action={
-          <ItemButton variant="secondary" onClick={() => navigate("/porch/")}>
-            Back to your feed
-          </ItemButton>
-        }
-      />
+      <PageHeader title="Edit post" back />
+      {q.isPending ? (
+        <PostSkeleton />
+      ) : q.isError && !(isAxiosError(q.error) && q.error.response?.status === 404) ? (
+        <LoadError what="Couldn't load this post." onRetry={() => void q.refetch()} />
+      ) : (
+        <Unavailable title="This post can't be changed" text="Only the person who posted it can change it, and it may have been deleted." />
+      )}
     </Column>
   );
 }

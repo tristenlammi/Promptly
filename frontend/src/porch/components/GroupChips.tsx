@@ -9,13 +9,18 @@ import { useGroupActions } from "../actions";
 
 const chip =
   "inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--bg)]";
-const on = "border-[var(--item-accent)] bg-[var(--item-accent)] text-white";
-const off = "border-[var(--border)] bg-[var(--surface)] text-[var(--text-muted)] hover:text-[var(--text)]";
+// Ticked: a light tint of the accent with the accent's text colour and a
+// tick (several ticked groups stay calm, not a wall of orange); unticked:
+// an outline. Both read at WCAG AA in light and dark.
+const on =
+  "border-[color-mix(in_srgb,var(--item-accent)_45%,transparent)] bg-[color-mix(in_srgb,var(--item-accent)_12%,var(--surface))] text-[var(--porch-chip-text)] hover:border-[var(--item-accent)]";
+const off = "border-[var(--border)] bg-transparent text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]";
 
 /**
  * The feed's groups, as chips you tick and untick (saved on your account at
  * once, so it's the same on every device). "All" ticks or unticks the lot.
- * Hold a chip (or right-click it) to open the group.
+ * Hold a chip (or right-click it) to open the group. Phones and tablets only:
+ * on a wide screen the left-hand "In your feed" ticks do this job.
  */
 export function GroupChips({ groups, className }: { groups: PorchGroup[]; className?: string }) {
   const { setTicks } = useGroupActions();
