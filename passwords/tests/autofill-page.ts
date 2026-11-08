@@ -2,6 +2,19 @@
 // compare them with the fixture's expectations. Bundled by build-autofill-bundle.mjs.
 import { analyzePage, type DomAdapter, type Field, type FormInfo, isVisible } from "../../frontend/src/passwords/core/autofill/classify";
 import { fillFields, type FillValues } from "../../frontend/src/passwords/core/autofill/fill";
+import { fieldIsClear, fieldIsFillable, inViewport } from "../../frontend/src/passwords/core/autofill/guard";
+
+/** What the extension's own report counts (content.ts, ``showing``): a box the fill guard
+ *  would refuse gets no value, however it was classified. */
+function guardSays(el: Element, d: DomAdapter): string | null {
+  const fillable = fieldIsFillable(el);
+  if (!fillable.ok) return fillable.reason ?? "not fillable";
+  if (inViewport(el)) {
+    const clear = fieldIsClear(el, d.shadowRoot);
+    if (!clear.ok) return clear.reason ?? "not clear";
+  }
+  return null;
+}
 
 type Expected = { selector: string | string[]; role: string; frame: string[] | null };
 
@@ -57,7 +70,7 @@ win.__af = {
     const page = analyzePage(document, d);
     const form = bestFor(page, expected);
     last = form;
-    const out: { kind: string; roles: { selector: unknown; want: string; got: string | null }[]; extras: string[]; missing: unknown[]; honeypotHit: string[]; fillableForms: number; kinds: string[] } = {
+    const out: { kind: string; roles: { selector: unknown; want: string; got: string | null }[]; extras: string[]; missing: unknown[]; honeypotHit: string[]; fillableForms: number; kinds: string[]; guarded: string[] } = {
       kind: form?.kind ?? "none",
       roles: [],
       extras: [],
@@ -65,6 +78,7 @@ win.__af = {
       honeypotHit: [],
       fillableForms: page.forms.filter((f) => f.fields.length > 0).length,
       kinds: page.forms.map((f) => f.kind),
+      guarded: [],
     };
     const seen = new Set<Element>();
     const LOGIN = ["signin", "email-first", "password-next", "signup", "change-password", "otp"];
@@ -79,6 +93,9 @@ win.__af = {
       const inForm = (form?.fields ?? []).find((x) => x.el === el);
       const elsewhere = allFields.find((x) => x.el === el);
       out.roles.push({ selector: e.selector, want: e.role, got: inForm?.role ?? (elsewhere ? `other-form:${elsewhere.role}` : null) });
+      // Classified right, but the fill guard would leave it empty.
+      const refused = inForm ? guardSays(el, d) : null;
+      if (refused) out.guarded.push(`${JSON.stringify(e.selector)}: ${refused}`);
     }
     if (expected.length) {
       for (const f of form?.fields ?? []) {
@@ -93,17 +110,26 @@ win.__af = {
     }
     return out;
   },
-  async fill(values: FillValues) {
+  async fill(values: FillValues, guard = false) {
     if (!last) return { filled: [] };
+    const d = dom();
+    // As the extension does: a box off screen is scrolled to, and any box the guard refuses stays empty.
+    const allow = (el: Element) => {
+      if (!inViewport(el)) el.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+      return guardSays(el, d) === null;
+    };
     const results = await fillFields(last.fields, values, (role) => {
       const again = analyzePage(document, dom());
       return again.forms.flatMap((f) => f.fields).find((f) => f.role === role)?.el ?? null;
-    });
+    }, guard ? allow : undefined);
     return { filled: results.map((r) => ({ name: (r.el as HTMLInputElement).name || r.el.id, ok: r.ok, method: r.method })) };
   },
   state() {
     const f = win.__fixture as { state?: () => unknown } | undefined;
     return f?.state?.() ?? null;
+  },
+  element(selector: string | string[]) {
+    return resolve(selector);
   },
   domValue(selector: string | string[]) {
     return (resolve(selector) as HTMLInputElement | null)?.value ?? null;

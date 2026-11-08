@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join a quiz</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#f6f2fb;--fg:#241a33;--soft:#6a5c80;--line:#dcd2ea;--accent:#6b3fb5;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, Helvetica, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+
+</style>
+
+</head>
+<body>
+
+<main class="wrap">
+<form class="narrow box" style="text-align:center" onsubmit="return false"><h1>Join a game</h1><p>Type the game PIN from the screen at the front.</p><div style="display:flex;gap:6px;justify-content:center"><input id="q1" maxlength="1" inputmode="numeric" style="width:40px;text-align:center" aria-label="PIN digit 1"><input id="q2" maxlength="1" inputmode="numeric" style="width:40px;text-align:center" aria-label="PIN digit 2"><input id="q3" maxlength="1" inputmode="numeric" style="width:40px;text-align:center" aria-label="PIN digit 3"><input id="q4" maxlength="1" inputmode="numeric" style="width:40px;text-align:center" aria-label="PIN digit 4"><input id="q5" maxlength="1" inputmode="numeric" style="width:40px;text-align:center" aria-label="PIN digit 5"><input id="q6" maxlength="1" inputmode="numeric" style="width:40px;text-align:center" aria-label="PIN digit 6"></div><div class="row" style="margin-top:14px"><label for="q-nick">Nickname</label><input id="q-nick" name="nickname"></div><button>Join</button></form>
+</main>
+
+
+<script>window.__fixture={state:function(){return {};}};</script>
+
+</body>
+</html>

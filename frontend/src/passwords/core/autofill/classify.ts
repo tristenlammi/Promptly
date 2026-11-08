@@ -142,6 +142,8 @@ export function parentOf(el: Element): Element | null {
 
 export function isVisible(el: Element, dom: DomAdapter = {}): boolean {
   if (!el.isConnected) return false;
+  // Behind an open modal the page is inert: nothing in it can be focused or typed into.
+  for (let n: Element | null = el; n; n = parentOf(n)) if (n.hasAttribute("inert")) return false;
   if (dom.noLayout) {
     for (let n: Element | null = el; n; n = parentOf(n)) {
       if (n.hasAttribute("hidden")) return false;
@@ -187,6 +189,11 @@ export function isVisible(el: Element, dom: DomAdapter = {}): boolean {
     if (rect.left < -500 || rect.top < -500) return false;
   }
   return true;
+}
+
+/** Whether a box names itself a password in so many words (true), or not (false). */
+function saysPassword(s: { signals: Signals }): boolean {
+  return [s.signals.idOwn, s.signals.label, s.signals.placeholder].some((t) => hits(t, W.PASSWORD_ONLY) > 0);
 }
 
 function looksHoneypot(el: FillableElement, signal: string): boolean {
@@ -261,6 +268,7 @@ type Signals = {
   years: boolean;
   placeholderRaw: string;
   labelRaw: string;
+  nearRaw: string;
   numeric: boolean;
 };
 
@@ -284,6 +292,7 @@ function signalsOf(el: FillableElement): Signals {
     rawOwn,
     placeholderRaw: attr("placeholder"),
     labelRaw: labelText(el),
+    nearRaw: nearbyText(el),
     numeric: attr("inputmode") === "numeric" || type === "number" || type === "tel",
     name: attr("name").toLowerCase(),
     readonlyFilled: "readOnly" in el && el.readOnly && !!el.value,
@@ -471,6 +480,13 @@ function textOf(el: Element): string {
   add("h1,h2,h3,h4,legend,[role=heading]", 4);
   add("button,input[type=submit],input[type=button],[role=button],a.button,a.btn", 6);
   for (const b of el.querySelectorAll("input[type=submit],input[type=button]")) parts.push((b as HTMLInputElement).value ?? "");
+  // Icon buttons and submit inputs named only for screen readers.
+  let named = 0;
+  for (const b of el.querySelectorAll("button[aria-label],button[aria-labelledby],input[type=submit][aria-labelledby],[role=button][aria-label]")) {
+    if (b.textContent?.trim() && !b.hasAttribute("aria-labelledby")) continue;
+    parts.push(buttonText(b));
+    if (++named >= 6) break;
+  }
   return parts.join(" | ");
 }
 
@@ -485,6 +501,34 @@ function headingAbove(el: Element): string {
   return "";
 }
 
+/** What a button says, including a name it only has for screen readers. */
+export function buttonText(b: Element): string {
+  const parts = [b.textContent ?? "", (b as HTMLInputElement).value ?? "", b.getAttribute("aria-label") ?? "", b.getAttribute("title") ?? ""];
+  const by = b.getAttribute("aria-labelledby");
+  if (by) {
+    const root = b.getRootNode() as Document | ShadowRoot;
+    for (const id of by.split(/\s+/)) {
+      try {
+        parts.push(root.querySelector?.(`#${CSS.escape(id)}`)?.textContent ?? "");
+      } catch {
+        /* odd ids */
+      }
+    }
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 120);
+}
+
+/** A button a person can press: visible, or a see-through native button laid over a
+ *  styled box that is (a common way to style submit inputs). */
+function pressable(b: Element, dom: DomAdapter): boolean {
+  if (isVisible(b, dom)) return true;
+  const box = b.parentElement;
+  if (!box || !isVisible(box, dom)) return false;
+  const r = b.getBoundingClientRect();
+  const o = box.getBoundingClientRect();
+  return r.width >= 10 && r.height >= 10 && r.left >= o.left - 4 && r.right <= o.right + 4 && r.top >= o.top - 4 && r.bottom <= o.bottom + 4;
+}
+
 function submitOf(group: Element, fields: FillableElement[], dom: DomAdapter): HTMLElement | null {
   const candidates: HTMLElement[] = [];
   for (const el of walk(group, dom)) {
@@ -494,9 +538,9 @@ function submitOf(group: Element, fields: FillableElement[], dom: DomAdapter): H
     if (candidates.length > 30) break;
   }
   const ranked = candidates
-    .filter((b) => isVisible(b, dom) && !fields.includes(b as FillableElement))
+    .filter((b) => pressable(b, dom) && !fields.includes(b as FillableElement))
     .map((b) => {
-      const text = `${b.textContent ?? ""} ${(b as HTMLInputElement).value ?? ""} ${b.getAttribute("aria-label") ?? ""}`;
+      const text = buttonText(b);
       let score = 0;
       if (b.getAttribute("type") === "submit" || b.tagName === "INPUT") score += 3;
       if (phrase(text, W.SUBMIT_WORDS)) score += 3;
@@ -527,7 +571,10 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
       // setting being shown: an API secret, say. (React mirrors typed values into the attribute,
       // so a value there alone means nothing.)
       const showing = !!s.el.getAttribute("value") && !idBeside && hits(s.signals.label, W.PASSWORD_ONLY) === 0 && hits(s.signals.idOwn, W.PASSWORD_ONLY) === 0;
-      return !showing && (!looksLikePin(s) || idBeside);
+      // A masked API key, token or signing secret on a settings page, with no account
+      // beside it, is configuration. (Beside a username, a "secret key" is the login.)
+      const config = !idBeside && saysPassword(s) === false && [s.signals.idOwn, s.signals.label, s.signals.placeholder].some((t) => hits(t, W.SECRET_SETTING) > 0);
+      return !showing && !config && (!looksLikePin(s) || idBeside);
     }
     // Some password boxes start as text until focused. Those say so more than once,
     // and hold nothing yet: "password_min" with 12 in it is a setting, and a label
@@ -548,10 +595,13 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
   }
 
   // Card, first: its security code would read as a one-time code otherwise.
-  if (phrase(text, W.CARD_INTENT) || /\b(pay|buy|purchase|payment|checkout)\b/i.test(text)) {
+  // Card wording, or a box that's plainly a card number, sets the card reading for the rest.
+  if (phrase(text, W.CARD_INTENT) || /\b(pay|buy|purchase|payment|checkout|donate|donation|gift)\b/i.test(text) || visible.some((s) => (s.scores.get("card-number") ?? 0) >= 4 || s.signals.autocomplete.includes("cc-number"))) {
     for (const s of visible) {
       if (s.signals.numeric && s.signals.type !== "tel" && !hitsOtp(s) && (s.el as HTMLInputElement).maxLength !== 3 && (s.el as HTMLInputElement).maxLength !== 4 && (/number|digits|\bno\b/i.test(s.signals.labelRaw) || (!s.signals.labelRaw && !(s.el as HTMLInputElement).placeholder && (s.el as HTMLInputElement).inputMode === "numeric" && visible.length >= 3)) && !/gift|phone|mobile|order/i.test(s.signals.labelRaw)) s.scores.set("card-number", Math.max(s.scores.get("card-number") ?? 0, 5));
-      if (s.signals.numeric && (s.el as HTMLInputElement).maxLength >= 3 && (s.el as HTMLInputElement).maxLength <= 4 && (/code|security|back|digits|cvv|cvc/i.test(s.signals.labelRaw) || !s.signals.labelRaw)) {
+      // A short box for the code on the back, by its type or by the words beside it.
+      const cvvWords = /\b(cvv2?|cvc2?|csc|cid|security code|card code|verification (code|number|value)|digits on the back|back of (your |the )?card)\b/i.test(`${s.signals.labelRaw} ${s.signals.nearRaw} ${s.signals.placeholderRaw}`);
+      if ((s.signals.numeric || cvvWords) && (s.el as HTMLInputElement).maxLength >= 3 && (s.el as HTMLInputElement).maxLength <= 4 && (/code|security|back|digits|cvv|cvc/i.test(s.signals.labelRaw) || cvvWords || !s.signals.labelRaw)) {
         s.scores.set("card-cvv", Math.max(s.scores.get("card-cvv") ?? 0, 6));
         // Masked or not, it isn't a password here.
         s.scores.delete("password");
@@ -606,11 +656,16 @@ function classifyGroup(group: Element, scored: Scored[], dom: DomAdapter, pageTe
     const s = ids[0];
     const sigStrong = (s.scores.get("username") ?? 0) >= 4 || (s.scores.get("email") ?? 0) >= 4 || phoneLogin.includes(s);
     const submit = submitOf(group, [s.el], dom);
-    const submitText = submit ? `${submit.textContent ?? ""} ${(submit as HTMLInputElement).value ?? ""}` : "";
+    const submitText = submit ? buttonText(submit) : "";
     // Its own heading or button has to say so. The page's title can't speak for a
-    // newsletter box in the corner of a sign-in page.
-    const signinWords = phrase(text, W.LOGIN_STRONG) || phrase(submitText, W.LOGIN_INTENT) || phoneLogin.includes(s);
-    const hasContinue = !!submit && !/sign me up|subscribe|join|notify|keep me/i.test(submitText);
+    // newsletter box in the corner of a sign-in page. A box that calls itself the
+    // account's username, or a Forgot password link beside it, says so too.
+    const ownsLogin = s.signals.autocomplete.split(/\s+/).some((t) => t === "username" || t === "webauthn") || phrase(allText, W.FORGOT_INTENT);
+    const signinWords = phrase(text, W.LOGIN_STRONG) || phrase(submitText, W.LOGIN_INTENT) || phoneLogin.includes(s) || (ownsLogin && phrase(`${text} ${submitText}`, W.LOGIN_INTENT));
+    // The button that sends it comes after it. One earlier on the page (a header's Log in,
+    // say) belongs to something else.
+    const after = !!submit && !!(s.el.compareDocumentPosition(submit) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const hasContinue = !!submit && after && !/sign me up|subscribe|join|notify|keep me/i.test(submitText);
     if (sigStrong && signinWords && hasContinue) {
       const role: FieldRole = "username";
       return { kind: "email-first", fields: [{ el: s.el, role, score: s.scores.get("username") ?? 0 }], container: group, submit: submitOf(group, [s.el], dom) };
@@ -740,8 +795,10 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
   const says = (s: Scored, list: readonly string[]) => sig(s).some((t) => hits(t, list) > 0);
   const auto = (s: Scored, v: string) => s.signals.autocomplete.split(/\s+/).includes(v);
 
-  // Not this site's own login: a Wi-Fi password, say.
-  if (passwords.every((p) => notLoginField(p.signals)) || (phrase(text, ["wi-fi", "wifi", "router", "ssid", "network settings"]) && !phrase(text, ["sign in", "log in", "login"]))) {
+  // Not this site's own login: a Wi-Fi password, say. The form names the network it
+  // sets (an SSID box, a WPA choice), or says so with no word of signing in.
+  const networkForm = visible.some((s) => hits(s.signals.idOwn, W.WIFI_FIELD) > 0 || /\b(ssid|network name|wpa[23]?|wep|psk|pre-?shared key|network key|wireless (password|key))\b/i.test(`${s.signals.labelRaw} ${s.signals.placeholderRaw}`) || (s.el.tagName === "SELECT" && [...(s.el as HTMLSelectElement).options].some((o) => /\b(wpa[23]?|wep)\b/i.test(o.text))));
+  if (passwords.every((p) => notLoginField(p.signals)) || networkForm || (phrase(text, ["wi-fi", "wifi", "router", "ssid", "network settings", "wireless"]) && !phrase(text, ["sign in", "log in", "login"]))) {
     return { kind: "none", fields: [], container: group, submit: null };
   }
 
@@ -756,6 +813,13 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
 
   const newish = (p: Scored) => auto(p, "new-password") || says(p, W.NEW_PASSWORD);
   const confirmish = (p: Scored) => says(p, W.CONFIRM);
+  // Of several boxes that could be the confirm box, the one whose words say so beats one
+  // whose name merely ends in 2; failing that, the last, since confirm comes last.
+  const confirmOf = (list: Scored[]) => {
+    const all = list.filter(confirmish);
+    const worded = all.filter((p) => [p.signals.label, p.signals.placeholder, p.signals.near].some((t) => hits(t, W.CONFIRM) > 0));
+    return worded[worded.length - 1] ?? all[all.length - 1];
+  };
 
   let kind: FormKind;
   const personNamed = textFields.some((s) => topScore(s, ["first-name", "last-name", "full-name"]));
@@ -775,7 +839,15 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
     // A password box with nothing to send it, like a strength tester, isn't a sign-in.
     // A hosted password box in a frame gets its button from the page around it.
     const inFrame = doc(group).defaultView !== doc(group).defaultView?.top;
-    if (!changeWords && !inFrame && !submitOf(group, passwords.map((p) => p.el), dom)) return { kind: "none", fields: [], container: group, submit: null };
+    const pwSubmit = submitOf(group, passwords.map((p) => p.el), dom);
+    if (!changeWords && !inFrame && !pwSubmit) return { kind: "none", fields: [], container: group, submit: null };
+    // A lone password box that a page tests, or that a settings page saves, isn't a way in.
+    // Only a button that plainly saves or makes something counts against it: a step's own
+    // wording ("Carry on", "Log on", any language) is too varied to require.
+    const pwButton = pwSubmit ? buttonText(pwSubmit) : "";
+    const savesSomething = !!pwButton && phrase(pwButton, W.SETTINGS_BUTTON) && !phrase(`${text} ${pwButton}`, W.LOGIN_INTENT) && !auto(passwords[0], "current-password");
+    const tester = phrase(`${text} ${group.textContent?.slice(0, 600) ?? ""}`, W.PASSWORD_TESTER);
+    if (!changeWords && (tester || savesSomething)) return { kind: "none", fields: [], container: group, submit: null };
     kind = changeWords ? "change-password" : "password-next";
   } else {
     // Both words about: a tab page or a "no account? sign up" link. Field count decides.
@@ -791,12 +863,12 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
       const current = order.find((p) => says(p, W.CURRENT_PASSWORD)) ?? (order.length === 3 && !anyLabel ? order[0] : order.find((p) => auto(p, "current-password") && !confirmish(p))) ?? (order.length === 3 ? order[0] : undefined);
       const rest = order.filter((p) => p !== current);
       if (current) fields.push({ el: current.el, role: "current-password", score: 8 });
-      const confirm = rest.find(confirmish) ?? (rest.length > 1 ? rest[rest.length - 1] : undefined);
+      const confirm = confirmOf(rest) ?? (rest.length > 1 ? rest[rest.length - 1] : undefined);
       const nu = rest.find((p) => p !== confirm && (newish(p) || !confirm)) ?? rest.find((p) => p !== confirm);
       if (nu) fields.push({ el: nu.el, role: "new-password", score: 8 });
       if (confirm && confirm !== nu) fields.push({ el: confirm.el, role: "confirm-password", score: 8 });
     } else {
-      const confirm = order.find(confirmish) ?? (order.length > 1 ? order[order.length - 1] : undefined);
+      const confirm = confirmOf(order) ?? (order.length > 1 ? order[order.length - 1] : undefined);
       const nu = order.find((p) => p !== confirm) ?? order[0];
       fields.push({ el: nu.el, role: "new-password", score: 8 });
       if (confirm && confirm !== nu) fields.push({ el: confirm.el, role: "confirm-password", score: 8 });
@@ -834,7 +906,8 @@ function classifyPasswords(group: Element, visible: Scored[], passwords: Scored[
         fields.push({ el: pick.el, role: "username", score: 6 });
       } else {
         // Any box right before the password, whatever it's called, unless it says it's a search.
-        const plainBefore = textFields.filter((s) => s.el.tagName === "INPUT" && before(s.el, firstPw) && !notLoginField(s.signals) && s.signals.type !== "search" && hits(s.signals.placeholder, W.SEARCH) === 0);
+        // Not a box for a web address, a number of things or a date: those are settings.
+        const plainBefore = textFields.filter((s) => s.el.tagName === "INPUT" && before(s.el, firstPw) && !notLoginField(s.signals) && !["search", "url", "number", "range", "date", "month"].includes(s.signals.type) && hits(s.signals.placeholder, W.SEARCH) === 0);
         const last = plainBefore[plainBefore.length - 1];
         if (last) fields.push({ el: last.el, role: "username", score: 2 });
       }

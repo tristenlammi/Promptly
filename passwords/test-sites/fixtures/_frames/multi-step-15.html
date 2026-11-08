@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign In</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#faf7f2;--fg:#26221c;--soft:#6f675b;--line:#dcd4c6;--accent:#b4532a;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Georgia, "Times New Roman", serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+.aid{padding:24px 28px;font-family:system-ui,sans-serif}.aid-title{font-size:1.4em}.aid-fields{position:relative;border:1px solid #aaa;border-radius:12px;overflow:hidden}
+.ftb{position:relative}.ftb-in{width:100%;border:0;border-radius:0;padding:22px 52px 6px 14px;background:#fff}.ftb-lbl{position:absolute;left:15px;top:15px;color:#888;pointer-events:none;transition:all .12s}
+.ftb-in:focus+.ftb-lbl,.ftb-in:not(:placeholder-shown)+.ftb-lbl{top:4px;font-size:.72em}
+.pw-wrap{border-top:1px solid #aaa;transition:height .25s ease,opacity .25s ease;height:54px}.pw-wrap.hide{height:0;opacity:0;overflow:hidden;border-top:0}
+.si-button{position:absolute;right:10px;top:12px;width:30px;height:30px;border-radius:50%;border:1px solid #888;background:#fff;color:#333;padding:0}
+.kmsi{display:block;margin:16px 0;font-weight:400}.aid-links{text-align:center}.code{display:flex;gap:10px;justify-content:center;margin:20px 0}.code input{width:44px;height:52px;text-align:center;font-size:1.4em}
+</style>
+
+</head>
+<body>
+
+<div class="aid"><h1 class="aid-title" id="aid-h">Sign in with Pomeroy ID</h1>
+<div id="aid-body"><div class="aid-fields">
+<div class="ftb"><input type="text" id="account_name_text_field" class="ftb-in" autocomplete="username webauthn" autocapitalize="off" autocorrect="off" spellcheck="false" aria-required="true" required can-field="accountName" placeholder=" "><label for="account_name_text_field" class="ftb-lbl">Email or Phone Number</label></div>
+<div class="pw-wrap hide" id="pw-wrap" aria-hidden="true"><div class="ftb"><input type="password" id="password_text_field" class="ftb-in" autocomplete="current-password" aria-required="true" required can-field="password" tabindex="-1" placeholder=" "><label for="password_text_field" class="ftb-lbl">Password</label></div></div>
+<button id="sign-in" class="si-button" type="button" aria-label="Continue">&#8594;</button></div>
+<label class="kmsi"><input type="checkbox" id="remember-me"> Keep me signed in</label>
+<p class="aid-links"><a href="#">Forgot password?</a><br><a href="#">Create Pomeroy ID</a></p></div></div>
+
+
+
+<script>
+var S={username:'',password:'',otp:''};function send(){parent.postMessage({__fx:S},'*');}window.__fixture={state:function(){return S;}};
+var a=document.getElementById('account_name_text_field');a.addEventListener('input',function(){S.username=a.value;send();});
+var p=document.getElementById('password_text_field');p.addEventListener('input',function(){S.password=p.value;send();});
+var b=document.getElementById('sign-in');var stage=1;
+b.addEventListener('click',function(){
+ if(stage===1){if(!a.value)return;stage=2;var w=document.getElementById('pw-wrap');w.classList.remove('hide');w.removeAttribute('aria-hidden');p.tabIndex=0;b.setAttribute('aria-label','Sign In');b.style.top='66px';
+  w.addEventListener('transitionend',function once(e){if(e.target!==w||e.propertyName!=='height')return;w.removeEventListener('transitionend',once);p.focus();parent.postMessage({__stage:'pw'},'*');});}
+ else if(stage===2){if(!p.value)return;stage=3;setTimeout(function(){document.getElementById('aid-h').textContent='Two-Factor Authentication';
+  var html='<p>A message with a verification code has been sent to your devices. Enter the code to continue.</p><div class="code">';for(var i=1;i<=6;i++)html+='<input type="tel" class="form-security-code-input" maxlength="1" autocomplete="off" aria-label="Enter verification code. Digit '+i+'" id="d'+i+'">';
+  html+='</div><p class="aid-links"><a href="#">Didn&rsquo;t get a verification code?</a></p>';document.getElementById('aid-body').innerHTML=html;
+  var boxes=[].slice.call(document.querySelectorAll('.code input'));boxes.forEach(function(x,k){x.addEventListener('input',function(){S.otp=boxes.map(function(y){return y.value;}).join('');send();if(x.value&&boxes[k+1])boxes[k+1].focus();});});
+  boxes[0].focus();parent.postMessage({__stage:'code'},'*');},400);}
+});
+</script>
+</body>
+</html>

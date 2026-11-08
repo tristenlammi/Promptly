@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Login - Cumulo</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#eef1f5;--fg:#1b2430;--soft:#5a6778;--line:#cfd6df;--accent:#2c5fb3;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+.cu{max-width:380px;margin:90px auto;background:rgba(255,255,255,.95);border-radius:10px;padding:26px 30px}.cu label{display:block;margin:12px 0 4px}.cu input[type=text],.cu input[type=password]{width:100%}.cu-pw{position:relative}.cu-pw button{position:absolute;right:4px;top:4px;background:none;color:#555;padding:4px}.cu input[type=submit]{width:100%;margin-top:16px}
+</style>
+
+</head>
+<body style="background:linear-gradient(160deg,#0f4c81,#3a7bbf)">
+
+<div class="cu"><h2>Log in to Cumulo</h2><form method="post" name="login" id="cu-form" onsubmit="return false"><fieldset style="border:0;padding:0">
+<label for="user">Account name or email</label><input type="text" name="user" id="user" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+<label for="password">Password</label><div class="cu-pw"><input type="password" name="password" id="password" autocomplete="current-password" spellcheck="false" required><button type="button" aria-label="Show password">&#128065;</button></div>
+<input type="hidden" name="timezone" value="Australia/Sydney"><input type="hidden" name="timezone_offset" value="10"><input type="hidden" name="requesttoken" value="Q3VtdWxvLXJlcXVlc3QtdG9rZW4">
+<input type="submit" id="submit-form" value="Log in"></fieldset></form><p><a href="#">Forgot password?</a></p><p><button type="button" class="linkbtn">Log in with a device</button></p></div>
+
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#user"),"password":q("#password")};}};</script>
+
+</body>
+</html>

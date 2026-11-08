@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pve01 - Halcyon Virtual Environment</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#e8e8e0;--fg:#000000;--soft:#444444;--line:#999999;--accent:#000080;--card:#f4f4ee}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Tahoma, Verdana, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+.x-mask{position:fixed;inset:0;background:rgba(80,80,80,.55)}.x-window{position:absolute;left:50%;top:120px;width:420px;margin-left:-210px;background:#f5f5f5;border:1px solid #5d8ab6;box-shadow:0 0 12px rgba(0,0,0,.4)}
+.x-header{background:#3d78b4;color:#fff;padding:6px 10px;font-weight:700}.x-body{padding:14px}.x-row{display:table;width:100%;margin:6px 0}.x-row label{display:table-cell;width:110px;font-size:13px;vertical-align:middle}
+.x-row .x-wrap{display:table-cell}.x-row input{width:100%;font-size:13px;padding:3px 5px;border:1px solid #b5b8c8;border-radius:0;background:#fff}.x-trig{position:relative}.x-trig:after{content:'\25BE';position:absolute;right:6px;top:3px;color:#555}
+.x-toolbar{display:flex;justify-content:space-between;align-items:center;padding:8px 14px;border-top:1px solid #ddd}.x-btn{display:inline-block;background:#3d78b4;color:#fff;padding:4px 18px;text-decoration:none;cursor:pointer}
+</style>
+
+</head>
+<body>
+
+<div class="x-mask"></div><div class="x-window" role="dialog" aria-labelledby="window-1009-title" id="window-1009">
+<div class="x-header" id="window-1009-title">Halcyon VE Login</div><div class="x-body"><form id="form-1010" onsubmit="return false">
+<div class="x-row"><label for="textfield-1012-inputEl" id="textfield-1012-labelEl">User name:</label><div class="x-wrap"><input type="text" id="textfield-1012-inputEl" name="username" role="textbox" aria-invalid="false" data-ref="inputEl" class="x-form-field x-form-text"></div></div>
+<div class="x-row"><label for="textfield-1013-inputEl">Password:</label><div class="x-wrap"><input type="password" id="textfield-1013-inputEl" name="password" role="textbox" data-ref="inputEl" class="x-form-field x-form-text"></div></div>
+<div class="x-row"><label for="pmxRealmComboBox-1014-inputEl">Realm:</label><div class="x-wrap x-trig"><input type="text" id="pmxRealmComboBox-1014-inputEl" name="realm" role="combobox" aria-readonly="true" readonly value="Linux PAM standard authentication" data-ref="inputEl" class="x-form-field x-form-text"></div></div>
+<div class="x-row"><label for="combobox-1015-inputEl">Language:</label><div class="x-wrap x-trig"><input type="text" id="combobox-1015-inputEl" name="lang" role="combobox" readonly value="English - English" data-ref="inputEl" class="x-form-field x-form-text"></div></div>
+</form></div><div class="x-toolbar"><label style="font-size:13px;font-weight:400"><input type="checkbox" id="checkbox-1017-inputEl"> Save User name:</label><a class="x-btn" role="button" tabindex="0" id="button-1018" hidefocus="on"><span id="button-1018-btnInnerEl">Login</span></a></div></div>
+
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#textfield-1012-inputEl"),"password":q("#textfield-1013-inputEl")};}};</script>
+
+</body>
+</html>

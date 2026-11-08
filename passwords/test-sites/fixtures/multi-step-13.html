@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in - Orrin Accounts</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#eef1f5;--fg:#1b2430;--soft:#5a6778;--line:#cfd6df;--accent:#2c5fb3;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+.lang-foot{display:flex;justify-content:space-between;padding:16px 28px;font-size:.85em;color:var(--soft);flex-wrap:wrap;gap:10px}
+.ow-card{position:relative;overflow:hidden;max-width:450px;margin:48px auto;border:1px solid var(--line);border-radius:28px;padding:36px 40px;background:var(--card)}
+.ow-bar{position:absolute;left:0;top:0;height:4px;width:0;background:var(--accent);transition:width .4s}.ow-bar.go{width:100%}
+.ow-logo{font-weight:700;font-size:1.3em;color:var(--accent)}
+.ow-step{transition:transform .3s ease,opacity .3s ease}.ow-step.enter{transform:translateX(56px);opacity:0}.ow-step.leave{opacity:.45}.ow-step.pending{position:absolute;visibility:hidden}
+.ow-field{position:relative;margin:24px 0 8px}
+.ow-in{width:100%;height:56px;padding:18px 14px 2px;border:1px solid var(--line);border-radius:4px;font-size:16px;background:transparent}
+.ow-label{position:absolute;left:11px;top:16px;padding:0 4px;color:var(--soft);pointer-events:none;transition:transform .15s;transform-origin:left top}
+.ow-field.up .ow-label{transform:translateY(-26px) scale(.75);background:var(--card)}
+.ow-vh{position:absolute;left:0;top:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none}
+.ow-act{display:flex;justify-content:space-between;align-items:center;margin-top:32px}
+.ow-chip{display:inline-flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:16px;padding:2px 10px 2px 3px;cursor:pointer}
+.ow-av{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:12px}
+.ow-text{background:none;color:var(--accent);padding:0;font-weight:600}
+</style>
+
+</head>
+<body>
+
+<main class="wrap">
+<div class="ow-card" id="ow"></div>
+</main>
+<div class="lang-foot"><select aria-label="Language" name="hl"><option>English (United States)</option><option>English (United Kingdom)</option><option>Espa&ntilde;ol</option></select><span><a href="#">Help</a> &nbsp; <a href="#">Privacy</a> &nbsp; <a href="#">Terms</a> &nbsp; Orrin</span></div>
+
+
+<script>
+var S={username:'',password:''};var card=document.getElementById('ow');
+function lift(f){var w=f.closest('.ow-field');var up=function(){w.classList.toggle('up',document.activeElement===f||!!f.value);};f.addEventListener('focus',up);f.addEventListener('blur',up);f.addEventListener('input',up);up();}
+function ident(){card.innerHTML='<div class="ow-bar" id="bar"></div><div class="ow-step" id="st1"><div class="ow-logo">Orrin</div><h1>Sign in</h1><p>Use your Orrin Account</p>'
++'<div class="ow-field"><input type="email" class="ow-in" id="identifierId" name="identifier" autocomplete="username webauthn" spellcheck="false" tabindex="0" aria-label="Email or phone" autocapitalize="none" dir="ltr" data-initial-value=""><div class="ow-label" aria-hidden="true">Email or phone</div></div>'
++'<input type="password" name="hiddenPassword" id="hiddenPassword" class="ow-vh" tabindex="-1" aria-hidden="true" spellcheck="false">'
++'<button type="button" class="ow-text">Forgot email?</button>'
++'<p class="muted">Not your computer? Use a guest window to sign in privately. <a href="#">Learn more</a></p>'
++'<div class="ow-act"><button type="button" class="ow-text" aria-haspopup="menu">Create account</button><div id="identifierNext"><button type="button" id="idNext"><span>Next</span></button></div></div></div>';
+var i=document.getElementById('identifierId');i.value=S.username;i.addEventListener('input',function(){S.username=i.value;});lift(i);
+i.addEventListener('keydown',function(e){if(e.key==='Enter')next();});document.getElementById('idNext').addEventListener('click',next);i.focus();}
+function next(){if(!S.username)return;document.getElementById('bar').classList.add('go');var st=document.getElementById('st1');st.classList.add('leave');st.inert=true;pass();
+setTimeout(function(){history.pushState({},'',location.pathname+'?challenge=pwd');st.remove();var st2=document.getElementById('st2');st2.classList.remove('pending');requestAnimationFrame(function(){requestAnimationFrame(function(){st2.classList.remove('enter');});});},700);}
+function pass(){card.insertAdjacentHTML('beforeend','<div class="ow-step enter pending" id="st2"><div class="ow-logo">Orrin</div><h1>Welcome</h1>'
++'<div class="ow-chip" role="link" tabindex="0" id="chip"><span class="ow-av">A</span><span id="who"></span><span aria-hidden="true">&#9662;</span></div>'
++'<div class="ow-vh" aria-hidden="true"><input type="email" name="identifier" id="hiddenIdent" autocomplete="username" tabindex="-1" spellcheck="false"></div>'
++'<div class="ow-field"><input type="password" class="ow-in" name="Passwd" id="pwField" autocomplete="current-password" spellcheck="false" tabindex="0" aria-label="Enter your password" autocapitalize="off" dir="ltr" data-initial-value=""><div class="ow-label" aria-hidden="true">Enter your password</div></div>'
++'<label style="font-weight:400"><input type="checkbox" id="showpw"> Show password</label>'
++'<div class="ow-act"><button type="button" class="ow-text">Try another way</button><div id="passwordNext"><button type="button" id="pwNext"><span>Next</span></button></div></div></div>');
+document.getElementById('who').textContent=S.username;document.getElementById('chip').setAttribute('data-email',S.username);
+var h=document.getElementById('hiddenIdent');h.value=S.username;h.setAttribute('value',S.username);
+var pw=document.getElementById('pwField');pw.addEventListener('input',function(){S.password=pw.value;});lift(pw);
+document.getElementById('showpw').addEventListener('change',function(){pw.type=this.checked?'text':'password';});
+var st=document.getElementById('st2');
+st.addEventListener('transitionend',function once(e){if(e.target!==st)return;st.removeEventListener('transitionend',once);pw.focus();card.setAttribute('data-settled','pwd');});}
+ident();window.__fixture={state:function(){return S;}};
+</script>
+</body>
+</html>

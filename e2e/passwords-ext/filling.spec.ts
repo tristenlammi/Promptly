@@ -1097,3 +1097,40 @@ test("the popup bundle stays light, with no generator or site matching in it", a
   expect(js, "the word list").not.toContain("abacus");
   expect(js, "the Public Suffix List").not.toContain("amazonaws");
 });
+
+// ---- Steps that the page shows and focuses itself (D-AUTOFILL-1) -----------------------------
+
+test("the menu comes up on a password step that slides in and focuses itself, and on the box a page focused at load", async () => {
+  await saved({ title: "Slide", url: "http://slide.localhost:8111", username: "slide@example.com", password: "Slide-Pw-1" });
+  const page = await rig.ctx.newPage();
+  await page.goto("http://slide.localhost:8111/slide-step.html");
+  // The identifier was focused by the page before the extension was ready.
+  await expect.poll(() => !!menuFrame(page), { timeout: 10_000 }).toBe(true);
+  await page.keyboard.press("Escape");
+  await page.locator("#user").pressSequentially("slide@example.com");
+  await page.keyboard.press("Escape");
+  await page.click("#next");
+  await page.waitForSelector("body[data-settled]");
+  // No click: the page put the focus there itself, after the slide.
+  await expect.poll(() => !!menuFrame(page), { timeout: 10_000 }).toBe(true);
+  const f = menuFrame(page)!;
+  await f.waitForLoadState();
+  await page.waitForTimeout(LOOK_MS);
+  await f.getByRole("button", { name: /Slide/ }).first().click();
+  await expect.poll(() => page.evaluate(() => (window as any).__state().pass), { timeout: 10_000 }).toBe("Slide-Pw-1");
+  // The hidden carrier the page keeps for password managers is left as the page set it.
+  expect(await page.evaluate(() => (document.getElementById("carrier") as HTMLInputElement).value)).toBe("slide@example.com");
+  await page.close();
+});
+
+test("a press on a box that already has focus opens the menu", async () => {
+  const page = await rig.ctx.newPage();
+  await page.goto("http://slide.localhost:8111/slide-step.html");
+  await expect.poll(() => !!menuFrame(page), { timeout: 10_000 }).toBe(true);
+  await page.keyboard.press("Escape");
+  await expect.poll(() => !!menuFrame(page)).toBe(false);
+  // Still focused, so this click fires no focus event.
+  await page.click("#user");
+  await expect.poll(() => !!menuFrame(page), { timeout: 10_000 }).toBe(true);
+  await page.close();
+});

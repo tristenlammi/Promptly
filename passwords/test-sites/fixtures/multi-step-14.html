@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in to your account</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#ffffff;--fg:#222222;--soft:#666666;--line:#d8d8d8;--accent:#00587a;--card:#f7f9fa}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Arial, Helvetica, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+.legal-line{text-align:center;padding:30px 12px;font-size:.8em;color:var(--soft)}
+.hv-box{max-width:440px;margin:60px auto;background:var(--card);padding:44px;box-shadow:0 2px 6px rgba(0,0,0,.2)}.hv-logo{font-weight:700;color:var(--accent);margin-bottom:16px}.hv-title{font-size:1.5em;font-weight:600;margin:6px 0 14px}
+.hv-in{width:100%;border:0;border-bottom:1px solid #666;border-radius:0;padding:6px 0;background:transparent}.hv-small{font-size:.85em;margin:12px 0}.hv-btns{text-align:right;margin-top:24px}
+.hv-banner{display:flex;align-items:center;gap:8px}.hv-back{background:none;color:var(--fg);padding:0 4px;font-size:1.2em}
+</style>
+
+</head>
+<body>
+
+<main class="wrap">
+<div class="hv-box"><div class="hv-logo">Halvard</div>
+<form name="f1" id="f1" method="post" novalidate autocomplete="off" action="#">
+<input type="hidden" name="login" id="hLogin"><input type="hidden" name="type" value="11"><input type="hidden" name="flowToken" value="AbCdEf0123">
+<div id="views">
+<div id="identSection"><div role="heading" aria-level="1" class="hv-title" id="loginHeader">Sign in</div>
+<input type="email" name="loginfmt" id="i0116" maxlength="113" lang="en" class="hv-in" aria-required="true" aria-describedby="loginHeader" placeholder="Email, phone, or handle" aria-label="Enter your email, phone, or handle." autocomplete="username">
+<div class="hv-small">No account? <a href="#">Create one!</a></div><div class="hv-small"><a href="#">Can&rsquo;t access your account?</a></div></div>
+<div id="pwdSection" style="display:none"><div class="hv-banner"><button type="button" class="hv-back" id="idBtn_Back" aria-label="Back">&larr;</button><div id="displayName"></div></div>
+<div role="heading" aria-level="1" class="hv-title">Enter password</div>
+<input name="passwd" type="password" id="i0118" autocomplete="current-password" class="hv-in" aria-required="true" placeholder="Password" aria-label="Enter the password for your account" tabindex="0">
+<div class="hv-small"><a href="#">Forgot password?</a></div></div>
+</div>
+<div class="hv-btns"><input type="submit" id="idSIButton9" value="Next"></div>
+</form></div>
+</main>
+<div class="legal-line">&copy; 2026 Halvard Online, all rights reserved &middot; <a href="#">Privacy</a> &middot; <a href="#">Terms</a> &middot; <a href="#">Accessibility</a></div>
+
+
+<script>
+var S={username:'',password:''};var step=1;var f=document.getElementById('f1');
+var e=document.getElementById('i0116');e.addEventListener('input',function(){S.username=e.value;});
+var pw=document.getElementById('i0118');pw.addEventListener('input',function(){S.password=pw.value;});
+document.getElementById('idBtn_Back').addEventListener('click',function(){step=1;document.getElementById('identSection').style.display='';document.getElementById('pwdSection').style.display='none';document.getElementById('idSIButton9').value='Next';});
+f.addEventListener('submit',function(ev){ev.preventDefault();
+ if(step===1){if(!S.username)return;step=2;document.getElementById('hLogin').value=S.username;document.getElementById('displayName').textContent=S.username;
+  setTimeout(function(){document.getElementById('identSection').style.display='none';document.getElementById('pwdSection').style.display='';document.getElementById('idSIButton9').value='Sign in';pw.focus();f.setAttribute('data-step','pwd');},350);}
+ else if(step===2){if(!S.password)return;step=3;setTimeout(function(){document.getElementById('views').innerHTML='<div class="hv-title" role="heading" aria-level="1">Stay signed in?</div><p>Do this to reduce the number of times you are asked to sign in.</p><label style="font-weight:400"><input type="checkbox" name="DontShowAgain"> Don&rsquo;t show this again</label>';
+  document.querySelector('.hv-btns').innerHTML='<input type="button" id="idBtn_No" value="No"> <input type="submit" id="idSIButton9" value="Yes">';f.setAttribute('data-step','kmsi');},350);}
+});
+window.__fixture={state:function(){return S;}};
+</script>
+</body>
+</html>

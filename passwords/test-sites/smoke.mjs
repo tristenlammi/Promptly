@@ -143,7 +143,8 @@ async function checkFixture(browser, f, ports) {
   });
   page.on('request', (r) => {
     const u = new URL(r.url());
-    if (u.protocol.startsWith('http') && !/(^|\.)localhost$/.test(u.hostname)) problems.push(`external request: ${r.url()}`);
+    // 127.0.0.1 is the box-on-the-LAN case (the selfhosted fixtures), and still this machine.
+    if (u.protocol.startsWith('http') && !/(^|\.)localhost$/.test(u.hostname) && u.hostname !== '127.0.0.1') problems.push(`external request: ${r.url()}`);
   });
   page.on('response', (r) => {
     if (r.status() >= 400) problems.push(`HTTP ${r.status()}: ${r.url()}`);

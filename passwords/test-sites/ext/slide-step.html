@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Sign in</title>
+    <style>
+      .step { transition: transform 0.3s ease, opacity 0.3s ease; }
+      .step.enter { transform: translateX(48px); opacity: 0; }
+      .step.pending { position: absolute; visibility: hidden; }
+      .vh { position: absolute; left: 0; top: 0; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+      input { display: block; width: 280px; margin: 8px 0; padding: 8px; }
+    </style>
+  </head>
+  <body>
+    <!-- The pattern of the big account providers: no form, the identifier focused on load,
+         the password step rendered at once but hidden until the answer comes back, then a
+         slide, then the page focuses the password box itself. -->
+    <div id="card"></div>
+    <script>
+      const card = document.getElementById("card");
+      const state = { user: "", pass: "" };
+      window.__state = () => state;
+      card.innerHTML = '<div class="step" id="s1"><h1>Sign in</h1><input id="user" type="email" name="identifier" autocomplete="username" aria-label="Email or phone"><button type="button" id="next">Next</button></div>';
+      const user = document.getElementById("user");
+      user.addEventListener("input", () => (state.user = user.value));
+      user.focus();
+      document.getElementById("next").addEventListener("click", () => {
+        card.insertAdjacentHTML("beforeend", '<div class="step enter pending" id="s2"><h1>Welcome</h1><p id="who"></p><div class="vh" aria-hidden="true"><input type="email" name="identifier" id="carrier" tabindex="-1" autocomplete="username"></div><input id="pass" type="password" name="Passwd" autocomplete="current-password" aria-label="Enter your password"><button type="button">Next</button></div>');
+        document.getElementById("who").textContent = state.user;
+        document.getElementById("carrier").value = state.user;
+        const pass = document.getElementById("pass");
+        pass.addEventListener("input", () => (state.pass = pass.value));
+        setTimeout(() => {
+          history.pushState({}, "", location.pathname + "?challenge=pwd");
+          document.getElementById("s1").remove();
+          const s2 = document.getElementById("s2");
+          s2.classList.remove("pending");
+          s2.addEventListener("transitionend", function once(e) {
+            if (e.target !== s2) return;
+            s2.removeEventListener("transitionend", once);
+            pass.focus();
+            document.body.dataset.settled = "1";
+          });
+          requestAnimationFrame(() => requestAnimationFrame(() => s2.classList.remove("enter")));
+        }, 700);
+      });
+    </script>
+  </body>
+</html>

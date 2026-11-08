@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gw01 - LibreLink admin</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#e8e8e0;--fg:#000000;--soft:#444444;--line:#999999;--accent:#000080;--card:#f4f4ee}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 Tahoma, Verdana, Arial, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+.lr-top{background:#003a70;color:#fff;padding:8px 16px}.lr{max-width:520px;margin:40px auto}.lr fieldset{border:1px solid #999;padding:14px}.lr-row{display:flex;align-items:center;margin:8px 0}.lr-row label{width:120px}.lr-row input{flex:1}
+</style>
+
+</head>
+<body>
+
+<div class="lr-top">gw01 | LibreLink 23.05 | Wireless: home-net (2.4 GHz, 5 GHz) | Load: 0.08</div><div class="lr"><form method="post" action="#" onsubmit="return false"><h2>Authorization Required</h2><p>Please enter your username and password.</p>
+<fieldset><div class="lr-row"><label for="luci_username">Username</label><input name="luci_username" id="luci_username" type="text" value="root"></div>
+<div class="lr-row"><label for="luci_password">Password</label><input name="luci_password" id="luci_password" type="password"></div></fieldset>
+<p><input type="submit" value="Login" class="cbi-button-apply"> <input type="reset" value="Reset"></p></form></div>
+
+
+<script>window.__fixture={state:function(){var q=function(s){var e=document.querySelector(s);return e?e.value:'';};var j=function(a){return a.map(q).join('');};return {"username":q("#luci_username"),"password":q("#luci_password")};}};</script>
+
+</body>
+</html>

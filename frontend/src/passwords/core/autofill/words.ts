@@ -13,7 +13,7 @@ export const PASSWORD = [
   "password", "passwd", "pass", "pwd", "pswd", "passcode", "passphrase", "kennwort", "passwort", "contraseña", "contrasena", "clave", "senha", "motdepasse", "mdp", "wachtwoord", "парол", "пароль", "パスワード", "暗証番号", "密码", "密碼", "口令", "비밀번호", "암호", "패스워드", "jelszó", "şifre", "parola", "hasło", "haslo", "lösenord", "kodeord", "mậtkhẩu", "katasandi", "sandi", "รหัสผ่าน", "κωδικός", "κωδικόςπρόσβασης", "סיסמה", "סיסמא", "secret", "phrase", "كلمةالمرور", "كلمةالسر", "पासवर्ड", "कूटशब्द",
 ];
 export const NEW_PASSWORD = ["nowe", "nytt", "yeni", "mới", "baru", "ใหม่", "νέος", "חדשה",
-  "new", "newpassword", "newpass", "newpwd", "nuevacontraseña", "nueva", "nouveau", "nouveaumotdepasse", "neues", "neu", "neuespasswort", "neueskennwort", "nova", "novasenha", "nuova", "nuovapassword", "nieuw", "nieuwwachtwoord", "новый", "новыйпароль", "新しい", "新しいパスワード", "新密码", "新密碼", "새", "새비밀번호", "الجديدة", "نई", "नया", "create", "choose", "set", "reset",
+  "new", "newpassword", "newpass", "newpwd", "nuevacontraseña", "nueva", "nouveau", "nouveaumotdepasse", "neues", "neu", "neuespasswort", "neueskennwort", "nova", "novasenha", "nuova", "nuovapassword", "nieuw", "nieuwwachtwoord", "новый", "новыйпароль", "新しい", "新しいパスワード", "新密码", "新密碼", "새", "새비밀번호", "الجديدة", "نई", "नया", "create", "choose", "set", "reset", "replacement", "desired",
 ];
 export const CONFIRM = ["repeat", "again", "retype", "reenter","potwierdź", "bekräfta", "tekrar", "xácnhận", "konfirmasi", "ยืนยัน", "επιβεβαίωση", "אימות",
   "confirm", "confirmation", "confirmpassword", "repeat", "repeatpassword", "retype", "reenter", "verify", "again", "password2", "pass2", "pwd2", "passwordconfirm", "passwordconfirmation", "confirmar", "repetir", "confirmez", "confirmer", "répéter", "bestätigen", "wiederholen", "bestatigen", "confermare", "conferma", "ripeti", "bevestig", "bevestigen", "herhaal", "подтвердите", "подтверждение", "повторите", "確認", "再入力", "确认", "重复", "再次", "確認密碼", "확인", "재입력", "تأكيد", "पुष्टि",
@@ -32,7 +32,7 @@ export const CARD_EXP_YEAR = ["expyear", "expiryyear", "expirationyear", "ccyear
 export const CARD_CVV = ["cvv", "cvc", "cvn", "cid", "csc", "securitycode", "seccode", "cardcode", "cardverification", "ccv", "ccsc", "kartenprüfnummer", "prüfziffer", "codigodeseguridad", "cryptogramme", "beveiligingscode", "コード", "安全码", "보안코드"];
 export const FIRST_NAME = ["firstname", "fname", "givenname", "forename", "nome", "nombre", "vorname", "prenom", "prénom", "primeironome", "voornaam", "имя", "الاسمالأول"];
 export const LAST_NAME = ["lastname", "lname", "surname", "familyname", "apellido", "apellidos", "nachname", "nomdefamille", "sobrenome", "cognome", "achternaam", "фамилия", "姓", "성", "اسمالعائلة"];
-export const FULL_NAME = ["fullname", "yourname", "displayname", "nombrecompleto", "nomcomplet", "vollständigername", "nomecompleto", "volledigenaam", "имяфамилия", "氏名", "お名前", "姓名", "성명", "이름", "الاسمالكامل"];
+export const FULL_NAME = ["fullname", "yourname", "displayname", "recipient", "recipientname", "addressee", "nombrecompleto", "nomcomplet", "vollständigername", "nomecompleto", "volledigenaam", "имяфамилия", "氏名", "お名前", "姓名", "성명", "이름", "الاسمالكامل"];
 export const ADDRESS1 = ["address", "address1", "addressline1", "street", "streetaddress", "addr", "addr1", "billingaddress", "shippingaddress", "direccion", "dirección", "adresse", "straße", "strasse", "endereco", "endereço", "indirizzo", "adres", "straat", "адрес", "住所", "地址", "주소", "العنوان"];
 export const ADDRESS2 = ["flat", "floor", "level", "address2", "addressline2", "addr2", "apartment", "suite", "unit", "apt", "line2"];
 export const CITY = ["city", "town", "suburb", "locality", "ciudad", "ville", "stadt", "ort", "cidade", "citta", "città", "plaats", "город", "市区町村", "城市", "도시", "المدينة"];
@@ -56,6 +56,16 @@ export const IDENTITY_INTENT = ["shipping", "delivery", "your details", "persona
 export const SEARCH_INTENT = ["search", "buscar", "suche", "recherche", "pesquisar", "cerca", "zoeken", "поиск", "検索", "搜索", "검색", "بحث", "खोज"];
 export const NEWSLETTER_INTENT = ["newsletter", "subscribe", "stay in touch", "stay updated", "get updates", "join our list", "mailing list", "sign up for our", "abonnieren", "suscríbete", "s'abonner", "nieuwsbrief", "подписаться", "ニュースレター", "订阅", "뉴스레터"];
 export const NOT_LOGIN_INTENT = ["contact us", "send message", "leave a comment", "post comment", "apply coupon", "redeem", "wi-fi", "wifi", "router", "network settings", "delete account", "delete my account", "calculate", "track order", "share"];
+/** Masked boxes that hold a setting rather than an account's password. */
+export const SECRET_SETTING = ["apikey", "apisecret", "token", "accesstoken", "authtoken", "bearertoken", "signingsecret", "signingkey", "clientsecret", "sharedsecret", "webhook", "webhooksecret", "privatekey", "encryptionkey", "signing", "hmac"];
+/** Names of the boxes on a wireless network settings page. */
+export const WIFI_FIELD = ["ssid", "wifi", "wlan", "wpa", "wpakey", "psk", "wireless", "wifipassword", "networkkey"];
+/** Buttons that keep a setting or make something, never ones that let you in. */
+export const SETTINGS_BUTTON = ["save", "save changes", "apply", "regenerate", "generate", "check", "test", "copy", "create link", "share", "download", "encrypt", "decrypt", "upload", "export", "import"];
+/** A page for trying passwords out, not using one. */
+export const PASSWORD_TESTER = ["how strong", "password strength", "strength test", "strength checker", "test your password", "check your password", "password checker", "password tester", "password generator", "generate a password", "is my password"];
+/** A way back into an account: only a sign-in form offers one. */
+export const FORGOT_INTENT = ["forgot password", "forgot your password", "forgotten your password", "forgotten password", "reset password", "can't access your account", "trouble signing in", "passwort vergessen", "olvidaste tu contraseña", "mot de passe oublié", "esqueceu a senha", "password dimenticata", "wachtwoord vergeten", "забыли пароль", "パスワードをお忘れ", "忘记密码", "비밀번호 찾기"];
 export const BACKUP_CODE_INTENT = ["backup code", "recovery code", "recovery key", "scratch code"];
 
 export const SUBMIT_WORDS = ["log in", "login", "sign in", "signin", "continue", "next", "submit", "go", "enter", "verify", "confirm", "create", "register", "sign up", "signup", "save", "update", "change", "reset", "weiter", "anmelden", "einloggen", "siguiente", "entrar", "acceder", "continuar", "suivant", "connexion", "se connecter", "avanti", "accedi", "volgende", "inloggen", "войти", "далее", "ログイン", "次へ", "登录", "登入", "下一步", "로그인", "다음", "دخول", "التالي", "लॉगिन", "आगे"];

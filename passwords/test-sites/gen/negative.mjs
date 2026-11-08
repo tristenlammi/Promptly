@@ -188,3 +188,56 @@ neg({
   title: 'Manage your trip',
   main: `<div class="split"><form class="box" onsubmit="return false"><h2>Find a trip</h2><div class="row"><label for="b-from">From</label><input id="b-from" name="from"></div><div class="row"><label for="b-to">To</label><input id="b-to" name="to"></div><div class="row"><label for="b-date">Depart</label><input id="b-date" name="depart" type="date"></div><button>Search</button></form><form class="box" onsubmit="return false"><h2>Manage my booking</h2><div class="row"><label for="b-ref">Booking reference</label><input id="b-ref" name="pnr"></div><div class="row"><label for="b-last">Surname</label><input id="b-last" name="surname"></div><button>Retrieve</button></form></div>`,
 });
+
+// ---- Shapes behind false offers on the blind sets, written fresh with other markup.
+
+neg({
+  id: 'negative-loginbutton-01', brand: 'Quillmere Weather', theme: 'sun', header: 'none', footer: 'none', fields: ['#qw-find', '#qw-alerts'],
+  description: 'Weather site: a header with a place search and a Sign in button that opens nothing yet, and lower down an alerts box asking for an email with no button of its own and no newsletter wording.',
+  title: 'Quillmere Weather - Seven-day forecast',
+  bare: true,
+  main: `<div id="qw-app"><div style="display:flex;gap:12px;align-items:center;padding:10px 18px;background:var(--card);border-bottom:1px solid var(--line)"><b>Quillmere</b><input id="qw-find" type="search" placeholder="Find a town" style="margin-left:auto"><button type="button" id="qw-signin">Sign in</button></div>
+<div class="wrap"><h1>Seven-day forecast</h1><p>Showers clearing by Thursday, then a warm weekend along the coast.</p><div style="display:flex;gap:8px;align-items:center"><span>Storm alerts for your suburb</span><input id="qw-alerts" type="email" name="email" placeholder="you@example.test"></div></div></div>`,
+});
+
+neg({
+  id: 'negative-giftcard-02', brand: 'Harrowgate Books', theme: 'paper', header: 'none', footer: 'none', fields: ['#gc-no'],
+  description: 'Gift card balance: one long number box named cardNumber with a 16-digit example and a Check balance button, no PIN and no name.',
+  title: 'Check a gift card balance',
+  main: `<form class="narrow box" onsubmit="return false"><h1>Gift card balance</h1><p>Enter the number on the back of your card to see what is left on it.</p><div class="row"><label for="gc-no">Card number</label><input id="gc-no" name="cardNumber" inputmode="numeric" placeholder="6006 1234 5678 9012"></div><button>Check balance</button></form>`,
+});
+
+neg({
+  id: 'negative-secret-01', brand: 'Brassjaw CI', theme: 'night', header: 'none', footer: 'none', fields: ['#hook-url', '#hook-retries', '#hook-secret'],
+  description: 'Webhook settings: a payload URL, a number of retries and a signing secret in an empty masked box with a Regenerate button, saved with Save changes. Not a login.',
+  title: 'Webhook settings',
+  main: `<form class="narrow box" onsubmit="return false"><h1>Webhook</h1><div class="row"><label for="hook-url">Payload URL</label><input id="hook-url" name="url" type="url" placeholder="https://"></div><div class="row"><label for="hook-retries">Retries</label><input id="hook-retries" name="retries" type="number" value="3"></div><div class="row"><label for="hook-secret">Signing secret</label><input id="hook-secret" name="secret" type="password" autocomplete="off"> <button type="button">Regenerate</button></div><button>Save changes</button></form>`,
+});
+
+neg({
+  id: 'negative-quiz-01', brand: 'Brightwick Quiz', theme: 'grape', header: 'none', footer: 'none', fields: ['#q1', '#q2', '#q3', '#q4', '#q5', '#q6', '#q-nick'],
+  description: 'Class quiz join screen: six one-digit boxes for the game PIN shown on the board, and a nickname box, with a Join button.',
+  title: 'Join a quiz',
+  main: `<form class="narrow box" style="text-align:center" onsubmit="return false"><h1>Join a game</h1><p>Type the game PIN from the screen at the front.</p><div style="display:flex;gap:6px;justify-content:center">${[1, 2, 3, 4, 5, 6].map((n) => `<input id="q${n}" maxlength="1" inputmode="numeric" style="width:40px;text-align:center" aria-label="PIN digit ${n}">`).join('')}</div><div class="row" style="margin-top:14px"><label for="q-nick">Nickname</label><input id="q-nick" name="nickname"></div><button>Join</button></form>`,
+});
+
+neg({
+  id: 'negative-strength-01', brand: 'Fernhollow Labs', theme: 'forest', header: 'none', footer: 'none', fields: ['#try-pw'],
+  description: 'Password strength checker page: one masked box with a meter under it and a Check button, and text telling people not to type a real password.',
+  title: 'How strong is my password?',
+  main: `<div class="narrow box"><h1>How strong is your password?</h1><p>Try a made-up example. Never type a password you really use into any website.</p><form onsubmit="return false"><input id="try-pw" type="password" placeholder="Type an example" style="width:100%"><div style="height:6px;background:var(--line);margin:8px 0"><i style="display:block;height:6px;width:0;background:var(--accent)"></i></div><button>Check</button></form></div>`,
+});
+
+neg({
+  id: 'negative-pincode-01', brand: 'Tallowmere Home', theme: 'sun', header: 'none', footer: 'none', fields: ['#pin-check', '#qty'],
+  description: 'Product page: a six-digit delivery pincode checker (numeric, maxlength 6) with a Check button, and a quantity box next to Add to cart.',
+  title: 'Oak side table - Tallowmere Home',
+  main: `<div class="split"><div><h1>Oak side table</h1><p>Solid oak, oiled finish. 45 cm high.</p><p><b>4,999</b></p><p><label for="qty">Qty</label> <input id="qty" type="number" value="1" min="1" style="width:70px"> <button type="button">Add to cart</button></p></div><div class="box"><h3>Delivery</h3><form onsubmit="return false"><label for="pin-check">Enter pincode</label> <input id="pin-check" inputmode="numeric" maxlength="6"> <button>Check</button></form><p class="muted">Free delivery over 2,000.</p></div></div>`,
+});
+
+neg({
+  id: 'negative-wifi-03', brand: 'Arcwave', theme: 'corp', header: 'none', footer: 'none', fields: ['#w-name', '#w-sec', '#w-key'],
+  description: 'Router Wireless page with no word wifi in the heading: Network Name, a Security select (WPA2/WPA3), a masked Password and Save. Changes the network, not a login.',
+  title: 'Arcwave - Wireless',
+  main: `<form class="narrow box" onsubmit="return false"><h1>Wireless</h1><p class="muted">2.4 GHz band</p><div class="row"><label for="w-name">Network Name</label><input id="w-name" name="ssid_24" value="Arcwave-7F21"></div><div class="row"><label for="w-sec">Security</label><select id="w-sec" name="security"><option>WPA2-PSK</option><option>WPA3-SAE</option><option>None</option></select></div><div class="row"><label for="w-key">Password</label><input id="w-key" name="wpa_key" type="password" autocomplete="off"></div><button>Save</button></form>`,
+});

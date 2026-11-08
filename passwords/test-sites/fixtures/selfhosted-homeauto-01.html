@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hearthstead</title>
+<link rel="icon" href="data:,">
+<style>
+:root{--bg:#eef1f5;--fg:#1b2430;--soft:#5a6778;--line:#cfd6df;--accent:#2c5fb3;--card:#ffffff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui, "Segoe UI", Roboto, sans-serif}
+a{color:var(--accent)}
+h1,h2,h3{line-height:1.25;margin:.2em 0 .5em}
+input,select,textarea{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:4px;padding:.45em .6em;max-width:100%}
+button,input[type=submit],input[type=button]{font:inherit;cursor:pointer;background:var(--accent);color:#fff;border:0;border-radius:4px;padding:.5em 1em}
+button[disabled],input[disabled]{opacity:.5;cursor:not-allowed}
+.wrap{max-width:1040px;margin:0 auto;padding:24px 16px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:24px}
+.narrow{max-width:420px;margin:0 auto}
+.row{margin:0 0 14px}
+.row label,.lbl{display:block;font-weight:600;margin-bottom:4px}
+.row input:not([type=checkbox]):not([type=radio]){width:100%}
+.split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
+@media(max-width:720px){.split{grid-template-columns:minmax(0,1fr)}}
+.muted{color:var(--soft);font-size:.9em}
+.linkbtn{background:none;color:var(--accent);padding:0;text-decoration:underline}
+
+
+hs-authorize,hs-auth-flow,hs-textfield{display:block}.hs-card{max-width:400px;margin:70px auto;background:var(--card);border-radius:12px;box-shadow:0 2px 10px rgba(0,0,0,.12);padding:28px}
+hs-textfield{position:relative;margin:14px 0}hs-textfield input{width:100%;padding:22px 12px 6px;border:0;border-bottom:1px solid #888;border-radius:4px 4px 0 0;background:#f2f4f7}
+hs-textfield .lbl{position:absolute;left:12px;top:15px;color:#666;pointer-events:none;transition:all .15s}hs-textfield.up .lbl{top:4px;font-size:.75em}
+.hs-sw{display:flex;align-items:center;gap:10px;margin:12px 0}.hs-sw button{width:36px;height:20px;border-radius:10px;padding:0;background:#bbb}.hs-sw button[aria-checked=true]{background:var(--accent)}.hs-act{text-align:right}
+</style>
+
+</head>
+<body>
+
+<hs-authorize><div class="hs-card"><p class="muted">Logging in to <b>http://127.0.0.1</b>.</p><hs-auth-flow id="flow"></hs-auth-flow></div></hs-authorize>
+
+
+
+<script>
+var S={username:'',password:'',otp:''};window.__fixture={state:function(){return S;}};
+function bind(el,key){el.addEventListener('input',function(){S[key]=el.value;});}
+customElements.define('hs-authorize',class extends HTMLElement{});customElements.define('hs-auth-flow',class extends HTMLElement{});
+customElements.define('hs-textfield',class extends HTMLElement{connectedCallback(){var i=this.querySelector('input');var me=this;var up=function(){me.classList.toggle('up',document.activeElement===i||!!i.value);};i.addEventListener('focus',up);i.addEventListener('blur',up);i.addEventListener('input',up);up();}});
+var flow=document.getElementById('flow');
+function login(){flow.innerHTML='<form id="hs-form" onsubmit="return false"><hs-textfield><input name="username" id="hs-u" autocomplete="username" autocapitalize="off"><span class="lbl">Username</span></hs-textfield><hs-textfield><input name="password" id="hs-p" type="password" autocomplete="current-password"><span class="lbl">Password</span></hs-textfield><div class="hs-sw"><button type="button" role="switch" aria-checked="false" aria-label="Keep me logged in" id="hs-keep"></button><span>Keep me logged in</span></div><div class="hs-act"><button type="submit" id="hs-login">Log in</button></div></form>';
+ bind(document.getElementById('hs-u'),'username');bind(document.getElementById('hs-p'),'password');
+ document.getElementById('hs-keep').onclick=function(){this.setAttribute('aria-checked',this.getAttribute('aria-checked')==='true'?'false':'true');};
+ document.getElementById('hs-form').addEventListener('submit',function(){if(S.username&&S.password)setTimeout(mfa,300);});}
+function mfa(){flow.innerHTML='<form id="hs-form2" onsubmit="return false"><p>Please enter the code from your authenticator app.</p><hs-textfield><input name="code" id="hs-c" autocomplete="one-time-code" inputmode="numeric"><span class="lbl">Two-factor authentication code</span></hs-textfield><div class="hs-act"><button type="submit">Log in</button></div></form>';
+ var c=document.getElementById('hs-c');bind(c,'otp');c.focus();flow.setAttribute('data-step','mfa');}
+login();
+</script>
+</body>
+</html>

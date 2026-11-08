@@ -1,9 +1,11 @@
 # Autofill test sites
 
-A local corpus of 161 pages for testing the password manager's field classifier and filler
-(134 positive, 27 negative). Each page reproduces a pattern seen on real sites, written from
-scratch with invented brands. The pages were written without reference to the classifier, so
-they are not fitted to it. Nothing here contacts the network.
+A local corpus of 184 pages for testing the password manager's field classifier and filler
+(150 positive, 34 negative). Each page reproduces a pattern seen on real sites, written from
+scratch with invented brands. The first 161 were written without reference to the classifier.
+The 23 added later (`multi-step-13` to `16`, `selfhosted-*`, and seven negatives) were written
+by someone who knew it, so they test its rules rather than measure it blind. Nothing here
+contacts the network.
 
 ## Running
 
@@ -16,8 +18,14 @@ node gen/build.mjs                              # regenerate fixtures/ and manif
 ```
 
 `server.mjs` also exports `start(ports?)`, which resolves to `{ close, ports }`. The Host header
-is not checked, so `a.localhost`, `b.localhost`, `other.localhost`, `localhost` and deeper names
-such as `login.a.localhost` all reach it. `/` lists every fixture.
+is not checked, so `a.localhost`, `b.localhost`, `other.localhost`, `localhost`, `127.0.0.1` and
+deeper names such as `login.a.localhost` all reach it. `/` lists every fixture. The `selfhosted`
+fixtures on `127.0.0.1` are the box-on-the-LAN case: an IP address and a port over plain HTTP.
+
+The runners that score the classifier against this corpus live in `passwords/tests/`
+(`corpus-chromium.mjs`, `corpus-firefox.mjs`, and `corpus-extension.mjs`, which runs the
+extension's own content script). Run them from `e2e/`, with `PW_SITES=../test-sites-holdout`
+and so on for another set, and `PW_SITES_PORTS` for the ports.
 
 HTML responses have two tokens replaced so that frames follow a port override: `__PORT__` (the
 port the request came in on) and `__OTHER_PORT__`. Open fixtures through the server, not from disk.
@@ -117,7 +125,7 @@ Every page defines `window.__fixture.state()`, including negative pages, which r
 | --- | --- | --- |
 | `signin` | 17 | tables, no form, generated ids, wrapped and aria-labelledby labels, placeholder-only, icon-only, toggle, text-until-focus, WebForms single form |
 | `email-first` | 6 | in place on one page |
-| `multi-step` | 12 | 4 by real navigation, 4 with a code step, account chooser, hidden carrier fields |
+| `multi-step` | 16 | 5 by real navigation, 6 with a code step, account chooser, hidden carrier fields; 13 to 16 follow the big account providers (one page with a password step kept hidden until it's ready, one form for every step, a sign-in frame from another site, three real pages) |
 | `modal` | 8 | dialog, popover, overlay on a timer, tabs, drawer, dropdown, portal |
 | `shadow` | 9 | open, closed, nested, slotted, internal labels, form-associated, declarative |
 | `iframe` | 11 | same-origin, other host, other port, nested, srcdoc, late, stepped, shadow inside |
@@ -130,7 +138,8 @@ Every page defines `window.__fixture.state()`, including negative pages, which r
 | `late` | 7 | |
 | `card` | 7 | includes hosted fields in cross-origin frames |
 | `identity` | 4 | |
-| `negative` | 25 | search, newsletter and everything else that must not trigger |
+| `negative` | 32 | search, newsletter and everything else that must not trigger, including the shapes behind the blind sets' false offers |
+| `selfhosted` | 12 | NAS, home automation, hypervisor, media server, metrics dashboard, container manager, git forge, two routers, DNS sinkhole, file cloud, sign-on portal; eight on `127.0.0.1` |
 
 ## What the checks cover
 
