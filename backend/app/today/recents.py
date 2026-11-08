@@ -44,10 +44,10 @@ logger = logging.getLogger("promptly.today.recents")
 UTC = timezone.utc
 CAP = 50
 DEBOUNCE = timedelta(seconds=30)
-OFFICE = ("document", "sheet", "whiteboard")
+OFFICE = ("document", "sheet", "whiteboard", "form")
 FILE_KINDS = (*OFFICE, "file", "item")
 KINDS = (*FILE_KINDS, "chat", "room", "workspace_item")
-PostKind = Literal["document", "sheet", "whiteboard", "file", "item", "chat", "room", "workspace_item"]
+PostKind = Literal["document", "sheet", "whiteboard", "form", "file", "item", "chat", "room", "workspace_item"]
 
 router = APIRouter()
 
@@ -65,7 +65,7 @@ def _stem(name: str, suffixes: tuple[str, ...]) -> str:
 
 def office_title(filename: str | None) -> str:
     """A doc / sheet / whiteboard's title from its shell's file name."""
-    return _stem(filename or "", (".sheet", ".whiteboard", ".html", ".md", ".docx"))
+    return _stem(filename or "", (".sheet", ".whiteboard", ".form", ".html", ".md", ".docx"))
 
 
 def _file_icon(mime: str | None) -> str:
@@ -94,7 +94,7 @@ async def _resolve_file(db: AsyncSession, user: User, file_id: uuid.UUID) -> dic
             return None
         seg = "doc" if sk == "document" else sk
         title = office_title(row.filename)
-        label = {"document": "Doc", "sheet": "Sheet", "whiteboard": "Whiteboard"}[sk]
+        label = {"document": "Doc", "sheet": "Sheet", "whiteboard": "Whiteboard", "form": "Form"}[sk]
         return {"kind": sk, "title": title, "detail": label, "url": f"/files/{seg}/{row.id}", "icon": sk}
     if sk == "item":
         from app.items import service as items

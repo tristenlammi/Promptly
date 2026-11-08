@@ -138,3 +138,5 @@ from app.trash.models import TrashEntry  # noqa: F401
 from app.links.models import EntityLink  # noqa: F401
 from app.today.models import RecentOpen  # noqa: F401
 from app.workspaces.meetings_models import MeetingJob  # noqa: F401
+# Forms (WP-F1.1).
+from app.forms.models import Form, FormNotify, FormOptionCount, FormResponse, FormUpload  # noqa: F401

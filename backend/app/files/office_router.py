@@ -39,6 +39,9 @@ async def office_token_response(db: AsyncSession, row: UserFile, user: User) -> 
 
     perm = "write" if access == "edit" else "read"
     kind = row.source_kind
+    if kind == GeneratedKind.FORM.value:
+        # A form has no collab room: the builder saves with a version guard.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     if kind == GeneratedKind.DOCUMENT.value:
         from app.files.documents_router import _mint_collab_token
 
@@ -178,6 +181,9 @@ async def take_snapshot(
     row = await db.get(UserFile, file_id)
     if row is None or await get_office_access(db, row, user) != "edit":
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
+    if row.source_kind == GeneratedKind.FORM.value:
+        # Forms have no versions in phase 1 (autosave + undo).
+        return {"id": None}
     from app import collab_internal
     from app.files.versions import RestoreError, room_for
 
@@ -206,6 +212,7 @@ _EDITOR_PATHS = {
     GeneratedKind.DOCUMENT.value: "doc",
     GeneratedKind.SHEET.value: "sheet",
     GeneratedKind.WHITEBOARD.value: "whiteboard",
+    GeneratedKind.FORM.value: "form",
 }
 
 
@@ -239,11 +246,13 @@ async def _target_folder(db: AsyncSession, folder_id: uuid.UUID | None, user: Us
 class _CreateOfficeRequest(BaseModel):
     # "note" is a Document under another name (a workspace note is one too)
     # — it just starts as "Untitled note", so New → Note in Files reads right.
-    kind: Literal["document", "note", "sheet", "whiteboard"] | None = None
+    kind: Literal["document", "note", "sheet", "whiteboard", "form"] | None = None
     title: str | None = Field(default=None, max_length=200)
     folder_id: uuid.UUID | None = None
     # Start from this template (any office file the caller can read).
     template_id: uuid.UUID | None = None
+    # Forms: one of the built-in templates (``GET /api/forms/templates``).
+    form_template: str | None = Field(default=None, max_length=40)
 
 
 @router.post("/office", response_model=FileResponseSchema, status_code=status.HTTP_201_CREATED)
@@ -252,8 +261,9 @@ async def create_office(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> FileResponseSchema:
-    """New Document / Spreadsheet / Whiteboard in the caller's Drive, blank
-    or from a template (Part C §3.5)."""
+    """New Document / Spreadsheet / Whiteboard / Form in the caller's
+    Drive, blank or from a template (Part C §3.5) — for a form, one of the
+    built-in templates (``form_template``) or one you saved."""
     from app.files.office import create_office_file
     from app.files.office_templates import (
         copy_office_file,
@@ -283,6 +293,16 @@ async def create_office(
             sheet = await content_for_shell(db, row)
             if sheet is not None and sheet.data is not None:
                 sheet.data = _json.loads(fill_template_placeholders(_json.dumps(sheet.data)))
+    elif payload.form_template is not None:
+        from app.forms.service import from_template
+
+        made = await from_template(
+            db, owner=user, key=payload.form_template, title=title or None,
+            folder_id=folder.id if folder else None,
+        )
+        if made is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+        row = made[0]
     else:
         if payload.kind is None:
             raise HTTPException(
@@ -293,6 +313,7 @@ async def create_office(
             "note": "Untitled note",
             "sheet": "Untitled spreadsheet",
             "whiteboard": "Untitled whiteboard",
+            "form": "Untitled form",
         }
         kind = "document" if payload.kind == "note" else payload.kind
         row, _entity = await create_office_file(

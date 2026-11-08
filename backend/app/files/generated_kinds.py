@@ -97,6 +97,16 @@ class GeneratedKind(str, Enum):
     SHEET = "sheet"
     WHITEBOARD = "whiteboard"
 
+    # Forms (WP-F1.1, 0290): a form's shell — the form itself is a
+    # ``forms`` row (``file_id`` points back); downloads export a .zip of
+    # the questions and the answers. ``FORM_ASSET`` is a picture in a form
+    # (header, question, option); ``FORM_UPLOAD`` is a file someone sent
+    # with their answer. Both hang off the shell by ``source_file_id``,
+    # are owned by the form's owner (quota) and are never listed.
+    FORM = "form"
+    FORM_ASSET = "form_asset"
+    FORM_UPLOAD = "form_upload"
+
 
 # Derived rows that exist for the AI (and a document's inline media), not
 # for people: never listed in Drive — browse, Recent, Starred, Trash,
@@ -112,8 +122,21 @@ HIDDEN_KINDS: frozenset[str] = frozenset(
         GeneratedKind.ROSTER_TEXT.value,
         GeneratedKind.DISCUSSION_TEXT.value,
         GeneratedKind.AUTOMATIONS_TEXT.value,
+        # Forms: pictures in a form and respondents' files.
+        GeneratedKind.FORM_ASSET.value,
+        GeneratedKind.FORM_UPLOAD.value,
+    }
+)
+
+# Hidden rows that are real uploads, not derived copies: they count
+# against their owner's storage.
+QUOTA_COUNTED_HIDDEN: frozenset[str] = frozenset(
+    {
+        GeneratedKind.DOCUMENT_ASSET.value,
+        GeneratedKind.FORM_ASSET.value,
+        GeneratedKind.FORM_UPLOAD.value,
     }
 )
 
 
-__all__ = ["GeneratedKind", "HIDDEN_KINDS"]
+__all__ = ["GeneratedKind", "HIDDEN_KINDS", "QUOTA_COUNTED_HIDDEN"]

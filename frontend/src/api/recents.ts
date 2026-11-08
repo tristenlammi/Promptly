@@ -6,7 +6,7 @@ import { apiClient } from "@/api/client";
  * items, newest first. Each ``url`` is the in-app route straight back to it.
  */
 
-export type RecentKind = "document" | "sheet" | "whiteboard" | "file" | "item" | "chat" | "room" | "workspace_item";
+export type RecentKind = "document" | "sheet" | "whiteboard" | "form" | "file" | "item" | "chat" | "room" | "workspace_item";
 
 export interface RecentEntry {
   kind: RecentKind;

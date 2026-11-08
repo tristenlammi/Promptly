@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Blocks,
+  ClipboardList,
   File,
   FileText,
   Film,
@@ -39,6 +40,8 @@ function iconFor(e: RecentEntry): LucideIcon {
       return Table2;
     case "whiteboard":
       return PenTool;
+    case "form":
+      return ClipboardList;
     case "item":
       return Blocks;
     case "chat":

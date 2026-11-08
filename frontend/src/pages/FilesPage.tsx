@@ -33,6 +33,7 @@ import {
   type FolderItem,
   type SharedView,
   supportsEditGrant,
+  shareLinksAllowed,
   shareRolesFor,
   type ShareLinkRole,
 } from "@/api/files";
@@ -306,6 +307,8 @@ export function FilesPage({
       supportsEdit?: boolean;
       /** WP-6.6 — roles a link / person can have (``shareRolesFor``). */
       roles?: ShareLinkRole[];
+      /** Forms: no file links (a form is answered through its own link). */
+      links?: boolean;
     } | null
   >(null);
 
@@ -1081,6 +1084,7 @@ export function FilesPage({
                     name: detailFile.filename,
                     supportsEdit: supportsEditGrant(detailFile),
                     roles: shareRolesFor(detailFile),
+                    links: shareLinksAllowed(detailFile),
                   });
                 }
               }}
@@ -1199,6 +1203,7 @@ export function FilesPage({
             name: f.filename,
             supportsEdit: supportsEditGrant(f),
             roles: shareRolesFor(f),
+            links: shareLinksAllowed(f),
           })
         }
         onEdit={(f) => {
@@ -1249,6 +1254,7 @@ export function FilesPage({
                 name: shareGrantsFor.name,
                 supports_edit: shareGrantsFor.supportsEdit ?? false,
                 roles: shareGrantsFor.roles,
+                links: shareGrantsFor.links,
               }
             : null
         }
@@ -1454,6 +1460,8 @@ function ContentGrid({
     name: string;
     supportsEdit?: boolean;
     roles?: ShareLinkRole[];
+    /** Forms: no file links (a form is answered through its own link). */
+    links?: boolean;
   }) => void;
   onSelectItem?: (kind: "file" | "folder", id: string, e: React.MouseEvent) => void;
   /** "file:<id>" / "folder:<id>" whose rename F2 asked for. */
@@ -1535,6 +1543,7 @@ function ContentGrid({
           name: entry.file.filename,
           supportsEdit: supportsEditGrant(entry.file),
           roles: shareRolesFor(entry.file),
+          links: shareLinksAllowed(entry.file),
         });
     };
     const toggleStar = (entry: DriveEntry) => {

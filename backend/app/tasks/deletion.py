@@ -197,6 +197,13 @@ async def purge_user(
         identifier=user.email,
         detail=detail[:512],
     )
+    # Forms: a form row never cascades from its shell, so their forms (and
+    # the answers) go first, or the files' cascade would be refused.
+    from sqlalchemy import text as _text
+
+    await db.execute(
+        _text("DELETE FROM forms WHERE file_id IN (SELECT id FROM files WHERE user_id = :u)"), {"u": uid}
+    )
     # Workspaces still owned here (the solo ones) cascade with the user.
     await db.delete(user)
     await db.commit()

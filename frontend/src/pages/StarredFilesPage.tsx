@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Star } from "lucide-react";
 
-import { filesApi, type FileItem, type ShareLinkRole, shareRolesFor, supportsEditGrant } from "@/api/files";
+import { filesApi, type FileItem, type ShareLinkRole, shareRolesFor, shareLinksAllowed, supportsEditGrant } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveSimpleList } from "@/components/files/DriveSimpleList";
 import { DriveSelectionBar } from "@/components/files/DriveSelectionBar";
@@ -43,6 +43,8 @@ export function StarredFilesPage() {
       name: string;
       supportsEdit?: boolean;
       roles?: ShareLinkRole[];
+      /** Forms: no file links (a form is answered through its own link). */
+      links?: boolean;
     } | null
   >(null);
 
@@ -165,6 +167,7 @@ export function StarredFilesPage() {
                           name: e.file.filename,
                           supportsEdit: supportsEditGrant(e.file),
                           roles: shareRolesFor(e.file),
+                          links: shareLinksAllowed(e.file),
                         }),
                       onTrash: () => trashFile.mutate({ id: e.file.id, scope: SCOPE }),
                     }
@@ -190,6 +193,7 @@ export function StarredFilesPage() {
             name: f.filename,
             supportsEdit: supportsEditGrant(f),
                           roles: shareRolesFor(f),
+                          links: shareLinksAllowed(f),
           })
         }
         onToggleStar={(f) => {
@@ -207,6 +211,7 @@ export function StarredFilesPage() {
                 name: shareFor.name,
                 supports_edit: shareFor.supportsEdit ?? false,
                 roles: shareFor.roles,
+                links: shareFor.links,
               }
             : null
         }

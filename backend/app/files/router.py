@@ -2088,18 +2088,19 @@ async def download_file(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> FastAPIFileResponse:
-    from app.files.office import content_for_shell, export_for_download, get_office_access, is_shell
+    from app.files.office import content_for_shell, export_shell, get_office_access, is_shell
 
     shell = await db.get(UserFile, file_id)
     if shell is not None and is_shell(shell):
         # A sheet / whiteboard downloads as .xlsx / .excalidraw, exported
-        # from its live content (WP-3.2) — it has no blob of its own.
+        # from its live content (WP-3.2) — it has no blob of its own. A
+        # form is a .zip of its questions and answers.
         if await get_office_access(db, shell, user) == "none":
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
         entity = await content_for_shell(db, shell)
         if entity is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-        data, name, mime = await asyncio.to_thread(export_for_download, shell, entity)
+        data, name, mime = await export_shell(db, shell, entity)
         return Response(
             content=data,
             media_type=mime,
@@ -4024,7 +4025,8 @@ async def _assert_can_comment_allowed(
     from app.files.office import OFFICE_SOURCE_KINDS
 
     row = await db.get(UserFile, resource_id) if resource_type == "file" else None
-    if row is None or row.source_kind not in OFFICE_SOURCE_KINDS:
+    # Forms have no comments: their people edit, or see the answers.
+    if row is None or row.source_kind not in OFFICE_SOURCE_KINDS or row.source_kind == "form":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Commenting is available on documents, spreadsheets and whiteboards.",
@@ -4724,6 +4726,13 @@ async def create_file_share_link(
     user: User = Depends(get_current_user),
 ) -> ShareLinkResponse:
     row = await _assert_share_owner_of_file(db, file_id, user)
+    if row.source_kind == "form":
+        # A form's answer link (Send) never serves the form itself, and a
+        # file link would hand out its answers.
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A form has its own link for answers: open the form and use Send.",
+        )
     link = await _create_share_link(
         db,
         resource_type="file",

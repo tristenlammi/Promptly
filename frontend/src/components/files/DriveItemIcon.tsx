@@ -1,6 +1,7 @@
 import {
   Archive,
   Camera,
+  ClipboardList,
   File as FileIcon,
   FileCode,
   FileText,
@@ -82,6 +83,8 @@ function fileTint(file: IconFile): Tint {
     return { Icon: TableIcon, text: "text-emerald-600", tile: "bg-emerald-600/15" };
   if (file.source_kind === "whiteboard")
     return { Icon: PenTool, text: "text-orange-500", tile: "bg-orange-500/15" };
+  if (file.source_kind === "form")
+    return { Icon: ClipboardList, text: "text-purple-600", tile: "bg-purple-600/15" };
 
   const kind = classifyMime(file.mime_type, file.filename, file.source_kind);
   switch (kind) {

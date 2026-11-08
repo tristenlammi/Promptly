@@ -788,3 +788,7 @@ app.include_router(
     prefix="/api/notifications",
     tags=["notifications"],
 )
+# Forms (WP-F1.1): the owner side of a form, a Files document type.
+from app.forms.router import router as forms_router  # noqa: E402
+
+app.include_router(forms_router, prefix="/api/forms", tags=["forms"])

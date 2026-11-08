@@ -187,6 +187,7 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
             stem = f.filename.rsplit(".", 1)[0] if "." in f.filename else f.filename
             ext = (
                 ".xlsx" if f.source_kind == GeneratedKind.SHEET.value
+                else ".form.zip" if f.source_kind == GeneratedKind.FORM.value
                 else "." + f.filename.rsplit(".", 1)[-1] + ".json" if f.source_kind == "item"
                 else ".excalidraw"
             )
@@ -548,7 +549,7 @@ async def _office_bytes(e: dict[str, Any]) -> tuple[bytes | None, bool]:
     they are now."""
     from app.database import SessionLocal
     from app.files.models import UserFile
-    from app.files.office import content_for_shell, export_for_download
+    from app.files.office import content_for_shell, export_shell
 
     async with SessionLocal() as db:
         row = await db.get(UserFile, uuid.UUID(e["f"]))
@@ -558,7 +559,7 @@ async def _office_bytes(e: dict[str, Any]) -> tuple[bytes | None, bool]:
             entity = await content_for_shell(db, row)
             if entity is None:
                 return None, False
-            data, _name, _mime = await asyncio.to_thread(export_for_download, row, entity)
+            data, _name, _mime = await export_shell(db, row, entity)
             return data, False
         from app.files import page_setup
         from app.files.docx_writer import html_to_docx

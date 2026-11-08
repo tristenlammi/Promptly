@@ -137,6 +137,10 @@ class PushPreferences(Base):
     calendar: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # Forms (0290): "New answers to my forms". Counts only, never an answer.
+    form_response: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

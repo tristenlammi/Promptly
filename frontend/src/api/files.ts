@@ -187,13 +187,22 @@ export function isOfficeShell(file: Pick<FileItem, "source_kind">): boolean {
 export function shareRolesFor(
   file: Pick<FileItem, "source_kind"> & Partial<Pick<FileItem, "filename" | "mime_type">>
 ): ShareLinkRole[] {
+  // A form: people see it and its answers, or edit it. No comments, and
+  // no file links — a form is answered through its own link (Send).
+  if (file.source_kind === "form") return ["view", "edit"];
   if (isDocumentFile(file) || isOfficeShell(file)) return ["view", "comment", "edit"];
   if (isEditablePdf(file)) return ["view", "edit"];
   return ["view"];
 }
 
+/** Can this file have share links? Not a form: it's answered through its
+ *  own link (Send in the form), and a file link would hand out its answers. */
+export function shareLinksAllowed(file: Pick<FileItem, "source_kind">): boolean {
+  return file.source_kind !== "form";
+}
+
 export function supportsEditGrant(file: Pick<FileItem, "source_kind"> & Partial<Pick<FileItem, "filename" | "mime_type">>): boolean {
-  return isDocumentFile(file) || isOfficeShell(file) || isEditablePdf(file);
+  return isDocumentFile(file) || isOfficeShell(file) || isEditablePdf(file) || file.source_kind === "form";
 }
 
 /** An uploaded PDF — fill in, mark up and reorganise in the viewer, and

@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+
+- Forms (groundwork): a form is a new kind of file. It can be made blank or from six ready templates (RSVP, sign-up sheet, feedback, contact details, event registration, order form), copied, saved as a template, shared with people who can edit it or see its answers, trashed (which stops it taking answers) and restored (still closed), and downloaded as a .zip of its questions and answers. The form builder comes next, so "New ▸ Form" stays hidden until then.
+
 ## [0.31.0] - 2026-11-08
 
 ### Added

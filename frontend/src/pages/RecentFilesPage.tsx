@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Clock } from "lucide-react";
 
-import { type FileItem, supportsEditGrant, shareRolesFor } from "@/api/files";
+import { type FileItem, supportsEditGrant, shareRolesFor, shareLinksAllowed } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
 import { DriveEmptyState, DriveSimpleList } from "@/components/files/DriveSimpleList";
 import { DriveSubNav } from "@/components/files/DriveSubNav";
@@ -115,6 +115,7 @@ export function RecentFilesPage() {
                 name: shareFor.filename,
                 supports_edit: supportsEditGrant(shareFor),
                 roles: shareRolesFor(shareFor),
+                links: shareLinksAllowed(shareFor),
               }
             : null
         }

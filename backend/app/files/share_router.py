@@ -82,6 +82,16 @@ settings = get_settings()
 
 router = APIRouter()
 
+# Never shown or served through a file or folder link: a document's inline
+# media (part of the document), and forms — a form is answered through its
+# own link, and its download carries other people's answers (Forms).
+_NOT_IN_FOLDER_LINKS = (
+    GeneratedKind.DOCUMENT_ASSET.value,
+    GeneratedKind.FORM.value,
+    GeneratedKind.FORM_ASSET.value,
+    GeneratedKind.FORM_UPLOAD.value,
+)
+
 
 # --------------------------------------------------------------------
 # Helpers
@@ -662,7 +672,7 @@ async def browse_share(
                     # not loose files in the folder (R-027).
                     or_(
                         UserFile.source_kind.is_(None),
-                        UserFile.source_kind != GeneratedKind.DOCUMENT_ASSET.value,
+                        UserFile.source_kind.not_in(_NOT_IN_FOLDER_LINKS),
                     ),
                 )
                 .order_by(UserFile.filename.asc())
@@ -762,6 +772,9 @@ async def _document_download(file: UserFile) -> Response:
 async def _shell_download(db: AsyncSession, file: UserFile) -> Response:
     from app.files.office import content_for_shell, export_for_download
 
+    if file.source_kind in _NOT_IN_FOLDER_LINKS:
+        # A form's answers never leave through a share link.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     entity = await content_for_shell(db, file)
     if entity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Linked file no longer exists")
@@ -787,6 +800,8 @@ async def _office_view(db: AsyncSession, file: UserFile) -> dict:
     from app.files.office_templates import office_title
     from app.workspaces.export_router import canvas_scene_json
 
+    if file.source_kind in _NOT_IN_FOLDER_LINKS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nothing to show")
     entity = await content_for_shell(db, file) if is_shell(file) else None
     if entity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nothing to show")

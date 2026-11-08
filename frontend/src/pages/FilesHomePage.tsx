@@ -1,4 +1,4 @@
-import { FileText, LayoutTemplate, Loader2, MessageSquareText, Presentation, Shapes, StickyNote, Table2, Upload } from "lucide-react";
+import { ClipboardList, FileText, LayoutTemplate, Loader2, MessageSquareText, Presentation, Shapes, StickyNote, Table2, Upload } from "lucide-react";
 import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -13,6 +13,7 @@ import { displayFileName, extractError, formatRelativeTime, kindLabel, openFile 
 import { TemplatePickerModal } from "@/components/files/TemplatePickerModal";
 import { TopNav } from "@/components/layout/TopNav";
 import { useRecentFiles } from "@/hooks/useFiles";
+import { FORMS_BUILDER_READY } from "@/lib/forms";
 import { toast } from "@/store/toastStore";
 import { useUploadStore } from "@/store/uploadStore";
 import { cn } from "@/utils/cn";
@@ -63,6 +64,10 @@ export function FilesHomePage() {
     { label: "Note", icon: StickyNote, tint: "text-yellow-600 bg-yellow-500/10", onClick: () => void create("note"), busy: creating === "note" },
     { label: "Spreadsheet", icon: Table2, tint: "text-emerald-600 bg-emerald-500/10", onClick: () => void create("sheet"), busy: creating === "sheet" },
     { label: "Whiteboard", icon: Shapes, tint: "text-violet-600 bg-violet-500/10", onClick: () => void create("whiteboard"), busy: creating === "whiteboard" },
+    // Forms: shown once the builder (WP-F1.2) is in.
+    ...(FORMS_BUILDER_READY
+      ? [{ label: "Form", icon: ClipboardList, tint: "text-purple-600 bg-purple-600/10", onClick: () => void create("form"), busy: creating === "form" }]
+      : []),
     {
       label: "Presentation", icon: Presentation, tint: "text-orange-600 bg-orange-500/10", busy: creating === "presentation",
       onClick: () => {

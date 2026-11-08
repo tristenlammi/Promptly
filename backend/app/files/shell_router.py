@@ -214,11 +214,11 @@ async def storage_breakdown(
     from sqlalchemy import or_
 
     from app.backups.models import BackupRun
-    from app.files.generated_kinds import HIDDEN_KINDS, GeneratedKind
+    from app.files.generated_kinds import HIDDEN_KINDS, QUOTA_COUNTED_HIDDEN
     from app.files.quota import get_quota
 
     quota = await get_quota(db, user)
-    derived = sorted(HIDDEN_KINDS - {GeneratedKind.DOCUMENT_ASSET.value})
+    derived = sorted(HIDDEN_KINDS - QUOTA_COUNTED_HIDDEN)
     trash = await db.scalar(
         select(func.coalesce(func.sum(UserFile.size_bytes), 0)).where(
             UserFile.user_id == user.id,
