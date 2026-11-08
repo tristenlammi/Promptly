@@ -35,6 +35,7 @@ import {
   type Command,
   type DoKind,
 } from "@/lib/paletteCommands";
+import { useCallPaletteRows } from "@/rtc/call/ui/paletteCalls";
 import { useVoicePaletteRows } from "@/rtc/ui/paletteVoice";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
@@ -179,14 +180,19 @@ export function usePaletteActions(
 
   // Calls: join a voice channel, and Mute / Deafen / Leave while in one.
   const voiceRows = useVoicePaletteRows(query, navigate);
-  const voiceFirst = !doRow && voiceRows.length > 0 && voiceRows[0].sure;
+  // Calls: "Call Mum", "Video call Sam" (people you can call).
+  const callRows = useCallPaletteRows(query, navigate);
+  const callFirst = !doRow && callRows.length > 0 && callRows[0].sure;
+  const voiceFirst = !doRow && !callFirst && voiceRows.length > 0 && voiceRows[0].sure;
 
   const actions = useMemo(
     () =>
-      voiceFirst
-        ? [...voiceRows, ...createRows, ...(mapRow ? [mapRow] : [])]
-        : [...(doRow ? [doRow] : []), ...createRows, ...voiceRows, ...(mapRow ? [mapRow] : [])],
-    [doRow, createRows, mapRow, voiceRows, voiceFirst],
+      callFirst
+        ? [...callRows, ...voiceRows, ...createRows, ...(mapRow ? [mapRow] : [])]
+        : voiceFirst
+          ? [...voiceRows, ...callRows, ...createRows, ...(mapRow ? [mapRow] : [])]
+          : [...(doRow ? [doRow] : []), ...callRows, ...createRows, ...voiceRows, ...(mapRow ? [mapRow] : [])],
+    [doRow, createRows, mapRow, voiceRows, voiceFirst, callRows, callFirst],
   );
 
   /** Tab on the Do row: the next file to write to. */
@@ -199,7 +205,7 @@ export function usePaletteActions(
     return true;
   };
 
-  return { actions, sureTop: !!doRow?.sure || voiceFirst, cycleTarget };
+  return { actions, sureTop: !!doRow?.sure || voiceFirst || callFirst, cycleTarget };
 }
 
 interface Ctx {

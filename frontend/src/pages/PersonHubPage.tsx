@@ -20,6 +20,7 @@ import {
   Phone,
   Share2,
   UserRound,
+  Video,
 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -35,6 +36,7 @@ import { daysFrom, fmtDate, nextOccurrence } from "@/items/kinds/contacts/model"
 import { birthdayLabel, contactPath, photosPersonPath } from "@/items/kinds/contacts/photosLink";
 import { todayISO } from "@/items/ui";
 import { BOOTSTRAP_KEY } from "@/rooms/cache";
+import { calls } from "@/rtc/call/actions";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
@@ -173,8 +175,26 @@ function PersonBody({ p }: { p: PersonPage }) {
 
       {/* Actions */}
       {other && (
-        <section className="grid grid-cols-3 gap-2">
+        <section className={cn("grid gap-2", p.can_call ? "grid-cols-3 sm:grid-cols-5" : "grid-cols-3")}>
           <ActionTile icon={<MessageCircle className="h-5 w-5" />} label="Message" onClick={() => void message()} busy={opening} />
+          {p.can_call && (
+            <>
+              <ActionTile
+                icon={<Phone className="h-5 w-5" />}
+                label="Call"
+                ariaLabel={`Call ${first}`}
+                onClick={() => void calls.startWith([other.id], "audio")}
+                testId="person-call"
+              />
+              <ActionTile
+                icon={<Video className="h-5 w-5" />}
+                label="Video call"
+                ariaLabel={`Video call ${first}`}
+                onClick={() => void calls.startWith([other.id], "video")}
+                testId="person-video-call"
+              />
+            </>
+          )}
           <ActionTile
             icon={<CalendarPlus className="h-5 w-5" />}
             label="Invite to event"
@@ -429,12 +449,28 @@ function DetailRow({ icon, label, value, href }: { icon: ReactNode; label: strin
   );
 }
 
-function ActionTile({ icon, label, onClick, busy }: { icon: ReactNode; label: string; onClick: () => void; busy?: boolean }) {
+function ActionTile({
+  icon,
+  label,
+  onClick,
+  busy,
+  ariaLabel,
+  testId,
+}: {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  busy?: boolean;
+  ariaLabel?: string;
+  testId?: string;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={busy}
+      aria-label={ariaLabel}
+      data-testid={testId}
       className="flex min-h-[72px] flex-col items-center justify-center gap-1.5 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-2 text-center text-xs font-medium text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-60 sm:text-sm"
     >
       <span className="text-[var(--accent-text,var(--accent))]">{icon}</span>

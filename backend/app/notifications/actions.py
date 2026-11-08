@@ -38,6 +38,11 @@ LABELS = {
     "cal_snooze": "Snooze 10 min",
     "task_done": "Done",
     "task_snooze": "Snooze 1 hour",
+    # Calls (0282): a ringing DM call. Decline works from the push alone;
+    # Answer needs media, so its token is redeemed by the page or the
+    # Android incoming-call screen at /api/calls/answer (never here).
+    "call_decline": "Decline",
+    "call_answer": "Answer",
 }
 
 
@@ -125,6 +130,8 @@ async def perform(db: AsyncSession, token: str) -> str:
         return await _task_done(db, user, target)
     if action == "task_snooze":
         return await _task_snooze(db, user, target)
+    if action == "call_decline":
+        return await _call_decline(db, user, target)
     raise ActionRefused("bad token")
 
 
@@ -241,3 +248,14 @@ async def _task_snooze(db: AsyncSession, user: User, target: str) -> str:
     )
     await db.commit()
     return f"I'll remind you about {sent.title} in an hour"
+
+
+async def _call_decline(db: AsyncSession, user: User, target: str) -> str:
+    """Decline a ringing DM call from its push (Calls)."""
+    from app.calls import dm
+
+    try:
+        await dm.decline_by_id(db, user, _uuid(target))
+    except dm.CallError as exc:
+        raise ActionRefused("gone") from exc
+    return "Call declined"

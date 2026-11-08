@@ -381,6 +381,28 @@ export function NotificationsPanel() {
                 extra={(prefs.form_response ?? true) && summaryMode("form_response")}
               />
               <CategoryRow
+                title="Calls"
+                subtitle="Someone calling you in Rooms, and calls you missed."
+                checked={prefs.call ?? true}
+                busy={prefsBusy === "call"}
+                onChange={(v) => toggle("call", v)}
+                dimmed={!prefs.enabled}
+                extra={
+                  (prefs.call ?? true) && prefs.quiet_enabled ? (
+                    <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--text-muted)]">
+                      <input
+                        type="checkbox"
+                        checked={prefs.call_quiet_hold ?? false}
+                        disabled={prefsBusy === "call_quiet_hold"}
+                        onChange={(e) => toggle("call_quiet_hold", e.target.checked)}
+                        data-testid="call-quiet-hold"
+                      />
+                      Don&apos;t ring me during quiet hours (you&apos;ll see who called when they end)
+                    </label>
+                  ) : null
+                }
+              />
+              <CategoryRow
                 title="Passwords"
                 subtitle="A new device asking to join your vault, or someone sharing a vault with you. These never carry anything from the vault."
                 checked={prefs.passwords ?? true}
@@ -456,7 +478,7 @@ function QuietHours({
     <div className="mb-4 overflow-hidden rounded-md border border-[var(--border)]">
       <CategoryRow
         title="Quiet hours"
-        subtitle="Notifications wait until quiet hours end, then arrive together. Calls, Calendar reminders, item reminders, Passwords and admin alerts always get through."
+        subtitle="Notifications wait until quiet hours end, then arrive together. Calls, Calendar reminders, item reminders, Passwords and admin alerts always get through (calls can be held too, under Calls)."
         checked={prefs.quiet_enabled}
         busy={busy}
         onChange={(v) => onSave({ quiet_enabled: v })}

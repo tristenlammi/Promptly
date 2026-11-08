@@ -44,6 +44,19 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- DM calls (Calls WP-D3): a ring that fills the lock screen, and a call that
+         Android treats as a phone call (Core-Telecom: the car, headsets, audio focus).
+         The Play build needs the calling-app declaration for full-screen rings. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <!-- DM calls (Calls WP-D5): the phone's own camera in a video call, which keeps
+         going with the screen locked. Phones without a camera can still install. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <application
         android:name=".SyncApp"
@@ -322,6 +335,42 @@
             android:name=".voice.VoiceService"
             android:exported="false"
             android:foregroundServiceType="microphone|mediaPlayback" />
+
+        <!-- DM calls (Calls WP-D3): Chrome's ring goes to org.promptly.app.Delegation,
+             which hands it to the calls package: the full-screen ring and call screen,
+             the call's audio, and the ring's Decline. -->
+        <activity
+            android:name=".calls.CallActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity="org.promptly.app.calls"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+        <service
+            android:name=".calls.CallService"
+            android:exported="false"
+            android:foregroundServiceType="phoneCall|microphone|camera|mediaPlayback" />
+        <!-- Calls WP-D5: Call / Video call on the page hands the call to this app
+             (promptly://call/start?…), which holds it like a call it answered. -->
+        <activity
+            android:name=".calls.CallStartActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.callstart"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptly" android:host="call" android:path="/start" />
+            </intent-filter>
+        </activity>
+        <receiver android:name=".calls.CallActions" android:exported="false" />
 
         <!-- WorkManager's foreground service, for long backups. -->
         <service

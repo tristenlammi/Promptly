@@ -15,7 +15,13 @@ export type VoiceSound =
   | "deafen"
   | "undeafen"
   | "disconnect"
-  | "live";
+  | "live"
+  // DM calls (Calls WP-D5): through to them, the call's over, the connection
+  // dropped, and it's back.
+  | "call-connect"
+  | "call-end"
+  | "reconnecting"
+  | "reconnected";
 
 /** Each sound: notes [frequency Hz, start s, length s], and a loudness. */
 const SOUNDS: Record<VoiceSound, { notes: [number, number, number][]; gain: number }> = {
@@ -29,6 +35,10 @@ const SOUNDS: Record<VoiceSound, { notes: [number, number, number][]; gain: numb
   undeafen: { notes: [[262, 0, 0.1], [392, 0.07, 0.16]], gain: 0.16 },
   disconnect: { notes: [[523, 0, 0.12], [392, 0.1, 0.12], [262, 0.2, 0.25]], gain: 0.2 },
   live: { notes: [[587, 0, 0.1], [740, 0.08, 0.1], [880, 0.16, 0.18]], gain: 0.14 },
+  "call-connect": { notes: [[523, 0, 0.1], [659, 0.08, 0.1], [784, 0.16, 0.2]], gain: 0.2 },
+  "call-end": { notes: [[480, 0, 0.16], [480, 0.24, 0.16], [480, 0.48, 0.16]], gain: 0.16 },
+  reconnecting: { notes: [[440, 0, 0.14], [392, 0.16, 0.2]], gain: 0.14 },
+  reconnected: { notes: [[392, 0, 0.1], [523, 0.08, 0.18]], gain: 0.14 },
 };
 
 export function playVoiceSound(ctx: BaseAudioContext | null, sound: VoiceSound, volume = 1): void {

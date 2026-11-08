@@ -67,7 +67,8 @@ async def export_sessions(db: AsyncSession, user_id: uuid.UUID) -> list[dict[str
             .join(Call, Call.id == CallParticipant.call_id)
             .outerjoin(Room, Room.id == Call.room_id)
             .outerjoin(RoomSpace, RoomSpace.id == Room.space_id)
-            .where(CallParticipant.user_id == user_id)
+            # Calls you were in (a DM call that only rang you isn't a session).
+            .where(CallParticipant.user_id == user_id, CallParticipant.first_joined_at.is_not(None))
             .order_by(CallParticipant.first_joined_at)
         )
     ).all()
@@ -76,6 +77,7 @@ async def export_sessions(db: AsyncSession, user_id: uuid.UUID) -> list[dict[str
         out.append(
             {
                 "kind": call.kind,
+                **({"media": call.media or "audio"} if call.kind == "dm" else {}),
                 "channel": room_name,
                 "space": space_name,
                 "joined_at": p.first_joined_at.isoformat() if p.first_joined_at else None,

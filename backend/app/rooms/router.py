@@ -97,6 +97,10 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
     voice_on = await calls_access.voice_allowed(db, user, calls_settings)
     voice_ids = [r.id for r in rooms if r.kind == "voice"]
     voice_me = await calls_voice.where(user.id) if voice_on else None
+    # DM calls (Calls phase 2): live calls in your conversations.
+    from app.calls import dm as calls_dm
+
+    calls_live = await calls_dm.live_for(db, user) if voice_on else []
     return {
         "me": core.user_out(user),
         "spaces": out_spaces,
@@ -113,6 +117,10 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
         "voice_limits": (
             {"max_participants": calls_settings.max_participants, "max_stream": calls_settings.max_stream} if voice_on else None
         ),
+        # Live DM calls in your conversations (ringing you, or on with a Join).
+        "calls": calls_live,
+        # The Calls tab's badge: missed calls you haven't seen (Calls WP-D4).
+        "calls_missed": await calls_dm.missed_count(db, user.id) if voice_on else 0,
     }
 
 

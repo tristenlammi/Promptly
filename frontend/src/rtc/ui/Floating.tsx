@@ -21,6 +21,7 @@ export function Floating({
   children,
   className,
   placement = "auto",
+  zIndex = 90,
 }: {
   open: boolean;
   onClose: () => void;
@@ -32,6 +33,8 @@ export function Floating({
   className?: string;
   /** "right": beside the anchor (lists); "auto": above or below it. */
   placement?: "auto" | "right";
+  /** Above something that sits higher (the call screen). */
+  zIndex?: number;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
@@ -124,7 +127,7 @@ export function Floating({
       ref={panel}
       role="dialog"
       aria-label={label}
-      style={{ ...VOICE_ACCENT_STYLE, position: "fixed", left: pos?.left ?? -9999, top: pos?.top ?? -9999, width: Math.min(width, window.innerWidth - 16), zIndex: 90 }}
+      style={{ ...VOICE_ACCENT_STYLE, position: "fixed", left: pos?.left ?? -9999, top: pos?.top ?? -9999, width: Math.min(width, window.innerWidth - 16), zIndex }}
       className={cn(
         "overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] shadow-[var(--shadow-lg)]",
         className,

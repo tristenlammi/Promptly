@@ -255,11 +255,17 @@ async def _page(db: AsyncSession, viewer: User, p: Person) -> dict[str, Any]:
         "files": [],
         # Only whether *you* blocked them — never whether they blocked you.
         "blocked": False,
+        "can_call": False,
     }
     if p.user is not None and not is_me:
         from .blocks import has_blocked
 
         out["blocked"] = await has_blocked(db, viewer.id, p.user.id)
+        # Calls WP-D4: Call / Video call on the page (calls on for both of
+        # you, no block either way, the same rule as Ctrl+K and Contacts).
+        from app.calls import dm as calls_dm
+
+        out["can_call"] = p.user.id in await calls_dm.callable_ids(db, viewer, [p.user.id])
         out["events"] = await _events(db, viewer, p.user)
         out["dm_room_id"], out["rooms"] = await _rooms(db, viewer, p.user)
         out["files"] = await _files(db, viewer, p.user)
@@ -306,6 +312,15 @@ async def block_person(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), v
     await blocks.block(db, viewer.id, user_id)
     await db.commit()
     await _blocks_changed(db, viewer.id, user_id)
+    # Calls: a block ends a 1:1 call between you (D7). Nobody is told why.
+    try:
+        from app.calls import dm as calls_dm
+
+        await calls_dm.block_started(db, viewer.id, user_id)
+    except Exception:  # noqa: BLE001 — the block itself has happened
+        import logging
+
+        logging.getLogger("promptly.people").warning("calls not ended after a block", exc_info=True)
     return {"user_id": str(user_id), "blocked": True}
 
 

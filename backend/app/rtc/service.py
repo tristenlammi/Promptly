@@ -91,6 +91,19 @@ async def remove_participant(room: str, identity: str) -> bool:
             raise
 
 
+async def delete_room(room: str) -> bool:
+    """Close a LiveKit room: everyone in it is disconnected at once. False
+    when it wasn't there (nobody had connected yet, or already closed)."""
+    async with room_service() as rs:
+        try:
+            await rs.delete_room(api.DeleteRoomRequest(room=room))
+            return True
+        except Exception as exc:  # noqa: BLE001
+            if getattr(exc, "status", None) == 404 or str(getattr(exc, "code", "")) == "not_found":
+                return False
+            raise
+
+
 async def send_data(room: str, payload: bytes, *, identities: list[str] | None = None, topic: str | None = None) -> None:
     req = api.SendDataRequest(room=room, data=payload, kind=api.DataPacket.RELIABLE, destination_identities=identities or [])
     if topic:

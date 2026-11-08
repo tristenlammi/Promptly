@@ -14,6 +14,7 @@ import { AttachmentList } from "./Attachments";
 import { EventCard } from "./EventCard";
 import { MessageBody } from "./MessageBody";
 import { ShareCard } from "./ShareCard";
+import { CallLine, callMetaOf } from "@/rtc/call/ui/CallLine";
 import { EmojiGrid, Popover, PromptlyAvatar, UserAvatar } from "./ui";
 
 /** A "Send to…" card's ``meta.share`` (see ShareCard), if this message is one. */
@@ -35,6 +36,10 @@ export interface MessageCtx {
   onEdit: (m: Message) => void;
   onJump: (seq: number, id?: string) => void;
   onActions: (m: Message) => void;
+  /** Calls: a group conversation (call lines say who started it). */
+  groupConversation?: boolean;
+  /** Calls: "Call back" on call lines. */
+  canCall?: boolean;
 }
 
 function authorName(m: Pick<Message, "author_id" | "kind">, users: Record<string, RoomUser>) {
@@ -58,6 +63,12 @@ export const MessageItem = memo(function MessageItem({
   const own = m.kind === "user" && m.author_id === ctx.meId;
 
   if (m.kind === "system") {
+    const call = callMetaOf(m);
+    if (call) {
+      return (
+        <CallLine m={m} meta={call} meId={ctx.meId} users={ctx.users} group={!!ctx.groupConversation} time={timeOf(m.created_at)} canCall={!!ctx.canCall} />
+      );
+    }
     return (
       <div data-seq={m.seq} data-id={m.id} className="flex justify-center px-4 py-1.5">
         <span className="max-w-[80%] text-center text-xs text-[var(--text-muted)]">

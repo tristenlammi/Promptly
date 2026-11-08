@@ -350,6 +350,34 @@ async def voice_reaper(ctx) -> dict:
     return await reap()
 
 
+# ---- Calls phase 2: DM call timers (app/calls/dm.py). The ring timeout
+# marks a call nobody answered as missed 45 s after it rang; a group call
+# left with one person ends two minutes later.
+async def call_ring_timeout(ctx, call_id: str, marker: str) -> str:
+    from app.calls.dm import ring_timeout
+
+    return await ring_timeout(call_id, marker)
+
+
+async def call_alone_check(ctx, call_id: str, token: str) -> str:
+    from app.calls.dm import alone_check
+
+    return await alone_check(call_id, token)
+
+
+# Calls WP-D5: a dropped connection's grace before it counts as hanging up.
+async def call_left_check(ctx, call_id: str, user_id: str, sid: str) -> str:
+    from app.calls.dm import left_check
+
+    return await left_check(call_id, user_id, sid)
+
+
+async def calls_reaper(ctx) -> dict:
+    from app.calls.dm import reap
+
+    return await reap()
+
+
 class WorkerSettings:
     functions = [
         # Never retried by arq: a run interrupted mid-way is closed out by
@@ -380,6 +408,11 @@ class WorkerSettings:
         # Calls: voice channel timers ("Still there?", a move's grace).
         func(voice_alone_check, timeout=60, max_tries=2, keep_result=0),
         func(voice_move_check, timeout=60, max_tries=2, keep_result=0),
+        # Calls phase 2: DM call timers (ring timeout, alone in a group call).
+        func(call_ring_timeout, timeout=60, max_tries=2, keep_result=0),
+        func(call_alone_check, timeout=60, max_tries=2, keep_result=0),
+        # Calls WP-D5: a dropped connection's grace.
+        func(call_left_check, timeout=60, max_tries=2, keep_result=0),
     ]
     cron_jobs = [
         # Learn from chats that have gone quiet, then look after memory overnight.
@@ -423,6 +456,8 @@ class WorkerSettings:
         cron(calls_check, minute=27, run_at_startup=False, unique=True, timeout=120),
         # Calls: match voice channels' live state with LiveKit (app/calls/voice.py).
         cron(voice_reaper, minute=set(range(2, 60, 5)), run_at_startup=False, unique=True, timeout=240),
+        # Calls phase 2: DM calls whose timers were lost, or whose people left LiveKit.
+        cron(calls_reaper, minute=set(range(1, 60, 2)), run_at_startup=False, unique=True, timeout=240),
     ]
     on_startup = wait_for_schema
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

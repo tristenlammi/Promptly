@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Ban, CalendarDays, Hash, Pin, Search, Settings, Sparkles, Upload, Users } from "lucide-react";
+import { ArrowLeft, Ban, CalendarDays, Hash, MoreVertical, Pin, Search, Settings, Sparkles, Upload, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
@@ -19,6 +19,8 @@ import { PlanEventSheet } from "./PlanEventSheet";
 import { DmSettingsSheet, RoomSettingsSheet } from "./RoomSheets";
 import { UserAvatar } from "./ui";
 import { VoiceChannelView } from "@/rtc/ui/VoiceChannelView";
+import { CallHeaderButtons, CallInProgressBar, canCallIn } from "@/rtc/call/ui/RoomCall";
+import { Floating } from "@/rtc/ui/Floating";
 
 type Panel = "members" | "pins" | "search" | "events" | null;
 
@@ -48,6 +50,7 @@ export function RoomView({
   const [editing, setEditing] = useState<Message | null>(null);
   const [actionsFor, setActionsFor] = useState<Message | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [moreAnchor, setMoreAnchor] = useState<HTMLElement | null>(null);
   const composer = useRef<ComposerHandle>(null);
   const typing = useRoomsStore((s) => s.typing[roomId]) ?? NO_TYPING;
   const thinking = useRoomsStore((s) => !!s.thinking[roomId]);
@@ -80,8 +83,10 @@ export function RoomView({
       onEdit,
       onJump: () => undefined, // MessageList supplies its own
       onActions: setActionsFor,
+      groupConversation: room?.kind === "group",
+      canCall: canCallIn(b, room) && !room?.blocked && room?.can_send !== false,
     }),
-    [b.me.id, b.me.username, b.users, usernames, canModerate, isPhone, onReply, onEdit],
+    [b, room, b.me.id, b.me.username, b.users, usernames, canModerate, isPhone, onReply, onEdit],
   );
 
   const closePlanning = useCallback(() => setPlanning(false), []);
@@ -217,6 +222,25 @@ export function RoomView({
     );
   }
 
+  // Phones, in a conversation you can call: the call buttons stay in the
+  // header and the rest moves into a "More" menu, so the name still fits.
+  const compactHeader = isPhone && !space && canCallIn(b, room);
+  const moreItem = (label: string, Icon: typeof Pin, onClick: () => void, danger = false) => (
+    <button
+      type="button"
+      onClick={() => {
+        setMoreAnchor(null);
+        onClick();
+      }}
+      className={cn(
+        "flex w-full items-center gap-3 px-4 py-3 text-left text-sm hover:bg-[var(--hover)] focus-visible:bg-[var(--hover)] focus-visible:outline-none",
+        danger ? "text-[var(--danger)]" : "text-[var(--text)]",
+      )}
+    >
+      <Icon className="h-[18px] w-[18px] shrink-0 opacity-80" /> {label}
+    </button>
+  );
+
   const headerBtn = (p: Exclude<Panel, null>, label: string, Icon: typeof Pin) => (
     <button
       type="button"
@@ -299,11 +323,24 @@ export function RoomView({
             </span>
           )}
           <div className="ml-auto flex shrink-0 items-center">
-            {headerBtn("search", "Search this conversation", Search)}
-            {headerBtn("events", "Events", CalendarDays)}
-            {headerBtn("pins", "Pinned messages", Pin)}
+            {!space && <CallHeaderButtons b={b} room={room} otherName={oneToOne?.username ?? null} />}
+            {compactHeader && (
+              <button
+                type="button"
+                aria-label="More"
+                title="More"
+                aria-expanded={!!moreAnchor}
+                onClick={(e) => setMoreAnchor(moreAnchor ? null : e.currentTarget)}
+                className="flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+              >
+                <MoreVertical className="h-[18px] w-[18px]" />
+              </button>
+            )}
+            {!compactHeader && headerBtn("search", "Search this conversation", Search)}
+            {!compactHeader && headerBtn("events", "Events", CalendarDays)}
+            {!compactHeader && headerBtn("pins", "Pinned messages", Pin)}
             {(!isPhone || space) && headerBtn("members", "Members", Users)}
-            {oneToOne && (
+            {oneToOne && !compactHeader && (
               <button
                 type="button"
                 aria-label={room.blocked ? `Unblock ${oneToOne.username}` : `Block ${oneToOne.username}`}
@@ -329,6 +366,17 @@ export function RoomView({
             </button>
           </div>
         </header>
+        {compactHeader && (
+          <Floating open={!!moreAnchor} onClose={() => setMoreAnchor(null)} anchor={moreAnchor} label="More" width={240}>
+            <div className="py-1">
+              {moreItem("Search this conversation", Search, () => setPanel("search"))}
+              {moreItem("Events", CalendarDays, () => setPanel("events"))}
+              {moreItem("Pinned messages", Pin, () => setPanel("pins"))}
+              {oneToOne && moreItem(room.blocked ? `Unblock ${oneToOne.username}` : `Block ${oneToOne.username}`, Ban, toggleBlock, !room.blocked)}
+            </div>
+          </Floating>
+        )}
+        {!space && <CallInProgressBar b={b} room={room} />}
 
         <MessageList room={room} title={title} ctx={ctx} />
 

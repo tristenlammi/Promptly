@@ -21,6 +21,37 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- Calls (DM calls), WP-D1 -->
+- Calls in DMs, the server side (the call screen comes next): voice and video calls in 1:1 and group conversations. A call rings everyone else on every device for 45 seconds, even during quiet hours; answer on one device and the others stop ringing. Decline from the notification, or let it ring out: the conversation then shows "Missed call" and you get a "Missed call" notification. A finished call leaves "Call · 12 min" in the conversation. Anyone in a group conversation can join its call while it is on, and a group call can ring someone again. You are only ever in one call or voice channel at a time. Blocking someone refuses calls both ways and ends a call with them.
+- Account → Notifications gains a Calls switch (on by default) for ringing and missed calls.
+<!-- Calls (DM calls), WP-D2 -->
+- Calls in DMs, the call screen: phone and camera buttons in every 1:1 and group conversation. A call rings in every open Promptly tab with a ringtone and a big Answer and Decline (Voice only for a video call; "End and answer" when you're already on a call or in a voice channel), and as a notification with Answer and Decline when Promptly isn't in front. In the call: mute, camera on and off, switch camera on a phone, share your screen, speaker, microphone and camera choice, a timer, a green ring on whoever is talking, a grid for group calls, and Ring again. Minimise to a small window you can drag around while you use Promptly, or pop the video out into picture-in-picture.
+- Rooms: a green "Call in progress · 2 people · Join" bar in a conversation with a call on, and "Switch here" when you're in it on another device. Call lines in the conversation in your own words ("Missed call from Sam · Call back", "No answer · Call again", "Video call · 12 min"). On a phone, the conversation's header keeps the call buttons and moves Search, Events, Pinned and Block into More.
+<!-- Calls (DM calls), WP-D3 -->
+- Calls in DMs on Android phones with the Promptly app: a call rings like a phone call, full screen over the lock screen with your phone's own ringtone (silent, vibrate and Do Not Disturb respected), with Answer and Decline, or End and answer when you're already on a call. Answering keeps the call going with the screen off or in other apps, with a call notification for Mute, Speaker and Hang up. Android treats it as a real call: Bluetooth headsets and the car can answer and hang up, the car shows the call screen, and spoken directions duck under it. Answer on your laptop and the phone stops ringing. If Android 14 or later won't let calls ring full screen, they show as a notification and Promptly asks once to allow it.
+- Rooms on a phone with the app: a video call answered on the phone opens its conversation with everyone's cameras while the app keeps the sound; Mute and Speaker there control the app's call, and Turn camera on moves the call to the page.
+<!-- Calls (DM calls), WP-D4 -->
+- Rooms: a Calls tab (Spaces · Messages · Calls on a phone, a phone button under Messages on a computer) with your call history: who, which way, how long, missed calls in red and the ones you haven't seen in bold, a call-back button on every row, All or Missed, and a red badge with the number of missed calls until you look. Each call opens to its details: every call with the same people, Call, Video call and Message, and Remove from call history. Removing a call, or clearing your whole history, only changes your own list.
+- New call: pick someone from the Calls tab, or call anyone straight from their person page or their contact card (Call and Video call, when they're on Promptly and can take calls).
+- Ctrl+K: "Call Mum" or "Video call Sam" calls someone by the name you know them by (a contact's name or nickname, what they are to you in Photos, or their username). People you've blocked, or who blocked you, aren't offered.
+<!-- Calls (DM calls), WP-D5 -->
+- Calls on Android phones with the Promptly app: Call and Video call on the phone now hand the call to the app (the first time, it asks), so the call you start keeps going with the screen locked, in other apps or with the page closed, just like a call you answer. The ringback plays in the app, Bluetooth headsets and the car see it as a call, and if Android puts it on hold for a phone call the other person is told. Needs the new app version; without the app the page holds the call as before.
+- Video calls on Android phones with the app: your phone's own camera in the call (on and off, switch front and back), everyone's video on the app's call screen, working over the lock screen, and picture-in-picture when you leave the call screen. Locking the phone pauses your camera and it comes back when you unlock. The conversation's page can turn the app's camera on and off and switch it too.
+- Call tones: the through tone when they answer, a tone when the connection drops and when it's back, a soft tone while the other person has you on hold, and one when the call ends. While the connection drops the call says "Reconnecting…", or "You're offline" when there's no network, and carries on by itself (also when a phone moves from Wi-Fi to mobile data).
+- Calls on a weak connection, or with Data saver on: video is taken and sent smaller, and the call says so. On Android, mobile data takes the middle quality and Android's Data Saver the lowest.
+- Account → Notifications → Calls: "Don't ring me during quiet hours". Calls still ring through quiet hours unless you turn this on; then a call in your quiet hours rings out to a missed call, and you're told about it when quiet hours end.
+
+### Changed
+<!-- Calls (DM calls), WP-D5 -->
+- A missed call's notification now opens that call in the Calls tab (call back, message, or every call with them), rather than the conversation.
+
+### Fixed
+<!-- Calls (DM calls), WP-D5 -->
+- Calls: a 1:1 call no longer ends when one side's connection drops for a moment and comes back (for example moving from Wi-Fi to mobile data). A connection now has 15 seconds to come back before it counts as hanging up.
+<!-- Calls (DM calls), WP-D2 -->
+- Voice channels: reloading the page, or joining the same channel on another device, could drop you straight back out when the old connection's goodbye arrived late.
+
 ## [0.33.0] - 2026-11-09
 
 ### Added

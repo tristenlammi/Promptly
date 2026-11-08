@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug builds only. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- DM calls on the emulator: stands in for Chrome handing a call push's
+             notification to Delegation (adb only: the DUMP permission). -->
+        <receiver
+            android:name=".calls.DebugRing"
+            android:exported="true"
+            android:permission="android.permission.DUMP" />
+    </application>
+</manifest>
