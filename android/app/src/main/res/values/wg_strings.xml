@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notes widgets: the home-screen widgets' names and descriptions in the widget picker. -->
+<resources>
+    <string name="wg_agenda_name">Agenda</string>
+    <string name="wg_agenda_description">Today and the week ahead from P Calendar. Works with no signal.</string>
+    <string name="wg_tasks_name">Tasks</string>
+    <string name="wg_tasks_description">Today\'s and overdue tasks. Tick them off, even with no signal.</string>
+</resources>

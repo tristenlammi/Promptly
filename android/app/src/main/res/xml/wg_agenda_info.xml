@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Notes widgets: Agenda. Refreshed by WorkManager (widgets-refresh), not by
+     updatePeriodMillis. Works without its settings screen (configuration_optional). -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/wg_agenda_description"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="80dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:configure="org.promptly.sync.widgets.AgendaConfigActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional" />

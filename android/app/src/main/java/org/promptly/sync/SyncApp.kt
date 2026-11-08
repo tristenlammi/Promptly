@@ -8,5 +8,6 @@ class SyncApp : Application() {
         org.promptly.sync.assistant.Crashes.watch(this)
         Sync.channel(this)
         Sync.upgrade(this)
+        org.promptly.sync.widgets.Widgets.upgrade(this)
     }
 }

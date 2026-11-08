@@ -151,6 +151,7 @@ private fun App(incoming: PairLink?, consumed: () -> Unit) {
                 store.unlinked = false
                 store.lastError = null
                 account = it
+                org.promptly.sync.widgets.Widgets.linked(ctx)
             }
             !media -> PermissionScreen(partial = remember(permTick) { hasSomeMedia(ctx) }) { permTick++ }
             buckets == null || choosing -> FolderScreen(initial = buckets) {
@@ -167,6 +168,7 @@ private fun App(incoming: PairLink?, consumed: () -> Unit) {
                     Sync.stop(ctx)
                     Ledger(ctx).reset()
                     store.clear()
+                    org.promptly.sync.widgets.Widgets.unlinked(ctx)
                     account = null
                     buckets = null
                 },
