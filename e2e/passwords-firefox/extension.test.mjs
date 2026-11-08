@@ -190,17 +190,163 @@ test("Firefox: popup fills the page", async () => {
   await closeTabs();
 });
 
-test("Firefox: the inline menu never fills, since nothing here can tell it's really showing", async () => {
-  await page("login.html");
+// ---- The on-page menu hands off to the toolbar panel (D-FIREFOX-1, D-FIREFOX-2) -----------
+// A click in the menu never fills on Firefox. It opens the toolbar panel with that login at
+// the top. WebDriver can't see the real panel, so these open the same page in a tab, aimed
+// at the site's tab, as the other popup tests do.
+
+/** Where the menu's first row is, for the box it opened under (content.ts openMenu). */
+async function firstRow(sel = "#user") {
+  return driver.executeScript(
+    `const r=document.querySelector(arguments[0]).getBoundingClientRect();return {x:Math.max(4,Math.min(r.left,innerWidth-328))+80,y:Math.min(r.bottom+4,innerHeight-48-8)+20}`,
+    sel,
+  );
+}
+
+/** Click a box like a person, wait for the menu, and click its first row. */
+async function strikeMenu(sel = "#user") {
+  const r = await rectOf(sel);
+  await clickAt(r.x + 10, r.y + 5);
+  await driver.sleep(1200);
+  const at = await firstRow(sel);
+  await clickAt(at.x, at.y);
+  await driver.sleep(800);
+}
+
+/** A person reaching for a button: the pointer comes from somewhere else, then clicks. */
+async function reachAndClick(locator) {
+  const el = await see(driver, locator);
+  await driver.sleep(700);
+  await driver.actions({ async: true }).move({ origin: el, x: -30, y: 0 }).pause(60).move({ origin: el, x: -10, y: 0 }).pause(60).move({ origin: el }).pause(60).click().perform();
+}
+
+const handoffFill = (title) => By.css(`[data-testid="handoff"] button[aria-label=${JSON.stringify(`Fill ${title}`)}]`);
+
+test("Firefox: a pick in the on-page menu fills nothing there, and the panel fills it with one more click", async () => {
+  const pg = await page("login.html");
+  const url = await driver.getCurrentUrl();
   const r = await rectOf("#user");
   await clickAt(r.x + 10, r.y + 5);
   await driver.sleep(1200);
+  // The page sees an empty box, with nothing in it to read.
   const seen = await driver.executeScript(`const el=document.documentElement.lastElementChild;return {tag:el.tagName,id:el.id,cls:el.className,shadow:!!el.shadowRoot,frames:document.querySelectorAll('iframe').length}`);
   assert.deepEqual(seen, { tag: "DIV", id: "", cls: "", shadow: false, frames: 0 });
-  // Where the first row would be, looked at for as long as anyone likes.
-  await clickAt(r.x + 80, r.y + r.h + 24);
-  await driver.sleep(700);
-  assert.equal((await state()).pass, "");
+  const at = await firstRow();
+  await clickAt(at.x, at.y);
+  await driver.sleep(800);
+  assert.deepEqual(await state(), { user: "", pass: "" }, "the menu itself never fills on Firefox");
+  const h = await hook("handoff", { tabId: await tabId(url) });
+  assert.equal(h.item?.title, "Acme", JSON.stringify(h));
+  assert.equal(h.pageOpened, true);
+
+  await popup(url);
+  const box = await see(driver, By.css('[data-testid="handoff"]'));
+  assert.match(await box.getText(), /Acme/);
+  await reachAndClick(handoffFill("Acme"));
+  await driver.sleep(600);
+  await driver.switchTo().window(pg);
+  assert.deepEqual(await state(), { user: "ana@example.com", pass: "acme-Pass-1" });
+  await hook("pageOpened", { on: false });
+  await closeTabs();
+});
+
+test("Firefox: a panel the page opened ignores a press under a still cursor (double-click trick), and takes a real one", async () => {
+  const pg = await page("login.html");
+  const url = await driver.getCurrentUrl();
+  await strikeMenu();
+  await popup(url);
+  const fillButton = await see(driver, handoffFill("Acme"));
+  // Put the pointer where the button is, then open the panel again under it: what a page
+  // gets from the second click of a double click.
+  await driver.actions({ async: true }).move({ origin: fillButton }).perform();
+  await hook("pageOpened", { on: true });
+  await driver.navigate().refresh();
+  await see(driver, handoffFill("Acme"));
+  // Well past the wait, so only the missing movement refuses it.
+  await driver.sleep(900);
+  await driver.actions({ async: true }).press().release().perform();
+  await driver.sleep(600);
+  await see(driver, byText("didn't count"));
+  const popupTab = await driver.getWindowHandle();
+  await driver.switchTo().window(pg);
+  assert.deepEqual(await state(), { user: "", pass: "" }, "a press nobody reached for fills nothing");
+
+  // A quick press, even with the pointer moving, doesn't count either.
+  await driver.switchTo().window(popupTab);
+  await hook("pageOpened", { on: true });
+  await driver.navigate().refresh();
+  const quick = await see(driver, handoffFill("Acme"));
+  await driver.actions({ async: true }).move({ origin: quick, x: -20, y: 0 }).move({ origin: quick }).click().perform();
+  await driver.switchTo().window(pg);
+  await driver.sleep(400);
+  const early = await state();
+
+  // The person moves to it and clicks: that fills.
+  await driver.switchTo().window(popupTab);
+  await reachAndClick(handoffFill("Acme"));
+  await driver.sleep(600);
+  await driver.switchTo().window(pg);
+  assert.deepEqual(await state(), { user: "ana@example.com", pass: "acme-Pass-1" });
+  // Checked last: WebDriver may take longer than the wait to find the button, and then the
+  // quick press really was a deliberate one. Say so rather than pass quietly.
+  if (early.pass) console.log("note: the quick press came after the 500 ms wait on this machine, so it counted");
+  await hook("pageOpened", { on: false });
+  await closeTabs();
+});
+
+// Marek Toth's variants a page can play on the menu itself. On Chromium these are refused
+// by the menu's own check. On Firefox the menu can't fill at all, so the click reaches only
+// the hand-off, and the page still gets nothing.
+for (const [name, attack] of [
+  ["transparent menu", "root-opacity"],
+  ["nearly transparent menu", "root-opacity-tiny"],
+  ["transparent page", "html-opacity"],
+  ["covered by an overlay that ignores the pointer", "overlay-full-pointer-none"],
+  ["covered by a popover overlay", "overlay-popover-pointer-none"],
+  ["moved to where a lure is", "position-fixed-lure"],
+]) {
+  test(`Firefox: a ${name} gets no fill from a click on it`, async () => {
+    const before = (await hook("handoff", { tabId: -1 })).pageOpenedAt;
+    const pg = await page(`hostile.html?attack=${attack}&timing=after`);
+    const url = await driver.getCurrentUrl();
+    // An overlay may be in the way of a click; focus is how the menu opens either way.
+    await driver.executeScript(`document.getElementById("user").focus()`);
+    await driver.sleep(1200);
+    const at = await firstRow();
+    // The lure moves the menu to the corner; that's where the click goes then.
+    if (attack === "position-fixed-lure") await clickAt(80, 20);
+    else await clickAt(at.x, at.y);
+    await driver.sleep(1500);
+    const s = await state();
+    assert.equal(s.pass, "", "password stayed out");
+    assert.equal(s.user, "", "username stayed out");
+    assert.deepEqual(s.stolen, []);
+    const h = await hook("handoff", { tabId: await tabId(url) });
+    // The click did land on our menu, so this isn't passing for want of trying.
+    assert.ok(h.pageOpenedAt > before, `${attack}: the click reached the menu`);
+    await driver.switchTo().window(pg);
+    await hook("pageOpened", { on: false });
+    await closeTabs();
+  });
+}
+
+test("Firefox: a menu moved under the cursor gets no fill from a click on it", async () => {
+  const before = (await hook("handoff", { tabId: -1 })).pageOpenedAt;
+  const pg = await page("hostile.html?attack=mouse-follow&timing=after");
+  const r = await rectOf("#user");
+  await clickAt(r.x + 10, r.y + 5);
+  await driver.sleep(100);
+  await driver.actions({ async: true }).move({ x: 600, y: 500 }).perform();
+  await driver.sleep(600);
+  await clickAt(600, 500);
+  await driver.sleep(1500);
+  await driver.switchTo().window(pg);
+  const s = await state();
+  assert.equal(s.pass, "");
+  assert.equal(s.user, "");
+  assert.deepEqual(s.stolen, []);
+  assert.ok((await hook("handoff", { tabId: -1 })).pageOpenedAt > before, "the click reached the menu");
+  await hook("pageOpened", { on: false });
   await closeTabs();
 });
 
@@ -214,6 +360,8 @@ test("Firefox: the review's covers make no difference, and the popup still fills
     assert.equal((await state()).pass, "", name);
     await closeTabs();
   }
+  // A click on the hidden menu may have opened the panel; the next tests start plain.
+  await hook("pageOpened", { on: false });
 });
 
 test("Firefox: a page that knows our address and frames our menu gets nothing", async () => {
@@ -233,6 +381,7 @@ test("Firefox: a page that knows our address and frames our menu gets nothing", 
   await driver.sleep(500);
   assert.equal((await hook("pending")).filter((p) => p.offer.host.startsWith("evil.acme")).length, 0);
   await closeTabs();
+  await hook("pageOpened", { on: false });
 });
 
 test("Firefox: a page that sets values and submits gets no offer, and neither does a sandboxed one get a fill", async () => {
@@ -296,6 +445,38 @@ test("Firefox: a frame swapped after the origin check gets nothing, by the conte
   } finally {
     await hook("flags", { flags: { fillDelayMs: 0 } });
   }
+});
+
+test("Firefox: Save on the page's bar opens the panel, and the panel saves on a deliberate click", async () => {
+  await hook("pageOpened", { on: false });
+  await driver.switchTo().window(extTab);
+  const url = `http://foxbar.localhost:${PORT}/adv-typed.html`;
+  const pg = await newTab(url);
+  await driver.findElement(By.css("#user")).sendKeys("bar@example.com");
+  await driver.findElement(By.css("#pass")).sendKeys("Fox-Bar-1");
+  await driver.findElement(By.css("#go")).click();
+  await driver.sleep(2500);
+  // The bar is in a closed shadow root, so it's found by where it is: top right, 360 wide.
+  // Its first button is "Save in the panel", on the left of its row; nothing else sits at
+  // that x, so going down the bar there clicks only text until it reaches the button.
+  const width = await driver.executeScript("return document.documentElement.clientWidth");
+  const x = width - 12 - 360 + 1 + 12 + 40;
+  for (let y = 70; y <= 150; y += 6) {
+    await clickAt(x, y);
+    await driver.sleep(150);
+    if ((await hook("handoff", { tabId: -1 })).pageOpened) break;
+  }
+  assert.equal((await hook("handoff", { tabId: -1 })).pageOpened, true, "the bar's Save button opened the panel");
+  assert.equal((await hook("items")).some((i) => i.username === "bar@example.com"), false, "the bar itself saves nothing");
+  await popup(url);
+  await see(driver, By.css('[data-testid="save-offer"]'));
+  await reachAndClick(By.xpath('//*[@data-testid="save-offer"]//button[normalize-space(.)="Save"]'));
+  await driver.sleep(800);
+  const items = await hook("items");
+  assert.ok(items.some((i) => i.username === "bar@example.com" && i.password === "Fox-Bar-1"), JSON.stringify(items.map((i) => i.title)));
+  await hook("pageOpened", { on: false });
+  await driver.switchTo().window(pg);
+  await closeTabs();
 });
 
 test("Firefox: the toolbar popup is where a save gets answered", async () => {

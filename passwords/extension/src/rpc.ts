@@ -67,7 +67,9 @@ export type PageRequest =
   | { t: "plusBase" }
   | { t: "plusAddress"; email: string; host?: string | null }
   | { t: "clipWatch"; text: string }
-  | { t: "clipClear" };
+  | { t: "clipClear" }
+  /** Firefox: what the on-page menu picked, and whether a page opened this panel (D-FIREFOX-1). */
+  | { t: "handoffFor"; tabId: number };
 
 export type FillOutcome =
   | { ok: true; filled: string[]; left?: string[] }
@@ -96,10 +98,12 @@ export type MenuRequest = { token: string } & (
   | { t: "menuGenerate"; itemId?: string }
   | { t: "menuClose" }
   | { t: "menuOpenPopup" }
+  /** Firefox: a row was clicked, so the toolbar panel opens with it at the top. */
+  | { t: "menuHandoff"; itemId?: string }
   | { t: "menuSize"; h: number }
 );
 
-export type SaveRequest = { token: string } & ({ t: "saveAnswer"; answer: "save" | "update" | "never" | "dismiss" } | { t: "saveOffer" });
+export type SaveRequest = { token: string } & ({ t: "saveAnswer"; answer: "save" | "update" | "never" | "dismiss" } | { t: "saveOffer" } | { t: "saveOpenPopup" });
 
 /** From the background to a frame's content script. */
 export type ToContent =

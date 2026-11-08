@@ -37,6 +37,19 @@ function button(text: string, onClick: () => void, primary = false, gated = true
   return b;
 }
 
+/** Firefox (D-FIREFOX-1): this bar can't tell whether it's really showing, so Save here
+ *  doesn't save. It opens the toolbar panel, which asks the same question where a page
+ *  can't cover it. The background opens it (Firefox 149 and later); before that, this says
+ *  where to click. */
+function toPanel(e: Event, how: HTMLElement) {
+  if (!e.isTrusted) return;
+  void call({ t: "saveOpenPopup" }).then((answer) => {
+    // Only true means it opened; a refusal comes back as an object.
+    const opened = answer === true;
+    how.textContent = opened ? "It's at the top of the Promptly Passwords panel. Answer it there." : "Click the Promptly Passwords button in your toolbar to answer it.";
+  });
+}
+
 async function init() {
   const offer = (await call({ t: "saveOffer" })) as { kind: "save" | "update"; username: string; host: string } | null;
   if (!offer) return;
@@ -59,8 +72,14 @@ async function init() {
   } else {
     const how = document.createElement("div");
     how.className = "sub";
-    how.textContent = "To save it, click the Promptly Passwords button in your toolbar.";
+    how.textContent = "Firefox can't confirm this is really showing, so you answer in the toolbar panel.";
     root.appendChild(how);
+    const go = document.createElement("button");
+    go.type = "button";
+    go.className = "primary";
+    go.textContent = offer.kind === "update" ? "Update in the panel" : "Save in the panel";
+    go.addEventListener("click", (e) => toPanel(e, how));
+    row.appendChild(go);
   }
   // Doing nothing can't hurt, so this one needs no such care.
   row.appendChild(button("Not now", () => call({ t: "saveAnswer", answer: "dismiss" }).then(close), false, false));

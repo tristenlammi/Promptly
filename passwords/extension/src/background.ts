@@ -1363,6 +1363,8 @@ async function handlePage(m: PageRequest): Promise<unknown> {
     case "saveAnswerFor":
       await answerSave(m.tabId, m.answer);
       return { ok: true };
+    case "handoffFor":
+      return handoffFor(m.tabId);
   }
 }
 
@@ -1598,7 +1600,75 @@ async function tokenOwner(tabId: number, kind: "ownsMenu" | "ownsSave", token: u
   return owners.length === 1 && owners[0].origin !== "null" ? owners[0] : null;
 }
 
+// ---- Firefox: the on-page menu hands off to the toolbar panel (D-FIREFOX-1) -------------
+// Firefox has no reading that tells us the menu is really showing (press.ts), so a click
+// there never fills. It opens the toolbar panel with the login it named at the top, and
+// the fill is one more click there, where a page can't cover anything. What the menu
+// says is only a suggestion to the panel: the fill goes through the panel's own checks.
+
+/** How long a pick waits for the panel. */
+const HANDOFF_MS = 60_000;
+/** How long after a page's menu or save bar opened the panel that the panel asks for a
+ *  deliberate press (D-FIREFOX-2). Generous: a person takes a second or two at most. */
+const PAGE_OPENED_MS = 10_000;
+
+type Handoff = { itemId: string | null; host: string; at: number };
+/** Per tab, as a promise, so a panel that opens before the check's done waits for it. */
+const handoffs = new Map<number, Promise<Handoff | null>>();
+/** When a page last got the panel opened, from any tab. Set before anything's checked, so
+ *  a frame a page made up (a wrong token) still makes the panel careful. */
+let pageOpenedAt = 0;
+
+function startHandoff(tabId: number, m: { token: string; itemId?: string }): Promise<Handoff | null> {
+  pageOpenedAt = Date.now();
+  const job = (async (): Promise<Handoff | null> => {
+    await boot();
+    await reloading;
+    if (await fillsOnClickOnly()) return null;
+    const owner = await tokenOwner(tabId, "ownsMenu", m.token);
+    if (!owner) return null;
+    // Only a login the menu could have shown for that frame.
+    const known = typeof m.itemId === "string" && !!client?.unlocked && (await orderedCandidates(tabId, owner.url)).some((c) => c.id === m.itemId);
+    return { itemId: known ? m.itemId! : null, host: hostOf(owner.url) ?? "", at: Date.now() };
+  })();
+  handoffs.set(tabId, job);
+  return job;
+}
+
+async function openPanelFromPage(): Promise<boolean> {
+  pageOpenedAt = Date.now();
+  try {
+    // Firefox 149 and later open it with no gesture (bug 1799344). Earlier ones refuse, and
+    // the frame says where to click instead. It always opens in the focused window.
+    await (ext.action as unknown as { openPopup?: () => Promise<void> }).openPopup?.();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** For the panel: the login the page's menu picked, if the tab's still on that site. */
+async function handoffFor(tabId: number): Promise<{ item: Candidate | null; pageOpened: boolean }> {
+  const pageOpened = Date.now() - pageOpenedAt < PAGE_OPENED_MS;
+  const h = await handoffs.get(tabId);
+  if (!h?.itemId || Date.now() - h.at > HANDOFF_MS || !client?.unlocked) return { item: null, pageOpened };
+  let url = "";
+  try {
+    url = (await ext.tabs.get(tabId)).url ?? "";
+  } catch {
+    /* the tab's gone */
+  }
+  if (hostOf(url) !== h.host) return { item: null, pageOpened };
+  const item = (await orderedCandidates(tabId, url)).find((c) => c.id === h.itemId) ?? null;
+  return { item, pageOpened };
+}
+
 async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
+  // Before anything that waits, so a panel opening right now finds it.
+  if (__ENGINE__ === "firefox" && m.t === "menuHandoff" && sender.tab?.id !== undefined) {
+    await startHandoff(sender.tab.id, m);
+    return { ok: true };
+  }
   await boot();
   await reloading;
   const tabId = sender.tab?.id;
@@ -1610,8 +1680,10 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
     return null;
   }
   // Firefox has no way to tell this menu is really showing (press.ts), and "on click" means
-  // no inline menu at all. The menu says so, and this holds whatever it says.
-  if (__ENGINE__ === "firefox" || (await fillsOnClickOnly())) return { ok: false, reason: "popup", locked: false, candidates: [] };
+  // no inline menu at all. The menu says so, and this holds whatever it says. On Firefox
+  // the menu may list logins and open the panel, and nothing else (D-FIREFOX-1).
+  if (await fillsOnClickOnly()) return { ok: false, reason: "popup", locked: false, candidates: [] };
+  if (__ENGINE__ === "firefox" && m.t !== "menuList" && m.t !== "menuOpenPopup") return { ok: false, reason: "popup", locked: false, candidates: [] };
   const owner = await tokenOwner(tabId, "ownsMenu", m.token);
   if (!owner) return { ok: false, reason: "popup", locked: false, candidates: [] };
   const hostFrame = owner.frameId;
@@ -1622,6 +1694,8 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
     case "menuList": {
       if (!client?.unlocked) return { locked: true, candidates: [] };
       const list = await orderedCandidates(tabId, url);
+      // Titles and usernames only, in a frame the page can't read. Picking one opens the panel.
+      if (__ENGINE__ === "firefox") return { locked: false, candidates: list, handoff: true };
       const report = await inFrame<PageReport>({ t: "report" });
       const kinds = report?.kinds ?? [];
       // Firefox's menu doesn't act on a click, so its passkeys are in the toolbar panel.
@@ -1675,16 +1749,16 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
       await inFrame({ t: "report" });
       return null;
     case "menuOpenPopup":
-      try {
-        await (ext.action as unknown as { openPopup?: () => Promise<void> }).openPopup?.();
-      } catch {
-        /* needs a user gesture on some versions; the toolbar icon's still there */
-      }
-      return null;
+      // Needs a user gesture on some versions; the toolbar icon's still there.
+      return openPanelFromPage();
   }
 }
 
 async function handleSave(m: SaveRequest, sender: chrome.runtime.MessageSender): Promise<unknown> {
+  // Firefox: Save opens the toolbar panel, which asks the same question (D-FIREFOX-1). The
+  // panel's marked careful before anything waits or the token's checked, like the menu's,
+  // so it's careful whoever asked.
+  if (m.t === "saveOpenPopup") return __ENGINE__ === "firefox" && sender.tab?.id !== undefined ? openPanelFromPage() : null;
   await boot();
   const tabId = sender.tab?.id;
   if (tabId === undefined) return null;
@@ -1809,6 +1883,12 @@ async function handleTest(m: { op: string; [k: string]: unknown }): Promise<unkn
       return testFlags;
     case "pending":
       return ((await session.get("pendingSave")).pendingSave as PendingSave[]) ?? [];
+    case "handoff":
+      return { ...(await handoffFor(m.tabId as number)), pageOpenedAt };
+    case "pageOpened":
+      // Start or end the panel's careful time, so tests don't hang on the clock.
+      pageOpenedAt = m.on ? Date.now() : 0;
+      return { ok: true };
     case "addCard":
       await client!.saveNew(await client!.personalVaultId(), newBody("card", m.title as string, { cardNumber: m.cardNumber as string, cardCvv: m.cardCvv as string }));
       return { ok: true };
@@ -1836,10 +1916,10 @@ ext.runtime.onMessage.addListener((msg: { t: string }, sender, reply) => {
   let p: Promise<unknown>;
   if (t.startsWith("pk")) {
     p = boot().then(() => handlePasskey(msg as never, sender, () => client, isThePerson, (tabId, url) => void updateBadge(tabId, url)));
-  } else if (t === "menuList" || t === "menuPick" || t === "menuPasskey" || t === "menuMailCode" || t === "menuMailLink" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup" || t === "menuSize") {
+  } else if (t === "menuList" || t === "menuPick" || t === "menuPasskey" || t === "menuMailCode" || t === "menuMailLink" || t === "menuGenerate" || t === "menuClose" || t === "menuOpenPopup" || t === "menuHandoff" || t === "menuSize") {
     if (!isOurPage(sender, "/menu.html")) return false;
     p = handleMenu(msg as MenuRequest, sender);
-  } else if (t === "saveOffer" || t === "saveAnswer") {
+  } else if (t === "saveOffer" || t === "saveAnswer" || t === "saveOpenPopup") {
     if (!isOurPage(sender, "/save.html")) return false;
     p = handleSave(msg as SaveRequest, sender);
   } else if (t === "pageReport" || t === "hello" || t === "captured" || t === "capturedUser" || t === "submitFailed" || t === "teachResult") {

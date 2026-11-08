@@ -37,6 +37,71 @@ function row(text: string, sub: string, onClick: () => void, name?: string): HTM
   return b;
 }
 
+/** Firefox (D-FIREFOX-1): this frame can't tell whether it's really showing, so a press here
+ *  never fills. It opens the toolbar panel, with this login at the top, where a page can't
+ *  cover anything and one more click fills. Told to the background first, so the panel
+ *  finds it. The background opens the panel: Firefox gives a frame in a page no action
+ *  API, and from Firefox 149 opening it needs no gesture. Before that, it says where to click. */
+function handOff(e: Event, picked?: Candidate) {
+  if (!e.isTrusted) return;
+  void call({ t: "menuHandoff", itemId: picked?.id });
+  void call({ t: "menuOpenPopup" }).then((answer) => {
+    // Only true means it opened; a refusal comes back as an object.
+    const opened = answer === true;
+    root.textContent = "";
+    if (opened) note(picked ? `${picked.title} is at the top of the Promptly Passwords panel. Click Fill there.` : "Promptly Passwords is open in your toolbar.");
+    else note(`Click the Promptly Passwords button in your toolbar.${picked ? ` ${picked.title} will be at the top, ready to fill.` : ""}`);
+    if (!opened || !picked) return;
+    // The panel shuts when it loses focus, so there's a way back to it.
+    const again = document.createElement("button");
+    again.type = "button";
+    again.className = "row";
+    again.textContent = "Open it again";
+    again.addEventListener("click", (ev) => handOff(ev, picked));
+    root.appendChild(again);
+  });
+}
+
+/** Firefox's menu: this site's logins, and each one opens the panel. */
+async function renderHandoff() {
+  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; handoff?: boolean } | null;
+  if (!r || (!r.locked && !r.handoff)) {
+    note("To fill here, click the Promptly Passwords button in your toolbar.");
+    return;
+  }
+  const plain = (text: string, sub: string, picked: Candidate | undefined, name: string) => {
+    // Built like row(), but nothing here fills, so there's no press to judge.
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "row";
+    b.setAttribute("aria-label", name);
+    const t = document.createElement("span");
+    t.className = "title";
+    t.textContent = text;
+    b.appendChild(t);
+    if (sub) {
+      const u = document.createElement("span");
+      u.className = "sub";
+      u.textContent = sub;
+      b.appendChild(u);
+    }
+    b.addEventListener("click", (e) => handOff(e, picked));
+    return b;
+  };
+  if (r.locked) {
+    note("Your vault is locked.");
+    root.appendChild(plain("Open Promptly Passwords", "", undefined, "Open Promptly Passwords"));
+    return;
+  }
+  for (const c of r.candidates.slice(0, 6)) root.appendChild(plain(c.title, c.username, c, `Pick ${c.title}`));
+  if (!r.candidates.length) {
+    note("No saved logins for this site.");
+    root.appendChild(plain("Open Promptly Passwords", "", undefined, "Open Promptly Passwords"));
+    return;
+  }
+  note("Firefox can't confirm this menu is really showing, so filling finishes in the toolbar panel.");
+}
+
 /** It didn't count. Doesn't take the rows away: the person's looking now, and can press again. */
 function refused() {
   document.getElementById("refused")?.remove();
@@ -84,11 +149,9 @@ function askBeforeLink(m: MailRow) {
 async function render() {
   root.textContent = "";
   guard.rendered();
-  // Nothing here can tell a person from a hidden cover, so it doesn't pretend to.
-  if (!inlineCanAct()) {
-    note("To fill here, click the Promptly Passwords button in your toolbar. This browser can't confirm this menu is really showing, so it can't fill from here.");
-    return;
-  }
+  // Nothing here can tell a person from a hidden cover, so it doesn't pretend to: a pick
+  // only opens the toolbar panel.
+  if (!inlineCanAct()) return renderHandoff();
   const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; kinds?: string[]; mail?: MailRow[]; otherMail?: string[]; passkeys?: { key: string; credentialId: string; userName: string; rpId: string }[] } | null;
   if (!r) return note("Can't reach Promptly Passwords.");
   if (r.locked) {

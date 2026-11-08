@@ -22,6 +22,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ## [Unreleased]
 
 ### Changed
+- Passwords on Firefox: clicking a login in the menu under a login box opens the toolbar panel with it at the top, ready to fill with one more click, and the save bar's button opens the panel to save. Before, the menu and bar there only said to use the toolbar.
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed

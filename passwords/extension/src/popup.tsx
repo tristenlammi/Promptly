@@ -6,10 +6,36 @@ import { LockSetting } from "./lockchoice";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 
+import { deliberateGate } from "../../../frontend/src/passwords/core/autofill/deliberate";
 import { nativeHello, nativeHelloStatus, toB64u } from "./native";
 import { ext, type Candidate, type FillOutcome, pageHost, type StateOut } from "./rpc";
 
 declare const __TEST_BUILD__: boolean;
+declare const __ENGINE__: string;
+
+// ---- Firefox: when a page got this panel opened (D-FIREFOX-2) -----------------------------
+// On Firefox a click in the on-page menu or save bar opens this panel (D-FIREFOX-1). A page
+// can't cover it, but it can get it opened under a still cursor between the two clicks of
+// a double click, so the second lands here. For a while after a page opened it, a click
+// counts only once the panel's been up for half a second and the person has moved the
+// pointer, or moved focus with the keyboard, since. "unknown" until the background says,
+// and nothing's clickable then; a few milliseconds, before the rows are drawn.
+const deliberate = deliberateGate(performance.now());
+let carefulness: "open" | "unknown" | "careful" = __ENGINE__ === "firefox" ? "unknown" : "open";
+let onRefused: () => void = () => undefined;
+addEventListener("pointermove", (e) => deliberate.move(e.clientX, e.clientY, performance.now()), true);
+addEventListener("pointerdown", () => deliberate.pointerDown(performance.now()), true);
+addEventListener("keydown", (e) => deliberate.key(e.key, e.repeat, performance.now()), true);
+addEventListener(
+  "click",
+  (e) => {
+    if (carefulness === "open" || (carefulness === "careful" && e.isTrusted && deliberate.allows())) return;
+    e.stopImmediatePropagation();
+    e.preventDefault();
+    if (carefulness === "careful") onRefused();
+  },
+  true,
+);
 
 type Row = { id: string; title: string; username: string; kind: string; hasTotp: boolean; reprompt: boolean; favorite?: boolean };
 type Counts = { login: number; card: number; identity: number; note: number; other: number; codes: number; favorites: number; bookmarks: number };
@@ -67,6 +93,8 @@ function Popup() {
     reload();
   }, [reload]);
   if (!state) return <p className="p-3 text-sm">Loading…</p>;
+  // Typing a master password is deliberate enough, and these screens fill nothing.
+  if (!state.connected || !state.hasKit || !state.unlocked) carefulness = carefulness === "unknown" ? "open" : carefulness;
   if (!state.connected || !state.hasKit) return <SetupView connected={state.connected} />;
   if (!state.unlocked) return <UnlockView onDone={reload} preview={state.preview} />;
   return <Open state={state} onLock={reload} />;
@@ -282,12 +310,26 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
   const [tab, setTab] = useState<Tab>("vault");
   const [adding, setAdding] = useState(false);
   const [reprompt, setReprompt] = useState<{ pass: () => void } | null>(null);
+  // Firefox: the login picked in the menu on the page (D-FIREFOX-1).
+  const [picked, setPicked] = useState<Candidate | null>(null);
 
   useEffect(() => {
     (async () => {
       // A test build can be opened in a tab of its own and aimed at another tab.
       const aimed = __TEST_BUILD__ ? Number(new URLSearchParams(location.search).get("tab")) : 0;
       const t = aimed ? await ext.tabs.get(aimed) : (await ext.tabs.query({ active: true, currentWindow: true }))[0];
+      if (__ENGINE__ === "firefox") {
+        // Asked before anything clickable is drawn for this tab.
+        carefulness = "unknown";
+        onRefused = () => setMessage("That click came as this panel opened, so it didn't count. Click again.");
+        try {
+          const h = t?.id !== undefined ? await call<{ item: Candidate | null; pageOpened: boolean }>({ t: "handoffFor", tabId: t.id }) : { item: null, pageOpened: false };
+          setPicked(h.item);
+          carefulness = h.pageOpened ? "careful" : "open";
+        } catch {
+          carefulness = "careful";
+        }
+      }
       setTabInfo(t ?? null);
       if (t?.id !== undefined) {
         const r = await call<{ candidates: Candidate[]; lookalike: string | null }>({ t: "matches", tabId: t.id });
@@ -371,6 +413,12 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
           </button>
         )}
         {lookalike && <p className="err">This site looks like {lookalike}, but it isn't. Be careful.</p>}
+        {picked && tab === "vault" && !searching && !adding && (
+          <div data-testid="handoff" className="flex flex-col rounded border p-2">
+            <p className="text-xs font-medium">You picked this in the menu on the page.</p>
+            <ItemRow row={picked} here onFill={() => doFill(picked.id)} {...rowProps} />
+          </div>
+        )}
         {message && <p role="status" className="text-xs font-medium">{message}</p>}
         {confirm && <ConfirmBox outcome={confirm.outcome} onYes={answer} onNo={() => setConfirm(null)} />}
         {reprompt && (
@@ -392,7 +440,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
               {rows.length === 0 && <p className="muted">Nothing matches that.</p>}
             </div>
           ) : (
-            <VaultHome tab={tabInfo} matches={matches} doFill={doFill} rowProps={rowProps} />
+            <VaultHome tab={tabInfo} matches={matches} pickedId={picked?.id} doFill={doFill} rowProps={rowProps} />
           )
         )}
         {tab === "codes" && <CodesTab query={q} {...rowProps} />}
@@ -432,7 +480,7 @@ const CATEGORIES: { id: string; label: string; icon: keyof typeof PATHS; count: 
 
 type RowProps = { onReprompt: (pass: () => void) => void; setMessage: (m: string) => void };
 
-function VaultHome({ tab, matches, doFill, rowProps }: { tab: chrome.tabs.Tab | null; matches: Candidate[]; doFill: (id: string) => void; rowProps: RowProps }) {
+function VaultHome({ tab, matches, pickedId, doFill, rowProps }: { tab: chrome.tabs.Tab | null; matches: Candidate[]; pickedId?: string; doFill: (id: string) => void; rowProps: RowProps }) {
   const [counts, setCounts] = useState<Counts | null>(null);
   const [favourites, setFavourites] = useState<Row[]>([]);
   const [category, setCategory] = useState<{ id: string; label: string } | null>(null);
@@ -463,7 +511,7 @@ function VaultHome({ tab, matches, doFill, rowProps }: { tab: chrome.tabs.Tab | 
       <div className="flex flex-col">
         <p className="section">This site</p>
         {matches.length === 0 && <p className="muted">Nothing saved for this site.</p>}
-        {matches.map((m) => <ItemRow key={m.id} row={m} here onFill={() => doFill(m.id)} {...rowProps} />)}
+        {matches.filter((m) => m.id !== pickedId).map((m) => <ItemRow key={m.id} row={m} here onFill={() => doFill(m.id)} {...rowProps} />)}
       </div>
       {stars.length > 0 && (
         <div className="flex flex-col">

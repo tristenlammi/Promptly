@@ -21,6 +21,8 @@ Install the extension from your server's Install page, connect it to your server
 
 - Click a field to see your logins for that site, or use the toolbar button.
 - **The toolbar button is the safest way:** a page can't touch or cover it.
+- **On Firefox,** clicking a login in the menu on the page opens the toolbar panel with that login at the top. Click Fill there. It's one more click than on Chrome, because Firefox can't tell us whether a page is hiding or covering the menu. The same goes for saving: Save in the panel opens the panel, and you answer there. On Firefox older than 149, click the toolbar button yourself; the login is still at the top. If the panel ignores a click right as it opens, click again.
+- Right-clicking a box and choosing Fill from Promptly Passwords, or Ctrl+Shift+L, fills this site's first login straight away, in any browser. Those are the browser's own menu and keys, which a page can't fake.
 - If the extension gets a form wrong, open the toolbar button, then This page, then Show me which boxes to fill here. It remembers.
 - If it warns that a site looks like another one you have a login for, believe it and look at the address.
 - Cards and addresses always ask first.
