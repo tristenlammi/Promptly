@@ -2,7 +2,10 @@
 // Readers keep fields they don't know, so an older client can't destroy a newer
 // client's data (CRYPTO_SPEC.md section 4).
 
-export type UrlMatch = "base" | "host" | "exact" | "prefix" | "regex" | "never";
+/** How a saved address matches a page (match.ts). "auto" is the default; "base" is the same
+ *  domain; "host" one host on any port unless the address names one; "port" one host and port. */
+export type UrlMatch = "auto" | "base" | "host" | "port" | "exact" | "prefix" | "regex" | "never";
+/** `match` here overrides the item's own setting for this one address. */
 export type LoginUrl = { url: string; match?: UrlMatch };
 export type CustomField = { name: string; value: string; type: "text" | "hidden" | "boolean" };
 export type HistoryEntry = { password: string; at: string };
@@ -89,6 +92,8 @@ export type ItemBody = {
 
   // login
   urls?: LoginUrl[];
+  /** How this login's websites match a page, unless an address says otherwise. None: "auto". */
+  match?: UrlMatch;
   username?: string;
   password?: string;
   passwordHistory?: HistoryEntry[];

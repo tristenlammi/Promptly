@@ -17,7 +17,7 @@ import { dedupe, fromBitwardenJson, fromGenericCsv, importFile } from "../../../
 import { openSend, sendMeta } from "../../../../../frontend/src/passwords/core/send";
 import { strengthOf } from "../../../../../frontend/src/passwords/core/strength";
 import { b64u, fromB64u, utf8 } from "../../../../../frontend/src/passwords/core/bytes";
-import { editDistance, hostOf, lookalikeOf, matchUrl, skeleton } from "../../../../../frontend/src/passwords/core/match";
+import { editDistance, hostOf, lookalikeOf, matchItems, matchUrl, skeleton } from "../../../../../frontend/src/passwords/core/match";
 import { newBody, touch } from "../../../../../frontend/src/passwords/core/model";
 import { getAssertion, makeCredential } from "../../../../../frontend/src/passwords/core/passkey";
 import { MemoryStore } from "../../../../../frontend/src/passwords/core/store";
@@ -299,8 +299,14 @@ it(`step ${STEP}`, async () => {
     const v = JSON.parse(fs.readFileSync(new URL("./match-vectors.json", import.meta.url), "utf8")) as { match: any[]; host: any[]; lookalike: any[]; lookalikeVault: string[]; editDistance: any[]; skeleton: any[] };
     const wrong: string[] = [];
     for (const c of v.match) {
-      const got = matchUrl({ url: c.url, match: c.mode }, c.page);
-      if (got !== c.want) wrong.push(`${c.url} (${c.mode ?? "base"}) on ${c.page}: ${got}, wanted ${c.want}`);
+      const got = matchUrl({ url: c.url, match: c.mode }, c.page, { itemMatch: c.item });
+      if (got !== c.want) wrong.push(`${c.url} (${c.mode ?? "-"}/${c.item ?? "-"}) on ${c.page}: ${got}, wanted ${c.want}`);
+    }
+    // Whole vaults: what Auto works out from the rest of the vault.
+    for (const c of (v as any).items as any[]) {
+      const vault = c.vault.map((x: any) => ({ id: x.id, vaultId: "v", revision: 1, deleted: !!x.deleted, updatedAt: "", body: newBody("login", x.id, { urls: x.urls, ...(x.match ? { match: x.match } : {}) }) }));
+      const got = JSON.stringify(matchItems(vault, c.page).map((m) => [m.item.id, m.kind]));
+      if (got !== JSON.stringify(c.want)) wrong.push(`vault on ${c.page}: ${got}, wanted ${JSON.stringify(c.want)}`);
     }
     for (const c of v.host) {
       const got = hostOf(c.url);

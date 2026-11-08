@@ -50,11 +50,20 @@ function refused() {
   guard.rendered();
 }
 
-function note(text: string) {
+function note(text: string, className = "note") {
   const d = document.createElement("div");
-  d.className = "note";
+  d.className = className;
   d.textContent = text;
   root.appendChild(d);
+}
+
+/** The page's own host, for a warning that names it. */
+function hostIn(url: string | undefined): string {
+  try {
+    return url ? new URL(url).hostname : "";
+  } catch {
+    return "";
+  }
 }
 
 function toToolbar() {
@@ -89,7 +98,7 @@ async function render() {
     note("To fill here, click the Promptly Passwords button in your toolbar. This browser can't confirm this menu is really showing, so it can't fill from here.");
     return;
   }
-  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; kinds?: string[]; mail?: MailRow[]; otherMail?: string[]; passkeys?: { key: string; credentialId: string; userName: string; rpId: string }[] } | null;
+  const r = (await call({ t: "menuList" })) as { locked: boolean; candidates: Candidate[]; url?: string; site?: string; lookalike?: string | null; kinds?: string[]; mail?: MailRow[]; otherMail?: string[]; passkeys?: { key: string; credentialId: string; userName: string; rpId: string }[] } | null;
   if (!r) return note("Can't reach Promptly Passwords.");
   if (r.locked) {
     note("Your vault is locked.");
@@ -122,21 +131,29 @@ async function render() {
   for (const domain of r.otherMail ?? []) {
     note(`An email from ${domain} has a code. It isn't from this site, so it's not offered here.`);
   }
-  for (const c of r.candidates.slice(0, 6)) {
-    root.appendChild(
-      row(c.title, c.username, async () => {
-        const out = (await call({ t: "menuPick", itemId: c.id })) as { ok: boolean; reason?: string } | null;
-        if (!out?.ok) toToolbar();
-      }, `Fill ${c.title}`),
-    );
+  // A lookalike is never offered a login (D49). It's said plainly, so the person knows why.
+  if (r.lookalike) note(`This is ${hostIn(r.url) || "a different site"}. Your login for ${r.lookalike} isn't offered here.`, "warn");
+  const fillRow = (c: Candidate) =>
+    row(c.title, c.username, async () => {
+      const out = (await call({ t: "menuPick", itemId: c.id })) as { ok: boolean; reason?: string } | null;
+      if (!out?.ok) toToolbar();
+    }, `Fill ${c.title}`);
+  const own = r.candidates.filter((c) => !c.other);
+  const others = r.candidates.filter((c) => c.other);
+  for (const c of own.slice(0, 6)) root.appendChild(fillRow(c));
+  // Logins for other services on this domain stay out of the way: shown only when there's
+  // nothing for this one, under their own heading. The toolbar panel always lists them.
+  if (!own.length && others.length) {
+    note(`Other logins for ${r.site || "this domain"}`, "heading");
+    for (const c of others.slice(0, 4)) root.appendChild(fillRow(c));
   }
-  if (!r.candidates.length) note("No saved logins for this site.");
+  if (!r.candidates.length && !r.lookalike) note("No saved logins for this site.");
   const kinds = r.kinds ?? [];
   const generate = async (itemId?: string) => {
     const out = (await call({ t: "menuGenerate", itemId })) as { ok: boolean } | null;
     if (!out?.ok) toToolbar();
   };
-  const changeable = r.candidates.filter((c) => !c.reprompt);
+  const changeable = own.filter((c) => !c.reprompt);
   if (kinds.includes("change-password") && changeable.length > 1) {
     // A new password belongs to one account, and which one isn't ours to guess.
     for (const c of changeable.slice(0, 3)) {

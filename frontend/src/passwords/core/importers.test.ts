@@ -104,7 +104,7 @@ describe("JSON formats", () => {
     const login = r.items[0];
     expect(login.folder).toBe("Work");
     expect(login.body).toMatchObject({ kind: "login", username: "u", password: "p", favorite: true, reprompt: true });
-    expect(login.body.urls?.[0]).toEqual({ url: "https://x.example", match: "host" });
+    expect(login.body.urls?.[0]).toEqual({ url: "https://x.example", match: "port" });
     expect(login.body.totp?.secret).toBe("JBSWY3DPEHPK3PXP");
     expect(login.body.passkeys?.[0]).toMatchObject({ rpId: "x.example", signCount: 3 });
     expect(login.body.passwordHistory?.[0].password).toBe("old");
