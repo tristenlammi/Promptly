@@ -797,3 +797,7 @@ app.include_router(
 from app.talk.router import router as talk_router  # noqa: E402
 
 app.include_router(talk_router, prefix="/api/talk", tags=["talk"])
+# Admin -> Talk (WP-T6): switch, groups, live slots, speech models, timings.
+from app.talk.admin import router as talk_admin_router  # noqa: E402
+
+app.include_router(talk_admin_router, prefix="/api/admin/talk", tags=["talk"])

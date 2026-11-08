@@ -5,6 +5,7 @@ import {
   Captions as CaptionsIcon,
   CaptionsOff,
   Check,
+  Cloud,
   ExternalLink,
   Image as ImageIcon,
   Keyboard,
@@ -281,6 +282,10 @@ function Header({
   const median = s.latencies.length
     ? [...s.latencies].sort((a, b) => a - b)[Math.floor(s.latencies.length / 2)]
     : null;
+  // A hosted model works out the answers: say where, on hover (or a tap on
+  // a phone). Listening and speaking stay on this server either way.
+  const cloud = s.answers?.hosted ? `Answers come from ${s.answers.provider}` : null;
+  const [cloudShown, setCloudShown] = useState(false);
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-[var(--border)] px-3 py-2">
       <span
@@ -289,7 +294,25 @@ function Header({
         aria-hidden
       />
       <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-semibold text-[var(--text)]">{s.title || title || "New chat"}</p>
+        <div className="flex min-w-0 items-center gap-1">
+          <p className="truncate text-sm font-semibold text-[var(--text)]">{s.title || title || "New chat"}</p>
+          {cloud && (
+            <button
+              type="button"
+              onClick={() => setCloudShown((v) => !v)}
+              aria-label={cloud}
+              aria-expanded={cloudShown}
+              title={`${cloud}. Your voice is turned into text on this server; only the text is sent.`}
+              data-testid="talk-answers-from"
+              className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--text-muted)] hover:text-[var(--text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+            >
+              <Cloud className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          )}
+        </div>
+        {cloud && cloudShown && (
+          <p className="text-[11px] text-[var(--text-muted)]">{cloud}. Only the text of what you say is sent.</p>
+        )}
         {temporary && <p className="text-[11px] text-[var(--text-muted)]">Temporary · gone in an hour, nothing remembered</p>}
       </div>
       <button

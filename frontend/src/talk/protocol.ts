@@ -53,6 +53,8 @@ export type ServerEvent =
       interrupt_mode: InterruptMode;
       audio: { format: string; sample_rate: number; frame_ms: number };
       limits: { resume_s: number; idle_s: number };
+      /** Where answers are worked out (WP-T6), for the header's note. */
+      answers?: { provider: string; hosted: boolean } | null;
     }
   | { type: "state"; state: TalkState; muted: boolean }
   | { type: "partial"; text: string }

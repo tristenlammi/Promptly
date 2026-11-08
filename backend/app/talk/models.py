@@ -30,6 +30,9 @@ class TalkMetric(UUIDPKMixin, CreatedAtMixin, Base):
     # Last word -> the first audio sent back. The number that matters.
     first_audio_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tool_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Heard you start talking over it -> its audio stopped (0301). NULL when
+    # nobody talked over this answer.
+    barge_in_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     barge_ins: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     fast_path: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 

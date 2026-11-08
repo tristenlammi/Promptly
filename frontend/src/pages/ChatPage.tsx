@@ -2,7 +2,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useEditorStore } from "@/store/editorStore";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Check,
@@ -1238,9 +1238,29 @@ export function ChatPage({
   // whether the connection has recovered enough to go back to hands-free.
   const [fallbackWeak, setFallbackWeak] = useState(false);
   const [connectionBack, setConnectionBack] = useState(false);
+  // Talk switched off on the server or not for this account (Admin → Talk):
+  // no Talk orb, and every way in opens the tap-to-talk voice mode instead.
+  // An older server without Talk (404) keeps the orb; starting says so.
+  const talkConfig = useQuery({
+    queryKey: ["talk", "config"],
+    queryFn: async () => (await apiClient.get<{ enabled: boolean }>("/talk/config")).data,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const talkAvailable = talkConfig.data?.enabled !== false;
+  // Turned off since the page loaded: the next look hides the orb.
+  const talkProblem = useTalkStore((s) => s.problem?.code ?? null);
+  useEffect(() => {
+    if (talkProblem === "talk_off") void queryClient.invalidateQueries({ queryKey: ["talk", "config"] });
+  }, [talkProblem, queryClient]);
 
   const openTalk = useCallback(() => {
     if (talk.live) return;
+    if (!talkAvailable) {
+      setFallbackWeak(false);
+      setVoiceModeOpen(true);
+      return;
+    }
     if (embedded && !id) {
       // A brand-new chat inside a workspace pane has nowhere to put a new
       // conversation yet: the simple voice mode sends through the composer.
@@ -1269,6 +1289,7 @@ export function ChatPage({
           },
     });
   }, [
+    talkAvailable,
     embedded,
     id,
     selectedModel,
@@ -1283,15 +1304,17 @@ export function ChatPage({
   // Talk to Promptly from elsewhere (Today, Ctrl+K, the shortcut) lands on
   // /chat?talk=1: start it once, then drop the flag from the address.
   const talkParam = new URLSearchParams(location.search).get("talk") === "1";
+  const talkConfigKnown = !talkConfig.isPending;
   useEffect(() => {
-    if (!talkParam) return;
+    // Wait for /talk/config, so Talk being off goes straight to voice mode.
+    if (!talkParam || !talkConfigKnown) return;
     const params = new URLSearchParams(location.search);
     params.delete("talk");
     const rest = params.toString();
     navigate(`${location.pathname}${rest ? `?${rest}` : ""}`, { replace: true });
     openTalk();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [talkParam]);
+  }, [talkParam, talkConfigKnown]);
 
   // A reload in the middle of a conversation picks it up again (the server
   // keeps it for 30 s). Audio waits for a tap if the browser wants one.
@@ -1613,6 +1636,7 @@ export function ChatPage({
               onToolsChange={handleToolsChange}
               onResearch={() => setResearchDialogOpen(true)}
               onVoiceMode={openTalk}
+              talkAvailable={talkAvailable}
               onSubchat={id && hasMessages ? openSubchat : undefined}
               footer={footerText}
               autoFocus

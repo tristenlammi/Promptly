@@ -257,6 +257,13 @@ async def memory_learning(ctx) -> dict[str, int]:
     return {"suggested": await nightly()}
 
 
+# Talking to Promptly (WP-T6): Talk's timings are kept 30 days.
+async def prune_talk_metrics(ctx) -> int:
+    from app.talk.metrics import prune_talk_metrics as prune
+
+    return await prune()
+
+
 class WorkerSettings:
     functions = [
         # Never retried by arq: a run interrupted mid-way is closed out by
@@ -310,6 +317,8 @@ class WorkerSettings:
             run_at_startup=False,
             unique=True,
         ),
+        # Talking to Promptly (WP-T6): drop Talk timings older than 30 days.
+        cron(prune_talk_metrics, hour=4, minute=35, run_at_startup=False, unique=True),
     ]
     on_startup = wait_for_schema
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

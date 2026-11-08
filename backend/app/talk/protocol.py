@@ -26,7 +26,8 @@ Client -> server, binary
 
 Server -> client, JSON text
     ``ready {session_id, conversation_id, resumed, audio: {format, sample_rate,
-    frame_ms}, limits}``, ``state {state: listening|thinking|speaking|muted,
+    frame_ms}, limits, answers: {provider, hosted} | null}`` (where answers are
+    worked out, for the header's note), ``state {state: listening|thinking|speaking|muted,
     muted}``, ``partial {text}`` (your words so far), ``heard {text,
     message_id}`` (what was taken as your turn), ``reply {text, message_id?}``
     (its words so far, cleaned for speech), ``spoken {chars}`` (how much of

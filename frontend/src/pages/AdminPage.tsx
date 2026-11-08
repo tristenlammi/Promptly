@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  AudioLines,
   BarChart3,
   DatabaseBackup,
   HardDrive,
@@ -18,6 +19,7 @@ import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { BackupsPanel } from "@/components/admin/BackupsPanel";
 import { PasswordsPanel } from "@/components/admin/PasswordsPanel";
 import { StoragePanel } from "@/components/admin/StoragePanel";
+import { TalkAdminPanel } from "@/components/admin/TalkAdminPanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
 import { GroupsPanel } from "@/components/admin/GroupsPanel";
 import { McpConnectorsPanel } from "@/components/admin/McpConnectorsPanel";
@@ -37,6 +39,7 @@ type TabId =
   | "backups"
   | "passwords"
   | "storage"
+  | "talk"
   | "models"
   | "connectors";
 
@@ -112,6 +115,12 @@ const TABS: TabDef[] = [
     subtitle: "Disk space, the nightly integrity check, and files to restore from a backup.",
   },
   {
+    id: "talk",
+    label: "Talk",
+    icon: <AudioLines className="h-3.5 w-3.5" />,
+    subtitle: "Live spoken conversations: who can talk, how many at once, and how fast it answers.",
+  },
+  {
     id: "settings",
     label: "App settings",
     icon: <Settings className="h-3.5 w-3.5" />,
@@ -184,6 +193,7 @@ export function AdminPage() {
             {tab === "backups" && <BackupsPanel />}
             {tab === "passwords" && <PasswordsPanel />}
             {tab === "storage" && <StoragePanel />}
+            {tab === "talk" && <TalkAdminPanel />}
             {tab === "settings" && <AppSettingsPanel />}
           </div>
         </div>

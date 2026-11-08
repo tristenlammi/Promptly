@@ -56,6 +56,45 @@ async def refusal(db, user: User, server: ServerTalk) -> str | None:  # noqa: AN
     return None
 
 
+async def answer_source(conversation_id: uuid.UUID) -> dict[str, object] | None:
+    """Where a spoken answer in this chat is worked out: the admin's voice
+    model when one is set (``chat/router.py`` swaps it in for spoken turns,
+    except for custom models), else the chat's own. ``{provider, hosted}``,
+    for the Talk header's "Answers come from ..." note; None when unknown.
+    Speech itself (Whisper, Kokoro) never leaves the server."""
+    from app.app_settings.defaults import load_effective_defaults
+    from app.chat.models import Conversation
+    from app.custom_models.resolver import is_custom_model_id, resolve_custom_model
+    from app.database import SessionLocal
+    from app.mail.search import is_local
+    from app.models_config.models import ModelProvider
+
+    try:
+        async with SessionLocal() as db:
+            conv = await db.get(Conversation, conversation_id)
+            if conv is None:
+                return None
+            provider = None
+            custom = bool(conv.model_id) and is_custom_model_id(conv.model_id)
+            if not custom:
+                defaults = await load_effective_defaults(db)
+                if defaults.voice_configured:
+                    voice = await db.get(ModelProvider, defaults.voice_provider_id)
+                    if voice is not None and voice.enabled:
+                        provider = voice
+            if provider is None and custom:
+                resolved = await resolve_custom_model(conv.model_id, db)
+                provider = resolved.base_provider if resolved is not None else None
+            if provider is None and conv.provider_id is not None:
+                provider = await db.get(ModelProvider, conv.provider_id)
+            if provider is None:
+                return None
+            return {"provider": provider.name, "hosted": not is_local(provider)}
+    except Exception:  # noqa: BLE001 - a note in the header; never fail the conversation for it
+        logger.exception("talk: couldn't tell where answers come from")
+        return None
+
+
 @dataclass
 class VoicePrefs:
     voice: str | None
@@ -96,6 +135,7 @@ async def record_turn(
     barge_ins: int,
     fast_path: bool = False,
     tool_ms: int | None = None,
+    barge_in_ms: int | None = None,
     transport: str = "ws",
 ) -> None:
     """One answered turn's timings. Never fails the conversation."""
@@ -120,6 +160,7 @@ async def record_turn(
                     ttft_ms=_ms(ttft_ms),
                     first_audio_ms=_ms(first_audio_ms),
                     tool_ms=_ms(tool_ms),
+                    barge_in_ms=_ms(barge_in_ms),
                     barge_ins=barge_ins,
                     fast_path=fast_path,
                 )

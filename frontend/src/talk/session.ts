@@ -133,6 +133,8 @@ export interface TalkUi {
   latencies: number[];
   /** Bumped whenever the chat's messages changed on the server. */
   changed: number;
+  /** Where answers are worked out: "Answers come from OpenRouter". */
+  answers: { provider: string; hosted: boolean } | null;
 }
 
 const INITIAL: TalkUi = {
@@ -163,6 +165,7 @@ const INITIAL: TalkUi = {
   endReason: null,
   latencies: [],
   changed: 0,
+  answers: null,
 };
 
 export const useTalkStore = create<TalkUi>(() => ({ ...INITIAL }));
@@ -479,6 +482,7 @@ class TalkController {
           title: ev.title ?? get().title,
           turnMode: ev.turn_mode,
           interruptMode: ev.interrupt_mode,
+          answers: ev.answers ?? null,
           problem: null,
           notice: resumedFromDrop && !ev.resumed ? "Reconnected. Say that again?" : null,
         });

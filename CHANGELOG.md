@@ -33,8 +33,13 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Chats mark spoken messages with "Spoken", and replies you talked over with "Spoken · interrupted".
 - Talk to Promptly on Android: the assistant sheet is now a conversation. Just talk, it answers out loud with captions, talk over it to interrupt, and say "that's all" to finish. Changes and alarms wait for your yes (say it or tap it); timers, calls, texts, apps and directions work as before. Open it with your phone's assistant gesture, the new "Talk to Promptly" Quick Settings tile, or long-press the Promptly icon → Talk. Once started it keeps going if your screen locks, with Mute and End on the lock screen; a headset button stops it talking or mutes it, and it waits quietly while a call or another app has the audio. Phone conversations aren't saved. If your server doesn't have Talk yet (or it's off), the sheet asks one question at a time as before.
 - Phone assistant settings: turn hands-free conversations off, and choose whether answers play as call audio (best for talking over it on the speaker) or as assistant audio (can be louder).
+- Admin → Talk: turn Talk on or off, limit it to some user groups, set how many people can talk at once, see the speech models in use, and see how fast answers have been (usual and slow-end times for knowing you'd finished, the transcript, the model, the first sound, and going quiet when talked over, per device). Only timings are kept for this, for 30 days, never words or audio.
+- The Talk screen shows a small cloud when answers come from a hosted model; hover or tap it to see which ("Answers come from OpenRouter").
+- README: "Talking to Promptly" setup notes, with the speech settings `WHISPER_LIVE_MODEL`, `WHISPER_LIVE_SLOTS`, `TTS_THREADS` and `TTS_STREAM_SLOTS` (now also settable in `.env`).
 
 ### Changed
+- When Talk is off for you, the Talk button is hidden and every way in (Today, Ctrl+K, the shortcut, the + menu) opens the tap-to-talk voice mode instead.
+- Memory learns from voice conversations knowing which of your words were transcribed, and skips facts that look misheard (it won't save a name, number or date from speech unless the conversation confirms it).
 - Read-aloud runs Kokoro on 4 threads (`TTS_THREADS`) instead of one per core, which was 2–3× slower when the server was busy.
 - Phone assistant: a spoken yes or no is now judged by the same strict rule everywhere. "Okay, do it" and "nope, never mind" are understood without asking the AI, and anything with a "wait" or "no" in it is never taken as a yes.
 

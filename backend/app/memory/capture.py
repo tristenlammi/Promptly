@@ -85,7 +85,13 @@ _SYSTEM_PROMPT = (
     "several messages to come out. Facts about people close to them count, written as facts "
     "about the user ('User's wife is allergic to peanuts'). Only the user's own statements "
     "count as evidence: never save something only the assistant said, a hypothetical ('if I "
-    "were a vegan'), or what a document or article says."
+    "were a vegan'), or what a document or article says.\n\n"
+    "Lines marked 'User (spoken)' were said out loud and turned into text by speech "
+    "recognition, which mishears: a wrong word, a name or number that doesn't fit the rest, "
+    "a sentence that doesn't quite make sense. Skip a fact from a spoken line that looks "
+    "misheard rather than guessing what was meant, and never save a name, number, date or "
+    "spelling from a spoken line unless the conversation confirms it (they repeat or type it, "
+    "or it matches a fact already saved)."
 )
 
 
@@ -98,9 +104,16 @@ def _drew_on_outside_content(message: Message) -> bool:
     )
 
 
+def _spoken(message: Message) -> bool:
+    """Said out loud in Talk and transcribed (``messages.voice``, WP-T2)."""
+    voice = getattr(message, "voice", None)
+    return isinstance(voice, dict) and bool(voice.get("spoken"))
+
+
 def transcript(messages: list[Message]) -> tuple[str, int]:
     """Oldest first, with dates so "next Friday" means something. Stops at a sensible size,
-    and says how many messages that covered, so the rest aren't marked as read."""
+    and says how many messages that covered, so the rest aren't marked as read. Your
+    spoken turns are marked, so the model knows they may have been misheard."""
     lines: list[str] = []
     used = 0
     covered = 0
@@ -109,7 +122,8 @@ def transcript(messages: list[Message]) -> tuple[str, int]:
         if m.role == "user":
             if not body:
                 continue
-            line = f"[{m.created_at:%Y-%m-%d}] User: {body[:_USER_CHARS]}"
+            who = "User (spoken)" if _spoken(m) else "User"
+            line = f"[{m.created_at:%Y-%m-%d}] {who}: {body[:_USER_CHARS]}"
         elif m.role == "assistant":
             if _drew_on_outside_content(m):
                 # Could be repeating something planted. The user's own words still count.

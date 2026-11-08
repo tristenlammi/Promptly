@@ -983,6 +983,8 @@ services:
       - TTS_LANG=${TTS_LANG:-en-us}
       # onnxruntime threads for Kokoro (4 beat one-per-core on a busy box).
       - TTS_THREADS=${TTS_THREADS:-4}
+      # Talk answers spoken at once through /tts/stream (others wait their turn).
+      - TTS_STREAM_SLOTS=${TTS_STREAM_SLOTS:-2}
     volumes:
       # Persist downloaded model weights so the pull is a one-time cost.
       - ./data/tts:/root/.cache

@@ -44,7 +44,7 @@ from typing import Any
 from app.auth.models import User
 
 from . import confirm, fastpath, links, readback, reply as chat, tools as voice_tools
-from .access import SPEEDS, VoicePrefs, record_turn
+from .access import SPEEDS, VoicePrefs, answer_source, record_turn
 from .audio import FRAME_MS, TTS_SAMPLE_RATE, Playhead, split_seq, with_seq
 from .protocol import CLOSE_UNAVAILABLE, PROTOCOL_VERSION, Hello, Transport
 from .speech import Piece, SpeechSplitter, heard_raw
@@ -122,6 +122,8 @@ class Reply:
     tts_failed: bool = False
     failed_say: str | None = None  # the model failed: say this instead
     barge_ins: int = 0
+    # Heard them start talking over it -> its audio stopped (WP-T6 metrics).
+    barge_in_ms: int | None = None
     pieces_started: int = 0
     fast_path: bool = False  # said without the model (a command, an answer to a yes/no)
     tool_ms: int = 0
@@ -231,6 +233,8 @@ class TalkSession:
         self.user = user
         self.hello = hello
         self.conv = conv
+        # {provider, hosted}: the Talk header's "Answers come from ..." (WP-T6).
+        self.answers: dict[str, Any] | None = None
         self.prefs = prefs
         self.connection = connection  # stands in for the request in audit rows
         self.turn_mode = hello.turn_mode or prefs.turn_mode
@@ -265,6 +269,7 @@ class TalkSession:
         :class:`links.SpeechUnavailable` when there's no live speech."""
         self.stt = links.LiveStt(codec=self.hello.codec, language=_lang(self.hello.lang), on_event=self._stt_event)
         await self.stt.open()
+        self.answers = await answer_source(self.conv.id)
         _SESSIONS[self.id] = self
         self._actor = asyncio.create_task(self._run(), name=f"talk-{self.id}")
         await self.attach(transport, resumed=False)
@@ -288,6 +293,7 @@ class TalkSession:
                 "interrupt_mode": self.interrupt_mode,
                 "audio": {"format": self.play_format, "sample_rate": TTS_SAMPLE_RATE, "frame_ms": FRAME_MS},
                 "limits": {"resume_s": int(RESUME_S), "idle_s": int(IDLE_S)},
+                "answers": self.answers,
             }
         )
         await self._send_state()
@@ -554,7 +560,7 @@ class TalkSession:
                 and barges_in(text, spoken)
             ):
                 h.barged = True
-                await self._barge_in(r)
+                await self._barge_in(r, since=h.started)
             await self.send({"type": "partial", "text": text})
             return
         if real_words(text):
@@ -600,7 +606,7 @@ class TalkSession:
                     return  # its own echo, or a backchannel
                 if playing:
                     h.barged = True
-                    await self._barge_in(r)
+                    await self._barge_in(r, since=h.started)
             if is_goodbye(text):
                 await self._goodbye()
                 return
@@ -981,8 +987,9 @@ class TalkSession:
         await chat.discard(r.stream, self.conv, r.turn.message_id)
         logger.info("talk: speculative answer dropped, they carried on")
 
-    async def _barge_in(self, r: Reply, *, played_ms: int | None = None) -> None:
-        """They talked over it (or pressed Stop): stop now, keep what was heard."""
+    async def _barge_in(self, r: Reply, *, played_ms: int | None = None, since: float | None = None) -> None:
+        """They talked over it (or pressed Stop): stop now, keep what was heard.
+        ``since`` is when the speech that stopped it began, for the timings."""
         if r.cancelled:
             return
         r.cancelled = True
@@ -990,6 +997,8 @@ class TalkSession:
         heard_ms = min(heard_ms, r.playhead.sent_ms)
         await self._stop_tasks(r)
         await self.send({"type": "stop_audio"})
+        if since is not None:
+            r.barge_in_ms = max(0, int((time.monotonic() - since) * 1000))
         if self.reply is r:
             self.reply = None
         r.barge_ins += 1
@@ -1253,6 +1262,7 @@ class TalkSession:
             barge_ins=r.barge_ins,
             fast_path=r.fast_path,
             tool_ms=r.tool_ms or None,
+            barge_in_ms=r.barge_in_ms,
         )
 
     # ------------------------------------------------------------ helpers
