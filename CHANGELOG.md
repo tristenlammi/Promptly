@@ -26,6 +26,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Notes: a "Notes" switch in Notifications, for when someone shares a note with you.
 - Notes: deleted notes go to the Trash for 30 days, with Restore and Delete forever, and show in the one Trash under "Notes".
 - Notifications: quiet hours for all of Promptly (Account → Notifications), with start and end in your own time zone and different times on Friday and Saturday nights if you like. Notifications wait and arrive together when quiet hours end; calls, Calendar reminders, item reminders, Passwords and admin alerts always get through. Rooms and Mail can go in a daily summary instead, one push of counts at your Today summary time. And you can block someone from their profile or your 1:1 conversation: neither of you can message the other one-to-one, you get no notifications about what they do, and they aren't told. Account → Blocked people lists them, with Unblock.
+- `scripts/stack.sh` (and `scripts/stack.ps1`) runs a separate copy of Promptly for a worktree on its own port (`up`, `down`, `ls`, `e2e`), with its own containers, images, data and throwaway secrets, so testing a branch never touches the main app.
+
+### Fixed
+- Mail: a very large or tangled HTML email could still tie up the mail worker for minutes while it was cleaned. Cleaning now stops after 3 seconds, and an email it can't finish shows as plain text, with a note saying so. Sending works the same way, so a draft like that no longer holds up the app.
+- Workspaces: two board edits close together (adding a card, then dragging it to Done) could leave the board's text in chat search out of date, because both tried to create the workspace's Boards folder at once and one crashed. Making a workspace folder is now safe when two requests race, for every folder kind.
 
 ## [0.31.0] - 2026-11-08
 
