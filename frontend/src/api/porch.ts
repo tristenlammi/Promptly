@@ -604,4 +604,83 @@ export const porchApi = {
   async activitySeen(): Promise<void> {
     await apiClient.post("/porch/activity/seen");
   },
+
+  // ---- hand-offs (WP-P1.6)
+  /** Posts you can see, by words and (photos) by what's in them. */
+  async search(q: string, signal?: AbortSignal): Promise<SearchResults> {
+    const { data } = await apiClient.get<SearchResults>("/porch/search", { params: { q }, signal });
+    return data;
+  },
+  /** Your 1:1 conversation with the post's author (made if new). */
+  async replyPrivately(postId: string): Promise<{ room_id: string; share: string; url: string }> {
+    const { data } = await apiClient.post<{ room_id: string; share: string; url: string }>(`/porch/posts/${postId}/reply`);
+    return data;
+  },
+  /** "Make this an event": the post's words and place, and who can see it. */
+  async eventPrefill(postId: string): Promise<EventPrefillOut> {
+    const { data } = await apiClient.get<EventPrefillOut>(`/porch/posts/${postId}/event`);
+    return data;
+  },
+  /** A post's small card, or 404 when you can't see it. */
+  async card(postId: string): Promise<PostCardSummary> {
+    const { data } = await apiClient.get<PostCardSummary>(`/porch/posts/${postId}/card`);
+    return data;
+  },
+  /** How many Porch posts these photos of yours are in (Photos' trash warning). */
+  async uses(fileIds: string[]): Promise<{ posts: number; photos: number }> {
+    const { data } = await apiClient.post<{ posts: number; photos: number }>("/porch/files/uses", { file_ids: fileIds });
+    return data;
+  },
 };
+
+export interface SearchResult {
+  id: string;
+  kind: PostKind;
+  title: string;
+  /** "Sam · in Family · 3 Nov" */
+  subtitle: string;
+  author: PorchUser | null;
+  thumb: string | null;
+  href: string;
+  created_at: string | null;
+}
+
+export interface SearchResults {
+  results: SearchResult[];
+  /** False: photos weren't searched by what's in them (the photo service is off). */
+  photos_searched: boolean;
+}
+
+export interface EventPrefillOut {
+  title: string;
+  body: string;
+  location: string;
+  author: PorchUser | null;
+  url: string;
+  /** Everyone who can see the post (not you): the only people it can invite. */
+  guests: PorchUser[];
+}
+
+export interface PostCardSummary {
+  title: string;
+  subtitle: string;
+  thumb: string | null;
+  href: string;
+}
+
+/**
+ * Before photos go to the trash: "This photo is in 2 Porch posts. …", or
+ * null when they're in none (or Porch isn't on for you, or it can't be told).
+ */
+export async function porchTrashWarning(fileIds: string[]): Promise<string | null> {
+  if (!fileIds.length) return null;
+  try {
+    const { posts, photos } = await porchApi.uses(fileIds);
+    if (!posts) return null;
+    const inPosts = posts === 1 ? "1 Porch post" : `${posts} Porch posts`;
+    const lead = fileIds.length === 1 ? `This photo is in ${inPosts}.` : photos === 1 ? `One of these is in ${inPosts}.` : `${photos} of these are in ${inPosts}.`;
+    return `${lead} Moving ${fileIds.length === 1 ? "it" : "them"} to the trash takes ${fileIds.length === 1 ? "it" : "them"} out of ${posts === 1 ? "that post" : "those posts"} for everyone. Restoring from the trash puts ${fileIds.length === 1 ? "it" : "them"} back.`;
+  } catch {
+    return null;
+  }
+}

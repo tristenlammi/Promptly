@@ -9,6 +9,7 @@ import {
   Contact,
   FileText,
   Folder,
+  House,
   Image,
   Images,
   LayoutGrid,
@@ -60,6 +61,7 @@ export const KIND_ICONS: Record<ThingKind, LucideIcon> = {
   witem: LayoutGrid,
   room_msg: MessageSquare,
   chat_msg: MessagesSquare,
+  porch_post: House,
 };
 
 export const connectionsKey = (ref: ThingRef) => ["connections", ref.kind, ref.id] as const;

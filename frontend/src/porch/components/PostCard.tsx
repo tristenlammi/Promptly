@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import {
   Baby,
   Briefcase,
+  CalendarPlus,
   Download,
   ExternalLink,
   GraduationCap,
@@ -10,6 +11,8 @@ import {
   ImageOff,
   Link2,
   MapPin,
+  MessageSquareShare,
+  MessagesSquare,
   MoreHorizontal,
   Pencil,
   Sparkles,
@@ -20,6 +23,7 @@ import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode }
 import { Link, useNavigate } from "react-router-dom";
 
 import { HEART, porchApi, type LifeEventType, type PorchPost, type PorchUser } from "@/api/porch";
+import { SendToSheet } from "@/components/share/SendToSheet";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { Sheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
@@ -31,6 +35,7 @@ import { putPost } from "../cache";
 import { usePorch } from "../context";
 import { usePostTalk } from "../talkActions";
 import { CommentsSheet, InlineComments } from "./Comments";
+import { MakeEventSheet } from "./MakeEventSheet";
 import { MediaCarousel } from "./MediaCarousel";
 import { PollCard } from "./PollCard";
 import { PostActions } from "./PostActions";
@@ -127,6 +132,8 @@ function LifeEventCard({ post }: { post: PorchPost }) {
 export function PostCard({ post, full = false, media = true, className }: { post: PorchPost; full?: boolean; media?: boolean; className?: string }) {
   const [menu, setMenu] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [planning, setPlanning] = useState(false);
   // Comments: a sheet on a phone, under the post on a computer, always on
   // the post's own page.
   const [talk, setTalk] = useState<null | { focus: boolean }>(null);
@@ -162,6 +169,33 @@ export function PostCard({ post, full = false, media = true, className }: { post
       onClick: () => navigate(`/porch/p/${post.id}/edit`),
     });
   }
+  if (!post.mine && author) {
+    actions.push({
+      label: "Reply privately",
+      icon: MessagesSquare,
+      hint: `A message to ${who} in Rooms, with this post`,
+      onClick: async () => {
+        try {
+          const got = await porchApi.replyPrivately(post.id);
+          navigate(got.url);
+        } catch (err) {
+          toast.error(apiErrorMessage(err, "Couldn't open a conversation. Try again."));
+        }
+      },
+    });
+  }
+  actions.push({
+    label: "Share to a Room",
+    icon: MessageSquareShare,
+    hint: "Only people who can see this post can open it",
+    onClick: () => setSharing(true),
+  });
+  actions.push({
+    label: "Make this an event",
+    icon: CalendarPlus,
+    hint: "In your calendar, inviting people who can see this post",
+    onClick: () => setPlanning(true),
+  });
   actions.push({
     label: "Copy link",
     icon: Link2,
@@ -282,8 +316,24 @@ export function PostCard({ post, full = false, media = true, className }: { post
 
       <ActionSheet open={menu} onClose={() => setMenu(false)} title={post.mine ? "Your post" : `${who}'s post`} actions={actions} />
       {saving && <SaveSheet post={post} onClose={() => setSaving(false)} />}
+      <SendToSheet
+        open={sharing}
+        onClose={() => setSharing(false)}
+        target={{ kind: "porch_post", id: post.id, title: shareTitle(post, who) }}
+        canGrant={false}
+      />
+      <MakeEventSheet post={post} open={planning} onClose={() => setPlanning(false)} />
     </article>
   );
+}
+
+/** How the post is named in "Send to…" ("Sharing “BBQ Saturday”"). */
+function shareTitle(post: PorchPost, who: string): string {
+  const line = post.body.split(/\r?\n/).find((l) => l.trim())?.trim() ?? "";
+  if (line) return line.length > 60 ? `${line.slice(0, 59)}…` : line;
+  if (post.life_event?.title) return post.life_event.title;
+  if (post.kind === "photo" || post.kind === "video") return `${who}'s ${post.media.length > 1 ? `${post.media.length} photos` : post.kind}`;
+  return `${who}'s post`;
 }
 
 function SaveSheet({ post, onClose }: { post: PorchPost; onClose: () => void }) {

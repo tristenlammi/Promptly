@@ -33,6 +33,11 @@ GRANTABLE = ("file", "folder", "photo", "album")
 # Kinds that live inside an app file (``file_id``) under their own ``id``.
 IN_ITEM = {"task": "tasks", "recipe": "mealplan", "trip": "trip"}
 
+# Porch (WP-P1.6): a post. Never grantable — who sees it is the post's
+# groups; anyone else in the room gets "This post isn't shared with you".
+KINDS = (*KINDS, "porch_post")
+LABELS["porch_post"] = "a Porch post"
+
 
 def _uuid(v: Any) -> uuid.UUID | None:
     try:
@@ -259,6 +264,10 @@ async def card(db: AsyncSession, user: User, share: dict) -> dict | None:
         out = await _album_card(db, user, share)
     elif kind in IN_ITEM:
         out = await _item_card(db, user, share, kind)
+    elif kind == "porch_post":
+        from app.porch.handoffs import card as porch_card
+
+        out = await porch_card(db, user, share.get("id"))
     else:
         out = None
     if out is None:

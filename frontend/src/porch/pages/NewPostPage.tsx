@@ -10,7 +10,7 @@ import { Column, LoadError, PageHeader, PostSkeleton } from "../components/ui";
 import { usePorch } from "../context";
 import { Unavailable } from "./PostPage";
 
-/** ``/porch/new``: a new post (``?group=``, ``?memory=`` and ``?shared=1`` say where it came from). */
+/** ``/porch/new``: a new post (``?group=``, ``?memory=``, ``?shared=1`` and ``?for=`` say where it came from). */
 export function NewPostPage() {
   const [params] = useSearchParams();
   return (
@@ -19,6 +19,7 @@ export function NewPostPage() {
         group: params.get("group"),
         memory: params.get("memory"),
         shared: params.get("shared") === "1",
+        forUser: params.get("for"),
       }}
     />
   );

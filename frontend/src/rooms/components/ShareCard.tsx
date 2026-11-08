@@ -5,6 +5,7 @@ import {
   ChefHat,
   File as FileIcon,
   Folder,
+  House,
   Image as ImageIcon,
   Images,
   Lock,
@@ -22,12 +23,12 @@ const FilePreviewModal = lazy(() => import("@/components/files/FilePreviewModal"
 
 /**
  * Something sent to the room with "Send to…" (the message's ``meta.share``):
- * a file, folder, photo, album, task, recipe or trip, drawn from the live
+ * a file, folder, photo, album, task, recipe, trip or Porch post, drawn from the live
  * thing as *you* can see it. If you can't open it, a neutral card says so —
  * the message itself never carries its name.
  */
 
-const ICONS: Record<ShareKind, LucideIcon> = {
+export const SHARE_ICONS: Record<ShareKind, LucideIcon> = {
   file: FileIcon,
   folder: Folder,
   photo: ImageIcon,
@@ -35,6 +36,7 @@ const ICONS: Record<ShareKind, LucideIcon> = {
   task: CheckSquare,
   recipe: ChefHat,
   trip: Plane,
+  porch_post: House,
 };
 
 export const shareKey = (messageId: string) => ["rooms", "share-card", messageId] as const;
@@ -48,7 +50,7 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
     staleTime: 60_000,
     retry: 1,
   });
-  const Icon = ICONS[kind] ?? FileIcon;
+  const Icon = SHARE_ICONS[kind] ?? FileIcon;
   const shell =
     "mt-1 flex w-full max-w-md items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-2.5 text-left shadow-[var(--shadow-sm)]";
 
@@ -71,9 +73,13 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
           <Lock className="h-5 w-5" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-[var(--text)]">Shared item</span>
+          <span className="block text-sm font-medium text-[var(--text)]">{kind === "porch_post" ? "Porch post" : "Shared item"}</span>
           <span className="block text-xs text-[var(--text-muted)]">
-            {isError ? "Couldn't load this." : `You don't have access to ${data?.label ?? label ?? "it"}.`}
+            {isError
+              ? "Couldn't load this."
+              : kind === "porch_post"
+                ? "This post isn't shared with you."
+                : `You don't have access to ${data?.label ?? label ?? "it"}.`}
           </span>
         </span>
       </div>

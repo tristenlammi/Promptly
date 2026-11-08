@@ -3,6 +3,7 @@ import { ArrowLeft, Ban, CalendarDays, Hash, Pin, Search, Settings, Sparkles, Up
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
+import { SHARE_KINDS, type ShareKind } from "@/api/crossapp";
 import type { Bootstrap, Message } from "@/api/rooms";
 import { blockPerson, unblockPerson } from "@/components/people/blockActions";
 import { Sheet } from "@/items/ui";
@@ -10,7 +11,7 @@ import { cn } from "@/utils/cn";
 
 import { dmTitle, findRoom } from "../cache";
 import { useRoomsStore } from "../store";
-import { Composer, type ComposerHandle } from "./Composer";
+import { Composer, type ComposerAttachment, type ComposerHandle } from "./Composer";
 import { MessageActionSheet } from "./MessageActionSheet";
 import type { MessageCtx } from "./MessageItem";
 import { MessageList } from "./MessageList";
@@ -91,6 +92,19 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
     next.delete("m");
     setParams(next, { replace: true });
   }, [linkedSeq, room, params, setParams]);
+
+  // ``?share=<kind>:<id>`` — something to send as a card with your next
+  // message (Porch's "Reply privately"). It stays until it's sent or removed.
+  const shareParam = params.get("share");
+  const attachment = useMemo<ComposerAttachment | null>(() => {
+    const m = /^([a-z_]{1,16}):([A-Za-z0-9:_-]{1,80})$/.exec(shareParam ?? "");
+    return m && (SHARE_KINDS as readonly string[]).includes(m[1]) ? { kind: m[1] as ShareKind, id: m[2] } : null;
+  }, [shareParam]);
+  const clearAttachment = useCallback(() => {
+    const next = new URLSearchParams(params);
+    next.delete("share");
+    setParams(next, { replace: true });
+  }, [params, setParams]);
 
   if (!room) {
     return (
@@ -296,6 +310,8 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
           onEdit={onEdit}
           users={b.users}
           onPlanEvent={() => setPlanning(true)}
+          attachment={attachment}
+          onClearAttachment={clearAttachment}
         />
         )}
       </section>

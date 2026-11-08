@@ -201,6 +201,12 @@ export interface TodayHub {
     catchup_total: number;
   };
   automations?: { url: string; failed_24h: number; next: { id: string; title: string; at: string }[] };
+  /** Porch: new posts in your ticked groups since you last looked, and today's birthdays. */
+  porch?: {
+    url: string;
+    new_posts: { count: number; thumbs: { post_id: string; thumb: string | null; url: string }[]; from: string[]; more_people: number } | null;
+    birthdays: { user: { id: string; username: string; name: string; avatar_url: string | null; color: string | null }; profile_url: string; post_url: string }[];
+  };
 }
 
 export interface MorningSummary {
@@ -232,6 +238,8 @@ export interface EverydaySearch {
   tasks: { id: string; title: string; done: boolean; due: string | null; time: string | null; list: string; url: string }[];
   /** Shared tags matching the query (#tags). */
   tags?: { id: string; name: string; color: string | null; count?: number; url: string }[];
+  /** Porch posts you can see (words, and photos by what's in them). */
+  porch?: { id: string; title: string; subtitle: string; thumb: string | null; url: string }[];
 }
 
 export interface JournalDay {

@@ -13,6 +13,8 @@ interface PorchState {
   /** Sheets any page can open. */
   newGroupOpen: boolean;
   setNewGroupOpen: (v: boolean) => void;
+  searchOpen: boolean;
+  setSearchOpen: (v: boolean) => void;
 }
 
 export const usePorchStore = create<PorchState>((set) => ({
@@ -23,4 +25,6 @@ export const usePorchStore = create<PorchState>((set) => ({
   setPhotosOnly: (v) => set({ photosOnly: v, fresh: [] }),
   newGroupOpen: false,
   setNewGroupOpen: (v) => set({ newGroupOpen: v }),
+  searchOpen: false,
+  setSearchOpen: (v) => set({ searchOpen: v }),
 }));

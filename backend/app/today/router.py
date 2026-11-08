@@ -124,4 +124,11 @@ async def search(
         mail = await quick_search(db, user, q.strip(), limit)
     except Exception:  # noqa: BLE001 — the other results still matter
         logger.exception("mail search failed")
-    return {"events": events, "contacts": contacts[:limit], "tasks": tasks[:limit], "tags": tags, "mail": mail}
+    porch: list[dict] = []
+    try:
+        from app.porch.search import quick as porch_quick
+
+        porch = await porch_quick(db, user, q.strip(), limit)
+    except Exception:  # noqa: BLE001
+        logger.exception("porch search failed")
+    return {"events": events, "contacts": contacts[:limit], "tasks": tasks[:limit], "tags": tags, "mail": mail, "porch": porch}

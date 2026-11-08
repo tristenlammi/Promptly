@@ -4,7 +4,10 @@ someone Porch isn't on for, all of it is a 404.
 
 Here: first open (``/bootstrap``), the people picker, profiles and "seen"
 marks. Groups are in :mod:`app.porch.groups`, posts and the feed in
-:mod:`app.porch.posts`, photo links in :mod:`app.porch.media`.
+:mod:`app.porch.posts`, photo links in :mod:`app.porch.media`; the
+hand-offs to Rooms, Calendar and Photos in :mod:`app.porch.handoffs`, search
+in :mod:`app.porch.search` (Today: :mod:`app.porch.today`, export:
+:mod:`app.porch.export`).
 """
 from __future__ import annotations
 
@@ -22,7 +25,7 @@ from app.auth.models import User
 from app.database import get_db
 from app.people import blocks
 
-from . import access, activity, compose, core, deps, events, groups, media, posts, tags, talk
+from . import access, activity, compose, core, deps, events, groups, handoffs, media, posts, search, tags, talk
 from .deps import require_porch
 from .models import PorchGroup, PorchGroupMember, PorchProfile
 
@@ -34,6 +37,8 @@ router.include_router(compose.router)
 router.include_router(talk.router)
 router.include_router(tags.router)
 router.include_router(activity.router)
+router.include_router(handoffs.router)
+router.include_router(search.router)
 
 
 def _profile_out(p: PorchProfile, *, me: bool) -> dict[str, Any]:

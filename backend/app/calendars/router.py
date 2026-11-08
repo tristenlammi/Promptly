@@ -371,15 +371,26 @@ class EventIn(BaseModel):
     color: str | None = Field(default=None, pattern=_HEX)
     # Planned in a room: everyone in it is invited, and a card is posted there.
     room_id: uuid.UUID | None = None
-    # What it was made from: a task planned into a time slot.
-    source: "EventSource | None" = None
+    # What it was made from: a task planned into a time slot, or a Porch post.
+    source: "EventSource | None" = Field(default=None, discriminator="kind")
 
 
-class EventSource(BaseModel):
+class TaskSource(BaseModel):
     kind: Literal["task"]
     file_id: uuid.UUID
     task_id: str = Field(min_length=1, max_length=64)
 
+
+class PorchPostSource(BaseModel):
+    """"Make this an event" on a Porch post (WP-P1.6): guests can only be
+    people who can see the post; the event says "From a Porch post" only to
+    those who can."""
+
+    kind: Literal["porch_post"]
+    post_id: uuid.UUID
+
+
+EventSource = TaskSource | PorchPostSource
 
 EventIn.model_rebuild()
 
@@ -404,6 +415,10 @@ class EventPatch(BaseModel):
 
 @router.post("/events", status_code=201)
 async def create_event(body: EventIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    if isinstance(body.source, PorchPostSource):
+        from app.porch.handoffs import check_event
+
+        await check_event(db, user, body.source.post_id, body.guests)
     f = service.EventFields(**body.model_dump(exclude={"repeat", "color", "room_id", "source"}), repeat=body.repeat, repeat_set=True, color=body.color, color_set=True)
     # In a room, the card (and its push) is the invitation — no second ping.
     ev = await service.create_event(db, user, f, ping_guests=body.room_id is None)
@@ -468,6 +483,13 @@ async def room_upcoming(room_id: uuid.UUID, db: AsyncSession = Depends(get_db), 
 @router.patch("/events/{event_id}")
 async def update_event(event_id: uuid.UUID, body: EventPatch, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     given = body.model_fields_set
+    if body.guests:
+        # Made from a Porch post: new guests must be able to see it.
+        existing = await db.get(CalEvent, event_id)
+        if existing is not None and (existing.source or {}).get("kind") == "porch_post":
+            from app.porch.handoffs import check_new_guests
+
+            await check_new_guests(db, existing, body.guests)
     data = body.model_dump(exclude={"scope", "occurrence", "repeat", "color"}, exclude_unset=True)
     f = service.EventFields(
         **data,

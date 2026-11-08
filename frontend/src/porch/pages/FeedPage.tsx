@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, CheckCircle2, Image as ImageIcon, PenSquare, Plus, Users } from "lucide-react";
+import { ArrowUp, CheckCircle2, Image as ImageIcon, PenSquare, Plus, Search, Users } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -25,6 +25,7 @@ export function FeedPage() {
   const fresh = usePorchStore((s) => s.fresh);
   const clearFresh = usePorchStore((s) => s.clearFresh);
   const setNewGroup = usePorchStore((s) => s.setNewGroupOpen);
+  const setSearch = usePorchStore((s) => s.setSearchOpen);
 
   const q = useInfiniteQuery({
     queryKey: feedKey(photos),
@@ -208,6 +209,7 @@ export function FeedPage() {
       <PageHeader
         title={isPhone ? "Porch" : "Feed"}
         actions={
+          <>
           <button
             type="button"
             aria-pressed={photos}
@@ -221,6 +223,16 @@ export function FeedPage() {
             <ImageIcon className="h-[18px] w-[18px]" aria-hidden />
             <span className={cn(isPhone && "sr-only")}>Photos only</span>
           </button>
+          <button
+            type="button"
+            title="Search posts"
+            aria-label="Search posts"
+            onClick={() => setSearch(true)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]"
+          >
+            <Search className="h-[18px] w-[18px]" aria-hidden />
+          </button>
+          </>
         }
       />
       {/* Phones and tablets: the chips. Wide screens tick groups in the left column instead. */}

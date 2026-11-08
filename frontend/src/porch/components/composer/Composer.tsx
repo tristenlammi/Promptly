@@ -39,6 +39,8 @@ export interface ComposerStart {
   memory?: string | null;
   /** ``?shared=1``: from the phone's share sheet. */
   shared?: boolean;
+  /** ``?for=<user id>``: "Post for Sam" on their birthday (Today, Porch). */
+  forUser?: string | null;
 }
 
 const STEP_TITLES: Record<Step, string> = { pick: "Pick photos", arrange: "Arrange", share: "Share" };
@@ -95,7 +97,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
   // ---------------------------------------------------------------- start
   const initial = useMemo<{ draft: Draft; restored: boolean }>(() => {
     if (editing) return { draft: fromPost(editing), restored: false };
-    const fresh = !!(start?.memory || start?.shared);
+    const fresh = !!(start?.memory || start?.shared || start?.forUser);
     const kept = fresh ? null : loadDraft();
     const d: Draft = kept ?? { ...EMPTY };
     // A kept draft's groups: only ones you're still in.
@@ -256,6 +258,22 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
           }));
         })
         .catch(() => toast.error("That memory isn't there any more."));
+    }
+    if (start?.forUser) {
+      // A birthday post: "Happy birthday @sam! 🎂", mentioning them.
+      void porchApi
+        .profile(start.forUser)
+        .then((p) => {
+          if (p.is_me) return;
+          const who = p.user;
+          setDraft((d) => ({
+            ...d,
+            step: d.picks.length ? d.step : "share",
+            body: d.body || `Happy birthday @${who.username}! 🎂`,
+            mentions: d.mentions.some((m) => m.id === who.id) ? d.mentions : [...d.mentions, who],
+          }));
+        })
+        .catch(() => toast.error("That person isn't on Porch for you."));
     }
     if (start?.shared) {
       void import("@/lib/shareTargetStash").then(async ({ takeShared }) => {

@@ -221,6 +221,14 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
         }
         for a in album_rows
     ]
+    # Porch: your posts (with paths to their photos here), comments, groups.
+    porch = None
+    try:
+        from app.porch.export import porch_json
+
+        porch = await porch_json(db, user, arc_of, ROOT)
+    except Exception:  # noqa: BLE001 — the library still exports without it
+        logger.exception("porch export failed")
 
     # Parts: in order, each up to the chosen size (a bigger single file
     # gets a part of its own).
@@ -236,7 +244,7 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
         used += size
     return {
         "user_id": str(user.id), "created": time.time(), "part_gb": int(part_gb),
-        "parts": parts, "albums": albums, "counts": counts,
+        "parts": parts, "albums": albums, "porch": porch, "counts": counts,
         "bytes": sum(e["s"] for e in entries), "zone": str(zone) if zone else None,
     }
 
@@ -351,7 +359,10 @@ def readme(state: dict[str, Any]) -> bytes:
         "                           import a Takeout read these;\n"
         "              <name>.xmp   date, place and description for Lightroom, digiKam,\n"
         "                           darktable and similar.\n"
-        "albums.json  your albums and the photos in each.\n\n"
+        "albums.json  your albums and the photos in each.\n"
+        + ("porch.json   your Porch posts (with their photos' places in My files), the comments\n"
+           "             on them, your comments on other posts, and the groups you're in.\n" if state.get("porch") else "")
+        + "\n"
         "To bring it into another Promptly: Files -> Import -> A folder of photos, and add\n"
         "the parts. Dates, places, favourites and albums come with it.\n\n"
         "Your passwords aren't here. This server can't read them, so it can't export them.\n"
@@ -490,6 +501,11 @@ async def stream_part(export_id: str, n: int) -> AsyncIterator[bytes]:
                 _info(ROOT + "albums.json", int(planned["created"]), zone, zipfile.ZIP_DEFLATED),
                 json.dumps(planned["albums"], ensure_ascii=False, indent=2).encode("utf-8"),
             )
+            if planned.get("porch"):
+                zf.writestr(
+                    _info(ROOT + "porch.json", int(planned["created"]), zone, zipfile.ZIP_DEFLATED),
+                    json.dumps(planned["porch"], ensure_ascii=False, indent=2).encode("utf-8"),
+                )
             yield sink.take()
         for e in entries:
             arc = e["a"]

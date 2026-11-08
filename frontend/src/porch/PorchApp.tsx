@@ -16,6 +16,7 @@ import "./porch.css";
 import { useGroupActions } from "./actions";
 import { BOOTSTRAP_KEY, discoverKey } from "./cache";
 import { NewGroupSheet } from "./components/GroupSheets";
+import { SearchSheet } from "./components/SearchSheet";
 import { GroupTile, PorchAvatar } from "./components/ui";
 import { WelcomeSheet } from "./components/WelcomeSheet";
 import { PorchContext, isStandalone } from "./context";
@@ -232,7 +233,14 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
 function GlobalSheets() {
   const open = usePorchStore((s) => s.newGroupOpen);
   const set = usePorchStore((s) => s.setNewGroupOpen);
-  return <NewGroupSheet open={open} onClose={() => set(false)} />;
+  const searching = usePorchStore((s) => s.searchOpen);
+  const setSearching = usePorchStore((s) => s.setSearchOpen);
+  return (
+    <>
+      <NewGroupSheet open={open} onClose={() => set(false)} />
+      <SearchSheet open={searching} onClose={() => setSearching(false)} />
+    </>
+  );
 }
 
 function Badge({ n, className }: { n: number; className?: string }) {
@@ -313,6 +321,9 @@ function SideNav({ b, route, embedded }: { b: Bootstrap; route: Route; embedded:
       <Link to="/porch/saved" aria-current={route.page === "saved" ? "page" : undefined} className={item(route.page === "saved")}>
         <Bookmark className="h-[18px] w-[18px]" aria-hidden /> Saved
       </Link>
+      <button type="button" onClick={() => usePorchStore.getState().setSearchOpen(true)} className={item(false)}>
+        <Search className="h-[18px] w-[18px]" aria-hidden /> Search
+      </button>
       <Link to={`/porch/u/${b.me.id}`} aria-current={me ? "page" : undefined} className={item(me)}>
         <UserRound className="h-[18px] w-[18px]" aria-hidden /> Profile
       </Link>

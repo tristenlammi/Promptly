@@ -599,6 +599,15 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
             sec["maps"] = m
     except Exception:  # noqa: BLE001
         logger.exception("today maps section failed")
+    # Porch: new posts from your ticked groups, today's birthdays in them.
+    try:
+        from app.porch.today import today_section as porch_section
+
+        p = await porch_section(db, user, now, today)
+        if p:
+            sec["porch"] = p
+    except Exception:  # noqa: BLE001
+        logger.exception("today porch section failed")
 
     found = await _primary(db, user, "tasks")
     tasks_data = found[1].data if found else None

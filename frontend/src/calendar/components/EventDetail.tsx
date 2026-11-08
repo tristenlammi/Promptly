@@ -20,6 +20,7 @@ import { addUsers, useCalUsers, useRefreshEvents } from "../data";
 import { describeRepeat, describeWhen, REMINDER_OPTIONS, reminderLabel, type ViewEvent } from "../model";
 import { EventPhotos } from "./EventPhotos";
 import { ShareToRoomSheet } from "./ShareToRoomSheet";
+import { PorchSourceBadge } from "./PorchSourceBadge";
 import { TaskSourceBadge } from "./TaskSourceBadge";
 import { askScope, RsvpButtons, StatusBadge } from "./ui";
 
@@ -175,6 +176,7 @@ export function EventDetail({
         )}
       </Row>
       {ev.source?.kind === "task" && <TaskSourceBadge source={ev.source} onNavigate={onClose} />}
+      {ev.source?.kind === "porch_post" && <PorchSourceBadge postId={ev.source.post_id} onNavigate={onClose} />}
 
       {ev.location && (
         <Row icon={<MapPin className="h-4 w-4" />}>

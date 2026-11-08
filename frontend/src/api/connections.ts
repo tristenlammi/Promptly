@@ -23,7 +23,8 @@ export type ThingKind =
   | "user"
   | "witem"
   | "room_msg"
-  | "chat_msg";
+  | "chat_msg"
+  | "porch_post";
 
 /** A thing, named the way a mention or link stores it. Things inside an app
  *  file are ``<file id>:<id inside it>`` (see :func:`subRef`). */

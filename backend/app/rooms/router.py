@@ -387,37 +387,9 @@ class DmIn(BaseModel):
 
 @router.post("/dms")
 async def open_dm(body: DmIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    others = set(body.user_ids) - {user.id}
-    if not others:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pick someone to message")
-    found = set((await db.execute(select(User.id).where(User.id.in_(others), User.disabled.is_(False)))).scalars().all())
-    if found != others:
-        raise core.not_found("Person")
-    everyone = others | {user.id}
-    if len(others) == 1:
-        # The same 1:1 conversation every time.
-        mine = select(RoomMember.room_id).where(RoomMember.user_id == user.id)
-        theirs = select(RoomMember.room_id).where(RoomMember.user_id == next(iter(others)))
-        existing = (await db.execute(select(Room).where(Room.space_id.is_(None), Room.kind == "dm", Room.id.in_(mine), Room.id.in_(theirs)))).scalars().first()
-        if existing is not None:
-            st = await core.my_state(db, existing.id, user.id)
-            st.hidden = False
-            await db.commit()
-            return await core.room_out(db, existing, user)
-        # A block either way: no new 1:1 conversation (decision D7). The
-        # blocked person's wording never mentions the block.
-        from app.people.blocks import dm_refusal
-
-        why = await dm_refusal(db, user.id, next(iter(others)))
-        if why:
-            raise core.forbidden(why)
-    room = Room(space_id=None, kind="dm" if len(others) == 1 else "group", created_by=user.id)
-    db.add(room)
-    await db.flush()
-    for uid in everyone:
-        db.add(RoomMember(room_id=room.id, user_id=uid, hidden=uid != user.id))
-    await db.commit()
-    # The others see it once there's a message in it.
+    # The same 1:1 conversation every time; a block either way refuses a new
+    # one (decision D7). The others see it once there's a message in it.
+    room = await service.open_dm(db, user, body.user_ids)
     return await core.room_out(db, room, user)
 
 
