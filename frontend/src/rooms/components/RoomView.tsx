@@ -1,8 +1,10 @@
-import { ArrowLeft, CalendarDays, Hash, Pin, Search, Settings, Sparkles, Upload, Users } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { ArrowLeft, Ban, CalendarDays, Hash, Pin, Search, Settings, Sparkles, Upload, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import type { Bootstrap, Message } from "@/api/rooms";
+import { blockPerson, unblockPerson } from "@/components/people/blockActions";
 import { Sheet } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
@@ -23,6 +25,7 @@ const NO_TYPING: Record<string, number> = {};
 
 export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bootstrap; isPhone: boolean; onBack?: () => void }) {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const found = findRoom(b, roomId);
   const [panel, setPanel] = useState<Panel>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -103,6 +106,12 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
   const title = space ? room.name : dmTitle(b, room);
   const aiOn = space ? room.ai_context : (room.members ?? []).length > 0 && (room.members ?? []).every((id) => room.ai_ok?.[id]);
   const others = (room.members ?? []).filter((id) => id !== b.me.id);
+  // A 1:1 conversation: Block / Unblock the other person (decision D7).
+  const oneToOne = !space && room.kind === "dm" && others.length === 1 ? b.users[others[0]] ?? null : null;
+  const toggleBlock = () => {
+    if (!oneToOne) return;
+    void (room.blocked ? unblockPerson(qc, oneToOne) : blockPerson(qc, oneToOne));
+  };
   const typers = Object.keys(typing)
     .filter((id) => id !== b.me.id)
     .map((id) => b.users[id]?.username ?? "Someone");
@@ -220,6 +229,21 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
             {headerBtn("events", "Events", CalendarDays)}
             {headerBtn("pins", "Pinned messages", Pin)}
             {(!isPhone || space) && headerBtn("members", "Members", Users)}
+            {oneToOne && (
+              <button
+                type="button"
+                aria-label={room.blocked ? `Unblock ${oneToOne.username}` : `Block ${oneToOne.username}`}
+                title={room.blocked ? `Unblock ${oneToOne.username}` : `Block ${oneToOne.username}`}
+                aria-pressed={!!room.blocked}
+                onClick={toggleBlock}
+                className={cn(
+                  "flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] md:h-9 md:w-9",
+                  room.blocked && "!text-[var(--danger)]",
+                )}
+              >
+                <Ban className="h-[18px] w-[18px]" />
+              </button>
+            )}
             <button
               type="button"
               aria-label="Settings"
@@ -243,6 +267,22 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
           {typingText && <span className="truncate">{typingText}</span>}
         </div>
 
+        {room.can_send === false ? (
+          // Closed by a block. The person who was blocked only ever sees the
+          // plain line, never the word "block".
+          <div className="shrink-0 border-t border-[var(--border)] px-4 py-3 text-center text-sm text-[var(--text-muted)]">
+            {room.blocked && oneToOne ? (
+              <>
+                You've blocked {oneToOne.username}. You can still read your conversation.{" "}
+                <button type="button" onClick={toggleBlock} className="font-semibold text-[var(--item-accent)] underline">
+                  Unblock
+                </button>
+              </>
+            ) : (
+              "Messages can't be sent in this conversation."
+            )}
+          </div>
+        ) : (
         <Composer
           ref={composer}
           roomId={roomId}
@@ -257,6 +297,7 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
           users={b.users}
           onPlanEvent={() => setPlanning(true)}
         />
+        )}
       </section>
 
       {!isPhone && panel && (
