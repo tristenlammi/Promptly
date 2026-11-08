@@ -21,6 +21,9 @@
 #   ./install.sh --no-maps      # skip P Maps. It's on by default, and builds
 #                               # its map data in the background: about an hour
 #                               # and 15 GB of disk (7 GB after).
+#   ./install.sh --no-calls     # skip the calls server (LiveKit) behind voice
+#                               # channels in Rooms. On by default; voice stays
+#                               # off for people until an admin turns it on.
 #
 # The choice persists in COMPOSE_PROFILES in .env, so a plain
 # `docker compose up -d` keeps honouring it. Re-run with a flag to change it.
@@ -42,16 +45,18 @@ red()    { printf '\033[31m%s\033[0m\n' "$*" >&2; }
 WITH_OLLAMA=false
 NO_SEARCH=false
 NO_MAPS=false
+NO_CALLS=false
 PROFILE_FLAGS_GIVEN=false
 for arg in "$@"; do
   case "$arg" in
     --with-ollama) WITH_OLLAMA=true; PROFILE_FLAGS_GIVEN=true ;;
     --no-search)   NO_SEARCH=true;   PROFILE_FLAGS_GIVEN=true ;;
     --no-maps)     NO_MAPS=true;     PROFILE_FLAGS_GIVEN=true ;;
+    --no-calls)    NO_CALLS=true;    PROFILE_FLAGS_GIVEN=true ;;
     # Back-compat: --no-ollama is now the default; accept it silently.
     --no-ollama)   PROFILE_FLAGS_GIVEN=true ;;
     -h|--help)
-      sed -n '2,28p' "$0" | sed 's/^# //; s/^#//'
+      sed -n '2,31p' "$0" | sed 's/^# //; s/^#//'
       exit 0
       ;;
     *)
@@ -120,6 +125,24 @@ seed_secret SEARXNG_SECRET    "$(openssl rand -hex 32)"
 seed_secret POSTGRES_PASSWORD "$(openssl rand -hex 24)"
 seed_secret SETUP_TOKEN       "$(openssl rand -hex 6)"
 seed_secret TUS_HOOK_SECRET   "$(openssl rand -hex 32)"
+# Calls (LiveKit). An .env from before Calls has no such lines: add them.
+for k in LIVEKIT_API_KEY LIVEKIT_API_SECRET; do
+  grep -qE "^${k}=" .env || printf '%s=change-me\n' "$k" >> .env
+done
+seed_secret LIVEKIT_API_KEY    "API$(openssl rand -hex 8)"
+seed_secret LIVEKIT_API_SECRET "$(openssl rand -hex 32)"
+
+# This machine's LAN address (for LIVEKIT_NODE_IP on Docker Desktop), or "".
+lan_ip() {
+  local ip=""
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
+  else
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  fi
+  [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && printf '%s' "$ip"
+  return 0
+}
 
 # ---------- 3. optional services (compose profiles) ----------
 # COMPOSE_PROFILES in .env is the persistent source of truth: docker
@@ -185,6 +208,14 @@ profiles=()
 [[ "$OLLAMA_MODE" == "bundled" ]] && profiles+=("$OLLAMA_PROFILE")
 $NO_SEARCH || profiles+=("search")
 $NO_MAPS || profiles+=("maps")
+# Calls: host networking on Linux; Docker Desktop has none, so it gets the
+# bridged variant with the media ports published and this machine's LAN
+# address advertised (docker-compose.yml, "Calls").
+DOCKER_DESKTOP=false
+docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -qi 'docker desktop' && DOCKER_DESKTOP=true
+if ! $NO_CALLS; then
+  if $DOCKER_DESKTOP; then profiles+=("calls-desktop"); else profiles+=("calls"); fi
+fi
 profiles_csv=$(IFS=,; printf '%s' "${profiles[*]-}")
 
 if $PROFILE_FLAGS_GIVEN || $FRESH_ENV || ! grep -qE '^COMPOSE_PROFILES=' .env; then
@@ -196,6 +227,15 @@ if $PROFILE_FLAGS_GIVEN || $FRESH_ENV || ! grep -qE '^COMPOSE_PROFILES=' .env; t
   [[ -n "$OLLAMA_NOTE" ]] && yellow "  ${OLLAMA_NOTE}"
   $NO_SEARCH && yellow "  --no-search: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)"
   green "  COMPOSE_PROFILES=${profiles_csv:-<none>}"
+  if ! $NO_CALLS && $DOCKER_DESKTOP && ! grep -qE '^LIVEKIT_NODE_IP=' .env; then
+    calls_ip="$(lan_ip)"
+    if [[ -n "$calls_ip" ]]; then
+      set_env_line LIVEKIT_NODE_IP "$calls_ip"
+      green "  Calls: advertising this computer's LAN address ${calls_ip}"
+    else
+      yellow "  Calls: couldn't find this computer's LAN address; set LIVEKIT_NODE_IP in .env"
+    fi
+  fi
 else
   yellow "  COMPOSE_PROFILES already set, leaving untouched (re-run with --with-ollama/--no-search to change)"
 fi
@@ -287,6 +327,11 @@ if grep -qE '^COMPOSE_PROFILES=.*maps' .env; then
   yellow "  Note: P Maps is building Australia's map data in the background: about"
   yellow "  an hour and 15 GB of disk (7 GB after). Everything else works meanwhile."
   yellow "  For another country, or to turn it off, see \"P Maps\" in .env."
+fi
+if grep -qE '^COMPOSE_PROFILES=.*calls' .env; then
+  echo
+  yellow "  Voice channels: turn them on in Admin -> Calls. For voice from outside"
+  yellow "  your home, forward UDP 7882 and TCP 7881 on your router to this machine."
 fi
 if $NO_SEARCH; then
   echo

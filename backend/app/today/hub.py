@@ -609,6 +609,15 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
             sec["forms"] = f
     except Exception:  # noqa: BLE001
         logger.exception("today forms section failed")
+    # Calls: who's hanging out in a voice channel of your spaces right now.
+    try:
+        from app.calls.apps import today_section as voice_today
+
+        v = await voice_today(db, user)
+        if v:
+            sec["voice"] = v
+    except Exception:  # noqa: BLE001
+        logger.exception("today voice section failed")
 
     found = await _primary(db, user, "tasks")
     tasks_data = found[1].data if found else None

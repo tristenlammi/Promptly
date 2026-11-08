@@ -88,6 +88,51 @@ wait_healthy() {
   green "  workers and collab running"
 }
 
+# This machine's LAN address (for LIVEKIT_NODE_IP on Docker Desktop), or "".
+lan_ip() {
+  local ip=""
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
+  else
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}' || true)
+  fi
+  [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && printf '%s' "$ip"
+  return 0
+}
+
+# Calls (voice channels, LiveKit): the first update that has them makes the
+# key pair and turns the calls service on, host networking on Linux and the
+# bridged variant on Docker Desktop (docker-compose.yml, "Calls"). Later
+# updates see the key and leave both alone, so taking the token out of
+# COMPOSE_PROFILES sticks. Voice stays off for people until an admin turns
+# it on in Admin -> Calls.
+setup_calls() {
+  [[ -f .env ]] || return 0
+  grep -qE '^LIVEKIT_API_KEY=' .env && return 0
+  command -v openssl >/dev/null 2>&1 || { yellow "  Calls: openssl isn't installed, so no key pair was made (see .env.example)"; return 0; }
+  printf 'LIVEKIT_API_KEY=API%s\nLIVEKIT_API_SECRET=%s\n' "$(openssl rand -hex 8)" "$(openssl rand -hex 32)" >> .env
+  local variant=calls
+  if docker info --format '{{.OperatingSystem}}' 2>/dev/null | grep -qi 'docker desktop'; then
+    variant=calls-desktop
+    if ! grep -qE '^LIVEKIT_NODE_IP=' .env; then
+      local ip
+      ip="$(lan_ip)"
+      [[ -n "$ip" ]] && printf 'LIVEKIT_NODE_IP=%s\n' "$ip" >> .env
+    fi
+  fi
+  if grep -qE '^COMPOSE_PROFILES=' .env; then
+    if ! grep -qE '^COMPOSE_PROFILES=.*calls' .env; then
+      sed -i.bak -E "s/^COMPOSE_PROFILES=(.*)$/COMPOSE_PROFILES=\1,${variant}/; s/^COMPOSE_PROFILES=,/COMPOSE_PROFILES=/" .env
+      rm -f .env.bak
+    fi
+  else
+    printf 'COMPOSE_PROFILES=%s\n' "$variant" >> .env
+  fi
+  green "  Calls: made a key pair and turned the calls service on ($variant)."
+  green "  Turn voice on in Admin -> Calls. For voice from outside your home, forward"
+  green "  UDP 7882 and TCP 7881 on your router to this machine."
+}
+
 reload_nginx() {
   # Recreated, not reloaded: nginx.conf is a single-file bind mount, and
   # git replaces the file on update — a running container keeps the old
@@ -178,6 +223,7 @@ if [[ "$TARGET" == "origin/main" ]]; then
 else
   git checkout --quiet "$TARGET"
 fi
+setup_calls
 # Refresh third-party images (nginx, postgres, redis…) and the base images
 # ours build FROM, so security fixes in them actually arrive.
 docker compose pull --ignore-buildable --quiet || yellow "  Couldn't pull some images; continuing with what's here."

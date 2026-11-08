@@ -317,6 +317,37 @@ async def forms_upload_sweep(ctx) -> int:
 
     async with SessionLocal() as db:
         return await sweep(db)
+# ---- Calls (voice channels): is the calls service up, has the home's
+# address moved? One admin alert a day at most, only while voice is on.
+async def calls_check(ctx) -> dict:
+    from app.calls.access import load_settings
+    from app.calls.checks import hourly
+    from app.database import SessionLocal
+    from app.redis_client import redis
+
+    async with SessionLocal() as db:
+        s = await load_settings(db)
+    return await hourly(redis, enabled=s.enabled)
+
+
+# ---- Calls: voice channel timers (app/calls/voice.py). Deferred per
+# channel / per move; the reaper reconciles Redis with LiveKit.
+async def voice_alone_check(ctx, room_id: str, token: str) -> str:
+    from app.calls.voice import alone_check
+
+    return await alone_check(room_id, token)
+
+
+async def voice_move_check(ctx, user_id: str, from_room: str, session: str) -> str:
+    from app.calls.voice import move_check
+
+    return await move_check(user_id, from_room, session)
+
+
+async def voice_reaper(ctx) -> dict:
+    from app.calls.voice import reap
+
+    return await reap()
 
 
 class WorkerSettings:
@@ -346,6 +377,9 @@ class WorkerSettings:
         # Forms (WP-F1.5): one sync per form at a time (an advisory lock).
         func(forms_sheet_sync_job, timeout=600, max_tries=2, keep_result=0),
         func(forms_sheet_reconcile_job, timeout=300, max_tries=1, keep_result=0),
+        # Calls: voice channel timers ("Still there?", a move's grace).
+        func(voice_alone_check, timeout=60, max_tries=2, keep_result=0),
+        func(voice_move_check, timeout=60, max_tries=2, keep_result=0),
     ]
     cron_jobs = [
         # Learn from chats that have gone quiet, then look after memory overnight.
@@ -385,6 +419,10 @@ class WorkerSettings:
         cron(forms_sheet_nightly, hour=3, minute=50, run_at_startup=False, unique=True, timeout=3600),
         # Forms (WP-F1.6): staged files nobody sent go after a day.
         cron(forms_upload_sweep, hour=4, minute=20, run_at_startup=False, unique=True, timeout=1800),
+        # Calls: hourly check of the calls service (app/calls/checks.py).
+        cron(calls_check, minute=27, run_at_startup=False, unique=True, timeout=120),
+        # Calls: match voice channels' live state with LiveKit (app/calls/voice.py).
+        cron(voice_reaper, minute=set(range(2, 60, 5)), run_at_startup=False, unique=True, timeout=240),
     ]
     on_startup = wait_for_schema
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

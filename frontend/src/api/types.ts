@@ -166,6 +166,12 @@ export interface UserPreferencesUpdate {
   spellcheck_lang?: string;
   /** Replace the full personal-dictionary word list. */
   spellcheck_words?: string[];
+  /** Calls: Voice & video settings, merged key by key (``rtc/voice/prefs``). */
+  voice?: Record<string, string | number | boolean>;
+  /** Calls: per-person volume {user id: 0..200}; replaces the whole map. */
+  voice_volumes?: Record<string, number>;
+  /** Calls: people muted for you; replaces the whole list. */
+  voice_local_mutes?: string[];
 }
 
 export interface User {

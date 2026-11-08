@@ -40,8 +40,16 @@ installer detects it and wires the stack to it automatically.
 | `--with-ollama` | Bundle a local-model container. GPU auto-detected: NVIDIA (CUDA), AMD (ROCm), else CPU |
 | `--no-search` | Skip the bundled SearXNG web search — add Brave/Tavily keys later in Admin |
 | `--no-maps` | Skip P Maps, which is on by default and builds its map data in the background (about an hour and 15 GB of disk, 7 GB after) |
+| `--no-calls` | Skip the calls service (LiveKit) behind voice channels in Rooms |
 
-PowerShell spelling: `-WithOllama`, `-NoSearch`, `-NoMaps`.
+PowerShell spelling: `-WithOllama`, `-NoSearch`, `-NoMaps`, `-NoCalls`.
+
+**Voice channels** (Rooms) run on a self-hosted LiveKit server that the
+installer sets up. Turn voice on in **Admin → Calls**. At home it works with
+no router changes; for voice from outside, forward **UDP 7882** and **TCP
+7881** on your router to the server (audio doesn't go through Cloudflare or
+your web address), then run **Test calls** (Account → Voice & video) on a
+phone with Wi-Fi off. The admin checklist says what's missing.
 
 **P Maps** covers Australia out of the box. For another country, set the
 `MAPS_*` values in `.env` (see "P Maps" there).

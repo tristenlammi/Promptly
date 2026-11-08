@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, Hash, Loader2, MessagesSquare } from "lucide-react";
+import { ArrowDown, Hash, Loader2, MessagesSquare, Volume2 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { roomsApi, type Message, type Room } from "@/api/rooms";
@@ -407,16 +407,17 @@ function DayDivider({ label }: { label: string }) {
 
 function RoomStart({ room, title, empty }: { room: Room; title: string; empty: ReactNode }) {
   const dm = !room.space_id;
+  const voiceRoom = room.kind === "voice";
   return (
     <div className={cn("flex flex-col gap-2 px-4 pb-4 pt-8")}>
       <span className="flex h-14 w-14 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--text-muted)]">
-        {dm ? <MessagesSquare className="h-7 w-7" /> : <Hash className="h-7 w-7" />}
+        {dm ? <MessagesSquare className="h-7 w-7" /> : voiceRoom ? <Volume2 className="h-7 w-7" /> : <Hash className="h-7 w-7" />}
       </span>
-      <h2 className="text-xl font-bold text-[var(--text)]">{dm ? title : `Welcome to #${title}`}</h2>
+      <h2 className="text-xl font-bold text-[var(--text)]">{dm ? title : voiceRoom ? `${title} chat` : `Welcome to #${title}`}</h2>
       <p className="max-w-lg text-sm text-[var(--text-muted)]">
         {dm
           ? `This is the start of your conversation with ${title}.`
-          : room.topic || `This is the start of #${title}.`}{" "}
+          : room.topic || (voiceRoom ? `Messages for ${title}: links, notes, what's on. They stay after everyone leaves.` : `This is the start of #${title}.`)}{" "}
         Type <b>@promptly</b> in a message to ask Promptly — it only reads{" "}
         {room.ai_context ? "this room's recent messages" : "the message that mentions it"}.
       </p>

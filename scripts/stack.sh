@@ -20,6 +20,7 @@
 #                           voice      whisper + tts
 #                           convert    Office previews (Gotenberg)
 #                           search     SearXNG
+#                           calls      LiveKit (voice channels), bridged; media ports not published
 #                           all        everything above except maps-full
 #         --e2e           add what the e2e suite exercises (media, photos-ml, maps, convert)
 #         --build-extras  build sandbox/whisper/tts/photos-ml/maps from this worktree

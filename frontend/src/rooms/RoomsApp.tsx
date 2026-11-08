@@ -24,6 +24,10 @@ import { RoomView } from "./components/RoomView";
 import { CreateSpaceSheet, SpaceSettingsSheet } from "./components/SpaceSheets";
 import { CountBadge, SpaceIcon } from "./components/ui";
 import { useRecordOpen } from "@/hooks/useRecordOpen";
+import { useVoiceLive } from "@/rtc/voice/hooks";
+import { seedFromBootstrap } from "@/rtc/ui/directory";
+import { VoicePanel } from "@/rtc/ui/VoicePanel";
+import { VoicePill } from "@/rtc/ui/VoicePill";
 
 export const ROOMS_ACCENT = "#5865F2";
 const LAST_ROOM_KEY = "rooms:last-room";
@@ -105,9 +109,13 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
   const [newDm, setNewDm] = useState(false);
   const [spaceSettings, setSpaceSettings] = useState<string | null>(null);
   const [newRoomIn, setNewRoomIn] = useState<string | null>(null);
+  const [newRoomKind, setNewRoomKind] = useState<"text" | "voice">("text");
   const [globalSearch, setGlobalSearch] = useState(false);
 
   useRoomsEvents(roomId);
+  // Calls: who's in each voice channel, live, and the bootstrap's view of it.
+  useVoiceLive();
+  useEffect(() => seedFromBootstrap(b), [b]);
 
   // Accent for the whole page (sheets render in a portal) + own touch sizing.
   useEffect(() => {
@@ -264,6 +272,7 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
       </div>
     );
   } else if (isPhone) {
+    const pill = <VoicePill hideFor={roomId} />;
     body = roomId ? (
       <RoomView
         key={roomId}
@@ -271,9 +280,11 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
         b={b}
         isPhone
         onBack={() => navigate(open && !open.space ? "/rooms/dm" : "/rooms/")}
+        pill={pill}
       />
     ) : (
       <PhoneHome
+        pill={pill}
         b={b}
         tab={onDmPath ? "dms" : "spaces"}
         selSpace={sel === "dms" ? (b.spaces[0] ?? null) : selSpace}
@@ -282,7 +293,10 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
         onCreateSpace={() => setCreateSpace(true)}
         onNewDm={() => setNewDm(true)}
         onSpaceSettings={(id) => setSpaceSettings(id)}
-        onNewRoom={(id) => setNewRoomIn(id)}
+        onNewRoom={(id, kind = "text") => {
+          setNewRoomKind(kind);
+          setNewRoomIn(id);
+        }}
         onSearch={() => setGlobalSearch(true)}
       />
     );
@@ -311,10 +325,18 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
               space={selSpace}
               activeRoomId={roomId}
               onSettings={() => setSpaceSettings(selSpace.id)}
-              onNewRoom={() => setNewRoomIn(selSpace.id)}
+              onNewRoom={() => {
+                setNewRoomKind("text");
+                setNewRoomIn(selSpace.id);
+              }}
+              onNewVoice={() => {
+                setNewRoomKind("voice");
+                setNewRoomIn(selSpace.id);
+              }}
               isPhone={false}
             />
           )}
+          <VoicePanel variant="rooms" />
           <SideFooter />
         </div>
         <main id={embedded ? undefined : "main"} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--bg)]">
@@ -347,7 +369,15 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
       {b && settingsSpace && (
         <SpaceSettingsSheet open={!!settingsSpace} onClose={() => setSpaceSettings(null)} space={settingsSpace} b={b} />
       )}
-      {newRoomSpace && <CreateRoomSheet open={!!newRoomSpace} onClose={() => setNewRoomIn(null)} space={newRoomSpace} />}
+      {newRoomSpace && (
+        <CreateRoomSheet
+          open={!!newRoomSpace}
+          onClose={() => setNewRoomIn(null)}
+          space={newRoomSpace}
+          kind={newRoomKind}
+          voiceAvailable={b?.voice_available === true}
+        />
+      )}
       {b && (
         <Sheet open={globalSearch} onClose={() => setGlobalSearch(false)} title="Search Rooms" size="lg">
           <div className="-mx-5 h-[65dvh]">
@@ -575,6 +605,7 @@ function DesktopEmpty({ b, onCreateSpace, onNewDm, dms }: { b: Bootstrap; onCrea
 // ---------------------------------------------------------------------
 
 function PhoneHome({
+  pill,
   b,
   tab,
   selSpace,
@@ -594,8 +625,9 @@ function PhoneHome({
   onCreateSpace: () => void;
   onNewDm: () => void;
   onSpaceSettings: (id: string) => void;
-  onNewRoom: (id: string) => void;
+  onNewRoom: (id: string, kind?: "text" | "voice") => void;
   onSearch: () => void;
+  pill?: ReactNode;
 }) {
   const embedded = useContext(EmbeddedContext);
   const navigate = useNavigate();
@@ -603,6 +635,7 @@ function PhoneHome({
   const iconBtn = "flex h-11 w-11 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--hover)] hover:text-[var(--text)]";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {pill}
       <header className="flex h-14 shrink-0 items-center gap-1 px-2">
         {!isStandalone() && !embedded && (
           <Link to="/" aria-label="Back to Promptly" className={iconBtn}>
@@ -711,6 +744,7 @@ function PhoneHome({
             activeRoomId={null}
             onSettings={() => onSpaceSettings(selSpace.id)}
             onNewRoom={() => onNewRoom(selSpace.id)}
+            onNewVoice={() => onNewRoom(selSpace.id, "voice")}
             isPhone
           />
         </>

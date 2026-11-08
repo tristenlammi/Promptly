@@ -187,6 +187,14 @@ rembg[cpu]==2.0.85
 # streamable-HTTP client API we use is stable across 1.x.
 mcp==1.12.4
 
+# ---- Calls (voice channels): LiveKit server API ----
+# Access tokens, webhook signatures and the RoomService client for the
+# self-hosted LiveKit server (Apache-2.0). Pinned with the livekit image in
+# docker-compose.yml and livekit-client in the frontend; bump together.
+# Uses aiohttp and protobuf, which the image already has.
+livekit-api==1.2.2
+livekit-protocol==1.1.31
+
 # ---- Testing (dev-only; safe to leave installed in images) ----
 # Used by the study-gate regression tests (and any future automated
 # suite). Both are pure-Python with no system dependencies.

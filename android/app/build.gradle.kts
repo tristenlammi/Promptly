@@ -191,6 +191,11 @@ dependencies {
     // Its native library follows the ABI filters above: arm64 only in release.
     implementation("io.github.rallista:valhalla-mobile:0.6.4")
 
+    // Rooms voice channels: the background voice service (voice package).
+    // LiveKit Android, Apache-2.0; brings WebRTC (BSD-3) and AudioSwitch (Apache-2.0).
+    // Pinned: bump on purpose, together with the server and the web client.
+    implementation("io.livekit:livekit-android:2.30.0")
+
     // The car's rules are checked when a template is built, so build them in a test.
     testImplementation("junit:junit:4.13.2")
     testImplementation("androidx.test:core:1.7.0")

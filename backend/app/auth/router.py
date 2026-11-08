@@ -1400,6 +1400,9 @@ async def update_preferences(
     for key, value in updates.items():
         if isinstance(value, str) and value == "":
             merged.pop(key, None)
+        elif key == "voice" and isinstance(value, dict):
+            # Voice & video settings: merged key by key (Calls).
+            merged[key] = {**(merged.get(key) or {}), **{k: v for k, v in value.items() if v is not None}}
         else:
             merged[key] = value
     before_tz = (current_user.settings or {}).get("timezone")

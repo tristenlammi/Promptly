@@ -338,6 +338,21 @@ class AppSettings(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # ----- Calls: voice channels (0280) -----
+    # Off until an admin turns it on (Admin > Calls). ``calls_group_ids``:
+    # NULL = everyone, else only members of these user groups (admins
+    # always). The rest cap what a channel may ask for.
+    calls_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    calls_group_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    calls_max_participants: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30, server_default="30"
+    )
+    calls_max_stream: Mapped[str] = mapped_column(
+        String(8), nullable=False, default="1080p60", server_default="1080p60"
+    )
+
     # ----- Bookkeeping -----
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

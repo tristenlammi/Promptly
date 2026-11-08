@@ -284,6 +284,13 @@ async def rooms_out(db: AsyncSession, rooms: list[Room], user: User) -> list[dic
                 i_blocked.add(b.blocked_id)
             else:
                 blocked_me.add(b.blocker_id)
+    # Voice channels (Calls): their settings ride along with the room.
+    voice_ids = [r.id for r in rooms if r.kind == "voice"]
+    voice_settings: dict = {}
+    if voice_ids:
+        from app.calls.voice import settings_map
+
+        voice_settings = await settings_map(db, voice_ids)
     out = []
     for r in rooms:
         st = mine.get(r.id)
@@ -303,6 +310,8 @@ async def rooms_out(db: AsyncSession, rooms: list[Room], user: User) -> list[dic
             "mentions": int(mentions.get(r.id, 0)),
             "notify": st.notify if st else None,
         }
+        if r.kind == "voice":
+            d["voice"] = voice_settings.get(r.id)
         if r.space_id is None:
             members = dm_members.get(r.id, [])
             d["members"] = [str(m.user_id) for m in members]

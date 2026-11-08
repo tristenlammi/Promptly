@@ -177,6 +177,38 @@ if ($target -eq "origin/main") {
     git checkout --quiet $target
 }
 if ($LASTEXITCODE -ne 0) { throw "git checkout failed" }
+# Calls (voice channels, LiveKit): the first update that has them makes the
+# key pair and turns the calls service on (Docker Desktop: the bridged
+# variant, with this PC's LAN address). Later updates see the key and leave
+# both alone, so taking the token out of COMPOSE_PROFILES sticks.
+if ((Test-Path ".env") -and -not (Select-String -Path ".env" -Pattern "^LIVEKIT_API_KEY=" -Quiet)) {
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $hex = { param($n) $b = New-Object byte[] $n; $rng.GetBytes($b); -join ($b | ForEach-Object { $_.ToString('x2') }) }
+    $envText = [System.IO.File]::ReadAllText((Join-Path $PWD ".env"))
+    if ($envText -and -not $envText.EndsWith("`n")) { $envText += "`n" }
+    $envText += "LIVEKIT_API_KEY=API$(& $hex 8)`nLIVEKIT_API_SECRET=$(& $hex 32)`n"
+    $rng.Dispose()
+    if ($envText -notmatch "(?m)^LIVEKIT_NODE_IP=") {
+        $callsIp = $null
+        try {
+            $callsIp = (Get-NetIPConfiguration -ErrorAction Stop |
+                Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq "Up" } |
+                Select-Object -First 1).IPv4Address.IPAddress
+        } catch { }
+        if ($callsIp) { $envText += "LIVEKIT_NODE_IP=$callsIp`n" }
+    }
+    if ($envText -match "(?m)^COMPOSE_PROFILES=(.*)$") {
+        if ($Matches[1] -notmatch "calls") {
+            $newCsv = (@($Matches[1].Trim().Split(",") | Where-Object { $_ }) + "calls-desktop") -join ","
+            $envText = [regex]::Replace($envText, "(?m)^COMPOSE_PROFILES=.*$", "COMPOSE_PROFILES=$newCsv")
+        }
+    } else {
+        $envText += "COMPOSE_PROFILES=calls-desktop`n"
+    }
+    $envText = $envText -replace "`r`n", "`n"
+    [System.IO.File]::WriteAllText((Join-Path $PWD ".env"), $envText)
+    Write-Ok "Calls: made a key pair and turned the calls service on (calls-desktop). Turn voice on in Admin -> Calls."
+}
 docker compose pull --ignore-buildable --quiet
 if ($LASTEXITCODE -ne 0) { Write-Warn "Couldn't pull some images; continuing with what's here." }
 docker compose build --pull

@@ -19,6 +19,9 @@
 #   .\install.ps1 -NoMaps       # skip P Maps. It's on by default, and builds
 #                               # its map data in the background: about an hour
 #                               # and 15 GB of disk (7 GB after).
+#   .\install.ps1 -NoCalls      # skip the calls server (LiveKit) behind voice
+#                               # channels in Rooms. On by default; voice stays
+#                               # off for people until an admin turns it on.
 #
 # The choice persists in COMPOSE_PROFILES in .env, so a plain
 # `docker compose up -d` keeps honouring it. Re-run with a flag to change it.
@@ -36,13 +39,14 @@ param(
     [switch]$WithOllama,
     [switch]$NoSearch,
     [switch]$NoMaps,
+    [switch]$NoCalls,
     # Back-compat: -NoOllama is now the default, -Minimal == -NoSearch.
     [switch]$NoOllama,
     [switch]$Minimal
 )
 
 if ($Minimal) { $NoSearch = $true }
-$ProfileFlagsGiven = $WithOllama -or $NoSearch -or $NoMaps -or $NoOllama -or $Minimal
+$ProfileFlagsGiven = $WithOllama -or $NoSearch -or $NoMaps -or $NoCalls -or $NoOllama -or $Minimal
 
 $ErrorActionPreference = "Stop"
 
@@ -110,6 +114,15 @@ Set-IfPlaceholder ([ref]$envText) "SEARXNG_SECRET"    (New-HexSecret 32)
 Set-IfPlaceholder ([ref]$envText) "POSTGRES_PASSWORD" (New-HexSecret 24)
 Set-IfPlaceholder ([ref]$envText) "SETUP_TOKEN"       (New-HexSecret 6)
 Set-IfPlaceholder ([ref]$envText) "TUS_HOOK_SECRET"   (New-HexSecret 32)
+# Calls (LiveKit). An .env from before Calls has no such lines: add them.
+foreach ($k in @("LIVEKIT_API_KEY", "LIVEKIT_API_SECRET")) {
+    if ($envText -notmatch "(?m)^$k=") {
+        if (-not $envText.EndsWith("`n")) { $envText += "`n" }
+        $envText += "$k=change-me`n"
+    }
+}
+Set-IfPlaceholder ([ref]$envText) "LIVEKIT_API_KEY"    ("API" + (New-HexSecret 8))
+Set-IfPlaceholder ([ref]$envText) "LIVEKIT_API_SECRET" (New-HexSecret 32)
 
 # ---------- 3. optional services (compose profiles) ----------
 # COMPOSE_PROFILES in .env is the persistent source of truth: docker
@@ -174,6 +187,9 @@ $profiles = @()
 if ($OllamaMode -eq "bundled") { $profiles += $OllamaProfile }
 if (-not $NoSearch) { $profiles += "search" }
 if (-not $NoMaps) { $profiles += "maps" }
+# Calls: Docker Desktop has no host networking, so the bridged LiveKit
+# variant runs (media ports published, this PC's LAN address advertised).
+if (-not $NoCalls) { $profiles += "calls-desktop" }
 $profilesCsv = $profiles -join ","
 
 if ($ProfileFlagsGiven -or $FreshEnv -or ($envText -notmatch "(?m)^COMPOSE_PROFILES=")) {
@@ -184,6 +200,20 @@ if ($ProfileFlagsGiven -or $FreshEnv -or ($envText -notmatch "(?m)^COMPOSE_PROFI
     if ($OllamaNote) { Write-Skip $OllamaNote }
     if ($NoSearch) { Write-Skip "-NoSearch: bundled SearXNG disabled (add Brave/Tavily keys in the admin panel for web search)" }
     Write-Ok "COMPOSE_PROFILES=$(if ($profilesCsv) { $profilesCsv } else { '<none>' })"
+    if (-not $NoCalls -and $envText -notmatch "(?m)^LIVEKIT_NODE_IP=") {
+        $callsIp = $null
+        try {
+            $callsIp = (Get-NetIPConfiguration -ErrorAction Stop |
+                Where-Object { $_.IPv4DefaultGateway -and $_.NetAdapter.Status -eq "Up" } |
+                Select-Object -First 1).IPv4Address.IPAddress
+        } catch { }
+        if ($callsIp) {
+            Set-EnvLine ([ref]$envText) "LIVEKIT_NODE_IP" $callsIp
+            Write-Ok "Calls: advertising this computer's LAN address $callsIp"
+        } else {
+            Write-Skip "Calls: couldn't find this computer's LAN address; set LIVEKIT_NODE_IP in .env"
+        }
+    }
 } else {
     Write-Skip "COMPOSE_PROFILES already set, leaving untouched (re-run with -WithOllama/-NoSearch to change)"
 }
@@ -279,6 +309,10 @@ if ($OllamaMode -eq "cloud") {
 if ((Get-Content .env -Raw) -match "(?m)^COMPOSE_PROFILES=.*maps") {
     Write-Host ""
     Write-Skip "P Maps is building Australia's map data in the background: about an hour and 15 GB of disk (7 GB after). Everything else works meanwhile. For another country, or to turn it off, see 'P Maps' in .env."
+}
+if ((Get-Content .env -Raw) -match "(?m)^COMPOSE_PROFILES=.*calls") {
+    Write-Host ""
+    Write-Skip "Voice channels: turn them on in Admin -> Calls. For voice from outside your home, forward UDP 7882 and TCP 7881 on your router to this computer, and allow them through Windows Firewall."
 }
 if ($NoSearch) {
     Write-Host ""

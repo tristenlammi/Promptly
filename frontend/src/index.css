@@ -44,6 +44,10 @@
   --accent-text: #A84B2A;
   /* Darkened accent for hover on filled accent buttons. */
   --accent-hover: #C2613E;
+  /* Calls WP-V5: a deeper terracotta for fills that carry white text
+     (4.9:1, where the brand accent is ~3.1:1). The voice sheets use it
+     for their primary buttons and switches. */
+  --accent-strong: #B5532F;
   /* Raised/recessed neutral surfaces above --surface, used for
      toolbars, table headers, selected/hover rows and inset panels.
      --surface-1 is the faint raised tone; --surface-2 is the slightly
@@ -1374,4 +1378,11 @@ html.dark .promptly-doc .suggestion-del { color: #f87171; }
 .mail-fade { animation: mail-fade 140ms ease-out; }
 @media (prefers-reduced-motion: reduce) {
   .mail-tick, .mail-fade { animation: none; }
+}
+
+/* Calls WP-V4: items/ui pieces (Toggle, primary buttons) used outside an
+   app, e.g. the voice sheets over any page, take Promptly's accent. Apps
+   still set their own on <html> (inline, so it wins). */
+:root {
+  --item-accent: var(--accent);
 }

@@ -130,6 +130,11 @@ export interface TodayHub {
     more: number;
     closing: { title: string; closes_at: string; url: string }[];
   };
+  /** Calls: voice channels of your spaces with people in them now. */
+  voice?: {
+    channels: { room_id: string; name: string; space: string; user_ids: string[]; people: string[]; here: boolean; url: string }[];
+    in_voice: string | null;
+  };
   mail?: {
     url: string;
     unread: number;

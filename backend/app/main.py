@@ -804,3 +804,14 @@ from app.forms.public_router import router as forms_answer_router  # noqa: E402
 
 app.include_router(forms_answer_router, prefix="/api/f", tags=["forms"])
 app.include_router(forms_admin_router, prefix="/api/admin/forms", tags=["forms"])
+
+# ---- Calls (voice channels; app/calls, built on app/rtc) ----
+# LiveKit webhooks, Test calls and Admin > Calls (WP-V1).
+from app.calls.router import router as calls_router  # noqa: E402
+
+app.include_router(calls_router, prefix="/api/calls", tags=["calls"])
+# Voice channels in Rooms (WP-V2): join/leave/state/moderation under /api/rooms;
+# importing app.calls.voice registers its LiveKit webhook handlers ("v_").
+from app.calls.voice_router import router as calls_voice_router  # noqa: E402
+
+app.include_router(calls_voice_router, prefix="/api/rooms", tags=["calls"])

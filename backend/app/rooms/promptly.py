@@ -79,7 +79,7 @@ async def build(db, room: Room, ask: RoomMessage, asker) -> tuple[str, list[dict
     from app.items.service import zone_for
 
     space = await db.get(RoomSpace, room.space_id) if room.space_id else None
-    where = f"the room #{room.name} in the space “{space.name}”" if space else ("a direct message" if room.kind == "dm" else "a group conversation")
+    where = (f"the voice channel {room.name}’s text chat" if room.kind == "voice" else f"the room #{room.name}") + f" in the space “{space.name}”" if space else ("a direct message" if room.kind == "dm" else "a group conversation")
     history = await can_read_history(db, room)
     if history:
         rows = list(

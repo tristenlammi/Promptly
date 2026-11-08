@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Ban, CalendarDays, Hash, Pin, Search, Settings, Sparkles, Upload, Users } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import type { Bootstrap, Message } from "@/api/rooms";
@@ -18,12 +18,26 @@ import { MembersPanel, PanelFrame, PinsPanel, SearchPanel, UpcomingPanel } from 
 import { PlanEventSheet } from "./PlanEventSheet";
 import { DmSettingsSheet, RoomSettingsSheet } from "./RoomSheets";
 import { UserAvatar } from "./ui";
+import { VoiceChannelView } from "@/rtc/ui/VoiceChannelView";
 
 type Panel = "members" | "pins" | "search" | "events" | null;
 
 const NO_TYPING: Record<string, number> = {};
 
-export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bootstrap; isPhone: boolean; onBack?: () => void }) {
+export function RoomView({
+  roomId,
+  b,
+  isPhone,
+  onBack,
+  pill,
+}: {
+  roomId: string;
+  b: Bootstrap;
+  isPhone: boolean;
+  onBack?: () => void;
+  /** Phones: the "you're in voice" bar at the top. */
+  pill?: ReactNode;
+}) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const found = findRoom(b, roomId);
@@ -144,6 +158,65 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
   const panelTitle =
     panel === "search" ? "Search" : panel === "pins" ? "Pinned messages" : panel === "members" ? `Members (${memberIds.length})` : panel === "events" ? "Events" : "";
 
+  // A voice channel: the stage, with its text chat beside it (Calls).
+  if (room.kind === "voice" && space) {
+    return (
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        <VoiceChannelView
+          b={b}
+          room={room}
+          space={space}
+          isPhone={isPhone}
+          onBack={onBack}
+          onSettings={() => setSettingsOpen(true)}
+          chat={
+            <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={`Chat in ${room.name}`}>
+              {!isPhone && (
+                <div className="flex h-14 shrink-0 items-center gap-2 border-b border-[var(--border)] px-4">
+                  <span className="text-sm font-semibold text-[var(--text)]">Chat</span>
+                  <span className="truncate text-xs text-[var(--text-muted)]">{room.topic || "Messages stay here after everyone leaves."}</span>
+                </div>
+              )}
+              <MessageList room={room} title={title} ctx={ctx} />
+              <div className="flex h-5 shrink-0 items-center gap-3 px-4 text-[11px] text-[var(--text-muted)]" aria-live="polite">
+                {thinking && (
+                  <span className="inline-flex items-center gap-1 font-medium text-[var(--item-accent)]">
+                    <Sparkles className="h-3 w-3 animate-pulse" /> Promptly is thinking…
+                  </span>
+                )}
+                {typingText && <span className="truncate">{typingText}</span>}
+              </div>
+              <Composer
+                ref={composer}
+                roomId={roomId}
+                placeholder={`Message ${title}`}
+                members={members}
+                meId={b.me.id}
+                isPhone={isPhone}
+                replyTo={replyTo}
+                onCancelReply={() => setReplyTo(null)}
+                editing={editing}
+                onEdit={onEdit}
+                users={b.users}
+                onPlanEvent={() => setPlanning(true)}
+              />
+            </section>
+          }
+        />
+        <RoomSettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} room={room} space={space} />
+        <PlanEventSheet open={planning} onClose={closePlanning} room={{ id: room.id, name: title }} members={members} meId={b.me.id} />
+        <MessageActionSheet
+          m={actionsFor}
+          onClose={() => setActionsFor(null)}
+          meId={b.me.id}
+          canModerate={canModerate}
+          onReply={onReply}
+          onEdit={onEdit}
+        />
+      </div>
+    );
+  }
+
   const headerBtn = (p: Exclude<Panel, null>, label: string, Icon: typeof Pin) => (
     <button
       type="button"
@@ -180,6 +253,7 @@ export function RoomView({ roomId, b, isPhone, onBack }: { roomId: string; b: Bo
       }}
     >
       <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label={space ? `#${title}` : title}>
+        {pill}
         <header className="flex h-14 shrink-0 items-center gap-1 border-b border-[var(--border)] px-1.5 md:gap-2 md:px-4">
           {onBack && (
             <button

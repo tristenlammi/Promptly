@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
+import { VoicePanel } from "@/rtc/ui/VoicePanel";
 import {
   Archive,
   ChevronDown,
@@ -86,6 +87,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
   const { pathname } = useLocation();
   // While a pinned app is open, its own row lights up — not "Apps" too.
   const inNavApp = navApps.some((a) => pathname === a.to || pathname.startsWith(`${a.to}/`));
+  // Calls: Rooms shows the voice panel in its own channel column.
+  const voiceHere = !pathname.startsWith("/rooms");
   const {
     isLoading: convLoading,
     hasNextPage: moreChats,
@@ -220,6 +223,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
             <SideIcon to="/admin" icon={<Settings className="h-4 w-4" />} label="Settings" />
           )}
         </nav>
+        {voiceHere && <VoicePanel variant="collapsed" />}
       </aside>
     );
   }
@@ -370,6 +374,8 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
         )}
       </div>
 
+      {/* Calls: you're in voice — Mute, Deafen, Disconnect wherever you are. */}
+      {voiceHere && <VoicePanel variant="sidebar" />}
       {/* Footer */}
       <UserFooter />
 

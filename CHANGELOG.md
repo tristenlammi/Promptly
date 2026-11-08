@@ -58,6 +58,27 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Admin → App settings: an "Offline maps for phones" card with the packs' state, the disk they use and how many areas people have saved.
 - Export my library includes your P Maps offline areas (`maps/offline-areas.json`).
 - Promptly for Android: opening P Maps with no signal now opens its own map, Drive, instead of a web page that can't load: your location, Where to?, Home, Work and your places, and a place's routes from your offline areas with Start. Long-press the P Maps icon for Drive and Offline areas. A map link from another app with no signal opens there too.
+<!-- Calls (voice channels), WP-V1 -->
+- Calls: the calls service (LiveKit, self-hosted) that voice channels in Rooms will use. New installs get it on. On an existing server, run the update once more after updating to this version: that run makes the calls key pair and starts the service (Admin → Calls says so if it hasn't). For voice from outside your home, forward UDP 7882 and TCP 7881 on your router.
+- Admin → Calls: turn voice on, choose everyone or certain groups, cap Go Live quality and how many people fit in a channel, a set-up checklist that says what's wrong and how to fix it (calls service running, keys, your internet address and CGNAT, works from outside, upload for streams), and live usage. Admins are alerted if the calls service stops or your home's address changes.
+- Account → Voice & video → Test calls: pick your microphone, speaker and camera, see your mic level, then make a real call to your server and hear yourself back, with how it connected in plain words ("Direct (best)", "Fallback over TCP (fine)", "Couldn't connect from here") and what to do about it. From outside your home it also estimates how many people could watch a stream.
+<!-- Calls (voice channels), WP-V2 -->
+- Rooms: voice channels in spaces, the server side (the screens come next). Admins add them like rooms; anyone in the space can drop in, and you can only be in one at a time: joining another channel, or the same one on another device, moves you. Admins set a user limit, voice quality, who can join and who can talk, whether cameras and Go Live are allowed, and how long someone alone in a channel stays before a "Still there?" check (15 minutes unless changed). Admins can mute or deafen someone for everyone (it sticks until they lift it), move them to another channel, or disconnect them. Nothing said is recorded.
+<!-- Calls (voice channels), WP-V3 -->
+- Voice channels, the engine in the browser (the screens come next): joining and moving between channels, staying connected while you use other pages, reconnecting on its own after a network drop, Enhanced noise suppression on by default (removes keyboards, barks and fans on your own device; switches to a lighter filter by itself on a slow device), voice activity with automatic or manual sensitivity, push to talk with a key and a release delay, mute and deafen (Ctrl+Shift+M / Ctrl+Shift+D), each person's volume up to 200% and "Mute for me" remembered on every device, join and mute sounds, and Go Live: share a screen, window or tab at 720p 30, 1080p 30 or 1080p 60, with its sound where the browser allows, which others watch only when they press Watch.
+<!-- Calls (voice channels), WP-V4 -->
+- Rooms: voice channels you can use, the way Discord's work. They sit in a space's list with 🔊 and show who's in them right now, with a green ring while someone talks and icons for muted, deafened (red when an admin did it), camera and LIVE. One click joins, or moves you from another channel. Admins add one from the space's menu ("New voice channel") or "+ Add voice channel".
+- The voice panel: while you're in voice it stays at the bottom of the Rooms list and of Promptly's sidebar on every page, with the connection (click for ping, packet loss and how it connected), the channel, Disconnect, Camera, Go Live, who's in the channel, and Mute, Deafen and settings. A reload puts you straight back in your channel.
+- A voice channel's page: everyone as a tile with their speaking ring or camera, live streams with a Watch button and how many are watching, a big view of the stream you watch with its own volume, theatre mode, full screen and pop-out, and the channel's text chat beside it.
+- Go Live: pick your entire screen, a window or a browser tab, the quality (up to what your server allows), and "Smoother motion" or "Better for text". It says plainly which choices can bring sound (a tab in Chrome or Edge, your whole screen with sound in Chrome or Edge on Windows) and that a single window's or game's sound can't be shared from a browser.
+- Click or right-click someone in voice for their volume (0–200%), Mute for me, Message, and for the space's admins Mute or Deafen for everyone, Move to another channel and Disconnect.
+- Voice & video settings (Account → Voice & video, or the gear in the voice panel): microphone, speaker and camera, input and output volume, "Let's check" with a level meter and hearing yourself, voice activity with automatic or manual sensitivity, or push to talk with your own key and a release delay, noise suppression (Enhanced, Standard or Off, saying when a device uses a lighter filter), echo cancellation, automatic gain, Go Live defaults, data saver and voice sounds.
+- Voice channel settings for admins: user limit, voice quality, who can join and who can talk, cameras and Go Live on or off, and how long someone can be alone before "Still there?" (5, 15, 30 or 60 minutes, or never).
+- Voice messages in plain words: "Still there?" with a countdown, "You're muted" when you talk while muted, "You might be too quiet", moved by an admin, every way a call can end, microphone and camera problems with how to allow them, a reconnecting and "Rejoin" state, and a one-time tip the first time you join.
+- Voice on a phone: a full-screen channel with big buttons and hold-to-talk for push to talk, a bar at the top of every screen to get back or leave, the screen kept awake while you're in the channel, and a note that voice may stop if you lock the phone.
+- Ctrl+K: "join lounge" joins a voice channel; Mute, Deafen and Leave voice while you're in one. Today shows who's hanging out in voice now, with Join. Export my library includes voice.json: your time in voice channels (which channel, when, how long; nothing said is ever recorded).
+<!-- Calls (voice channels), WP-V5 -->
+- Voice channels on Android phones with the Promptly app: tapping Join in P Rooms hands the channel to the app, which keeps you in it with the screen off or while you use other apps, through Bluetooth earbuds, a car or the loudspeaker. Its notification says who's talking and has Mute, Deafen and Leave; the channel page stays the remote control and still shows cameras and streams while it's open. Spoken directions from P Maps play over the channel, and "Still there?" asks on the phone too. Needs the new app version; iPhones and phones without the app keep the page awake instead, as before.
 
 ### Changed
 <!-- P Maps offline (maps-offline) -->
@@ -67,6 +88,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: wrong turns check for road closures at most once every 5 minutes, so a bad day doesn't use up the day's closure checks (Admin → App settings explains this).
 - P Maps in the car: the route choice uses the newer car screen on cars that support it.
 - P Maps (Android): ending a trip (on the phone, in the car, or on arriving) goes back to P Maps' Drive map, ready for the next place, and a trip that can't start says why there.
+<!-- Calls (voice channels), WP-V1 -->
+- The site now allows the camera and screen sharing for itself (for voice channels' cameras and Go Live) and WebAssembly (for noise suppression). Account → Voice is now Voice & video.
+<!-- Calls (voice channels), WP-V5 -->
+- Voice & video settings use Promptly's own colour (terracotta) for sliders, switches, focus rings and the selected options, also inside Rooms. Push to talk now says what to do in a game: voice activity keeps working while you play, with a "Use voice activity instead" link.
 
 ### Fixed
 - Sheets: text that looks like a formula (typed as text) stays text when the sheet is downloaded as Excel or CSV, instead of turning into a formula there.
@@ -82,6 +107,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: the map's "© OpenStreetMap contributors · Protomaps" credit is stored so no app can show it garbled as "Â©".
 - Android Auto: release builds only talk to Google's own car hosts.
 - P Maps (Android): "Save where I parked" with no signal is no longer lost: it's kept on the phone and saved to P Maps when there's signal, with the time you parked (a place saved since, on the web or another phone, isn't overwritten). The car's own parking note and the timeline's work the same way.
+<!-- Calls (voice channels), WP-V4 -->
+- Rooms: making a new room without a topic failed ("Couldn't create the room").
 
 ## [0.31.0] - 2026-11-08
 

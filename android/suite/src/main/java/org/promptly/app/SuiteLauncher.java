@@ -98,9 +98,13 @@ public class SuiteLauncher extends LauncherActivity {
         } catch (PackageManager.NameNotFoundException ignored) {
             // Can't happen for our own activity; "/" is a fine fallback.
         }
+        // A path asked for by another app (P Maps' map links) or by the app itself
+        // (the voice notification opens its channel). Paths on our own server only.
         String asked = getIntent() == null ? null : getIntent().getStringExtra(EXTRA_PATH);
         if (asked != null && asked.startsWith("/") && !asked.startsWith("//") && !asked.contains("\\")) path = asked;
         String sep = path.contains("?") ? "&" : "?";
-        return Uri.parse(Server.get(this) + path + sep + "source=android");
+        // caps=voice: this app can hold a voice channel in the background
+        // (the page hands Join over to it, frontend/src/rtc/voice/androidApp.ts).
+        return Uri.parse(Server.get(this) + path + sep + "source=android&caps=voice");
     }
 }
