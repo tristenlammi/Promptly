@@ -82,7 +82,7 @@ async def config(db: AsyncSession = Depends(get_db), user: User = Depends(maps_u
 
 
 @router.get("/data-status")
-async def data_status(admin: User = Depends(require_admin)) -> dict[str, Any]:
+async def data_status(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """For the admin panel: how the map data's doing."""
     _ = admin
     state = await asyncio.to_thread(data.status)
@@ -96,7 +96,8 @@ async def data_status(admin: User = Depends(require_admin)) -> dict[str, Any]:
         "addresses": await asyncio.to_thread(data.addresses_state),
         "overdue_days": 0 if state.get("state") == "building" else data.overdue_days((manifest or {}).get("built_at"), get_settings().MAPS_REFRESH_DAYS),
         # Offline packs for phones (maps-offline): off | building | waiting | failed | ready.
-        "offline": await asyncio.to_thread(offline_state),
+        # Plus the build, its date and how many areas people saved (counts only).
+        "offline": await offline_admin_status(db),
     }
 
 
@@ -741,6 +742,6 @@ async def cameras(bbox: str, user: User = Depends(maps_user)) -> dict[str, Any]:
 
 # ---- Offline areas (maps-offline) ---------------------------------------------
 # Their own module, included here so main.py isn't touched.
-from .offline import router as offline_router, state as offline_state  # noqa: E402
+from .offline import admin_status as offline_admin_status, router as offline_router  # noqa: E402
 
 router.include_router(offline_router)

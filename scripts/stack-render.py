@@ -349,6 +349,39 @@ def maps_stub(state: Path) -> None:
         json.dumps({"built_at": "2026-11-01T00:00:00+00:00", "osm_data": "stack stub, no real map"}) + "\n",
         encoding="utf-8")
     (d / "basemap.pmtiles").write_text("stub, not a real map\n", encoding="utf-8")
+    maps_offline_stub(d / "areas")
+
+
+def maps_offline_stub(areas: Path) -> None:
+    """P Maps offline areas (maps-offline): an index of a few squares with
+    real-looking sizes, so saving an area shows its size. Only the index: the
+    pack files aren't there, so phones can't download from a stub. Put real
+    squares in ``areas/`` (it's kept) to test phone downloads."""
+    if (areas / "index.json").exists():
+        return
+    areas.mkdir(parents=True, exist_ok=True)
+    mb = 1_000_000
+
+    def f(n: float) -> dict:
+        return {"bytes": int(n * mb), "sha256": "0" * 64}
+
+    # (map, route, places, house numbers) MB, as measured in WP-M1.
+    sizes = {
+        "148_-33": (6.0, 3.1, 0.4, 0.8), "149_-33": (5.2, 2.6, 0.3, 0.6), "148_-34": (4.1, 1.9, 0.2, 0.5),
+        "149_-34": (7.3, 4.4, 0.5, 1.1), "150_-34": (24.0, 38.0, 3.6, 8.2), "151_-34": (52.0, 86.0, 7.9, 14.0),
+        "150_-35": (8.0, 9.0, 1.2, 2.5), "151_-35": (14.0, 21.0, 2.8, 6.0), "149_-36": (26.0, 44.0, 2.5, 4.1),
+    }
+    cells = {}
+    for cell, (m, r, p, a) in sizes.items():
+        x, y = (int(v) for v in cell.split("_"))
+        cells[cell] = {"box": [x, y, x + 1, y + 1], "l0": 1342, "files": {"map": f(m), "route": f(r), "places": f(p), "addresses": f(a)}}
+    total = sum(e["bytes"] for c in cells.values() for e in c["files"].values())
+    index = {
+        "format": 1, "build": "stub", "built_at": "2026-11-01T00:00:00Z", "search": True, "cells": cells,
+        "l0": {"1342": f(10.6)}, "base": {"cameras": f(0.096), "chargers": f(0.304)},
+        "totals": {"squares": len(cells), "bytes": total + int(11.0 * mb)},
+    }
+    (areas / "index.json").write_text(json.dumps(index) + "\n", encoding="utf-8")
 
 
 def main() -> None:

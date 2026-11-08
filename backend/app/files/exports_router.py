@@ -56,7 +56,7 @@ async def make_export(
     if body.part_gb not in library_export.PART_SIZES_GB:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "Choose 2, 10 or 50 GB parts.")
     planned = await library_export.plan(db, user, body.part_gb)
-    if not planned["counts"]["files"] and not planned["counts"]["folders"]:
+    if not planned["counts"]["files"] and not planned["counts"]["folders"] and not planned["maps"]["offline_areas"]:
         raise HTTPException(status.HTTP_409_CONFLICT, "There's nothing in your files to export yet.")
     export_id = await library_export.create(user, planned)
     state = await library_export.load(export_id)

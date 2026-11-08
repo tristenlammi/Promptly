@@ -121,7 +121,23 @@ def state() -> dict[str, Any]:
         # This build was made before packs were turned on: the next refresh has them.
         name = "waiting"
     totals = (idx or {}).get("totals") or {}
-    return {"state": name, "squares": totals.get("squares", 0) if idx else 0, "bytes": totals.get("bytes", 0) if idx else 0}
+    return {
+        "state": name,
+        "squares": totals.get("squares", 0) if idx else 0,
+        "bytes": totals.get("bytes", 0) if idx else 0,
+        "build": (idx.get("build") or build) if idx else None,
+        "built_at": idx.get("built_at") if idx else None,
+    }
+
+
+async def admin_status(db: AsyncSession) -> dict[str, Any]:
+    """For Admin → App settings: the packs' state and disk use, and how many
+    areas people have saved (counts only, never whose or where)."""
+    out = await asyncio.to_thread(state)
+    areas, people = (await db.execute(
+        select(func.count(), func.count(func.distinct(MapOfflineArea.user_id))).select_from(MapOfflineArea)
+    )).one()
+    return {**out, "areas": int(areas), "people": int(people)}
 
 
 def file_path(kind: str, west: int, south: int, tile: int) -> tuple[str, str] | None:

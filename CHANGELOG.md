@@ -38,6 +38,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Promptly for Android: P Maps finds routes on the phone when your server can't be reached (no signal, or it takes more than 6 seconds). Inside your offline areas you can start a trip, and a wrong turn gets a new route from the phone within a few seconds; the screen shows "Offline route", "No signal · no traffic info" and, where there's no downloaded map, "No offline map here"; speed cameras still warn, and Ask Promptly says plainly that it needs signal. Outside your areas it tells you to head back to the route, and picks you up when you do. Back in signal, routes come from your server again. In the car, a one-off "No signal: using your offline map" note, and the route list works offline too.
 - Promptly for Android: P Maps search works with no signal, on the phone and in the car: places by name ("Caltex Mudgee", nearest you first), street addresses with house numbers ("12 Macquarie St Dubbo", "3/12 …"), "fuel" or "the nearest servo", and your saved places, recents and usual routes, kept on the phone. Your server answers first; if it can't within 4 seconds, the phone does, and the results say they're offline ones.
 - Promptly for Android: Add stop with no signal lists fuel, food and the rest along the road ahead from your offline areas, with how far ahead each is.
+- P Maps on the web: Offline areas. Save the map's view for your Android phone with its size shown first (the squares it keeps are shaded on the map), or a route's roads with Save for offline next to Start; see what each of your phones has of each area ("Ready on Pixel 9 · 3 Nov", "Not on a phone yet"); rename, delete, or leave out house numbers. On an Android phone, saving opens the Promptly app to download it; elsewhere your phone downloads it next time it's on Wi-Fi.
+- Admin → App settings: an "Offline maps for phones" card with the packs' state, the disk they use and how many areas people have saved.
+- Export my library includes your P Maps offline areas (`maps/offline-areas.json`).
 - Promptly for Android: opening P Maps with no signal now opens its own map, Drive, instead of a web page that can't load: your location, Where to?, Home, Work and your places, and a place's routes from your offline areas with Start. Long-press the P Maps icon for Drive and Offline areas. A map link from another app with no signal opens there too.
 
 ### Changed
@@ -55,6 +58,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- P Maps offline (maps-offline) -->
 - P Maps (Android): your speed on the driving screen now turns red when you're over the road's speed limit. It never did, because the limit was read the wrong way.
 - P Maps: ending a trip from the car (or by voice) now closes the phone's driving screen instead of leaving a map with no trip.
+- P Maps (Android): Back while the driving screen's Add stop list is open now closes the list (or goes back to the kinds of stop) instead of leaving the driving screen.
+- P Maps (Android): the driving screen no longer restarts its trip when Android rebuilds it (the phone switching to dark mode at sunset, or reopening it after Android closed it in the background), mid-drive or after you've arrived.
+- P Maps: the map's "© OpenStreetMap contributors · Protomaps" credit is stored so no app can show it garbled as "Â©".
 - Android Auto: release builds only talk to Google's own car hosts.
 - P Maps (Android): "Save where I parked" with no signal is no longer lost: it's kept on the phone and saved to P Maps when there's signal, with the time you parked (a place saved since, on the web or another phone, isn't overwritten). The car's own parking note and the timeline's work the same way.
 

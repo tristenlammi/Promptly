@@ -329,4 +329,20 @@ class MapTilesTest {
         assertTrue(style.getString("sprite").startsWith(MapTiles.ORIGIN))
         assertFalse(MapTiles.style(raw).contains("__"))
     }
+
+    /** "© OpenStreetMap contributors · Protomaps", never "Â©": the styles are plain
+     *  ASCII (©, ·), so whatever charset a reader assumes, it reads right. */
+    @Test
+    fun the_styles_attribution_reads_right_whatever_reads_the_file() {
+        val frontend = File(System.getProperty("pw.frontend") ?: "../frontend")
+        for (theme in listOf("light", "dark")) {
+            val bytes = File(frontend, "public/map-assets/style-$theme.json").readBytes()
+            assertTrue("style-$theme.json has non-ASCII bytes", bytes.all { it >= 0 })
+            for (charset in listOf(Charsets.UTF_8, Charsets.ISO_8859_1, charset("windows-1252"))) {
+                val styled = JSONObject(MapTiles.style(String(bytes, charset)))
+                val attribution = styled.getJSONObject("sources").getJSONObject("protomaps").getString("attribution")
+                assertEquals("© OpenStreetMap contributors · Protomaps", attribution)
+            }
+        }
+    }
 }

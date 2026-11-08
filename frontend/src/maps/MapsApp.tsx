@@ -3,7 +3,7 @@ import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } 
 import { CSS } from "@dnd-kit/utilities";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft, BatteryCharging, Bike, Bookmark, Briefcase, Car, ChevronDown, ChevronUp, Clock, SlidersHorizontal, Crosshair, Footprints, GripVertical,
+  ArrowLeft, BatteryCharging, Bike, Bookmark, Briefcase, Car, ChevronDown, ChevronUp, Clock, CloudDownload, SlidersHorizontal, Crosshair, Footprints, GripVertical,
   Home, List, Loader2, MapPin, Navigation, ParkingCircle, Plus, Route as RouteIcon, Search, TrafficCone, Trash2, User, Users, X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -18,11 +18,12 @@ import { toast } from "@/store/toastStore";
 import { useKeyboardInset } from "@/components/files/documents/useKeyboardInset";
 import { NEARBY, mapsApi, decodeShape, formatDuration, formatKm, routeSeconds, trafficLine, type Charger, type Mode, type PlaceMore, type PreferredRoute, type Route, type SavedPlace, type SearchResult, type Spot } from "./api";
 import { MapView, placeLook, type MapViewHandle } from "./MapView";
+import { OFFLINE_KEY, OfflinePanel, saveRouteForOffline, useOffline } from "./Offline";
 import { PeoplePanel, useShares } from "./People";
 import { PLACE_COLOURS, PLACE_ICON_SVG, PLACE_ICONS } from "./placeIcons";
 import { TimelinePanel } from "./Timeline";
 
-type Panel = "home" | "place" | "route" | "charger" | "timeline" | "people";
+type Panel = "home" | "place" | "route" | "charger" | "timeline" | "people" | "offline";
 
 const MODES: { id: Mode; label: string; icon: typeof Car }[] = [
   { id: "drive", label: "Drive", icon: Car },
@@ -75,6 +76,8 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
   const friends = useMemo(() => (shares?.shared_with_me ?? []).filter((p) => p.live), [shares]);
 
   const [panel, setPanel] = useState<Panel>("home");
+  const panelRef = useRef(panel);
+  panelRef.current = panel;
   const [open, setOpen] = useState(true);
   const [place, setPlace] = useState<SearchResult | null>(null);
   const [charger, setCharger] = useState<Charger | null>(null);
@@ -425,8 +428,34 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
   moved.current = loadChargers;
   const alongRef = useRef(alongRoute);
   alongRef.current = alongRoute;
+  // ---- Offline areas (maps-offline) ----
+  const { data: offline } = useOffline();
+  const [squares, setSquares] = useState<string[] | null>(null);
+  // Bumps each time the map stops moving while the offline panel's open: its size follows the view.
+  const [moves, setMoves] = useState(0);
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const offlineView = useCallback(() => {
+    // What you can see of the map: past the panel on the left, or above the sheet on a phone.
+    const inset = isMobile
+      ? { top: 72, bottom: sheetRef.current?.offsetHeight ?? 0, left: 0, right: 0 }
+      : { top: 0, bottom: 0, left: 424, right: 0 };
+    return map.current?.visibleBounds(inset) ?? null;
+  }, [isMobile]);
+  const [savingOffline, setSavingOffline] = useState(false);
+  const saveRouteOffline = async () => {
+    const chosen = routes[selected];
+    if (!chosen || savingOffline) return;
+    setSavingOffline(true);
+    try {
+      if (await saveRouteForOffline(chosen, stops)) void qc.invalidateQueries({ queryKey: OFFLINE_KEY });
+    } finally {
+      setSavingOffline(false);
+    }
+  };
+
   const onMoved = useCallback(() => {
     if (!alongRef.current) void moved.current();
+    if (panelRef.current === "offline") setMoves((n) => n + 1);
   }, []);
 
   // ---- Saving ----
@@ -529,6 +558,11 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
           }}
           onTimeline={() => setPanel("timeline")}
           onPeople={() => setPanel("people")}
+          onOffline={() => {
+            setPanel("offline");
+            setOpen(true);
+          }}
+          offlineAreas={offline?.areas.length ?? 0}
           usual={usualRoutes ?? []}
           onGoUsual={(r) => {
             const rows = [asStop(r.from), asStop(r.to)];
@@ -577,6 +611,18 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
           onShow={(p) => p.live && showPlace({ kind: "contact", name: p.name, address: p.live.destination ? `Going to ${p.live.destination}` : null, lat: p.live.lat, lon: p.live.lon })}
         />
       )}
+      {panel === "offline" && (
+        <OfflinePanel
+          view={offlineView}
+          moves={moves}
+          onClose={() => setPanel("home")}
+          onSquares={setSquares}
+          onShowArea={(a) => {
+            map.current?.fit([[a.box.west, a.box.south], [a.box.east, a.box.north]], panelPadding());
+            if (isMobile) setOpen(true);
+          }}
+        />
+      )}
       {panel === "timeline" && (
         <TimelinePanel
           onClose={() => {
@@ -623,6 +669,8 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
           onPrefer={() => void preferSelected()}
           onStopPreferring={(id) => void stopPreferring(id)}
           onStart={startDriving}
+          onSaveOffline={offline?.enabled === false ? undefined : () => void saveRouteOffline()}
+          savingOffline={savingOffline}
           via={via}
           pickingVia={pickingVia}
           onPickVia={setPickingVia}
@@ -659,6 +707,7 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
           marks={dayOnMap?.stays ?? nearMarks}
           onPickPoint={pickingVia ? (lat, lon) => void addVia(lat, lon) : undefined}
           trail={dayOnMap?.lines}
+          squares={panel === "offline" ? squares ?? undefined : undefined}
           onPickSaved={(p) => showPlace({ ...p })}
           friends={friends}
           onHold={hold}
@@ -715,6 +764,7 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
         {/* On a phone, the same panel rises from the bottom. */}
         {!showResults && isMobile && (
           <div
+            ref={sheetRef}
             style={{ bottom: keyboard, maxHeight: keyboard || addingStop ? `calc(100% - ${keyboard}px - 3rem)` : "62%" }}
             className="absolute inset-x-0 z-10 flex flex-col rounded-t-2xl border-t border-[var(--border)] bg-[var(--surface)] shadow-[0_-4px_20px_rgba(0,0,0,0.15)]"
           >
@@ -852,6 +902,8 @@ function HomePanel(p: {
   onClearRecents: () => void;
   onTimeline: () => void;
   onPeople: () => void;
+  onOffline: () => void;
+  offlineAreas: number;
   usual: PreferredRoute[];
   onGoUsual: (r: PreferredRoute) => void;
   onRemoveUsual: (id: string) => void;
@@ -887,6 +939,12 @@ function HomePanel(p: {
       {p.nearby}
       <Row icon={Clock} title="Your timeline" detail="Where you've been, by day" onClick={p.onTimeline} />
       <Row icon={Users} title="Live location" detail={p.friends ? `${p.friends} sharing with you` : "Share where you are with family"} onClick={p.onPeople} />
+      <Row
+        icon={CloudDownload}
+        title="Offline areas"
+        detail={p.offlineAreas ? `${p.offlineAreas} ${p.offlineAreas === 1 ? "area" : "areas"} kept on your phone for no signal` : "Keep the map on your phone for no signal"}
+        onClick={p.onOffline}
+      />
       {p.usual.length > 0 && (
         <div>
           <Heading>Your usual routes</Heading>
@@ -1323,6 +1381,9 @@ function RoutePanel(p: {
   onPrefer: () => void;
   onStopPreferring: (id: string) => void;
   onStart: () => void;
+  /** Save this route's roads as an offline area (absent when the server has offline maps off). */
+  onSaveOffline?: () => void;
+  savingOffline: boolean;
   onAddStop: (s: Spot) => void;
 }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
@@ -1496,6 +1557,13 @@ function RoutePanel(p: {
           {/* Always there: everything above scrolls under it. */}
           <div className="sticky bottom-0 flex gap-2 bg-[var(--surface)] px-4 pb-3 pt-2">
             <PrimaryButton icon={Navigation} onClick={p.onStart}>Start</PrimaryButton>
+            {p.onSaveOffline && (
+              <button type="button" onClick={p.onSaveOffline} disabled={p.savingOffline} aria-label="Save for offline" title="Save this route's roads for offline, on your phone" className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-50">
+                {p.savingOffline ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudDownload className="h-4 w-4" />}
+                <span className="hidden sm:inline">Save for offline</span>
+                <span className="sm:hidden">Offline</span>
+              </button>
+            )}
             <button type="button" onClick={() => setShowSteps((v) => !v)} aria-expanded={showSteps} className="inline-flex h-10 items-center gap-1 rounded-xl border border-[var(--border)] px-3 text-sm text-[var(--text)] hover:bg-[var(--hover)]">
               Steps{showSteps ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </button>

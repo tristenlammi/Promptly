@@ -367,3 +367,27 @@ async def test_admins_see_the_packs_state(offline_build, db, user, client, statu
     assert got["state"] == state
     if state == "ready":
         assert got["squares"] == 0 or got["squares"] == index.get("totals", {}).get("squares", 0)
+
+
+async def test_admins_see_the_packs_disk_use_and_how_many_areas(offline_build, db, user, client):
+    """Admin -> App settings' offline row: the build, its date, the packs' disk
+    use and how many areas people saved (counts only, no names or places)."""
+    from app.maps import offline
+
+    root, index = offline_build
+    index["totals"] = {"squares": 6, "bytes": 4_410_000_000}
+    (root / "build-1" / "areas" / "index.json").write_text(json.dumps(index))
+    offline._index.key = None
+    other = await _other(db)
+    for who, name in ((user, "Sydney"), (user, "Canberra"), (other, "Theirs")):
+        r = await client.post("/api/maps/offline/areas", headers=_hdr(who), json={**VIEW, "name": name})
+        assert r.status_code == 201, r.text
+    user.role = "admin"
+    await db.commit()
+    got = (await client.get("/api/maps/data-status", headers=_hdr(user))).json()["offline"]
+    assert got == {
+        "state": "ready", "squares": 6, "bytes": 4_410_000_000, "build": "build-1",
+        "built_at": "2026-11-04T00:00:00Z", "areas": 3, "people": 2,
+    }
+    # Not for everyone.
+    assert (await client.get("/api/maps/data-status", headers=_hdr(other))).status_code == 403

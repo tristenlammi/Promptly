@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -118,8 +119,14 @@ class NavigationActivity : ComponentActivity() {
         // The map's tiles come from the phone first (squares, this week's trips).
         org.promptly.sync.maps.offline.MapTiles.install(this)
         enableEdgeToEdge()
-        request.value = parse(intent?.data)
-        driveAsk.value = DriveAsk.fromWebPath(intent?.getStringExtra(MapLinkActivity.EXTRA_PATH))
+        // Recreated (the phone switching to dark at sunset, or after Android closed it in the
+        // background), the trip it was opened for is usually running in Nav already, or over:
+        // starting it again would restart a trip mid-drive, or after arriving. Only one that
+        // hadn't started yet is picked up again.
+        if (savedInstanceState == null || savedInstanceState.getBoolean(PENDING)) {
+            request.value = parse(intent?.data)
+            driveAsk.value = DriveAsk.fromWebPath(intent?.getStringExtra(MapLinkActivity.EXTRA_PATH))
+        }
         // Ended anywhere (here, the car's End, the assistant, arriving): back to the map
         // with Where to?, not a map with no trip on it.
         lifecycleScope.launch {
@@ -140,10 +147,23 @@ class NavigationActivity : ComponentActivity() {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putBoolean(PENDING, request.value != null && !Nav.onTrip() && !Nav.arrived.value)
+    }
+
+    private companion object {
+        const val PENDING = "trip_pending"
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         val trip = parse(intent.data)
-        if (trip != null) request.value = trip
+        if (trip != null) {
+            // The trip a recreated screen picks up again if it hadn't started.
+            setIntent(intent)
+            request.value = trip
+        }
         else DriveAsk.fromWebPath(intent.getStringExtra(MapLinkActivity.EXTRA_PATH))?.let { if (!Nav.onTrip()) driveAsk.value = it }
     }
 
@@ -440,11 +460,13 @@ private fun SmallPill(text: String) {
     )
 }
 
-/** Fuel, food and so on along the rest of the trip. */
+/** Fuel, food and so on along the rest of the trip. Back closes it (or goes back to
+ *  the kinds of stop), not the driving screen. */
 @Composable
-private fun AddStopSheet(onClose: () -> Unit) {
+internal fun AddStopSheet(onClose: () -> Unit) {
     val context = LocalContext.current
     var category by remember { mutableStateOf<Pair<String, String>?>(null) }
+    BackHandler { if (category == null) onClose() else category = null }
     var rows by remember { mutableStateOf<List<Maps.Nearby>?>(null) }
     LaunchedEffect(category) {
         val picked = category ?: return@LaunchedEffect

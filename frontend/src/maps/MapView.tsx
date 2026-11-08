@@ -13,6 +13,8 @@ export interface MapViewHandle {
   fit(points: [number, number][], padding?: { top: number; bottom: number; left: number; right: number }): void;
   center(): { lat: number; lon: number } | null;
   bounds(): [number, number, number, number] | null;
+  /** The part of the map you can see past the panels (pixels covered on each side). */
+  visibleBounds(inset: { top: number; bottom: number; left: number; right: number }): [number, number, number, number] | null;
 }
 
 interface Props {
@@ -36,6 +38,8 @@ interface Props {
   onPickIncident?: (incident: Pick<RouteIncident, "label" | "text" | "lat" | "lon" | "delay_seconds">) => void;
   /** Colour the roads by how busy they are. */
   showTraffic?: boolean;
+  /** 1-degree squares ("<west>_<south>") shaded on the map: an offline area's. */
+  squares?: string[];
   /** Frame these once the map's ready, and whenever they change. */
   fitTo?: [number, number][];
   /** Choosing a point on the map: a tap goes here and nothing else happens. */
@@ -95,7 +99,7 @@ function dot(html: string, className: string): HTMLDivElement {
 }
 
 export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, ref) {
-  const { basemap, routes, selected, pin, stops, chargers, parked, you, saved, friends, marks, trail, fitTo, showTraffic } = props;
+  const { basemap, routes, selected, pin, stops, chargers, parked, you, saved, friends, marks, trail, fitTo, showTraffic, squares } = props;
   const theme = useThemeStore((s) => s.resolved());
   const box = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
@@ -125,6 +129,21 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
       const b = mapRef.current?.getBounds();
       return b ? [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()] : null;
     },
+    visibleBounds(inset) {
+      const map = mapRef.current;
+      if (!map) return null;
+      const { clientWidth: w, clientHeight: h } = map.getContainer();
+      // Too little left uncovered (a small window): the whole map.
+      const left = w - inset.left - inset.right < 120 ? 0 : inset.left;
+      const right = w - inset.left - inset.right < 120 ? 0 : inset.right;
+      const top = h - inset.top - inset.bottom < 120 ? 0 : inset.top;
+      const bottom = h - inset.top - inset.bottom < 120 ? 0 : inset.bottom;
+      const corners = [[left, top], [w - right, top], [left, h - bottom], [w - right, h - bottom]].map(([x, y]) => map.unproject([x, y]));
+      const lons = corners.map((c) => c.lng);
+      const lats = corners.map((c) => c.lat);
+      const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+      return [clamp(Math.min(...lons), -180, 180), clamp(Math.min(...lats), -85, 85), clamp(Math.max(...lons), -180, 180), clamp(Math.max(...lats), -85, 85)];
+    },
   }));
 
   // The map. A new theme means a new style, so the view is carried across.
@@ -153,6 +172,9 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
         map.addSource("chargers", { type: "geojson", data: EMPTY as never });
         map.addSource("you", { type: "geojson", data: EMPTY as never });
         map.addSource("trail", { type: "geojson", data: EMPTY as never });
+        map.addSource("squares", { type: "geojson", data: EMPTY as never });
+        map.addLayer({ id: "squares", type: "fill", source: "squares", paint: { "fill-color": ROUTE, "fill-opacity": 0.12 } });
+        map.addLayer({ id: "squares-edge", type: "line", source: "squares", paint: { "line-color": ROUTE, "line-width": 1.5, "line-opacity": 0.7 } });
         map.addLayer({ id: "trail", type: "line", source: "trail", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#4F7FE0", "line-width": 4, "line-opacity": 0.85 } });
         map.addLayer({ id: "alts", type: "line", source: "alts", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": theme === "dark" ? "#8a8580" : "#a8a29a", "line-width": 6, "line-opacity": 0.9 } });
         map.addLayer({ id: "route-edge", type: "line", source: "route", layout: { "line-cap": "round", "line-join": "round" }, paint: { "line-color": "#8f4630", "line-width": 9 } });
@@ -327,6 +349,18 @@ export const MapView = forwardRef<MapViewHandle, Props>(function MapView(props, 
       features: (trail ?? []).map((coordinates) => ({ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates } })),
     } as never);
   }, [ready, trail]);
+
+  // An offline area's squares, lightly shaded.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!ready || !map) return;
+    const features = (squares ?? []).flatMap((cell) => {
+      const [x, y] = cell.split("_").map(Number);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return [];
+      return [{ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [[[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1], [x, y]]] } }];
+    });
+    (map.getSource("squares") as GeoJSONSource | undefined)?.setData({ type: "FeatureCollection", features } as never);
+  }, [ready, squares]);
 
   useEffect(() => {
     const map = mapRef.current;

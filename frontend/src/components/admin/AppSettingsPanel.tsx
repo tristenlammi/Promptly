@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
+  CloudDownload,
   Gauge,
   Globe,
   KeyRound,
@@ -88,6 +90,7 @@ export function AppSettingsPanel() {
         onSubmit={(patch) => update.mutateAsync(patch)}
         busy={update.isPending}
       />
+      <MapsOfflineCard />
       <OidcCard
         settings={data}
         onSubmit={(patch) => update.mutateAsync(patch)}
@@ -1107,22 +1110,32 @@ interface MapDataStatus {
   built_at: string | null;
   addresses: "ok" | "missing" | "unknown";
   overdue_days: number;
-  // Offline packs for phones (maps-offline).
-  offline?: { state: "off" | "building" | "waiting" | "failed" | "ready"; squares: number; bytes: number };
+  // Offline packs for phones (maps-offline): their state, disk use, and how
+  // many areas people saved (counts only).
+  offline?: {
+    state: "off" | "building" | "waiting" | "failed" | "ready";
+    squares: number;
+    bytes: number;
+    build?: string | null;
+    built_at?: string | null;
+    areas?: number;
+    people?: number;
+  };
+}
+
+/** The map data's state, for the warning and the offline maps card. */
+function useMapDataStatus() {
+  return useQuery({
+    queryKey: ["maps-data-status"],
+    queryFn: async () => (await apiClient.get<MapDataStatus>("/maps/data-status")).data,
+    staleTime: 60_000,
+    retry: false,
+  });
 }
 
 /** Warns when the map data is missing something. Quiet when maps aren't set up at all. */
 function MapDataWarning() {
-  const [status, setStatus] = useState<MapDataStatus | null>(null);
-  useEffect(() => {
-    let live = true;
-    apiClient.get<MapDataStatus>("/maps/data-status").then((r) => {
-      if (live) setStatus(r.data);
-    }).catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, []);
+  const { data: status } = useMapDataStatus();
   if (!status) return null;
   const problems: { title: string; detail: string }[] = [];
   if (status.addresses === "missing") {
@@ -1162,6 +1175,51 @@ function MapDataWarning() {
         </div>
       ))}
     </div>
+  );
+}
+
+function bytesText(bytes: number): string {
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(1)} GB`;
+  return `${Math.max(1, Math.round(bytes / 1_000_000))} MB`;
+}
+
+/** P Maps offline areas (maps-offline): whether this server makes the packs
+ *  phones download, and the disk they use. Only when maps are set up. */
+function MapsOfflineCard() {
+  const { data: status } = useMapDataStatus();
+  const offline = status?.offline;
+  if (!status || !offline || (!status.ready && !status.building)) return null;
+  const date = offline.built_at ? new Date(offline.built_at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" }) : null;
+  const state = {
+    ready: { label: "Ready", tone: "text-emerald-700 dark:text-emerald-400", text: `${offline.squares.toLocaleString()} squares${date ? `, made ${date}` : ""}. Phones download only the squares their areas need.` },
+    off: { label: "Off", tone: "text-[var(--text-muted)]", text: "Turned off with MAPS_OFFLINE=0 in the maps container's environment. Phones keep the areas they have, but can't download new ones." },
+    building: { label: "Being made", tone: "text-[var(--text-muted)]", text: "They're made with this map update, and phones can download them when it finishes." },
+    waiting: { label: "Not made yet", tone: "text-[var(--text-muted)]", text: "This map was built before offline maps were on. The next monthly map update makes them." },
+    failed: { label: "Failed", tone: "text-red-600 dark:text-red-400", text: "The last map update couldn't make them. Phones keep the areas they have. It's tried again at the next update; the Promptly-Maps log has the details." },
+  }[offline.state];
+  return (
+    <SettingsCard title="Offline maps for phones (P Maps)" icon={<CloudDownload className="h-4 w-4" />}>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm" data-testid="maps-offline-status">
+        <dt className="text-[var(--text-muted)]">State</dt>
+        <dd>
+          <span className={`font-medium ${state.tone}`}>{state.label}</span>
+          <span className="block text-xs text-[var(--text-muted)]">{state.text}</span>
+        </dd>
+        <dt className="text-[var(--text-muted)]">Disk</dt>
+        <dd>{offline.state === "ready" ? `${bytesText(offline.bytes)} for all of Australia` : "None in use"}</dd>
+        <dt className="text-[var(--text-muted)]">Areas</dt>
+        <dd>
+          {offline.areas
+            ? `${offline.areas.toLocaleString()} saved by ${(offline.people ?? 0).toLocaleString()} ${offline.people === 1 ? "person" : "people"}`
+            : "No one has saved an offline area yet"}
+        </dd>
+      </dl>
+      <p className="mt-3 text-xs text-[var(--text-muted)]">
+        People save areas in P Maps, and the Promptly app on their Android phones downloads them for when there&apos;s no signal.
+        The packs are rebuilt with each monthly map update (about 5 GB, and about 10 GB while a new update replaces the old).
+        They&apos;re map data like the basemap, so they don&apos;t count towards anyone&apos;s storage.
+      </p>
+    </SettingsCard>
   );
 }
 
