@@ -225,6 +225,78 @@ async def control(body: ControlIn, db: AsyncSession = Depends(get_db), user: Use
         raise _err(e) from None
 
 
+# ---------------------------------------------------------------- the Android service
+# The same reports, authenticated by the voice session instead of a bearer
+# (the service never holds one). Only the current session works.
+
+
+async def _session_user(db: AsyncSession, token: str) -> tuple[User, str]:
+    claims = voice.read_session(token)
+    if claims is None:
+        raise rooms_core.not_found("Voice session")
+    uid = uuid.UUID(claims["sub"])
+    cur = await voice.where(uid)
+    user = await db.get(User, uid)
+    if cur is None or cur["session"] != claims["sid"] or user is None or user.disabled:
+        raise rooms_core.not_found("Voice session")
+    if not await access.voice_allowed(db, user):
+        raise rooms_core.not_found("Voice session")
+    return user, claims["sid"]
+
+
+class SessionStateIn(StateIn):
+    voice_session: str = Field(min_length=10, max_length=2000)
+
+
+@router.post("/voice/session/state")
+async def session_state(body: SessionStateIn, db: AsyncSession = Depends(get_db)) -> dict:
+    user, sid = await _session_user(db, body.voice_session)
+    try:
+        return await voice.report_state(
+            db, user, session=sid, muted=body.muted, deafened=body.deafened, video=body.video, live=body.live, watching=body.watching
+        )
+    except voice.VoiceError as e:
+        raise _err(e) from None
+
+
+class SessionSpeakingIn(SpeakingIn):
+    voice_session: str = Field(min_length=10, max_length=2000)
+
+
+@router.post("/voice/session/speaking", status_code=204)
+async def session_speaking(body: SessionSpeakingIn, db: AsyncSession = Depends(get_db)) -> None:
+    user, _sid = await _session_user(db, body.voice_session)
+    try:
+        await voice.speaking(db, user, body.on)
+    except voice.VoiceError as e:
+        raise _err(e) from None
+
+
+class SessionOnlyIn(BaseModel):
+    voice_session: str = Field(min_length=10, max_length=2000)
+
+
+@router.post("/voice/session/still-here")
+async def session_still_here(body: SessionOnlyIn, db: AsyncSession = Depends(get_db)) -> dict:
+    user, _sid = await _session_user(db, body.voice_session)
+    try:
+        return await voice.still_here(db, user)
+    except voice.VoiceError as e:
+        raise _err(e) from None
+
+
+@router.post("/voice/session/leave")
+async def session_leave(body: SessionOnlyIn, db: AsyncSession = Depends(get_db)) -> dict:
+    """The service leaves (Leave in its notification)."""
+    claims = voice.read_session(body.voice_session)
+    if claims is None:
+        raise rooms_core.not_found("Voice session")
+    user = await db.get(User, uuid.UUID(claims["sub"]))
+    if user is None:
+        raise rooms_core.not_found("Voice session")
+    return {"ok": True, "left": await voice.leave(db, user, claims["sid"])}
+
+
 # ---------------------------------------------------------------- moderation
 
 

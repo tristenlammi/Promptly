@@ -941,3 +941,23 @@ async def test_go_live_and_who_is_watching(client, db, lk):
     await client.post("/api/rooms/voice/state", headers=bearer(w.admin), json={"watching": str(w.sam.id)})
     await client.post("/api/rooms/voice/leave", headers=bearer(w.sam), json={})
     assert all(m["watching"] is None for m in (await in_room(w.lounge)).values())
+
+
+async def test_the_android_service_reports_with_its_session(client, db, lk, events):
+    w = await world(client, db)
+    phone = await join(client, w.sam, w.lounge, device="android")
+    vs = phone["session"]
+    r = await client.post("/api/rooms/voice/session/state", json={"voice_session": vs, "muted": True})
+    assert r.status_code == 200 and r.json()["muted"] is True
+    events.clear()
+    r = await client.post("/api/rooms/voice/session/speaking", json={"voice_session": vs, "on": False})
+    assert r.status_code == 204 and of_type(events, "voice_speaking")
+    assert (await client.post("/api/rooms/voice/session/still-here", json={"voice_session": vs})).status_code == 200
+    # A bad or replaced session is refused.
+    assert (await client.post("/api/rooms/voice/session/state", json={"voice_session": vs[:-3] + "xyz", "muted": False})).status_code == 404
+    web = await join(client, w.sam, w.lounge)
+    assert (await client.post("/api/rooms/voice/session/state", json={"voice_session": vs, "muted": False})).status_code == 404
+    assert (await client.post("/api/rooms/voice/session/leave", json={"voice_session": vs})).json()["left"] is False
+    assert await where(w.sam) is not None
+    r = await client.post("/api/rooms/voice/session/leave", json={"voice_session": web["session"]})
+    assert r.json()["left"] is True and await where(w.sam) is None
