@@ -104,7 +104,7 @@ export function NewWorkspaceModal({
       await queryClient.invalidateQueries({ queryKey: ["workspaces"] });
       // The modal closes on success, so the import summary — including
       // what was left out and why — goes in a toast (R-315).
-      const imported = `${result.notes} note${result.notes === 1 ? "" : "s"}${
+      const imported = `${result.notes} page${result.notes === 1 ? "" : "s"}${
         result.notebooks
           ? ` in ${result.notebooks} notebook${result.notebooks === 1 ? "" : "s"}`
           : ""
@@ -319,13 +319,13 @@ export function NewWorkspaceModal({
             <span>
               <span className="font-medium">
                 {importing
-                  ? "Importing notes…"
+                  ? "Importing pages…"
                   : "Or import from a Markdown export (.zip)"}
               </span>
               <span className="mt-0.5 block text-[11px] leading-snug">
                 Obsidian vaults and Notion / Confluence Markdown exports —
-                .md files become notes, top-level folders become notebooks
-                (deeper folders stay in the note title). Images and other
+                .md files become pages, top-level folders become notebooks
+                (deeper folders stay in the page title). Images and other
                 files are skipped.
               </span>
             </span>

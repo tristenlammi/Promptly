@@ -25,6 +25,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 import { SearchDateFilter, type DateRange } from "./SearchDateFilter";
 import { ActionRows, usePaletteActions, type PaletteAction } from "./usePaletteActions";
+import { itemKindWord } from "@/components/workspaces/itemKindWord";
 
 /**
  * Global command palette for full-text conversation search.
@@ -429,7 +430,7 @@ export function SearchPalette({ open, onClose }: SearchPaletteProps) {
                       className="flex w-full items-start gap-2 px-3 py-1.5 text-left transition hover:bg-[var(--surface-2)]"
                     >
                       <span className="mt-0.5 shrink-0 rounded bg-[var(--surface-2)] px-1 py-0.5 text-[9px] uppercase tracking-wide text-[var(--text-muted)]">
-                        {h.kind}
+                        {itemKindWord(h.kind)}
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm text-[var(--text)]">

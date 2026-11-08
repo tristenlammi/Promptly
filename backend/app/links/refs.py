@@ -65,6 +65,12 @@ LABELS = {
 }
 LABELS["note"] = "Note"  # Notes
 
+
+def witem_kind(kind: str | None) -> str:
+    """A workspace item's kind as people see it: the "note" kind is a Page
+    (Notes N1.7 — one thing in Promptly is called a note)."""
+    return {"note": "Page", "container": "Notebook"}.get(kind or "", (kind or "item").capitalize())
+
 _SUB_RE = re.compile(r"^[A-Za-z0-9_\-]{1,60}$")
 
 
@@ -219,7 +225,7 @@ async def _witem(db: AsyncSession, user: User, iid: uuid.UUID) -> dict | None:
     except HTTPException:
         return None
     href = f"/workspaces/{ws.id}?item={item.id}&kind={item.kind}" + (f"&ref={item.ref_id}" if item.ref_id else "")
-    return {"title": item.title or "Untitled", "subtitle": f"{(item.kind or 'item').capitalize()} · {ws.title}", "href": href}
+    return {"title": item.title or "Untitled", "subtitle": f"{witem_kind(item.kind)} · {ws.title}", "href": href}
 
 
 async def _room_msg(db: AsyncSession, user: User, mid: uuid.UUID) -> dict | None:

@@ -820,7 +820,7 @@ function ActivitySection({
 function kindMeta(kind: string): { Icon: typeof FileText; label: string } {
   switch (kind) {
     case "note":
-      return { Icon: FileText, label: "Note" };
+      return { Icon: FileText, label: "Page" };
     case "canvas":
       return { Icon: Layers, label: "Canvas" };
     case "chat":
@@ -958,7 +958,7 @@ function LinksSection({
 
       {links.length === 0 && !adding && (
         <span className="text-xs text-[var(--text-muted)]">
-          No links yet{canEdit ? " — link a note, chat, board, or a URL." : "."}
+          No links yet{canEdit ? " — link a page, chat, board, or a URL." : "."}
         </span>
       )}
 

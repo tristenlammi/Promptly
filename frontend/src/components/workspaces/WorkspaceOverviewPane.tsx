@@ -53,6 +53,7 @@ import { UserAvatar } from "@/components/shared/UserAvatar";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 import { WorkspaceFilesPanel } from "./WorkspaceFilesPanel";
+import { itemKindWord } from "@/components/workspaces/itemKindWord";
 
 /**
  * Workspace home (redesigned, Batch 8).
@@ -248,7 +249,7 @@ export function WorkspaceOverviewPane({
         <div className="relative mt-4 flex items-start gap-2 rounded-card border border-[var(--border)] bg-[var(--surface)] px-3 py-2 pr-8 text-xs text-[var(--text-muted)]">
           <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--accent-text)]" />
           <span>
-            Everything you add here — notes, canvases, and files — becomes{" "}
+            Everything you add here — pages, canvases, and files — becomes{" "}
             <span className="font-medium text-[var(--text)]">context</span> your
             chats can draw on. Toggle any item's ⚡ to include or exclude it.
           </span>
@@ -299,7 +300,7 @@ export function WorkspaceOverviewPane({
                   >
                     <span className="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-[var(--text-muted)]">
                       <KindIcon kind={r.kind} className="h-3.5 w-3.5" />
-                      {r.kind}
+                      {itemKindWord(r.kind)}
                     </span>
                     <span className="line-clamp-2 text-sm font-medium leading-snug text-[var(--text)]">
                       {r.title || "Untitled"}
@@ -322,7 +323,7 @@ export function WorkspaceOverviewPane({
             <details className="group">
               <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)] transition hover:text-[var(--text)]">
                 <ChevronRight className="h-3 w-3 shrink-0 transition-transform group-open:rotate-90" />
-                Checklists in notes ({noteChecks.filter((t) => !t.checked).length}{" "}
+                Checklists in pages ({noteChecks.filter((t) => !t.checked).length}{" "}
                 open)
               </summary>
               <div className="mt-2 space-y-0.5">
@@ -375,7 +376,7 @@ export function WorkspaceOverviewPane({
                   [
                     // [key, singular, plural, count, Icon] — explicit plural so
                     // "canvas" reads "canvases", not the naive +"s" "canvass".
-                    ["note", "note", "notes", counts?.notes ?? 0, FileText],
+                    ["note", "page", "pages", counts?.notes ?? 0, FileText],
                     ["board", "board", "boards", counts?.boards ?? 0, Columns3],
                     ["sheet", "sheet", "sheets", counts?.sheets ?? 0, Table2],
                     ["canvas", "canvas", "canvases", counts?.canvases ?? 0, PenTool],
@@ -407,7 +408,7 @@ export function WorkspaceOverviewPane({
                 {indexing.pending > 0 && !searchReady && (
                   <span
                     className="inline-flex items-center gap-1.5 text-[var(--warning)]"
-                    title="Files and notes are indexed once an embedding model is set up (Admin → Models). Until then chats here can't search them."
+                    title="Files and pages are indexed once an embedding model is set up (Admin → Models). Until then chats here can't search them."
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-[var(--warning)]" />
                     Search is off — no embedding model yet
@@ -660,7 +661,7 @@ function ActivitySection({
   const verb = (e: WorkspaceActivityEvent) => {
     switch (e.kind) {
       case "item_created":
-        return `created ${e.item_kind === "folder" ? "folder" : e.item_kind} “${e.item_title}”`;
+        return `created ${e.item_kind === "folder" ? "folder" : itemKindWord(e.item_kind)} “${e.item_title}”`;
       case "item_comment":
         return `commented on “${e.item_title}”`;
       case "card_comment":
@@ -815,7 +816,7 @@ function GettingStarted() {
   const steps: Array<{ icon: typeof FileText; title: string; body: string }> = [
     {
       icon: FileText,
-      title: "Add a note or upload a file",
+      title: "Add a page or upload a file",
       body: "Use “+ New” in the rail, or drop files into the drive below.",
     },
     {
@@ -826,7 +827,7 @@ function GettingStarted() {
     {
       icon: Sparkles,
       title: "Ask this workspace (⌘K)",
-      body: "Get a grounded answer with citations across all your notes, canvases, and files.",
+      body: "Get a grounded answer with citations across all your pages, canvases, and files.",
     },
   ];
   return (
@@ -835,7 +836,7 @@ function GettingStarted() {
         Get started
       </h2>
       <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-        A workspace is a shared space where your chats, notes, and canvases all
+        A workspace is a shared space where your chats, pages, and canvases all
         feed one AI knowledge pool.
       </p>
       <ol className="mt-4 space-y-3">

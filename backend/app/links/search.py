@@ -174,7 +174,7 @@ async def search(db: AsyncSession, user: User, q: str, limit: int = 6, kinds: se
                     .limit(limit)
                 )
             ).all()
-            out += [_r("witem", str(it.id), it.title, f"{(it.kind or 'item').capitalize()} · {wt}") for it, wt in rows]
+            out += [_r("witem", str(it.id), it.title, f"{refs.witem_kind(it.kind)} · {wt}") for it, wt in rows]
 
     if "note" in want:
         from app.notes.access import visible_predicate

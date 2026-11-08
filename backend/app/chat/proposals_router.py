@@ -261,7 +261,7 @@ async def _apply_create_note(
         resolve_or_create_notebook,
     )
 
-    title = str(payload.get("title") or "Untitled note").strip()[:200]
+    title = str(payload.get("title") or "Untitled page").strip()[:200]
     markdown = str(payload.get("markdown") or "")
     owner = user if ws.user_id == user.id else await db.get(User, ws.user_id)
     if owner is None:

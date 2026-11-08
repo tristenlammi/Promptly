@@ -19,6 +19,7 @@ import {
 } from "@/api/workspaces";
 import { cn } from "@/utils/cn";
 import { setPendingHighlight } from "./deepCitation";
+import { itemKindWord } from "@/components/workspaces/itemKindWord";
 
 /**
  * The workspace search pane (Batch 4.3) — one box over three passes:
@@ -127,7 +128,7 @@ export function WorkspaceSearchPane({
           {debounced.length < 2 ? (
             <p className="py-8 text-center text-sm text-[var(--text-muted)]">
               Type at least two characters. Results cover item titles, the
-              full text of notes / canvases / sheets / boards / pinned
+              full text of pages / canvases / sheets / boards / pinned
               files, and semantic matches when embeddings are set up.
             </p>
           ) : hits.length === 0 && !isFetching ? (
@@ -176,7 +177,7 @@ export function WorkspaceSearchPane({
                               )}
                             </span>
                             <span className="shrink-0 text-[10px] uppercase tracking-wide text-[var(--text-muted)]/70">
-                              {h.kind}
+                              {itemKindWord(h.kind)}
                             </span>
                           </button>
                         </li>

@@ -4,8 +4,10 @@ import {
   CalendarPlus,
   CheckSquare,
   FileText,
+  ListChecks,
   ListPlus,
   MapPin,
+  Mic,
   MessageSquarePlus,
   Presentation,
   StickyNote,
@@ -36,6 +38,7 @@ import {
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
+import { openNewNote } from "@/notes/newNote";
 
 /*
  * The palette's "Do" rows (see ``lib/paletteCommands``): the typed command
@@ -81,6 +84,8 @@ const ICONS: Record<DoKind, ReactNode> = {
   task: <ListPlus className="h-4 w-4" />,
   money: <Wallet className="h-4 w-4" />,
   note: <StickyNote className="h-4 w-4" />,
+  list: <ListChecks className="h-4 w-4" />,
+  voice: <Mic className="h-4 w-4" />,
   doc: <FileText className="h-4 w-4" />,
   sheet: <Table2 className="h-4 w-4" />,
   slides: <Presentation className="h-4 w-4" />,
@@ -88,7 +93,9 @@ const ICONS: Record<DoKind, ReactNode> = {
   message: <MessageSquarePlus className="h-4 w-4" />,
 };
 
-const FILE_WORD: Record<"note" | "doc" | "sheet" | "slides", string> = { note: "note", doc: "doc", sheet: "sheet", slides: "slides" };
+const FILE_WORD: Record<"doc" | "sheet" | "slides", string> = { doc: "doc", sheet: "sheet", slides: "slides" };
+/** Notes (N1.7): a note, a list or a recording, opened in Notes. */
+const NOTE_KINDS = new Set<DoKind>(["note", "list", "voice"]);
 
 function money(n: number): string {
   return `${n < 0 ? "−" : "+"}$${Math.abs(n).toFixed(2).replace(/\.00$/, "")}`;
@@ -140,10 +147,20 @@ export function usePaletteActions(
       key: `create-${a.kind}`,
       icon: ICONS[a.kind],
       title: a.label,
-      detail: a.kind === "note" || a.kind === "doc" || a.kind === "sheet" || a.kind === "slides" ? "Make a blank one and open it" : `Type “${a.prefix.trim()} …”`,
+      detail: NOTE_KINDS.has(a.kind)
+        ? a.kind === "voice"
+          ? "Start recording in Notes"
+          : "Start one in Notes"
+        : a.kind === "doc" || a.kind === "sheet" || a.kind === "slides"
+          ? "Make a blank one and open it"
+          : `Type “${a.prefix.trim()} …”`,
       sure: false,
       run: async () => {
-        if (a.kind === "note" || a.kind === "doc" || a.kind === "sheet" || a.kind === "slides") return makeFile(a.kind, "", navigate);
+        if (a.kind === "note" || a.kind === "list" || a.kind === "voice") {
+          openNewNote(navigate, a.kind);
+          return true;
+        }
+        if (a.kind === "doc" || a.kind === "sheet" || a.kind === "slides") return makeFile(a.kind, "", navigate);
         setQuery(a.prefix);
         return false;
       },
@@ -194,9 +211,9 @@ interface Ctx {
   setQuery: (q: string) => void;
 }
 
-/** Make a Drive note / doc / sheet / deck. Untitled ones (and decks, which
- *  turn slide mode on when first opened) open straight away. */
-async function makeFile(kind: "note" | "doc" | "sheet" | "slides", title: string, navigate: (to: string) => void): Promise<boolean> {
+/** Make a Drive doc / sheet / deck. Untitled ones (and decks, which turn
+ *  slide mode on when first opened) open straight away. */
+async function makeFile(kind: "doc" | "sheet" | "slides", title: string, navigate: (to: string) => void): Promise<boolean> {
   try {
     if (kind === "slides") {
       const file = await officeApi.create({ kind: "whiteboard", title: title || "Untitled presentation" });
@@ -337,12 +354,27 @@ function buildDo(cmd: Command, c: Ctx): PaletteAction {
       };
     }
     case "note":
+    case "list":
+    case "voice": {
+      const kind = cmd.kind;
+      const words = cmd.text.slice(0, 2000).trim();
+      const label = { note: "New note", list: "New list", voice: "Record a voice note" }[kind];
+      return {
+        ...base,
+        title: words && kind !== "voice" ? `${label}: “${words.length > 80 ? `${words.slice(0, 80)}…` : words}”` : label,
+        detail: kind === "voice" ? "Start recording in Notes" : kind === "list" && words ? "Each comma starts a new item · opens in Notes" : "Opens in Notes",
+        run: async () => {
+          openNewNote(c.navigate, kind, kind === "voice" ? "" : words);
+          return true;
+        },
+      };
+    }
     case "doc":
     case "sheet":
     case "slides": {
       const kind = cmd.kind;
       const title = cmd.text.slice(0, 200).trim();
-      const label = { note: "New note", doc: "New doc", sheet: "New sheet", slides: "New slides" }[kind];
+      const label = { doc: "New doc", sheet: "New sheet", slides: "New slides" }[kind];
       return {
         ...base,
         title: title ? `${label}: “${title}”` : label,

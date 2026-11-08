@@ -203,7 +203,7 @@ export function MeetingNotesModal({
                 </div>
                 <p className="mt-1.5 text-[10px] leading-snug text-[var(--text-muted)]">
                   This runs in the background — you can close this window
-                  and you'll get a notification when the note is ready.
+                  and you'll get a notification when the page is ready.
                 </p>
               </>
             )}
@@ -218,7 +218,7 @@ export function MeetingNotesModal({
                 }}
                 className="mt-2.5 w-full rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white transition hover:opacity-90"
               >
-                Open the note
+                Open the page
               </button>
             )}
             {ACTIVE.has(job.status) && (

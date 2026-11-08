@@ -48,7 +48,7 @@ export function ItemCommentsPanel({
   canEdit,
   canModerate = false,
   defaultOpen = false,
-  emptyHint = "No comments yet. Select text in the note and hit “Quote selection” to anchor one.",
+  emptyHint = "No comments yet. Select text in the page and hit “Quote selection” to anchor one.",
 }: Props) {
   const currentUserId = useAuthStore((s) => s.user?.id ?? null);
   // The *workspace's* owner/admin moderates — not the app admin (R-202).
@@ -287,7 +287,7 @@ export function ItemCommentsPanel({
               // long enough to read it.
               onMouseDown={(e) => e.preventDefault()}
               onClick={captureQuote}
-              title="Anchor the next comment to the text selected in the note"
+              title="Anchor the next comment to the text selected in the page"
               className="inline-flex h-9 shrink-0 items-center gap-1 rounded-md border border-[var(--border)] px-2 text-xs text-[var(--text-muted)] transition hover:bg-[var(--hover)] hover:text-[var(--text)]"
             >
               <Quote className="h-3.5 w-3.5" />

@@ -69,7 +69,7 @@ async def create_note_with_item(
         _resolve_subfolder_id,
     )
 
-    title = (title or "Untitled note").strip()[:200]
+    title = (title or "Untitled page").strip()[:200]
     notes_folder_id = await _resolve_subfolder_id(db, ws, owner, "Notes")
     doc = await create_blank_document(
         db, owner_id=owner.id, folder_id=notes_folder_id, name=title

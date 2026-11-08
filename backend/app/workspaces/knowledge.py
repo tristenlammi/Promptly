@@ -2843,7 +2843,7 @@ def _format_context_block(
 _MAP_KIND_LABEL = {
     "folder": "Folder",
     "container": "Notebook",
-    "note": "Note",
+    "note": "Page",  # the "note" kind is called a Page (Notes N1.7)
     "sheet": "Sheet",
     "canvas": "Canvas",
     "board": "Board",

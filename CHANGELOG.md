@@ -52,6 +52,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Calendar: a link to `/calendar?new=1` with a title, notes, place, day and times opens a new event filled in.
 - Notes: bring your Google Keep notes across (Import from Google Keep in Notes, or Files → Import & export → Google Keep). Colours, pins, archived notes, labels, ticked lists, pictures and recordings come with them, with the dates you wrote them. Links Keep found stay in the note, notes in Keep's trash are left out, and importing the same Takeout again skips what's already in. Keep's older voice recordings are converted so browsers can play them. The Google Takeout import brings Keep notes too, along with Photos and Drive.
 - Export my library includes your notes: a Markdown file for each (colour, pin, labels, dates, reminder and who it's shared with at the top; lists as checkboxes; pictures and recordings linked) and a notes.json with all of them. Importing the export into another Promptly ("A folder of photos") brings the notes back with their colours, pins, labels, lists, formatting, pictures, recordings and transcripts, and importing it twice adds nothing new.
+- Notes: Ctrl+K has New note, New list ("new list milk, eggs" makes the list with its items) and Record a voice note, each opening Notes.
+
+### Changed
+- One thing in Promptly is called a note now. A workspace's documents are called Pages (New page, Untitled page, pages in counts, search, the trash, automations and links); they work exactly as before. Files' New → Note and the Note tile on Files' home start a note in Notes; use Document for long writing.
 
 ### Fixed
 - Notes: notes made while you were elsewhere in Promptly (an import, a chat) didn't show when you went back to Notes until the page was reloaded.

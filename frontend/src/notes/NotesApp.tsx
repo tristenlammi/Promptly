@@ -51,7 +51,8 @@ import "./notes.css";
 import { takeSharedText } from "./shareStash";
 import { closeDraft, fetchNote, initNotes, keepCopy, loadLists, loadTrash, newDraft, notesActions, searchServer, useNote, useNotes } from "./store";
 import { addFiles, initUploads, kindOf } from "./uploads";
-import { attachmentCounts, COLOR_NAMES, docText, NOTE_COLORS, textDoc, type Note, type NoteLabel } from "./types";
+import { takeNewNoteText } from "./newNote";
+import { attachmentCounts, COLOR_NAMES, docText, NOTE_COLORS, textDoc, uuid, type Note, type NoteLabel } from "./types";
 import { toast } from "@/store/toastStore";
 
 type Place = { view: "home" | "archive" | "trash" | "reminders" | "label"; label?: string };
@@ -209,14 +210,30 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  // "New list" / "New note" / "Voice note" from the installed app's shortcuts.
+  // "New list" / "New note" / "Voice note" from the installed app's shortcuts,
+  // and from elsewhere in Promptly (Files' New → Note, the Ctrl+K palette;
+  // words typed there come along: ``newNote.ts``).
+  const newParam = params.get("new");
   useEffect(() => {
-    const kind = params.get("new");
+    const kind = newParam;
     if (!ready || (kind !== "list" && kind !== "note" && kind !== "voice")) return;
-    const id = newDraft(kind === "list" ? "list" : "text", kind === "voice" ? { source: "voice" } : {});
+    const text = takeNewNoteText(kind);
+    const opts: Partial<Note> = kind === "voice" ? { source: "voice" } : {};
+    if (text && kind === "list") {
+      const items = text
+        .split(/\n|,|;/)
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .slice(0, 1000)
+        .map((t) => ({ id: uuid(), parent_id: null, text: t.slice(0, 1000), checked: false }));
+      Object.assign(opts, { items, items_total: items.length });
+    } else if (text) {
+      Object.assign(opts, { body_doc: textDoc(text), body_text: text });
+    }
+    const id = newDraft(kind === "list" ? "list" : "text", opts);
     navigate(`/notes/n/${id}`, { replace: true, state: { from: "/notes", focus: kind === "list" ? "list" : kind === "voice" ? undefined : "body", noBack: true, record: kind === "voice" } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready]);
+  }, [ready, newParam]);
 
   // Server search: words deep in long notes and every list item.
   useEffect(() => {

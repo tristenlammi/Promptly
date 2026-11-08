@@ -149,7 +149,7 @@ export function WorkspacesPage() {
     <>
       <TopNav
         title="Workspaces"
-        subtitle="Project spaces — notes, boards, sheets, canvases, chats, and automations, with an AI that knows all of it"
+        subtitle="Project spaces — pages, boards, sheets, canvases, chats, and automations, with an AI that knows all of it"
         actions={
           <div className="flex items-center gap-2">
             <Button

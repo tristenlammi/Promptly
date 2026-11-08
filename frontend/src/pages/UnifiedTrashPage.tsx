@@ -56,7 +56,8 @@ function kindLabel(it: TrashItem): string {
     case "contact":
       return "Contact";
     case "note":
-      return "Note";
+      // A workspace "note" is a Page; a Notes note is a Note (N1.7).
+      return it.type === "workspace_item" ? "Page" : "Note";
     case "workspace":
       return "Workspace";
     case "container":
