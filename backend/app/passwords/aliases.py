@@ -38,8 +38,8 @@ def _mail_scope(session: VaultSession) -> None:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "This device can't read mail.")
 
 
-async def _my_domain(db: AsyncSession, session: VaultSession, domain_id: uuid.UUID) -> al.PwAliasDomain:
-    row = await db.get(al.PwAliasDomain, domain_id)
+async def _my_domain(db: AsyncSession, session: VaultSession, domain_id: uuid.UUID) -> al.MailAliasDomain:
+    row = await db.get(al.MailAliasDomain, domain_id)
     if row is None or row.user_id != session.user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     return row
@@ -52,14 +52,14 @@ async def _my_account(db: AsyncSession, session: VaultSession, account_id: uuid.
     return row
 
 
-async def _my_alias(db: AsyncSession, session: VaultSession, alias_id: uuid.UUID) -> al.PwAlias:
-    row = await db.get(al.PwAlias, alias_id)
+async def _my_alias(db: AsyncSession, session: VaultSession, alias_id: uuid.UUID) -> al.MailAlias:
+    row = await db.get(al.MailAlias, alias_id)
     if row is None or row.user_id != session.user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
     return row
 
 
-def _expire_check(d: al.PwAliasDomain, account_email: str) -> None:
+def _expire_check(d: al.MailAliasDomain, account_email: str) -> None:
     if d.status == "checking" and d.check_started_at and datetime.now(timezone.utc) - d.check_started_at > al.CHECK_WAIT:
         d.status, d.check_local = "failed", ""
         d.status_detail = (
@@ -68,11 +68,11 @@ def _expire_check(d: al.PwAliasDomain, account_email: str) -> None:
         )
 
 
-async def _domain_out(db: AsyncSession, d: al.PwAliasDomain) -> dict[str, Any]:
+async def _domain_out(db: AsyncSession, d: al.MailAliasDomain) -> dict[str, Any]:
     account = await db.get(MailAccount, d.account_id)
     email = account.email if account else ""
     _expire_check(d, email)
-    count = await db.scalar(select(func.count()).select_from(al.PwAlias).where(al.PwAlias.domain_id == d.id))
+    count = await db.scalar(select(func.count()).select_from(al.MailAlias).where(al.MailAlias.domain_id == d.id))
     return {
         "id": str(d.id), "domain": d.domain, "account_id": str(d.account_id), "account_email": email,
         "word_style": d.word_style, "random_len": d.random_len, "separator": d.separator,
@@ -95,7 +95,7 @@ async def alias_accounts(session: VaultSession = Depends(require_session), db: A
 @router.get("/aliases/domains")
 async def list_domains(response: Response, session: VaultSession = Depends(require_session), db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
     response.headers["Cache-Control"] = "no-store"
-    rows = (await db.execute(select(al.PwAliasDomain).where(al.PwAliasDomain.user_id == session.user.id).order_by(al.PwAliasDomain.created_at))).scalars().all()
+    rows = (await db.execute(select(al.MailAliasDomain).where(al.MailAliasDomain.user_id == session.user.id).order_by(al.MailAliasDomain.created_at))).scalars().all()
     out = [await _domain_out(db, d) for d in rows]
     await db.commit()
     return out
@@ -112,10 +112,10 @@ async def add_domain(body: DomainIn, session: VaultSession = Depends(require_ses
     if name is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Use a domain you own, like example.com or mail.example.com.")
     account = await _my_account(db, session, body.account_id)
-    have = await db.scalar(select(func.count()).select_from(al.PwAliasDomain).where(al.PwAliasDomain.user_id == session.user.id))
+    have = await db.scalar(select(func.count()).select_from(al.MailAliasDomain).where(al.MailAliasDomain.user_id == session.user.id))
     if (have or 0) >= al.MAX_DOMAINS:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Up to {al.MAX_DOMAINS} alias domains.")
-    row = al.PwAliasDomain(user_id=session.user.id, account_id=account.id, domain=name)
+    row = al.MailAliasDomain(user_id=session.user.id, account_id=account.id, domain=name)
     db.add(row)
     try:
         await db.commit()
@@ -251,8 +251,8 @@ async def list_aliases(response: Response, session: VaultSession = Depends(requi
     _mail_scope(session)
     response.headers["Cache-Control"] = "no-store"
     rows = (await db.execute(
-        select(al.PwAlias, al.PwAliasDomain).join(al.PwAliasDomain, al.PwAliasDomain.id == al.PwAlias.domain_id)
-        .where(al.PwAlias.user_id == session.user.id).order_by(al.PwAlias.created_at.desc()).limit(al.MAX_ALIASES)
+        select(al.MailAlias, al.MailAliasDomain).join(al.MailAliasDomain, al.MailAliasDomain.id == al.MailAlias.domain_id)
+        .where(al.MailAlias.user_id == session.user.id).order_by(al.MailAlias.created_at.desc()).limit(al.MAX_ALIASES)
     )).all()
     counted = await al.stats(db, [a.id for a, _ in rows])
     return [al.alias_out(a, d, counted.get(a.id)) for a, d in rows]
@@ -269,14 +269,14 @@ async def make_alias(body: AliasIn, session: VaultSession = Depends(require_sess
     """The word comes from the client (a random word, the site's name or your own, as
     you chose); the random part is made here."""
     d = await _my_domain(db, session, body.domain_id)
-    have = await db.scalar(select(func.count()).select_from(al.PwAlias).where(al.PwAlias.user_id == session.user.id))
+    have = await db.scalar(select(func.count()).select_from(al.MailAlias).where(al.MailAlias.user_id == session.user.id))
     if (have or 0) >= al.MAX_ALIASES:
         raise HTTPException(status.HTTP_409_CONFLICT, f"Up to {al.MAX_ALIASES} aliases.")
     for _ in range(8):
         local = al.make_local(body.word, d.random_len, d.separator)
         if local.startswith(("promptly-check", "promptly-sender")):
             continue
-        row = al.PwAlias(user_id=session.user.id, domain_id=d.id, address=f"{local}@{d.domain}", item_id=body.item_id)
+        row = al.MailAlias(user_id=session.user.id, domain_id=d.id, address=f"{local}@{d.domain}", item_id=body.item_id)
         db.add(row)
         try:
             await db.commit()
@@ -304,7 +304,7 @@ async def edit_alias(alias_id: uuid.UUID, body: AliasPatch, session: VaultSessio
     elif body.item_id is not None:
         a.item_id = body.item_id
     await db.commit()
-    d = await db.get(al.PwAliasDomain, a.domain_id)
+    d = await db.get(al.MailAliasDomain, a.domain_id)
     return al.alias_out(a, d, (await al.stats(db, [a.id])).get(a.id))
 
 
@@ -324,7 +324,7 @@ async def allow_sender(alias_id: uuid.UUID, body: AllowIn, session: VaultSession
     if sender not in allowed:
         allowed.append(sender)
     a.allowed_senders = allowed[-50:]
-    rows = (await db.execute(select(al.PwAliasMail).where(al.PwAliasMail.alias_id == a.id, al.PwAliasMail.unlike.is_(True)))).scalars().all()
+    rows = (await db.execute(select(al.MailAliasHit).where(al.MailAliasHit.alias_id == a.id, al.MailAliasHit.unlike.is_(True)))).scalars().all()
     for r in rows:
         if any(al.same_business(r.sender_domain, ok) for ok in a.allowed_senders):
             r.unlike = False
@@ -333,7 +333,7 @@ async def allow_sender(alias_id: uuid.UUID, body: AllowIn, session: VaultSession
     if not still:
         a.flagged_at = None
     await db.commit()
-    d = await db.get(al.PwAliasDomain, a.domain_id)
+    d = await db.get(al.MailAliasDomain, a.domain_id)
     return al.alias_out(a, d, (await al.stats(db, [a.id])).get(a.id))
 
 

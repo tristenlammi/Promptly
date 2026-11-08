@@ -19,7 +19,7 @@ def _created():
 
 def upgrade() -> None:
     op.create_table(
-        "pw_alias_domains",
+        "mail_alias_domains",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
         sa.Column("account_id", UUID(as_uuid=True), sa.ForeignKey("mail_accounts.id", ondelete="CASCADE"), nullable=False, index=True),
@@ -37,13 +37,13 @@ def upgrade() -> None:
         sa.Column("send_as", sa.String(10), nullable=False, server_default="unknown"),
         sa.Column("send_as_detail", sa.String(300), nullable=False, server_default=""),
         _created(),
-        sa.UniqueConstraint("user_id", "domain", name="uq_pw_alias_domain"),
+        sa.UniqueConstraint("user_id", "domain", name="uq_mail_alias_domain"),
     )
     op.create_table(
-        "pw_aliases",
+        "mail_aliases",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("user_id", UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True),
-        sa.Column("domain_id", UUID(as_uuid=True), sa.ForeignKey("pw_alias_domains.id", ondelete="CASCADE"), nullable=False, index=True),
+        sa.Column("domain_id", UUID(as_uuid=True), sa.ForeignKey("mail_alias_domains.id", ondelete="CASCADE"), nullable=False, index=True),
         sa.Column("address", sa.String(320), nullable=False),
         sa.Column("item_id", UUID(as_uuid=True), nullable=True),
         sa.Column("enabled", sa.Boolean, nullable=False, server_default="true"),
@@ -53,22 +53,22 @@ def upgrade() -> None:
         sa.Column("flagged_at", sa.DateTime(timezone=True)),
         sa.Column("flagged_sender", sa.String(253), nullable=False, server_default=""),
         _created(),
-        sa.UniqueConstraint("user_id", "address", name="uq_pw_alias_address"),
+        sa.UniqueConstraint("user_id", "address", name="uq_mail_alias_address"),
     )
     op.create_table(
-        "pw_alias_mail",
-        sa.Column("alias_id", UUID(as_uuid=True), sa.ForeignKey("pw_aliases.id", ondelete="CASCADE"), primary_key=True),
+        "mail_alias_hits",
+        sa.Column("alias_id", UUID(as_uuid=True), sa.ForeignKey("mail_aliases.id", ondelete="CASCADE"), primary_key=True),
         sa.Column("msg_key", sa.String(500), primary_key=True),
         sa.Column("account_id", UUID(as_uuid=True), sa.ForeignKey("mail_accounts.id", ondelete="CASCADE"), nullable=False),
         sa.Column("sender_domain", sa.String(253), nullable=False, server_default=""),
         sa.Column("sent_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("unlike", sa.Boolean, nullable=False, server_default="false"),
     )
-    op.create_index("ix_pw_alias_mail_lookup", "pw_alias_mail", ["account_id", "msg_key"])
+    op.create_index("ix_mail_alias_hits_lookup", "mail_alias_hits", ["account_id", "msg_key"])
 
 
 def downgrade() -> None:
-    op.drop_index("ix_pw_alias_mail_lookup", table_name="pw_alias_mail")
-    op.drop_table("pw_alias_mail")
-    op.drop_table("pw_aliases")
-    op.drop_table("pw_alias_domains")
+    op.drop_index("ix_mail_alias_hits_lookup", table_name="mail_alias_hits")
+    op.drop_table("mail_alias_hits")
+    op.drop_table("mail_aliases")
+    op.drop_table("mail_alias_domains")

@@ -83,7 +83,7 @@ from app.mail.models import (  # noqa: F401
     MailSnooze,
     MailThreadLabel,
 )
-from app.mail.alias_models import PwAlias, PwAliasDomain, PwAliasMail  # noqa: F401
+from app.mail.alias_models import MailAlias, MailAliasDomain, MailAliasHit  # noqa: F401
 from app.passwords.models import (  # noqa: F401
     PwAccount,
     PwActivity,

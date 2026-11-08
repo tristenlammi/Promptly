@@ -16,11 +16,11 @@ from app.database import Base
 from app.db_types import CreatedAtMixin, UUIDPKMixin
 
 
-class PwAliasDomain(UUIDPKMixin, CreatedAtMixin, Base):
+class MailAliasDomain(UUIDPKMixin, CreatedAtMixin, Base):
     """A domain you own, with a catch-all into one of your connected mailboxes."""
 
-    __tablename__ = "pw_alias_domains"
-    __table_args__ = (UniqueConstraint("user_id", "domain", name="uq_pw_alias_domain"),)
+    __tablename__ = "mail_alias_domains"
+    __table_args__ = (UniqueConstraint("user_id", "domain", name="uq_mail_alias_domain"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("mail_accounts.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -41,15 +41,15 @@ class PwAliasDomain(UUIDPKMixin, CreatedAtMixin, Base):
     send_as_detail: Mapped[str] = mapped_column(String(300), nullable=False, default="", server_default="")
 
 
-class PwAlias(UUIDPKMixin, CreatedAtMixin, Base):
+class MailAlias(UUIDPKMixin, CreatedAtMixin, Base):
     """One address, usually for one login. ``item_id`` is the vault item's opaque id:
     the server can't read the item, so it can't tell which site that is."""
 
-    __tablename__ = "pw_aliases"
-    __table_args__ = (UniqueConstraint("user_id", "address", name="uq_pw_alias_address"),)
+    __tablename__ = "mail_aliases"
+    __table_args__ = (UniqueConstraint("user_id", "address", name="uq_mail_alias_address"),)
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    domain_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pw_alias_domains.id", ondelete="CASCADE"), nullable=False, index=True)
+    domain_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("mail_alias_domains.id", ondelete="CASCADE"), nullable=False, index=True)
     address: Mapped[str] = mapped_column(String(320), nullable=False)
     item_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
@@ -62,14 +62,14 @@ class PwAlias(UUIDPKMixin, CreatedAtMixin, Base):
     flagged_sender: Mapped[str] = mapped_column(String(253), nullable=False, default="", server_default="")
 
 
-class PwAliasMail(Base):
+class MailAliasHit(Base):
     """One email an alias got, once, however many folders it shows in. Kept after
     the email is deleted, so counts don't drop."""
 
-    __tablename__ = "pw_alias_mail"
-    __table_args__ = (Index("ix_pw_alias_mail_lookup", "account_id", "msg_key"),)
+    __tablename__ = "mail_alias_hits"
+    __table_args__ = (Index("ix_mail_alias_hits_lookup", "account_id", "msg_key"),)
 
-    alias_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("pw_aliases.id", ondelete="CASCADE"), primary_key=True)
+    alias_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("mail_aliases.id", ondelete="CASCADE"), primary_key=True)
     msg_key: Mapped[str] = mapped_column(String(500), primary_key=True)
     account_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("mail_accounts.id", ondelete="CASCADE"), nullable=False)
     sender_domain: Mapped[str] = mapped_column(String(253), nullable=False, default="", server_default="")

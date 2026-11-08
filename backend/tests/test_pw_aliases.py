@@ -307,8 +307,8 @@ async def test_nobody_sees_or_changes_someone_elses_aliases(client, db):  # noqa
     assert (await _list(client, a))[shop["address"]]["enabled"] is True
 
     # The same domain added by someone else counts only mail in their own mailbox.
-    clash = (await db.execute(select(al.PwAlias).where(al.PwAlias.id == uuid.UUID(shop["id"])))).scalar_one()
-    db.add(al.PwAlias(user_id=b.user.id, domain_id=uuid.UUID(b_domain["id"]), address=clash.address))
+    clash = (await db.execute(select(al.MailAlias).where(al.MailAlias.id == uuid.UUID(shop["id"])))).scalar_one()
+    db.add(al.MailAlias(user_id=b.user.id, domain_id=uuid.UUID(b_domain["id"]), address=clash.address))
     await db.commit()
     await _arrive(account, f["inbox"], [_raw(to=shop["address"])])
     assert (await _list(client, a))[shop["address"]]["count"] == 2
@@ -378,7 +378,7 @@ async def test_the_setup_check(client, db, monkeypatch):  # noqa: F811
 
     # It never arrives.
     await client.post(url, headers=a.h)
-    await db.execute(update(al.PwAliasDomain).values(check_started_at=datetime.now(timezone.utc) - timedelta(minutes=11)))
+    await db.execute(update(al.MailAliasDomain).values(check_started_at=datetime.now(timezone.utc) - timedelta(minutes=11)))
     await db.commit()
     got = (await client.get("/api/passwords/aliases/domains", headers=a.h)).json()[0]
     assert got["status"] == "failed" and account.email in got["status_detail"]
@@ -398,7 +398,7 @@ async def test_replying_from_an_alias(client, db):  # noqa: F811
 
     # Not an alias of yours, or one the provider won't send as.
     assert (await client.post("/api/mail/send", headers=bearer(a.user), json={**body, "from_alias": f"nobody@{DOMAIN}"})).status_code == 404
-    await db.execute(update(al.PwAliasDomain).values(send_as="refused", send_as_detail="Add it as a send-as address."))
+    await db.execute(update(al.MailAliasDomain).values(send_as="refused", send_as_detail="Add it as a send-as address."))
     await db.commit()
     r = await client.post("/api/mail/send", headers=bearer(a.user), json=body)
     assert r.status_code == 409 and "send-as" in r.json()["detail"]

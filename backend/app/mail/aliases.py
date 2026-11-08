@@ -39,7 +39,7 @@ from app.auth.models import User
 from app.database import get_db
 
 from . import rules
-from .alias_models import PwAlias, PwAliasDomain, PwAliasMail
+from .alias_models import MailAlias, MailAliasDomain, MailAliasHit
 from .models import MailAccount, MailFolder, MailMessage
 
 # ------------------------------------------------------------------ addresses
@@ -156,7 +156,7 @@ def _msg_key(m: MailMessage) -> str:
     return (m.message_id or f"id:{m.id}")[:500]
 
 
-async def _off_target(db: AsyncSession, domain: PwAliasDomain) -> MailFolder | None:
+async def _off_target(db: AsyncSession, domain: MailAliasDomain) -> MailFolder | None:
     if domain.off_folder_id:
         chosen = await db.get(MailFolder, domain.off_folder_id)
         if chosen is not None and chosen.account_id == domain.account_id:
@@ -164,7 +164,7 @@ async def _off_target(db: AsyncSession, domain: PwAliasDomain) -> MailFolder | N
     return await db.scalar(select(MailFolder).where(MailFolder.account_id == domain.account_id, MailFolder.role == "trash").limit(1))
 
 
-async def _finish_check(db: AsyncSession, domain: PwAliasDomain, m: MailMessage, folder: MailFolder) -> None:
+async def _finish_check(db: AsyncSession, domain: MailAliasDomain, m: MailMessage, folder: MailFolder) -> None:
     now = datetime.now(timezone.utc)
     domain.status, domain.checked_at, domain.check_local = "ok", now, ""
     domain.status_detail = "The test arrived in Spam. Mark it as not spam so alias mail reaches your Inbox." if folder.role == "spam" else ""
@@ -192,7 +192,7 @@ async def on_arrival(db: AsyncSession, account_id: uuid.UUID, folder: MailFolder
         return set()
     domains = {
         d.domain: d
-        for d in (await db.execute(select(PwAliasDomain).where(PwAliasDomain.account_id == account_id, PwAliasDomain.user_id == account.user_id))).scalars()
+        for d in (await db.execute(select(MailAliasDomain).where(MailAliasDomain.account_id == account_id, MailAliasDomain.user_id == account.user_id))).scalars()
     }
     if not domains:
         return set()
@@ -211,7 +211,7 @@ async def on_arrival(db: AsyncSession, account_id: uuid.UUID, folder: MailFolder
                     rules.move(db, {folder.id: folder}, [m], trash)
                 filed.add(m.id)
                 break
-            alias = await db.scalar(select(PwAlias).where(PwAlias.user_id == account.user_id, PwAlias.domain_id == domain.id, PwAlias.address == addr))
+            alias = await db.scalar(select(MailAlias).where(MailAlias.user_id == account.user_id, MailAlias.domain_id == domain.id, MailAlias.address == addr))
             if alias is None:
                 continue
             await _record(db, alias, m, account_id, fresh, folder, domain, filed)
@@ -219,7 +219,7 @@ async def on_arrival(db: AsyncSession, account_id: uuid.UUID, folder: MailFolder
     return filed
 
 
-async def _record(db: AsyncSession, alias: PwAlias, m: MailMessage, account_id: uuid.UUID, fresh: bool, folder: MailFolder, domain: PwAliasDomain, filed: set[uuid.UUID]) -> None:
+async def _record(db: AsyncSession, alias: MailAlias, m: MailMessage, account_id: uuid.UUID, fresh: bool, folder: MailFolder, domain: MailAliasDomain, filed: set[uuid.UUID]) -> None:
     sender = domain_of(m.from_addr)[:253]
     # Your own replies from the alias aren't someone else having it.
     own = sender == domain.domain
@@ -229,8 +229,8 @@ async def _record(db: AsyncSession, alias: PwAlias, m: MailMessage, account_id: 
             alias.baseline = registrable(sender)
         elif not same_business(sender, alias.baseline) and not any(same_business(sender, ok) for ok in alias.allowed_senders or []):
             unlike = True
-    statement = insert(PwAliasMail).values(alias_id=alias.id, msg_key=_msg_key(m), account_id=account_id, sender_domain=sender, sent_at=m.sent_at, unlike=unlike)
-    first_time = (await db.execute(statement.on_conflict_do_nothing().returning(PwAliasMail.alias_id))).first() is not None
+    statement = insert(MailAliasHit).values(alias_id=alias.id, msg_key=_msg_key(m), account_id=account_id, sender_domain=sender, sent_at=m.sent_at, unlike=unlike)
+    first_time = (await db.execute(statement.on_conflict_do_nothing().returning(MailAliasHit.alias_id))).first() is not None
     if not first_time:
         return
     if unlike and alias.flagged_at is None:
@@ -246,11 +246,11 @@ async def _record(db: AsyncSession, alias: PwAlias, m: MailMessage, account_id: 
 # ------------------------------------------------------------------ replying from an alias
 
 
-async def alias_for_sending(db: AsyncSession, user: User, account: MailAccount, address: str) -> tuple[PwAlias, PwAliasDomain]:
+async def alias_for_sending(db: AsyncSession, user: User, account: MailAccount, address: str) -> tuple[MailAlias, MailAliasDomain]:
     a = address.strip().lower()
     found = (await db.execute(
-        select(PwAlias, PwAliasDomain).join(PwAliasDomain, PwAliasDomain.id == PwAlias.domain_id)
-        .where(PwAlias.user_id == user.id, PwAlias.address == a, PwAliasDomain.account_id == account.id)
+        select(MailAlias, MailAliasDomain).join(MailAliasDomain, MailAliasDomain.id == MailAlias.domain_id)
+        .where(MailAlias.user_id == user.id, MailAlias.address == a, MailAliasDomain.account_id == account.id)
     )).first()
     if found is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="That alias isn't one of yours on this mailbox.")
@@ -284,7 +284,7 @@ def sender_refused(code: int, text: str) -> bool:
 router = APIRouter()
 
 
-def _send_as_text(d: PwAliasDomain) -> str:
+def _send_as_text(d: MailAliasDomain) -> str:
     return {
         "ok": "",
         "unknown": "Not checked yet: run the check in Passwords → Aliases.",
@@ -298,8 +298,8 @@ async def stats(db: AsyncSession, alias_ids: list[uuid.UUID]) -> dict[uuid.UUID,
         return {}
     out: dict[uuid.UUID, dict[str, Any]] = {a: {"count": 0, "last_at": None, "senders": []} for a in alias_ids}
     rows = (await db.execute(
-        select(PwAliasMail.alias_id, PwAliasMail.sender_domain, func.count(), func.max(PwAliasMail.sent_at), func.bool_or(PwAliasMail.unlike))
-        .where(PwAliasMail.alias_id.in_(alias_ids)).group_by(PwAliasMail.alias_id, PwAliasMail.sender_domain)
+        select(MailAliasHit.alias_id, MailAliasHit.sender_domain, func.count(), func.max(MailAliasHit.sent_at), func.bool_or(MailAliasHit.unlike))
+        .where(MailAliasHit.alias_id.in_(alias_ids)).group_by(MailAliasHit.alias_id, MailAliasHit.sender_domain)
     )).all()
     for alias_id, sender, n, last, unlike in rows:
         s = out[alias_id]
@@ -325,9 +325,9 @@ async def thread_aliases(account_id: uuid.UUID, key: str, db: AsyncSession = Dep
     if not keys:
         return {"messages": {}, "aliases": {}}
     hits = (await db.execute(
-        select(PwAliasMail.msg_key, PwAlias, PwAliasDomain)
-        .join(PwAlias, PwAlias.id == PwAliasMail.alias_id).join(PwAliasDomain, PwAliasDomain.id == PwAlias.domain_id)
-        .where(PwAliasMail.account_id == account_id, PwAliasMail.msg_key.in_(list(keys)), PwAlias.user_id == user.id)
+        select(MailAliasHit.msg_key, MailAlias, MailAliasDomain)
+        .join(MailAlias, MailAlias.id == MailAliasHit.alias_id).join(MailAliasDomain, MailAliasDomain.id == MailAlias.domain_id)
+        .where(MailAliasHit.account_id == account_id, MailAliasHit.msg_key.in_(list(keys)), MailAlias.user_id == user.id)
     )).all()
     counted = await stats(db, list({a.id for _, a, _ in hits}))
     aliases: dict[str, Any] = {}
@@ -338,7 +338,7 @@ async def thread_aliases(account_id: uuid.UUID, key: str, db: AsyncSession = Dep
     return {"messages": by_message, "aliases": aliases}
 
 
-def alias_out(alias: PwAlias, domain: PwAliasDomain, counted: dict[str, Any] | None) -> dict[str, Any]:
+def alias_out(alias: MailAlias, domain: MailAliasDomain, counted: dict[str, Any] | None) -> dict[str, Any]:
     c = counted or {"count": 0, "last_at": None, "senders": []}
     return {
         "id": str(alias.id), "address": alias.address, "domain_id": str(domain.id), "domain": domain.domain, "account_id": str(domain.account_id),
@@ -355,7 +355,7 @@ class AliasSwitch(BaseModel):
     enabled: bool
 
 
-async def set_enabled(db: AsyncSession, alias: PwAlias, enabled: bool) -> None:
+async def set_enabled(db: AsyncSession, alias: MailAlias, enabled: bool) -> None:
     if alias.enabled == enabled:
         return
     alias.enabled = enabled
@@ -364,10 +364,10 @@ async def set_enabled(db: AsyncSession, alias: PwAlias, enabled: bool) -> None:
 
 @router.patch("/aliases/{alias_id}")
 async def switch_alias(alias_id: uuid.UUID, body: AliasSwitch, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, Any]:
-    alias = await db.get(PwAlias, alias_id)
+    alias = await db.get(MailAlias, alias_id)
     if alias is None or alias.user_id != user.id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Alias not found.")
     await set_enabled(db, alias, body.enabled)
     await db.commit()
-    domain = await db.get(PwAliasDomain, alias.domain_id)
+    domain = await db.get(MailAliasDomain, alias.domain_id)
     return alias_out(alias, domain, (await stats(db, [alias.id])).get(alias.id))
