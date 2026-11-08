@@ -20,8 +20,8 @@ test.beforeAll(async () => {
   const [owner] = makeUsers(["matcher"]);
   await connect(rig, owner);
   await unlockExt(rig);
-  await addItem(rig, { title: "Gym ZYX", url: ZYX, username: "zyx-user", password: "Zyx-Pw-1" });
-  await addItem(rig, { title: "Gym ABC", url: ABC, username: "abc-user", password: "Abc-Pw-1" });
+  await addItem(rig, { title: "Gym ZYX", url: ZYX, username: "zyx@example.com", password: "Zyx-Pw-1" });
+  await addItem(rig, { title: "Gym ABC", url: ABC, username: "abc@example.com", password: "Abc-Pw-1" });
 });
 
 test.afterAll(async () => {
@@ -67,7 +67,7 @@ test("each self-hosted service gets its own login, and the other is set apart", 
   await expect(menu.getByRole("button", { name: "Fill Gym ZYX" })).toBeVisible();
   await expect(menu.getByRole("button", { name: "Fill Gym ABC" })).toHaveCount(0);
   await menu.getByRole("button", { name: "Fill Gym ZYX" }).click();
-  await expect.poll(() => state(page)).toEqual({ user: "zyx-user", pass: "Zyx-Pw-1" });
+  await expect.poll(() => state(page)).toEqual({ user: "zyx@example.com", pass: "Zyx-Pw-1" });
   await page.close();
 
   // And the other way round on abc.
@@ -93,8 +93,9 @@ test("on a host of the domain with no login of its own, both are offered under t
 test("a new login on another service is saved beside the zyx one, not over it", async () => {
   const page = await rig.ctx.newPage();
   await page.goto("http://new.gymserver.localhost:8111/login.html");
-  // The same username as the zyx login, and another password.
-  await page.locator("#user").pressSequentially("zyx-user");
+  // The same username as the zyx login, and another password. The box is type=email, so the
+  // username has to be an address or the browser won't submit the form.
+  await page.locator("#user").pressSequentially("zyx@example.com");
   await page.keyboard.press("Escape");
   await page.locator("#pass").pressSequentially("New-Pw-1");
   await page.keyboard.press("Escape");
