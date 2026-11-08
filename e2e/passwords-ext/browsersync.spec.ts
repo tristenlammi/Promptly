@@ -105,7 +105,6 @@ test("two browsers share their open tabs, with internal pages left out, and it s
 
   // A closed tab goes from the other browser's list after the next publish.
   await pageA.close();
-  await bg(a, "await chrome.tabs.query({});");
   await new Promise((r) => setTimeout(r, 6000));
   await syncNow(a);
   const after = await ask<{ devices: { windows: { tabs: { url: string }[] }[] }[] }>(b, { t: "bs:tabs" });
@@ -157,7 +156,7 @@ test("history stays off until it's turned on, keeps excluded sites out, and can 
   await expect(settings.getByText(/Off unless you turn it on/)).toBeVisible();
   await settings.getByTestId("bs-excludes").fill("127.0.0.1");
   await settings.getByRole("button", { name: "Save sites" }).click();
-  await expect(settings.getByRole("status")).toContainText("Saved");
+  await expect(settings.getByTestId("browser-sync-settings").getByRole("status")).toContainText("Saved");
   await settings.close();
 
   const kept = await openSite(a, "login.html?bs=history-after");
