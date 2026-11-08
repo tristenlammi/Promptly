@@ -16,10 +16,10 @@ import {
   Trash2,
   UserX,
 } from "lucide-react";
-import { Fragment, useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { porchApi, type LifeEventType, type PorchPost, type PorchUser } from "@/api/porch";
+import { HEART, porchApi, type LifeEventType, type PorchPost, type PorchUser } from "@/api/porch";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { Sheet } from "@/items/ui";
 import { toast } from "@/store/toastStore";
@@ -28,8 +28,16 @@ import { cn } from "@/utils/cn";
 
 import { useBlock } from "../actions";
 import { putPost } from "../cache";
+import { usePorch } from "../context";
+import { usePostTalk } from "../talkActions";
+import { CommentsSheet, InlineComments } from "./Comments";
 import { MediaCarousel } from "./MediaCarousel";
+import { PollCard } from "./PollCard";
+import { PostActions } from "./PostActions";
+import { RichText } from "./RichText";
 import { ActionSheet, PorchAvatar, PersonLink, dayWords, fullTime, groupsLine, shortAgo, type MenuAction } from "./ui";
+
+export { RichText };
 
 export const LIFE_EVENTS: Record<LifeEventType, { label: string; icon: ComponentType<{ className?: string }> }> = {
   new_baby: { label: "New baby", icon: Baby },
@@ -39,49 +47,6 @@ export const LIFE_EVENTS: Record<LifeEventType, { label: string; icon: Component
   graduated: { label: "Graduated", icon: GraduationCap },
   other: { label: "Life event", icon: Sparkles },
 };
-
-const URL_RE = /(https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]])/g;
-const AT_RE = /(@[\p{L}\p{N}._-]+)/gu;
-
-/** Words with @mentions of the people the post mentions linked to their profiles. */
-function Mentions({ text, people }: { text: string; people: Map<string, PorchUser> }) {
-  if (!people.size) return <>{text}</>;
-  const parts = text.split(AT_RE);
-  return (
-    <>
-      {parts.map((part, i) => {
-        const u = i % 2 === 1 ? people.get(part.slice(1).toLowerCase()) : undefined;
-        return u ? (
-          <Link key={i} to={`/porch/u/${u.id}`} className="font-medium text-[var(--accent-text)] hover:underline">
-            {part}
-          </Link>
-        ) : (
-          <Fragment key={i}>{part}</Fragment>
-        );
-      })}
-    </>
-  );
-}
-
-/** Plain text with web links made clickable, and @mentions of ``mentions``
- *  linked to their profiles (nothing else is interpreted). */
-export function RichText({ text, mentions = [] }: { text: string; mentions?: PorchUser[] }) {
-  const parts = text.split(URL_RE);
-  const people = new Map(mentions.map((u) => [u.username.toLowerCase(), u]));
-  return (
-    <>
-      {parts.map((part, i) =>
-        i % 2 === 1 ? (
-          <a key={i} href={part} target="_blank" rel="noopener noreferrer nofollow" className="text-[var(--accent-text)] underline-offset-2 hover:underline">
-            {part}
-          </a>
-        ) : (
-          <Mentions key={i} text={part} people={people} />
-        ),
-      )}
-    </>
-  );
-}
 
 /** A caption cut to three lines, with "more". */
 function Caption({ text, big, full, mentions }: { text: string; big?: boolean; full?: boolean; mentions: PorchUser[] }) {
@@ -162,9 +127,27 @@ function LifeEventCard({ post }: { post: PorchPost }) {
 export function PostCard({ post, full = false, media = true, className }: { post: PorchPost; full?: boolean; media?: boolean; className?: string }) {
   const [menu, setMenu] = useState(false);
   const [saving, setSaving] = useState(false);
+  // Comments: a sheet on a phone, under the post on a computer, always on
+  // the post's own page.
+  const [talk, setTalk] = useState<null | { focus: boolean }>(null);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const block = useBlock();
+  const { isPhone } = usePorch();
+  const { react } = usePostTalk();
+  const ref = useRef<HTMLElement>(null);
+  const openComments = (focus: boolean) => {
+    if (full) {
+      const box = ref.current?.querySelector<HTMLTextAreaElement>("[data-comments] textarea");
+      box?.scrollIntoView({ block: "center", behavior: "smooth" });
+      if (focus) box?.focus({ preventScroll: true });
+      return;
+    }
+    setTalk((t) => (t && !isPhone ? null : { focus }));
+  };
+  const heart = () => {
+    if (!post.reactions.mine) void react(post, HEART);
+  };
   const author = post.author;
   const isText = post.kind === "text" || post.kind === "poll";
   const big = isText && !post.link && post.body.length > 0 && post.body.length < 120;
@@ -175,7 +158,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
     actions.push({
       label: "Edit post",
       icon: Pencil,
-      hint: post.kind === "text" ? "Its words and place" : "Its words, photos and place",
+      hint: post.kind === "text" || post.kind === "poll" ? "Its words and place" : "Its words, photos and place",
       onClick: () => navigate(`/porch/p/${post.id}/edit`),
     });
   }
@@ -221,6 +204,9 @@ export function PostCard({ post, full = false, media = true, className }: { post
     });
   }
 
+  const hasMedia = media && post.media.length > 0;
+  const actions_ = <PostActions post={post} onComments={openComments} preview={!full && !(talk && !isPhone)} />;
+
   const time = (
     <Link to={`/porch/p/${post.id}`} className="hover:underline" title={fullTime(post.created_at)}>
       <time dateTime={post.created_at}>{shortAgo(post.created_at)}</time>
@@ -229,6 +215,7 @@ export function PostCard({ post, full = false, media = true, className }: { post
 
   return (
     <article
+      ref={ref}
       aria-label={`Post by ${who}`}
       data-post={post.id}
       className={cn("flex flex-col gap-3 py-3 md:rounded-2xl md:border md:border-[var(--border)] md:bg-[var(--surface)] md:px-4 md:shadow-[var(--shadow-sm)]", className)}
@@ -261,7 +248,12 @@ export function PostCard({ post, full = false, media = true, className }: { post
       {post.kind === "life_event" && <LifeEventCard post={post} />}
 
       {media && post.media.length > 0 && (
-        <MediaCarousel media={post.media} label={`${who}'s ${post.media.length > 1 ? `${post.media.length} photos` : post.media[0].kind === "video" ? "video" : "photo"}`} className="md:rounded-xl" />
+        <MediaCarousel
+          media={post.media}
+          label={`${who}'s ${post.media.length > 1 ? `${post.media.length} photos` : post.media[0].kind === "video" ? "video" : "photo"}`}
+          className="md:rounded-xl"
+          onDoubleTap={heart}
+        />
       )}
       {post.photo_removed && (
         <div className="mx-4 flex items-center gap-2 rounded-xl bg-[var(--surface-2)] px-3 py-6 text-sm text-[var(--text-muted)] md:mx-0">
@@ -269,7 +261,10 @@ export function PostCard({ post, full = false, media = true, className }: { post
         </div>
       )}
 
-      {post.body && <Caption text={post.body} big={big} full={full} mentions={post.mentions} />}
+      {/* Photos: the actions right under them, then the words (as Instagram). */}
+      {hasMedia && actions_}
+      {post.body && <Caption text={post.body} big={big && !post.poll} full={full} mentions={post.mentions} />}
+      {post.poll && <PollCard post={post} />}
       {post.link && <LinkCard link={post.link} />}
       {post.place && (
         <Link
@@ -279,6 +274,11 @@ export function PostCard({ post, full = false, media = true, className }: { post
           <MapPin className="h-4 w-4" aria-hidden /> {post.place.name}
         </Link>
       )}
+      {!hasMedia && actions_}
+
+      {full && <InlineComments post={post} className="px-4 md:px-0" />}
+      {!full && talk && !isPhone && <InlineComments post={post} focusBox={talk.focus} className="mx-4 rounded-xl bg-[var(--surface-1)] p-3 md:mx-0" />}
+      {!full && isPhone && <CommentsSheet post={post} open={!!talk} onClose={() => setTalk(null)} />}
 
       <ActionSheet open={menu} onClose={() => setMenu(false)} title={post.mine ? "Your post" : `${who}'s post`} actions={actions} />
       {saving && <SaveSheet post={post} onClose={() => setSaving(false)} />}

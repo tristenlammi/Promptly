@@ -1,14 +1,16 @@
-import { ChevronLeft, ChevronRight, ImagePlus, SlidersHorizontal, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ImagePlus, SlidersHorizontal, Tag, UserPlus, X } from "lucide-react";
 import { useRef, useState } from "react";
 
 import type { EditOps, PhotoItem } from "@/api/photos";
+import type { PorchUser, TagSuggestion } from "@/api/porch";
 import { PhotoEditor } from "@/components/photos/PhotoEditor";
 import { presetOf } from "@/components/photos/filterPresets";
 import { ItemButton, TextArea } from "@/items/ui";
 import { cn } from "@/utils/cn";
 
-import { moveItem, type Pick } from "./model";
+import { moveItem, toEdited, type Pick } from "./model";
 import { PickImage } from "./PickImage";
+import { TagOverlay } from "./TagOverlay";
 
 function asPhotoItem(p: Pick): PhotoItem {
   return {
@@ -200,6 +202,9 @@ export function ArrangeStep({
   onAdd,
   maxMedia,
   isPhone,
+  audience,
+  audienceReady,
+  suggestions,
 }: {
   picks: Pick[];
   setPicks: (fn: (p: Pick[]) => Pick[]) => void;
@@ -208,8 +213,16 @@ export function ArrangeStep({
   onAdd: () => void;
   maxMedia: number;
   isPhone: boolean;
+  /** Who'd see the post (the groups picked so far): the only people who can be tagged. */
+  audience: PorchUser[];
+  audienceReady: boolean;
+  /** Faces in your photos that are people who'd see it (both opted in). */
+  suggestions: TagSuggestion[];
 }) {
   const [editing, setEditing] = useState<Pick | null>(null);
+  const [tagging, setTagging] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const previewBox = useRef<HTMLDivElement>(null);
   const i = Math.min(active, picks.length - 1);
   const cur = picks[i];
   if (!cur) return null;
@@ -224,13 +237,37 @@ export function ArrangeStep({
   };
   const words = editWords(cur.edit);
   const canEdit = cur.kind === "image" && !!cur.fileId;
+  const canTag = cur.kind === "image";
+  const tags = cur.tags ?? [];
+  // Suggested faces, moved to where they are after this post's crop.
+  const offered = !canTag ? [] : suggestions
+    .filter((s) => s.file_id === cur.fileId)
+    .map((s) => {
+      const at = toEdited(s.x, s.y, cur.edit);
+      return at ? { user: s.user, ...at } : null;
+    })
+    .filter((s): s is { user: PorchUser; x: number; y: number } => !!s);
 
   return (
     <div className="flex flex-col gap-3 md:grid md:grid-cols-[minmax(0,1fr)_280px] md:items-start md:gap-5">
       <div className="flex min-w-0 flex-col gap-1">
-        <div className="relative flex aspect-[4/5] max-h-[62vh] w-full items-center justify-center overflow-hidden bg-[var(--surface-2)] md:aspect-[4/3] md:rounded-2xl">
+        <div ref={previewBox} className="relative flex aspect-[4/5] max-h-[62vh] w-full items-center justify-center overflow-hidden bg-[var(--surface-2)] md:aspect-[4/3] md:rounded-2xl">
           <PickImage key={cur.key} pick={cur} big label={cur.alt || `Photo ${i + 1}`} className="flex h-full w-full items-center justify-center bg-transparent" />
-          <span className="absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white">
+          {canTag && (
+            <TagOverlay
+              box={previewBox}
+              pickKey={`${cur.key}:${JSON.stringify(cur.edit)}`}
+              tags={tags}
+              onChange={(t) => update(cur.key, { tags: t })}
+              tagging={tagging}
+              audience={audience}
+              audienceReady={audienceReady}
+              suggestions={offered}
+              addOpen={adding}
+              setAddOpen={setAdding}
+            />
+          )}
+          <span className="pointer-events-none absolute left-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white">
             {i + 1}/{picks.length}
           </span>
         </div>
@@ -253,20 +290,60 @@ export function ArrangeStep({
           >
             Edit
           </ItemButton>
-          {picks.length > 1 && (
-            <>
-              <ItemButton variant="ghost" icon={<ChevronLeft className="h-4 w-4" />} disabled={i === 0} onClick={() => move(i, i - 1)} aria-label="Move earlier">
-                <span className="sr-only md:not-sr-only">Earlier</span>
-              </ItemButton>
-              <ItemButton variant="ghost" icon={<ChevronRight className="h-4 w-4" />} disabled={i === picks.length - 1} onClick={() => move(i, i + 1)} aria-label="Move later">
-                <span className="sr-only md:not-sr-only">Later</span>
-              </ItemButton>
-            </>
+          {canTag && (
+            <ItemButton
+              variant={tagging ? "primary" : "secondary"}
+              icon={<Tag className="h-4 w-4" />}
+              onClick={() => setTagging((t) => !t)}
+              title={tagging ? "Stop tagging" : "Tap people in the photo to tag them"}
+            >
+              {tagging ? "Done tagging" : "Tag people"}
+            </ItemButton>
           )}
-          <ItemButton variant="ghost" icon={<X className="h-4 w-4" />} onClick={remove} className="ml-auto text-[var(--danger)]" aria-label="Take this one out">
-            <span className="sr-only md:not-sr-only">Take out</span>
+          <ItemButton variant="ghost" icon={<X className="h-4 w-4" />} onClick={remove} className="ml-auto text-[var(--danger)]" aria-label="Take this one out of the post" title="Take this one out of the post">
+            Take out
           </ItemButton>
         </div>
+        {picks.length > 1 && (
+          <div className="flex items-center gap-2" role="group" aria-label="Order">
+            <span className="text-xs text-[var(--text-muted)]">Order</span>
+            <ItemButton
+              size="sm"
+              variant="secondary"
+              icon={<ArrowLeft className="h-4 w-4" />}
+              disabled={i === 0}
+              onClick={() => move(i, i - 1)}
+              aria-label="Move earlier"
+              title="Move this photo one place earlier"
+            >
+              Earlier
+            </ItemButton>
+            <ItemButton
+              size="sm"
+              variant="secondary"
+              icon={<ArrowRight className="h-4 w-4" />}
+              disabled={i === picks.length - 1}
+              onClick={() => move(i, i + 1)}
+              aria-label="Move later"
+              title="Move this photo one place later"
+            >
+              Later
+            </ItemButton>
+          </div>
+        )}
+        {canTag && (tagging || tags.length > 0) && (
+          <div className="flex flex-col gap-1.5 rounded-xl bg-[var(--surface-2)] px-3 py-2.5 text-sm">
+            <p className="text-[var(--text)]">
+              {tags.length ? `Tagged: ${tags.map((t) => t.user.name).join(", ")}` : "Nobody tagged in this photo yet."}
+            </p>
+            <p className="text-xs text-[var(--text-muted)]">Only people who'll see the post can be tagged. Each is asked first; a tag shows once they say yes.</p>
+            {tagging && (
+              <ItemButton size="sm" variant="secondary" icon={<UserPlus className="h-4 w-4" />} className="w-fit" onClick={() => setAdding(true)}>
+                Tag someone
+              </ItemButton>
+            )}
+          </div>
+        )}
         {words && <p className="text-xs text-[var(--text-muted)]">For this post: {words}. The photo in your library stays as it is.</p>}
         {cur.kind === "video" && <p className="text-xs text-[var(--text-muted)]">Videos are posted as they are, sized for phones.</p>}
         {cur.error && <p className="text-sm text-[var(--danger)]">Couldn't upload this one: {cur.error}</p>}

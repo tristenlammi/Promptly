@@ -16,7 +16,7 @@ import { useEffect } from "react";
 import { API_BASE_URL, authHeader, refreshAccessToken } from "@/api/client";
 import { PORCH_EVENTS_PATH, porchApi, type Bootstrap, type PorchEvent, type PostPage } from "@/api/porch";
 
-import { BOOTSTRAP_KEY, feedKey, groupsChanged, listPosts, putPost } from "./cache";
+import { ACTIVITY_KEY, BOOTSTRAP_KEY, commentsKey, feedKey, groupsChanged, listPosts, putPost, refreshPost } from "./cache";
 import { usePorchStore } from "./store";
 
 const BASE_RETRY_MS = 1000;
@@ -45,6 +45,7 @@ export function usePorchEvents(enabled: boolean) {
 
     const resync = () => {
       void qc.invalidateQueries({ queryKey: BOOTSTRAP_KEY });
+      void qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
       void checkFeedHead(qc);
     };
 
@@ -173,6 +174,16 @@ export async function applyPorchEvent(qc: QueryClient, ev: PorchEvent): Promise<
     case "group":
     case "invite":
       groupsChanged(qc, ev.group_id);
+      return;
+    case "comment":
+      // The thread (if it's open) and the post's count and latest two.
+      void qc.invalidateQueries({ queryKey: commentsKey(ev.post_id) });
+      void refreshPost(qc, ev.post_id);
+      return;
+    case "activity":
+      // Something new about you: the badge and the Activity list.
+      void qc.invalidateQueries({ queryKey: BOOTSTRAP_KEY });
+      void qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
       return;
   }
 }

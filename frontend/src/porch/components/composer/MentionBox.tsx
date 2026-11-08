@@ -1,5 +1,5 @@
 import { AtSign, X } from "lucide-react";
-import { useId, useMemo, useRef, useState } from "react";
+import { useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 
 import type { PorchUser } from "@/api/porch";
 import { TextArea } from "@/items/ui";
@@ -33,6 +33,10 @@ export function MentionBox({
   audienceReady,
   label,
   placeholder,
+  compact = false,
+  maxLength = 5000,
+  onSubmit,
+  boxRef,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -43,8 +47,23 @@ export function MentionBox({
   audienceReady: boolean;
   label: string;
   placeholder: string;
+  /** A comment box: one line that grows, the label for screen readers
+   *  only, no chips, and the list opening upwards. */
+  compact?: boolean;
+  maxLength?: number;
+  /** Ctrl/⌘+Enter. */
+  onSubmit?: () => void;
+  boxRef?: Ref<HTMLTextAreaElement | null>;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
+  useImperativeHandle(boxRef, () => ref.current, []);
+  // A comment box grows with what's typed (up to its max height).
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!compact || !el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight + 2, 160)}px`;
+  }, [compact, value]);
   const listId = useId();
   const [query, setQuery] = useState<string | null>(null);
   const [hi, setHi] = useState(0);
@@ -89,15 +108,16 @@ export function MentionBox({
 
   return (
     <div className="relative flex flex-col gap-1">
-      <label htmlFor={`${listId}-box`} className="text-xs font-medium text-[var(--text-muted)]">
+      <label htmlFor={`${listId}-box`} className={cn("text-xs font-medium text-[var(--text-muted)]", compact && "sr-only")}>
         {label}
       </label>
       <TextArea
         id={`${listId}-box`}
         ref={ref}
         value={value}
-        rows={4}
-        maxLength={5000}
+        rows={compact ? 1 : 4}
+        maxLength={maxLength}
+        className={compact ? "!min-h-[44px] max-h-40 resize-none py-2.5" : undefined}
         placeholder={placeholder}
         role="combobox"
         aria-expanded={open}
@@ -114,6 +134,11 @@ export function MentionBox({
         }}
         onBlur={() => window.setTimeout(() => setQuery(null), 150)}
         onKeyDown={(e) => {
+          if (onSubmit && e.key === "Enter" && (e.ctrlKey || e.metaKey) && !open) {
+            e.preventDefault();
+            onSubmit();
+            return;
+          }
           if (!open) return;
           if (e.key === "ArrowDown") {
             e.preventDefault();
@@ -136,7 +161,10 @@ export function MentionBox({
           id={`${listId}-list`}
           role="listbox"
           aria-label="People who'll see this post"
-          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow-md)]"
+          className={cn(
+            "absolute left-0 right-0 z-30 max-h-64 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface)] p-1 shadow-[var(--shadow-md)]",
+            compact ? "bottom-full mb-1" : "top-full mt-1",
+          )}
         >
           {matches.map((u, i) => (
             <li
@@ -160,12 +188,12 @@ export function MentionBox({
           ))}
         </ul>
       )}
-      {query !== null && !open && audienceReady && (
+      {query !== null && !open && audienceReady && !compact && (
         <p className="text-xs text-[var(--text-muted)]">
           {audience.length ? `Nobody called “${query}” will see this post.` : "Nobody else will see this post yet, so there's no one to mention."}
         </p>
       )}
-      {mentions.length > 0 && (
+      {mentions.length > 0 && !compact && (
         <ul aria-label="Mentioned" className="mt-1 flex flex-col gap-1.5">
           {mentions.map((m) => {
             const can = !audienceReady || inAudience.has(m.id);

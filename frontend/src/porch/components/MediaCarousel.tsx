@@ -1,5 +1,6 @@
-import { ChevronLeft, ChevronRight, ImageOff, Loader2, Play, Volume2, VolumeX } from "lucide-react";
+import { ChevronLeft, ChevronRight, Heart, ImageOff, Loader2, Play, UserRound, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { thumbHashToDataURL } from "thumbhash";
 
 import type { PorchMedia } from "@/api/porch";
@@ -27,9 +28,35 @@ export function frameRatio(media: PorchMedia[]): number {
  * ThumbHash blur while it loads. Videos play muted when mostly on screen;
  * tap for sound.
  */
-export function MediaCarousel({ media, label, className }: { media: PorchMedia[]; label: string; className?: string }) {
+export function MediaCarousel({
+  media,
+  label,
+  className,
+  onDoubleTap,
+}: {
+  media: PorchMedia[];
+  label: string;
+  className?: string;
+  /** Double-tap (or double-click) a photo: ❤️ it. */
+  onDoubleTap?: () => void;
+}) {
   const track = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState(0);
+  const [burst, setBurst] = useState(0);
+  const [showTags, setShowTags] = useState(false);
+  const lastTap = useRef(0);
+  const tap = () => {
+    if (!onDoubleTap) return;
+    const now = Date.now();
+    if (now - lastTap.current < 320) {
+      lastTap.current = 0;
+      setBurst((b) => b + 1);
+      onDoubleTap();
+    } else {
+      lastTap.current = now;
+    }
+  };
+  const tags = media[at]?.tags ?? [];
   const ratio = useMemo(() => frameRatio(media), [media]);
   const n = media.length;
 
@@ -79,10 +106,33 @@ export function MediaCarousel({ media, label, className }: { media: PorchMedia[]
             aria-label={`${i + 1} of ${n}`}
             className="relative h-full w-full shrink-0 snap-center"
           >
-            {m.kind === "video" ? <VideoSlide m={m} active={i === at} /> : <PhotoSlide m={m} index={i} total={n} />}
+            {m.kind === "video" ? (
+              <VideoSlide m={m} active={i === at} />
+            ) : (
+              <div className="h-full w-full select-none" onClick={tap}>
+                <PhotoSlide m={m} index={i} total={n} />
+                {showTags && <TagLabels m={m} />}
+              </div>
+            )}
           </div>
         ))}
       </div>
+      {burst > 0 && (
+        <span key={burst} aria-hidden className="porch-heart-burst pointer-events-none absolute inset-0 m-auto flex h-24 w-24 items-center justify-center text-white drop-shadow-[0_2px_8px_rgba(0,0,0,.45)]">
+          <Heart className="h-24 w-24 fill-white" />
+        </span>
+      )}
+      {tags.length > 0 && media[at]?.kind !== "video" && (
+        <button
+          type="button"
+          aria-pressed={showTags}
+          aria-label={showTags ? "Hide who's in this photo" : `Show who's in this photo (${tags.length})`}
+          onClick={() => setShowTags((v) => !v)}
+          className="absolute bottom-3 left-3 flex h-8 w-8 items-center justify-center rounded-full bg-black/60 text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+        >
+          <UserRound className="h-4 w-4" aria-hidden />
+        </button>
+      )}
       {n > 1 && (
         <>
           <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium tabular-nums text-white" aria-hidden>
@@ -117,11 +167,36 @@ export function MediaCarousel({ media, label, className }: { media: PorchMedia[]
   );
 }
 
+/** Who's tagged on a photo, at their spots. The author also sees who
+ *  hasn't said yes yet. */
+function TagLabels({ m }: { m: PorchMedia }) {
+  return (
+    <ul aria-label="Tagged in this photo" className="pointer-events-none absolute inset-0">
+      {m.tags.map((t) => (
+        <li key={t.id} className="absolute" style={{ left: `${t.x * 100}%`, top: `${t.y * 100}%` }}>
+          <Link
+            to={`/porch/u/${t.user.id}`}
+            onClick={(e) => e.stopPropagation()}
+            className={cn(
+              "pointer-events-auto absolute left-0 top-0 -translate-x-1/2 translate-y-1 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-semibold text-white shadow-[var(--shadow-md)]",
+              t.status === "approved" ? "bg-black/75" : "border border-dashed border-white/80 bg-black/55",
+            )}
+          >
+            {t.user.name}
+            {t.status === "pending" && <span className="font-normal"> · waiting for their OK</span>}
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function PhotoSlide({ m, index, total }: { m: PorchMedia; index: number; total: number }) {
   const bg = useMemo(() => blur(m.thumbhash), [m.thumbhash]);
   const [failed, setFailed] = useState(false);
   const src = m.preview ?? m.thumb;
-  const alt = m.alt_text || (total > 1 ? `Photo ${index + 1} of ${total}` : "Photo");
+  const tagged = (m.tags ?? []).filter((t) => t.status === "approved").map((t) => t.user.name);
+  const alt = (m.alt_text || (total > 1 ? `Photo ${index + 1} of ${total}` : "Photo")) + (tagged.length ? `. With ${tagged.join(", ")}.` : "");
   return (
     <div className="flex h-full w-full items-center justify-center bg-cover bg-center" style={bg ? { backgroundImage: `url(${bg})` } : undefined}>
       {src && !failed ? (

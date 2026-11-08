@@ -5,7 +5,22 @@
  * Kept in ``localStorage`` (best effort) until it's posted or thrown away.
  */
 import type { EditOps } from "@/api/photos";
-import type { LifeEventType, LinkSnapshot, PorchUser, PostPlace } from "@/api/porch";
+import type { LifeEventType, LinkSnapshot, PollCloses, PorchUser, PostPlace, TagStatus } from "@/api/porch";
+
+/** Someone tagged on a photo, at a point (shares of the photo as posted). */
+export interface DraftTag {
+  user: PorchUser;
+  x: number;
+  y: number;
+  /** Editing a post: whether they've said yes yet. */
+  status?: TagStatus;
+}
+
+/** A poll: the question is the post's words. */
+export interface PollDraft {
+  options: string[];
+  closes: PollCloses;
+}
 
 /** One photo or video in the post being made. */
 export interface Pick {
@@ -34,6 +49,8 @@ export interface Pick {
   /** Upload progress, 0..1. */
   progress?: number;
   error?: string;
+  /** People tagged on it (photos only). */
+  tags?: DraftTag[];
 }
 
 export type Audience = "all" | string[];
@@ -54,6 +71,7 @@ export interface Draft {
   audience: Audience | null;
   place: PostPlace | null;
   life: LifeDraft | null;
+  poll: PollDraft | null;
   link: LinkSnapshot | null;
   /** The link the poster took off (not offered again). */
   linkDismissed: string | null;
@@ -68,6 +86,7 @@ export const EMPTY: Draft = {
   audience: null,
   place: null,
   life: null,
+  poll: null,
   link: null,
   linkDismissed: null,
   memoryId: null,
@@ -76,7 +95,39 @@ export const EMPTY: Draft = {
 const KEY = "porch.composer.draft.v1";
 
 export function hasContent(d: Draft): boolean {
-  return d.picks.length > 0 || !!d.body.trim() || !!d.life || !!d.place;
+  return d.picks.length > 0 || !!d.body.trim() || !!d.life || !!d.place || !!d.poll;
+}
+
+/** Why a poll can't be posted yet, or null. */
+export function pollProblem(d: { poll: PollDraft | null; body: string }): string | null {
+  if (!d.poll) return null;
+  if (!d.body.trim()) return "Write your question in the box above.";
+  const filled = d.poll.options.map((o) => o.trim()).filter(Boolean);
+  if (filled.length < 2) return "A poll needs at least two options.";
+  if (new Set(filled.map((o) => o.toLowerCase())).size !== filled.length) return "Two of the options are the same.";
+  return null;
+}
+
+/**
+ * A point on the upright photo (a face Photos found) to the same point on
+ * the photo as this post shows it: turned, flipped, then cropped, as
+ * ``photos/edits.apply`` draws it. Null when the crop leaves it out.
+ */
+export function toEdited(x: number, y: number, ops: EditOps | null): { x: number; y: number } | null {
+  let px = x;
+  let py = y;
+  const r = ops?.rotate ?? 0;
+  if (r === 90) [px, py] = [1 - py, px];
+  else if (r === 180) [px, py] = [1 - px, 1 - py];
+  else if (r === 270) [px, py] = [py, 1 - px];
+  if (ops?.flip) px = 1 - px;
+  const k = ops?.crop;
+  if (k) {
+    px = (px - k.x) / k.w;
+    py = (py - k.y) / k.h;
+  }
+  if (px < 0 || px > 1 || py < 0 || py > 1) return null;
+  return { x: px, y: py };
 }
 
 /** The draft kept on this device (only finished, library photos). */

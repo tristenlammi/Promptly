@@ -8,7 +8,7 @@
  */
 import type { InfiniteData, QueryClient } from "@tanstack/react-query";
 
-import type { Bootstrap, PorchPost, PostPage } from "@/api/porch";
+import { porchApi, type Bootstrap, type PorchPost, type PostPage } from "@/api/porch";
 
 export const ROOT = ["porch"] as const;
 export const BOOTSTRAP_KEY = ["porch", "bootstrap"] as const;
@@ -22,6 +22,46 @@ export const membersKey = (id: string) => ["porch", "members", id] as const;
 export const pendingKey = (id: string) => ["porch", "pending", id] as const;
 export const discoverKey = (q: string) => ["porch", "discover", q] as const;
 export const profileKey = (id: string) => ["porch", "profile", id] as const;
+export const savedKey = ["porch", "list", "saved"] as const;
+export const commentsKey = (postId: string) => ["porch", "comments", postId] as const;
+export const ACTIVITY_KEY = ["porch", "activity"] as const;
+
+/** Change one post wherever it's cached (lists and its own query). */
+export function patchPost(qc: QueryClient, id: string, fn: (p: PorchPost) => PorchPost): void {
+  qc.setQueriesData<Pages>({ queryKey: LISTS }, (data) => {
+    if (!data) return data;
+    let changed = false;
+    const pages = data.pages.map((p) => {
+      if (!p.posts.some((x) => x.id === id)) return p;
+      changed = true;
+      return { ...p, posts: p.posts.map((x) => (x.id === id ? fn(x) : x)) };
+    });
+    return changed ? { ...data, pages } : data;
+  });
+  const own = qc.getQueryData<PorchPost>(postKey(id));
+  if (own) qc.setQueryData(postKey(id), fn(own));
+}
+
+/** The cached copy of a post (its own query, else from a list). */
+export function cachedPost(qc: QueryClient, id: string): PorchPost | undefined {
+  const own = qc.getQueryData<PorchPost>(postKey(id));
+  if (own) return own;
+  for (const [, data] of qc.getQueriesData<Pages>({ queryKey: LISTS })) {
+    const hit = data?.pages.flatMap((p) => p.posts).find((p) => p.id === id);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** A post's comments or reactions changed: refetch it where it's shown. */
+export async function refreshPost(qc: QueryClient, id: string): Promise<void> {
+  if (!cachedPost(qc, id)) return; // not on screen anywhere
+  try {
+    putPost(qc, id, await porchApi.post(id));
+  } catch {
+    /* gone or not shared any more: the next list refresh drops it */
+  }
+}
 
 type Pages = InfiniteData<PostPage, string | null>;
 
@@ -65,6 +105,7 @@ export function updateBootstrap(qc: QueryClient, fn: (b: Bootstrap) => Bootstrap
 export function groupsChanged(qc: QueryClient, groupId?: string): void {
   void qc.invalidateQueries({ queryKey: BOOTSTRAP_KEY });
   void qc.invalidateQueries({ queryKey: ["porch", "discover"] });
+  void qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
   if (groupId) {
     void qc.invalidateQueries({ queryKey: groupKey(groupId) });
     void qc.invalidateQueries({ queryKey: membersKey(groupId) });

@@ -66,8 +66,9 @@ async def test_posting_rules_and_validation(client, db, people):
     assert r.status_code == 400 and r.json()["detail"] == "Write something first"
     r = await client.post("/api/porch/posts", headers=H(ann), json={"kind": "photo", "body": "x", "groups": [fam]})
     assert r.status_code == 400
+    # A poll needs its options (polls themselves: test_porch_talk.py).
     r = await client.post("/api/porch/posts", headers=H(ann), json={"kind": "poll", "body": "x", "groups": [fam]})
-    assert r.status_code == 422
+    assert r.status_code == 400 and r.json()["detail"] == "Add at least two options"
     # A link post with no words; the link is a snapshot (no outside images).
     got = await say(client, ann, [fam], "", link={"url": "https://example.com/a", "title": "A page", "site_name": "Example"})
     assert got["link"] == {"url": "https://example.com/a", "title": "A page", "description": "", "site_name": "Example"}

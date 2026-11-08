@@ -3,8 +3,8 @@ stream per open Porch app, on the Rooms pattern (``rooms/router.py``).
 
 Each person has one Redis channel (``porch:u:<id>``, :func:`core.channel`);
 writes publish small events there (``post``, ``post_change``, ``group``,
-``invite``) that carry ids only, never content, so the app refetches through
-the normal, checked endpoints. A comment ``: ping`` goes out every 20 s so
+``invite``, ``comment``, ``activity``) that carry ids only, never content, so
+the app refetches through the normal, checked endpoints. A comment ``: ping`` goes out every 20 s so
 the client can tell a live stream from one a proxy is holding open.
 """
 from __future__ import annotations

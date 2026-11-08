@@ -71,6 +71,8 @@ class PorchPost(UUIDPKMixin, CreatedAtMixin, Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     origin: Mapped[str | None] = mapped_column(String(255), nullable=True)
     uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # A poll's closing time (0271); NULL: never closes, or not a poll.
+    poll_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # body_tsv: a generated column, searched with raw SQL (not mapped).
 
 
@@ -118,4 +120,113 @@ class PorchProfile(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
-__all__ = ["KINDS", "NOTIFY", "ROLES", "STATUSES", "PorchGroup", "PorchGroupMember", "PorchPost", "PorchPostGroup", "PorchPostMedia", "PorchProfile"]
+# ------------------------------------------------------------------ talking (0271)
+
+
+class PorchComment(UUIDPKMixin, CreatedAtMixin, Base):
+    """A comment on a post, or a reply to one (``parent_id``: one level
+    only — a reply to a reply hangs off the same top comment). Deleting
+    one marks it (``deleted_at``) so a thread's replies keep their place."""
+
+    __tablename__ = "porch_comments"
+
+    post_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_posts.id", ondelete="CASCADE"), nullable=False)
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    parent_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("porch_comments.id", ondelete="CASCADE"), nullable=True)
+    body: Mapped[str] = mapped_column(String(2000), nullable=False)
+    mentions: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
+    edited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PorchReaction(Base):
+    """One person's reaction (one of a small fixed set of emoji) to a post or
+    a comment. ``post_id`` is the post it's on either way."""
+
+    __tablename__ = "porch_reactions"
+
+    target_type: Mapped[str] = mapped_column(String(8), primary_key=True)  # post | comment
+    target_id: Mapped[uuid.UUID] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    post_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_posts.id", ondelete="CASCADE"), nullable=False)
+    emoji: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PorchPollOption(UUIDPKMixin, Base):
+    __tablename__ = "porch_poll_options"
+    __table_args__ = (UniqueConstraint("post_id", "position", name="uq_porch_poll_options_position"),)
+
+    post_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_posts.id", ondelete="CASCADE"), nullable=False)
+    position: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    label: Mapped[str] = mapped_column(String(80), nullable=False)
+
+
+class PorchPollVote(Base):
+    """One vote each, changeable until the poll closes."""
+
+    __tablename__ = "porch_poll_votes"
+
+    post_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_posts.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    option_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_poll_options.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+TAG_STATUSES = ("pending", "approved", "declined")
+
+
+class PorchTag(UUIDPKMixin, CreatedAtMixin, Base):
+    """Someone tagged on one photo of a post, at a point (``box`` ``{x, y}``,
+    shares of the picture as posted). It shows only once they say yes."""
+
+    __tablename__ = "porch_tags"
+    __table_args__ = (UniqueConstraint("media_id", "tagged_user_id", name="uq_porch_tags_media_user"),)
+
+    post_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_posts.id", ondelete="CASCADE"), nullable=False)
+    media_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_post_media.id", ondelete="CASCADE"), nullable=False)
+    tagged_user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    tagged_by: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    box: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    status: Mapped[str] = mapped_column(String(8), nullable=False, default="pending", server_default="pending")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PorchSave(Base):
+    """Saved posts: a private collection."""
+
+    __tablename__ = "porch_saves"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    post_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("porch_posts.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PorchAlert(Base):
+    """"Notify me when they post" (pushes: WP-P1.7)."""
+
+    __tablename__ = "porch_alerts"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PorchReport(UUIDPKMixin, CreatedAtMixin, Base):
+    """A post or comment reported to the server admins (the queue: WP-P1.7)."""
+
+    __tablename__ = "porch_reports"
+
+    reporter_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    target_type: Mapped[str] = mapped_column(String(8), nullable=False)  # post | comment
+    target_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
+    status: Mapped[str] = mapped_column(String(8), nullable=False, default="open", server_default="open")
+    handled_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+__all__ = [
+    "KINDS", "NOTIFY", "ROLES", "STATUSES", "TAG_STATUSES", "PorchAlert", "PorchComment", "PorchGroup", "PorchGroupMember", "PorchPollOption",
+    "PorchPollVote", "PorchPost", "PorchPostGroup", "PorchPostMedia", "PorchProfile", "PorchReaction", "PorchReport", "PorchSave", "PorchTag",
+]

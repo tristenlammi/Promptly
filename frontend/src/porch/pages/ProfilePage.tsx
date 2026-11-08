@@ -1,6 +1,6 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Bell, Cake, ContactRound, Home, MessageCircle, MoreHorizontal, Pencil, Sparkles, UserX } from "lucide-react";
+import { Bell, Bookmark, Cake, ContactRound, Home, MessageCircle, MoreHorizontal, Pencil, Sparkles, UserX } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -180,6 +180,7 @@ export function ProfilePage({ userId }: { userId: string }) {
         <div className="flex flex-col gap-2 px-4 pt-6 md:px-0">
           <h2 className="px-1 text-sm font-semibold text-[var(--text)]">Settings</h2>
           <List>
+            <ListRow leading={<Bookmark className="h-4 w-4 text-[var(--text-muted)]" />} title="Saved" subtitle="Posts you've saved. Only you can see them." onClick={() => navigate("/porch/saved")} />
             <ListRow leading={<Bell className="h-4 w-4 text-[var(--text-muted)]" />} title="Quiet hours" subtitle="Set in Account → Notifications" onClick={() => navigate("/account/notifications")} />
             <ListRow leading={<UserX className="h-4 w-4 text-[var(--text-muted)]" />} title="Blocked people" subtitle="Set in Account → Blocked people" onClick={() => navigate("/account/blocked")} />
           </List>
@@ -240,17 +241,19 @@ function EditProfileSheet({ open, onClose, profile, welcomedName }: { open: bool
   const [bio, setBio] = useState(profile.bio);
   const [birthday, setBirthday] = useState(profile.birthday ?? "");
   const [show, setShow] = useState(!!profile.show_birthday);
+  const [faces, setFaces] = useState(!!profile.face_suggestions);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     if (!open) return;
     setBio(profile.bio);
     setBirthday(profile.birthday ?? "");
     setShow(!!profile.show_birthday);
+    setFaces(!!profile.face_suggestions);
   }, [open, profile]);
   const save = async () => {
     setBusy(true);
     try {
-      await porchApi.updateProfile({ bio, birthday: birthday || null, show_birthday: show });
+      await porchApi.updateProfile({ bio, birthday: birthday || null, show_birthday: show, face_suggestions: faces });
       void qc.invalidateQueries({ queryKey: profileKey(profile.user.id) });
       void qc.invalidateQueries({ queryKey: BOOTSTRAP_KEY });
       toast.success("Profile saved.");
@@ -297,6 +300,15 @@ function EditProfileSheet({ open, onClose, profile, welcomedName }: { open: bool
             <p className="text-xs text-[var(--text-muted)]">Day and month only, on your profile.</p>
           </div>
           <Toggle checked={show} onChange={setShow} label="Show my birthday" />
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium text-[var(--text)]">Suggest tags from my faces</p>
+            <p className="text-xs text-[var(--text-muted)]">
+              When someone posts a photo you're in, Porch can suggest tagging you, from the faces their own Photos knows. Only between people who both turn this on. You still say yes to every tag.
+            </p>
+          </div>
+          <Toggle checked={faces} onChange={setFaces} label="Suggest tags from my faces" />
         </div>
       </div>
     </Sheet>

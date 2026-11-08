@@ -74,7 +74,8 @@ test("a private group: invite, accept, posts in the feed live — and invisible 
   await bob.goto("/porch/groups");
   const invite = bob.locator("#porch-scroll").getByText(new RegExp(`invited you to.*${name}`));
   await expect(invite).toBeVisible();
-  await expect(bob.getByRole("link", { name: /Groups\s*\d+ invites?/ })).toBeVisible();
+  // The badge is on Activity (WP-P1.5), counting the invite.
+  await expect(bob.getByRole("link", { name: /Activity\s*\d+ new/ })).toBeVisible();
   await bob.locator(`#porch-scroll [data-invite="${gid}"]`).getByRole("button", { name: "Join", exact: true }).click();
   await expect(bob.getByText(`You're in ${name}. Its posts are in your feed.`)).toBeVisible();
 

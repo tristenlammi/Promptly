@@ -17,3 +17,29 @@ html[data-porch] {
 html.dark[data-porch] {
   --porch-chip-text: #E8977A;
 }
+
+/* Double-tap a photo: a heart pops up and fades. */
+@keyframes porchHeart {
+  0% { opacity: 0; transform: scale(0.4); }
+  15% { opacity: 1; transform: scale(1.15); }
+  30% { transform: scale(0.95); }
+  45% { transform: scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.05); }
+}
+.porch-heart-burst {
+  animation: porchHeart 900ms ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .porch-heart-burst { animation-duration: 1ms; }
+}
+
+/* A comment opened from Activity: a moment's highlight. */
+@keyframes porchFlash {
+  from { background: color-mix(in srgb, var(--item-accent) 18%, transparent); }
+  to { background: transparent; }
+}
+.porch-flash {
+  border-radius: 0.75rem;
+  animation: porchFlash 2s ease-out;
+}

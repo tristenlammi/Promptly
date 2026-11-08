@@ -38,7 +38,7 @@ async function libraryPhoto(page: Page, auth: string, word: string): Promise<str
   const name = `porch-${word.toLowerCase()}-${stamp}.jpg`;
   const up = await page.request.post("/api/files/", {
     headers: { Authorization: auth },
-    multipart: { scope: "mine", route: "camera", file: { name, mimeType: "image/jpeg", buffer: fs.readFileSync(wordPhoto(name, word)) } },
+    multipart: { scope: "mine", route: "camera", file: { name, mimeType: "image/jpeg", buffer: fs.readFileSync(wordPhoto(name, word, { clean: true })) } },
   });
   expect(up.ok(), await up.text()).toBeTruthy();
   const id = (await up.json()).id as string;

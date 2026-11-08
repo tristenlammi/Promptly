@@ -14,7 +14,7 @@ import { usePorch } from "../context";
 import { usePorchStore } from "../store";
 
 /** An invite to answer: "Sam invited you to 🍻 The Lads · 6 people". */
-export function InviteRow({ g }: { g: PorchGroup }) {
+export function InviteRow({ g, compact = false }: { g: PorchGroup; compact?: boolean }) {
   const { accept, decline } = useGroupActions();
   const [busy, setBusy] = useState(false);
   const run = async (fn: () => Promise<boolean>) => {
@@ -23,7 +23,7 @@ export function InviteRow({ g }: { g: PorchGroup }) {
     setBusy(false);
   };
   return (
-    <div data-invite={g.id} className="flex flex-col gap-3 p-3 sm:flex-row sm:items-center">
+    <div data-invite={g.id} className={cn("flex flex-col gap-3 p-3", !compact && "sm:flex-row sm:items-center")}>
       <Link to={`/porch/g/${g.id}`} className="flex min-w-0 flex-1 items-center gap-3">
         <GroupTile group={g} size={44} />
         <span className="min-w-0">

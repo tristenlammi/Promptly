@@ -23,12 +23,13 @@ import { AudienceSheet, audienceIds } from "./AudienceSheet";
 import { LifeEventEditor } from "./LifeEventEditor";
 import { mentionedIn } from "./MentionBox";
 import {
-  EMPTY, clearDraft, firstLink, hasContent, loadDraft, newKey, saveDraft, videoLimitWords, videoSeconds,
+  EMPTY, clearDraft, firstLink, hasContent, loadDraft, newKey, pollProblem, saveDraft, videoLimitWords, videoSeconds,
   type Audience, type Draft, type Pick, type Step,
 } from "./model";
 import { PickImage } from "./PickImage";
 import { PickStep } from "./PickStep";
 import { PlaceSheet } from "./PlaceSheet";
+import { PollEditor } from "./PollEditor";
 import { ShareStep } from "./ShareStep";
 
 export interface ComposerStart {
@@ -61,12 +62,14 @@ function fromPost(post: PorchPost): Draft {
       edit: m.kind === "image" ? m.edit ?? null : null,
       alt: m.alt_text,
       altTouched: true,
+      tags: (m.tags ?? []).map((t) => ({ user: t.user, x: t.x, y: t.y, status: t.status })),
     })),
     body: post.body,
     mentions: post.mentions,
     audience: post.groups.map((g) => g.id),
     place: post.place,
     life: post.life_event,
+    poll: null,
     link: post.link,
   };
 }
@@ -111,7 +114,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
   const [draft, setDraft] = useState<Draft>(initial.draft);
   const [restored, setRestored] = useState(initial.restored);
   const [active, setActive] = useState(0);
-  const [sheet, setSheet] = useState<null | "audience" | "place" | "life">(null);
+  const [sheet, setSheet] = useState<null | "audience" | "place" | "life" | "poll">(null);
   const [busy, setBusy] = useState(false);
   const [waiting, setWaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -326,6 +329,17 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
     staleTime: 60_000,
   });
 
+  // ---------------------------------------------------------------- face suggestions for tags
+  // Faces in your photos that are people who'd see the post — only when
+  // you and they both turned "Suggest tags from my faces" on.
+  const photoIds = useMemo(() => picks.filter((p) => p.kind === "image" && p.fileId).map((p) => p.fileId as string), [picks]);
+  const suggest = useQuery({
+    queryKey: ["porch", "compose", "faces", photoIds.join(","), editing ? `post:${editing.id}` : audIds.join(",")],
+    queryFn: () => porchApi.tagSuggestions(editing ? { file_ids: photoIds, post_id: editing.id } : { file_ids: photoIds, groups: audIds }),
+    enabled: b.profile.face_suggestions && photoIds.length > 0 && (step === "arrange" || step === "share") && (!!editing || audIds.length > 0),
+    staleTime: 5 * 60_000,
+  });
+
   // ---------------------------------------------------------------- link preview (text posts)
   const linkUrl = picks.length ? null : firstLink(draft.body);
   useEffect(() => {
@@ -356,7 +370,8 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
   const uploading = picks.filter((p) => !p.fileId && !p.error).length;
   const failed = picks.filter((p) => p.error);
   const storageFull = failed.some((p) => /storage|quota|space|full/i.test(p.error ?? ""));
-  const empty = !picks.length && !draft.body.trim() && !draft.life && !draft.link;
+  const empty = !picks.length && !draft.body.trim() && !draft.life && !draft.link && !draft.poll;
+  const pollIssue = pollProblem(draft);
   const dirty = editing ? JSON.stringify(fromPost(editing)) !== JSON.stringify({ ...draft, step: "share" }) : hasContent(draft);
 
   const submit = useCallback(async () => {
@@ -371,8 +386,10 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
       ...(p.mediaId ? { id: p.mediaId } : { file_id: p.fileId as string }),
       alt_text: p.alt.trim(),
       edit: p.kind === "image" ? p.edit : null,
+      // Only people who can see it are asked (the server checks again).
+      ...(p.kind === "image" ? { tags: (p.tags ?? []).map((t) => ({ user_id: t.user.id, x: t.x, y: t.y })) } : {}),
     }));
-    const kind = d.life ? "life_event" : d.picks.length ? "photo" : "text";
+    const kind = d.life ? "life_event" : d.picks.length ? "photo" : d.poll ? "poll" : "text";
     try {
       if (editing) {
         const post = await porchApi.updatePost(editing.id, {
@@ -397,6 +414,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
         place: d.place,
         link: d.picks.length ? null : d.link,
         life_event: d.life,
+        poll: kind === "poll" && d.poll ? { options: d.poll.options.map((o) => o.trim()).filter(Boolean), closes: d.poll.closes } : null,
         from_memory_id: d.memoryId,
         mentions: mentions.map((m) => m.id),
       });
@@ -471,7 +489,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
   };
   const backFn = back();
   const nextLabel = step === "share" ? (editing ? "Save" : "Post") : "Next";
-  const canNext = step === "pick" ? picks.length > 0 : step === "arrange" ? picks.length > 0 : !empty && !busy && !waiting;
+  const canNext = step === "pick" ? picks.length > 0 : step === "arrange" ? picks.length > 0 : !empty && !busy && !waiting && !pollIssue;
   const onNext = () => {
     if (step === "pick") go("arrange");
     else if (step === "arrange") go("share");
@@ -546,7 +564,18 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
           />
         )}
         {step === "arrange" && picks.length > 0 && (
-          <ArrangeStep picks={picks} setPicks={setPicks} active={active} setActive={setActive} onAdd={() => go("pick")} maxMedia={maxMedia} isPhone={isPhone} />
+          <ArrangeStep
+            picks={picks}
+            setPicks={setPicks}
+            active={active}
+            setActive={setActive}
+            onAdd={() => go("pick")}
+            maxMedia={maxMedia}
+            isPhone={isPhone}
+            audience={people.data ?? []}
+            audienceReady={people.isSuccess}
+            suggestions={suggest.data?.suggestions ?? []}
+          />
         )}
         {step === "arrange" && !picks.length && (
           <p className="px-3 py-10 text-center text-sm text-[var(--text-muted)]">
@@ -580,9 +609,21 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
             life={draft.life}
             onLife={() => setSheet("life")}
             onClearLife={() => set({ life: null })}
-            canPhotos={!editing || editing.kind !== "text"}
+            canPhotos={!editing || (editing.kind !== "text" && editing.kind !== "poll")}
             canLife={!editing || editing.kind === "life_event"}
+            poll={draft.poll}
+            onPoll={() => setSheet("poll")}
+            onClearPoll={() => set({ poll: null })}
+            canPoll={!editing}
+            pollLocked={editing?.kind === "poll"}
+            onTags={() => go("arrange")}
           />
+        )}
+
+        {step === "share" && pollIssue && !empty && (
+          <p className="mx-3 mt-3 text-sm text-[var(--text-muted)] md:mx-0" aria-live="polite">
+            {pollIssue}
+          </p>
         )}
 
         {step === "share" && (waiting || error) && (
@@ -647,7 +688,8 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
 
       <AudienceSheet open={sheet === "audience"} onClose={() => setSheet(null)} value={audience} onChange={(a) => set({ audience: a })} groups={b.groups} />
       <PlaceSheet open={sheet === "place"} onClose={() => setSheet(null)} onPick={(p) => set({ place: p })} fromPhotos={photoPlaces} />
-      <LifeEventEditor open={sheet === "life"} onClose={() => setSheet(null)} value={draft.life} onSave={(v) => set({ life: v })} onRemove={() => set({ life: null })} />
+      <PollEditor open={sheet === "poll"} onClose={() => setSheet(null)} value={draft.poll} onSave={(v) => set({ poll: v, life: null })} onRemove={() => set({ poll: null })} />
+      <LifeEventEditor open={sheet === "life"} onClose={() => setSheet(null)} value={draft.life} onSave={(v) => set({ life: v, poll: null })} onRemove={() => set({ life: null })} />
     </div>
   );
 }
@@ -666,5 +708,6 @@ function libraryPick(p: PhotoItem): Pick {
     edit: null,
     alt: "",
     altTouched: false,
+    tags: [],
   };
 }

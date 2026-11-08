@@ -81,6 +81,142 @@ export interface PorchMedia {
   /** Your own posts only: the library file and this post's crop / filter. */
   file_id?: string;
   edit?: EditOps | null;
+  /** People tagged on it: approved ones; the author also sees who hasn't
+   *  answered yet, and you your own request. */
+  tags: PhotoTag[];
+}
+
+export type TagStatus = "pending" | "approved" | "declined";
+
+/** Someone tagged at a point (shares of the photo as posted). */
+export interface PhotoTag {
+  id: string;
+  user: PorchUser;
+  x: number;
+  y: number;
+  status: TagStatus;
+}
+
+/** A tag in a new or changed post. */
+export interface TagIn {
+  user_id: string;
+  x: number;
+  y: number;
+}
+
+/** The six reactions (the same as Rooms' quick ones). */
+export const REACTIONS = ["👍", "❤️", "😂", "😮", "😢", "🙏"] as const;
+export const HEART = "❤️";
+
+/** Which emoji were used and yours; who reacted only on your own post or comment. */
+export interface Reactions {
+  emojis: string[];
+  mine: string | null;
+  /** Yours only: the latest few people who reacted (not you). */
+  people?: PorchUser[];
+  /** Yours only: how many people reacted (not you). */
+  count?: number;
+}
+
+export interface ReactionBy {
+  user: PorchUser;
+  emoji: string;
+  created_at: string | null;
+}
+
+export interface PollOption {
+  id: string;
+  label: string;
+  /** null until you can see the results. */
+  votes: number | null;
+  voters: PorchUser[] | null;
+}
+
+export interface Poll {
+  options: PollOption[];
+  closes_at: string | null;
+  closed: boolean;
+  my_vote: string | null;
+  /** After you vote, when it closes, or on your own poll. */
+  show_results: boolean;
+  total: number | null;
+}
+
+export type PollCloses = "1d" | "3d" | "1w" | "never";
+
+export interface PorchComment {
+  id: string;
+  post_id: string;
+  parent_id: string | null;
+  author: PorchUser | null;
+  body: string;
+  mentions: PorchUser[];
+  /** Deleted, kept in place for its replies. */
+  deleted: boolean;
+  created_at: string | null;
+  edited_at: string | null;
+  mine: boolean;
+  can_edit: boolean;
+  can_delete: boolean;
+  reactions: Reactions;
+  /** Top comments only. */
+  replies?: PorchComment[];
+}
+
+export interface CommentLine {
+  id: string;
+  parent_id: string | null;
+  author: PorchUser | null;
+  body: string;
+}
+
+export type ActivityKind = "comment" | "reply" | "mention" | "reaction";
+
+export interface PostRef {
+  id: string;
+  kind: PostKind;
+  thumb: string | null;
+  body: string;
+  mine: boolean;
+}
+
+export interface ActivityItem {
+  id: string;
+  kind: ActivityKind;
+  at: string;
+  actors: PorchUser[];
+  /** How many more people than ``actors``. */
+  others: number;
+  post: PostRef;
+  text: string | null;
+  emoji: string[] | null;
+  target: "post" | "comment";
+  comment_id: string | null;
+  unseen: boolean;
+}
+
+export interface TagRequest {
+  id: string;
+  post: PostRef;
+  by: PorchUser | null;
+  thumb: string | null;
+  created_at: string | null;
+}
+
+export interface Activity {
+  invites: PorchGroup[];
+  tag_requests: TagRequest[];
+  items: ActivityItem[];
+  seen_at: string | null;
+  unseen: number;
+}
+
+export interface TagSuggestion {
+  file_id: string;
+  user: PorchUser;
+  /** The middle of their face, as shares of the upright photo (before this post's crop). */
+  x: number;
+  y: number;
 }
 
 export type PostKind = "photo" | "video" | "text" | "poll" | "life_event";
@@ -107,10 +243,12 @@ export interface MediaIn {
   alt_text?: string;
   /** This post's own crop / filter (``photos/edits`` ops); null: none. */
   edit?: EditOps | null;
+  /** Who's tagged on it (asked first); left out: unchanged. */
+  tags?: TagIn[];
 }
 
 export interface NewPost {
-  kind: "photo" | "video" | "text" | "life_event";
+  kind: "photo" | "video" | "text" | "poll" | "life_event";
   body: string;
   groups: "all" | string[];
   media?: MediaIn[];
@@ -119,6 +257,7 @@ export interface NewPost {
   life_event?: { type: LifeEventType; title: string; date: string } | null;
   from_memory_id?: string | null;
   mentions?: string[];
+  poll?: { options: string[]; closes: PollCloses } | null;
 }
 
 export type PostPatch = Partial<Pick<NewPost, "body" | "media" | "place" | "link" | "life_event" | "mentions">>;
@@ -152,6 +291,13 @@ export interface PorchPost {
   mine: boolean;
   can_edit: boolean;
   can_delete: boolean;
+  /** Comments you can see, and the latest two. */
+  comment_count: number;
+  latest_comments: CommentLine[];
+  reactions: Reactions;
+  poll: Poll | null;
+  /** In your saved posts. */
+  saved: boolean;
 }
 
 export interface MyProfile {
@@ -173,6 +319,8 @@ export interface Bootstrap {
   invites: PorchGroup[];
   everyone: { id: string; name: string; emoji: string; member_count: number };
   limits: { max_media: number; video_max_seconds: number; video_max_mb: number };
+  /** The Activity badge: new since you last looked, plus invites and tag requests waiting. */
+  activity_unseen: number;
 }
 
 export interface PostPage {
@@ -190,6 +338,8 @@ export interface Profile {
   bio: string;
   birthday: string | null;
   show_birthday?: boolean;
+  /** Yours only: "Suggest tags from my faces". */
+  face_suggestions?: boolean;
   /** Groups you're both in (never one you're not in). */
   shared_groups?: GroupLabel[];
   /** What they are to you, from your own Contacts and Photos people. */
@@ -219,7 +369,9 @@ export type PorchEvent =
   | { type: "post"; post_id: string }
   | { type: "post_change"; post_id: string }
   | { type: "group"; group_id: string }
-  | { type: "invite"; group_id: string };
+  | { type: "invite"; group_id: string }
+  | { type: "comment"; post_id: string; comment_id: string }
+  | { type: "activity" };
 
 export interface NewGroup {
   name: string;
@@ -373,8 +525,83 @@ export const porchApi = {
   async block(userId: string): Promise<void> {
     await apiClient.put(`/people/blocks/${userId}`);
   },
-  async updateProfile(patch: Partial<Pick<MyProfile, "bio" | "birthday" | "show_birthday">> & { welcomed?: boolean }): Promise<MyProfile> {
+  async updateProfile(patch: Partial<Pick<MyProfile, "bio" | "birthday" | "show_birthday" | "face_suggestions">> & { welcomed?: boolean }): Promise<MyProfile> {
     const { data } = await apiClient.patch<MyProfile>("/porch/me/profile", patch);
     return data;
+  },
+
+  // ---- comments
+  async comments(postId: string): Promise<{ comments: PorchComment[]; count: number }> {
+    const { data } = await apiClient.get(`/porch/posts/${postId}/comments`);
+    return data;
+  },
+  async addComment(postId: string, body: string, opts: { parentId?: string | null; mentions?: string[] } = {}): Promise<PorchComment> {
+    const { data } = await apiClient.post<PorchComment>(`/porch/posts/${postId}/comments`, { body, parent_id: opts.parentId ?? null, mentions: opts.mentions ?? [] });
+    return data;
+  },
+  async editComment(id: string, body: string, mentions: string[] = []): Promise<PorchComment> {
+    const { data } = await apiClient.patch<PorchComment>(`/porch/comments/${id}`, { body, mentions });
+    return data;
+  },
+  async deleteComment(id: string): Promise<void> {
+    await apiClient.delete(`/porch/comments/${id}`);
+  },
+
+  // ---- reactions
+  async react(postId: string, emoji: string | null): Promise<Reactions> {
+    const { data } = emoji
+      ? await apiClient.put<Reactions>(`/porch/posts/${postId}/reactions`, { emoji })
+      : await apiClient.delete<Reactions>(`/porch/posts/${postId}/reactions`);
+    return data;
+  },
+  async reactComment(commentId: string, emoji: string | null): Promise<Reactions> {
+    const { data } = emoji
+      ? await apiClient.put<Reactions>(`/porch/comments/${commentId}/reactions`, { emoji })
+      : await apiClient.delete<Reactions>(`/porch/comments/${commentId}/reactions`);
+    return data;
+  },
+  /** Who reacted to your post or comment (yours only). */
+  async whoReacted(target: "post" | "comment", id: string): Promise<ReactionBy[]> {
+    const { data } = await apiClient.get<ReactionBy[]>(`/porch/${target === "post" ? "posts" : "comments"}/${id}/reactions`);
+    return data;
+  },
+
+  // ---- polls
+  async vote(postId: string, optionId: string | null): Promise<PorchPost> {
+    const { data } = optionId
+      ? await apiClient.put<PorchPost>(`/porch/posts/${postId}/vote`, { option_id: optionId })
+      : await apiClient.delete<PorchPost>(`/porch/posts/${postId}/vote`);
+    return data;
+  },
+
+  // ---- saved
+  async setSaved(postId: string, saved: boolean): Promise<void> {
+    if (saved) await apiClient.put(`/porch/posts/${postId}/save`);
+    else await apiClient.delete(`/porch/posts/${postId}/save`);
+  },
+  async saved(before: string | null): Promise<PostPage> {
+    const { data } = await apiClient.get<PostPage>("/porch/saved", { params: { before: before || undefined } });
+    return data;
+  },
+
+  // ---- tags
+  async answerTag(tagId: string, yes: boolean): Promise<void> {
+    await apiClient.post(`/porch/tags/${tagId}/${yes ? "approve" : "decline"}`);
+  },
+  async removeTag(tagId: string): Promise<void> {
+    await apiClient.delete(`/porch/tags/${tagId}`);
+  },
+  async tagSuggestions(body: { file_ids: string[]; groups?: "all" | string[]; post_id?: string }): Promise<{ enabled: boolean; suggestions: TagSuggestion[] }> {
+    const { data } = await apiClient.post("/porch/compose/tag-suggestions", body);
+    return data;
+  },
+
+  // ---- activity
+  async activity(): Promise<Activity> {
+    const { data } = await apiClient.get<Activity>("/porch/activity");
+    return data;
+  },
+  async activitySeen(): Promise<void> {
+    await apiClient.post("/porch/activity/seen");
   },
 };

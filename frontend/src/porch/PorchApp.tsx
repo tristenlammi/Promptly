@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Check, Home, Loader2, Newspaper, PenSquare, Plus, Search, UserRound, Users } from "lucide-react";
+import { Bell, Bookmark, Check, Home, Loader2, Newspaper, PenSquare, Plus, Search, UserRound, Users } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 
@@ -20,18 +20,22 @@ import { GroupTile, PorchAvatar } from "./components/ui";
 import { WelcomeSheet } from "./components/WelcomeSheet";
 import { PorchContext, isStandalone } from "./context";
 import { usePorchEvents } from "./live";
+import { ActivityPage } from "./pages/ActivityPage";
 import { FeedPage } from "./pages/FeedPage";
 import { GroupPage } from "./pages/GroupPage";
 import { DiscoverRow, GroupsPage, InviteRow } from "./pages/GroupsPage";
 import { EditPostPage, NewPostPage } from "./pages/NewPostPage";
 import { PostPage } from "./pages/PostPage";
 import { ProfilePage } from "./pages/ProfilePage";
+import { SavedPage } from "./pages/SavedPage";
 import { SCROLLER_ID } from "./scroll";
 import { usePorchStore } from "./store";
 
 type Route =
   | { page: "feed" }
   | { page: "groups" }
+  | { page: "activity" }
+  | { page: "saved" }
   | { page: "new" }
   | { page: "edit"; id: string }
   | { page: "post"; id: string }
@@ -45,6 +49,8 @@ function parse(path: string): Route {
   const p = path.replace(/\/+$/, "") || "/porch";
   if (p === "/porch") return { page: "feed" };
   if (p === "/porch/groups") return { page: "groups" };
+  if (p === "/porch/activity") return { page: "activity" };
+  if (p === "/porch/saved") return { page: "saved" };
   if (p === "/porch/new") return { page: "new" };
   let m = new RegExp(`^/porch/p/${ID}$`).exec(p);
   if (m) return { page: "post", id: m[1] };
@@ -86,7 +92,9 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
     };
   }, []);
 
-  const invites = b?.invites.length ?? 0;
+  // The Activity badge: new comments, reactions and mentions since you last
+  // looked, plus invites and tag requests waiting for an answer.
+  const unseen = b?.activity_unseen ?? 0;
   useEffect(() => {
     const before = document.title;
     return () => {
@@ -94,8 +102,8 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
     };
   }, []);
   useEffect(() => {
-    document.title = invites ? `(${invites}) Porch` : "Porch";
-  }, [invites]);
+    document.title = unseen ? `(${unseen}) Porch` : "Porch";
+  }, [unseen]);
 
   // Each page opens at its top; the feed comes back where you left it.
   const route = parse(location.pathname);
@@ -169,6 +177,12 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
     case "groups":
       page = <GroupsPage />;
       break;
+    case "activity":
+      page = <ActivityPage />;
+      break;
+    case "saved":
+      page = <SavedPage />;
+      break;
     case "new":
       page = <NewPostPage key={location.search} />;
       break;
@@ -226,12 +240,12 @@ function Badge({ n, className }: { n: number; className?: string }) {
   return (
     <span className={cn("inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[var(--item-accent)] px-1 text-[11px] font-bold leading-none text-white", className)}>
       {n > 99 ? "99+" : n}
-      <span className="sr-only">{n === 1 ? " invite" : " invites"}</span>
+      <span className="sr-only"> new</span>
     </span>
   );
 }
 
-/** Phone: Feed · Groups · ＋ · Profile. */
+/** Phone: Feed · Groups · ＋ · Activity · Profile. */
 function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
   const navigate = useNavigate();
   const tab = "relative flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]";
@@ -244,10 +258,7 @@ function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
         Feed
       </Link>
       <Link to="/porch/groups" aria-current={route.page === "groups" ? "page" : undefined} className={cn(tab, is(route.page === "groups" || route.page === "group"))}>
-        <span className="relative">
-          <Users className="h-5 w-5" aria-hidden />
-          <Badge n={b.invites.length} className="absolute -right-3 -top-1.5" />
-        </span>
+        <Users className="h-5 w-5" aria-hidden />
         Groups
       </Link>
       <button type="button" onClick={() => navigate("/porch/new")} aria-label="New post" className={cn(tab, "text-[var(--text-muted)]")}>
@@ -255,6 +266,13 @@ function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
           <Plus className="h-5 w-5" aria-hidden />
         </span>
       </button>
+      <Link to="/porch/activity" aria-current={route.page === "activity" ? "page" : undefined} className={cn(tab, is(route.page === "activity"))}>
+        <span className="relative">
+          <Bell className="h-5 w-5" aria-hidden />
+          <Badge n={b.activity_unseen} className="absolute -right-3 -top-1.5" />
+        </span>
+        Activity
+      </Link>
       <Link to={`/porch/u/${b.me.id}`} aria-current={me ? "page" : undefined} className={cn(tab, is(me))}>
         <PorchAvatar user={b.me} size={22} className={cn(me && "ring-2 ring-[var(--item-accent)]")} />
         Profile
@@ -287,7 +305,13 @@ function SideNav({ b, route, embedded }: { b: Bootstrap; route: Route; embedded:
       </Link>
       <Link to="/porch/groups" aria-current={route.page === "groups" ? "page" : undefined} className={item(route.page === "groups")}>
         <Users className="h-[18px] w-[18px]" aria-hidden /> Groups
-        <Badge n={b.invites.length} className="ml-auto" />
+      </Link>
+      <Link to="/porch/activity" aria-current={route.page === "activity" ? "page" : undefined} className={item(route.page === "activity")}>
+        <Bell className="h-[18px] w-[18px]" aria-hidden /> Activity
+        <Badge n={b.activity_unseen} className="ml-auto" />
+      </Link>
+      <Link to="/porch/saved" aria-current={route.page === "saved" ? "page" : undefined} className={item(route.page === "saved")}>
+        <Bookmark className="h-[18px] w-[18px]" aria-hidden /> Saved
       </Link>
       <Link to={`/porch/u/${b.me.id}`} aria-current={me ? "page" : undefined} className={item(me)}>
         <UserRound className="h-[18px] w-[18px]" aria-hidden /> Profile
@@ -362,7 +386,7 @@ function RightPanel({ b }: { b: Bootstrap }) {
           <h2 className="text-sm font-semibold text-[var(--text)]">Invites</h2>
           <List>
             {b.invites.map((g) => (
-              <InviteRow key={g.id} g={g} />
+              <InviteRow key={g.id} g={g} compact />
             ))}
           </List>
         </section>

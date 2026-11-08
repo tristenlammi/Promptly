@@ -27,9 +27,10 @@ from app.auth.models import User
 from app.database import get_db
 from app.people import blocks
 
-from . import access, core, deps, media
+from . import access, activity, core, deps, media, tags, talk
 from .deps import require_porch
-from .models import PorchGroup, PorchPost, PorchPostGroup, PorchPostMedia, PorchProfile
+from .models import PorchGroup, PorchPost, PorchPostGroup, PorchPostMedia, PorchProfile, PorchSave
+from .tags import TagIn
 
 router = APIRouter()
 
@@ -91,6 +92,9 @@ async def posts_out(db: AsyncSession, viewer: User, posts: list[PorchPost]) -> l
                 "can_delete": mine or (bool(gs) and gs <= admin_of),
             }
         )
+    # Comments, reactions, the poll and "saved" (talk.py); photo tags (tags.py).
+    await talk.decorate(db, viewer, posts, out)
+    await tags.decorate(db, viewer, posts, out)
     return out
 
 
@@ -204,6 +208,29 @@ async def get_post(post_id: uuid.UUID, db: AsyncSession = Depends(get_db), user:
     return await post_out(db, user, await access.load_post(db, user, post_id))
 
 
+@router.get("/saved")
+async def saved(before: str | None = None, db: AsyncSession = Depends(get_db), user: User = Depends(require_porch)) -> dict:
+    """Your saved posts, the last saved first: only ones you can still see
+    (a post that's gone or no longer shared with you drops out)."""
+    q = (
+        select(PorchPost, PorchSave.created_at)
+        .join(PorchSave, PorchSave.post_id == PorchPost.id)
+        .where(PorchSave.user_id == user.id, access.visible_post(user.id))
+    )
+    if before:
+        try:
+            at, pid = before.rsplit("_", 1)
+            cur = (datetime.fromisoformat(at), uuid.UUID(pid))
+        except ValueError:
+            raise core.bad("That page link isn't valid") from None
+        q = q.where(tuple_(PorchSave.created_at, PorchPost.id) < tuple_(cur[0], cur[1]))
+    rows = (await db.execute(q.order_by(PorchSave.created_at.desc(), PorchPost.id.desc()).limit(PAGE + 1))).all()
+    more = len(rows) > PAGE
+    rows = rows[:PAGE]
+    nxt = f"{rows[-1][1].isoformat()}_{rows[-1][0].id}" if more and rows else None
+    return {"posts": await posts_out(db, user, [p for p, _ in rows]), "next": nxt}
+
+
 # ------------------------------------------------------------------ write
 
 
@@ -212,6 +239,9 @@ class MediaIn(BaseModel):
     file_id: uuid.UUID | None = None
     alt_text: str = Field(default="", max_length=1000)
     edit: dict[str, Any] | None = None
+    # People tagged on it (asked first; only people who can see the post).
+    # None: leave this photo's tags as they are.
+    tags: list[TagIn] | None = Field(default=None, max_length=30)
 
 
 class PlaceIn(BaseModel):
@@ -242,13 +272,15 @@ class LifeEventIn(BaseModel):
 
 
 class PostIn(BaseModel):
-    kind: Literal["photo", "video", "text", "life_event"]
+    kind: Literal["photo", "video", "text", "poll", "life_event"]
     body: str = Field(default="", max_length=5000)
     groups: Literal["all"] | list[uuid.UUID]
     media: list[MediaIn] = Field(default_factory=list, max_length=media.MAX_MEDIA)
     place: PlaceIn | None = None
     link: LinkIn | None = None
     life_event: LifeEventIn | None = None
+    # A poll: the question is the post's words.
+    poll: talk.PollIn | None = None
     from_memory_id: uuid.UUID | None = None
     # @mentions: kept only for people who can see the post.
     mentions: list[uuid.UUID] = Field(default_factory=list, max_length=50)
@@ -326,6 +358,13 @@ async def create_post(body: PostIn, db: AsyncSession = Depends(get_db), user: Us
             raise core.bad("Write something first")
     if body.kind == "life_event" and body.life_event is None:
         raise core.bad("Say what happened")
+    if body.kind == "poll":
+        if body.media:
+            raise core.bad("A poll has no photos")
+        if not text_:
+            raise core.bad("Ask a question first")
+        if body.poll is None:
+            raise core.bad("Add at least two options")
     if any(m.id is not None for m in body.media):
         raise core.bad("Each photo needs a file")
     group_ids = await _audience(db, user, body.groups)
@@ -346,16 +385,27 @@ async def create_post(body: PostIn, db: AsyncSession = Depends(get_db), user: Us
     await db.flush()
     for gid in group_ids:
         db.add(PorchPostGroup(post_id=post.id, group_id=gid))
+    rows: list[PorchPostMedia] = []
     for i, m in enumerate(body.media):
         row, fm = files[m.file_id]  # type: ignore[index]
-        db.add(PorchPostMedia(post_id=post.id, position=i, file_id=row.id, alt_text=m.alt_text.strip(), edit=media.clean_edit(m.edit, media.is_video(row, fm))))
+        pm = PorchPostMedia(post_id=post.id, position=i, file_id=row.id, alt_text=m.alt_text.strip(), edit=media.clean_edit(m.edit, media.is_video(row, fm)))
+        db.add(pm)
+        rows.append(pm)
     await db.flush()
+    if body.kind == "poll" and body.poll is not None:
+        await talk.add_poll(db, post, body.poll)
     post.mentions = await _mentions(db, post, body.mentions)
+    # Tags: only people who can see the post, asked before they show.
+    audience = await access.audience_ids(db, post)
+    asked: list[uuid.UUID] = []
+    for m, pm in zip(body.media, rows):
+        asked += await tags.sync(db, post, pm, m.tags, audience)
     prof = await core.profile(db, user.id)
     prof.last_groups = "all" if body.groups == "all" else [str(g) for g in group_ids]
     await db.commit()
     await db.refresh(post)
     await core.publish(await access.audience_ids(db, post), {"type": "post", "post_id": str(post.id)})
+    await activity.after_post(db, post, post.mentions or [], asked)
     return await post_out(db, user, post)
 
 
@@ -377,21 +427,27 @@ async def update_post(post_id: uuid.UUID, body: PostPatch, db: AsyncSession = De
         if body.life_event is None:
             raise core.bad("Say what happened")
         post.life_event = _life(body.life_event)
+    asked: list[uuid.UUID] = []
     if body.media is not None:
-        await _replace_media(db, user, post, body.media)
+        asked = await _replace_media(db, user, post, body.media)
+    before = set(post.mentions or [])
     if body.mentions is not None:
         post.mentions = await _mentions(db, post, body.mentions)
     if post.kind == "text" and not post.body and not post.link:
         raise core.bad("Write something first")
+    if post.kind == "poll" and not post.body:
+        raise core.bad("Ask a question first")
     post.edited_at = core.now()
     await db.commit()
     await db.refresh(post)
     await core.publish(await access.audience_ids(db, post), {"type": "post_change", "post_id": str(post.id)})
+    await activity.after_post(db, post, [m for m in (post.mentions or []) if m not in before], asked)
     return await post_out(db, user, post)
 
 
-async def _replace_media(db: AsyncSession, user: User, post: PorchPost, items: list[MediaIn]) -> None:
-    if post.kind == "text" and items:
+async def _replace_media(db: AsyncSession, user: User, post: PorchPost, items: list[MediaIn]) -> list[uuid.UUID]:
+    """Returns the people newly asked about a tag."""
+    if post.kind in ("text", "poll") and items:
         raise core.bad("A text post has no photos")
     if post.kind in PHOTO_KINDS and not items:
         raise core.bad("A photo post needs at least one photo. Delete the post instead.")
@@ -407,9 +463,11 @@ async def _replace_media(db: AsyncSession, user: User, post: PorchPost, items: l
             media.forget_renders(row.file_id, row.id)
             await db.delete(row)
     kinds: list[tuple[Any, Any]] = []
+    placed: list[PorchPostMedia] = []
     for i, m in enumerate(items):
         if m.id is not None:
             row = existing[m.id]
+            placed.append(row)
             f = await db.get(UserFile, row.file_id)
             fm = await db.get(FileMedia, row.file_id)
             new_edit = media.clean_edit(m.edit, media.is_video(f, fm)) if f is not None else None
@@ -420,11 +478,18 @@ async def _replace_media(db: AsyncSession, user: User, post: PorchPost, items: l
             kinds.append((f, fm))
         else:
             f, fm = files[m.file_id]  # type: ignore[index]
-            db.add(PorchPostMedia(post_id=post.id, position=i, file_id=f.id, alt_text=m.alt_text.strip(), edit=media.clean_edit(m.edit, media.is_video(f, fm))))
+            pm = PorchPostMedia(post_id=post.id, position=i, file_id=f.id, alt_text=m.alt_text.strip(), edit=media.clean_edit(m.edit, media.is_video(f, fm)))
+            db.add(pm)
+            placed.append(pm)
             kinds.append((f, fm))
     await db.flush()
     if post.kind in PHOTO_KINDS:
         post.kind = _kind_for(post.kind, [k for k in kinds if k[0] is not None])
+    audience = await access.audience_ids(db, post)
+    asked: list[uuid.UUID] = []
+    for m, pm in zip(items, placed):
+        asked += await tags.sync(db, post, pm, m.tags, audience)
+    return asked
 
 
 @router.delete("/posts/{post_id}", status_code=204)

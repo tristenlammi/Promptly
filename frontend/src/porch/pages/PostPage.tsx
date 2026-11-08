@@ -3,7 +3,7 @@ import { isAxiosError } from "axios";
 import { FileQuestion } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
-import { porchApi } from "@/api/porch";
+import { HEART, porchApi } from "@/api/porch";
 import { EmptyState, ItemButton } from "@/items/ui";
 
 import { postKey } from "../cache";
@@ -11,6 +11,7 @@ import { MediaCarousel } from "../components/MediaCarousel";
 import { PostCard } from "../components/PostCard";
 import { Column, LoadError, PageHeader, PostSkeleton } from "../components/ui";
 import { usePorch } from "../context";
+import { usePostTalk } from "../talkActions";
 
 /** One page for "deleted", "not shared with you" and "never existed". */
 export function Unavailable({ title, text }: { title: string; text: string }) {
@@ -36,6 +37,7 @@ export function PostPage({ postId }: { postId: string }) {
   const q = useQuery({ queryKey: postKey(postId), queryFn: () => porchApi.post(postId), retry: (n, err) => !(isAxiosError(err) && err.response?.status === 404) && n < 2 });
   const post = q.data;
   const twoUp = !isPhone && !!post && post.media.length > 0;
+  const { react } = usePostTalk();
 
   let body;
   if (q.isPending) body = <PostSkeleton />;
@@ -50,7 +52,13 @@ export function PostPage({ postId }: { postId: string }) {
     body = (
       <div className="grid grid-cols-[minmax(0,1fr)_320px] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] shadow-[var(--shadow-sm)]">
         <div className="flex items-center bg-[var(--surface-2)]">
-          <MediaCarousel media={post.media} label={`${post.author?.name ?? "Someone"}'s photos`} />
+          <MediaCarousel
+            media={post.media}
+            label={`${post.author?.name ?? "Someone"}'s photos`}
+            onDoubleTap={() => {
+              if (!post.reactions.mine) void react(post, HEART);
+            }}
+          />
         </div>
         <PostCard post={post} full media={false} className="border-l border-[var(--border)] md:rounded-none md:border-0 md:border-l md:shadow-none" />
       </div>
