@@ -3,6 +3,7 @@ import {
   Archive,
   ArchiveRestore,
   CloudOff,
+  Import,
   LayoutGrid,
   Lightbulb,
   ListChecks,
@@ -466,6 +467,10 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       <RailLink to="/notes/trash" active={!searching && place.view === "trash"} icon={Trash2} onNavigate={() => setDrawer(false)}>
         Trash
       </RailLink>
+      <div className="my-2 border-t border-[var(--border)]" />
+      <RailLink to={KEEP_IMPORT} icon={Import} active={false} onNavigate={() => setDrawer(false)}>
+        Import from Google Keep
+      </RailLink>
       {embedded && isPhone && (
         <button
           type="button"
@@ -652,7 +657,18 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     if (place.view === "reminders")
       return <Empty icon={AlarmClock} title="Notes with reminders appear here" body="Tap the bell on a note to be reminded about it. Reminders go in your Tasks too, with Done and Snooze on the reminder." />;
     if (place.view === "label") return <Empty icon={Tag} title="No notes with this label" body={currentLabel ? `Notes you label “${currentLabel.name}” appear here.` : "This label isn't on any of your notes."} />;
-    return <Empty icon={Lightbulb} title="Notes you add appear here" body={isPhone ? "Tap + to write one, or the list button for a checklist." : "Click “Take a note…” above to write one."} />;
+    return (
+      <Empty
+        icon={Lightbulb}
+        title="Notes you add appear here"
+        body={isPhone ? "Tap + to write one, or the list button for a checklist." : "Click “Take a note…” above to write one."}
+        action={
+          <Link to={KEEP_IMPORT} className="mt-1 inline-flex items-center gap-1.5 text-sm font-medium text-[var(--accent-text)] hover:underline">
+            <Import className="h-4 w-4" aria-hidden /> Bring your notes from Google Keep
+          </Link>
+        }
+      />
+    );
   })();
 
   const showComposer = !isPhone && !searching && (place.view === "home" || place.view === "label");
@@ -788,6 +804,9 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     </div>
   );
 }
+
+/** Moving in from Google Keep (N1.6): a Keep import on the Import page. */
+const KEEP_IMPORT = "/files/import?start=keep";
 
 function RailLink({ to, active, icon: Icon, dot, count, children, onNavigate }: { to: string; active: boolean; icon?: React.ComponentType<{ className?: string }>; dot?: string; count?: number; children: ReactNode; onNavigate: () => void }) {
   return (

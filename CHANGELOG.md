@@ -50,8 +50,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Notes: Send to… posts a note card in a room or to a person. Only people the note is shared with can open it; everyone else sees "This note isn't shared with you".
 - Notes: Make a copy (pictures and recordings come too) and Open as document (the note's words become a Document in your Files, and the note keeps a card that opens it), each with Undo.
 - Calendar: a link to `/calendar?new=1` with a title, notes, place, day and times opens a new event filled in.
+- Notes: bring your Google Keep notes across (Import from Google Keep in Notes, or Files → Import & export → Google Keep). Colours, pins, archived notes, labels, ticked lists, pictures and recordings come with them, with the dates you wrote them. Links Keep found stay in the note, notes in Keep's trash are left out, and importing the same Takeout again skips what's already in. Keep's older voice recordings are converted so browsers can play them. The Google Takeout import brings Keep notes too, along with Photos and Drive.
+- Export my library includes your notes: a Markdown file for each (colour, pin, labels, dates, reminder and who it's shared with at the top; lists as checkboxes; pictures and recordings linked) and a notes.json with all of them. Importing the export into another Promptly ("A folder of photos") brings the notes back with their colours, pins, labels, lists, formatting, pictures, recordings and transcripts, and importing it twice adds nothing new.
 
 ### Fixed
+- Notes: notes made while you were elsewhere in Promptly (an import, a chat) didn't show when you went back to Notes until the page was reloaded.
 - Notes: a note put back the way it was (an earlier version, or Undo) sometimes kept showing the newer words in an open note until it was reopened.
 - Notes: list tick boxes were plain white squares in dark mode; they now match the cards in both themes.
 - People picker (sharing in Notes, Files, Calendar, Rooms): each person in the list was a button inside a list option, which screen readers announce badly; the option itself is now what you pick.

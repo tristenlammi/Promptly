@@ -307,6 +307,11 @@ async def _process(db: AsyncSession, attachment_id: uuid.UUID, *, transcribe: bo
         att.duration_ms = duration_ms
     if peaks:
         att.peaks = peaks
+    if att.transcript_state == "done" and att.transcript:
+        # Its words came with it (an imported export): only the waveform was needed.
+        await db.commit()
+        await _touch(db, note_id)
+        return "done"
     cfg = await config(db)
     if not transcribe or not cfg.on:
         if att.transcript_state in (None, "pending", "working"):

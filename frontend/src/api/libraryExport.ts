@@ -18,7 +18,7 @@ export interface LibraryExport {
   expires: number;
   part_gb: number;
   bytes: number;
-  counts: { files: number; documents: number; photos: number; folders: number };
+  counts: { files: number; documents: number; photos: number; folders: number; notes?: number };
   parts: LibraryExportPart[];
 }
 

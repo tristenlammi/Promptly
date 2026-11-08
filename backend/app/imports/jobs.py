@@ -63,10 +63,15 @@ async def index(job_id: uuid.UUID | str) -> str:
     try:
         if not parts:
             raise ValueError("Upload the archive parts first.")
-        if source == "takeout":
+        if source in ("takeout", "keep"):
+            # A Keep import is a Takeout too (Notes N1.6): read the same way.
             scans = [await asyncio.to_thread(scan_part, job_dir(jid) / p["file"], i) for i, p in enumerate(parts)]
             plan, report = await asyncio.to_thread(build_plan, scans)
-            plan["source"] = "takeout"
+            plan["source"] = source
+            if source == "keep":
+                from app.imports.takeout import only_notes
+
+                plan, report = only_notes(plan, report)
         else:
             # A folder of photos or an Apple export (WP-10.3).
             from app.imports import folders
@@ -75,8 +80,12 @@ async def index(job_id: uuid.UUID | str) -> str:
             plan, report = await asyncio.to_thread(
                 lambda: folders.build_plan(scans, source=source, archive_names=[p["name"] for p in parts])
             )
-        if not plan["photos"] and not plan["drive"]:
-            raise ValueError("There are no photos, videos or files in these archives.")
+        if source == "keep" and not plan.get("notes"):
+            raise ValueError(
+                "There are no Google Keep notes in these archives. At takeout.google.com, choose Keep and add the parts Google sends."
+            )
+        if not plan["photos"] and not plan["drive"] and not plan.get("notes"):
+            raise ValueError("There are no photos, videos, files or notes in these archives.")
         await asyncio.to_thread(plan_path(jid).write_text, json.dumps(plan), "utf-8")
         state, error = "ready", None
     except Exception as exc:  # noqa: BLE001 — told to the person, not raised

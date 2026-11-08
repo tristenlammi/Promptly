@@ -194,7 +194,12 @@ function lose(ids: string[]) {
 // ------------------------------------------------------------------ start
 
 export async function initNotes(uid: string): Promise<void> {
-  if (get().uid === uid) return;
+  if (get().uid === uid) {
+    // Back in Notes after being elsewhere: notes made meanwhile (an import,
+    // chat, another device while the stream was closed) come in.
+    if (get().ready) void loadLists();
+    return;
+  }
   set({ uid, ready: false, known: {}, outbox: [], notes: {}, drafts: {}, loaded: { main: false, trash: false }, sync: "idle", lost: {} });
   const [ks, ops, drafts] = await Promise.all([
     notesDb.loadKnown(uid),
