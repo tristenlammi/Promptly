@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Check your gift card balance – Corner & Co</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Gill Sans",sans-serif;background:#f7f3ee}
+.c{width:340px;margin:60px auto;background:#fff;border-radius:12px;padding:24px;text-align:center}
+.c input{width:100%;box-sizing:border-box;padding:10px;margin:6px 0 12px;font-size:18px;text-align:center;letter-spacing:2px;border:1px solid #ccc}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.pad button{padding:14px;font-size:20px;border:1px solid #ddd;background:#fafafa;border-radius:8px}
+</style>
+</head>
+<body>
+<div class="c">
+  <h2>Gift card balance</h2>
+  <label for="gc-number">Gift card number</label>
+  <input id="gc-number" name="giftcard" type="text" inputmode="numeric" autocomplete="off">
+  <label for="gc-pin">4-digit PIN (scratch the back of the card)</label>
+  <input id="gc-pin" name="pin" type="password" readonly>
+  <div class="pad" id="pad">
+    <button type="button">1</button><button type="button">2</button><button type="button">3</button>
+    <button type="button">4</button><button type="button">5</button><button type="button">6</button>
+    <button type="button">7</button><button type="button">8</button><button type="button">9</button>
+    <button type="button" data-k="clear">C</button><button type="button">0</button><button type="button" data-k="ok">OK</button>
+  </div>
+</div>
+<script>
+document.getElementById('pad').addEventListener('click', function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  var pin = document.getElementById('gc-pin');
+  var k = b.getAttribute('data-k');
+  if (k === 'clear') pin.value = '';
+  else if (!k && pin.value.length < 4) pin.value += b.textContent;
+});
+window.__fixture = { state: function () { return {}; } };
+</script>
+</body>
+</html>

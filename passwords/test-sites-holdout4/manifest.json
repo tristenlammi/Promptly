@@ -1,0 +1,2669 @@
+[
+  {
+    "id": "h4-signin-01",
+    "category": "signin",
+    "description": "Shop account page in a utility CSS framework: labelled email and password with autocomplete hints, header product search and a footer discount sign-up.",
+    "path": "/fixtures/h4-signin-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#loginEmail",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#loginPassword",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#q",
+          "#nl-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-signin-02",
+    "category": "signin",
+    "description": "Single-page app with no form element: two inputs named only by aria-label, no ids or names, a div acting as the button.",
+    "path": "/fixtures/h4-signin-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": ".auth-box input[aria-label=\"Work email\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": ".auth-box input[aria-label=\"Password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-signin-03",
+    "category": "signin",
+    "description": "Social site log-in with placeholder-only fields (\"Phone, email or username\"), bracketed field names and a language picker in the footer.",
+    "path": "/fixtures/h4-signin-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"session[username_or_email]\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"session[password]\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#lang"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-signin-04",
+    "category": "signin",
+    "description": "Old forum header bar: table layout, the username box shows \"User Name\" as its value until focused, remember-me tick, and a forum search box in the sidebar.",
+    "path": "/fixtures/h4-signin-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#navbar_username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#navbar_password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#forum-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-signin-05",
+    "category": "signin",
+    "description": "Checkout gate with \"Returning customer\" log-in beside a \"New customer\" guest-checkout email box, plus a header search.",
+    "path": "/fixtures/h4-signin-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#rc-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#rc-password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hdr-search",
+          "#guest-email"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-signin-06",
+    "category": "signin",
+    "description": "Building-society internet banking with unusual labels: \"Customer number\" (numeric keyboard) and \"Passcode\", a remember-number tick and a security notice.",
+    "path": "/fixtures/h4-signin-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#custNo",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#passcode",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-signin-07",
+    "category": "signin",
+    "description": "Cinema site whose \"Log in\" header button opens a native dialog with the form; the header search stays on the page behind the backdrop.",
+    "path": "/fixtures/h4-signin-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#search"
+        ],
+        "advance": {
+          "click": "#open-login"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "dialog[open] #dlg-email",
+        "expected": [
+          {
+            "selector": "#dlg-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#dlg-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-signin-08",
+    "category": "signin",
+    "description": "Patient portal with floating labels placed after the inputs, \"Member ID or email\" as the identifier, and a show/hide password button that swaps the input type.",
+    "path": "/fixtures/h4-signin-08.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#f-user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#f-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-signin-09",
+    "category": "signin",
+    "description": "CRM log-in with generated ids and aria-labelledby labels, an off-screen \"website\" trap field, and an SSO company-email box inside a closed details element.",
+    "path": "/fixtures/h4-signin-09.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[id=\"_r_7_\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[id=\"_r_9_\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"website\"]",
+          "#sso-domain"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-signin-10",
+    "category": "signin",
+    "description": "Rewards app with \"Email\" and \"Mobile\" tabs; the mobile tab's phone and password boxes sit in a hidden panel.",
+    "path": "/fixtures/h4-signin-10.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#e-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#e-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#m-phone",
+          "#m-pass"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-multi-01",
+    "category": "multi-step",
+    "description": "Identifier first, then a progress bar and a fade to a \"Welcome\" step that shows the account as a text chip, keeps the identifier in a hidden input and asks for the password.",
+    "path": "/fixtures/h4-multi-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#identifierId",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#identifierNext"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "body[data-settled] #pw",
+        "expected": [
+          {
+            "selector": "#pw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#hiddenIdentifier"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-multi-02",
+    "category": "multi-step",
+    "description": "Email step slides left and the password step slides in from the right with a back arrow showing the address; the email input is hidden once the slide ends.",
+    "path": "/fixtures/h4-multi-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "input[name=\"loginfmt\"]",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#idSIButton9"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": ".stage[data-settled=\"pw\"]",
+        "expected": [
+          {
+            "selector": "input[name=\"passwd\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-multi-03",
+    "category": "multi-step",
+    "description": "Hosting control panel: username first, then the password box expands below while the username stays editable, so step two is a full sign-in.",
+    "path": "/fixtures/h4-multi-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#login-user",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#continue"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#pw-row.open",
+        "expected": [
+          {
+            "selector": "#login-user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#login-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-multi-04",
+    "category": "multi-step",
+    "description": "Brokerage log-in that swaps to a \"Check your phone\" view with a single one-time-code box after a short spinner.",
+    "path": "/fixtures/h4-multi-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#login-btn"
+        }
+      },
+      {
+        "kind": "otp",
+        "wait": "#mfa-view:not([hidden]) #mfa-code",
+        "expected": [
+          {
+            "selector": "#mfa-code",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password",
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "h4-multi-05",
+    "category": "multi-step",
+    "description": "Webmail sign-in across two real pages: the email page navigates to a password page that shows the address as text and keeps it in session storage.",
+    "path": "/fixtures/h4-multi-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#login-email",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#pw-page #login-password",
+        "expected": [
+          {
+            "selector": "#login-password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-multi-06",
+    "category": "multi-step",
+    "description": "Account chooser listing two remembered accounts as buttons; picking one shows a password step with that account as text and a hidden login hint.",
+    "path": "/fixtures/h4-multi-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [],
+        "advance": {
+          "click": "#acct-0"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#pw-step.ready",
+        "expected": [
+          {
+            "selector": "#chooser-pw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-multi-07",
+    "category": "multi-step",
+    "description": "Bank \"Online ID\" first, then a route change that removes the first form, shows a skeleton, then the chosen security picture and phrase above a \"Passcode\" box.",
+    "path": "/fixtures/h4-multi-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "#onlineId",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#onlineId-continue"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": "#sitekey-step #passcode-input",
+        "expected": [
+          {
+            "selector": "#passcode-input",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-iframe-01",
+    "category": "iframe",
+    "description": "Community site that embeds its log-in form from a same-origin page in an iframe beside the topic list; the site search is in the outer page.",
+    "path": "/fixtures/h4-iframe-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "iframe#login-frame[data-loaded]",
+        "expected": [
+          {
+            "selector": "#username",
+            "role": "username",
+            "frame": [
+              "#login-frame"
+            ]
+          },
+          {
+            "selector": "#password",
+            "role": "password",
+            "frame": [
+              "#login-frame"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#site-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-iframe-02",
+    "category": "iframe",
+    "description": "Help centre embedding a \"customer log-in\" widget served from a different origin; the widget reports edits to the host page with postMessage.",
+    "path": "/fixtures/h4-iframe-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "iframe#support-widget[data-loaded]",
+        "expected": [
+          {
+            "selector": "input[name=\"email\"]",
+            "role": "username",
+            "frame": [
+              "#support-widget"
+            ]
+          },
+          {
+            "selector": "input[name=\"password\"]",
+            "role": "password",
+            "frame": [
+              "#support-widget"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#kb-search"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-iframe-03",
+    "category": "iframe",
+    "description": "Learning platform that inserts a srcdoc iframe with the sign-in form about a second after load, built from a template element.",
+    "path": "/fixtures/h4-iframe-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "iframe#late-auth[data-loaded]",
+        "expected": [
+          {
+            "selector": "#lp-user",
+            "role": "username",
+            "frame": [
+              "#late-auth"
+            ]
+          },
+          {
+            "selector": "#lp-pass",
+            "role": "password",
+            "frame": [
+              "#late-auth"
+            ]
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-shadow-01",
+    "category": "shadow",
+    "description": "A single custom element with an open shadow root holding its own form, labels and inputs.",
+    "path": "/fixtures/h4-shadow-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "tern-login[data-ready]",
+        "expected": [
+          {
+            "selector": [
+              "tern-login",
+              "#user"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "tern-login",
+              "#pass"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-shadow-02",
+    "category": "shadow",
+    "description": "Design-system components three shadow roots deep: an app shell, an auth card, and a text-field component wrapping each native input.",
+    "path": "/fixtures/h4-shadow-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "app-shell[data-ready]",
+        "expected": [
+          {
+            "selector": [
+              "app-shell",
+              "auth-card",
+              "text-field[name=\"email\"]",
+              "input"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "app-shell",
+              "auth-card",
+              "text-field[name=\"password\"]",
+              "input"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-shadow-03",
+    "category": "shadow",
+    "description": "Layout component with a shadow root whose named slot shows light-DOM inputs; the inputs themselves are ordinary document nodes.",
+    "path": "/fixtures/h4-shadow-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "signin-layout[data-ready]",
+        "expected": [
+          {
+            "selector": "#si-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#si-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-framework-01",
+    "category": "framework",
+    "description": "React-style app that fetches its config JSON, then mounts a controlled form; inputs carry only data-testid and name, and values live in component state.",
+    "path": "/fixtures/h4-framework-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "#root form[data-mounted]",
+        "expected": [
+          {
+            "selector": "input[data-testid=\"login-email\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[data-testid=\"login-password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-framework-02",
+    "category": "framework",
+    "description": "Vue-style single-page app: the home view has a \"Sign in\" link to a hash route, which renders a login view whose inputs are bound to a reactive model on input events.",
+    "path": "/fixtures/h4-framework-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [],
+        "advance": {
+          "click": "#nav-login"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#app .login-view",
+        "expected": [
+          {
+            "selector": ".login-view input[data-v-3c1a]:not([type=\"password\"])",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": ".login-view input[type=\"password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-framework-03",
+    "category": "framework",
+    "description": "Controlled form that mounts after a skeleton and re-renders four times a second for a \"last synced\" clock, writing the model back into each input on every render.",
+    "path": "/fixtures/h4-framework-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "form.hyperion-login",
+        "expected": [
+          {
+            "selector": "input[name=\"email\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-framework-04",
+    "category": "framework",
+    "description": "Angular-style reactive form bootstrapped into app-root after half a second: formcontrolname attributes, ng-* state classes, labels inside mat-style wrappers.",
+    "path": "/fixtures/h4-framework-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "app-root app-login form",
+        "expected": [
+          {
+            "selector": "input[formcontrolname=\"userName\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[formcontrolname=\"passWord\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-01",
+    "category": "selfhosted",
+    "description": "NAS admin desktop: an \"Account\" step with an arrow button, then a password step greeting the user by name with a \"Stay signed in\" tick.",
+    "path": "/fixtures/h4-selfhost-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "email-first",
+        "expected": [
+          {
+            "selector": "input[name=\"username\"]",
+            "role": "username",
+            "frame": null
+          }
+        ],
+        "honeypots": [],
+        "advance": {
+          "click": "#login-next"
+        }
+      },
+      {
+        "kind": "password-next",
+        "wait": ".login-panel[data-phase=\"password\"]",
+        "expected": [
+          {
+            "selector": "input[name=\"current-password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-02",
+    "category": "selfhosted",
+    "description": "Home automation hub: the authorize page puts its log-in form two open shadow roots deep, with a \"keep me logged in\" tick and the client name in text.",
+    "path": "/fixtures/h4-selfhost-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "hearth-authorize[data-ready]",
+        "expected": [
+          {
+            "selector": [
+              "hearth-authorize",
+              "hearth-login-flow",
+              "input[name=\"username\"]"
+            ],
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": [
+              "hearth-authorize",
+              "hearth-login-flow",
+              "input[name=\"password\"]"
+            ],
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-03",
+    "category": "selfhosted",
+    "description": "Hypervisor web UI: a widget-toolkit login window over a dimmed console, generated ids, and read-only combo boxes for realm and language.",
+    "path": "/fixtures/h4-selfhost-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#textfield-1016-inputEl",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#textfield-1017-inputEl",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#combo-1018-inputEl",
+          "#combo-1019-inputEl"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-04",
+    "category": "selfhosted",
+    "description": "Media server sign-in: first a grid of user avatars and a \"Manual Login\" button, then a username and password form revealed in place.",
+    "path": "/fixtures/h4-selfhost-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [],
+        "advance": {
+          "click": "#btnManual"
+        }
+      },
+      {
+        "kind": "signin",
+        "wait": "#manualLoginForm:not(.hide)",
+        "expected": [
+          {
+            "selector": "#txtManualName",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#txtManualPassword",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-05",
+    "category": "selfhosted",
+    "description": "Metrics dashboard log-in rendered by a client bundle after a short delay: \"Email or username\" and \"Password\" with test ids, an OAuth button and a forgot link.",
+    "path": "/fixtures/h4-selfhost-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": "[data-testid=\"login-form\"]",
+        "expected": [
+          {
+            "selector": "input[name=\"user\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-06",
+    "category": "selfhosted",
+    "description": "Container manager log-in in an older two-way-binding framework: ng-model attributes, icon-prefixed inputs with placeholders only, and an OAuth link.",
+    "path": "/fixtures/h4-selfhost-06.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-07",
+    "category": "selfhosted",
+    "description": "Self-hosted git forge: \"Username or Email Address\" sign-in under a navbar with a repository search box, plus a hidden OpenID tab.",
+    "path": "/fixtures/h4-selfhost-07.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#user_name",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#navbar-search",
+          "#openid"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-08",
+    "category": "selfhosted",
+    "description": "Router admin \"Authorization Required\" page: a table form whose username box comes pre-filled with \"root\", and a password box.",
+    "path": "/fixtures/h4-selfhost-08.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"luci_username\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"luci_password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-09",
+    "category": "selfhosted",
+    "description": "Password-protected wiki \"Log In\" page: labels wrapping their inputs, one-letter field names, and a quick-search box in the page header.",
+    "path": "/fixtures/h4-selfhost-09.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"u\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"p\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#qsearch__in"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-10",
+    "category": "selfhosted",
+    "description": "Self-hosted notes app with a single password box and no username at all, as personal knowledge bases often have.",
+    "path": "/fixtures/h4-selfhost-10.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-11",
+    "category": "selfhosted",
+    "description": "IP camera embedded web server opened as a bare IP and port: uppercase old HTML, a font-tag table, short field names and a client-side hash on submit.",
+    "path": "/fixtures/h4-selfhost-11.html",
+    "host": "127.0.0.1",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"user\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"pass\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-12",
+    "category": "selfhosted",
+    "description": "Basic-auth style prompt drawn as a page: a centred sheet saying the server at an IP and port wants a username and password, with Cancel and Sign in.",
+    "path": "/fixtures/h4-selfhost-12.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#ba-user",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#ba-pass",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-13",
+    "category": "selfhosted",
+    "description": "Network ad-blocker admin: a password-only log-in box, a remember-for-a-week tick, a domain lookup box in the header and a collapsed \"Forgot password?\" note.",
+    "path": "/fixtures/h4-selfhost-13.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#loginpw",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#domain-search"
+        ]
+      }
+    ],
+    "state": {
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-14",
+    "category": "selfhosted",
+    "description": "Uptime monitor single-page app: the log-in card mounts after a delay with framework floating labels (input before label) and a remember-me switch.",
+    "path": "/fixtures/h4-selfhost-14.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "wait": ".form-container form",
+        "expected": [
+          {
+            "selector": "#floatingInput",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#floatingPassword",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-15",
+    "category": "selfhosted",
+    "description": "Torrent client web UI on a bare IP and port: no form element, two inputs in a div and an input-button with a click handler.",
+    "path": "/fixtures/h4-selfhost-15.html",
+    "host": "127.0.0.1",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#password",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-16",
+    "category": "selfhosted",
+    "description": "Build server log-in with servlet-container field names (j_username, j_password), a keep-me-signed-in tick and a simple centred panel.",
+    "path": "/fixtures/h4-selfhost-16.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#j_username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"j_password\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-selfhost-17",
+    "category": "selfhosted",
+    "description": "First-run setup of a container manager: create the initial administrator, username pre-filled with \"admin\", password and confirm, and a statistics tick.",
+    "path": "/fixtures/h4-selfhost-17.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#password",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#confirm_password",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h4-lang-01",
+    "category": "language",
+    "description": "French insurer customer area: \"Identifiant\" and \"Mot de passe\", no autocomplete hints, \"Se souvenir de moi\" tick.",
+    "path": "/fixtures/h4-lang-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#identifiant",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#motdepasse",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-lang-02",
+    "category": "language",
+    "description": "Spanish marketplace: \"Correo electrónico\" and \"Contraseña\" with \"Iniciar sesión\", a product search box in the header.",
+    "path": "/fixtures/h4-lang-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"correo\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"clave\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#buscar"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-lang-03",
+    "category": "language",
+    "description": "German utility customer portal: \"Benutzername\" and \"Kennwort\", \"Angemeldet bleiben\", labels in a definition-list layout.",
+    "path": "/fixtures/h4-lang-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#feld-benutzer",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#feld-kennwort",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-lang-04",
+    "category": "language",
+    "description": "Japanese online bookshop: \"メールアドレス\" and \"パスワード\", \"ログイン状態を保持する\", and a keyword search in the header.",
+    "path": "/fixtures/h4-lang-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "input[name=\"mail\"]",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"pass\"]",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#kw"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-lang-05",
+    "category": "language",
+    "description": "Brazilian Portuguese store: \"CPF ou e-mail\" as the identifier, \"Senha\", \"Entrar\" and \"Esqueci minha senha\".",
+    "path": "/fixtures/h4-lang-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signin",
+        "expected": [
+          {
+            "selector": "#login-cpf-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#login-senha",
+            "role": "password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "password": "password"
+    }
+  },
+  {
+    "id": "h4-signup-01",
+    "category": "signup",
+    "description": "Recipe site registration: email, password and confirm password with a terms tick; a newsletter box sits in the footer.",
+    "path": "/fixtures/h4-signup-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#reg-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#reg-pass",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#reg-pass2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#footer-news"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h4-signup-02",
+    "category": "signup",
+    "description": "Community sign-up with a public username, a separate email and a single new password with a live rules checklist and show toggle.",
+    "path": "/fixtures/h4-signup-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#su-username",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#su-email",
+            "role": "email",
+            "frame": null
+          },
+          {
+            "selector": "#su-password",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "username": "username",
+      "email": "email",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "h4-signup-03",
+    "category": "signup",
+    "description": "German bike shop registration: Vorname, Nachname, E-Mail-Adresse, Passwort and \"Passwort wiederholen\", without autocomplete hints.",
+    "path": "/fixtures/h4-signup-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#vorname",
+            "role": "first-name",
+            "frame": null
+          },
+          {
+            "selector": "#nachname",
+            "role": "last-name",
+            "frame": null
+          },
+          {
+            "selector": "#email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#passwort",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#passwort2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "first-name": "first-name",
+      "last-name": "last-name",
+      "username": "username",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h4-signup-04",
+    "category": "signup",
+    "description": "Craft marketplace sign-up with one password, a display:none bot trap, an optional referral code box and a \"how did you hear\" select.",
+    "path": "/fixtures/h4-signup-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "signup",
+        "expected": [
+          {
+            "selector": "#signup_email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#signup_password",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "input[name=\"hp_company\"]",
+          "#referral",
+          "#heard"
+        ]
+      }
+    ],
+    "state": {
+      "username": "username",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "h4-signup-05",
+    "category": "signup",
+    "description": "Travel site \"Join\" button opens a slide-in panel asking for full name, email and a password with a strength bar.",
+    "path": "/fixtures/h4-signup-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [],
+        "advance": {
+          "click": "#join-btn"
+        }
+      },
+      {
+        "kind": "signup",
+        "wait": "#join-panel[data-settled]",
+        "expected": [
+          {
+            "selector": "#j-name",
+            "role": "full-name",
+            "frame": null
+          },
+          {
+            "selector": "#j-email",
+            "role": "username",
+            "frame": null
+          },
+          {
+            "selector": "#j-pass",
+            "role": "new-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "full-name": "full-name",
+      "username": "username",
+      "new-password": "new-password"
+    }
+  },
+  {
+    "id": "h4-chpw-01",
+    "category": "change-password",
+    "description": "Accounting app settings page: a profile section with pre-filled display name and email, then a security section with current, new and confirm password.",
+    "path": "/fixtures/h4-chpw-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#cur-pw",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#new-pw",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#new-pw2",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#display-name",
+          "#profile-email"
+        ]
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h4-chpw-02",
+    "category": "change-password",
+    "description": "Reset page reached from an email link: new and confirm password only, with the account name in a hidden username input for password managers.",
+    "path": "/fixtures/h4-chpw-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#password",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#password_confirm",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#reset-username"
+        ]
+      }
+    ],
+    "state": {
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h4-chpw-03",
+    "category": "change-password",
+    "description": "French grocery delivery account: \"Mot de passe actuel\", \"Nouveau mot de passe\", \"Confirmer le nouveau mot de passe\", no autocomplete hints.",
+    "path": "/fixtures/h4-chpw-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "#mdp-actuel",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "#mdp-nouveau",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "#mdp-confirmation",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h4-chpw-04",
+    "category": "change-password",
+    "description": "Corporate \"Your password has expired\" page shown after log-in: the user name as plain text, then old password, new password and re-enter.",
+    "path": "/fixtures/h4-chpw-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "change-password",
+        "expected": [
+          {
+            "selector": "input[name=\"oldPassword\"]",
+            "role": "current-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"newPassword\"]",
+            "role": "new-password",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"newPassword2\"]",
+            "role": "confirm-password",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "current-password": "current-password",
+      "new-password": "new-password",
+      "confirm-password": "confirm-password"
+    }
+  },
+  {
+    "id": "h4-otp-01",
+    "category": "otp",
+    "description": "Cloud console two-factor page: one box with one-time-code autocomplete for an authenticator app, a trust-this-browser tick and a recovery-code link.",
+    "path": "/fixtures/h4-otp-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#totp",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "h4-otp-02",
+    "category": "otp",
+    "description": "Game account verification with six one-character boxes, aria-labels per digit, auto-advance and paste spreading.",
+    "path": "/fixtures/h4-otp-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": ".code-inputs input:nth-child(1)",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": ".code-inputs input:nth-child(2)",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": ".code-inputs input:nth-child(3)",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": ".code-inputs input:nth-child(4)",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": ".code-inputs input:nth-child(5)",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": ".code-inputs input:nth-child(6)",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp-digit": "otp"
+    }
+  },
+  {
+    "id": "h4-otp-03",
+    "category": "otp",
+    "description": "Spanish mobile carrier SMS check: \"Código de verificación\" box with a numeric keyboard and a resend countdown.",
+    "path": "/fixtures/h4-otp-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "input[name=\"sms_code\"]",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "h4-otp-04",
+    "category": "otp",
+    "description": "Document app new-device check: an alphanumeric \"XXXX-XXXX\" code emailed to the user, one text box with no autocomplete hint.",
+    "path": "/fixtures/h4-otp-04.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#email-code",
+            "role": "otp",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp": "otp"
+    }
+  },
+  {
+    "id": "h4-otp-05",
+    "category": "otp",
+    "description": "Ride-hailing phone check: four telephone-keyboard boxes for an SMS code, no labels beyond the heading.",
+    "path": "/fixtures/h4-otp-05.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "otp",
+        "expected": [
+          {
+            "selector": "#pin-1",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#pin-2",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#pin-3",
+            "role": "otp-digit",
+            "frame": null
+          },
+          {
+            "selector": "#pin-4",
+            "role": "otp-digit",
+            "frame": null
+          }
+        ],
+        "honeypots": []
+      }
+    ],
+    "state": {
+      "otp-digit": "otp"
+    }
+  },
+  {
+    "id": "h4-card-01",
+    "category": "card",
+    "description": "Outdoor shop checkout: name on card, a number box that groups digits as you type, month and year selects, CVC, and a coupon box in the order summary.",
+    "path": "/fixtures/h4-card-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "#cc-name",
+            "role": "card-name",
+            "frame": null
+          },
+          {
+            "selector": "#cc-number",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "#cc-exp-month",
+            "role": "card-exp-month",
+            "frame": null
+          },
+          {
+            "selector": "#cc-exp-year",
+            "role": "card-exp-year",
+            "frame": null
+          },
+          {
+            "selector": "#cc-csc",
+            "role": "card-cvv",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#coupon"
+        ]
+      }
+    ],
+    "state": {
+      "card-name": "card-name",
+      "card-number": "card-number",
+      "card-exp-month": "card-exp-month",
+      "card-exp-year": "card-exp-year",
+      "card-cvv": "card-cvv"
+    }
+  },
+  {
+    "id": "h4-card-02",
+    "category": "card",
+    "description": "Hosted payment fields: the name box is on the shop page, while number, expiry and CVC each sit in their own iframe from another origin and talk to the page by postMessage.",
+    "path": "/fixtures/h4-card-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "wait": "#pay-form[data-frames-ready]",
+        "expected": [
+          {
+            "selector": "#cardholder",
+            "role": "card-name",
+            "frame": null
+          },
+          {
+            "selector": "input[name=\"cardnumber\"]",
+            "role": "card-number",
+            "frame": [
+              "#cf-number"
+            ]
+          },
+          {
+            "selector": "input[name=\"exp-date\"]",
+            "role": "card-exp",
+            "frame": [
+              "#cf-expiry"
+            ]
+          },
+          {
+            "selector": "input[name=\"cvc\"]",
+            "role": "card-cvv",
+            "frame": [
+              "#cf-cvc"
+            ]
+          }
+        ],
+        "honeypots": [
+          "#gift-note"
+        ]
+      }
+    ],
+    "state": {
+      "card-name": "card-name",
+      "card-number": "card-number",
+      "card-exp": "card-exp",
+      "card-cvv": "card-cvv"
+    }
+  },
+  {
+    "id": "h4-card-03",
+    "category": "card",
+    "description": "Charity donation page: amount buttons and an \"other amount\" number box, then card number, a combined MM/YY expiry with a slash mask, CVV and name on card.",
+    "path": "/fixtures/h4-card-03.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "card",
+        "expected": [
+          {
+            "selector": "#dn-card",
+            "role": "card-number",
+            "frame": null
+          },
+          {
+            "selector": "#dn-exp",
+            "role": "card-exp",
+            "frame": null
+          },
+          {
+            "selector": "#dn-cvv",
+            "role": "card-cvv",
+            "frame": null
+          },
+          {
+            "selector": "#dn-name",
+            "role": "card-name",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#other-amount"
+        ]
+      }
+    ],
+    "state": {
+      "card-number": "card-number",
+      "card-exp": "card-exp",
+      "card-cvv": "card-cvv",
+      "card-name": "card-name"
+    }
+  },
+  {
+    "id": "h4-identity-01",
+    "category": "identity",
+    "description": "Bakery delivery address without autocomplete hints: full name, two address lines, suburb, state select, postcode, country select, phone, and a delivery-notes box.",
+    "path": "/fixtures/h4-identity-01.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "identity",
+        "expected": [
+          {
+            "selector": "#ship-name",
+            "role": "full-name",
+            "frame": null
+          },
+          {
+            "selector": "#ship-line1",
+            "role": "address1",
+            "frame": null
+          },
+          {
+            "selector": "#ship-line2",
+            "role": "address2",
+            "frame": null
+          },
+          {
+            "selector": "#ship-suburb",
+            "role": "city",
+            "frame": null
+          },
+          {
+            "selector": "#ship-state",
+            "role": "state",
+            "frame": null
+          },
+          {
+            "selector": "#ship-postcode",
+            "role": "postcode",
+            "frame": null
+          },
+          {
+            "selector": "#ship-country",
+            "role": "country",
+            "frame": null
+          },
+          {
+            "selector": "#ship-phone",
+            "role": "phone",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#ship-notes"
+        ]
+      }
+    ],
+    "state": {
+      "full-name": "full-name",
+      "address1": "address1",
+      "address2": "address2",
+      "city": "city",
+      "state": "state",
+      "postcode": "postcode",
+      "country": "country",
+      "phone": "phone"
+    }
+  },
+  {
+    "id": "h4-identity-02",
+    "category": "identity",
+    "description": "Software billing profile with autocomplete hints: first and last name, company, address, city, ZIP, country select and phone, plus a VAT number box.",
+    "path": "/fixtures/h4-identity-02.html",
+    "negative": false,
+    "steps": [
+      {
+        "kind": "identity",
+        "expected": [
+          {
+            "selector": "#bp-first",
+            "role": "first-name",
+            "frame": null
+          },
+          {
+            "selector": "#bp-last",
+            "role": "last-name",
+            "frame": null
+          },
+          {
+            "selector": "#bp-company",
+            "role": "company",
+            "frame": null
+          },
+          {
+            "selector": "#bp-address",
+            "role": "address1",
+            "frame": null
+          },
+          {
+            "selector": "#bp-city",
+            "role": "city",
+            "frame": null
+          },
+          {
+            "selector": "#bp-zip",
+            "role": "postcode",
+            "frame": null
+          },
+          {
+            "selector": "#bp-country",
+            "role": "country",
+            "frame": null
+          },
+          {
+            "selector": "#bp-phone",
+            "role": "phone",
+            "frame": null
+          }
+        ],
+        "honeypots": [
+          "#bp-vat"
+        ]
+      }
+    ],
+    "state": {
+      "first-name": "first-name",
+      "last-name": "last-name",
+      "company": "company",
+      "address1": "address1",
+      "city": "city",
+      "postcode": "postcode",
+      "country": "country",
+      "phone": "phone"
+    }
+  },
+  {
+    "id": "h4-neg-01",
+    "category": "negative",
+    "description": "Help-centre search results: the big search box holds the query \"reset password\", with a sort select beside it.",
+    "path": "/fixtures/h4-neg-01.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "search",
+        "expected": [],
+        "honeypots": [
+          "#q",
+          "#sort"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-02",
+    "category": "negative",
+    "description": "Newsletter landing page: first name and email with a Subscribe button, nothing else.",
+    "path": "/fixtures/h4-neg-02.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "newsletter",
+        "expected": [],
+        "honeypots": [
+          "#nl-first",
+          "#nl-email"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-03",
+    "category": "negative",
+    "description": "Blog post comment form: name, email \"(will not be published)\", website and the comment itself.",
+    "path": "/fixtures/h4-neg-03.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#author",
+          "#email",
+          "#url",
+          "#comment"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-04",
+    "category": "negative",
+    "description": "Bot check before a download: a box drawn on a canvas shows a code, and one text box asks you to type the characters from the box.",
+    "path": "/fixtures/h4-neg-04.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#captcha_answer"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-05",
+    "category": "negative",
+    "description": "Password strength demo on a security blog: one password box with a live meter and crack-time estimate, used only to test a made-up password.",
+    "path": "/fixtures/h4-neg-05.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#pw-test"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-06",
+    "category": "negative",
+    "description": "Small-business contact form: name, email, phone, a subject select and a message.",
+    "path": "/fixtures/h4-neg-06.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#cf-name",
+          "#cf-email",
+          "#cf-phone",
+          "#cf-subject",
+          "#cf-message"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-07",
+    "category": "negative",
+    "description": "Shopping cart: quantity number boxes for two items and a promo code box with an Apply button.",
+    "path": "/fixtures/h4-neg-07.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#qty-1",
+          "#qty-2",
+          "#promo"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-08",
+    "category": "negative",
+    "description": "Gift card balance check: a card number box and a PIN box filled from an on-screen keypad (the PIN box is read-only and masked).",
+    "path": "/fixtures/h4-neg-08.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#gc-number",
+          "#gc-pin"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-09",
+    "category": "negative",
+    "description": "Wi-Fi QR code generator: network name, network password (masked), security select; makes a code for guests to scan.",
+    "path": "/fixtures/h4-neg-09.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#ssid",
+          "#wifi-pass",
+          "#enc"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-10",
+    "category": "negative",
+    "description": "Product page delivery estimator: quantity box, a postcode box and a country select to work out shipping cost.",
+    "path": "/fixtures/h4-neg-10.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#qty",
+          "#est-postcode",
+          "#est-country"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-11",
+    "category": "negative",
+    "description": "Support chat widget opened in the corner: optional name and email for a transcript, and a message box.",
+    "path": "/fixtures/h4-neg-11.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#chat-name",
+          "#chat-email",
+          "#chat-msg"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-12",
+    "category": "negative",
+    "description": "Domain name availability checker: a name box and a top-level-domain select with a Search button.",
+    "path": "/fixtures/h4-neg-12.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "search",
+        "expected": [],
+        "honeypots": [
+          "#domain",
+          "#tld"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-13",
+    "category": "negative",
+    "description": "Age gate in front of a winery site: day, month and year selects for the date of birth and a country select.",
+    "path": "/fixtures/h4-neg-13.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#dob-day",
+          "#dob-month",
+          "#dob-year",
+          "#age-country"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-14",
+    "category": "negative",
+    "description": "Developer settings page that has just created an access token: a read-only box shows the new token, next to boxes for another token's name and expiry.",
+    "path": "/fixtures/h4-neg-14.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#new-token",
+          "#token-name",
+          "#token-exp"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-15",
+    "category": "negative",
+    "description": "Create-a-poll form in a team app: question, three answer options and a closing date.",
+    "path": "/fixtures/h4-neg-15.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#poll-q",
+          "#opt-1",
+          "#opt-2",
+          "#opt-3",
+          "#poll-close"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "h4-neg-16",
+    "category": "negative",
+    "description": "Order tracking page for guests: order number and the email used at checkout, no account involved.",
+    "path": "/fixtures/h4-neg-16.html",
+    "negative": true,
+    "steps": [
+      {
+        "kind": "none",
+        "expected": [],
+        "honeypots": [
+          "#order-no",
+          "#track-email"
+        ]
+      }
+    ]
+  }
+]

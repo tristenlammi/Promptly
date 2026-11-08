@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join Pixelgrove</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px "Inter",sans-serif;background:#0f172a;color:#e2e8f0}
+.card{width:400px;margin:60px auto;background:#1e293b;border-radius:12px;padding:28px}
+.f{margin-bottom:14px}.f label{display:block;margin-bottom:5px;font-size:13px;color:#94a3b8}
+.f input{width:100%;box-sizing:border-box;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:8px;color:#fff}
+.pw{position:relative}.pw button{position:absolute;right:6px;top:6px;background:none;border:0;color:#38bdf8}
+ul.rules{list-style:none;padding:0;font-size:12px;color:#94a3b8}ul.rules li.ok{color:#4ade80}
+.go{width:100%;padding:11px;background:#38bdf8;border:0;border-radius:8px;font-weight:600}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 style="font-size:22px">Create your Pixelgrove account</h1>
+  <form action="#" onsubmit="return false">
+    <div class="f"><label for="su-username">Username</label><input id="su-username" name="username" type="text" autocomplete="username" maxlength="20"><small>This is your public name. Letters, numbers and underscores.</small></div>
+    <div class="f"><label for="su-email">Email address</label><input id="su-email" name="email" type="email" autocomplete="email"></div>
+    <div class="f"><label for="su-password">Password</label><div class="pw"><input id="su-password" name="password" type="password" autocomplete="new-password" aria-describedby="rules"><button type="button" id="toggle">Show</button></div>
+      <ul class="rules" id="rules"><li data-r="len">At least 10 characters</li><li data-r="num">One number</li><li data-r="case">Upper and lower case</li></ul></div>
+    <button class="go" type="submit">Create account</button>
+  </form>
+</div>
+<script>
+var pw = document.getElementById('su-password');
+pw.addEventListener('input', function () {
+  var v = pw.value;
+  var checks = { len: v.length >= 10, num: /[0-9]/.test(v), case: /[a-z]/.test(v) && /[A-Z]/.test(v) };
+  document.querySelectorAll('#rules li').forEach(function (li) { li.classList.toggle('ok', checks[li.getAttribute('data-r')]); });
+});
+document.getElementById('toggle').addEventListener('click', function () { pw.type = pw.type === 'password' ? 'text' : 'password'; });
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#su-username");
+  o["email"] = val("#su-email");
+  o["new-password"] = val("#su-password");
+  return o;
+} };
+</script>
+</body>
+</html>

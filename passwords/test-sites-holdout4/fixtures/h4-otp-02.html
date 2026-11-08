@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verify it's you – Tallyho Games</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Rubik",sans-serif;background:#1b1036;color:#fff}
+.c{width:420px;margin:100px auto;text-align:center}
+.code-inputs{display:flex;gap:10px;justify-content:center;margin:24px 0}
+.code-inputs input{width:46px;height:56px;text-align:center;font-size:24px;border-radius:8px;border:2px solid #6d4bd8;background:#2a1a52;color:#fff}
+</style>
+</head>
+<body>
+<div class="c">
+  <h1>Check your email</h1>
+  <p>Enter the 6-digit code we sent to r•••@mail.example</p>
+  <form action="#" onsubmit="return false">
+    <div class="code-inputs" role="group" aria-label="Verification code">
+      <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 1 of 6">
+      <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 2 of 6">
+      <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 3 of 6">
+      <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 4 of 6">
+      <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 5 of 6">
+      <input type="text" inputmode="numeric" maxlength="1" aria-label="Digit 6 of 6">
+    </div>
+    <button type="submit">Verify</button>
+  </form>
+</div>
+<script>
+var boxes = Array.prototype.slice.call(document.querySelectorAll('.code-inputs input'));
+boxes.forEach(function (b, i) {
+  b.addEventListener('input', function () {
+    if (b.value.length > 1) b.value = b.value.slice(-1);
+    if (b.value && boxes[i + 1]) boxes[i + 1].focus();
+  });
+  b.addEventListener('keydown', function (e) { if (e.key === 'Backspace' && !b.value && boxes[i - 1]) boxes[i - 1].focus(); });
+  b.addEventListener('paste', function (e) {
+    var t = (e.clipboardData.getData('text') || '').replace(/[^0-9]/g, '');
+    if (!t) return;
+    e.preventDefault();
+    for (var k = 0; k < boxes.length; k++) boxes[k].value = t.charAt(k) || '';
+  });
+});
+window.__fixture = { state: function () { return { otp: boxes.map(function (b) { return b.value; }).join('') }; } };
+</script>
+</body>
+</html>

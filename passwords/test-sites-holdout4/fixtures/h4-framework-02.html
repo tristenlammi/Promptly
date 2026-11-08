@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fieldnote Surveys</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Nunito",sans-serif;background:#f0fdf4}
+nav{display:flex;gap:18px;padding:14px 26px;background:#14532d}nav a{color:#dcfce7;text-decoration:none}
+.hero{padding:60px;text-align:center}
+.login-view{width:360px;margin:50px auto;background:#fff;padding:26px;border-radius:12px}
+.login-view label{display:block;margin:12px 0 4px;font-size:13px}
+.login-view input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #86efac;border-radius:8px}
+</style>
+</head>
+<body>
+<div id="app">
+  <nav><a href="#/">Fieldnote</a><a href="#/pricing">Pricing</a><a href="#/login" id="nav-login">Sign in</a></nav>
+  <main id="view"></main>
+</div>
+<script>
+if (location.hash) history.replaceState(null, '', location.pathname);
+var model = { login: '', password: '' };
+function home() {
+  return '<section class="hero" data-v-3c1a><h1 data-v-3c1a>Surveys your field teams will actually fill in</h1><p data-v-3c1a>Offline forms, photo capture and GPS stamps.</p></section>';
+}
+function login() {
+  return '<section class="login-view" data-v-3c1a><h2 data-v-3c1a>Sign in</h2><form data-v-3c1a>' +
+    '<label data-v-3c1a>Login</label><input data-v-3c1a data-model="login" type="text" autocomplete="username">' +
+    '<label data-v-3c1a>Password</label><input data-v-3c1a data-model="password" type="password" autocomplete="current-password">' +
+    '<button data-v-3c1a type="submit">Sign in</button></form></section>';
+}
+function route() {
+  var view = document.getElementById('view');
+  view.innerHTML = location.hash === '#/login' ? login() : home();
+  view.querySelectorAll('[data-model]').forEach(function (el) {
+    var key = el.getAttribute('data-model');
+    el.value = model[key];
+    el.addEventListener('input', function () { model[key] = el.value; });
+  });
+  var f = view.querySelector('form');
+  if (f) f.addEventListener('submit', function (e) { e.preventDefault(); });
+}
+window.addEventListener('hashchange', route);
+route();
+window.__fixture = { state: function () { return { username: model.login, password: model.password }; } };
+</script>
+</body>
+</html>

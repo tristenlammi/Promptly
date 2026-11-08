@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harborview</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#f2f4f7;font:14px "Helvetica Neue",sans-serif}
+.simple-box{width:420px;margin:90px auto;background:#fff;border-radius:8px;padding:30px;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.input-group{display:flex;margin-bottom:14px}
+.input-group-addon{width:38px;display:grid;place-items:center;background:#eef1f5;border:1px solid #ccd;border-right:0;border-radius:4px 0 0 4px}
+.form-control{flex:1;padding:9px;border:1px solid #ccd;border-radius:0 4px 4px 0}
+.btn-primary{background:#1d64c4;color:#fff;border:0;padding:9px 20px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="simple-box" ng-controller="AuthenticationController as ctrl">
+  <h2 style="color:#1d64c4">Harborview</h2>
+  <form class="simple-box-form form-horizontal" name="loginForm" onsubmit="return false">
+    <div class="input-group"><span class="input-group-addon">👤</span>
+      <input id="username" type="text" class="form-control" name="username" ng-model="ctrl.formValues.Username" auto-focus placeholder="Username" data-cy="auth-usernameInput"></div>
+    <div class="input-group"><span class="input-group-addon">🔒</span>
+      <input id="password" type="password" class="form-control" name="password" ng-model="ctrl.formValues.Password" autocomplete="off" placeholder="Password" data-cy="auth-passwordInput"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <a href="#">Login with OAuth</a>
+      <button type="submit" class="btn-primary" data-cy="auth-loginButton">Login</button>
+    </div>
+  </form>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#username");
+  o["password"] = val("#password");
+  return o;
+} };
+</script>
+</body>
+</html>

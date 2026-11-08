@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in [Butlerbot]</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#f8f8f8;font:14px "Segoe UI",sans-serif}
+.simple-page{width:340px;margin:100px auto;text-align:center}
+.logo{width:72px;height:72px;margin:0 auto;border-radius:50%;background:#d24939}
+.formRow{margin:10px 0;text-align:left}
+.bb-input{width:100%;box-sizing:border-box;padding:10px;border:2px solid #ccc;border-radius:6px}
+.bb-button{width:100%;padding:10px;background:#0b6aa2;color:#fff;border:0;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="simple-page">
+  <div class="logo"></div>
+  <h1>Welcome to Butlerbot!</h1>
+  <form method="post" name="login" action="#" onsubmit="return false">
+    <div class="formRow"><input autocorrect="off" autocomplete="off" name="j_username" id="j_username" placeholder="Username" type="text" class="bb-input" autocapitalize="off" aria-label="Username"></div>
+    <div class="formRow"><input name="j_password" placeholder="Password" type="password" class="bb-input" aria-label="Password"></div>
+    <div class="formRow"><label><input type="checkbox" id="remember_me" name="remember_me"> Keep me signed in</label></div>
+    <input name="from" type="hidden" value="/">
+    <button type="submit" class="bb-button" name="Submit">Sign in</button>
+  </form>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#j_username");
+  o["password"] = val("input[name=\"j_password\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

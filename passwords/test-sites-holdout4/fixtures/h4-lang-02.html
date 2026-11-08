@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Iniciar sesión | Mercadillo Azul</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px Helvetica,sans-serif;background:#eef4fb}
+header{background:#1565c0;padding:12px 30px;display:flex;gap:20px;align-items:center;color:#fff}
+header input{flex:1;padding:8px;border:0;border-radius:4px}
+.caja{width:380px;margin:50px auto;background:#fff;border-radius:8px;padding:28px}
+.caja label{display:block;margin:12px 0 4px;font-size:14px}
+.caja input[type=email],.caja input[type=password]{width:100%;box-sizing:border-box;padding:10px;border:1px solid #9bb5d6;border-radius:6px}
+.boton{margin-top:18px;width:100%;padding:11px;background:#1565c0;color:#fff;border:0;border-radius:6px}
+</style>
+</head>
+<body>
+<header><b>Mercadillo Azul</b><input type="search" id="buscar" placeholder="Buscar productos, marcas y más…"></header>
+<div class="caja">
+  <h1 style="font-size:21px">¡Hola! Ingresa tu correo y contraseña</h1>
+  <form action="#" onsubmit="return false">
+    <label>Correo electrónico<input type="email" name="correo"></label>
+    <label>Contraseña<input type="password" name="clave"></label>
+    <button class="boton" type="submit">Iniciar sesión</button>
+  </form>
+  <p><a href="#">¿Olvidaste tu contraseña?</a><br><a href="#">Crear cuenta</a></p>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("input[name=\"correo\"]");
+  o["password"] = val("input[name=\"clave\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

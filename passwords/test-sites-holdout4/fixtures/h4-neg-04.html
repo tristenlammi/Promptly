@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security check – Openfold Downloads</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px Arial,sans-serif;background:#eceff1}
+.c{width:380px;margin:100px auto;background:#fff;padding:26px;border-radius:6px;text-align:center}
+canvas{border:1px solid #999;background:#f5f5dc}
+input{width:180px;padding:9px;font-size:18px;text-align:center;letter-spacing:3px}
+</style>
+</head>
+<body>
+<div class="c">
+  <h2>One more step</h2>
+  <p>Please type the characters you see in the box below.</p>
+  <canvas id="cap" width="200" height="60" aria-label="Security code image"></canvas>
+  <p><a href="#" id="refresh">Show a different code</a> · <a href="#">Audio code</a></p>
+  <form action="#" onsubmit="return false">
+    <label for="captcha_answer">Characters from the box</label><br>
+    <input id="captcha_answer" name="captcha_answer" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="6">
+    <p><button type="submit">Continue to download</button></p>
+  </form>
+</div>
+<script>
+var ctx = document.getElementById('cap').getContext('2d');
+ctx.font = 'italic bold 30px serif';
+ctx.fillStyle = '#4a3b2a';
+'K7QM4X'.split('').forEach(function (ch, i) { ctx.save(); ctx.translate(20 + i * 28, 40); ctx.rotate((i % 2 ? 1 : -1) * 0.2); ctx.fillText(ch, 0, 0); ctx.restore(); });
+ctx.strokeStyle = '#999'; ctx.beginPath(); ctx.moveTo(0, 20); ctx.bezierCurveTo(60, 60, 140, 0, 200, 40); ctx.stroke();
+window.__fixture = { state: function () { return {}; } };
+</script>
+</body>
+</html>

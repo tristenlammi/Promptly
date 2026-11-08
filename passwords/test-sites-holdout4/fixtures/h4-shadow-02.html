@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brindle Studio</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#18181b;font:14px "Atkinson Hyperlegible",sans-serif;color:#f4f4f5}
+</style>
+</head>
+<body>
+<app-shell></app-shell>
+<script>
+customElements.define('text-field', class extends HTMLElement {
+  connectedCallback() {
+    var r = this.attachShadow({ mode: 'open' });
+    var type = this.getAttribute('type') || 'text';
+    r.innerHTML = '<style>:host{display:block;margin-bottom:16px}label{display:block;font-size:12px;color:#a1a1aa;margin-bottom:4px}input{width:100%;box-sizing:border-box;padding:10px;background:#27272a;color:#fff;border:1px solid #3f3f46;border-radius:6px}</style>' +
+      '<label part="label" for="control"></label><input id="control" part="input">';
+    r.querySelector('label').textContent = this.getAttribute('label');
+    var input = r.querySelector('input');
+    input.type = type;
+    input.name = this.getAttribute('name');
+    if (this.getAttribute('autocomplete')) input.autocomplete = this.getAttribute('autocomplete');
+  }
+  get value() { return this.shadowRoot.querySelector('input').value; }
+});
+customElements.define('auth-card', class extends HTMLElement {
+  connectedCallback() {
+    var r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<style>.card{width:360px;margin:80px auto;padding:28px;background:#09090b;border:1px solid #27272a;border-radius:12px}button{width:100%;padding:10px;border:0;border-radius:6px;background:#f97316;color:#000;font-weight:600}</style>' +
+      '<div class="card"><h2>Sign in to Brindle</h2>' +
+      '<text-field name="email" label="Email" type="email" autocomplete="username"></text-field>' +
+      '<text-field name="password" label="Password" type="password" autocomplete="current-password"></text-field>' +
+      '<button type="button">Continue</button></div>';
+  }
+});
+customElements.define('app-shell', class extends HTMLElement {
+  connectedCallback() {
+    var r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<style>nav{padding:14px 24px;border-bottom:1px solid #27272a}</style><nav>Brindle Studio</nav><auth-card></auth-card>';
+    this.setAttribute('data-ready', '');
+  }
+});
+window.__fixture = { state: function () {
+  var card = document.querySelector('app-shell').shadowRoot.querySelector('auth-card').shadowRoot;
+  return { username: card.querySelector('text-field[name="email"]').value, password: card.querySelector('text-field[name="password"]').value };
+} };
+</script>
+</body>
+</html>

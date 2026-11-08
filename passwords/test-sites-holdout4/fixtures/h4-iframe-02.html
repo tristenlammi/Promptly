@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cobalt Support – Help Centre</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Open Sans",Arial,sans-serif;background:#f5f7fb}
+.hero{background:#1e3a8a;color:#fff;padding:40px;text-align:center}
+.hero input{width:60%;padding:12px;border-radius:6px;border:0;font-size:16px}
+.grid{display:grid;grid-template-columns:2fr 1fr;gap:24px;padding:30px 40px}
+iframe{width:100%;height:300px;border:0;border-radius:8px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.15)}
+</style>
+</head>
+<body>
+<div class="hero"><h1>How can we help?</h1><input type="search" id="kb-search" placeholder="Search articles"></div>
+<div class="grid">
+  <div><h2>Popular articles</h2><ul><li>Changing your billing date</li><li>Exporting invoices</li><li>Adding a team member</li></ul></div>
+  <div><h3>Customers: log in for faster help</h3><iframe id="support-widget" title="Customer log-in"></iframe></div>
+</div>
+<script>
+var relayed = {};
+window.addEventListener('message', function (e) {
+  if (e.data && e.data.type === 'cobalt-widget-state') relayed = e.data.state;
+});
+var other = location.hostname === '127.0.0.1' ? 'localhost' : '127.0.0.1';
+var w = document.getElementById('support-widget');
+w.addEventListener('load', function () { w.setAttribute('data-loaded', ''); });
+w.src = location.protocol + '//' + other + ':' + location.port + '/fixtures/_frames/h4-iframe-02-widget.html';
+window.__fixture = { state: function () { return Object.assign({}, relayed); } };
+</script>
+</body>
+</html>

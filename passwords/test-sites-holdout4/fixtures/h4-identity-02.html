@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Billing details – Tessellate</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px "Inter",sans-serif;background:#f8f9fb}
+.card{width:560px;margin:40px auto;background:#fff;border:1px solid #e1e4ea;border-radius:8px;padding:24px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.f label{display:block;font-size:12px;font-weight:600;margin-bottom:4px}
+.f input,.f select{width:100%;box-sizing:border-box;padding:8px;border:1px solid #cdd2db;border-radius:6px}
+.full{grid-column:1 / -1}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Billing details</h2>
+  <form action="#" onsubmit="return false">
+    <div class="grid">
+      <div class="f"><label for="bp-first">First name</label><input id="bp-first" name="first_name" autocomplete="given-name"></div>
+      <div class="f"><label for="bp-last">Last name</label><input id="bp-last" name="last_name" autocomplete="family-name"></div>
+      <div class="f full"><label for="bp-company">Company</label><input id="bp-company" name="company" autocomplete="organization"></div>
+      <div class="f full"><label for="bp-address">Address</label><input id="bp-address" name="address" autocomplete="address-line1"></div>
+      <div class="f"><label for="bp-city">City</label><input id="bp-city" name="city" autocomplete="address-level2"></div>
+      <div class="f"><label for="bp-zip">ZIP / Postal code</label><input id="bp-zip" name="zip" autocomplete="postal-code"></div>
+      <div class="f"><label for="bp-country">Country</label><select id="bp-country" name="country" autocomplete="country"><option value="">Select…</option><option value="CA">Canada</option><option value="IE">Ireland</option><option value="US">United States</option></select></div>
+      <div class="f"><label for="bp-phone">Phone</label><input id="bp-phone" name="phone" type="tel" autocomplete="tel"></div>
+      <div class="f full"><label for="bp-vat">VAT / Tax ID (optional)</label><input id="bp-vat" name="tax_id"></div>
+    </div>
+    <p><button type="submit">Save billing details</button></p>
+  </form>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["first-name"] = val("#bp-first");
+  o["last-name"] = val("#bp-last");
+  o["company"] = val("#bp-company");
+  o["address1"] = val("#bp-address");
+  o["city"] = val("#bp-city");
+  o["postcode"] = val("#bp-zip");
+  o["country"] = val("#bp-country");
+  o["phone"] = val("#bp-phone");
+  return o;
+} };
+</script>
+</body>
+</html>

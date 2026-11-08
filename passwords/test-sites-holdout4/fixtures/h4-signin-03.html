@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Log in to Chirpline</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px system-ui,Segoe UI,sans-serif;background:#fff;color:#0f1419}
+.wrap{max-width:360px;margin:60px auto;text-align:left}
+.bird{width:40px;height:40px;border-radius:50%;background:#1d9bf0;margin-bottom:24px}
+h1{font-size:30px;margin:0 0 28px}
+.in{display:block;width:100%;box-sizing:border-box;padding:16px 10px;margin-bottom:18px;border:1px solid #cfd9de;border-radius:4px;font-size:17px}
+.btn{width:100%;padding:12px;border-radius:999px;border:0;background:#0f1419;color:#fff;font-weight:700;font-size:15px}
+.links{display:flex;justify-content:space-between;margin-top:20px;font-size:14px}
+.links a{color:#1d9bf0;text-decoration:none}
+footer{text-align:center;color:#536471;font-size:13px;margin-top:80px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="bird" aria-hidden="true"></div>
+  <h1>Log in to Chirpline</h1>
+  <form action="#" method="post" onsubmit="event.preventDefault()">
+    <input class="in" type="text" name="session[username_or_email]" autocapitalize="none" autocorrect="off" placeholder="Phone, email or username">
+    <input class="in" type="password" name="session[password]" placeholder="Password">
+    <input type="hidden" name="authenticity_token" value="b1e9f04ac2d7">
+    <button class="btn" type="submit">Log in</button>
+  </form>
+  <div class="links"><a href="#">Forgot password?</a><a href="#">Sign up for Chirpline</a></div>
+</div>
+<footer>
+  <a href="#">About</a> · <a href="#">Help</a> · <a href="#">Terms</a> ·
+  <select id="lang" aria-label="Language"><option>English</option><option>Español</option><option>Français</option></select>
+</footer>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("input[name=\"session[username_or_email]\"]");
+  o["password"] = val("input[name=\"session[password]\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

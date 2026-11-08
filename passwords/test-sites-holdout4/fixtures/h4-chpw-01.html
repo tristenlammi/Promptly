@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings – Atlas Ledger</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px "Inter",sans-serif;background:#f7f7fb;color:#222}
+.side{position:fixed;left:0;top:0;bottom:0;width:200px;background:#1f2a44;color:#cfd6e6;padding:20px}
+main{margin-left:240px;padding:30px;max-width:620px}
+section{background:#fff;border:1px solid #e3e5ee;border-radius:8px;padding:22px;margin-bottom:22px}
+.row{display:flex;align-items:center;margin-bottom:12px}.row label{width:190px}
+.row input{flex:1;padding:8px;border:1px solid #c9ccd8;border-radius:6px}
+button{background:#3b5bdb;color:#fff;border:0;padding:8px 16px;border-radius:6px}
+</style>
+</head>
+<body>
+<nav class="side"><b>Atlas Ledger</b><p>Dashboard</p><p>Invoices</p><p>Settings</p></nav>
+<main>
+  <h1>Settings</h1>
+  <section>
+    <h2>Profile</h2>
+    <form action="#" onsubmit="return false">
+      <div class="row"><label for="display-name">Display name</label><input id="display-name" name="display_name" type="text" value="Sam Rivera"></div>
+      <div class="row"><label for="profile-email">Email</label><input id="profile-email" name="email" type="email" value="sam.rivera@atlas.example"></div>
+      <button type="submit">Save profile</button>
+    </form>
+  </section>
+  <section>
+    <h2>Change password</h2>
+    <form action="#" onsubmit="return false">
+      <div class="row"><label for="cur-pw">Current password</label><input id="cur-pw" name="current_password" type="password" autocomplete="current-password"></div>
+      <div class="row"><label for="new-pw">New password</label><input id="new-pw" name="new_password" type="password" autocomplete="new-password"></div>
+      <div class="row"><label for="new-pw2">Confirm new password</label><input id="new-pw2" name="new_password_confirmation" type="password" autocomplete="new-password"></div>
+      <button type="submit">Update password</button>
+    </form>
+  </section>
+</main>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["current-password"] = val("#cur-pw");
+  o["new-password"] = val("#new-pw");
+  o["confirm-password"] = val("#new-pw2");
+  return o;
+} };
+</script>
+</body>
+</html>

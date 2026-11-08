@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graphon</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;min-height:100vh;background:#111217;color:#ccccdc;font:14px Inter,sans-serif}
+.lw{width:380px;margin:0 auto;padding-top:110px}
+.logo{width:60px;height:60px;border-radius:50%;margin:0 auto 10px;background:conic-gradient(#f05a28,#fbca0a,#f05a28)}
+h1{text-align:center;font-size:28px;font-weight:400}
+.fld{margin-bottom:16px}.fld label{display:block;font-weight:500;margin-bottom:6px}
+.fld input{width:100%;box-sizing:border-box;padding:8px;background:#0b0c0e;border:1px solid #2f3037;border-radius:2px;color:#fff}
+.btn{width:100%;padding:9px;background:#3d71d9;color:#fff;border:0;border-radius:2px}
+.oauth{margin-top:16px;width:100%;padding:9px;background:#22252b;color:#ccc;border:1px solid #333}
+</style>
+</head>
+<body>
+<div id="reactRoot"><div class="lw"><div class="logo"></div><h1>Welcome to Graphon</h1></div></div>
+<script>
+setTimeout(function () {
+  var lw = document.querySelector('.lw');
+  var form = document.createElement('form');
+  form.setAttribute('data-testid', 'login-form');
+  form.innerHTML = '<div class="fld"><label for="user">Email or username</label><input id="user" name="user" autocomplete="username" placeholder="email or username" data-testid="data-testid Username input field"></div>' +
+    '<div class="fld"><label for="current-password">Password</label><input id="current-password" name="password" type="password" autocomplete="current-password" placeholder="password" data-testid="data-testid Password input field"></div>' +
+    '<button class="btn" type="submit" data-testid="data-testid Login button">Log in</button>' +
+    '<p style="text-align:right"><a href="#">Forgot your password?</a></p>' +
+    '<button class="oauth" type="button">Sign in with Company SSO</button>';
+  form.addEventListener('submit', function (e) { e.preventDefault(); });
+  lw.appendChild(form);
+}, 450);
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("input[name=\"user\"]");
+  o["password"] = val("input[name=\"password\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

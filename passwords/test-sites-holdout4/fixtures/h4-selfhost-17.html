@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dockyard – Initial setup</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#f4f6f9;font:14px "Helvetica Neue",sans-serif}
+.box{width:520px;margin:70px auto;background:#fff;border-radius:8px;padding:28px;border:1px solid #dde3ea}
+.form-group{display:flex;align-items:center;margin-bottom:14px}
+.form-group label{width:170px}
+.form-group input{flex:1;padding:8px;border:1px solid #c9d1db;border-radius:4px}
+.hint{font-size:12px;color:#8a6d00;background:#fff8db;padding:8px;border-radius:4px}
+button{background:#1d64c4;color:#fff;border:0;padding:9px 18px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>New Dockyard installation</h2>
+  <p>Please create the initial administrator user.</p>
+  <form name="form" action="#" onsubmit="return false">
+    <div class="form-group"><label for="username">Username</label><input type="text" id="username" name="username" value="admin" data-cy="init-usernameInput"></div>
+    <div class="form-group"><label for="password">Password</label><input type="password" id="password" name="password" autocomplete="new-password" data-cy="init-passwordInput"></div>
+    <div class="form-group"><label for="confirm_password">Confirm password</label><input type="password" id="confirm_password" name="confirm_password" autocomplete="new-password" data-cy="init-confirmPasswordInput"></div>
+    <p class="hint">The password must be at least 12 characters long.</p>
+    <label><input type="checkbox" name="enableTelemetry" checked> Allow collection of anonymous statistics</label>
+    <p><button type="submit">Create user</button></p>
+  </form>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#username");
+  o["new-password"] = val("#password");
+  o["confirm-password"] = val("#confirm_password");
+  return o;
+} };
+</script>
+</body>
+</html>

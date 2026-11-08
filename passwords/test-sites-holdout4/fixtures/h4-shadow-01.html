@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tern Dispatch – Driver portal</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px sans-serif;background:#eef1f4}header{background:#0e7490;color:#fff;padding:14px 28px}tern-login{display:block;width:360px;margin:60px auto}
+</style>
+</head>
+<body>
+<header>Tern Dispatch</header>
+<tern-login></tern-login>
+<script>
+customElements.define('tern-login', class extends HTMLElement {
+  connectedCallback() {
+    var root = this.attachShadow({ mode: 'open' });
+    root.innerHTML = '<style>.c{background:#fff;padding:26px;border-radius:8px}label{display:block;font-size:13px;margin:12px 0 4px}input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #9bb}button{margin-top:16px;width:100%;padding:10px;background:#0e7490;color:#fff;border:0}</style>' +
+      '<div class="c"><h2>Driver sign in</h2><form><label for="user">Driver code or email</label><input id="user" name="user" autocomplete="username">' +
+      '<label for="pass">Password</label><input id="pass" name="pass" type="password" autocomplete="current-password"><button type="submit">Sign in</button></form></div>';
+    root.querySelector('form').addEventListener('submit', function (e) { e.preventDefault(); });
+    this.setAttribute('data-ready', '');
+  }
+});
+window.__fixture = { state: function () {
+  var r = document.querySelector('tern-login').shadowRoot;
+  return { username: r.getElementById('user').value, password: r.getElementById('pass').value };
+} };
+</script>
+</body>
+</html>

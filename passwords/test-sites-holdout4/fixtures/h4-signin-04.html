@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lowgear Motorcycle Forums - Powered by BoardKit</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:12px Verdana,Arial,sans-serif;background:#d8dde6}
+.page{width:960px;margin:0 auto;background:#fff;border:1px solid #889}
+.hdr{background:#33476a;color:#fff;padding:10px}
+.hdr table td{font-size:11px;color:#fff;padding:1px 3px}
+.hdr input.bginput{font-size:11px;width:120px}
+.cols{display:flex}.side{width:200px;padding:8px;border-right:1px solid #ccd}.main{flex:1;padding:8px}
+.thead{background:#738fbf;color:#fff;font-weight:bold;padding:4px}
+.alt1{background:#f5f5ff;padding:4px;border-bottom:1px solid #dde}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="hdr">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td><b style="font-size:18px">Lowgear Forums</b></td>
+      <td align="right">
+        <form action="#" method="post" onsubmit="return false">
+          <table cellpadding="0" cellspacing="3" border="0">
+            <tr>
+              <td>User Name</td>
+              <td><input type="text" class="bginput" name="fk_username" id="navbar_username" size="10" accesskey="u" tabindex="101" value="User Name" onfocus="if (this.value == 'User Name') this.value = '';"></td>
+              <td><label><input type="checkbox" name="cookieuser" value="1" tabindex="103" id="cb_cookieuser_navbar">Remember Me?</label></td>
+            </tr>
+            <tr>
+              <td>Password</td>
+              <td><input type="password" class="bginput" name="fk_password" id="navbar_password" size="10" tabindex="102"></td>
+              <td><input type="submit" class="button" value="Log in" tabindex="104" accesskey="s"></td>
+            </tr>
+          </table>
+          <input type="hidden" name="do" value="login">
+        </form>
+      </td>
+    </tr></table>
+  </div>
+  <div class="cols">
+    <div class="side">
+      <div class="thead">Search Forums</div>
+      <form action="#" onsubmit="return false"><input type="text" id="forum-search" name="query" size="18"> <input type="submit" value="Go"></form>
+      <div class="thead" style="margin-top:8px">Who's Online</div><div class="alt1">212 members and 1,044 guests</div>
+    </div>
+    <div class="main">
+      <div class="thead">Forum</div>
+      <div class="alt1"><b>Touring &amp; Long Distance</b><br>Routes, luggage and saddle sores.</div>
+      <div class="alt1"><b>Workshop</b><br>Valve clearances, chain care and the dreaded wiring loom.</div>
+      <div class="alt1"><b>Classifieds</b><br>Bikes and parts for sale.</div>
+    </div>
+  </div>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = (function(){var v=document.getElementById("navbar_username").value;return v==="User Name"?"":v;})();
+  o["password"] = val("#navbar_password");
+  return o;
+} };
+</script>
+</body>
+</html>

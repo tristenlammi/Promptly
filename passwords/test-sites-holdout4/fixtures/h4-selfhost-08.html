@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenRidge - gw-attic - Admin</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:13px sans-serif;background:#fff}
+header{background:#002b49;color:#fff;padding:10px 20px;font-size:18px}
+.alert-message{margin:20px;padding:10px;background:#fff6dd;border:1px solid #e8c56d}
+.cbi-map{margin:20px}
+.cbi-value{display:flex;align-items:center;padding:6px 0}
+.cbi-value-title{width:160px;text-align:right;padding-right:12px}
+.cbi-input-text,.cbi-input-password{padding:4px;width:200px}
+.cbi-button{padding:5px 14px;background:#0069d6;color:#fff;border:0}
+</style>
+</head>
+<body>
+<header>OpenRidge <small>23.05 · gw-attic</small></header>
+<form method="post" action="#" onsubmit="return false">
+  <div class="cbi-map">
+    <h2 name="content">Authorization Required</h2>
+    <div class="alert-message">Please enter your username and password.</div>
+    <div class="cbi-section"><div class="cbi-section-node">
+      <div class="cbi-value"><label class="cbi-value-title">Username</label><div class="cbi-value-field"><input class="cbi-input-text" type="text" name="luci_username" value="root"></div></div>
+      <div class="cbi-value"><label class="cbi-value-title">Password</label><div class="cbi-value-field"><input class="cbi-input-password" type="password" name="luci_password"></div></div>
+    </div></div>
+  </div>
+  <div class="cbi-page-actions" style="margin:0 20px"><input type="submit" value="Login" class="cbi-button cbi-button-apply"> <input type="reset" value="Reset" class="cbi-button"></div>
+</form>
+<footer style="margin:30px 20px;color:#888">Powered by OpenRidge</footer>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("input[name=\"luci_username\"]");
+  o["password"] = val("input[name=\"luci_password\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

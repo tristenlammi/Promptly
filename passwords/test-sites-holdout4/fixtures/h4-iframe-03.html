@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lanternpath Learning</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px Calibri,sans-serif;background:#fdfcfa}
+.nav{padding:14px 30px;border-bottom:1px solid #eee;font-weight:bold;color:#c2410c}
+#slot{width:380px;margin:40px auto;min-height:300px}
+#slot .loading{color:#999;text-align:center;padding-top:100px}
+iframe{width:100%;height:300px;border:1px solid #eee;border-radius:10px}
+</style>
+</head>
+<body>
+<div class="nav">Lanternpath</div>
+<div id="slot"><div class="loading">Loading sign-in…</div></div>
+<template id="auth-tpl">
+<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="data:,"><style>body{font:15px Calibri,sans-serif;padding:20px}input{display:block;width:100%;box-sizing:border-box;padding:9px;margin:6px 0 14px}</style></head>
+<body>
+<h2>Welcome back, learner</h2>
+<form action="#" onsubmit="return false">
+<label for="lp-user">Learner ID or email</label><input id="lp-user" name="learner" type="text" autocomplete="username">
+<label for="lp-pass">Password</label><input id="lp-pass" name="pwd" type="password" autocomplete="current-password">
+<button type="submit">Start learning</button>
+</form>
+<script>window.__fixture = { state: function () { return { username: document.getElementById('lp-user').value, password: document.getElementById('lp-pass').value }; } };</script>
+</body></html>
+</template>
+<script>
+setTimeout(function () {
+  var slot = document.getElementById('slot');
+  var f = document.createElement('iframe');
+  f.id = 'late-auth';
+  f.title = 'Sign in';
+  f.addEventListener('load', function () { f.setAttribute('data-loaded', ''); });
+  f.srcdoc = document.getElementById('auth-tpl').innerHTML;
+  slot.innerHTML = '';
+  slot.appendChild(f);
+}, 900);
+window.__fixture = { state: function () {
+  var f = document.getElementById('late-auth');
+  try { return f.contentWindow.__fixture.state(); } catch (e) { return {}; }
+} };
+</script>
+</body>
+</html>

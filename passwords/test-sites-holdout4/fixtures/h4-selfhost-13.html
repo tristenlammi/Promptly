@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sinkhole Admin Console</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#ecf0f5;font:14px "Source Sans Pro",sans-serif}
+.main-header{background:#367fa9;color:#fff;padding:10px 20px;display:flex;justify-content:space-between}
+.main-header input{padding:4px 8px;border:0;border-radius:3px}
+.login-box{width:360px;margin:70px auto}
+.card{background:#fff;border-top:3px solid #3c8dbc;padding:20px}
+.form-group{display:flex;margin-bottom:12px}
+.form-group input{flex:1;padding:8px;border:1px solid #d2d6de}
+.btn-primary{background:#3c8dbc;color:#fff;border:0;padding:8px 14px}
+</style>
+</head>
+<body>
+<div class="main-header"><b>Sinkhole</b><input type="text" id="domain-search" placeholder="Look up a domain"></div>
+<div class="login-box">
+  <div class="card">
+    <p class="login-box-msg">Sign in to start your session</p>
+    <form action="#" id="loginform" method="post" onsubmit="return false">
+      <div class="form-group"><input type="password" id="loginpw" name="pw" placeholder="Password" autocomplete="current-password" autofocus></div>
+      <label><input type="checkbox" id="logincookie" name="persistentlogin"> Remember me for 7 days</label>
+      <p><button type="submit" class="btn-primary">Log in</button></p>
+    </form>
+    <details><summary>Forgot password?</summary><p>Run the reset command on the server to set a new admin password.</p></details>
+  </div>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["password"] = val("#loginpw");
+  return o;
+} };
+</script>
+</body>
+</html>

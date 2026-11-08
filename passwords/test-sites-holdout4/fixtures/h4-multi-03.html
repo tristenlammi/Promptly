@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quarry Hosting – Client area</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px Tahoma,sans-serif;background:#2d2f33;color:#ddd}
+.panel{width:360px;margin:100px auto;background:#3a3d42;border-radius:6px;padding:26px}
+label{display:block;margin:10px 0 4px;color:#aab}
+input[type=text],input[type=password]{width:100%;box-sizing:border-box;padding:9px;background:#26282b;color:#eee;border:1px solid #555;border-radius:4px}
+#pw-row{display:none}#pw-row.open{display:block;animation:drop .25s}
+@keyframes drop{from{opacity:0;transform:translateY(-6px)}to{opacity:1}}
+button{margin-top:16px;width:100%;padding:10px;background:#f2a541;border:0;border-radius:4px;font-weight:bold}
+</style>
+</head>
+<body>
+<div class="panel">
+  <h2 style="margin-top:0;color:#f2a541">Quarry Hosting</h2>
+  <form id="f" action="#" onsubmit="return false">
+    <label for="login-user">Username</label>
+    <input type="text" id="login-user" name="user" autocomplete="username">
+    <div id="pw-row">
+      <label for="login-pass">Password</label>
+      <input type="password" id="login-pass" name="pass" autocomplete="current-password">
+    </div>
+    <button type="button" id="continue">Continue</button>
+  </form>
+</div>
+<script>
+document.getElementById('continue').addEventListener('click', function () {
+  var row = document.getElementById('pw-row');
+  if (!row.classList.contains('open')) {
+    setTimeout(function () { row.classList.add('open'); document.getElementById('continue').textContent = 'Log in'; }, 300);
+  }
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#login-user");
+  o["password"] = val("#login-pass");
+  return o;
+} };
+</script>
+</body>
+</html>

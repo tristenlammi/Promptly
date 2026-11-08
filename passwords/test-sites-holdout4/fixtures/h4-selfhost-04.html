@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reelbox</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#101010;color:#ddd;font:15px "Noto Sans",sans-serif}
+.padded{max-width:640px;margin:60px auto;text-align:center}
+.users{display:flex;gap:20px;justify-content:center;margin:30px 0}
+.user{width:110px;cursor:pointer}.user .av{width:110px;height:110px;border-radius:6px;background:#00a4dc}
+.hide{display:none}
+.inputContainer{text-align:left;margin:16px auto;width:360px}
+.inputContainer label{display:block;font-size:13px;color:#aaa;margin-bottom:4px}
+.reel-input{width:100%;box-sizing:border-box;padding:10px;background:#292929;border:1px solid #333;color:#fff;border-radius:3px}
+.raised{background:#00a4dc;color:#fff;border:0;padding:10px 24px;border-radius:3px}
+</style>
+</head>
+<body>
+<div class="padded">
+  <h1>Please sign in</h1>
+  <div id="visualLoginForm">
+    <div class="users">
+      <div class="user"><div class="av"></div>dana</div>
+      <div class="user"><div class="av" style="background:#e67e22"></div>kids</div>
+      <div class="user"><div class="av" style="background:#8e44ad"></div>living room</div>
+    </div>
+    <button is="reel-button" type="button" class="raised" id="btnManual">Manual Login</button>
+    <button is="reel-button" type="button" class="raised" style="background:#333">Forgot Password</button>
+  </div>
+  <form class="manualLoginForm hide" id="manualLoginForm" onsubmit="return false">
+    <div class="inputContainer"><label for="txtManualName">User</label><input is="reel-input" class="reel-input" type="text" id="txtManualName" autocomplete="username" autocapitalize="off"></div>
+    <div class="inputContainer"><label for="txtManualPassword">Password</label><input is="reel-input" class="reel-input" type="password" id="txtManualPassword" autocomplete="current-password"></div>
+    <label><input type="checkbox" id="chkRememberLogin" checked> Remember Me</label>
+    <p><button type="submit" class="raised">Sign In</button></p>
+  </form>
+</div>
+<script>
+document.getElementById('btnManual').addEventListener('click', function () {
+  document.getElementById('visualLoginForm').classList.add('hide');
+  document.getElementById('manualLoginForm').classList.remove('hide');
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#txtManualName");
+  o["password"] = val("#txtManualPassword");
+  return o;
+} };
+</script>
+</body>
+</html>

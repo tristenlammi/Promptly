@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hyperion Learning – Staff</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Source Sans Pro",sans-serif;background:#1e1b4b;color:#e0e7ff}
+#mount{width:360px;margin:80px auto}
+.sk{height:240px;border-radius:10px;background:#312e81}
+form{background:#312e81;padding:26px;border-radius:10px}
+input{display:block;width:100%;box-sizing:border-box;padding:10px;margin:6px 0 14px;border-radius:6px;border:0}
+.clock{font-size:12px;color:#a5b4fc}
+</style>
+</head>
+<body>
+<div id="mount"><div class="sk"></div></div>
+<script>
+var st = { email: '', password: '', tick: 0 };
+function render() {
+  var f = document.querySelector('form.hyperion-login');
+  if (!f) return;
+  f.querySelector('input[name="email"]').value = st.email;
+  f.querySelector('input[name="password"]').value = st.password;
+  f.querySelector('.clock').textContent = 'Last synced ' + st.tick + 's ago';
+}
+setTimeout(function () {
+  var m = document.getElementById('mount');
+  m.innerHTML = '<form class="hyperion-login" novalidate><h2>Staff sign in</h2>' +
+    '<label>Work email<input name="email" type="email" autocomplete="username"></label>' +
+    '<label>Password<input name="password" type="password" autocomplete="current-password"></label>' +
+    '<button type="submit">Sign in</button><p class="clock"></p></form>';
+  var f = m.querySelector('form');
+  f.addEventListener('submit', function (e) { e.preventDefault(); });
+  ['email', 'password'].forEach(function (k) {
+    f.querySelector('input[name="' + k + '"]').addEventListener('input', function (e) { st[k] = e.target.value; });
+  });
+  render();
+  setInterval(function () { st.tick++; render(); }, 250);
+}, 700);
+window.__fixture = { state: function () { return { username: st.email, password: st.password }; } };
+</script>
+</body>
+</html>

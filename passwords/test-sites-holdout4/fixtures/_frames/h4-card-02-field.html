@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Secure field</title>
+<link rel="icon" href="data:,">
+<style>
+html,body{margin:0;height:100%}input{width:100%;height:100%;box-sizing:border-box;border:0;padding:0 10px;font:15px "Avenir Next",sans-serif;outline:none}
+</style>
+</head>
+<body>
+<input id="field" type="text" inputmode="numeric" autocorrect="off" spellcheck="false">
+<script>
+var kind = new URLSearchParams(location.search).get('f');
+var conf = {
+  number: { name: 'cardnumber', ac: 'cc-number', ph: '1234 1234 1234 1234', role: 'card-number', label: 'Credit or debit card number' },
+  expiry: { name: 'exp-date', ac: 'cc-exp', ph: 'MM / YY', role: 'card-exp', label: 'Credit or debit card expiration date' },
+  cvc: { name: 'cvc', ac: 'cc-csc', ph: 'CVC', role: 'card-cvv', label: 'Credit or debit card CVC/CVV' },
+}[kind];
+var el = document.getElementById('field');
+el.name = conf.name; el.autocomplete = conf.ac; el.placeholder = conf.ph; el.setAttribute('aria-label', conf.label);
+var all = {};
+el.addEventListener('input', function () {
+  var d = el.value.replace(/[^0-9]/g, '');
+  if (kind === 'number') el.value = d.slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
+  if (kind === 'expiry') { d = d.slice(0, 4); el.value = d.length > 2 ? d.slice(0, 2) + ' / ' + d.slice(2) : d; }
+  if (kind === 'cvc') el.value = d.slice(0, 4);
+  parent.postMessage({ type: 'lattice-field', role: conf.role, value: el.value }, '*');
+});
+window.addEventListener('message', function (e) { if (e.data && e.data.type === 'lattice-all') all = e.data.state; });
+window.__fixture = { state: function () { var o = Object.assign({}, all); o[conf.role] = el.value; return o; } };
+</script>
+</body>
+</html>

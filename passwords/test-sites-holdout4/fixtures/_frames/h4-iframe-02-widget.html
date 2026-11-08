@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Customer log-in</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;padding:18px;font:14px Arial,sans-serif;background:#fff}input{display:block;width:100%;box-sizing:border-box;padding:9px;margin:4px 0 12px;border:1px solid #b6c2d9;border-radius:5px}button{background:#1e3a8a;color:#fff;border:0;padding:9px 18px;border-radius:5px}
+</style>
+</head>
+<body>
+<form id="w" action="#" onsubmit="return false">
+  <label>Email<input name="email" type="email" autocomplete="email"></label>
+  <label>Password<input name="password" type="password" autocomplete="current-password"></label>
+  <button type="submit">Log in</button>
+</form>
+<script>
+function snapshot() {
+  return { username: document.querySelector('input[name="email"]').value, password: document.querySelector('input[name="password"]').value };
+}
+document.getElementById('w').addEventListener('input', function () {
+  parent.postMessage({ type: 'cobalt-widget-state', state: snapshot() }, '*');
+});
+window.__fixture = { state: snapshot };
+</script>
+</body>
+</html>

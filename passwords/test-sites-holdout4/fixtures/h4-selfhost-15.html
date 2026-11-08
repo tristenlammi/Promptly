@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sprocket WebUI</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#dfe6ec;font:13px Verdana,sans-serif}
+#main{width:300px;margin:120px auto;background:#fff;border:1px solid #9aa9b8;padding:20px;text-align:center}
+.row{margin:8px 0;text-align:left}.row label{display:block;font-weight:bold}
+.row input{width:100%;box-sizing:border-box;padding:4px}
+#error_msg{color:#c00;min-height:16px}
+</style>
+</head>
+<body>
+<div id="main">
+  <h2>Sprocket WebUI</h2>
+  <div id="formplace">
+    <div class="row"><label for="username">Username</label><input type="text" id="username" autocapitalize="none" autocorrect="off" spellcheck="false" autofocus></div>
+    <div class="row"><label for="password">Password</label><input type="password" id="password"></div>
+    <input type="button" id="loginButton" value="Login">
+  </div>
+  <div id="error_msg"></div>
+</div>
+<script>
+document.getElementById('loginButton').addEventListener('click', function () {
+  document.getElementById('error_msg').textContent = 'Logging in...';
+});
+document.getElementById('password').addEventListener('keydown', function (e) { if (e.key === 'Enter') document.getElementById('loginButton').click(); });
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#username");
+  o["password"] = val("#password");
+  return o;
+} };
+</script>
+</body>
+</html>

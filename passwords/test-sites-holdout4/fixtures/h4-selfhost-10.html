@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Login – Ledgerleaf Notes</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#2a2a35;color:#ddd;font:15px "Segoe UI",sans-serif}
+.box{width:340px;margin:140px auto;background:#33333f;padding:30px;border-radius:6px}
+input[type=password]{width:100%;box-sizing:border-box;padding:9px;margin:8px 0 14px;background:#22222b;border:1px solid #555;color:#eee}
+button{background:#6a5acd;color:#fff;border:0;padding:8px 18px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1 style="font-size:22px">Ledgerleaf Notes</h1>
+  <form action="#" method="POST" onsubmit="return false">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" required>
+    <label><input type="checkbox" name="rememberMe" value="1"> Remember me</label>
+    <p><button type="submit">Login</button></p>
+  </form>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["password"] = val("#password");
+  return o;
+} };
+</script>
+</body>
+</html>

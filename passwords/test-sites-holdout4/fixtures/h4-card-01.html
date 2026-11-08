@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout – Juniper Outfitters</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px "Helvetica Neue",sans-serif;background:#f5f5f0}
+.grid{display:grid;grid-template-columns:1.4fr 1fr;gap:30px;max-width:920px;margin:40px auto}
+.pane{background:#fff;padding:24px;border:1px solid #ddd}
+.f{margin-bottom:12px}.f label{display:block;font-size:12px;text-transform:uppercase;color:#666;margin-bottom:4px}
+.f input,.f select{padding:9px;border:1px solid #bbb;width:100%;box-sizing:border-box}
+.two{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.pay{background:#2f5233;color:#fff;border:0;padding:12px 24px}
+</style>
+</head>
+<body>
+<div class="grid">
+  <div class="pane">
+    <h2>Payment</h2>
+    <form id="payment" action="#" onsubmit="return false">
+      <div class="f"><label for="cc-name">Name on card</label><input id="cc-name" name="cardholder" autocomplete="cc-name"></div>
+      <div class="f"><label for="cc-number">Card number</label><input id="cc-number" name="card_number" inputmode="numeric" maxlength="19" placeholder="1234 1234 1234 1234"></div>
+      <div class="two">
+        <div class="f"><label for="cc-exp-month">Expiry month</label><select id="cc-exp-month" name="exp_month"><option value="">MM</option><option value="01">01</option><option value="02">02</option><option value="03">03</option><option value="04">04</option><option value="05">05</option><option value="06">06</option><option value="07">07</option><option value="08">08</option><option value="09">09</option><option value="10">10</option><option value="11">11</option><option value="12">12</option></select></div>
+        <div class="f"><label for="cc-exp-year">Expiry year</label><select id="cc-exp-year" name="exp_year"><option value="">YYYY</option><option value="2026">2026</option><option value="2027">2027</option><option value="2028">2028</option><option value="2029">2029</option><option value="2030">2030</option><option value="2031">2031</option><option value="2032">2032</option><option value="2033">2033</option><option value="2034">2034</option><option value="2035">2035</option></select></div>
+        <div class="f"><label for="cc-csc">CVC</label><input id="cc-csc" name="cvc" inputmode="numeric" maxlength="4"></div>
+      </div>
+      <button class="pay" type="submit">Pay $184.00</button>
+    </form>
+  </div>
+  <div class="pane">
+    <h3>Order summary</h3>
+    <p>Trail tent 2P · $159.00<br>Titanium mug · $25.00</p>
+    <form action="#" onsubmit="return false"><label for="coupon">Discount code</label><br><input id="coupon" name="coupon" type="text"> <button>Apply</button></form>
+  </div>
+</div>
+<script>
+var num = document.getElementById('cc-number');
+num.addEventListener('input', function () {
+  var d = num.value.replace(/[^0-9]/g, '').slice(0, 16);
+  num.value = d.replace(/(.{4})/g, '$1 ').trim();
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["card-name"] = val("#cc-name");
+  o["card-number"] = val("#cc-number");
+  o["card-exp-month"] = val("#cc-exp-month");
+  o["card-exp-year"] = val("#cc-exp-year");
+  o["card-cvv"] = val("#cc-csc");
+  return o;
+} };
+</script>
+</body>
+</html>

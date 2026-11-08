@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkout – Brightloom Yarns</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px/1.45 "Trebuchet MS",sans-serif;color:#333}
+header{display:flex;justify-content:space-between;padding:14px 40px;border-bottom:3px solid #e07a5f}
+header input{padding:6px;width:260px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:40px;max-width:900px;margin:40px auto}
+.box{border:1px solid #ddd;padding:24px}.box h2{margin-top:0;color:#e07a5f}
+.row{margin-bottom:14px}.row label{display:block;font-weight:bold;font-size:13px}
+.row input{width:100%;box-sizing:border-box;padding:8px;border:1px solid #bbb}
+button{background:#3d405b;color:#fff;border:0;padding:10px 18px}
+</style>
+</head>
+<body>
+<header><strong>Brightloom Yarns</strong><input type="search" id="hdr-search" placeholder="Search yarn, patterns, needles"></header>
+<div class="cols">
+  <section class="box">
+    <h2>Returning customer</h2>
+    <form id="login-form" action="#" onsubmit="return false">
+      <div class="row"><label for="rc-email">E-mail</label><input id="rc-email" name="login[username]" type="email" autocomplete="username"></div>
+      <div class="row"><label for="rc-password">Password</label><input id="rc-password" name="login[password]" type="password" autocomplete="current-password"></div>
+      <button>Sign in and continue</button> <a href="#">Lost your password?</a>
+    </form>
+  </section>
+  <section class="box">
+    <h2>New customer</h2>
+    <p>Check out as a guest. You can create an account after your order.</p>
+    <form id="guest-form" action="#" onsubmit="return false">
+      <div class="row"><label for="guest-email">E-mail for order updates</label><input id="guest-email" name="guest[email]" type="email" autocomplete="email"></div>
+      <button>Continue as guest</button>
+    </form>
+  </section>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#rc-email");
+  o["password"] = val("#rc-password");
+  return o;
+} };
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oak bedside table – Grainline Furniture</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Libre Franklin",sans-serif;background:#fff}
+.p{display:grid;grid-template-columns:1fr 1fr;gap:40px;max-width:900px;margin:40px auto}
+.img{height:360px;background:linear-gradient(135deg,#d7b98e,#a47b4f)}
+.est{border:1px solid #ddd;padding:14px;margin-top:20px}
+.est input,.est select{padding:7px}
+</style>
+</head>
+<body>
+<div class="p">
+  <div class="img" role="img" aria-label="Oak bedside table"></div>
+  <div>
+    <h1>Oak bedside table</h1>
+    <p><b>$349</b></p>
+    <label for="qty">Quantity</label> <input id="qty" type="number" min="1" value="1" style="width:60px">
+    <p><button type="button">Add to cart</button></p>
+    <div class="est">
+      <b>Estimate delivery</b>
+      <form action="#" onsubmit="return false">
+        <label for="est-postcode">Postcode</label> <input id="est-postcode" name="postcode" inputmode="numeric" maxlength="4" style="width:80px">
+        <select id="est-country" name="country" aria-label="Country"><option>Australia</option><option>New Zealand</option></select>
+        <button type="submit">Calculate</button>
+      </form>
+    </div>
+  </div>
+</div>
+<script>
+window.__fixture = { state: function () { return {}; } };
+</script>
+</body>
+</html>

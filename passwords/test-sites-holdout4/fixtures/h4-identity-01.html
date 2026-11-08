@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery – Kettle & Crumb</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Quicksand",sans-serif;background:#fff8f0}
+form{width:520px;margin:40px auto;background:#fff;padding:26px;border-radius:10px}
+.f{margin-bottom:12px}.f label{display:block;font-size:13px;color:#8d6e63}
+.f input,.f select,.f textarea{width:100%;box-sizing:border-box;padding:8px;border:1px solid #d7ccc8;border-radius:6px}
+.three{display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px}
+</style>
+</head>
+<body>
+<form action="#" onsubmit="return false">
+  <h2>Where should we deliver?</h2>
+  <div class="f"><label for="ship-name">Recipient name</label><input id="ship-name" name="recipient"></div>
+  <div class="f"><label for="ship-line1">Street address</label><input id="ship-line1" name="street1"></div>
+  <div class="f"><label for="ship-line2">Apartment, unit, etc. (optional)</label><input id="ship-line2" name="street2"></div>
+  <div class="three">
+    <div class="f"><label for="ship-suburb">Suburb</label><input id="ship-suburb" name="suburb"></div>
+    <div class="f"><label for="ship-state">State</label><select id="ship-state" name="state"><option value="">–</option><option>ACT</option><option>NSW</option><option>NT</option><option>QLD</option><option>SA</option><option>TAS</option><option>VIC</option><option>WA</option></select></div>
+    <div class="f"><label for="ship-postcode">Postcode</label><input id="ship-postcode" name="postcode" inputmode="numeric" maxlength="4"></div>
+  </div>
+  <div class="f"><label for="ship-country">Country</label><select id="ship-country" name="country"><option value="AU">Australia</option><option value="NZ">New Zealand</option></select></div>
+  <div class="f"><label for="ship-phone">Mobile (for the driver)</label><input id="ship-phone" name="mobile" type="tel"></div>
+  <div class="f"><label for="ship-notes">Delivery notes</label><textarea id="ship-notes" name="notes" rows="2" placeholder="Leave at the side gate"></textarea></div>
+  <button type="submit">Continue to payment</button>
+</form>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["full-name"] = val("#ship-name");
+  o["address1"] = val("#ship-line1");
+  o["address2"] = val("#ship-line2");
+  o["city"] = val("#ship-suburb");
+  o["state"] = val("#ship-state");
+  o["postcode"] = val("#ship-postcode");
+  o["country"] = val("#ship-country");
+  o["phone"] = val("#ship-phone");
+  return o;
+} };
+</script>
+</body>
+</html>

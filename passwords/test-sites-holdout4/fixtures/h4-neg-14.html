@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Access tokens – Brookline Deploy</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px ui-sans-serif,system-ui,sans-serif;background:#fff;color:#111}
+main{max-width:700px;margin:30px auto}
+.ok{background:#ecfdf5;border:1px solid #6ee7b7;padding:14px;border-radius:8px}
+.ok input{width:100%;box-sizing:border-box;padding:8px;font-family:monospace;border:1px solid #6ee7b7;background:#fff}
+.f{margin:12px 0}.f label{display:block;font-weight:600}
+.f input,.f select{padding:7px;width:300px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Access tokens</h1>
+  <div class="ok">
+    <p><b>Token created.</b> Copy it now. You won't be able to see it again.</p>
+    <input id="new-token" type="text" readonly value="bkd_pat_9f3c1a77e0b24d6aa1c8f5e2d4b7a901" aria-label="New personal access token">
+    <button type="button">Copy</button>
+  </div>
+  <h2>Create another token</h2>
+  <form action="#" onsubmit="return false">
+    <div class="f"><label for="token-name">Token name</label><input id="token-name" name="name" type="text" placeholder="ci-deploys"></div>
+    <div class="f"><label for="token-exp">Expiration</label><select id="token-exp" name="expires"><option>30 days</option><option>90 days</option><option>No expiration</option></select></div>
+    <fieldset><legend>Scopes</legend><label><input type="checkbox" name="scope" value="read"> read</label> <label><input type="checkbox" name="scope" value="deploy"> deploy</label></fieldset>
+    <p><button type="submit">Generate token</button></p>
+  </form>
+</main>
+<script>
+window.__fixture = { state: function () { return {}; } };
+</script>
+</body>
+</html>

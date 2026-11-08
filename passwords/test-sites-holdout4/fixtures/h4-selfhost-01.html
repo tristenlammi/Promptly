@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StratumNAS – nas-living</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;height:100vh;background:radial-gradient(circle at 70% 20%,#4b6cb7,#182848);font:14px "Noto Sans",sans-serif;color:#222}
+.login-panel{position:absolute;right:12%;top:22%;width:330px;background:rgba(255,255,255,.95);border-radius:14px;padding:30px}
+.dev{font-size:12px;color:#667}
+.inrow{display:flex;margin-top:22px}.inrow input{flex:1;padding:10px;border:1px solid #c5ccd6;border-radius:6px 0 0 6px;font-size:15px}
+.inrow button{width:44px;border:0;border-radius:0 6px 6px 0;background:#2f6fdf;color:#fff;font-size:18px}
+.hi{font-size:20px;margin:0}
+</style>
+</head>
+<body>
+<div class="login-panel" data-phase="account">
+  <div class="dev">nas-living</div>
+  <div id="p-account">
+    <h2>Sign in</h2>
+    <form action="#" onsubmit="return false">
+      <div class="inrow"><input type="text" name="username" placeholder="Account" autocomplete="username" aria-label="Account"><button type="button" id="login-next" aria-label="Next">→</button></div>
+    </form>
+    <p><a href="#">Forgot password?</a></p>
+  </div>
+  <div id="p-password" hidden>
+    <p class="hi">Hi, <span id="hi-name"></span></p>
+    <form action="#" onsubmit="return false">
+      <div class="inrow"><input type="password" name="current-password" placeholder="Password" autocomplete="current-password" aria-label="Password"><button type="submit" aria-label="Sign in">→</button></div>
+      <p><label><input type="checkbox" name="rememberme"> Stay signed in</label></p>
+    </form>
+    <a href="#" id="other">Sign in with another account</a>
+  </div>
+</div>
+<script>
+var acct = '';
+document.getElementById('login-next').addEventListener('click', function () {
+  acct = document.querySelector('input[name="username"]').value;
+  document.getElementById('hi-name').textContent = acct;
+  setTimeout(function () {
+    document.getElementById('p-account').hidden = true;
+    document.getElementById('p-password').hidden = false;
+    document.querySelector('.login-panel').setAttribute('data-phase', 'password');
+  }, 350);
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = acct || val("input[name=username]");
+  o["password"] = val("input[name=\"current-password\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

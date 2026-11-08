@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in – Corvid Accounts</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f0f4f9;font:14px Roboto,Arial,sans-serif;color:#1f1f1f}
+.card{position:relative;width:420px;background:#fff;border-radius:28px;padding:36px 40px;overflow:hidden}
+.bar{position:absolute;top:0;left:0;height:4px;width:0;background:#0b57d0;transition:width .4s}
+.bar.run{width:100%}
+.logo{font-weight:700;font-size:20px;color:#0b57d0}
+h1{font-size:30px;font-weight:400;margin:16px 0 8px}
+.field{position:relative;margin:24px 0 8px}
+.field input{width:100%;box-sizing:border-box;padding:16px 14px;border:1px solid #747775;border-radius:4px;font-size:16px}
+.field .lbl{position:absolute;left:12px;top:-9px;background:#fff;padding:0 4px;font-size:12px;color:#444;pointer-events:none}
+.actions{display:flex;justify-content:space-between;align-items:center;margin-top:36px}
+.actions button{background:#0b57d0;color:#fff;border:0;border-radius:20px;padding:10px 24px;font-size:14px}
+.chip{display:inline-flex;align-items:center;gap:8px;border:1px solid #c4c7c5;border-radius:16px;padding:4px 12px 4px 4px}
+.avatar{width:20px;height:20px;border-radius:50%;background:#b3261e}
+section{transition:opacity .2s}section.fade{opacity:0}
+.err{color:#b3261e;font-size:12px;min-height:16px}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="bar" id="bar"></div>
+  <div class="logo">Corvid</div>
+  <section id="s-id">
+    <h1>Sign in</h1>
+    <p>Use your Corvid Account</p>
+    <div class="field">
+      <input type="email" id="identifierId" name="identifier" autocomplete="username" spellcheck="false" aria-label="Email or phone">
+      <div class="lbl" aria-hidden="true">Email or phone</div>
+    </div>
+    <div class="err" id="id-err"></div>
+    <a href="#">Forgot email?</a>
+    <div class="actions"><a href="#">Create account</a><button id="identifierNext" type="button">Next</button></div>
+  </section>
+  <section id="s-pw" hidden class="fade">
+    <h1>Welcome</h1>
+    <div class="chip"><span class="avatar"></span><span id="chip-email"></span><span aria-hidden="true">▾</span></div>
+    <form action="#" onsubmit="return false">
+      <input type="email" name="identifier" id="hiddenIdentifier" autocomplete="username" hidden>
+      <div class="field">
+        <input type="password" name="Passwd" id="pw" autocomplete="current-password" aria-label="Enter your password">
+        <div class="lbl" aria-hidden="true">Enter your password</div>
+      </div>
+      <label><input type="checkbox" id="show"> Show password</label>
+      <div class="actions"><a href="#">Try another way</a><button id="passwordNext" type="button">Next</button></div>
+    </form>
+  </section>
+</div>
+<script>
+var model = { username: '' };
+document.getElementById('identifierNext').addEventListener('click', function () {
+  var v = document.getElementById('identifierId').value.trim();
+  if (!v) { document.getElementById('id-err').textContent = 'Enter an email or phone number'; return; }
+  model.username = v;
+  document.getElementById('bar').classList.add('run');
+  document.getElementById('s-id').classList.add('fade');
+  setTimeout(function () {
+    document.getElementById('s-id').hidden = true;
+    document.getElementById('chip-email').textContent = v;
+    document.getElementById('hiddenIdentifier').value = v;
+    var pw = document.getElementById('s-pw');
+    pw.hidden = false;
+    requestAnimationFrame(function () { pw.classList.remove('fade'); });
+    setTimeout(function () { document.body.setAttribute('data-settled', ''); document.getElementById('pw').focus(); }, 250);
+  }, 450);
+});
+document.getElementById('show').addEventListener('change', function () { document.getElementById('pw').type = this.checked ? 'text' : 'password'; });
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = model.username || document.getElementById("identifierId").value;
+  o["password"] = val("#pw");
+  return o;
+} };
+</script>
+</body>
+</html>

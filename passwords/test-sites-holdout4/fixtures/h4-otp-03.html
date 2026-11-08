@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Verificación – Ceibo Móvil</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px Arial,sans-serif;background:#fff3e0}
+.c{width:380px;margin:80px auto;background:#fff;border-radius:10px;padding:26px}
+input[name=sms_code]{width:100%;box-sizing:border-box;padding:12px;font-size:22px;letter-spacing:6px;text-align:center;border:1px solid #ffb74d}
+button{width:100%;margin-top:14px;padding:11px;background:#ef6c00;color:#fff;border:0;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="c">
+  <h1 style="font-size:20px">Introduce el código</h1>
+  <p>Te hemos enviado un SMS con un código de 6 cifras al número terminado en 47.</p>
+  <form action="#" onsubmit="return false">
+    <label for="sms">Código de verificación</label>
+    <input id="sms" name="sms_code" type="text" inputmode="numeric" maxlength="6">
+    <button type="submit">Confirmar</button>
+  </form>
+  <p id="reenviar">Reenviar código en <span id="t">0:30</span></p>
+</div>
+<script>
+var left = 30;
+var timer = setInterval(function () {
+  left--;
+  document.getElementById('t').textContent = '0:' + (left < 10 ? '0' : '') + left;
+  if (left <= 0) { clearInterval(timer); document.getElementById('reenviar').innerHTML = '<a href="#">Reenviar código</a>'; }
+}, 1000);
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["otp"] = val("input[name=\"sms_code\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

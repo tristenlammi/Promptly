@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Copperleaf Invoicing</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#fefce8;font:15px Lato,sans-serif}.f{display:block;margin-bottom:14px}.f input{display:block;width:100%;box-sizing:border-box;padding:9px;margin-top:4px;border:1px solid #d6c27a}
+</style>
+</head>
+<body>
+<signin-layout>
+  <span slot="title">Sign in to Copperleaf</span>
+  <form slot="fields" action="#" onsubmit="return false">
+    <label class="f">Email<input id="si-email" type="email" name="email" autocomplete="username"></label>
+    <label class="f">Password<input id="si-pass" type="password" name="password" autocomplete="current-password"></label>
+    <button type="submit">Sign in</button>
+  </form>
+  <a slot="footer" href="#">Start a free trial</a>
+</signin-layout>
+<script>
+customElements.define('signin-layout', class extends HTMLElement {
+  connectedCallback() {
+    var r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<style>.wrap{width:380px;margin:70px auto;background:#fff;border-radius:10px;padding:28px;box-shadow:0 4px 18px rgba(120,90,0,.15)}h1{font-size:22px;color:#a16207}footer{margin-top:16px;font-size:13px}</style>' +
+      '<div class="wrap"><h1><slot name="title"></slot></h1><slot name="fields"></slot><footer><slot name="footer"></slot></footer></div>';
+    this.setAttribute('data-ready', '');
+  }
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#si-email");
+  o["password"] = val("#si-pass");
+  return o;
+} };
+</script>
+</body>
+</html>

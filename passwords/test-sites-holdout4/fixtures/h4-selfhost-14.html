@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Uptick</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#f0f6f4;font:15px "Segoe UI",sans-serif}
+.form-container{width:340px;margin:110px auto;background:#fff;padding:28px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.08)}
+.form-floating{position:relative;margin-bottom:12px}
+.form-floating input{width:100%;box-sizing:border-box;padding:24px 12px 8px;border:1px solid #ced4da;border-radius:8px;font-size:15px}
+.form-floating label{position:absolute;left:12px;top:6px;font-size:12px;color:#6c757d;pointer-events:none}
+.btn{width:100%;padding:10px;background:#5cdd8b;border:0;border-radius:20px;font-weight:600}
+</style>
+</head>
+<body>
+<div id="app"><div class="form-container"><p style="text-align:center;color:#999">Connecting…</p></div></div>
+<script>
+setTimeout(function () {
+  var box = document.querySelector('.form-container');
+  box.innerHTML = '<form><h1 style="font-size:20px;text-align:center">Uptick</h1>' +
+    '<div class="form-floating"><input id="floatingInput" type="text" class="form-control" placeholder="Username" autocomplete="username" required><label for="floatingInput">Username</label></div>' +
+    '<div class="form-floating"><input id="floatingPassword" type="password" class="form-control" placeholder="Password" autocomplete="current-password" required><label for="floatingPassword">Password</label></div>' +
+    '<div><input id="remember" type="checkbox" role="switch" checked> <label for="remember">Remember me</label></div>' +
+    '<p><button class="btn" type="submit">Login</button></p></form>';
+  box.querySelector('form').addEventListener('submit', function (e) { e.preventDefault(); });
+}, 600);
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#floatingInput");
+  o["password"] = val("#floatingPassword");
+  return o;
+} };
+</script>
+</body>
+</html>

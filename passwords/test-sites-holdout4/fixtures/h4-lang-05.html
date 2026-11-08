@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Entrar – Loja Jabuticaba</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Open Sans",sans-serif;background:#f6f0fa;color:#2d1b3d}
+.topo{background:#5e2b7e;color:#fff;padding:14px 30px}
+.cartao{width:380px;margin:50px auto;background:#fff;border-radius:10px;padding:26px}
+.campo{margin-bottom:14px}.campo label{display:block;font-size:13px;margin-bottom:4px}
+.campo input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #c7a8dc;border-radius:6px}
+.entrar{width:100%;padding:11px;background:#5e2b7e;color:#fff;border:0;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="topo">Loja Jabuticaba</div>
+<div class="cartao">
+  <h1 style="font-size:20px">Acesse sua conta</h1>
+  <form action="#" onsubmit="return false">
+    <div class="campo"><label for="login-cpf-email">CPF ou e-mail</label><input id="login-cpf-email" name="login" type="text"></div>
+    <div class="campo"><label for="login-senha">Senha</label><input id="login-senha" name="senha" type="password"></div>
+    <button class="entrar" type="submit">Entrar</button>
+  </form>
+  <p><a href="#">Esqueci minha senha</a> · <a href="#">Criar conta</a></p>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#login-cpf-email");
+  o["password"] = val("#login-senha");
+  return o;
+} };
+</script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parcelpine</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px system-ui,sans-serif;background:#f8fafc}
+#root{min-height:100vh;display:grid;place-items:center}
+.sk{width:360px;height:260px;border-radius:12px;background:#e2e8f0}
+form{width:360px;background:#fff;padding:28px;border-radius:12px;border:1px solid #e2e8f0}
+.fld{display:flex;flex-direction:column;gap:6px;margin-bottom:16px;font-size:14px}
+.fld input{padding:10px;border:1px solid #cbd5e1;border-radius:8px}
+button{width:100%;padding:11px;background:#16a34a;color:#fff;border:0;border-radius:8px}
+</style>
+</head>
+<body>
+<div id="root"><div class="sk" aria-busy="true"></div></div>
+<script>
+var appState = { email: '', password: '' };
+function field(label, name, type, key, testid, ac) {
+  var wrap = document.createElement('div'); wrap.className = 'fld';
+  var span = document.createElement('span'); span.textContent = label;
+  var input = document.createElement('input');
+  input.type = type; input.name = name; input.setAttribute('data-testid', testid); input.autocomplete = ac;
+  input.addEventListener('input', function (e) { appState[key] = e.target.value; render(); });
+  wrap.appendChild(span); wrap.appendChild(input);
+  return wrap;
+}
+function render() {
+  document.querySelectorAll('#root input[data-key]').forEach(function (el) {
+    var v = appState[el.getAttribute('data-key')];
+    if (el.value !== v) el.value = v;
+  });
+}
+function mount(cfg) {
+  var form = document.createElement('form');
+  form.innerHTML = '<h2></h2>';
+  form.querySelector('h2').textContent = cfg.heading;
+  var e = field(cfg.emailLabel, 'email', 'email', 'email', 'login-email', 'username');
+  var p = field(cfg.passwordLabel, 'password', 'password', 'password', 'login-password', 'current-password');
+  e.querySelector('input').setAttribute('data-key', 'email');
+  p.querySelector('input').setAttribute('data-key', 'password');
+  form.appendChild(e); form.appendChild(p);
+  var b = document.createElement('button'); b.type = 'submit'; b.textContent = cfg.submit; form.appendChild(b);
+  form.addEventListener('submit', function (ev) { ev.preventDefault(); });
+  var root = document.getElementById('root');
+  root.innerHTML = '';
+  root.appendChild(form);
+  form.setAttribute('data-mounted', '');
+}
+fetch('_data/h4-framework-01.json').then(function (r) { return r.json(); }).then(function (cfg) { setTimeout(function () { mount(cfg); }, 300); });
+window.__fixture = { state: function () { return { username: appState.email, password: appState.password }; } };
+</script>
+</body>
+</html>

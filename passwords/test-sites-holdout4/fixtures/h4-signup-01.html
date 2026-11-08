@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Create your account – Marigold Recipes</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px Georgia,serif;background:#fffaf0;color:#3b2f1e}
+main{width:420px;margin:50px auto;background:#fff;border:1px solid #f1d9a8;padding:28px}
+.r{margin-bottom:14px}.r label{display:block;font-size:14px}
+.r input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #d9b77a}
+.cta{background:#e09f3e;border:0;padding:10px 20px;color:#fff}
+footer{background:#3b2f1e;color:#f1d9a8;padding:24px;text-align:center}
+</style>
+</head>
+<body>
+<main>
+  <h1>Join Marigold</h1>
+  <p>Save recipes, build shopping lists and share your own dishes.</p>
+  <form action="#" method="post" onsubmit="return false">
+    <div class="r"><label for="reg-email">Email</label><input id="reg-email" name="user[email]" type="email" autocomplete="email"></div>
+    <div class="r"><label for="reg-pass">Password</label><input id="reg-pass" name="user[password]" type="password" autocomplete="new-password"></div>
+    <div class="r"><label for="reg-pass2">Confirm password</label><input id="reg-pass2" name="user[password_confirmation]" type="password" autocomplete="new-password"></div>
+    <label><input type="checkbox" name="user[terms]"> I agree to the Terms and Privacy Policy</label>
+    <p><button class="cta" type="submit">Create account</button></p>
+  </form>
+  <p>Already a member? <a href="#">Log in</a></p>
+</main>
+<footer>
+  <form action="#" onsubmit="return false"><label for="footer-news">Weekly recipes in your inbox</label> <input id="footer-news" type="email" name="news_email" placeholder="you@example.com"> <button>Subscribe</button></form>
+</footer>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#reg-email");
+  o["new-password"] = val("#reg-pass");
+  o["confirm-password"] = val("#reg-pass2");
+  return o;
+} };
+</script>
+</body>
+</html>

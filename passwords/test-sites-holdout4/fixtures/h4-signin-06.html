@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harbourstone Mutual – Internet Banking</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px Arial,sans-serif;background:#eef2f5;color:#14213d}
+.bar{background:#14213d;color:#fff;padding:16px 40px;font-size:20px}
+.panel{max-width:480px;margin:40px auto;background:#fff;border-top:5px solid #fca311;padding:26px 34px}
+.fld{margin:18px 0}.fld label{display:block;font-weight:bold;margin-bottom:6px}
+.fld .hint{font-size:12px;color:#556}
+.fld input[type=text],.fld input[type=password]{width:230px;padding:9px;border:2px solid #9aa;font-size:16px;letter-spacing:1px}
+.note{background:#fff8e6;border-left:4px solid #fca311;padding:10px 14px;font-size:13px}
+.btn{background:#fca311;border:0;padding:11px 26px;font-weight:bold}
+</style>
+</head>
+<body>
+<div class="bar">Harbourstone Mutual</div>
+<div class="panel">
+  <h1 style="font-size:22px">Log on to Internet Banking</h1>
+  <form name="logonForm" action="#" onsubmit="return false" autocomplete="off">
+    <div class="fld">
+      <label for="custNo">Customer number</label>
+      <span class="hint">This is the 8 to 10 digit number on your welcome letter.</span><br>
+      <input type="text" id="custNo" name="customerNumber" inputmode="numeric" autocomplete="off">
+    </div>
+    <div class="fld"><label><input type="checkbox" name="rememberCustNo"> Remember my customer number</label></div>
+    <div class="fld">
+      <label for="passcode">Passcode</label>
+      <input type="password" id="passcode" name="pc" autocomplete="off">
+      <div class="hint"><a href="#">Forgotten your passcode?</a></div>
+    </div>
+    <button class="btn" type="submit">Log on</button>
+  </form>
+  <p class="note">We will never ask for your full passcode by phone or email.</p>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#custNo");
+  o["password"] = val("#passcode");
+  return o;
+} };
+</script>
+</body>
+</html>

@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Modifier mon mot de passe – Ciboulette</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Nunito",sans-serif;background:#f1f8e9}
+.bloc{width:440px;margin:50px auto;background:#fff;border-radius:10px;padding:26px}
+.ch{margin-bottom:14px}.ch label{display:block;margin-bottom:4px}
+.ch input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #aed581;border-radius:6px}
+button{background:#558b2f;color:#fff;border:0;padding:10px 20px;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="bloc">
+  <h1 style="font-size:21px">Modifier mon mot de passe</h1>
+  <form action="#" onsubmit="return false">
+    <div class="ch"><label for="mdp-actuel">Mot de passe actuel</label><input id="mdp-actuel" name="ancien" type="password"></div>
+    <div class="ch"><label for="mdp-nouveau">Nouveau mot de passe</label><input id="mdp-nouveau" name="nouveau" type="password"><small>8 caractères minimum, dont un chiffre.</small></div>
+    <div class="ch"><label for="mdp-confirmation">Confirmer le nouveau mot de passe</label><input id="mdp-confirmation" name="confirmation" type="password"></div>
+    <button type="submit">Enregistrer</button>
+  </form>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["current-password"] = val("#mdp-actuel");
+  o["new-password"] = val("#mdp-nouveau");
+  o["confirm-password"] = val("#mdp-confirmation");
+  return o;
+} };
+</script>
+</body>
+</html>
