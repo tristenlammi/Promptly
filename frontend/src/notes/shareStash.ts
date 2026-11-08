@@ -1,5 +1,5 @@
 /**
- * Text shared into the installed Notes app ("Share → Promptly Notes"). The
+ * Text, pictures and recordings shared into the installed Notes app ("Share → Promptly Notes"). The
  * service worker receives the share (a POST, so the shared words never
  * sit in a URL or a server log), keeps it here and sends the app to
  * ``/notes/?shared=1``; the page makes it into a note. Used from both
@@ -10,6 +10,8 @@ const DB = "promptly-notes-share";
 const STORE = "shared";
 
 export interface SharedText {
+  /** Pictures and recordings shared along (or alone). */
+  files?: File[];
   title: string;
   text: string;
   url: string;
@@ -29,7 +31,7 @@ function open(): Promise<IDBDatabase> {
 
 /** Service worker side. */
 export async function stashSharedText(s: Omit<SharedText, "at">): Promise<void> {
-  if (!s.title && !s.text && !s.url) return;
+  if (!s.title && !s.text && !s.url && !s.files?.length) return;
   const db = await open();
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");

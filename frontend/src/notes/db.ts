@@ -7,6 +7,8 @@
  *   outbox  changes not yet saved, in order — survives the phone killing
  *           the app; sent when the connection is back
  *   meta    small things (when the lists last loaded)
+ *   uploads pictures and recordings not yet uploaded (their bytes too), so
+ *           a recording made with no signal survives a closed tab
  *
  * Keyed by user, and wiped with the rest of a person's data when someone
  * else signs in on this browser (lib/session.ts). Same pattern as
@@ -16,7 +18,7 @@ import type { Known } from "./types";
 import type { QueuedOp } from "./ops";
 
 const DB = "promptly-notes";
-const VERSION = 1;
+const VERSION = 2;
 
 let opening: Promise<IDBDatabase | null> | null = null;
 
@@ -27,7 +29,7 @@ function open(): Promise<IDBDatabase | null> {
       const req = indexedDB.open(DB, VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
-        for (const s of ["known", "outbox", "meta"]) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
+        for (const s of ["known", "outbox", "meta", "uploads"]) if (!db.objectStoreNames.contains(s)) db.createObjectStore(s);
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => resolve(null);
@@ -81,6 +83,10 @@ export const notesDb = {
     tx("outbox", "readwrite", (s) => {
       for (const q of seqs) s.delete(seqKey(uid, q));
     }),
+  /** Pictures and recordings still to upload (the File itself is kept). */
+  loadUploads: <T>(uid: string) => allWithPrefix<T>("uploads", `${uid}:`),
+  putUpload: (uid: string, aid: string, rec: unknown) => tx("uploads", "readwrite", (s) => s.put(rec, `${uid}:${aid}`)),
+  deleteUpload: (uid: string, aid: string) => tx("uploads", "readwrite", (s) => s.delete(`${uid}:${aid}`)),
   getMeta: <T>(uid: string, key: string) => tx<T>("meta", "readonly", (s) => s.get(`${uid}:${key}`)),
   putMeta: (uid: string, key: string, value: unknown) => tx("meta", "readwrite", (s) => s.put(value, `${uid}:${key}`)),
   /** Everything, for everyone — a different person signed in. */

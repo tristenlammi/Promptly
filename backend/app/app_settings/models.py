@@ -144,6 +144,9 @@ class AppSettings(Base):
     # (see app/mail/search.py). The provider is the cloud one the admin agreed to.
     mail_ai_search: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     mail_ai_search_provider: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    # Notes: transcribe voice notes. Unset: on with the server's own Whisper,
+    # off with cloud speech-to-text until the admin agrees (app/notes/transcription.py).
+    notes_transcribe: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # ----- Public origins (replaces the old static .env ALLOWED_ORIGINS) -----
     # JSON array of fully-qualified origins (scheme + host [+ :port]) the

@@ -38,6 +38,45 @@ export interface AttachmentCounts {
   audio_ms: number;
 }
 
+export type TranscriptState = "pending" | "working" | "done" | "failed" | "off";
+
+export interface AttachmentUrls {
+  original: string | null;
+  thumb: string | null;
+  preview: string | null;
+  /** A recording's seekable playback copy, once the server has made it. */
+  play: string | null;
+}
+
+/** A picture or recording in a note (``backend/app/notes/attachments.py``). */
+export interface NoteAttachment {
+  id: string;
+  kind: "image" | "audio";
+  file_id: string | null;
+  filename?: string | null;
+  mime?: string | null;
+  size?: number | null;
+  position?: number;
+  added_by?: string | null;
+  created_at?: string;
+  width?: number | null;
+  height?: number | null;
+  duration_ms?: number | null;
+  peaks?: number[] | null;
+  transcript?: string | null;
+  transcript_state?: TranscriptState | null;
+  urls?: AttachmentUrls;
+  /** Only on this device: still uploading (or waiting for a connection). */
+  local?: { url: string | null; state: "uploading" | "waiting" | "failed"; progress: number; error?: string | null };
+}
+
+export interface CardCover {
+  id: string;
+  thumb: string | null;
+  width?: number | null;
+  height?: number | null;
+}
+
 /** Body: a small TipTap document (paragraphs, H1/H2, bold, italic, underline, links). */
 export interface DocNode {
   type: string;
@@ -70,7 +109,12 @@ export interface Note {
   is_owner: boolean;
   member_ids: string[];
   shared: boolean;
-  attachments: AttachmentCounts | unknown[];
+  /** Card: counts. Full note: the pictures and recordings. */
+  attachments: AttachmentCounts | NoteAttachment[];
+  /** Card: the first few pictures' tiles. */
+  covers?: CardCover[];
+  /** Full note: whether this server transcribes recordings. */
+  transcription?: boolean;
   has_reminder: boolean;
   changed: boolean;
   revision: number;
@@ -189,8 +233,10 @@ export function displayTitle(n: Pick<Note, "title" | "snippet" | "body_text" | "
   return item ? item.text.trim().slice(0, 80) : "Untitled note";
 }
 
-export function isEmptyNote(n: Pick<Note, "title" | "kind" | "body_doc" | "items" | "snippet" | "body_text">): boolean {
+export function isEmptyNote(n: Pick<Note, "title" | "kind" | "body_doc" | "items" | "snippet" | "body_text"> & { attachments?: Note["attachments"] }): boolean {
   if (n.title.trim()) return false;
+  const c = n.attachments ? attachmentCounts(n as Note) : null;
+  if (c && (c.images || c.audio)) return false;
   if (n.kind === "list") return !n.items.some((i) => i.text.trim());
   const text = n.body_doc !== undefined ? docText(n.body_doc) : n.body_text ?? n.snippet ?? "";
   return !text.trim();

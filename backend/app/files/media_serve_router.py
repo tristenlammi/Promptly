@@ -104,6 +104,10 @@ async def serve(token: str, request: Request, db: AsyncSession = Depends(get_db)
         return await _serve_export(claim)
     if claim.rendition == "face":
         return await _serve_crop(db, claim, request)
+    if claim.rendition == "note":
+        from app.notes.media import serve as serve_note
+
+        return await serve_note(db, claim, user, request)
     try:
         row = await _load_readable_file(db, claim.file_id, user)
     except HTTPException:

@@ -6,7 +6,7 @@
  * and applying one twice to a note gives the same note — which is what lets
  * a sent change stay on screen until the refreshed note arrives.
  */
-import { docText, textDoc, type DocNode, type Note, type NoteItem, type NoteKind, type NoteLabel } from "./types";
+import { attachmentCounts, docText, textDoc, type DocNode, type Note, type NoteAttachment, type NoteItem, type NoteKind, type NoteLabel } from "./types";
 
 export type ItemFields = { text?: string; checked?: boolean; parent_id?: string | null; position?: number };
 export type MeFields = { pinned?: boolean; archived?: boolean; position?: number };
@@ -25,7 +25,11 @@ export type Op =
   | { k: "trash"; id: string; owner: boolean }
   | { k: "restore"; id: string }
   | { k: "forever"; id: string }
-  | { k: "empty_trash"; id: "" };
+  | { k: "empty_trash"; id: "" }
+  // A picture or recording already in Drive (uploaded, or from Photos) goes in the note.
+  | { k: "attach"; id: string; att: NoteAttachment }
+  | { k: "detach"; id: string; aid: string; kind: "image" | "audio" }
+  | { k: "transcribe"; id: string; aid: string };
 
 export interface QueuedOp {
   seq: number;
@@ -154,6 +158,31 @@ export function applyOp(note: Note | null, op: Op): Note | null {
       return { ...note, trashed_at: null };
     case "forever":
       return null;
+    case "attach": {
+      const a = note.attachments;
+      if (Array.isArray(a)) return a.some((x) => x.id === op.att.id) ? note : { ...note, attachments: [...a, op.att] };
+      // A card: only the counts move.
+      const c = attachmentCounts(note);
+      return {
+        ...note,
+        attachments: op.att.kind === "image" ? { ...c, images: c.images + 1 } : { ...c, audio: c.audio + 1, audio_ms: c.audio_ms + (op.att.duration_ms ?? 0) },
+      };
+    }
+    case "detach": {
+      const a = note.attachments;
+      if (Array.isArray(a)) return { ...note, attachments: a.filter((x) => x.id !== op.aid) };
+      const c = attachmentCounts(note);
+      return {
+        ...note,
+        covers: note.covers?.filter((x) => x.id !== op.aid),
+        attachments: op.kind === "image" ? { ...c, images: Math.max(0, c.images - 1) } : { ...c, audio: Math.max(0, c.audio - 1) },
+      };
+    }
+    case "transcribe": {
+      const a = note.attachments;
+      if (!Array.isArray(a)) return note;
+      return { ...note, attachments: a.map((x) => (x.id === op.aid ? { ...x, transcript_state: "pending" as const } : x)) };
+    }
   }
 }
 

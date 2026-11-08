@@ -88,4 +88,33 @@ export const notesApi = {
   async emptyTrash(): Promise<void> {
     await apiClient.delete("/notes/trash");
   },
+  /** One of your own pictures or recordings into the note (a retry with the same id is safe). */
+  async attach(id: string, body: { id: string; file_id: string; kind?: "image" | "audio"; duration_ms?: number | null; peaks?: number[] | null }): Promise<Note> {
+    const { data } = await apiClient.post<{ note: Note }>(`/notes/${id}/attachments`, body);
+    return data.note;
+  },
+  async detach(id: string, aid: string): Promise<Note> {
+    const { data } = await apiClient.delete<{ note: Note }>(`/notes/${id}/attachments/${aid}`);
+    return data.note;
+  },
+  async transcribe(id: string, aid: string): Promise<Note> {
+    const { data } = await apiClient.post<{ note: Note }>(`/notes/${id}/attachments/${aid}/transcribe`);
+    return data.note;
+  },
+  async transcription(): Promise<TranscriptionStatus> {
+    const { data } = await apiClient.get<TranscriptionStatus>("/notes/admin/transcription");
+    return data;
+  },
+  async setTranscription(on: boolean): Promise<TranscriptionStatus> {
+    const { data } = await apiClient.put<TranscriptionStatus>("/notes/admin/transcription", { on });
+    return data;
+  },
 };
+
+/** The admin's switch for transcribing voice notes. */
+export interface TranscriptionStatus {
+  on: boolean;
+  backend: "local" | "openai";
+  choice: boolean | null;
+  ready: boolean;
+}

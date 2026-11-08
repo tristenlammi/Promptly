@@ -8,7 +8,7 @@ const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), in
 
 /** A note open over the grid (desktop), so the grid stays where it was.
  *  Escape, the backdrop and Close all save and close it. */
-export function NoteDialog({ note, onClose, autoFocus }: { note: Note; onClose: () => void; autoFocus?: "title" | "body" | "list" }) {
+export function NoteDialog({ note, onClose, autoFocus, startWith }: { note: Note; onClose: () => void; autoFocus?: "title" | "body" | "list"; startWith?: "record" }) {
   const box = useRef<HTMLDivElement>(null);
   const closer = useRef<(() => void) | null>(null);
   const back = useRef<HTMLElement | null>(typeof document !== "undefined" ? (document.activeElement as HTMLElement | null) : null);
@@ -17,7 +17,7 @@ export function NoteDialog({ note, onClose, autoFocus }: { note: Note; onClose: 
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const raf = requestAnimationFrame(() => {
-      if (!box.current?.contains(document.activeElement)) box.current?.querySelector<HTMLElement>(autoFocus ? FOCUSABLE : '[aria-label="Title"]')?.focus();
+      if (!box.current?.contains(document.activeElement) && !(document.activeElement as HTMLElement | null)?.closest("[data-note-pop]")) box.current?.querySelector<HTMLElement>(autoFocus ? FOCUSABLE : '[aria-label="Title"]')?.focus();
     });
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
@@ -56,7 +56,7 @@ export function NoteDialog({ note, onClose, autoFocus }: { note: Note; onClose: 
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 pb-8 pt-[8vh]">
       <button type="button" aria-label="Close note" tabIndex={-1} onClick={() => closer.current?.()} className="fixed inset-0 bg-black/45" />
       <div ref={box} role="dialog" aria-modal="true" aria-label={displayTitle(note)} className="relative w-full max-w-[600px] shadow-[var(--shadow-lg)]">
-        <NoteEditor note={note} variant="dialog" onClose={onClose} autoFocus={autoFocus} closer={closer} />
+        <NoteEditor note={note} variant="dialog" onClose={onClose} autoFocus={autoFocus} closer={closer} startWith={startWith} />
       </div>
     </div>,
     document.body,

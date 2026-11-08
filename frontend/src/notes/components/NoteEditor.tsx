@@ -1,12 +1,19 @@
-import { Archive, ArchiveRestore, ArrowLeft, ArrowDownAZ, CheckSquare, CloudOff, ListX, MoreVertical, Palette, Pin, Square, Tag, Trash2, Type } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, ArrowDownAZ, CheckSquare, CloudOff, ListX, Mic, MoreVertical, Palette, Pin, Square, Tag, Trash2, Type } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import type { PhotoItem } from "@/api/photos";
 import { tagColor } from "@/api/tags";
+import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 import { noteOps } from "../actions";
 import { notesActions, runFlushers, useNotes } from "../store";
-import type { DocNode, Note, NoteLabel } from "../types";
+import { textDoc, uuid, type DocNode, type Note, type NoteAttachment, type NoteLabel } from "../types";
+import { addFiles, cancelUpload, retryUpload, useNoteAttachments } from "../uploads";
+import { AddImageButton } from "./AddImage";
+import { AudioPlayer } from "./AudioPlayer";
+import { NoteImages } from "./NoteImages";
+import { Recorder } from "./Recorder";
 import { BodyEditor, type BodyEditorHandle } from "./BodyEditor";
 import { ListEditor } from "./ListEditor";
 import { ColorGrid, LabelChooser } from "./pickers";
@@ -36,9 +43,12 @@ export function NoteEditor({
   autoFocus,
   labelId,
   closer,
+  startWith,
 }: {
   note: Note;
   variant: "dialog" | "page" | "composer";
+  /** Open the recorder as soon as the note opens (the Record buttons). */
+  startWith?: "record";
   onClose: () => void;
   autoFocus?: "title" | "body" | "list";
   labelId?: string;
@@ -61,6 +71,10 @@ export function NoteEditor({
   const moreBtn = useRef<HTMLButtonElement>(null);
   const body = useRef<BodyEditorHandle>(null);
   const titleRef = useRef<HTMLTextAreaElement>(null);
+  const atts = useNoteAttachments(note);
+  const images = atts.filter((a) => a.kind === "image");
+  const recordings = atts.filter((a) => a.kind === "audio");
+  const [recording, setRecording] = useState(startWith === "record" && !note.trashed_at);
 
   // ---------------------------------------------------------- title + body
   const [title, setTitle] = useState(note.title);
@@ -123,6 +137,54 @@ export function NoteEditor({
   };
   if (closer) closer.current = close;
 
+  // ---------------------------------------------------------- pictures and recordings
+  const putFiles = (files: File[], extra?: { duration_ms?: number; peaks?: number[] }) => {
+    flush();
+    const n = addFiles(id, files, extra);
+    if (n < files.length) toast.error(n ? "Only pictures and recordings can go in a note — the rest were left out." : "Only pictures and recordings can go in a note.");
+  };
+  const putPhotos = (items: PhotoItem[]) => {
+    flush();
+    for (const p of items)
+      notesActions.attach(id, {
+        id: uuid(),
+        kind: "image",
+        file_id: p.id,
+        filename: p.filename,
+        width: p.width,
+        height: p.height,
+        urls: { original: null, thumb: p.thumb, preview: p.thumb, play: null },
+      });
+  };
+  const removeAttachment = (a: NoteAttachment) => {
+    if (a.local) {
+      cancelUpload(a.id);
+      return;
+    }
+    notesActions.detach(id, a.id, a.kind);
+    const fileId = a.file_id;
+    toast.info(a.kind === "image" ? "Picture removed" : "Recording removed", {
+      action: fileId
+        ? {
+            label: "Undo",
+            onClick: () => notesActions.attach(id, { ...a, id: uuid(), file_id: fileId, local: undefined }),
+          }
+        : undefined,
+    });
+  };
+  const addToNote = (text: string) => {
+    flush();
+    const cur = useNotes.getState().notes[id] ?? useNotes.getState().drafts[id] ?? note;
+    if (cur.kind === "list") {
+      let after: string | null = null;
+      for (const line of text.split(/\n+/).map((l) => l.trim()).filter(Boolean)) after = notesActions.addItem(id, { text: line.slice(0, 1000) }, after ?? lastItemId(cur));
+    } else {
+      const extra = textDoc(text.replace(/^\[\d+:\d{2}:\d{2}\] /gm, ""))?.content ?? [];
+      notesActions.patch(id, { body_doc: { type: "doc", content: [...(cur.body_doc?.content ?? []), ...extra] } });
+    }
+    toast.success("Added to the note");
+  };
+
   const labelsOnNotes = Object.values(allLabels).flatMap((n) => n.labels);
   const toggleLabel = (l: NoteLabel, on: boolean) => {
     flush();
@@ -140,8 +202,8 @@ export function NoteEditor({
       className={cn(
         "note-c flex min-h-0 flex-col",
         variant === "page" && "h-full",
-        variant === "dialog" && "max-h-[min(85dvh,860px)] rounded-xl",
-        variant === "composer" && "rounded-xl border shadow-[var(--shadow-md)]",
+        variant === "dialog" && "max-h-[min(85dvh,860px)] overflow-hidden rounded-xl",
+        variant === "composer" && "overflow-hidden rounded-xl border shadow-[var(--shadow-md)]",
       )}
     >
       {variant === "page" && (
@@ -199,6 +261,11 @@ export function NoteEditor({
       )}
 
       <div className={cn("min-h-0 flex-1 overflow-y-auto px-4 pt-3", variant === "page" && "pb-6")}>
+        {images.length > 0 && (
+          <div className={cn("-mx-4 mb-3", variant === "page" ? "" : "-mt-3")}>
+            <NoteImages images={images} editable={editable} onRemove={removeAttachment} onRetryUpload={(a) => retryUpload(a.id)} />
+          </div>
+        )}
         <div className="flex items-start gap-2">
           <textarea
             ref={titleRef}
@@ -265,6 +332,23 @@ export function NoteEditor({
           )}
         </div>
 
+        {recordings.length > 0 && (
+          <div className="flex flex-col gap-2 pb-3">
+            {recordings.map((a) => (
+              <AudioPlayer
+                key={a.id}
+                att={a}
+                editable={editable}
+                transcriptionOn={note.transcription ?? true}
+                onRemove={() => removeAttachment(a)}
+                onAddToNote={addToNote}
+                onRetryTranscript={() => notesActions.transcribe(id, a.id)}
+                onRetryUpload={() => retryUpload(a.id)}
+              />
+            ))}
+          </div>
+        )}
+
         {note.labels.length > 0 && (
           <div className="flex flex-wrap gap-1.5 pb-3">
             {note.labels.map((l) => (
@@ -290,6 +374,10 @@ export function NoteEditor({
             </button>
             <button ref={labelBtn} type="button" aria-label="Labels" title="Labels" aria-expanded={pop === "labels"} onClick={() => setPop(pop === "labels" ? null : "labels")} className={footerBtn}>
               <Tag className="h-[18px] w-[18px]" />
+            </button>
+            <AddImageButton onFiles={(f) => putFiles(f)} onPhotos={putPhotos} className={footerBtn} />
+            <button type="button" aria-label="Record a voice note" title="Record" onClick={() => setRecording(true)} className={footerBtn}>
+              <Mic className="h-[18px] w-[18px]" />
             </button>
             {variant !== "page" && !isDraft && (
               <button
@@ -320,6 +408,19 @@ export function NoteEditor({
         )}
       </div>
 
+      {recording && (
+        <Recorder
+          onClose={() => setRecording(false)}
+          onSave={(r) => {
+            setRecording(false);
+            putFiles([r.file], { duration_ms: r.duration_ms, peaks: r.peaks });
+          }}
+          onFiles={(files) => {
+            setRecording(false);
+            putFiles(files);
+          }}
+        />
+      )}
       {pop === "color" && (
         <Pop anchor={colorBtn.current} label="Note colour" onClose={() => setPop(null)} width={248}>
           <ColorGrid value={note.color} onPick={(c) => noteOps.color([id], c)} />
@@ -420,4 +521,9 @@ export function NoteEditor({
       )}
     </div>
   );
+}
+
+function lastItemId(n: Note): string | null {
+  const open = [...n.items].sort((a, b) => (a.position ?? 0) - (b.position ?? 0));
+  return open.length ? open[open.length - 1].id : null;
 }

@@ -23,6 +23,10 @@ people on the note through their live stream (ids only).
     DELETE /notes/{id}                      owner → Trash; member → Leave
     POST   /notes/{id}/restore              out of Trash (owner)
     DELETE /notes/{id}/forever              gone for good (owner)
+    POST   /notes/{id}/attachments          {id, file_id, kind?, duration_ms?, peaks?} — your own picture or recording
+    DELETE /notes/{id}/attachments/{aid}    out of the note (the file stays in Drive)
+    POST   /notes/{id}/attachments/{aid}/transcribe   try the words again
+    GET|PUT /notes/admin/transcription      the admin's switch for transcribing voice notes
 """
 from __future__ import annotations
 
@@ -35,11 +39,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.deps import get_current_user
+from app.auth.deps import get_current_user, require_admin
 from app.auth.models import User
 from app.database import get_db
 
-from . import access, events, push, service
+from . import access, events, push, service, transcription
+from . import attachments as attach
 from .body import BodyError
 from .models import Note
 
@@ -128,6 +133,19 @@ class MembersIn(BaseModel):
     user_ids: list[uuid.UUID] = Field(min_length=1, max_length=service.MAX_MEMBERS)
 
 
+class AttachIn(BaseModel):
+    id: uuid.UUID
+    file_id: uuid.UUID
+    kind: Literal["image", "audio"] | None = None
+    # What the recorder measured (the worker's own reading replaces them).
+    duration_ms: int | None = Field(default=None, ge=0)
+    peaks: list[float] | None = Field(default=None, max_length=200)
+
+
+class TranscriptionIn(BaseModel):
+    on: bool
+
+
 class BulkIn(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
     action: Literal["pin", "unpin", "archive", "unarchive", "color", "label", "unlabel", "trash"]
@@ -156,6 +174,26 @@ async def list_notes(
 @router.get("/labels")
 async def labels(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     return {"labels": await service.label_counts(db, user)}
+
+
+# ------------------------------------------------------------------ admin
+
+
+def _transcription_out(cfg: transcription.Config) -> dict:
+    return {"on": cfg.on, "backend": cfg.backend, "choice": cfg.choice, "ready": cfg.ready}
+
+
+@router.get("/admin/transcription")
+async def transcription_status(db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)) -> dict:
+    """Whether voice notes are transcribed, for everyone on this Promptly."""
+    _ = user
+    return _transcription_out(await transcription.config(db))
+
+
+@router.put("/admin/transcription")
+async def set_transcription(body: TranscriptionIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)) -> dict:
+    _ = user
+    return _transcription_out(await transcription.set_choice(db, body.on))
 
 
 @router.get("/events")
@@ -478,6 +516,68 @@ async def restore_version(
         raise
     await db.commit()
     await _tell_all(db, note)
+    return {"note": await service.full_out(db, user, note)}
+
+
+# ------------------------------------------------------------------ attachments
+
+
+@router.post("/{note_id}/attachments", status_code=status.HTTP_201_CREATED)
+async def add_attachment(
+    note_id: uuid.UUID, body: AttachIn, response: Response, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Put one of your own pictures or recordings in the note (uploaded with
+    tus ``route=note``, or a photo from your library). A recording is
+    transcribed when the server does that."""
+    note = await access.load(db, user, note_id, lock=True)
+    cfg = await transcription.config(db)
+    att, created = await attach.add(
+        db, user, note, attachment_id=body.id, file_id=body.file_id, kind=body.kind, duration_ms=body.duration_ms,
+        peaks=body.peaks, transcribe=cfg.on,
+    )
+    if created:
+        await service.touch(db, note, user)
+    await db.commit()
+    if created:
+        await _tell_all(db, note)
+        if att.kind == "audio":
+            await transcription.enqueue(att.id)
+    else:
+        response.status_code = status.HTTP_200_OK
+    return {"note": await service.full_out(db, user, note)}
+
+
+@router.delete("/{note_id}/attachments/{attachment_id}")
+async def remove_attachment(
+    note_id: uuid.UUID, attachment_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    note = await access.load(db, user, note_id, lock=True)
+    if await attach.remove(db, note, attachment_id):
+        await service.touch(db, note, user)
+        await db.commit()
+        await _tell_all(db, note)
+    return {"note": await service.full_out(db, user, note)}
+
+
+@router.post("/{note_id}/attachments/{attachment_id}/transcribe")
+async def retry_transcription(
+    note_id: uuid.UUID, attachment_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Try a recording's words again (after "Couldn't transcribe", or one
+    made while transcription was off)."""
+    note = await access.load(db, user, note_id, lock=True)
+    att = await attach.load(db, note, attachment_id)
+    if att.kind != "audio":
+        raise service.bad("Only recordings have words to find.")
+    if not (await transcription.config(db)).on:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Transcription is off on this server.")
+    if att.transcript_state in ("pending", "working"):
+        return {"note": await service.full_out(db, user, note)}
+    att.transcript_state = "pending"
+    note.change_seq += 1
+    await db.commit()
+    await _tell_all(db, note)
+    await transcription.enqueue(att.id)
     return {"note": await service.full_out(db, user, note)}
 
 

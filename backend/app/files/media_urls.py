@@ -53,6 +53,11 @@ RENDITIONS = ("thumb", "preview", "poster", "video", "original")
 # or animal's crop (PH-3): the "file" is the face (or animal). An edited
 # photo's tile and preview (PH-7). New codes only ever go on the end.
 _CODE = {name: i + 1 for i, name in enumerate((*RENDITIONS, "zip", "version", "export", "face", "thumb_edit", "preview_edit", "basemap"))}
+# Notes (app/notes/media.py): a note's picture or recording — the "file" is
+# the ``note_attachments`` row, so the link names the note and the file;
+# which rendition (original, tile, preview, playback copy) rides in the low
+# bits of ``ver``. Code 19 is fixed: Porch has 13–18 on its branch.
+_CODE["note"] = 19
 _NAME = {v: k for k, v in _CODE.items()}
 # What each rendition is on disk under derived/<file_id>/.
 RENDITION_FILE = {

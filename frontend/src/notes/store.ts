@@ -25,7 +25,7 @@ import { notesApi } from "./api";
 import { notesDb } from "./db";
 import { mergeFields } from "./merge";
 import { applyOp, coalesce, grouped, type Base, type ItemFields, type MeFields, type NoteFields, type Op, type QueuedOp } from "./ops";
-import { isEmptyNote, uuid, type DocNode, type Known, type Note, type NoteItem, type NoteKind, type NoteLabel, type NoteUser } from "./types";
+import { isEmptyNote, uuid, type DocNode, type Known, type Note, type NoteAttachment, type NoteItem, type NoteKind, type NoteLabel, type NoteUser } from "./types";
 
 export type SyncState = "idle" | "saving" | "offline" | "retrying" | "signed_out";
 
@@ -486,6 +486,47 @@ async function send(q: QueuedOp): Promise<void> {
       }
       drop([op.id]);
       return removeOp(q);
+    case "attach": {
+      try {
+        const n = await notesApi.attach(op.id, {
+          id: op.att.id,
+          file_id: op.att.file_id ?? "",
+          kind: op.att.kind,
+          duration_ms: op.att.duration_ms ?? null,
+          peaks: op.att.peaks ?? null,
+        });
+        addUsers(n.users);
+        landed(q, n);
+      } catch (e) {
+        // The file went (deleted from Drive meanwhile), not the note: drop just this.
+        const detail = axios.isAxiosError(e) ? (e.response?.data as { detail?: unknown })?.detail : undefined;
+        if (status(e) === 404 && typeof detail === "string" && detail.includes("picture or recording")) {
+          removeOp(q);
+          toast.error("That picture or recording isn't in your files any more.");
+          refreshWanted.add(op.id);
+          return;
+        }
+        throw e;
+      }
+      return;
+    }
+    case "detach": {
+      const n = await notesApi.detach(op.id, op.aid);
+      addUsers(n.users);
+      landed(q, n);
+      return;
+    }
+    case "transcribe":
+      try {
+        const n = await notesApi.transcribe(op.id, op.aid);
+        landed(q, n);
+      } catch (e) {
+        if (status(e) !== 409 && !(status(e) === 404 && known)) throw e;
+        removeOp(q);
+        if (status(e) === 409) toast.error(apiErrorMessage(e));
+        refreshWanted.add(op.id);
+      }
+      return;
     case "empty_trash": {
       await notesApi.emptyTrash();
       const trashed = Object.values(get().known)
@@ -685,6 +726,22 @@ function commitDraftNote(d: Note): boolean {
   return true;
 }
 
+/** A draft becomes a real note now, even with nothing typed yet (a picture
+ *  or recording is going into it). A note that's already real is left be. */
+export function keepDraft(id: string): void {
+  const d = get().drafts[id];
+  if (!d) return;
+  const drafts = { ...get().drafts };
+  delete drafts[id];
+  set({ drafts });
+  saveDrafts();
+  const note: Note = { ...d, position: -Date.now() / 1000, updated_at: new Date().toISOString() };
+  const known = { ...get().known, [note.id]: { note, partial: false, local: true } };
+  set({ known });
+  persistKnown([known[note.id]]);
+  enqueue({ k: "create", id: note.id, note });
+}
+
 /** Close a draft: kept when there's something in it. Returns whether it was kept. */
 export function closeDraft(id: string): boolean {
   const d = get().drafts[id];
@@ -756,6 +813,17 @@ export const notesActions = {
   },
   emptyTrash() {
     enqueue({ k: "empty_trash", id: "" });
+  },
+  /** A file already in Drive goes in the note (see ``uploads.ts`` for new ones). */
+  attach(id: string, att: NoteAttachment) {
+    keepDraft(id);
+    enqueue({ k: "attach", id, att });
+  },
+  detach(id: string, aid: string, kind: "image" | "audio") {
+    enqueue({ k: "detach", id, aid, kind });
+  },
+  transcribe(id: string, aid: string) {
+    enqueue({ k: "transcribe", id, aid });
   },
 };
 

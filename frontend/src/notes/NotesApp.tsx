@@ -7,6 +7,7 @@ import {
   ListChecks,
   Loader2,
   Menu,
+  Mic,
   Palette,
   Pencil,
   Pin,
@@ -33,7 +34,8 @@ import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
 
 import { noteOps } from "./actions";
-import { Composer } from "./components/Composer";
+import { AddImageButton } from "./components/AddImage";
+import { attachPhotos, Composer } from "./components/Composer";
 import type { CardActions } from "./components/NoteCard";
 import { NoteDialog } from "./components/NoteDialog";
 import { NoteEditor } from "./components/NoteEditor";
@@ -44,7 +46,9 @@ import { useNotesLive } from "./live";
 import "./notes.css";
 import { takeSharedText } from "./shareStash";
 import { closeDraft, fetchNote, initNotes, loadLists, loadTrash, newDraft, notesActions, searchServer, useNote, useNotes } from "./store";
+import { addFiles, initUploads, kindOf } from "./uploads";
 import { attachmentCounts, COLOR_NAMES, docText, NOTE_COLORS, textDoc, type Note, type NoteLabel } from "./types";
+import { toast } from "@/store/toastStore";
 
 type Place = { view: "home" | "archive" | "trash" | "label"; label?: string };
 
@@ -86,7 +90,11 @@ function searchText(n: Note): string {
 
 /** A label in a link: its tag id, or its name while it's new on this device. */
 const labelKey = (l: Pick<NoteLabel, "id" | "name">) => l.id || `~${l.name.toLowerCase()}`;
-const hasLabel = (n: Note, key: string | undefined) => !!key && n.labels.some((l) => labelKey(l) === key);
+/** Does ``key`` (from a link) name this label? A ``~name`` link made while the
+ *  label was new still finds it once the server has given it an id. */
+const isLabel = (l: Pick<NoteLabel, "id" | "name">, key: string | undefined) =>
+  !!key && (labelKey(l) === key || (key.startsWith("~") && l.name.toLowerCase() === key.slice(1)));
+const hasLabel = (n: Note, key: string | undefined) => !!key && n.labels.some((l) => isLabel(l, key));
 
 const byOrder = (a: Note, b: Note) => a.position - b.position || a.id.localeCompare(b.id);
 
@@ -133,7 +141,9 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   const layout: "grid" | "list" = (settings?.notes_view as "grid" | "list" | undefined) ?? "grid";
 
   useEffect(() => {
-    if (uid) void initNotes(uid);
+    if (!uid) return;
+    void initNotes(uid);
+    void initUploads(uid);
   }, [uid]);
   useNotesLive(!!uid && ready);
 
@@ -163,11 +173,18 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     void (async () => {
       const items = await takeSharedText();
       let last: string | null = null;
+      let skipped = 0;
       for (const s of items) {
         const body = [s.text, s.url && !s.text.includes(s.url) ? s.url : ""].filter(Boolean).join("\n");
         const id = newDraft("text", { title: s.title.slice(0, 300), body_doc: textDoc(body), body_text: body, source: "share" });
-        if (closeDraft(id)) last = id;
+        const files = (s.files ?? []).filter((f) => kindOf(f));
+        skipped += (s.files?.length ?? 0) - files.length;
+        if (files.length) {
+          addFiles(id, files);
+          last = id;
+        } else if (closeDraft(id)) last = id;
       }
+      if (skipped) toast.error("Only pictures and recordings can go in a note — the rest weren't added.");
       const next = new URLSearchParams(params);
       next.delete("shared");
       setParams(next, { replace: true });
@@ -176,12 +193,12 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
-  // "New list" / "New note" from the installed app's shortcuts.
+  // "New list" / "New note" / "Voice note" from the installed app's shortcuts.
   useEffect(() => {
     const kind = params.get("new");
-    if (!ready || (kind !== "list" && kind !== "note")) return;
-    const id = newDraft(kind === "list" ? "list" : "text");
-    navigate(`/notes/n/${id}`, { replace: true, state: { from: "/notes", focus: kind === "list" ? "list" : "body", noBack: true } });
+    if (!ready || (kind !== "list" && kind !== "note" && kind !== "voice")) return;
+    const id = newDraft(kind === "list" ? "list" : "text", kind === "voice" ? { source: "voice" } : {});
+    navigate(`/notes/n/${id}`, { replace: true, state: { from: "/notes", focus: kind === "list" ? "list" : kind === "voice" ? undefined : "body", noBack: true, record: kind === "voice" } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready]);
 
@@ -212,7 +229,12 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       }
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   }, [live]);
-  const currentLabel = place.view === "label" ? labels.find((l) => labelKey(l) === place.label) ?? null : null;
+  const currentLabel = place.view === "label" ? labels.find((l) => isLabel(l, place.label)) ?? null : null;
+  // A ``~name`` link whose label now has its id: show the lasting link.
+  useEffect(() => {
+    if (place.view !== "label" || !place.label?.startsWith("~") || !currentLabel?.id || noteId) return;
+    navigate({ pathname: `/notes/label/${encodeURIComponent(currentLabel.id)}`, search: location.search }, { replace: true });
+  }, [place.view, place.label, currentLabel?.id, noteId, navigate, location.search]);
 
   const pendingIds = useMemo(() => new Set(outbox.filter((x) => !x.landed && sync !== "saving" && sync !== "idle").map((x) => x.op.id)), [outbox, sync]);
 
@@ -339,13 +361,21 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     setParams(next, { replace: true });
   };
 
+  const labelStart = () => (currentLabel ? { labels: [{ id: currentLabel.id, name: currentLabel.name, color: currentLabel.color }] } : {});
   const newOnPhone = (kind: "text" | "list") => {
-    const id = newDraft(kind, currentLabel ? { labels: [{ id: currentLabel.id, name: currentLabel.name, color: currentLabel.color }] } : {});
+    const id = newDraft(kind, labelStart());
     navigate(`/notes/n/${id}`, { state: { from: location.pathname + location.search, focus: kind === "list" ? "list" : "body" } });
+  };
+  /** The phone's Record and Image buttons: a new note with that in it. */
+  const newWith = (fill?: (id: string) => void) => {
+    const id = newDraft("text", fill ? labelStart() : { ...labelStart(), source: "voice" });
+    fill?.(id);
+    navigate(`/notes/n/${id}`, { state: { from: location.pathname + location.search, record: !fill } });
   };
 
   // ------------------------------------------------------------ the open note
   const openFocus = (location.state as { focus?: "title" | "body" | "list" } | null)?.focus;
+  const openRecord = (location.state as { record?: boolean } | null)?.record ? ("record" as const) : undefined;
   const open = useNote(noteId);
   const [openState, setOpenState] = useState<"idle" | "loading" | "gone">("idle");
   useEffect(() => {
@@ -382,7 +412,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       </RailLink>
       {labels.length > 0 && <p className="mt-3 px-4 pb-1 text-[11px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Labels</p>}
       {labels.map((l) => (
-        <RailLink key={labelKey(l)} to={`/notes/label/${encodeURIComponent(labelKey(l))}`} active={place.view === "label" && place.label === labelKey(l)} onNavigate={() => setDrawer(false)} dot={tagColor(l)} count={l.count}>
+        <RailLink key={labelKey(l)} to={`/notes/label/${encodeURIComponent(labelKey(l))}`} active={place.view === "label" && isLabel(l, place.label)} onNavigate={() => setDrawer(false)} dot={tagColor(l)} count={l.count}>
           {l.name}
         </RailLink>
       ))}
@@ -453,7 +483,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
           </Chip>
         ))}
         {labels.slice(0, 12).map((l) => (
-          <Chip key={labelKey(l)} on={place.view === "label" && place.label === labelKey(l)} onClick={() => navigate({ pathname: place.view === "label" && place.label === labelKey(l) ? "/notes" : `/notes/label/${encodeURIComponent(labelKey(l))}`, search: params.toString() })}>
+          <Chip key={labelKey(l)} on={place.view === "label" && isLabel(l, place.label)} onClick={() => navigate({ pathname: place.view === "label" && isLabel(l, place.label) ? "/notes" : `/notes/label/${encodeURIComponent(labelKey(l))}`, search: params.toString() })}>
             <span aria-hidden className="h-2 w-2 rounded-full" style={{ background: tagColor(l) }} />
             {l.name}
           </Chip>
@@ -653,6 +683,16 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
           <button type="button" onClick={() => newOnPhone("list")} aria-label="New list" className="flex h-12 w-12 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)]">
             <ListChecks className="h-6 w-6" />
           </button>
+          <button type="button" onClick={() => newWith()} aria-label="New voice note" className="flex h-12 w-12 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)]">
+            <Mic className="h-6 w-6" />
+          </button>
+          <AddImageButton
+            label="New picture note"
+            className="flex h-12 w-12 items-center justify-center rounded-full text-[var(--text-muted)] hover:bg-[var(--hover)]"
+            iconClassName="h-6 w-6"
+            onFiles={(files) => newWith((id) => addFiles(id, files))}
+            onPhotos={(items) => newWith((id) => attachPhotos(id, items))}
+          />
           <div className="flex-1" />
           <button
             type="button"
@@ -674,12 +714,12 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       {editorPage &&
         (open && openFull ? (
           <div className="flex min-h-0 flex-1 flex-col">
-            <NoteEditor key={open.id} note={open} variant="page" onClose={closeNote} autoFocus={openFocus} />
+            <NoteEditor key={open.id} note={open} variant="page" onClose={closeNote} autoFocus={openFocus} startWith={openRecord} />
           </div>
         ) : (
           <NoteMissing state={openState} onBack={closeNote} />
         ))}
-      {!editorPage && noteId && open && openFull && <NoteDialog key={open.id} note={open} onClose={closeNote} autoFocus={openFocus} />}
+      {!editorPage && noteId && open && openFull && <NoteDialog key={open.id} note={open} onClose={closeNote} autoFocus={openFocus} startWith={openRecord} />}
       {!editorPage && noteId && !(open && openFull) && (openState === "loading" || openState === "gone" || !open) && (
         <NoteMissingDialog state={openState} onBack={closeNote} />
       )}

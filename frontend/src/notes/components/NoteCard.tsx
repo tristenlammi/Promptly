@@ -7,6 +7,7 @@ import { cn } from "@/utils/cn";
 
 import { grouped } from "../ops";
 import { attachmentCounts, displayTitle, type Note, type NoteUser } from "../types";
+import { localUrl, usePendingCounts } from "../uploads";
 import { ColorGrid } from "./pickers";
 import { MenuItem, Pop } from "./Pop";
 
@@ -59,10 +60,17 @@ export const NoteCard = memo(function NoteCard({
   const shown = items.slice(0, 8);
   const unticked = note.items_total - note.items_checked;
   const moreOpen = Math.max(0, unticked - shown.length);
-  const counts = attachmentCounts(note);
+  const pendingUp = usePendingCounts(note.id);
+  const base = attachmentCounts(note);
+  const counts = { ...base, images: base.images + pendingUp.images.length, audio: base.audio + pendingUp.audio };
+  const own = Array.isArray(note.attachments)
+    ? note.attachments.filter((a) => a.kind === "image").map((a) => ({ id: a.id, thumb: a.urls?.thumb ?? a.urls?.preview ?? a.urls?.original ?? localUrl(a.id) }))
+    : note.covers ?? [];
+  const covers = [...own, ...pendingUp.images.map((a) => ({ id: a.id, thumb: a.local?.url ?? null }))].filter((c) => c.thumb).slice(0, 3);
+  const moreImages = Math.max(0, counts.images - covers.length);
   const people = note.is_owner ? note.member_ids : [note.owner_id, ...note.member_ids];
   const text = note.kind === "text" ? (note.body_text ?? note.snippet ?? "") : "";
-  const empty = !title && !text.trim() && !shown.length && !note.items_checked;
+  const empty = !title && !text.trim() && !shown.length && !note.items_checked && !counts.images && !counts.audio;
   const owner = users[note.owner_id];
 
   const tool = "flex h-8 w-8 items-center justify-center rounded-full note-muted note-hover hover:text-[var(--note-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]";
@@ -91,6 +99,13 @@ export const NoteCard = memo(function NoteCard({
         }}
       />
 
+      {covers.length > 0 && (
+        <div aria-hidden className={cn("pointer-events-none relative z-[1] grid gap-0.5", covers.length === 1 ? "grid-cols-1" : covers.length === 2 ? "grid-cols-2" : "grid-cols-3")}>
+          {covers.map((c) => (
+            <img key={`${c.id}:${c.thumb}`} src={c.thumb ?? undefined} alt="" loading="lazy" className={cn("w-full object-cover", covers.length === 1 ? "max-h-56" : "aspect-square")} onError={(e) => (e.currentTarget.style.visibility = "hidden")} />
+          ))}
+        </div>
+      )}
       <div className="pointer-events-none relative z-[1] flex flex-col gap-2 px-4 pb-2 pt-3">
         {title && <h3 className="break-words pr-6 text-[15px] font-semibold leading-snug">{title}</h3>}
         {note.kind === "text" && text.trim() && (
@@ -115,13 +130,14 @@ export const NoteCard = memo(function NoteCard({
           </ul>
         )}
         {empty && <p className="note-muted text-sm italic">Empty note</p>}
+        {covers.length > 0 && <span className="sr-only">{counts.images === 1 ? "1 picture" : `${counts.images} pictures`}</span>}
 
-        {(note.labels.length > 0 || counts.images > 0 || counts.audio > 0) && (
+        {(note.labels.length > 0 || moreImages > 0 || counts.audio > 0) && (
           <div className="flex flex-wrap gap-1">
-            {counts.images > 0 && (
+            {moreImages > 0 && (
               <span className="inline-flex h-6 items-center gap-1 rounded-full bg-[color-mix(in_srgb,var(--note-text)_9%,transparent)] px-2 text-xs">
-                <ImageIcon className="h-3 w-3" aria-hidden /> {counts.images}
-                <span className="sr-only">{counts.images === 1 ? "image" : "images"}</span>
+                <ImageIcon className="h-3 w-3" aria-hidden /> {covers.length ? `+${moreImages}` : moreImages}
+                <span className="sr-only">{moreImages === 1 ? "picture" : "pictures"}</span>
               </span>
             )}
             {counts.audio > 0 && (

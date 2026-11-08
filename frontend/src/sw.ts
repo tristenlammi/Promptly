@@ -135,7 +135,8 @@ self.addEventListener("fetch", (event: FetchEvent) => {
 });
 
 // ----- Share target: "Share → Promptly Notes" -----
-// Text or a link shared into the installed Notes app becomes a note. The
+// Text, a link, pictures or a recording shared into the installed Notes app
+// becomes a note. The
 // share is a POST so the words never sit in a URL; the page makes the note
 // (it works offline too, from the outbox).
 self.addEventListener("fetch", (event: FetchEvent) => {
@@ -149,7 +150,10 @@ self.addEventListener("fetch", (event: FetchEvent) => {
           const v = form.get(k);
           return typeof v === "string" ? v.slice(0, 20_000) : "";
         };
-        await stashSharedText({ title: str("title"), text: str("text"), url: str("url") });
+        // Pictures and recordings come along as files (kept as they are, in
+        // IndexedDB, until the page uploads them into the note).
+        const files = form.getAll("files").filter((v): v is File => v instanceof File && v.size > 0).slice(0, 20);
+        await stashSharedText({ title: str("title"), text: str("text"), url: str("url"), files });
       } catch {
         // Nothing usable arrived — still open Notes.
       }

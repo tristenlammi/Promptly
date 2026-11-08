@@ -369,7 +369,7 @@ function ItemRow({
         disabled={!editable}
         onChange={(e) => onToggle(e.target.checked)}
         aria-label={item.checked ? `Untick ${label}` : `Tick ${label}`}
-        className="mt-[7px] h-[18px] w-[18px] shrink-0 cursor-pointer accent-[var(--accent)]"
+        className="note-check mt-[7px] shrink-0"
       />
       {editable ? (
         <textarea

@@ -121,24 +121,45 @@ def _bump(note: Note, user: User, *, revision: bool) -> None:
     note.edited_by = user.id
 
 
+async def touch(db: AsyncSession, note: Note, user: User) -> None:
+    """Something on the note changed that isn't its text (a picture or
+    recording added or removed): it moves for everyone, edited by you."""
+    _bump(note, user, revision=False)
+    await _after_change(db, note, user)
+
+
 async def _after_change(db: AsyncSession, note: Note, user: User) -> None:
     """Keep the derived bits in step: search text, mentions, and your own
     "seen" mark (your change isn't news to you)."""
     from app.links.service import sync_text
 
-    items = await items_of(db, note.id)
-    transcripts = (
-        await db.execute(
-            select(NoteAttachment.transcript).where(NoteAttachment.note_id == note.id, NoteAttachment.transcript.is_not(None))
-        )
-    ).scalars().all()
-    parts = [note.title, note.body_text, *(i.text for i in items), *transcripts]
-    note.search_text = "\n".join(p for p in parts if p)[:MAX_SEARCH_TEXT]
+    items = await refresh_search_text(db, note)
     mention_text = json.dumps(note.body_doc or {}, ensure_ascii=False) + "\n" + "\n".join(i.text for i in items)
     await sync_text(db, "note", note.id, mention_text, user_id=user.id)
     st = await state_for(db, note.id, user.id)
     st.seen_seq = note.change_seq
     await db.flush()
+
+
+async def refresh_search_text(db: AsyncSession, note: Note) -> list[NoteItem]:
+    """Title, body, items and the transcripts of the recordings still in
+    the note — what search reads. Returns the items (callers want them)."""
+    from app.files.models import UserFile
+
+    from .attachments import live_join
+
+    items = await items_of(db, note.id)
+    transcripts = (
+        await db.execute(
+            select(NoteAttachment.transcript)
+            .join(UserFile, live_join())
+            .where(NoteAttachment.note_id == note.id, NoteAttachment.transcript.is_not(None))
+            .order_by(NoteAttachment.position)
+        )
+    ).scalars().all()
+    parts = [note.title, note.body_text, *(i.text for i in items), *transcripts]
+    note.search_text = "\n".join(p for p in parts if p)[:MAX_SEARCH_TEXT]
+    return items
 
 
 def _clean_list_opts(raw: dict[str, Any] | None) -> dict[str, bool]:
@@ -889,11 +910,16 @@ async def _cards(db: AsyncSession, user: User, notes: list[Note]) -> tuple[list[
         await db.execute(select(NoteMember.note_id, NoteMember.user_id).where(NoteMember.note_id.in_(ids)).order_by(NoteMember.added_at))
     ).all():
         members.setdefault(nid, []).append(uid)
+    from app.files.models import UserFile
+
+    from . import attachments as A
+
     att: dict[uuid.UUID, dict[str, int]] = {}
     for nid, kind, n, ms in (
         await db.execute(
             select(NoteAttachment.note_id, NoteAttachment.kind, func.count(), func.coalesce(func.sum(NoteAttachment.duration_ms), 0))
-            .where(NoteAttachment.note_id.in_(ids), NoteAttachment.file_id.is_not(None))
+            .join(UserFile, A.live_join())
+            .where(NoteAttachment.note_id.in_(ids))
             .group_by(NoteAttachment.note_id, NoteAttachment.kind)
         )
     ).all():
@@ -906,6 +932,7 @@ async def _cards(db: AsyncSession, user: User, notes: list[Note]) -> tuple[list[
         (await db.execute(select(NoteReminder.note_id).where(NoteReminder.user_id == user.id, NoteReminder.note_id.in_(ids)))).scalars()
     )
     labels = await _labels(db, user, ids)
+    covers = await A.covers(db, user, ids) if any(a.get("images") for a in att.values()) else {}
 
     people: set[uuid.UUID] = set()
     out: list[dict[str, Any]] = []
@@ -934,6 +961,7 @@ async def _cards(db: AsyncSession, user: User, notes: list[Note]) -> tuple[list[
             "member_ids": [str(u) for u in mem],
             "shared": bool(mem),
             "attachments": att.get(n.id, {"images": 0, "audio": 0, "audio_ms": 0}),
+            "covers": covers.get(n.id, []),
             "has_reminder": n.id in reminders,
             "changed": bool(st and st.seen_seq < n.change_seq and n.edited_by not in (None, user.id)),
             "revision": n.revision,
@@ -958,14 +986,11 @@ async def full_out(db: AsyncSession, user: User, note: Note) -> dict[str, Any]:
     """The whole note as ``user`` sees it."""
     cards, people = await _cards(db, user, [note])
     out = cards[0]
+    from . import attachments as A
+    from . import transcription
+
     items = await items_of(db, note.id)
-    atts = list(
-        (
-            await db.execute(
-                select(NoteAttachment).where(NoteAttachment.note_id == note.id, NoteAttachment.file_id.is_not(None)).order_by(NoteAttachment.position)
-            )
-        ).scalars()
-    )
+    atts = await A.for_note(db, user, note)
     mems = await members_of(db, note)
     rem = await db.get(NoteReminder, (note.id, user.id))
     out.update({
@@ -973,15 +998,8 @@ async def full_out(db: AsyncSession, user: User, note: Note) -> dict[str, Any]:
         "body_doc": note.body_doc,
         "body_text": note.body_text,
         "items": [item_out(i) for i in items],
-        "attachments": [
-            {
-                "id": str(a.id), "kind": a.kind, "file_id": str(a.file_id) if a.file_id else None, "position": a.position,
-                "added_by": str(a.added_by) if a.added_by else None, "created_at": a.created_at, "width": a.width,
-                "height": a.height, "duration_ms": a.duration_ms, "transcript": a.transcript,
-                "transcript_state": a.transcript_state,
-            }
-            for a in atts
-        ],
+        "attachments": atts,
+        "transcription": (await transcription.config(db)).on,
         "members": [
             {"user_id": str(m.user_id), "added_by": str(m.added_by) if m.added_by else None, "added_at": m.added_at} for m in mems
         ],
@@ -993,7 +1011,7 @@ async def full_out(db: AsyncSession, user: User, note: Note) -> dict[str, Any]:
             "leave": note.owner_id != user.id,
         },
     })
-    people.update(a.added_by for a in atts if a.added_by)
+    people.update(uuid.UUID(a["added_by"]) for a in atts if a["added_by"])
     out["users"] = await users_map(db, people)
     return out
 
@@ -1064,8 +1082,12 @@ async def list_cards(
         if type_ == "list":
             stmt = stmt.where(Note.kind == "list")
         elif type_ in ("image", "voice"):
+            from app.files.models import UserFile
+
+            from .attachments import live_join
+
             k = "image" if type_ == "image" else "audio"
-            stmt = stmt.where(exists().where(NoteAttachment.note_id == Note.id, NoteAttachment.kind == k, NoteAttachment.file_id.is_not(None)))
+            stmt = stmt.where(exists(select(NoteAttachment.id).join(UserFile, live_join()).where(NoteAttachment.note_id == Note.id, NoteAttachment.kind == k)))
         elif type_ == "shared":
             stmt = stmt.where(or_(Note.owner_id != user.id, exists().where(NoteMember.note_id == Note.id)))
         else:
@@ -1105,6 +1127,6 @@ async def list_cards(
 __all__ = [
     "MAX_ITEMS", "MAX_MEMBERS", "Stale", "add_item", "add_label", "add_members", "bulk_items", "clean_changes", "create",
     "delete_item", "display_title", "full_out", "item_out", "label_counts", "list_cards", "list_versions", "members_of",
-    "patch", "purge", "purge_expired", "remove_member", "restore", "restore_version", "save_version", "set_labels",
+    "patch", "purge", "purge_expired", "refresh_search_text", "touch", "remove_member", "restore", "restore_version", "save_version", "set_labels",
     "set_state", "state_out", "trash", "trashed_notes", "update_item", "version_out",
 ]
