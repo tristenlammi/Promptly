@@ -23,7 +23,9 @@ export function patchRoom(qc: QueryClient, roomId: string, patch: (r: Room) => R
 
 /** Insert or replace a room from the server. Returns false when its space
  *  isn't known yet (the caller refetches the bootstrap). */
-export function upsertRoom(qc: QueryClient, room: Room): boolean {
+/** Add or update a room in the cached bootstrap. ``users``: names that
+ *  came with it (a conversation a call just opened for you). */
+export function upsertRoom(qc: QueryClient, room: Room, users?: Record<string, RoomUser>): boolean {
   const b = qc.getQueryData<Bootstrap>(BOOTSTRAP_KEY);
   if (!b) return false;
   if (room.space_id && !b.spaces.some((s) => s.id === room.space_id)) return false;
@@ -40,7 +42,11 @@ export function upsertRoom(qc: QueryClient, room: Room): boolean {
       };
     }
     const exists = cur.dms.some((r) => r.id === room.id);
-    return { ...cur, dms: exists ? cur.dms.map((r) => (r.id === room.id ? { ...r, ...room } : r)) : [room, ...cur.dms] };
+    return {
+      ...cur,
+      users: users ? { ...users, ...cur.users } : cur.users,
+      dms: exists ? cur.dms.map((r) => (r.id === room.id ? { ...r, ...room } : r)) : [room, ...cur.dms],
+    };
   });
   return true;
 }

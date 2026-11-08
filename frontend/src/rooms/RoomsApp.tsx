@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Bell, Download, Home, Loader2, MessageSquarePlus, MessagesSquare, Plus, Search, Settings, X } from "lucide-react";
+import { Bell, Download, Home, Loader2, MessageSquarePlus, MessagesSquare, Phone, PhoneCall, Plus, Search, Settings, X } from "lucide-react";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useMatch, useNavigate } from "react-router-dom";
 
@@ -17,6 +17,7 @@ import { cn } from "@/utils/cn";
 import { BOOTSTRAP_KEY, findRoom, totals } from "./cache";
 import { useRoomsEvents } from "./live";
 import { useRoomsStore } from "./store";
+import { CallDetail, CallsHome, CallsList, NewCallSheet } from "./components/Calls";
 import { DmList, SpaceRoomList } from "./components/Lists";
 import { SearchPanel } from "./components/Panels";
 import { CreateRoomSheet, NewDmSheet } from "./components/RoomSheets";
@@ -24,6 +25,7 @@ import { RoomView } from "./components/RoomView";
 import { CreateSpaceSheet, SpaceSettingsSheet } from "./components/SpaceSheets";
 import { CountBadge, SpaceIcon } from "./components/ui";
 import { useRecordOpen } from "@/hooks/useRecordOpen";
+import { useCallStore } from "@/rtc/call/store";
 import { useVoiceLive } from "@/rtc/voice/hooks";
 import { seedFromBootstrap } from "@/rtc/ui/directory";
 import { VoicePanel } from "@/rtc/ui/VoicePanel";
@@ -91,6 +93,10 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
   const roomId = roomMatch?.params.roomId ?? null;
   useRecordOpen("room", roomId);
   const onDmPath = location.pathname.startsWith("/rooms/dm");
+  // Calls WP-D4: the Calls tab (/rooms/calls) and one call's details.
+  const onCallsPath = location.pathname.startsWith("/rooms/calls");
+  const callKey = useMatch("/rooms/calls/:callKey")?.params.callKey ?? null;
+  const missedCalls = useCallStore((s) => s.missed);
   // Rooms opens on Messages (your DMs); after that, Spaces is a tap away.
   const launching = useRef(!roomId && !onDmPath);
   useEffect(() => {
@@ -111,6 +117,7 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
   const [newRoomIn, setNewRoomIn] = useState<string | null>(null);
   const [newRoomKind, setNewRoomKind] = useState<"text" | "voice">("text");
   const [globalSearch, setGlobalSearch] = useState(false);
+  const [newCall, setNewCall] = useState(false);
 
   useRoomsEvents(roomId);
   // Calls: who's in each voice channel, live, and the bootstrap's view of it.
@@ -190,12 +197,14 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
     if (onDmPath) setRailSel("dms");
   }, [onDmPath, setRailSel]);
 
+  const callsOn = b?.voice_available === true;
   const sel: string | null = useMemo(() => {
     if (!b) return null;
+    if (onCallsPath && b.voice_available === true) return "calls";
     if (railSel === "dms") return "dms";
     if (railSel && b.spaces.some((s) => s.id === railSel)) return railSel;
     return b.spaces[0]?.id ?? "dms";
-  }, [b, railSel]);
+  }, [b, railSel, onCallsPath]);
   const selSpace = b?.spaces.find((s) => s.id === sel) ?? null;
 
   const openSpace = useCallback(
@@ -212,7 +221,7 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
   // Desktop, nothing open: Messages opens your latest conversation; a
   // space reopens the room you were last in.
   useEffect(() => {
-    if (!b || isPhone || roomId) return;
+    if (!b || isPhone || roomId || onCallsPath) return;
     if (onDmPath) {
       const latest = [...b.dms].sort((x, y) => (y.last_message_at ?? "").localeCompare(x.last_message_at ?? ""))[0];
       if (latest) navigate(`/rooms/r/${latest.id}`, { replace: true });
@@ -222,11 +231,11 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
     const target = (last && findRoom(b, last)?.room) || b.spaces[0]?.rooms[0];
     if (target) navigate(`/rooms/r/${target.id}`, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [b ? 1 : 0, isPhone, roomId, onDmPath]);
+  }, [b ? 1 : 0, isPhone, roomId, onDmPath, onCallsPath]);
 
   // Alt+↑ / Alt+↓: previous / next room in the list (desktop).
   useEffect(() => {
-    if (isPhone || !b) return;
+    if (isPhone || !b || sel === "calls") return;
     const onKey = (e: KeyboardEvent) => {
       if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
       const list =
@@ -249,6 +258,8 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
   if (location.pathname === "/rooms") {
     return <Navigate replace to={{ pathname: "/rooms/", search: location.search, hash: location.hash }} />;
   }
+  // Calls are off for you: no Calls tab.
+  if (onCallsPath && b && !callsOn) return <Navigate replace to="/rooms/dm" />;
 
   const rootStyle: CSSProperties = {
     "--item-accent": ROOMS_ACCENT,
@@ -273,7 +284,9 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
     );
   } else if (isPhone) {
     const pill = <VoicePill hideFor={roomId} />;
-    body = roomId ? (
+    body = callKey ? (
+      <CallDetail key={callKey} b={b} callKey={callKey} isPhone onBack={() => navigate("/rooms/calls")} />
+    ) : roomId ? (
       <RoomView
         key={roomId}
         roomId={roomId}
@@ -286,7 +299,9 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
       <PhoneHome
         pill={pill}
         b={b}
-        tab={onDmPath ? "dms" : "spaces"}
+        tab={onCallsPath ? "calls" : onDmPath ? "dms" : "spaces"}
+        missedCalls={missedCalls}
+        onNewCall={() => setNewCall(true)}
         selSpace={sel === "dms" ? (b.spaces[0] ?? null) : selSpace}
         totals={t}
         onSelectSpace={(s) => setRailSel(s.id)}
@@ -307,6 +322,8 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
           b={b}
           sel={sel}
           totals={t}
+          missedCalls={missedCalls}
+          onCalls={() => navigate("/rooms/calls")}
           onMessages={() => {
             setRailSel("dms");
             const lastDm = [...b.dms].sort((x, y) => (y.last_message_at ?? "").localeCompare(x.last_message_at ?? ""))[0];
@@ -317,7 +334,9 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
           onSearch={() => setGlobalSearch(true)}
         />
         <div className="flex w-60 shrink-0 flex-col border-r border-[var(--border)] bg-[var(--surface)] lg:w-64">
-          {sel === "dms" || !selSpace ? (
+          {sel === "calls" ? (
+            <CallsList b={b} activeKey={callKey} isPhone={false} onNewCall={() => setNewCall(true)} />
+          ) : sel === "dms" || !selSpace ? (
             <DmList b={b} activeRoomId={roomId} onNew={() => setNewDm(true)} isPhone={false} />
           ) : (
             <SpaceRoomList
@@ -340,7 +359,13 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
           <SideFooter />
         </div>
         <main id={embedded ? undefined : "main"} className="flex min-h-0 min-w-0 flex-1 flex-col bg-[var(--bg)]">
-          {roomId ? (
+          {sel === "calls" ? (
+            callKey ? (
+              <CallDetail key={callKey} b={b} callKey={callKey} isPhone={false} />
+            ) : (
+              <CallsHome onNewCall={() => setNewCall(true)} />
+            )
+          ) : roomId ? (
             <RoomView key={roomId} roomId={roomId} b={b} isPhone={false} />
           ) : (
             <DesktopEmpty b={b} onCreateSpace={() => setCreateSpace(true)} onNewDm={() => setNewDm(true)} dms={sel === "dms"} />
@@ -366,6 +391,7 @@ export function RoomsApp({ embedded = false }: { embedded?: boolean } = {}) {
       {body}
       <CreateSpaceSheet open={createSpace} onClose={() => setCreateSpace(false)} />
       {b && <NewDmSheet open={newDm} onClose={() => setNewDm(false)} b={b} />}
+      {b && callsOn && <NewCallSheet open={newCall} onClose={() => setNewCall(false)} b={b} />}
       {b && settingsSpace && (
         <SpaceSettingsSheet open={!!settingsSpace} onClose={() => setSpaceSettings(null)} space={settingsSpace} b={b} />
       )}
@@ -456,6 +482,8 @@ function Rail({
   b,
   sel,
   totals: t,
+  missedCalls,
+  onCalls,
   onMessages,
   onSpace,
   onCreateSpace,
@@ -464,6 +492,8 @@ function Rail({
   b: Bootstrap;
   sel: string | null;
   totals: ReturnType<typeof totals>;
+  missedCalls: number;
+  onCalls: () => void;
   onMessages: () => void;
   onSpace: (s: Space) => void;
   onCreateSpace: () => void;
@@ -484,6 +514,18 @@ function Rail({
           <MessagesSquare className="h-6 w-6" />
         </span>
       </RailButton>
+      {b.voice_available === true && (
+        <RailButton label={missedCalls > 0 ? `Calls, ${missedCalls} missed` : "Calls"} active={sel === "calls"} onClick={onCalls} badge={missedCalls}>
+          <span
+            className={cn(
+              "flex h-12 w-12 items-center justify-center rounded-2xl",
+              sel === "calls" ? "bg-[var(--item-accent)] text-white" : "bg-[var(--surface)] text-[var(--text)]",
+            )}
+          >
+            <Phone className="h-6 w-6" />
+          </span>
+        </RailButton>
+      )}
       <span className="h-px w-8 bg-[var(--border)]" />
       {b.spaces.map((s) => {
         const st = t.spaces[s.id];
@@ -610,6 +652,8 @@ function PhoneHome({
   tab,
   selSpace,
   totals: t,
+  missedCalls,
+  onNewCall,
   onSelectSpace,
   onCreateSpace,
   onNewDm,
@@ -618,9 +662,11 @@ function PhoneHome({
   onSearch,
 }: {
   b: Bootstrap;
-  tab: "spaces" | "dms";
+  tab: "spaces" | "dms" | "calls";
   selSpace: Space | null;
   totals: ReturnType<typeof totals>;
+  missedCalls: number;
+  onNewCall: () => void;
   onSelectSpace: (s: Space) => void;
   onCreateSpace: () => void;
   onNewDm: () => void;
@@ -648,18 +694,18 @@ function PhoneHome({
         </button>
         <button
           type="button"
-          aria-label={tab === "dms" ? "New message" : "Create a space"}
-          onClick={tab === "dms" ? onNewDm : onCreateSpace}
+          aria-label={tab === "calls" ? "New call" : tab === "dms" ? "New message" : "Create a space"}
+          onClick={tab === "calls" ? onNewCall : tab === "dms" ? onNewDm : onCreateSpace}
           className={iconBtn}
         >
-          {tab === "dms" ? <MessageSquarePlus className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
+          {tab === "calls" ? <PhoneCall className="h-5 w-5" /> : tab === "dms" ? <MessageSquarePlus className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
         </button>
       </header>
       <div className="shrink-0 px-3 pb-2">
         <Segmented
           className="w-full"
           value={tab}
-          onChange={(v) => navigate(v === "dms" ? "/rooms/dm" : "/rooms/", { replace: true })}
+          onChange={(v) => navigate(v === "calls" ? "/rooms/calls" : v === "dms" ? "/rooms/dm" : "/rooms/", { replace: true })}
           options={[
             {
               value: "spaces",
@@ -677,11 +723,26 @@ function PhoneHome({
                 </span>
               ),
             },
+            ...(b.voice_available === true
+              ? [
+                  {
+                    value: "calls" as const,
+                    label: (
+                      <span className="inline-flex items-center gap-1.5">
+                        Calls <CountBadge n={missedCalls} />
+                        {missedCalls > 0 && <span className="sr-only">missed</span>}
+                      </span>
+                    ),
+                  },
+                ]
+              : []),
           ]}
         />
       </div>
 
-      {tab === "dms" ? (
+      {tab === "calls" ? (
+        <CallsList b={b} activeKey={null} isPhone onNewCall={onNewCall} />
+      ) : tab === "dms" ? (
         <DmList b={b} activeRoomId={null} onNew={onNewDm} isPhone />
       ) : b.spaces.length === 0 || !selSpace ? (
         <div className="p-4">

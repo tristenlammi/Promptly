@@ -82,6 +82,8 @@ export interface Bootstrap {
   voice_limits?: { max_participants: number; max_stream: "720p30" | "1080p30" | "1080p60" } | null;
   /** Calls: live DM calls in your conversations. */
   calls?: DmCall[];
+  /** Calls: missed calls you haven't seen (the Calls tab's badge). */
+  calls_missed?: number;
 }
 
 export interface Attachment {
@@ -153,7 +155,8 @@ export type RoomEvent =
   | { type: "read"; room_id: string; seq: number }
   | { type: "typing"; room_id: string; user_id: string }
   | { type: "promptly_thinking"; room_id: string; on: boolean }
-  | { type: "room"; room: Room }
+  /** ``users``: the names in it, when a call opened it for you (Calls). */
+  | { type: "room"; room: Room; users?: Record<string, RoomUser> }
   | { type: "room_delete"; room_id: string }
   | { type: "space"; space_id: string }
   | { type: "space_delete"; space_id: string }

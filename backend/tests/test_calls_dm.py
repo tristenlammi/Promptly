@@ -1030,7 +1030,7 @@ async def test_history_from_each_side_and_hiding(client, db, lk, jobs):
     h = (await client.get("/api/calls/history", headers=H(w.ann))).json()
     got = [(c["id"], c["direction"], c["outcome"], c["media"]) for c in h["calls"]]
     assert got == [(b, "incoming", "answered", "audio"), (a, "outgoing", "no_answer", "video")]
-    assert str(w.ben.id) in h["users"] and h["calls"][0]["members"] and h["next"] is None
+    assert str(w.ben.id) in h["users"] and h["calls"][0]["who"] == [str(w.ben.id)] and h["next"] is None
     h = (await client.get("/api/calls/history", headers=H(w.ben))).json()
     assert [(c["direction"], c["outcome"]) for c in h["calls"]] == [("outgoing", "answered"), ("incoming", "missed")]
     # Paging.
@@ -1062,6 +1062,255 @@ async def test_a_call_reopens_a_closed_conversation(client, db, lk):
     await start(client, w.ann, w.dm)
     m = await db.get(RoomMember, (uuid.UUID(w.dm), w.ben.id), populate_existing=True)
     assert m.hidden is False
+
+
+# ---------------------------------------------------------------- WP-D4: history, missed calls, the room event, people
+
+
+async def test_history_is_yours_alone_and_who_you_knew(client, db, lk, jobs):
+    from app.people.blocks import block
+    from app.rooms.models import RoomMember
+
+    w = await world(client, db)
+    g = (await start(client, w.ann, w.group))["call"]["id"]
+    await act(client, w.ben, g, "join")
+    await run_timeout(jobs, g)  # Cat and Dan missed it
+    await act(client, w.ben, g, "leave")
+    await act(client, w.ann, g, "leave")
+    d = (await start(client, w.ann, w.dm))["call"]["id"]
+    await act(client, w.ben, d, "join")
+    await act(client, w.ann, d, "leave")
+
+    # Eve was in neither conversation: nothing, and nothing of theirs to remove.
+    assert (await client.get("/api/calls/history", headers=H(w.eve))).json()["calls"] == []
+    assert (await client.delete(f"/api/calls/{g}/history", headers=H(w.eve))).status_code == 404
+    assert (await client.delete(f"/api/calls/{uuid.uuid4()}/history", headers=H(w.eve))).status_code == 404
+
+    def row(h, cid):
+        return next(c for c in h["calls"] if c["id"] == cid)
+
+    hb = (await client.get("/api/calls/history", headers=H(w.ben))).json()
+    assert [c["id"] for c in hb["calls"]] == [d, g]
+    assert set(row(hb, g)["who"]) == {str(w.ann.id), str(w.cat.id), str(w.dan.id)} and row(hb, g)["group"] is True
+    assert row(hb, g)["can_call"] is True and row(hb, d)["who"] == [str(w.ann.id)]
+    assert {str(w.ann.id), str(w.cat.id), str(w.dan.id)} <= set(hb["users"])
+    hc = (await client.get("/api/calls/history", headers=H(w.cat))).json()
+    assert [(c["id"], c["direction"], c["outcome"], c["new"]) for c in hc["calls"]] == [(g, "incoming", "missed", True)]
+
+    # Dan leaves the group: his history keeps the call, with the people it
+    # rang then (not who's in the group now), and no calling back.
+    await db.delete(await db.get(RoomMember, (uuid.UUID(w.group), w.dan.id)))
+    await db.commit()
+    hd = (await client.get("/api/calls/history", headers=H(w.dan))).json()
+    [c] = hd["calls"]
+    assert c["id"] == g and set(c["who"]) == {str(w.ann.id), str(w.ben.id), str(w.cat.id)} and c["can_call"] is False
+    # ... and he can still remove it.
+    assert (await client.delete(f"/api/calls/{g}/history", headers=H(w.dan))).status_code == 204
+    assert (await client.get("/api/calls/history", headers=H(w.dan))).json()["calls"] == []
+    # Removing it twice is fine.
+    assert (await client.delete(f"/api/calls/{g}/history", headers=H(w.dan))).status_code == 204
+
+    # A block in a 1:1: the history stays, calling back doesn't, both ways.
+    await block(db, w.ann.id, w.ben.id)
+    await db.commit()
+    for u in (w.ann, w.ben):
+        h = (await client.get("/api/calls/history", headers=H(u))).json()
+        assert row(h, d)["can_call"] is False and row(h, g)["can_call"] is True
+
+
+async def test_removing_and_clearing_only_touch_your_own_history(client, db, lk, jobs):
+    w = await world(client, db)
+    a = (await start(client, w.ann, w.dm))["call"]["id"]
+    await run_timeout(jobs, a)
+    b = (await start(client, w.ann, w.dm, media="video"))["call"]["id"]
+    await act(client, w.ben, b, "join")
+    await act(client, w.ben, b, "leave")
+
+    assert (await client.delete(f"/api/calls/{a}/history", headers=H(w.ann))).status_code == 204
+    assert [c["id"] for c in (await client.get("/api/calls/history", headers=H(w.ann))).json()["calls"]] == [b]
+    assert [c["id"] for c in (await client.get("/api/calls/history", headers=H(w.ben))).json()["calls"]] == [b, a]
+
+    # Clear: everything ended goes, a live call stays (it's still going).
+    live = (await start(client, w.ann, w.group))["call"]["id"]
+    assert (await client.delete("/api/calls/history", headers=H(w.ann))).status_code == 204
+    assert [c["id"] for c in (await client.get("/api/calls/history", headers=H(w.ann))).json()["calls"]] == [live]
+    assert len((await client.get("/api/calls/history", headers=H(w.ben))).json()["calls"]) == 3
+    # The other side's line in the conversation is untouched too.
+    assert len(await lines(db, w.dm)) == 2
+
+
+async def test_the_missed_calls_badge(client, db, lk, jobs, events):
+    w = await world(client, db)
+
+    async def missed(u):
+        r = await client.get("/api/calls/missed", headers=H(u))
+        assert r.status_code == 200, r.text
+        return r.json()["count"]
+
+    def badge_events(u):
+        return [e["count"] for to, e in of_type(events, "calls_missed") if to == {str(u.id)}]
+
+    a = (await start(client, w.ann, w.dm))["call"]["id"]
+    await run_timeout(jobs, a)
+    b = (await start(client, w.ann, w.dm, media="video"))["call"]["id"]
+    await run_timeout(jobs, b)
+    assert await missed(w.ben) == 2 and badge_events(w.ben) == [1, 2]
+    # A call you made that nobody answered isn't one you missed.
+    assert await missed(w.ann) == 0 and badge_events(w.ann) == []
+    boot = (await client.get("/api/rooms/bootstrap", headers=H(w.ben))).json()
+    assert boot["calls_missed"] == 2
+    h = (await client.get("/api/calls/history", headers=H(w.ben))).json()
+    assert h["missed"] == 2 and [c["new"] for c in h["calls"]] == [True, True]
+
+    # A call you declined isn't missed either.
+    c = (await start(client, w.ann, w.dm))["call"]["id"]
+    await act(client, w.ben, c, "decline")
+    assert await missed(w.ben) == 2
+
+    # Removing a missed call you haven't seen takes it off the badge.
+    events.clear()
+    assert (await client.delete(f"/api/calls/{a}/history", headers=H(w.ben))).status_code == 204
+    assert await missed(w.ben) == 1 and badge_events(w.ben) == [1]
+
+    # Looking at the Calls tab clears it, on every device (the event).
+    events.clear()
+    r = await client.post("/api/calls/missed/seen", headers=H(w.ben))
+    assert r.status_code == 200 and r.json() == {"count": 0}
+    assert badge_events(w.ben) == [0]
+    h = (await client.get("/api/calls/history", headers=H(w.ben))).json()
+    assert h["missed"] == 0 and all(not c["new"] for c in h["calls"])
+    assert next(c for c in h["calls"] if c["id"] == b)["outcome"] == "missed"  # still red, just not new
+    # Seen again: nothing changes, nothing is sent.
+    events.clear()
+    assert (await client.post("/api/calls/missed/seen", headers=H(w.ben))).json() == {"count": 0}
+    assert badge_events(w.ben) == []
+
+    # A group call counts for everyone who missed it.
+    g = (await start(client, w.ann, w.group))["call"]["id"]
+    await act(client, w.cat, g, "join")
+    await run_timeout(jobs, g)
+    assert await missed(w.ben) == 1 and await missed(w.dan) == 1 and await missed(w.cat) == 0
+    await act(client, w.cat, g, "leave")
+    await act(client, w.ann, g, "leave")
+
+    # Calling that conversation back counts as seeing its missed calls
+    # (the 1:1's own aren't touched).
+    d = (await start(client, w.ann, w.dm))["call"]["id"]
+    await run_timeout(jobs, d)
+    assert await missed(w.ben) == 2
+    events.clear()
+    back = (await start(client, w.ben, w.dm))["call"]["id"]
+    assert await missed(w.ben) == 1 and badge_events(w.ben) == [1]
+    await act(client, w.ben, back, "leave")
+    # Answering (or joining) a call in a conversation does the same.
+    g2 = (await start(client, w.ann, w.group))["call"]["id"]
+    await act(client, w.ben, g2, "join")
+    assert await missed(w.ben) == 0
+
+    # Calls off for you: no badge to ask about.
+    await calls_on(db, calls_enabled=False)
+    assert (await client.get("/api/calls/missed", headers=H(w.ben))).status_code == 404
+
+
+async def test_a_call_sends_the_conversation_to_those_it_reopens(client, db, lk, jobs, events):
+    w = await world(client, db)
+    # The group was made by Ann and nobody has written in it: closed for the
+    # others until something happens in it. A call is something.
+    events.clear()
+    g = (await start(client, w.ann, w.group))["call"]["id"]
+    rooms = of_type(events, "room")
+    assert sorted(next(iter(to)) for to, _e in rooms) == sorted(str(u.id) for u in (w.ann, w.ben, w.cat, w.dan))
+    for to, e in rooms:
+        assert e["room"]["id"] == w.group and e["room"]["hidden"] is False
+        assert set(e["room"]["members"]) == {str(u.id) for u in (w.ann, w.ben, w.cat, w.dan)}
+        # The names come with it, for a list that never had them.
+        assert set(e["users"]) == set(e["room"]["members"])
+    # Before the ring, so the page knows where the call is.
+    order = [(e["type"], next(iter(to))) for to, e in events if len(to) == 1]
+    assert order.index(("room", str(w.ben.id))) < order.index(("call_ring", str(w.ben.id)))
+
+    # Cat closes it mid-call and is rung again: back for her alone.
+    await act(client, w.ben, g, "join")
+    await run_timeout(jobs, g)
+    r = await client.patch(f"/api/rooms/rooms/{w.group}/me", headers=H(w.cat), json={"hidden": True})
+    assert r.status_code == 200, r.text
+    events.clear()
+    out = await act(client, w.ann, g, "ring", user_ids=[str(w.cat.id)])
+    assert out["rang"] == [str(w.cat.id)]
+    assert [to for to, _e in of_type(events, "room")] == [{str(w.cat.id)}]
+    await act(client, w.ann, g, "end")
+
+    # Nothing closed: only the caller's own list hears about it.
+    events.clear()
+    await start(client, w.ann, w.group)
+    assert [to for to, _e in of_type(events, "room")] == [{str(w.ann.id)}]
+
+    # Calling people from Contacts makes a new group: theirs arrives, named.
+    events.clear()
+    r = await client.post("/api/calls/dm", headers=H(w.ben), json={"user_ids": [str(w.eve.id), str(w.dan.id)], "media": "video"})
+    assert r.status_code == 200, r.text
+    new_room = r.json()["room_id"]
+    got = {next(iter(to)): e for to, e in of_type(events, "room")}
+    assert set(got) == {str(w.ben.id), str(w.eve.id), str(w.dan.id)}
+    assert all(e["room"]["id"] == new_room for e in got.values())
+    assert str(w.ben.id) in got[str(w.eve.id)]["users"]
+
+
+async def test_people_you_can_call(client, db, lk):
+    from app.items import service as items
+    from app.people.blocks import block
+
+    w = await world(client, db)
+    await items.create_item(db, w.ann, "contacts", installed_check=False, data={
+        "contacts": [{"id": "m", "first": "Jane", "last": "Hill", "nickname": "Mum", "promptly_user_id": str(w.cat.id)}],
+    })
+    await db.commit()
+
+    async def ppl(u, **params):
+        r = await client.get("/api/calls/people", params=params, headers=H(u))
+        assert r.status_code == 200, r.text
+        return r.json()["people"]
+
+    # "Call Mum": by the name you know them by.
+    [m] = await ppl(w.ann, q="mum")
+    assert m["user"]["id"] == str(w.cat.id) and m["said"] == "Mum" and m["name"] == "Jane Hill"
+    assert [p["user"]["id"] for p in await ppl(w.ann, q="jane")] == [str(w.cat.id)]
+    # Or by username, anyone on this Promptly.
+    assert str(w.ben.id) in [p["user"]["id"] for p in await ppl(w.ann, q=w.ben.username[:5])]
+    assert await ppl(w.ann, q="") == []
+    # Never yourself.
+    assert await ppl(w.ann, q=w.ann.username) == []
+
+    # Blocked people aren't offered, either way round.
+    await block(db, w.ann.id, w.dan.id)
+    await db.commit()
+    assert await ppl(w.ann, q=w.dan.username) == []
+    assert await ppl(w.dan, q=w.ann.username) == []
+    # ... and a call is refused anyway (without saying why to Dan).
+    r = await client.post("/api/calls/dm", headers=H(w.dan), json={"user_ids": [str(w.ann.id)]})
+    assert r.status_code == 403 and "block" not in r.json()["detail"].lower()
+
+    # Which of these can I call (Contacts' buttons).
+    w.eve.disabled = True
+    await db.commit()
+    got = await ppl(w.ann, ids=",".join(str(u.id) for u in (w.ann, w.ben, w.dan, w.eve)))
+    assert [p["user"]["id"] for p in got] == [str(w.ben.id)]
+    assert (await client.get("/api/calls/people", params={"ids": "nope"}, headers=H(w.ann))).status_code == 422
+
+    # The person page says the same.
+    assert (await client.get(f"/api/people/u/{w.ben.id}", headers=H(w.ann))).json()["can_call"] is True
+    assert (await client.get(f"/api/people/u/{w.dan.id}", headers=H(w.ann))).json()["can_call"] is False
+    assert (await client.get(f"/api/people/u/{w.ann.id}", headers=H(w.dan))).json()["can_call"] is False
+
+    # Calls only for a group you're not in: nobody to call, and a 404 for you.
+    from app.groups.models import UserGroup
+
+    grp = UserGroup(name=f"callers{uuid.uuid4().hex[:4]}")
+    db.add(grp)
+    await db.commit()
+    await calls_on(db, calls_group_ids=[str(grp.id)])
+    assert (await client.get("/api/calls/people", params={"q": "mum"}, headers=H(w.ann))).status_code == 404
+    assert (await client.get(f"/api/people/u/{w.ben.id}", headers=H(w.ann))).json()["can_call"] is False
 
 
 def test_length_words():

@@ -251,6 +251,35 @@ async def tell(user_id: uuid.UUID | str, event: dict) -> None:
     await rooms_core.publish([user_id], event)
 
 
+async def _unhide(db: AsyncSession, room: Room, user_ids: list[uuid.UUID] | None = None) -> set[uuid.UUID]:
+    """Re-open a closed conversation (for ``user_ids``, else everyone in
+    it). Returns who it was closed for. The caller commits."""
+    q = select(RoomMember.user_id).where(RoomMember.room_id == room.id, RoomMember.hidden.is_(True))
+    if user_ids is not None:
+        q = q.where(RoomMember.user_id.in_(user_ids))
+    ids = set((await db.execute(q)).scalars().all())
+    if ids:
+        await db.execute(update(RoomMember).where(RoomMember.room_id == room.id, RoomMember.user_id.in_(ids)).values(hidden=False))
+    return ids
+
+
+async def announce_room(db: AsyncSession, room: Room, user_ids: set[uuid.UUID] | list[uuid.UUID]) -> None:
+    """A ``room`` event (the conversation as each of them sees it) on the
+    Rooms stream: their lists show it without fetching everything again."""
+    for uid in user_ids:
+        u = await db.get(User, uid)
+        if u is None or u.disabled:
+            continue
+        try:
+            out = await rooms_core.room_out(db, room, u)
+            # The names and pictures of the people in it, which a list that
+            # never had this conversation may not know yet.
+            users = await rooms_core.users_map(db, [uuid.UUID(str(m)) for m in out.get("members") or []])
+            await rooms_core.publish([uid], {"type": "room", "room": out, "users": users})
+        except Exception:  # noqa: BLE001 — a list refresh must never stop a call
+            logger.info("room event for %s not sent", uid, exc_info=True)
+
+
 async def _kick(call_id: uuid.UUID, user_id: uuid.UUID | str) -> None:
     try:
         await service.remove_participant(lk_room(call_id), identity(user_id))
@@ -466,9 +495,17 @@ async def start(db: AsyncSession, user: User, room: Room, cs: access.CallsSettin
         )
     await db.execute(insert(CallParticipant.__table__), rows)
     # A call re-opens a closed conversation for everyone, like a message.
-    await db.execute(update(RoomMember).where(RoomMember.room_id == room.id, RoomMember.hidden.is_(True)).values(hidden=False))
+    reopened = await _unhide(db, room)
+    # Calling a conversation back: its missed calls are seen.
+    seen_now = await _see_missed(db, user.id, room.id)
     await db.commit()
     await redis.sadd(K_LIVE, str(call.id))
+    # Everyone it re-opened for gets the conversation in their list before
+    # the ring (and the caller too: a call from Contacts may have just made
+    # it), so the "Join" bar and the call line have somewhere to go.
+    await announce_room(db, room, {*reopened, user.id})
+    if seen_now:
+        await publish_missed(db, user.id)
     parts = await _parts(db, call.id)
     from app.calls import ring
 
@@ -524,7 +561,10 @@ async def join(db: AsyncSession, user: User, call_id: uuid.UUID, cs: access.Call
     me.display_name = user.username[:120]
     if call.answered_at is None and user.id != call.started_by:
         call.answered_at = now
+    seen_now = await _see_missed(db, user.id, room.id)
     await db.commit()
+    if seen_now:
+        await publish_missed(db, user.id)
     if len(_present(parts)) >= 2:
         await redis.delete(K_ALONE.format(call.id))
     if was_ringing:
@@ -745,7 +785,11 @@ async def ring_again(db: AsyncSession, user: User, call_id: uuid.UUID, user_ids:
             p.ring = "ringing"
             p.rung_at = now
         rung.append(t)
+    # Someone who closed the conversation since it started gets it back.
+    reopened = await _unhide(db, room, [t.id for t in rung]) if rung else set()
     await db.commit()
+    if reopened:
+        await announce_room(db, room, reopened)
     parts = await _parts(db, call.id)
     if rung:
         from app.calls import ring
@@ -955,15 +999,83 @@ async def view_token(db: AsyncSession, user: User, call_id: uuid.UUID) -> dict:
 # ================================================================ history
 
 
+def _missed_q(user_id: uuid.UUID):  # noqa: ANN202 — a SQL select
+    """Your missed DM calls you haven't seen (the badge)."""
+    return (
+        select(CallParticipant.call_id)
+        .join(Call, Call.id == CallParticipant.call_id)
+        .where(
+            CallParticipant.user_id == user_id,
+            CallParticipant.ring == "missed",
+            CallParticipant.seen_at.is_(None),
+            CallParticipant.hidden.is_(False),
+            Call.kind == "dm",
+        )
+    )
+
+
+async def missed_count(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """How many calls you missed and haven't seen yet."""
+    from sqlalchemy import func
+
+    return int((await db.execute(select(func.count()).select_from(_missed_q(user_id).subquery()))).scalar() or 0)
+
+
+async def _see_missed(db: AsyncSession, user_id: uuid.UUID, room_id: uuid.UUID | None = None) -> bool:
+    """Mark your missed calls seen (all, or one conversation's). True when
+    any were unseen. The caller commits."""
+    calls = select(Call.id).where(Call.kind == "dm")
+    if room_id is not None:
+        calls = calls.where(Call.room_id == room_id)
+    res = await db.execute(
+        update(CallParticipant)
+        .where(
+            CallParticipant.user_id == user_id,
+            CallParticipant.ring == "missed",
+            CallParticipant.seen_at.is_(None),
+            CallParticipant.hidden.is_(False),
+            CallParticipant.call_id.in_(calls),
+        )
+        .values(seen_at=_now())
+        .execution_options(synchronize_session=False)
+    )
+    return bool(res.rowcount)
+
+
+async def publish_missed(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """Tell your open pages the badge's number (``calls_missed {count}``)."""
+    n = await missed_count(db, user_id)
+    await tell(user_id, {"type": "calls_missed", "count": n})
+    return n
+
+
+async def mark_seen(db: AsyncSession, user: User) -> int:
+    """You looked at the Calls tab: every missed call is seen."""
+    changed = await _see_missed(db, user.id)
+    await db.commit()
+    if changed:
+        return await publish_missed(db, user.id)
+    return await missed_count(db, user.id)
+
+
 async def history(db: AsyncSession, user: User, *, before: datetime | None, limit: int) -> dict:
     """Your DM calls, newest first: who, incoming or outgoing, answered or
-    missed, how long. ``next`` pages on (``before``)."""
+    missed, how long. ``next`` pages on (``before``). Only calls you were
+    in or rung for, and not ones you removed. ``missed``: the badge.
+
+    ``who`` is the people to show for each call: a 1:1's other person; a
+    group's members while you're still in it, else the people the call
+    rang (what you knew then, not who's in it now). ``can_call``: calling
+    back is possible (you're still in the conversation, and no block
+    either way in a 1:1; the same rule as sending a message)."""
+    from app.people.blocks import hidden_ids
+
     q = (
         select(CallParticipant, Call, Room)
         .join(Call, Call.id == CallParticipant.call_id)
         .join(Room, Room.id == Call.room_id)
         .where(CallParticipant.user_id == user.id, CallParticipant.hidden.is_(False), Call.kind == "dm")
-        .order_by(Call.started_at.desc())
+        .order_by(Call.started_at.desc(), Call.id.desc())
         .limit(limit + 1)
     )
     if before is not None:
@@ -976,6 +1088,15 @@ async def history(db: AsyncSession, user: User, *, before: datetime | None, limi
     if room_ids:
         for rid, uid in (await db.execute(select(RoomMember.room_id, RoomMember.user_id).where(RoomMember.room_id.in_(room_ids)))).all():
             members.setdefault(rid, []).append(str(uid))
+    rung: dict[uuid.UUID, list[str]] = {}
+    gone = [c.id for _p, c, r in rows if str(user.id) not in members.get(r.id, [])]
+    if gone:
+        for cid, uid in (
+            await db.execute(select(CallParticipant.call_id, CallParticipant.user_id).where(CallParticipant.call_id.in_(gone), CallParticipant.user_id.is_not(None)))
+        ).all():
+            rung.setdefault(cid, []).append(str(uid))
+    blocked = {str(u) for u in await hidden_ids(db, user.id)}
+    me = str(user.id)
     out = []
     people: set[uuid.UUID] = set()
     for p, call, room in rows:
@@ -986,42 +1107,153 @@ async def history(db: AsyncSession, user: User, *, before: datetime | None, limi
             outcome = {"answered": "answered", "declined": "declined", "missed": "missed", "ringing": "ringing"}.get(p.ring or "", "missed")
         if call.ended_at is None and outcome in ("no_answer", "missed"):
             outcome = "ringing" if p.ring == "ringing" or outgoing else "live"
+        member = me in members.get(room.id, [])
+        who = [u for u in (members.get(room.id, []) if member else rung.get(call.id, [])) if u != me]
+        can_call = member and not (room.kind == "dm" and any(u in blocked for u in who))
         if call.started_by:
             people.add(call.started_by)
-        for m in members.get(room.id, []):
-            people.add(uuid.UUID(m))
+        for u in who:
+            people.add(uuid.UUID(u))
         out.append(
             {
                 "id": str(call.id),
                 "room_id": str(room.id),
                 "group": room.kind == "group",
                 "name": room.name,
-                "members": members.get(room.id, []),
+                "who": who,
                 "media": call.media or "audio",
                 "direction": "outgoing" if outgoing else "incoming",
                 "outcome": outcome,
+                # A missed call you haven't seen yet (bold in the list).
+                "new": p.ring == "missed" and p.seen_at is None,
                 "started_by": str(call.started_by) if call.started_by else None,
                 "started_at": _iso(call.started_at),
                 "ended_at": _iso(call.ended_at),
                 "live": call.ended_at is None,
                 "duration": duration(call),
                 "my_seconds": p.seconds or 0,
+                "can_call": can_call,
             }
         )
     return {
         "calls": out,
         "users": await rooms_core.users_map(db, people),
         "next": out[-1]["started_at"] if more and out else None,
+        "missed": await missed_count(db, user.id),
     }
 
 
 async def hide(db: AsyncSession, user: User, call_id: uuid.UUID) -> None:
-    """Remove a call from your history (not anyone else's)."""
-    await visible_call(db, user, call_id)
-    await db.execute(
-        update(CallParticipant).where(CallParticipant.call_id == call_id, CallParticipant.user_id == user.id).values(hidden=True)
+    """Remove a call from your history (not anyone else's: their rows are
+    untouched). Works for a conversation you've left since, too."""
+    uid = user.id
+    res = await db.execute(
+        update(CallParticipant)
+        .where(CallParticipant.call_id == call_id, CallParticipant.user_id == uid, CallParticipant.hidden.is_(False))
+        .where(CallParticipant.call_id.in_(select(Call.id).where(Call.id == call_id, Call.kind == "dm")))
+        .values(hidden=True)
+        .execution_options(synchronize_session=False)
+    )
+    if not res.rowcount:
+        await db.rollback()
+        # Already removed (a second tab) is fine; anyone else's call isn't there.
+        mine = await db.execute(
+            select(CallParticipant.call_id).where(CallParticipant.call_id == call_id, CallParticipant.user_id == uid).join(Call, Call.id == CallParticipant.call_id).where(Call.kind == "dm")
+        )
+        if mine.first() is None:
+            raise not_found()
+        return
+    await db.commit()
+    # A missed call you remove stops counting on the badge.
+    await publish_missed(db, uid)
+
+
+async def clear_history(db: AsyncSession, user: User) -> int:
+    """Remove every call from your history (Calls tab › Clear call history).
+    Live calls stay (they're still going)."""
+    ended = select(Call.id).where(Call.kind == "dm", Call.ended_at.is_not(None))
+    res = await db.execute(
+        update(CallParticipant)
+        .where(CallParticipant.user_id == user.id, CallParticipant.hidden.is_(False), CallParticipant.call_id.in_(ended))
+        .values(hidden=True)
+        .execution_options(synchronize_session=False)
     )
     await db.commit()
+    await publish_missed(db, user.id)
+    return int(res.rowcount or 0)
+
+
+# ================================================================ people you can call
+
+
+async def callable_ids(db: AsyncSession, viewer: User, user_ids: list[uuid.UUID] | set[uuid.UUID], cs: access.CallsSettings | None = None) -> set[uuid.UUID]:
+    """Who of ``user_ids`` you can call from Contacts, the person page or
+    Ctrl+K: an account with calls on, not you, not disabled, and no block
+    either way (blocked people are never offered; a call is refused anyway)."""
+    from app.people.blocks import hidden_ids
+
+    ids = {u for u in user_ids if u != viewer.id}
+    if not ids:
+        return set()
+    cs = cs or await access.load_settings(db)
+    if not await access.voice_allowed(db, viewer, cs):
+        return set()
+    live = set((await db.execute(select(User.id).where(User.id.in_(ids), User.disabled.is_(False)))).scalars().all())
+    allowed = await access.voice_user_ids(db, list(live), cs)
+    return (live & set(allowed)) - await hidden_ids(db, viewer.id)
+
+
+async def people(db: AsyncSession, viewer: User, q: str, ids: list[uuid.UUID] | None, cs: access.CallsSettings) -> list[dict]:
+    """People you can call, for Ctrl+K "Call Mum" and the Contacts buttons.
+
+    ``ids``: which of these you can call. ``q``: by what you call them (a
+    contact's name, nickname, first or last name, a Photos relationship
+    label like "Mum") or by username (2+ letters, anyone on this Promptly).
+    Each row: the account, the name you know them by, and ``said``, the
+    word that matched when it's a name of yours ("Mum")."""
+    from app.people.directory import directory
+
+    if ids is not None:
+        ok = await callable_ids(db, viewer, ids, cs)
+        users = (await db.execute(select(User).where(User.id.in_(ok)).order_by(User.username))).scalars().all() if ok else []
+        return [{"user": rooms_core.user_out(u), "name": u.username, "label": None, "said": None} for u in users]
+    term = " ".join(q.lower().split())
+    if not term:
+        return []
+    found: dict[uuid.UUID, dict] = {}
+    order: list[uuid.UUID] = []
+    for p in await directory(db, viewer):
+        if p.user is None or p.user.id in found:
+            continue
+        names = [p.label, p.contact_name, p.person_name]
+        if p.contact:
+            names += [p.contact.get("nickname"), p.contact.get("first"), p.contact.get("last")]
+        said = next((n for n in names if n and n.strip().lower() == term), None) or next(
+            (n for n in names if n and any(w.startswith(term) for w in [n.lower(), *n.lower().split()])), None
+        )
+        hit_user = term in p.user.username.lower()
+        if said is None and not hit_user:
+            continue
+        found[p.user.id] = {"user": p.user, "name": p.name, "label": p.label, "said": said, "exact": bool(said and said.strip().lower() == term)}
+        order.append(p.user.id)
+    if len(term) >= 2:
+        esc = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        rows = (
+            await db.execute(
+                select(User)
+                .where(User.disabled.is_(False), User.id != viewer.id, User.username.ilike(f"%{esc}%", escape="\\"))
+                .order_by(User.username)
+                .limit(20)
+            )
+        ).scalars().all()
+        for u in rows:
+            if u.id not in found:
+                found[u.id] = {"user": u, "name": u.username, "label": None, "said": None, "exact": u.username.lower() == term}
+                order.append(u.id)
+    ok = await callable_ids(db, viewer, order, cs)
+    rows_out = [found[i] for i in order if i in ok]
+    rows_out.sort(key=lambda r: (not r["exact"], r["said"] is None, r["name"].lower()))
+    return [{"user": rooms_core.user_out(r["user"]), "name": r["name"], "label": r["label"], "said": r["said"]} for r in rows_out[:8]]
 
 
 # ================================================================ hooks from elsewhere

@@ -167,7 +167,12 @@ async def live(db: AsyncSession = Depends(get_db), user: User = Depends(get_curr
     and the one you're in."""
     await access.require_voice(db, user)
     current = await dm.current_call(db, user.id)
-    return {"calls": await dm.live_for(db, user), "in_call": str(current) if current else None}
+    return {
+        "calls": await dm.live_for(db, user),
+        "in_call": str(current) if current else None,
+        # The missed-calls badge (Calls WP-D4).
+        "missed": await dm.missed_count(db, user.id),
+    }
 
 
 @router.get("/history")
@@ -180,6 +185,47 @@ async def history(
     """Your calls, newest first (the Calls tab)."""
     await access.require_voice(db, user)
     return await dm.history(db, user, before=before, limit=limit)
+
+
+@router.delete("/history", status_code=204)
+async def clear_history(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    """Clear your call history (nobody else's). Live calls stay."""
+    await access.require_voice(db, user)
+    await dm.clear_history(db, user)
+
+
+@router.get("/missed")
+async def missed(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """The missed-calls badge: calls you missed and haven't seen."""
+    await access.require_voice(db, user)
+    return {"count": await dm.missed_count(db, user.id)}
+
+
+@router.post("/missed/seen")
+async def missed_seen(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """You looked at the Calls tab: the badge clears (on every device)."""
+    await access.require_voice(db, user)
+    return {"count": await dm.mark_seen(db, user)}
+
+
+@router.get("/people")
+async def people(
+    q: str = Query(default="", max_length=80),
+    ids: str | None = Query(default=None, max_length=40 * 37),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """People you can call (Ctrl+K "Call Mum", the Contacts buttons): by a
+    name you know them by, or ``ids`` (comma-separated) to ask which of
+    these you can call. Blocked people (either way) are never offered."""
+    cs = await access.require_voice(db, user)
+    id_list: list[uuid.UUID] | None = None
+    if ids is not None:
+        try:
+            id_list = [uuid.UUID(x) for x in ids.split(",") if x.strip()][:40]
+        except ValueError:
+            raise HTTPException(status_code=422, detail="ids must be user ids") from None
+    return {"people": await dm.people(db, user, q, id_list, cs)}
 
 
 # ---------------------------------------------------------------- one call

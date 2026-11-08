@@ -119,6 +119,8 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
         ),
         # Live DM calls in your conversations (ringing you, or on with a Join).
         "calls": calls_live,
+        # The Calls tab's badge: missed calls you haven't seen (Calls WP-D4).
+        "calls_missed": await calls_dm.missed_count(db, user.id) if voice_on else 0,
     }
 
 

@@ -6,17 +6,18 @@
  * Three sources, all landing in the same handlers:
  *  - ``GET /api/calls/live`` when the page opens, the Rooms stream comes
  *    back, or the window gets focus again (catch-up);
- *  - the Rooms stream (``call_*`` events), kept open in every tab while
- *    calls are on for you;
+ *  - the Rooms stream (``call_*`` events, the missed-calls badge's
+ *    ``calls_missed``, and ``room`` for a conversation a call opened for
+ *    you), kept open in every tab while calls are on for you;
  *  - the service worker, which passes each ``call`` push (ring, stop,
  *    missed) to every open tab (``sw.ts``), for when the stream is behind.
  */
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 
-import { dmCallsApi, type CallLive, type CallRing, type DmCall } from "@/api/dmCalls";
+import { CALL_HISTORY_KEY, dmCallsApi, type CallLive, type CallRing, type DmCall } from "@/api/dmCalls";
 import { roomsApi, type Bootstrap, type RoomEvent, type RoomUser } from "@/api/rooms";
-import { BOOTSTRAP_KEY } from "@/rooms/cache";
+import { BOOTSTRAP_KEY, upsertRoom } from "@/rooms/cache";
 import { subscribeRoomsStream } from "@/rooms/stream";
 import { useAuthStore } from "@/store/authStore";
 
@@ -33,22 +34,33 @@ const STOPPED_MEMORY_MS = 5 * 60_000;
 
 /** The page's query client (for the Rooms bootstrap), while mounted. */
 let queryClient: QueryClient | null = null;
-let refetchTimer: ReturnType<typeof setTimeout> | null = null;
-const askedRooms = new Set<string>();
 
-/** A call in a conversation this page doesn't know yet (a group someone
- *  just made, a conversation that was closed): fetch Rooms' list again so
- *  the conversation, its name and its "Join" bar show. */
-function knowRoom(roomId: string | null | undefined): void {
+/** A conversation a call opened for you (a group someone just made, one
+ *  you'd closed): the server sends it, with the names in it, as a ``room``
+ *  event before the ring. Kept here too, so a page outside Rooms that has
+ *  Rooms' list cached knows it when you go there. */
+function roomArrived(ev: Extract<RoomEvent, { type: "room" }>): void {
+  if (ev.users) rememberUsers(ev.users);
   const qc = queryClient;
-  if (!qc || !roomId || refetchTimer) return;
-  const b = qc.getQueryData<Bootstrap>(BOOTSTRAP_KEY);
-  if (!b || b.dms.some((r) => r.id === roomId) || askedRooms.has(roomId)) return;
-  askedRooms.add(roomId);
-  refetchTimer = setTimeout(() => {
-    refetchTimer = null;
-    void qc.invalidateQueries({ queryKey: BOOTSTRAP_KEY });
-  }, 250);
+  if (qc && !ev.room.space_id) upsertRoom(qc, ev.room, ev.users);
+}
+
+/** The missed-calls badge. */
+export function setMissed(n: number): void {
+  if (get().missed !== n) set({ missed: Math.max(0, n) });
+}
+
+let historyTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** A call started, changed or ended: the Calls tab's list is out of date
+ *  (it refetches only if it's showing). */
+function historyChanged(): void {
+  const qc = queryClient;
+  if (!qc || historyTimer) return;
+  historyTimer = setTimeout(() => {
+    historyTimer = null;
+    void qc.invalidateQueries({ queryKey: CALL_HISTORY_KEY });
+  }, 400);
 }
 
 const set = (patch: Partial<CallStoreState> | ((s: CallStoreState) => Partial<CallStoreState>)) =>
@@ -84,7 +96,6 @@ export function ringArrived(ring: CallRing): void {
   // Already in that call here (it rang again while you were joining).
   if (get().callId === ring.call_id && inCallHere(get())) return;
   rememberUsers([ring.caller]);
-  knowRoom(ring.room_id);
   set((s) => ({ incoming: { ...s.incoming, [ring.call_id]: { ...ring, at: s.incoming[ring.call_id]?.at ?? Date.now() } } }));
 }
 
@@ -96,7 +107,7 @@ export function ringStopped(callId: string): void {
 
 function callChanged(call: DmCall, ended: boolean): void {
   const self = useAuthStore.getState().user?.id;
-  if (!ended && call.live) knowRoom(call.room_id);
+  historyChanged();
   set((s) => {
     const live = { ...s.live };
     if (ended || !call.live) delete live[call.id];
@@ -114,7 +125,17 @@ function callChanged(call: DmCall, ended: boolean): void {
 }
 
 function onEvent(ev: RoomEvent): void {
-  if (!("type" in ev) || !ev.type.startsWith("call_")) return;
+  if (!("type" in ev)) return;
+  if (ev.type === "room") {
+    roomArrived(ev);
+    return;
+  }
+  if (ev.type === "calls_missed") {
+    setMissed(ev.count);
+    historyChanged();
+    return;
+  }
+  if (!ev.type.startsWith("call_")) return;
   switch (ev.type) {
     case "call_ring": {
       const { type: _t, ...ring } = ev;
@@ -156,13 +177,20 @@ export function onCallPush(data: Record<string, unknown>): void {
     });
   } else if (kind === "call_stop" || kind === "call_missed") {
     ringStopped(callId);
+    // The stream may be behind: ask for the badge's number.
+    if (kind === "call_missed") void dmCallsApi.missed().then(setMissed, () => undefined);
   }
 }
 
 /** Fill in rings from ``GET /api/calls/live`` (a page opened mid-ring). */
 async function applyLive(qc: QueryClient, live: CallLive): Promise<void> {
   const self = useAuthStore.getState().user?.id;
-  set({ available: true, live: Object.fromEntries(live.calls.map((c) => [c.id, c])), inCallAnywhere: live.in_call });
+  set({
+    available: true,
+    live: Object.fromEntries(live.calls.map((c) => [c.id, c])),
+    inCallAnywhere: live.in_call,
+    ...(typeof live.missed === "number" ? { missed: live.missed } : {}),
+  });
   const ringingMe = live.calls.filter((c) => self && c.ringing.includes(self) && !stopped.has(c.id));
   // Gone: rings this tab still shows that aren't ringing any more.
   for (const id of Object.keys(get().incoming)) {

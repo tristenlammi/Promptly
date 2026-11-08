@@ -80,6 +80,8 @@ export interface PersonPage {
   files: PersonFile[];
   /** Whether you blocked them (never whether they blocked you). */
   blocked?: boolean;
+  /** Calls: you can call them (calls on for both, no block either way). */
+  can_call?: boolean;
 }
 
 /** Someone you've blocked (Account → Blocked people). */

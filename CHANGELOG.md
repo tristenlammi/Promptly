@@ -54,6 +54,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Calls (DM calls), WP-D3 -->
 - Calls in DMs on Android phones with the Promptly app: a call rings like a phone call, full screen over the lock screen with your phone's own ringtone (silent, vibrate and Do Not Disturb respected), with Answer and Decline, or End and answer when you're already on a call. Answering keeps the call going with the screen off or in other apps, with a call notification for Mute, Speaker and Hang up. Android treats it as a real call: Bluetooth headsets and the car can answer and hang up, the car shows the call screen, and spoken directions duck under it. Answer on your laptop and the phone stops ringing. If Android 14 or later won't let calls ring full screen, they show as a notification and Promptly asks once to allow it.
 - Rooms on a phone with the app: a video call answered on the phone opens its conversation with everyone's cameras while the app keeps the sound; Mute and Speaker there control the app's call, and Turn camera on moves the call to the page.
+<!-- Calls (DM calls), WP-D4 -->
+- Rooms: a Calls tab (Spaces · Messages · Calls on a phone, a phone button under Messages on a computer) with your call history: who, which way, how long, missed calls in red and the ones you haven't seen in bold, a call-back button on every row, All or Missed, and a red badge with the number of missed calls until you look. Each call opens to its details: every call with the same people, Call, Video call and Message, and Remove from call history. Removing a call, or clearing your whole history, only changes your own list.
+- New call: pick someone from the Calls tab, or call anyone straight from their person page or their contact card (Call and Video call, when they're on Promptly and can take calls).
+- Ctrl+K: "Call Mum" or "Video call Sam" calls someone by the name you know them by (a contact's name or nickname, what they are to you in Photos, or their username). People you've blocked, or who blocked you, aren't offered.
 
 ### Changed
 <!-- Calls (voice channels), WP-V1 -->

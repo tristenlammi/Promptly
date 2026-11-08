@@ -26,6 +26,7 @@ import {
   Trash2,
   UserRound,
   Users,
+  Video,
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -38,6 +39,7 @@ import { peopleHubApi, personPath } from "@/api/peopleHub";
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import { toast } from "@/store/toastStore";
 import { Chip, Field, ItemButton, Select, Sheet, TextArea, TextInput, todayISO, uid } from "@/items/ui";
+import { calls } from "@/rtc/call/actions";
 import { cn } from "@/utils/cn";
 
 import { ContactForm } from "./ContactForm";
@@ -298,6 +300,30 @@ export function ContactDetail({
         <QuickAction href={email ? `mailto:${email}` : undefined} icon={Mail} label="Email" compact={!narrow} />
         <QuickAction onClick={can ? () => setLogging(true) : undefined} icon={NotebookPen} label="Log" compact={!narrow} />
       </div>
+      {/* Calls: they're on Promptly and you can call them there. */}
+      {account?.user && account.can_call && (
+        <div className="flex flex-wrap items-center gap-2" data-testid="contact-promptly-call">
+          <span className="w-full text-xs text-[var(--text-muted)]">Call {first} on Promptly</span>
+          <ItemButton
+            variant="primary"
+            className="flex-1"
+            icon={<Phone className="h-4 w-4" />}
+            aria-label={`Call ${first} on Promptly`}
+            onClick={() => void calls.startWith([account.user!.id], "audio")}
+          >
+            Voice call
+          </ItemButton>
+          <ItemButton
+            variant="secondary"
+            className="flex-1"
+            icon={<Video className="h-4 w-4" />}
+            aria-label={`Video call ${first} on Promptly`}
+            onClick={() => void calls.startWith([account.user!.id], "video")}
+          >
+            Video call
+          </ItemButton>
+        </div>
+      )}
 
       {/* Ask AI */}
       <div className={cn("flex gap-2", narrow ? "-mx-4 overflow-x-auto px-4 pb-1 [scrollbar-width:none]" : "flex-wrap")}>

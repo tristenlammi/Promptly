@@ -78,4 +78,6 @@ class CallParticipant(Base):
     session: Mapped[str | None] = mapped_column(String(32), nullable=True)
     device: Mapped[str | None] = mapped_column(String(8), nullable=True)  # web/android
     lk_sid: Mapped[str | None] = mapped_column(String(48), nullable=True)  # the LiveKit connection we know about
+    # Calls WP-D4 (0283): when you saw a call you missed (the Calls tab's badge).
+    seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     hidden: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")  # removed from my history

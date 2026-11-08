@@ -78,6 +78,8 @@ export interface CallStoreState {
   inCallAnywhere: string | null;
   /** People seen in calls: names and pictures. */
   users: Record<string, RoomUser>;
+  /** Missed calls you haven't seen yet (the Calls tab's badge). */
+  missed: number;
 
   // ---- the call in this tab
   status: CallStatus;
@@ -153,6 +155,7 @@ export const useCallStore = create<CallStoreState>(() => ({
   live: {},
   inCallAnywhere: null,
   users: {},
+  missed: 0,
   ended: null,
   ...initialCallConnection,
 }));

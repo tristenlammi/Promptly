@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import type { CallLineMeta } from "@/api/dmCalls";
 
-import { callLineWords, clock, endedWords, lengthWords } from "./words";
+import { callLineWords, clock, endedWords, historyWords, lengthWords } from "./words";
 
 const ALICE = "aaaaaaaa-1111-4111-8111-111111111111";
 const BOB = "bbbbbbbb-2222-4222-8222-222222222222";
@@ -64,5 +64,27 @@ describe("call words", () => {
     expect(endedWords("ended", 0)).toBe("Call ended");
     expect(endedWords("declined", 0)).toBe("No answer");
     expect(endedWords("cancelled", 0)).toBe("Call cancelled");
+  });
+});
+
+describe("call history", () => {
+  const base = { media: "audio" as const, direction: "incoming" as const, outcome: "answered" as const, duration: 754, my_seconds: 700, group: false };
+
+  it("says which way it went and how long", () => {
+    expect(historyWords(base)).toEqual({ text: "Incoming call", detail: "12 min", missed: false });
+    expect(historyWords({ ...base, direction: "outgoing", media: "video" })).toEqual({ text: "Outgoing video call", detail: "12 min", missed: false });
+  });
+
+  it("missed calls are red; your own unanswered calls aren't", () => {
+    expect(historyWords({ ...base, outcome: "missed", duration: 0 })).toEqual({ text: "Missed call", detail: "", missed: true });
+    expect(historyWords({ ...base, outcome: "missed", group: true, media: "video" }).text).toBe("Missed group video call");
+    expect(historyWords({ ...base, direction: "outgoing", outcome: "no_answer", duration: 0 })).toEqual({ text: "Outgoing call", detail: "No answer", missed: false });
+    expect(historyWords({ ...base, direction: "outgoing", outcome: "cancelled", duration: 0 }).detail).toBe("Cancelled");
+    expect(historyWords({ ...base, outcome: "declined" }).text).toBe("Declined call");
+  });
+
+  it("live calls", () => {
+    expect(historyWords({ ...base, outcome: "live", group: true }).text).toBe("Group call in progress");
+    expect(historyWords({ ...base, outcome: "ringing", direction: "outgoing" }).detail).toBe("Ringing");
   });
 });

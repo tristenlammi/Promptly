@@ -183,6 +183,10 @@ async def missed(db: AsyncSession, call: Call, room: Room, user_ids: list[uuid.U
             ttl=MISSED_TTL,
         )
         await rooms_core.publish([uid], {"type": "call_ring_stop", "call_id": str(call.id), "reason": "missed"})
+        # The Calls tab's badge on their open pages.
+        from app.calls.dm import publish_missed
+
+        await publish_missed(db, uid)
 
 
 # ---------------------------------------------------------------- the line in the conversation

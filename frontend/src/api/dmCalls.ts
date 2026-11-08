@@ -86,7 +86,9 @@ export type CallServerEvent =
   /** Stop ringing on this device: you answered or declined elsewhere, or missed it. */
   | { type: "call_ring_stop"; call_id: string; reason: CallStopReason }
   /** Your connection to a call ended without you hanging up here. */
-  | { type: "call_disconnected"; call_id: string; session: string | null; reason: CallDisconnectReason };
+  | { type: "call_disconnected"; call_id: string; session: string | null; reason: CallDisconnectReason }
+  /** The missed-calls badge changed (a call missed, seen or removed). */
+  | { type: "calls_missed"; count: number };
 
 /** ``meta.call`` on a call's line in the conversation. */
 export interface CallLineMeta {
@@ -104,7 +106,61 @@ export interface CallLive {
   calls: DmCall[];
   /** The call you're connected to (anywhere), if any. */
   in_call: string | null;
+  /** Missed calls you haven't seen (the badge). */
+  missed?: number;
 }
+
+/** How a call in your history went, from your side. */
+export type CallOutcome = "answered" | "missed" | "declined" | "no_answer" | "cancelled" | "ringing" | "live";
+
+/** One call in your call history (the Calls tab). */
+export interface CallHistoryEntry {
+  id: string;
+  room_id: string;
+  group: boolean;
+  /** A group's own name ("" when it has none). */
+  name: string;
+  /** Who to show: a 1:1's other person, a group's members (not you). */
+  who: string[];
+  media: CallMedia;
+  direction: "incoming" | "outgoing";
+  outcome: CallOutcome;
+  /** A missed call you haven't seen yet. */
+  new: boolean;
+  started_by: string | null;
+  started_at: string;
+  ended_at: string | null;
+  live: boolean;
+  /** Seconds from the first answer to the end. */
+  duration: number;
+  /** Seconds you were in it. */
+  my_seconds: number;
+  /** Calling back is possible (still in the conversation, no block). */
+  can_call: boolean;
+}
+
+export interface CallHistoryPage {
+  calls: CallHistoryEntry[];
+  users: Record<string, RoomUser>;
+  /** Pass as ``before`` for the next page (null: no more). */
+  next: string | null;
+  /** Missed calls you haven't seen (the badge). */
+  missed: number;
+}
+
+/** Someone you can call (Ctrl+K "Call Mum", Contacts). */
+export interface CallablePerson {
+  user: RoomUser;
+  /** The name you know them by (a contact's name, else their username). */
+  name: string;
+  /** What they are to you ("Mum"), from Photos. */
+  label: string | null;
+  /** The name of yours that matched what you typed ("Mum"). */
+  said: string | null;
+}
+
+/** React Query key of your call history (the Calls tab). */
+export const CALL_HISTORY_KEY = ["calls", "history"] as const;
 
 export const dmCallsApi = {
   /** Call a conversation (rings the others; joins its live call if one is on). */
@@ -157,5 +213,39 @@ export const dmCallsApi = {
   async ring(callId: string, userIds?: string[]): Promise<DmCall & { rang: string[] }> {
     const { data } = await apiClient.post<DmCall & { rang: string[] }>(`/calls/${callId}/ring`, { user_ids: userIds ?? null });
     return data;
+  },
+
+  // ---- history and missed calls (Calls WP-D4) ----
+  async history(before?: string | null, limit = 50): Promise<CallHistoryPage> {
+    const { data } = await apiClient.get<CallHistoryPage>("/calls/history", { params: { limit, ...(before ? { before } : {}) } });
+    return data;
+  },
+  /** Remove one call from your history (nobody else's). */
+  async hide(callId: string): Promise<void> {
+    await apiClient.delete(`/calls/${callId}/history`);
+  },
+  /** Clear your call history (live calls stay). */
+  async clearHistory(): Promise<void> {
+    await apiClient.delete("/calls/history");
+  },
+  async missed(): Promise<number> {
+    const { data } = await apiClient.get<{ count: number }>("/calls/missed");
+    return data.count;
+  },
+  /** You've looked at your calls: the badge clears on every device. */
+  async seen(): Promise<number> {
+    const { data } = await apiClient.post<{ count: number }>("/calls/missed/seen");
+    return data.count;
+  },
+  /** People you can call, by a name you know them by. */
+  async people(q: string): Promise<CallablePerson[]> {
+    const { data } = await apiClient.get<{ people: CallablePerson[] }>("/calls/people", { params: { q } });
+    return data.people;
+  },
+  /** Which of these accounts you can call. */
+  async callable(userIds: string[]): Promise<CallablePerson[]> {
+    if (!userIds.length) return [];
+    const { data } = await apiClient.get<{ people: CallablePerson[] }>("/calls/people", { params: { ids: userIds.join(",") } });
+    return data.people;
   },
 };
