@@ -505,6 +505,10 @@ async def join(db: AsyncSession, user: User, room: Room, sm: RoomSpaceMember, cs
     """Join (or move to) a voice channel. Removes you from any other
     channel, and replaces this channel's connection on another device."""
     rv = await voice_settings(db, room)
+    # One live conversation at a time: joining a channel hangs up a DM call.
+    from app.calls import dm
+
+    await dm.leave_elsewhere(db, user, voice_too=False)
     async with await _lock(user.id):
         return await _join_locked(db, user, room, sm, rv, cs, device)
 

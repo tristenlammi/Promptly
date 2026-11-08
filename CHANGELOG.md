@@ -45,6 +45,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Ctrl+K: "join lounge" joins a voice channel; Mute, Deafen and Leave voice while you're in one. Today shows who's hanging out in voice now, with Join. Export my library includes voice.json: your time in voice channels (which channel, when, how long; nothing said is ever recorded).
 <!-- Calls (voice channels), WP-V5 -->
 - Voice channels on Android phones with the Promptly app: tapping Join in P Rooms hands the channel to the app, which keeps you in it with the screen off or while you use other apps, through Bluetooth earbuds, a car or the loudspeaker. Its notification says who's talking and has Mute, Deafen and Leave; the channel page stays the remote control and still shows cameras and streams while it's open. Spoken directions from P Maps play over the channel, and "Still there?" asks on the phone too. Needs the new app version; iPhones and phones without the app keep the page awake instead, as before.
+<!-- Calls (DM calls), WP-D1 -->
+- Calls in DMs, the server side (the call screen comes next): voice and video calls in 1:1 and group conversations. A call rings everyone else on every device for 45 seconds, even during quiet hours; answer on one device and the others stop ringing. Decline from the notification, or let it ring out: the conversation then shows "Missed call" and you get a "Missed call" notification. A finished call leaves "Call · 12 min" in the conversation. Anyone in a group conversation can join its call while it is on, and a group call can ring someone again. You are only ever in one call or voice channel at a time. Blocking someone refuses calls both ways and ends a call with them.
+- Account → Notifications gains a Calls switch (on by default) for ringing and missed calls.
 
 ### Changed
 <!-- Calls (voice channels), WP-V1 -->

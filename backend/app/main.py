@@ -804,3 +804,9 @@ app.include_router(calls_router, prefix="/api/calls", tags=["calls"])
 from app.calls.voice_router import router as calls_voice_router  # noqa: E402
 
 app.include_router(calls_voice_router, prefix="/api/rooms", tags=["calls"])
+# Calls phase 2: voice and video calls in DMs (ringing, history) under
+# /api/calls, after phase 1's routes; importing app.calls.dm registers its
+# LiveKit webhook handlers ("c_").
+from app.calls.dm_router import router as calls_dm_router  # noqa: E402
+
+app.include_router(calls_dm_router, prefix="/api/calls", tags=["calls"])

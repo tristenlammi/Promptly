@@ -80,6 +80,9 @@ Category = Literal[
     "mail",
     # New-device approvals and shared-vault invites. Never any vault data.
     "passwords",
+    # Calls (0282): a DM call ringing you, a missed call, and the silent
+    # "answered on another device" that stops the ringing. Push only.
+    "call",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -102,6 +105,7 @@ CATEGORIES: tuple[str, ...] = (
     "calendar",
     "mail",
     "passwords",
+    "call",
     "test",
 )
 
@@ -148,6 +152,9 @@ RULES: dict[str, Rule] = {
     "calendar": Rule(False),
     "mail": Rule(True, app="Mail", one="new email", many="new emails", url="/mail", summary=True),
     "passwords": Rule(False),
+    # Calls: a ringing call is never held (it'd be over by morning), nor is
+    # the push that stops it ringing on your other devices.
+    "call": Rule(False, app="Calls", one="call", many="calls", url="/rooms"),
     "test": Rule(False),
 }
 _missing = set(CATEGORIES) - set(RULES)
@@ -185,6 +192,11 @@ class PushPayload:
     # Extra fields for the service worker (Rooms: the sender's icon, the
     # line to stack, the unread count for the app badge). Push only.
     extra: dict[str, Any] | None = None
+    # Web Push delivery: ``ttl`` seconds the push service keeps it for an
+    # offline device (None: pywebpush's default, 0 = now or never), and
+    # ``urgency`` (``high`` wakes a dozing phone at once). Not in the body.
+    ttl: int | None = None
+    urgency: str | None = None
 
     def to_json(self) -> str:
         payload: dict[str, Any] = {**(self.extra or {}), "title": self.title, "body": self.body}
@@ -210,6 +222,8 @@ async def notify_user(
     inbox: bool = True,
     extra: dict[str, Any] | None = None,
     summary: bool = False,
+    ttl: int | None = None,
+    urgency: str | None = None,
 ) -> None:
     """Schedule a push for every active subscription on ``user_id`` and
     write the durable inbox row.
@@ -225,9 +239,11 @@ async def notify_user(
     row) from someone the recipient has blocked, or who has blocked them,
     is dropped. ``summary=True`` holds it for the daily summary whatever
     the category's setting (an app's own per-kind "Daily summary" switch);
-    quiet hours may also hold it (see :data:`RULES`)."""
+    quiet hours may also hold it (see :data:`RULES`). ``ttl`` / ``urgency``:
+    see :class:`PushPayload` (a ringing call: 45 s, high)."""
     payload = PushPayload(
-        title=title, body=body, url=url, tag=tag, category=category, extra=extra
+        title=title, body=body, url=url, tag=tag, category=category, extra=extra,
+        ttl=ttl, urgency=urgency,
     )
     coro = _dispatch(
         user_id=user_id,
@@ -442,6 +458,8 @@ async def deliver(
             payload_json=payload.to_json(),
             vapid_private_key=vapid_private,
             vapid_contact=vapid_contact,
+            ttl=payload.ttl,
+            urgency=payload.urgency,
         )
         for sub in subs
     ]
@@ -521,6 +539,8 @@ def _send_one(
     payload_json: str,
     vapid_private_key: str,
     vapid_contact: str,
+    ttl: int | None = None,
+    urgency: str | None = None,
 ) -> None:
     """Single sync send via ``pywebpush``. Translates the HTTP status
     into our internal ``_PushGone`` on endpoint-invalid responses so
@@ -531,6 +551,11 @@ def _send_one(
     # installed (it's a runtime-only dependency).
     from pywebpush import WebPushException, webpush
 
+    extra: dict[str, Any] = {}
+    if ttl is not None:
+        extra["ttl"] = int(ttl)
+    if urgency:
+        extra["headers"] = {"Urgency": urgency}
     try:
         webpush(
             subscription_info={
@@ -540,6 +565,7 @@ def _send_one(
             data=payload_json,
             vapid_private_key=vapid_private_key,
             vapid_claims={"sub": vapid_contact},
+            **extra,
         )
     except WebPushException as exc:
         status = getattr(getattr(exc, "response", None), "status_code", None)

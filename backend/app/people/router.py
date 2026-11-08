@@ -306,6 +306,15 @@ async def block_person(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), v
     await blocks.block(db, viewer.id, user_id)
     await db.commit()
     await _blocks_changed(db, viewer.id, user_id)
+    # Calls: a block ends a 1:1 call between you (D7). Nobody is told why.
+    try:
+        from app.calls import dm as calls_dm
+
+        await calls_dm.block_started(db, viewer.id, user_id)
+    except Exception:  # noqa: BLE001 — the block itself has happened
+        import logging
+
+        logging.getLogger("promptly.people").warning("calls not ended after a block", exc_info=True)
     return {"user_id": str(user_id), "blocked": True}
 
 
