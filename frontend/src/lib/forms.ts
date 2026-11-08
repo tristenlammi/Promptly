@@ -1,13 +1,13 @@
 /**
  * Forms (the Google Forms replacement): a form is a Files document type
  * (``source_kind: "form"``) that opens in the form builder at
- * ``/files/form/:id``.
+ * ``/files/form/:id``. The Forms home (``/forms``) lists them.
  *
- * The builder arrives with WP-F1.2. Until then this stays off: "New ▸ Form"
- * is hidden and a form in Files opens its preview (download) rather than a
- * page that doesn't exist yet. WP-F1.2 turns it on with the builder route.
+ * ``FORMS_BUILDER_READY`` turned on with the builder (WP-F1.2): it shows
+ * "New ▸ Form" in Files and on the Files home, and opens forms in the
+ * builder rather than a preview.
  */
-export const FORMS_BUILDER_READY = false;
+export const FORMS_BUILDER_READY = true;
 
 /** A form's Drive file. */
 export function isFormFile(file: { source_kind?: string | null }): boolean {
@@ -16,3 +16,8 @@ export function isFormFile(file: { source_kind?: string | null }): boolean {
 
 /** The built-in templates ``POST /files/office {kind: "form", form_template}`` takes. */
 export type FormTemplateKey = "rsvp" | "signup" | "feedback" | "contact" | "registration" | "order";
+
+/** The builder's address for a form file. */
+export function formBuilderPath(fileId: string): string {
+  return `/files/form/${fileId}`;
+}

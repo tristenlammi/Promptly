@@ -165,6 +165,15 @@ const OfficeEditorPage = lazyWithRetry(
   () => import("@/pages/OfficeEditorPage").then((m) => ({ default: m.OfficeEditorPage })),
   "OfficeEditorPage"
 );
+// Forms: the builder and the Forms home.
+const FormBuilderPage = lazyWithRetry(
+  () => import("@/pages/FormBuilderPage").then((m) => ({ default: m.FormBuilderPage })),
+  "FormBuilderPage"
+);
+const FormsHomePage = lazyWithRetry(
+  () => import("@/pages/FormsHomePage").then((m) => ({ default: m.FormsHomePage })),
+  "FormsHomePage"
+);
 const SyncLandingPage = lazyWithRetry(
   () => import("@/pages/SyncLandingPage").then((m) => ({ default: m.SyncLandingPage })),
   "SyncLandingPage"
@@ -773,6 +782,9 @@ export default function App() {
         <Route path="/files/doc/:fileId" element={<OfficeEditorPage />} />
         <Route path="/files/sheet/:fileId" element={<OfficeEditorPage />} />
         <Route path="/files/whiteboard/:fileId" element={<OfficeEditorPage />} />
+        {/* Forms: the builder (a form is a file) and the Forms home. */}
+        <Route path="/files/form/:fileId" element={<FormBuilderPage />} />
+        <Route path="/forms" element={<FormsHomePage />} />
         <Route path="/files/item/:fileId" element={<ItemPage />} />
         {/* Apps: the launcher, the store, and each app (its file). Every
             app's data lives in My files › Apps › <App>. */}

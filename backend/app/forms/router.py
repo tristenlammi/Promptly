@@ -4,12 +4,14 @@ A form is made through Files (``POST /api/files/office {kind: "form"}``,
 blank or from a built-in template), and is copied, trashed, restored and
 downloaded like any office file. These routes are the builder's:
 
+* ``GET  ""`` — the Forms home (``?scope=mine|shared``); ``POST ""`` makes
+  a form in your ``Forms`` folder (blank or from a template).
 * ``GET  /templates`` — the built-in templates and your own saved ones.
 * ``GET  /{file_id}`` — the definition, settings, your access, the link.
 * ``PUT  /{file_id}/definition`` — save (409 when someone saved since).
 * ``PATCH /{file_id}/settings``
 * ``POST /{file_id}/assets`` — a picture for the header, a question or an
-  option. ``GET /{file_id}/assets/{asset_id}`` serves it by a signed link.
+  option; ``POST /{file_id}/assets/from-file`` copies one from Photos/Files. ``GET /{file_id}/assets/{asset_id}`` serves it by a signed link.
 
 Every route checks :mod:`app.forms.access`; anything you can't open is a
 404, never a 403.
@@ -93,6 +95,72 @@ async def get_templates(
         ).scalars().all()
         mine = [{"id": str(r.id), "title": office_title(r), "modified_at": r.modified_at} for r in rows]
     return {"built_in": listing(), "mine": mine}
+
+
+@router.get("")
+async def home(
+    scope: Literal["mine", "shared"] = Query("mine"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """The Forms home: your forms (``mine``) or forms shared with you, with
+    answers, new answers since you last looked, and open or closed."""
+    from app.forms.home import list_forms
+
+    return {"forms": await list_forms(db, user, scope=scope)}
+
+
+class _NewForm(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # A built-in template (``GET /templates``) …
+    template: str | None = Field(default=None, max_length=40)
+    # … or one of your saved templates (a form file you can read).
+    template_id: uuid.UUID | None = None
+    title: str | None = Field(default=None, max_length=300)
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def new_form(
+    payload: _NewForm,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """A new form from the Forms home: blank, from a built-in template or
+    from one you saved. It goes in your ``Forms`` folder (made the first
+    time). Returns the new form's file."""
+    from app.files.office import get_office_access
+    from app.files.office_templates import office_title
+    from app.files.quota import get_quota
+    from app.files.router import _file_to_response
+    from app.files.system_folders import ensure_forms_folder
+
+    folder = await ensure_forms_folder(db, user)
+    title = (payload.title or "").strip() or None
+    if payload.template_id is not None:
+        src = await db.get(UserFile, payload.template_id)
+        if (
+            src is None
+            or src.source_kind != GeneratedKind.FORM.value
+            or await get_office_access(db, src, user) == "none"
+        ):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+        if not (await get_quota(db, user)).can_fit(src.size_bytes or 0):
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail="This would exceed your storage quota.",
+            )
+        shell = await service.copy_form(db, src, owner=user, folder_id=folder.id, title=title or office_title(src))
+    elif payload.template is not None:
+        made = await service.from_template(db, owner=user, key=payload.template, title=title, folder_id=folder.id)
+        if made is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Template not found")
+        shell = made[0]
+    else:
+        shell, _form = await service.create_form(db, owner=user, title=title or "Untitled form", folder_id=folder.id)
+    await db.commit()
+    await db.refresh(shell)
+    return {"file": _file_to_response(shell, caller=user).model_dump(mode="json")}
 
 
 @router.get("/{file_id:uuid}")
@@ -227,6 +295,49 @@ async def upload_asset(
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
     finally:
         await file.close()
+    await db.commit()
+    return {"id": str(row.id), "url": service.asset_url(shell.id, row.id)}
+
+
+class _AssetFromFile(BaseModel):
+    file_id: uuid.UUID
+
+
+@router.post("/{file_id:uuid}/assets/from-file", status_code=status.HTTP_201_CREATED)
+async def asset_from_file(
+    file_id: uuid.UUID,
+    payload: _AssetFromFile,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _room: None = Depends(require_disk_room),
+) -> dict:
+    """A picture from your Photos or Files, **copied** into the form (so a
+    form's link never serves your library file). Same checks as an upload."""
+    from types import SimpleNamespace
+
+    from app.files.router import _load_readable_file
+    from app.files.storage import absolute_path
+
+    shell, _form, _access = await load_form(db, file_id, user, need="edit")
+    try:
+        src = await _load_readable_file(db, payload.file_id, user)
+    except HTTPException:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Picture not found") from None
+    if src.trashed_at is not None or not src.storage_path or not (src.mime_type or "").startswith("image/"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only pictures can go in a form.")
+    path = absolute_path(src.storage_path)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Picture not found")
+    fh = open(path, "rb")  # noqa: SIM115 — closed below
+    try:
+        row = await service.add_asset(
+            db, shell, SimpleNamespace(filename=src.filename or "image", content_type=src.mime_type, file=fh)
+        )
+    except service.AssetError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from None
+    finally:
+        fh.close()
     await db.commit()
     return {"id": str(row.id), "url": service.asset_url(shell.id, row.id)}
 

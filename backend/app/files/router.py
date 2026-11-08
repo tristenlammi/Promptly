@@ -2644,6 +2644,11 @@ async def update_file(
             entity = await content_for_shell(db, row)
             if entity is not None:
                 entity.title = title[:200]
+                if row.source_kind == "form":
+                    # A form's search text starts with its title (Forms).
+                    from app.forms.definition import search_text
+
+                    row.content_text = search_text(entity.definition or {}) or None
 
     if payload.folder_id is not None or payload.move_to_root:
         new_folder: FileFolder | None = None
