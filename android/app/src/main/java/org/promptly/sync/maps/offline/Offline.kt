@@ -70,6 +70,12 @@ object Offline {
         get() = prefs(this).getBoolean("auto_update", true)
         set(value) = prefs(this).edit().putBoolean("auto_update", value).apply()
 
+    /** "Keep each trip's map for a week" (on): the map along each route started with
+     *  signal is saved, so a dead spot never blanks the screen ([MapTiles.saveTrip]). */
+    var Context.keepTripMaps: Boolean
+        get() = prefs(this).getBoolean("keep_trip_maps", true)
+        set(value) = prefs(this).edit().putBoolean("keep_trip_maps", value).apply()
+
     /** This phone, as the server's area list names it. Made once, kept. */
     fun deviceId(context: Context): String {
         val p = prefs(context)

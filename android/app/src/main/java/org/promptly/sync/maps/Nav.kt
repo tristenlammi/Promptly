@@ -241,6 +241,8 @@ object Nav {
         val key = Triple(line.size, line.first(), line.last())
         if (key == camerasFor) return
         camerasFor = key
+        // This route's map, kept for a week, so a dead spot on the way doesn't blank it.
+        org.promptly.sync.maps.offline.MapTiles.saveTrip(app, line.map { it.lat to it.lng })
         cameraJob?.cancel()
         cameraJob = watching.launch(Dispatchers.IO + keepDriving) {
             val shape = Maps.encodeShape(line.map { it.lat to it.lng })

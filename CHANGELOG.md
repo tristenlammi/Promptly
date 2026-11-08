@@ -34,6 +34,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: the server now makes offline map packs with each monthly map update: the map, directions and search (house numbers included) for all of Australia, in squares a phone can download. `MAPS_OFFLINE=0` turns them off.
 - P Maps: offline areas you save (a view, a route's corridor or around a place) and signed, resumable downloads of their packs, for the Android app's offline maps. Admin → App settings says if making the packs failed.
 - Promptly for Android: Offline areas (P Maps on the web hand-off, Photo backup → Offline maps, or the download notification): choose an area on a map and see its size first, or save the area around Home; it downloads on Wi-Fi (or now, on mobile data, if you say so), carries on from where it stopped after a lost connection or a restart, checks every file, and updates itself after your server's monthly map update. Shows the space used and free, says plainly when there isn't room, and deleting an area frees its space at once.
+- Promptly for Android: P Maps' map now comes from your offline areas first, on the phone and in the car, so it draws in full with no signal and saves data with it. Outside your areas it uses the map along each trip you've started in the last week (Offline areas → Keep each trip's map for a week, on by default), then your server; with neither, the route still shows on a plain map.
 
 ### Changed
 <!-- P Maps offline (maps-offline) -->

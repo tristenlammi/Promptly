@@ -15,6 +15,7 @@ import org.json.JSONObject
 import org.promptly.sync.Api
 import org.promptly.sync.PairLink
 import org.promptly.sync.Store
+import org.promptly.sync.maps.offline.MapTiles
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
@@ -133,31 +134,45 @@ object Maps {
         }
     }
 
-    /** The map style with this server's addresses filled in, as a local file. On a weak
-     *  signal, the copy saved last time, rather than a blank screen while it tries. */
+    /**
+     * The map style as a local file, for the phone's screens and the car's. Its map,
+     * fonts and sprites all point at [MapTiles.HOST], answered on the phone (downloaded
+     * squares, the trip cache, then this server). The style itself is the copy offline
+     * downloads keep, else this server's, else the one saved last time, so a car
+     * session started with no signal still gets a map.
+     */
     suspend fun styleFile(context: Context, forceDark: Boolean? = null): String = withContext(Dispatchers.IO) {
         val server = server(context) ?: throw IOException("Not signed in")
         val dark = forceDark ?: (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
         val flavor = if (dark) "dark" else "light"
         val file = File(context.filesDir, "map-style-$flavor.json")
-        try {
-            val config = get(context, "/api/maps/config", CAR_TIMEOUT_SECONDS)
-            val basemap = config.optString("basemap").takeIf { it.isNotEmpty() && it != "null" }
-                ?: throw NotSetUp()
-            val (code, text) = call(context, CAR_TIMEOUT_SECONDS) { url("$server/map-assets/style-$flavor.json") }
-            if (code != 200) throw IOException("Server said $code")
-            val style = text.replace("__ORIGIN__", server).replace("__BASEMAP__", "$server$basemap")
+        val kept = File(org.promptly.sync.maps.offline.Offline.store(context).assetsDir, "style-$flavor.json")
+        val raw: String? = if (kept.isFile) {
+            kept.readText()
+        } else {
+            try {
+                val config = get(context, "/api/maps/config", CAR_TIMEOUT_SECONDS)
+                if (config.optString("basemap").let { it.isEmpty() || it == "null" }) throw NotSetUp()
+                val (code, text) = call(context, CAR_TIMEOUT_SECONDS) { url("$server/map-assets/style-$flavor.json") }
+                if (code != 200) throw IOException("Server said $code")
+                text
+            } catch (e: NotSetUp) {
+                throw IOException("Maps aren't set up on this server yet.")
+            } catch (e: IOException) {
+                // On a weak signal, the copy saved last time, rather than a blank screen
+                // (one made for the phone's own tiles, not an older app's server link).
+                if (!file.isFile || !file.readText().contains(MapTiles.HOST)) throw e
+                null
+            }
+        }
+        if (raw != null) {
+            val style = MapTiles.style(raw)
             val fresh = File(context.filesDir, "map-style-$flavor.json.new")
             fresh.writeText(style)
             if (!fresh.renameTo(file)) {
                 file.writeText(style)
                 fresh.delete()
             }
-        } catch (e: NotSetUp) {
-            throw IOException("Maps aren't set up on this server yet.")
-        } catch (e: IOException) {
-            // Only a style made for this server will do.
-            if (!file.exists() || !file.readText().contains(server)) throw e
         }
         "file://${file.absolutePath}"
     }

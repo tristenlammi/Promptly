@@ -103,6 +103,8 @@ class PromptlyCarSession : Session() {
         if (Maps.server(carContext) == null) {
             return NotReady(carContext, "Open P Maps on your phone and start a trip once, then come back.")
         }
+        // The car's map draws from the same tiles as the phone's, offline too.
+        org.promptly.sync.maps.offline.MapTiles.install(carContext)
         val screen = DriveScreen(carContext)
         // Opened by "navigate to…" from another app or the assistant. Once this screen
         // is on the car, so anything it opens goes on top of it.

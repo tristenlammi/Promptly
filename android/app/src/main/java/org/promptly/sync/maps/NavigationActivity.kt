@@ -110,6 +110,8 @@ class NavigationActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Nav.init(this)
+        // The map's tiles come from the phone first (squares, this week's trips).
+        org.promptly.sync.maps.offline.MapTiles.install(this)
         enableEdgeToEdge()
         request.value = parse(intent?.data)
         // Ended somewhere else (the car's End, the assistant, arriving and walking

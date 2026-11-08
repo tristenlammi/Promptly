@@ -45,6 +45,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -68,6 +69,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.promptly.sync.maps.Maps
 import org.promptly.sync.maps.offline.Offline.autoUpdate
+import org.promptly.sync.maps.offline.Offline.keepTripMaps
 import org.promptly.sync.maps.offline.Offline.wifiOnly
 import java.time.OffsetDateTime
 import java.time.ZoneId
@@ -92,6 +94,8 @@ class OfflineAreasActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Before the area maps: they draw from the phone's squares and the server alike.
+        MapTiles.install(this)
         enableEdgeToEdge()
         link.value = parse(intent)
         setContent {
@@ -494,6 +498,8 @@ private fun Settings(onChanged: () -> Unit) {
     val context = LocalContext.current
     var wifi by remember { mutableStateOf(with(Offline) { context.wifiOnly }) }
     var auto by remember { mutableStateOf(with(Offline) { context.autoUpdate }) }
+    var trips by remember { mutableStateOf(with(Offline) { context.keepTripMaps }) }
+    val tripBytes by produceState(-1L, trips) { value = withContext(Dispatchers.IO) { MapTiles.tripCache(context).bytes() } }
     Text("Settings", style = MaterialTheme.typography.titleSmall, modifier = Modifier.semantics { heading() })
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -508,6 +514,14 @@ private fun Settings(onChanged: () -> Unit) {
                 auto = it
                 with(Offline) { context.autoUpdate = it }
                 Offline.daily(context)
+                onChanged()
+            }
+            HorizontalDivider()
+            val kept = if (trips && tripBytes > 0) " Using ${Sizes.text(tripBytes)} now." else ""
+            SettingRow("Keep each trip's map for a week", "The map along each route you start with signal, so a dead spot never blanks the screen.$kept", trips) {
+                trips = it
+                with(Offline) { context.keepTripMaps = it }
+                if (!it) MapTiles.clearTrips(context)
                 onChanged()
             }
         }
