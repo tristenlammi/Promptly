@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Confirm it's you – Stillwater Docs</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Lora",serif;background:#f0f4f8}
+.c{width:400px;margin:90px auto;background:#fff;padding:28px;border-radius:6px}
+#email-code{width:100%;box-sizing:border-box;padding:11px;font:20px monospace;text-transform:uppercase;border:1px solid #8ca0b3}
+button{margin-top:14px;padding:10px 20px;background:#2c4a6b;color:#fff;border:0}
+</style>
+</head>
+<body>
+<div class="c">
+  <h1 style="font-size:21px">New sign-in from Firefish on Linux</h1>
+  <p>We emailed a confirmation code to s•••••@post.example. It looks like <code>AB12-CD34</code>.</p>
+  <form action="#" onsubmit="return false">
+    <label for="email-code">Confirmation code</label>
+    <input id="email-code" name="device_verification_code" type="text" maxlength="9" autocapitalize="characters" spellcheck="false">
+    <button type="submit">Confirm</button>
+  </form>
+  <p><a href="#">Didn't get it? Send a new code</a></p>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["otp"] = val("#email-code");
+  return o;
+} };
+</script>
+</body>
+</html>

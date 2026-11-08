@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ferrous CRM</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px Inter,Arial,sans-serif;background:#f6f6f9;color:#1c1c28}
+.box{width:380px;margin:80px auto;background:#fff;border:1px solid #e3e3ea;border-radius:8px;padding:30px}
+.lbl{font-weight:600;font-size:13px;margin:14px 0 6px}
+.box input[type=text],.box input[type=password]{width:100%;box-sizing:border-box;padding:9px;border:1px solid #c8c8d4;border-radius:6px}
+.trap{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
+button{margin-top:18px;width:100%;padding:10px;background:#5b4cdb;color:#fff;border:0;border-radius:6px}
+details{margin-top:18px;font-size:13px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>Ferrous CRM</h2>
+  <form action="#" onsubmit="return false">
+    <div class="lbl" id="_r_6_">Username</div>
+    <input id="_r_7_" type="text" aria-labelledby="_r_6_" autocomplete="off" spellcheck="false">
+    <div class="lbl" id="_r_8_">Password</div>
+    <input id="_r_9_" type="password" aria-labelledby="_r_8_">
+    <div class="trap" aria-hidden="true"><label>Website <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+    <button type="submit">Log in</button>
+  </form>
+  <details>
+    <summary>Log in with company SSO</summary>
+    <label>Company email domain <input id="sso-domain" type="text" placeholder="acme.example"></label>
+    <button type="button">Continue with SSO</button>
+  </details>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("input[id=\"_r_7_\"]");
+  o["password"] = val("input[id=\"_r_9_\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

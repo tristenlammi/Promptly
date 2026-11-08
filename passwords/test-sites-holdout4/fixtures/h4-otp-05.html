@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quokka Rides</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:16px "Montserrat",sans-serif;background:#fff}
+.c{width:340px;margin:110px auto;text-align:center}
+.pins{display:flex;gap:14px;justify-content:center;margin:26px 0}
+.pins input{width:52px;height:60px;border:0;border-bottom:3px solid #222;font-size:28px;text-align:center}
+</style>
+</head>
+<body>
+<div class="c">
+  <h1 style="font-size:22px">Enter the 4-digit code sent to +61 4•• ••• 018</h1>
+  <div class="pins">
+    <input id="pin-1" type="tel" maxlength="1">
+    <input id="pin-2" type="tel" maxlength="1">
+    <input id="pin-3" type="tel" maxlength="1">
+    <input id="pin-4" type="tel" maxlength="1">
+  </div>
+  <button type="button">Next</button>
+  <p><a href="#">I haven't received a code</a></p>
+</div>
+<script>
+var pins = [1, 2, 3, 4].map(function (n) { return document.getElementById('pin-' + n); });
+pins.forEach(function (p, i) { p.addEventListener('input', function () { if (p.value && pins[i + 1]) pins[i + 1].focus(); }); });
+window.__fixture = { state: function () { return { otp: pins.map(function (p) { return p.value; }).join('') }; } };
+</script>
+</body>
+</html>

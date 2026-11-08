@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Find your domain – Namecrate</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:16px "Nunito Sans",sans-serif;background:linear-gradient(#0f766e,#115e59);color:#fff;min-height:100vh}
+.c{max-width:640px;margin:0 auto;padding-top:120px;text-align:center}
+form{display:flex;gap:6px;margin-top:20px}
+#domain{flex:1;padding:14px;font-size:18px;border:0;border-radius:8px}
+#tld{padding:14px;border:0;border-radius:8px}
+</style>
+</head>
+<body>
+<div class="c">
+  <h1>Find the perfect domain</h1>
+  <form action="#" role="search" onsubmit="return false">
+    <input id="domain" name="domain" type="text" placeholder="yourbusiness" autocomplete="off" aria-label="Domain name">
+    <select id="tld" name="tld" aria-label="Ending"><option>.com</option><option>.net</option><option>.io</option><option>.com.au</option></select>
+    <button type="submit">Search</button>
+  </form>
+</div>
+<script>
+window.__fixture = { state: function () { return {}; } };
+</script>
+</body>
+</html>

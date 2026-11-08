@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kundenportal – Stadtwerke Lindenau</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Frutiger",Arial,sans-serif;background:#f3f6f3;color:#1d2b1d}
+.kopf{background:#2e7d32;color:#fff;padding:14px 32px}
+.inhalt{width:460px;margin:40px auto;background:#fff;padding:26px;border:1px solid #cfdccf}
+dl{display:grid;grid-template-columns:140px 1fr;gap:10px 12px;align-items:center}
+dd{margin:0}dd input{width:100%;box-sizing:border-box;padding:8px;border:1px solid #9ab09a}
+.knopf{background:#2e7d32;color:#fff;border:0;padding:9px 20px}
+</style>
+</head>
+<body>
+<div class="kopf">Stadtwerke Lindenau · Kundenportal</div>
+<div class="inhalt">
+  <h1 style="font-size:21px">Anmeldung</h1>
+  <p>Melden Sie sich an, um Zählerstände zu melden und Rechnungen einzusehen.</p>
+  <form action="#" onsubmit="return false">
+    <dl>
+      <dt><label for="feld-benutzer">Benutzername</label></dt><dd><input id="feld-benutzer" name="benutzer" type="text"></dd>
+      <dt><label for="feld-kennwort">Kennwort</label></dt><dd><input id="feld-kennwort" name="kennwort" type="password"></dd>
+    </dl>
+    <label><input type="checkbox" name="angemeldetBleiben"> Angemeldet bleiben</label>
+    <p><button class="knopf" type="submit">Anmelden</button> <a href="#">Kennwort vergessen?</a></p>
+  </form>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#feld-benutzer");
+  o["password"] = val("#feld-kennwort");
+  return o;
+} };
+</script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Search results – Wanderdocs Help</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Segoe UI",sans-serif;background:#fafafa}
+.bar{display:flex;gap:10px;padding:20px 40px;background:#fff;border-bottom:1px solid #ddd}
+.bar input{flex:1;padding:12px;font-size:17px;border:1px solid #bbb;border-radius:24px}
+.res{max-width:760px;margin:20px 40px}.res article{margin-bottom:18px}.res h3{margin:0;color:#1a4fbf}
+</style>
+</head>
+<body>
+<form class="bar" role="search" action="#" onsubmit="return false">
+  <input type="search" id="q" name="q" value="reset password" aria-label="Search help articles" autocomplete="off">
+  <select id="sort" name="sort" aria-label="Sort by"><option>Most relevant</option><option>Newest</option></select>
+  <button type="submit">Search</button>
+</form>
+<div class="res">
+  <p>About 14 results</p>
+  <article><h3>Reset a forgotten password</h3><p>Use the link on the sign-in page and we'll email you a reset link…</p></article>
+  <article><h3>Change your password while signed in</h3><p>Go to Settings, then Security…</p></article>
+  <article><h3>Password requirements</h3><p>Passwords must be at least 12 characters…</p></article>
+</div>
+<script>
+window.__fixture = { state: function () { return {}; } };
+</script>
+</body>
+</html>

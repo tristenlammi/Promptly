@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;padding:16px;font:14px Arial,sans-serif}label{display:block;margin-top:10px}input[type=text],input[type=password]{width:100%;box-sizing:border-box;padding:7px}button{margin-top:12px}
+</style>
+</head>
+<body>
+<h3 style="margin:0">Members sign in</h3>
+<form action="#" onsubmit="return false">
+  <label for="username">Username</label><input id="username" name="username" type="text" autocomplete="username">
+  <label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password">
+  <label><input type="checkbox" name="autologin"> Log me on automatically</label>
+  <button type="submit">Sign in</button> <a href="#">Register</a>
+</form>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#username");
+  o["password"] = val("#password");
+  return o;
+} };
+</script>
+</body>
+</html>

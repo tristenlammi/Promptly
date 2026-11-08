@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hearth Hub</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#fafafa;font:14px Roboto,sans-serif}hearth-authorize{display:block}
+</style>
+</head>
+<body>
+<hearth-authorize client-name="homehub.local:8123"></hearth-authorize>
+<script>
+customElements.define('hearth-login-flow', class extends HTMLElement {
+  connectedCallback() {
+    var r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<style>.f{position:relative;margin:18px 0}.f input{width:100%;box-sizing:border-box;padding:20px 12px 6px;border:0;border-bottom:1px solid #888;background:#f5f5f5;font-size:16px}.f span{position:absolute;left:12px;top:4px;font-size:12px;color:#03a9f4;pointer-events:none}button{background:#03a9f4;color:#fff;border:0;padding:9px 18px;border-radius:4px}</style>' +
+      '<form><div class="f"><span>Username</span><input name="username" autocomplete="username" autocapitalize="none"></div>' +
+      '<div class="f"><span>Password</span><input name="password" type="password" autocomplete="current-password"></div>' +
+      '<label><input type="checkbox" checked> Keep me logged in</label><p><button type="submit">Log in</button></p></form>';
+    r.querySelector('form').addEventListener('submit', function (e) { e.preventDefault(); });
+  }
+});
+customElements.define('hearth-authorize', class extends HTMLElement {
+  connectedCallback() {
+    var r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<style>.card{width:400px;margin:60px auto;background:#fff;padding:24px;border-radius:12px;box-shadow:0 2px 6px rgba(0,0,0,.15)}.logo{width:56px;height:56px;border-radius:12px;background:#03a9f4;margin:0 auto 12px}</style>' +
+      '<div class="card"><div class="logo"></div><p>Welcome home! You are about to give <b class="client"></b> access to your Hearth Hub.</p><hearth-login-flow></hearth-login-flow></div>';
+    r.querySelector('.client').textContent = this.getAttribute('client-name');
+    this.setAttribute('data-ready', '');
+  }
+});
+window.__fixture = { state: function () {
+  var r = document.querySelector('hearth-authorize').shadowRoot.querySelector('hearth-login-flow').shadowRoot;
+  return { username: r.querySelector('input[name="username"]').value, password: r.querySelector('input[name="password"]').value };
+} };
+</script>
+</body>
+</html>

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tidewater Brokerage – Log in</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Helvetica Neue",sans-serif;background:#f4f6f8;color:#0b2239}
+.card{width:400px;margin:70px auto;background:#fff;padding:30px;border-radius:4px;border:1px solid #d6dde4}
+.f{margin-bottom:16px}.f label{display:block;font-size:13px;font-weight:600;margin-bottom:5px}
+.f input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #8a99a8;border-radius:3px;font-size:15px}
+.primary{width:100%;padding:11px;background:#0b2239;color:#fff;border:0;border-radius:3px}
+.spin{display:none;text-align:center;padding:40px}.spin.on{display:block}
+#mfa-code{letter-spacing:6px;font-size:22px;text-align:center}
+</style>
+</head>
+<body>
+<div class="card">
+  <div id="login-view">
+    <h1 style="font-size:22px">Log in to Tidewater</h1>
+    <form action="#" onsubmit="return false">
+      <div class="f"><label for="user">User ID</label><input id="user" name="userId" type="text" autocomplete="username"></div>
+      <div class="f"><label for="pass">Password</label><input id="pass" name="password" type="password" autocomplete="current-password"></div>
+      <button class="primary" id="login-btn" type="button">Log in</button>
+    </form>
+  </div>
+  <div class="spin" id="spin">Verifying…</div>
+  <div id="mfa-view" hidden>
+    <h1 style="font-size:22px">Check your phone</h1>
+    <p>We sent a 6-digit code to the mobile number ending in 0148.</p>
+    <form action="#" onsubmit="return false">
+      <div class="f"><label for="mfa-code">Security code</label><input id="mfa-code" name="otpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"></div>
+      <label style="font-size:13px"><input type="checkbox" name="rememberDevice"> Don't ask again on this device</label>
+      <p><button class="primary" type="submit">Verify</button></p>
+      <a href="#">Resend code</a>
+    </form>
+  </div>
+</div>
+<script>
+var saved = { username: '', password: '' };
+document.getElementById('login-btn').addEventListener('click', function () {
+  saved.username = document.getElementById('user').value;
+  saved.password = document.getElementById('pass').value;
+  document.getElementById('login-view').remove();
+  document.getElementById('spin').classList.add('on');
+  setTimeout(function () {
+    document.getElementById('spin').classList.remove('on');
+    document.getElementById('mfa-view').hidden = false;
+  }, 500);
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = saved.username || val("#user");
+  o["password"] = saved.password || val("#pass");
+  o["otp"] = val("#mfa-code");
+  return o;
+} };
+</script>
+</body>
+</html>

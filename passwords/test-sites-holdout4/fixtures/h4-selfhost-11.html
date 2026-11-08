@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Owlcam IPC-2100</title>
+<link rel="icon" href="data:,">
+<style>
+body{background:#c0c0c0;font-family:Arial}
+</style>
+</head>
+<body>
+<CENTER>
+<TABLE WIDTH=420 BORDER=1 CELLPADDING=6 CELLSPACING=0 BGCOLOR="#FFFFFF">
+<TR><TD BGCOLOR="#000080" COLSPAN=2><FONT COLOR="#FFFFFF" SIZE=4><B>Owlcam IPC-2100 Network Camera</B></FONT></TD></TR>
+<FORM NAME="loginForm" ACTION="#" METHOD=POST onSubmit="return encodePass()">
+<TR><TD><FONT SIZE=2>User:</FONT></TD><TD><INPUT TYPE=text NAME=user SIZE=16 MAXLENGTH=31></TD></TR>
+<TR><TD><FONT SIZE=2>Pass:</FONT></TD><TD><INPUT TYPE=password NAME=pass SIZE=16 MAXLENGTH=31></TD></TR>
+<INPUT TYPE=hidden NAME=hash>
+<TR><TD COLSPAN=2 ALIGN=CENTER><INPUT TYPE=submit VALUE=" OK "> <INPUT TYPE=reset VALUE="Cancel"></TD></TR>
+</FORM>
+</TABLE>
+<P><FONT SIZE=1>Firmware V2.4.18 build 1907 · Plug-in required for live view in older browsers</FONT></P>
+</CENTER>
+<script>
+function encodePass() {
+  var f = document.loginForm, s = f.pass.value, h = 0;
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  f.hash.value = h.toString(16);
+  return false;
+}
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("input[name=\"user\"]");
+  o["password"] = val("input[name=\"pass\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

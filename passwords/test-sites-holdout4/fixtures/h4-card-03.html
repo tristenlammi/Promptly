@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Donate – Riverbank Wildlife Rescue</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:16px "Merriweather Sans",sans-serif;background:#e8f5e9}
+.wrap{width:460px;margin:40px auto;background:#fff;border-radius:10px;padding:28px}
+.amounts{display:flex;gap:8px;flex-wrap:wrap}.amounts label{border:1px solid #66bb6a;border-radius:6px;padding:6px 12px}
+.f{margin:12px 0}.f label{display:block;font-size:13px}
+.f input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #a5d6a7;border-radius:6px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button{width:100%;padding:12px;background:#2e7d32;color:#fff;border:0;border-radius:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 style="font-size:22px">Help an injured animal today</h1>
+  <form action="#" onsubmit="return false">
+    <div class="amounts">
+      <label><input type="radio" name="amount" value="25"> $25</label>
+      <label><input type="radio" name="amount" value="50" checked> $50</label>
+      <label><input type="radio" name="amount" value="100"> $100</label>
+    </div>
+    <div class="f"><label for="other-amount">Other amount ($)</label><input id="other-amount" name="other_amount" type="number" min="2"></div>
+    <h3>Card details</h3>
+    <div class="f"><label for="dn-card">Card number</label><input id="dn-card" name="ccnum" type="text" inputmode="numeric" autocomplete="cc-number"></div>
+    <div class="two">
+      <div class="f"><label for="dn-exp">Expiry (MM/YY)</label><input id="dn-exp" name="ccexp" type="text" inputmode="numeric" placeholder="MM/YY" maxlength="5"></div>
+      <div class="f"><label for="dn-cvv">CVV</label><input id="dn-cvv" name="cccvv" type="text" inputmode="numeric" maxlength="4"></div>
+    </div>
+    <div class="f"><label for="dn-name">Name on card</label><input id="dn-name" name="ccname" type="text"></div>
+    <label><input type="checkbox" name="giftaid"> Add 25% at no cost to me (Gift Aid)</label>
+    <p><button type="submit">Donate</button></p>
+  </form>
+</div>
+<script>
+var exp = document.getElementById('dn-exp');
+exp.addEventListener('input', function () {
+  var d = exp.value.replace(/[^0-9]/g, '').slice(0, 4);
+  exp.value = d.length > 2 ? d.slice(0, 2) + '/' + d.slice(2) : d;
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["card-number"] = val("#dn-card");
+  o["card-exp"] = val("#dn-exp");
+  o["card-cvv"] = val("#dn-cvv");
+  o["card-name"] = val("#dn-name");
+  return o;
+} };
+</script>
+</body>
+</html>

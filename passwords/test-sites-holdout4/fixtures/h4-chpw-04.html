@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Password expired – Verdant Logistics</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:13px Tahoma,sans-serif;background:#e6ece6}
+.dlg{width:440px;margin:100px auto;background:#fff;border:1px solid #8a9a8a}
+.dlg h1{margin:0;padding:10px 14px;background:#2f4f2f;color:#fff;font-size:14px}
+.body{padding:16px}
+table td{padding:4px}
+input[type=password]{width:220px;padding:4px}
+</style>
+</head>
+<body>
+<div class="dlg">
+  <h1>Verdant Logistics – Change password</h1>
+  <div class="body">
+    <p><b>Your password has expired and must be changed.</b></p>
+    <form action="#" onsubmit="return false">
+      <table>
+        <tr><td>User:</td><td><b>VERDANT\jdoe</b></td></tr>
+        <tr><td>Old password:</td><td><input type="password" name="oldPassword"></td></tr>
+        <tr><td>New password:</td><td><input type="password" name="newPassword"></td></tr>
+        <tr><td>Re-enter new password:</td><td><input type="password" name="newPassword2"></td></tr>
+      </table>
+      <p><input type="submit" value="Change"> <input type="button" value="Cancel"></p>
+    </form>
+  </div>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["current-password"] = val("input[name=\"oldPassword\"]");
+  o["new-password"] = val("input[name=\"newPassword\"]");
+  o["confirm-password"] = val("input[name=\"newPassword2\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

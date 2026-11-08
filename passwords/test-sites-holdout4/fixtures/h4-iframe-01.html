@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bramble Forums</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px Arial,sans-serif;background:#f3efe6}
+header{background:#3f5e3a;color:#fff;padding:12px 24px;display:flex;justify-content:space-between}
+.layout{display:grid;grid-template-columns:1fr 320px;gap:20px;padding:20px}
+.topic{background:#fff;padding:10px;margin-bottom:8px;border-left:4px solid #8ba888}
+iframe{width:100%;height:280px;border:1px solid #ccc;background:#fff}
+</style>
+</head>
+<body>
+<header><b>Bramble Forums</b><input type="search" id="site-search" placeholder="Search topics"></header>
+<div class="layout">
+  <div>
+    <div class="topic">Overwintering dahlias in clay soil</div>
+    <div class="topic">Best mulch for a new raspberry bed?</div>
+    <div class="topic">Show us your compost bays</div>
+  </div>
+  <aside>
+    <iframe id="login-frame" title="Sign in" src="_frames/h4-iframe-01-login.html" onload="this.setAttribute('data-loaded','')"></iframe>
+  </aside>
+</div>
+<script>
+window.__fixture = { state: function () {
+  try { return document.getElementById('login-frame').contentWindow.__fixture.state(); } catch (e) { return {}; }
+} };
+</script>
+</body>
+</html>

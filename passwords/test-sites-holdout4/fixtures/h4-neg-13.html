@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome – Ironstone Ridge Wines</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;height:100vh;background:#3b0d0c;color:#f5e6d3;font:16px "Cormorant Garamond",serif;display:grid;place-items:center}
+.gate{text-align:center}.gate select{padding:8px;margin:4px;font-size:16px}
+</style>
+</head>
+<body>
+<div class="gate" role="dialog" aria-labelledby="g-title">
+  <h1 id="g-title">Are you of legal drinking age?</h1>
+  <p>Please enter your date of birth.</p>
+  <form action="#" onsubmit="return false">
+    <select id="dob-day" name="day" aria-label="Day"><option value="">Day</option><option>1</option><option>2</option><option>3</option><option>15</option><option>28</option></select>
+    <select id="dob-month" name="month" aria-label="Month"><option value="">Month</option><option>January</option><option>June</option><option>December</option></select>
+    <select id="dob-year" name="year" aria-label="Year"><option value="">Year</option><option>1960</option><option>1985</option><option>2000</option></select><br>
+    <select id="age-country" name="country" aria-label="Country"><option>Australia</option><option>United Kingdom</option><option>Other</option></select>
+    <p><label><input type="checkbox" name="remember"> Remember me</label></p>
+    <button type="submit">Enter</button>
+  </form>
+</div>
+<script>
+window.__fixture = { state: function () { return {}; } };
+</script>
+</body>
+</html>

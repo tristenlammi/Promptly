@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Login [Household Wiki]</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px Arial,sans-serif;background:#fbfaf9;color:#333}
+#wiki__header{display:flex;justify-content:space-between;padding:12px 24px;border-bottom:1px solid #ccc}
+.page{max-width:780px;margin:20px auto;background:#fff;border:1px solid #ddd;padding:24px}
+fieldset{border:1px solid #ccc;padding:14px 18px}
+label.block{display:block;text-align:right;margin:6px 0}
+label.block span{display:inline-block;width:120px;text-align:left}
+input.edit{width:240px;padding:4px}
+</style>
+</head>
+<body>
+<div id="wiki__header">
+  <h1 style="margin:0;font-size:20px">Household Wiki</h1>
+  <form action="#" id="dw__search" onsubmit="return false"><input type="hidden" name="do" value="search"><input type="text" id="qsearch__in" name="q" accesskey="f" title="[F]" placeholder="Search"> <button type="submit">🔍</button></form>
+</div>
+<div class="page">
+  <h1>Login</h1>
+  <p>You are currently not logged in! Enter your authentication credentials below to log in. You need to have cookies enabled to log in.</p>
+  <form id="dw__login" method="post" action="#" onsubmit="return false">
+    <fieldset>
+      <legend>Login</legend>
+      <label class="block"><span>Username</span> <input type="text" name="u" class="edit" autofocus></label>
+      <label class="block"><span>Password</span> <input type="password" name="p" class="edit"></label>
+      <label class="simple"><input type="checkbox" name="r" value="1"> <span>Remember me</span></label>
+      <button type="submit">Log In</button>
+    </fieldset>
+  </form>
+  <p>Forgotten your password? <a href="#">Set new password</a></p>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("input[name=\"u\"]");
+  o["password"] = val("input[name=\"p\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

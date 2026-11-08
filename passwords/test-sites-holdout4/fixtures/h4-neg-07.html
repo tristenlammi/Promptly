@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your cart – Halfmoon Tea</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Helvetica Neue",sans-serif;background:#fff}
+table{width:700px;margin:40px auto;border-collapse:collapse}td,th{padding:10px;border-bottom:1px solid #eee;text-align:left}
+td input[type=number]{width:60px;padding:5px}
+.promo{width:700px;margin:0 auto;display:flex;gap:8px;justify-content:flex-end}
+.promo input{padding:8px;width:200px;text-transform:uppercase}
+</style>
+</head>
+<body>
+<table>
+  <tr><th>Item</th><th>Price</th><th>Qty</th><th>Total</th></tr>
+  <tr><td>Smoky lapsang, 100 g</td><td>$14.00</td><td><input id="qty-1" type="number" name="updates[]" value="1" min="0" aria-label="Quantity for Smoky lapsang"></td><td>$14.00</td></tr>
+  <tr><td>Glass teapot</td><td>$38.00</td><td><input id="qty-2" type="number" name="updates[]" value="1" min="0" aria-label="Quantity for Glass teapot"></td><td>$38.00</td></tr>
+</table>
+<form class="promo" action="#" onsubmit="return false">
+  <label for="promo">Promo code</label><input id="promo" name="discount" type="text" autocomplete="off"><button type="submit">Apply</button>
+</form>
+<p style="width:700px;margin:20px auto;text-align:right"><b>Subtotal $52.00</b><br><button type="button">Check out</button></p>
+<script>
+window.__fixture = { state: function () { return {}; } };
+</script>
+</body>
+</html>

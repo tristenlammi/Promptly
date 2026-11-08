@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pinewood Cinemas – What's on</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px Helvetica,sans-serif;background:#111;color:#eee}
+header{display:flex;align-items:center;gap:20px;padding:14px 30px;background:#000}
+header input{padding:7px 10px;background:#222;border:1px solid #444;color:#eee;width:240px}
+header button{margin-left:auto;background:#e50914;color:#fff;border:0;padding:8px 16px;border-radius:4px}
+.films{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;padding:30px}
+.film{background:#222;height:200px;border-radius:6px;padding:10px}
+dialog{border:0;border-radius:8px;padding:28px;width:340px;background:#fff;color:#111}
+dialog::backdrop{background:rgba(0,0,0,.7)}
+dialog label{display:block;font-size:13px;margin-top:12px}
+dialog input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #bbb;border-radius:4px}
+.x{float:right;background:none;border:0;font-size:20px}
+</style>
+</head>
+<body>
+<header>
+  <strong>PINEWOOD</strong>
+  <input type="search" id="search" placeholder="Search films and cinemas">
+  <button id="open-login" type="button">Log in</button>
+</header>
+<div class="films"><div class="film">Night Harbour</div><div class="film">The Ninth Lantern</div><div class="film">Paper Moons</div><div class="film">Iron Orchard</div></div>
+<dialog id="login-dialog" aria-labelledby="dlg-title">
+  <button class="x" type="button" aria-label="Close" onclick="this.closest('dialog').close()">×</button>
+  <h2 id="dlg-title">Log in to Pinewood</h2>
+  <form method="dialog" onsubmit="event.preventDefault()">
+    <label for="dlg-email">Email</label><input id="dlg-email" type="email" name="email" autocomplete="username">
+    <label for="dlg-pass">Password</label><input id="dlg-pass" type="password" name="password" autocomplete="current-password">
+    <p><button type="submit">Log in</button> <a href="#">Join Pinewood Plus</a></p>
+  </form>
+</dialog>
+<script>
+document.getElementById('open-login').addEventListener('click', function () { document.getElementById('login-dialog').showModal(); });
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#dlg-email");
+  o["password"] = val("#dlg-pass");
+  return o;
+} };
+</script>
+</body>
+</html>

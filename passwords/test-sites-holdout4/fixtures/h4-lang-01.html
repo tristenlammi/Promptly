@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Espace client – Mutuelle Coquelicot</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Marianne",Arial,sans-serif;background:#fff5f5;color:#3a0a0a}
+.bandeau{background:#c0392b;color:#fff;padding:14px 32px;font-size:20px}
+.bloc{width:420px;margin:50px auto;background:#fff;border:1px solid #f0caca;padding:28px}
+.champ{margin-bottom:16px}.champ label{display:block;font-weight:bold;margin-bottom:4px}
+.champ input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #b88}
+.btn{background:#c0392b;color:#fff;border:0;padding:10px 22px}
+</style>
+</head>
+<body>
+<div class="bandeau">Mutuelle Coquelicot</div>
+<div class="bloc">
+  <h1 style="font-size:22px">Accéder à mon espace</h1>
+  <form action="#" method="post" onsubmit="return false">
+    <div class="champ"><label for="identifiant">Identifiant</label><input id="identifiant" name="identifiant" type="text"><small>Votre numéro d'adhérent ou votre adresse e-mail</small></div>
+    <div class="champ"><label for="motdepasse">Mot de passe</label><input id="motdepasse" name="mdp" type="password"></div>
+    <label><input type="checkbox" name="souvenir"> Se souvenir de moi</label>
+    <p><button class="btn" type="submit">Se connecter</button></p>
+    <a href="#">Mot de passe oublié ?</a> · <a href="#">Première connexion</a>
+  </form>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#identifiant");
+  o["password"] = val("#motdepasse");
+  return o;
+} };
+</script>
+</body>
+</html>

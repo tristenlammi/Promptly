@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Glasswing Bank – Sign in</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px Georgia,serif;background:#fff;color:#222}
+.top{background:#5b2a86;color:#fff;padding:14px 36px;font-size:20px}
+main{width:420px;margin:50px auto}
+.skeleton{height:120px;border-radius:8px;background:linear-gradient(90deg,#eee,#f8f8f8,#eee);background-size:200%;animation:sh 1s infinite}
+@keyframes sh{to{background-position:-200% 0}}
+.pic{width:120px;height:90px;border-radius:6px;background:radial-gradient(circle at 30% 30%,#ffd166,#ef476f)}
+.phrase{font-style:italic;margin:10px 0 20px}
+label{display:block;margin-bottom:6px;font-weight:bold}
+input[type=text],input[type=password]{width:100%;box-sizing:border-box;padding:10px;border:1px solid #777}
+button{margin-top:16px;padding:10px 24px;background:#5b2a86;color:#fff;border:0}
+</style>
+</head>
+<body>
+<div class="top">Glasswing Bank</div>
+<main id="view"></main>
+<script>
+var state = { username: '' };
+var view = document.getElementById('view');
+function first() {
+  view.innerHTML = '<form id="id-form" action="#" onsubmit="return false"><h1>Sign in</h1>' +
+    '<label for="onlineId">Online ID</label><input type="text" id="onlineId" name="onlineId" autocomplete="off">' +
+    '<label style="font-weight:normal;margin-top:8px"><input type="checkbox" name="saveId"> Save this Online ID</label>' +
+    '<button id="onlineId-continue" type="button">Continue</button></form>';
+  document.getElementById('onlineId-continue').addEventListener('click', function () {
+    state.username = document.getElementById('onlineId').value;
+    view.innerHTML = '<div class="skeleton" aria-busy="true"></div>';
+    setTimeout(second, 600);
+  });
+}
+function second() {
+  view.innerHTML = '<section id="sitekey-step"><h1>Is this your picture?</h1>' +
+    '<div class="pic" role="img" aria-label="Your security picture"></div>' +
+    '<p class="phrase">Your phrase: <span>lighthouse at dawn</span></p>' +
+    '<p>If you recognise your picture and phrase, enter your passcode.</p>' +
+    '<form action="#" onsubmit="return false"><label for="passcode-input">Passcode</label>' +
+    '<input type="password" id="passcode-input" name="passcode" autocomplete="current-password">' +
+    '<button type="submit">Sign in</button></form></section>';
+}
+first();
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = state.username || val("#onlineId");
+  o["password"] = val("#passcode-input");
+  return o;
+} };
+</script>
+</body>
+</html>

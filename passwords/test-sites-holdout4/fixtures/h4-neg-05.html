@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How strong is your password? – Lockpick Weekly</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:16px "Fira Sans",sans-serif;background:#0d1117;color:#c9d1d9}
+.c{max-width:560px;margin:60px auto}
+#pw-test{width:100%;box-sizing:border-box;padding:14px;font-size:18px;background:#161b22;border:1px solid #30363d;color:#fff;border-radius:8px}
+.meter{height:10px;background:#21262d;border-radius:5px;margin-top:10px}.meter div{height:100%;width:0;border-radius:5px;background:#f85149}
+</style>
+</head>
+<body>
+<div class="c">
+  <h1>How strong is your password?</h1>
+  <p>Type a made-up password to see how long it might take to crack. The check runs only in your browser and nothing is sent anywhere. Please don't type your real password.</p>
+  <label for="pw-test">Try a password</label>
+  <input id="pw-test" type="password" autocomplete="off" placeholder="Try something like correct-horse-battery">
+  <label><input type="checkbox" id="reveal"> Show</label>
+  <div class="meter"><div id="fill"></div></div>
+  <p id="verdict">Start typing…</p>
+</div>
+<script>
+var t = document.getElementById('pw-test');
+t.addEventListener('input', function () {
+  var n = t.value.length, pct = Math.min(100, n * 7);
+  document.getElementById('fill').style.width = pct + '%';
+  document.getElementById('fill').style.background = pct > 70 ? '#3fb950' : pct > 40 ? '#d29922' : '#f85149';
+  document.getElementById('verdict').textContent = n < 8 ? 'Cracked instantly' : n < 12 ? 'About a day' : 'Centuries';
+});
+document.getElementById('reveal').addEventListener('change', function () { t.type = this.checked ? 'text' : 'password'; });
+window.__fixture = { state: function () { return {}; } };
+</script>
+</body>
+</html>

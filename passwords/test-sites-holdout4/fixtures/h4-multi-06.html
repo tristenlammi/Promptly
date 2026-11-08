@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Choose an account – Saltmarsh Cloud</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px system-ui,sans-serif;background:#f7f7f2}
+.card{width:400px;margin:80px auto;background:#fff;border:1px solid #ddd;border-radius:10px;padding:26px}
+.acct{display:flex;align-items:center;gap:12px;width:100%;padding:12px;border:0;border-bottom:1px solid #eee;background:none;text-align:left;cursor:pointer;font:inherit}
+.dot{width:32px;height:32px;border-radius:50%;background:#4a7c59;color:#fff;display:grid;place-items:center}
+#pw-step{display:none}#pw-step.ready{display:block}
+#pw-step input[type=password]{width:100%;box-sizing:border-box;padding:10px;border:1px solid #aaa;border-radius:6px;margin:10px 0}
+</style>
+</head>
+<body>
+<div class="card">
+  <div id="choose">
+    <h2>Choose an account</h2>
+    <button class="acct" id="acct-0" data-email="m.okafor@saltmarsh.example"><span class="dot">M</span><span>Mira Okafor<br><small>m.okafor@saltmarsh.example</small></span></button>
+    <button class="acct" id="acct-1" data-email="mira.home@post.example"><span class="dot">M</span><span>Mira (home)<br><small>mira.home@post.example</small></span></button>
+    <button class="acct" id="acct-other"><span class="dot">+</span><span>Use another account</span></button>
+  </div>
+  <div id="pw-step">
+    <h2>Hi <span id="first"></span></h2>
+    <p id="picked"></p>
+    <form action="#" onsubmit="return false">
+      <input type="hidden" name="login_hint" id="login_hint">
+      <label for="chooser-pw">Password</label>
+      <input type="password" id="chooser-pw" name="password" autocomplete="current-password">
+      <button type="submit">Sign in</button> <a href="#" id="switch">Switch account</a>
+    </form>
+  </div>
+</div>
+<script>
+var chosen = '';
+document.querySelectorAll('.acct[data-email]').forEach(function (b) {
+  b.addEventListener('click', function () {
+    chosen = b.getAttribute('data-email');
+    document.getElementById('choose').remove();
+    document.getElementById('picked').textContent = chosen;
+    document.getElementById('first').textContent = 'Mira';
+    document.getElementById('login_hint').value = chosen;
+    setTimeout(function () { document.getElementById('pw-step').classList.add('ready'); }, 200);
+  });
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["password"] = val("#chooser-pw");
+  return o;
+} };
+</script>
+</body>
+</html>

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Orchardline Rewards – Sign in</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px Avenir,Helvetica,sans-serif;background:#fffaf0}
+.wrap{max-width:380px;margin:60px auto}
+[role=tablist]{display:flex;border-bottom:2px solid #f0c987}
+[role=tab]{flex:1;padding:10px;background:none;border:0;font:inherit;cursor:pointer}
+[role=tab][aria-selected=true]{border-bottom:3px solid #b5651d;font-weight:bold}
+[role=tabpanel]{padding:20px 0}
+.f{margin-bottom:14px}.f label{display:block;font-size:13px;color:#7a5230}
+.f input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #e0c9a6;border-radius:6px}
+.go{width:100%;padding:11px;border:0;border-radius:6px;background:#b5651d;color:#fff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 style="color:#b5651d">Orchardline Rewards</h1>
+  <div role="tablist" aria-label="Sign in with">
+    <button role="tab" id="tab-e" aria-selected="true" aria-controls="panel-e">Email</button>
+    <button role="tab" id="tab-m" aria-selected="false" aria-controls="panel-m">Mobile</button>
+  </div>
+  <div role="tabpanel" id="panel-e" aria-labelledby="tab-e">
+    <form action="#" onsubmit="return false">
+      <div class="f"><label for="e-email">Email address</label><input id="e-email" type="email" name="email" autocomplete="email"></div>
+      <div class="f"><label for="e-pass">Password</label><input id="e-pass" type="password" name="password" autocomplete="current-password"></div>
+      <button class="go">Sign in</button>
+    </form>
+  </div>
+  <div role="tabpanel" id="panel-m" aria-labelledby="tab-m" hidden>
+    <form action="#" onsubmit="return false">
+      <div class="f"><label for="m-phone">Mobile number</label><input id="m-phone" type="tel" name="mobile" autocomplete="tel"></div>
+      <div class="f"><label for="m-pass">Password</label><input id="m-pass" type="password" name="password" autocomplete="current-password"></div>
+      <button class="go">Sign in</button>
+    </form>
+  </div>
+</div>
+<script>
+document.querySelectorAll('[role=tab]').forEach(function (t) {
+  t.addEventListener('click', function () {
+    document.querySelectorAll('[role=tab]').forEach(function (o) {
+      var on = o === t;
+      o.setAttribute('aria-selected', String(on));
+      document.getElementById(o.getAttribute('aria-controls')).hidden = !on;
+    });
+  });
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#e-email");
+  o["password"] = val("#e-pass");
+  return o;
+} };
+</script>
+</body>
+</html>

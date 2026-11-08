@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kestrel Analytics</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:linear-gradient(135deg,#0f2027,#2c5364);font:14px system-ui,sans-serif}
+.auth-box{width:340px;background:#fff;border-radius:10px;padding:32px;box-shadow:0 20px 40px rgba(0,0,0,.3)}
+.auth-box h2{margin:0 0 4px}.sub{color:#667;margin:0 0 24px}
+.auth-box input{display:block;width:100%;box-sizing:border-box;margin-bottom:14px;padding:11px 12px;border:1px solid #ccd;border-radius:6px;font-size:14px}
+.go{background:#2c5364;color:#fff;text-align:center;padding:11px;border-radius:6px;cursor:pointer;user-select:none}
+.msg{min-height:18px;color:#2c5364;margin-top:10px;font-size:13px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="auth-box">
+    <h2>Kestrel</h2>
+    <p class="sub">Sign in to your workspace</p>
+    <input type="email" aria-label="Work email" placeholder="name@company.com">
+    <input type="password" aria-label="Password" placeholder="••••••••">
+    <div class="go" role="button" tabindex="0">Continue</div>
+    <div class="msg" aria-live="polite"></div>
+  </div>
+</div>
+<script>
+document.querySelector('.go').addEventListener('click', function () {
+  document.querySelector('.msg').textContent = 'Checking your details...';
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val(".auth-box input[aria-label=\"Work email\"]");
+  o["password"] = val(".auth-box input[aria-label=\"Password\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

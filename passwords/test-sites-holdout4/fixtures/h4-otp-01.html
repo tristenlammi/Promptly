@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two-factor authentication – Ironbark Cloud</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px "Atkinson Hyperlegible",sans-serif;background:#f4f4f4}
+.c{width:380px;margin:90px auto;background:#fff;padding:28px;border-top:4px solid #8d4b1f}
+#totp{width:100%;box-sizing:border-box;padding:12px;font-size:20px;letter-spacing:4px;border:1px solid #999}
+button{margin-top:14px;width:100%;padding:10px;background:#8d4b1f;color:#fff;border:0}
+</style>
+</head>
+<body>
+<div class="c">
+  <h1 style="font-size:20px">Two-factor authentication</h1>
+  <p>Open your authenticator app and enter the 6-digit code for <b>Ironbark Cloud</b>.</p>
+  <form action="#" onsubmit="return false">
+    <label for="totp">Authentication code</label>
+    <input id="totp" name="code" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="6" placeholder="123456">
+    <p><label><input type="checkbox" name="trust"> Trust this browser for 30 days</label></p>
+    <button type="submit">Verify</button>
+  </form>
+  <p><a href="#">Use a recovery code instead</a></p>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["otp"] = val("#totp");
+  return o;
+} };
+</script>
+</body>
+</html>

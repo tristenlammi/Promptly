@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mossgrove Health – Member sign in</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:16px "Segoe UI",sans-serif;background:#f1f7f4}
+.card{max-width:400px;margin:70px auto;background:#fff;border-radius:14px;padding:32px;box-shadow:0 2px 12px rgba(0,60,40,.12)}
+.fl{position:relative;margin-bottom:20px}
+.fl input{width:100%;box-sizing:border-box;padding:22px 12px 8px;border:1px solid #9bb;border-radius:8px;font-size:16px}
+.fl label{position:absolute;left:13px;top:15px;color:#577;pointer-events:none;transition:all .15s}
+.fl input:focus + label,.fl input:not(:placeholder-shown) + label{top:5px;font-size:11px}
+.eye{position:absolute;right:8px;top:12px;border:0;background:none;color:#286;font-size:13px}
+.submit{width:100%;padding:12px;background:#1f7a5a;color:#fff;border:0;border-radius:8px;font-size:16px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1 style="font-size:22px;color:#1f7a5a">Mossgrove Health</h1>
+  <p>Sign in to see claims, benefits and your digital card.</p>
+  <form action="#" onsubmit="return false" novalidate>
+    <div class="fl">
+      <input id="f-user" name="identifier" type="text" placeholder=" " autocomplete="username">
+      <label for="f-user">Member ID or email</label>
+    </div>
+    <div class="fl">
+      <input id="f-pass" name="secret" type="password" placeholder=" " autocomplete="current-password">
+      <label for="f-pass">Password</label>
+      <button class="eye" type="button" aria-pressed="false" aria-controls="f-pass">Show</button>
+    </div>
+    <button class="submit" type="submit">Sign in</button>
+  </form>
+  <p style="font-size:14px"><a href="#">Forgot member ID?</a> · <a href="#">Reset password</a></p>
+</div>
+<script>
+document.querySelector('.eye').addEventListener('click', function () {
+  var p = document.getElementById('f-pass');
+  var show = p.type === 'password';
+  p.type = show ? 'text' : 'password';
+  this.textContent = show ? 'Hide' : 'Show';
+  this.setAttribute('aria-pressed', String(show));
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#f-user");
+  o["password"] = val("#f-pass");
+  return o;
+} };
+</script>
+</body>
+</html>

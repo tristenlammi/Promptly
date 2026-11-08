@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pve-01 - Proxtrix Virtual Environment</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;height:100vh;background:#f5f5f5;font:13px helvetica,arial,sans-serif}
+.mask{position:fixed;inset:0;background:rgba(80,80,80,.55)}
+.x-window{position:fixed;left:50%;top:30%;transform:translateX(-50%);width:400px;background:#fff;border:1px solid #157fcc;box-shadow:0 0 8px rgba(0,0,0,.4)}
+.x-window-header{background:#157fcc;color:#fff;padding:8px 10px;font-weight:bold}
+.x-form-item{display:flex;align-items:center;padding:6px 12px}
+.x-form-item-label{width:110px}
+.x-form-field{flex:1;padding:4px 6px;border:1px solid #cecece;font:13px helvetica,arial,sans-serif}
+.x-form-trigger-wrap{flex:1;display:flex}.x-form-trigger-wrap .x-form-field{cursor:pointer}
+.x-trigger{width:22px;border:1px solid #cecece;border-left:0;background:#f0f0f0}
+.x-toolbar{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-top:1px solid #ddd}
+.x-btn{background:#3892d4;color:#fff;border:0;padding:5px 16px}
+</style>
+</head>
+<body>
+<div class="mask"></div>
+<div class="x-window" id="loginview-1012" role="dialog" aria-labelledby="loginview-1012_header-title">
+  <div class="x-window-header" id="loginview-1012_header-title">Proxtrix VE Login</div>
+  <form id="form-1015" class="x-panel-body" onsubmit="return false">
+    <div class="x-form-item"><label class="x-form-item-label" for="textfield-1016-inputEl" id="textfield-1016-labelEl">User name:</label>
+      <input id="textfield-1016-inputEl" class="x-form-field x-form-text" type="text" name="username" autocomplete="username" role="textbox" aria-invalid="false"></div>
+    <div class="x-form-item"><label class="x-form-item-label" for="textfield-1017-inputEl">Password:</label>
+      <input id="textfield-1017-inputEl" class="x-form-field x-form-text" type="password" name="password" autocomplete="current-password" role="textbox"></div>
+    <div class="x-form-item"><label class="x-form-item-label" for="combo-1018-inputEl">Realm:</label>
+      <div class="x-form-trigger-wrap"><input id="combo-1018-inputEl" class="x-form-field" type="text" name="realm" readonly value="Linux PAM standard authentication" role="combobox" aria-haspopup="listbox"><div class="x-trigger"></div></div></div>
+    <div class="x-form-item"><label class="x-form-item-label" for="combo-1019-inputEl">Language:</label>
+      <div class="x-form-trigger-wrap"><input id="combo-1019-inputEl" class="x-form-field" type="text" name="lang" readonly value="English - English" role="combobox"><div class="x-trigger"></div></div></div>
+  </form>
+  <div class="x-toolbar"><label><input type="checkbox" id="checkbox-1020-inputEl"> Save User name:</label><button class="x-btn" id="button-1021" type="button">Login</button></div>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#textfield-1016-inputEl");
+  o["password"] = val("#textfield-1017-inputEl");
+  return o;
+} };
+</script>
+</body>
+</html>

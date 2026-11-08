@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign In - Teaforge: code, brewed slowly</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px system-ui,"Segoe UI",sans-serif;background:#fff;color:#181c21}
+.navbar{display:flex;gap:16px;align-items:center;padding:8px 20px;border-bottom:1px solid #d0d7de;background:#f8f8f9}
+.navbar input{padding:5px 8px;border:1px solid #d0d7de;border-radius:4px}
+.navbar .right{margin-left:auto}
+.ui.container{max-width:560px;margin:40px auto}
+.ui.top.attached.header{background:#f2f2f2;border:1px solid #d0d7de;padding:10px 14px;font-weight:600;margin:0}
+.ui.attached.segment{border:1px solid #d0d7de;border-top:0;padding:20px}
+.field{display:flex;align-items:center;margin-bottom:12px}
+.field label{width:200px;text-align:right;padding-right:14px}
+.field input[type=text],.field input[type=password]{flex:1;padding:7px;border:1px solid #d0d7de;border-radius:4px}
+.ui.primary.button{background:#4183c4;color:#fff;border:0;padding:8px 16px;border-radius:4px}
+.tabs a{margin-right:12px}
+</style>
+</head>
+<body>
+<nav class="navbar">
+  <b>Teaforge</b><a href="#">Explore</a><a href="#">Help</a>
+  <input type="text" id="navbar-search" name="q" placeholder="Search repos…" aria-label="Search">
+  <span class="right"><a href="#">Register</a> · <a href="#">Sign In</a></span>
+</nav>
+<div class="ui container">
+  <div class="tabs"><a href="#" class="active">Sign In</a><a href="#" id="tab-openid">OpenID</a></div>
+  <h4 class="ui top attached header">Sign In</h4>
+  <div class="ui attached segment">
+    <form class="ui form" action="#" method="post" onsubmit="return false">
+      <input type="hidden" name="_csrf" value="kF3x9pQ2">
+      <div class="required field"><label for="user_name">Username or Email Address</label><input id="user_name" type="text" name="user_name" autofocus required></div>
+      <div class="required field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required></div>
+      <div class="field"><label></label><label style="width:auto;text-align:left"><input name="remember" type="checkbox"> Remember This Device</label></div>
+      <div class="field"><label></label><button class="ui primary button">Sign In</button>&nbsp;<a href="#">Forgot password?</a></div>
+    </form>
+  </div>
+  <div id="openid-panel" hidden>
+    <label for="openid">OpenID URI</label><input id="openid" name="openid" type="text">
+  </div>
+</div>
+<script>
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#user_name");
+  o["password"] = val("#password");
+  return o;
+} };
+</script>
+</body>
+</html>

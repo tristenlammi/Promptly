@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quayside Ops</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:14px Roboto,sans-serif;background:#eceff1}
+app-root{display:block}app-login{display:block;width:380px;margin:80px auto;background:#fff;padding:24px;box-shadow:0 2px 4px rgba(0,0,0,.2)}
+.mat-form-field{display:block;margin-bottom:18px}.mat-form-field-label{display:block;font-size:12px;color:#607d8b}
+.mat-input-element{width:100%;border:0;border-bottom:1px solid #90a4ae;padding:6px 0;font-size:15px;outline:none}
+.ng-touched.ng-invalid{border-bottom-color:#d32f2f}
+</style>
+</head>
+<body>
+<app-root ng-version="17.3.0"></app-root>
+<script>
+var form = { userName: '', passWord: '' };
+setTimeout(function () {
+  var root = document.querySelector('app-root');
+  root.innerHTML = '<app-login _nghost-ng-c41><h2 _ngcontent-ng-c41>Quayside Ops</h2>' +
+    '<form _ngcontent-ng-c41 novalidate class="ng-untouched ng-pristine ng-invalid">' +
+    '<div class="mat-form-field"><span class="mat-form-field-label">User name</span><input _ngcontent-ng-c41 matinput class="mat-input-element ng-untouched ng-pristine ng-invalid" formcontrolname="userName" type="text"></div>' +
+    '<div class="mat-form-field"><span class="mat-form-field-label">Password</span><input _ngcontent-ng-c41 matinput class="mat-input-element ng-untouched ng-pristine ng-invalid" formcontrolname="passWord" type="password"></div>' +
+    '<button _ngcontent-ng-c41 type="submit" disabled>Log in</button></form></app-login>';
+  var f = root.querySelector('form');
+  f.addEventListener('submit', function (e) { e.preventDefault(); });
+  f.querySelectorAll('input[formcontrolname]').forEach(function (el) {
+    var key = el.getAttribute('formcontrolname');
+    el.addEventListener('input', function () {
+      form[key] = el.value;
+      el.classList.remove('ng-pristine'); el.classList.add('ng-dirty');
+      el.classList.toggle('ng-valid', !!el.value); el.classList.toggle('ng-invalid', !el.value);
+      f.querySelector('button').disabled = !(form.userName && form.passWord);
+    });
+    el.addEventListener('blur', function () { el.classList.remove('ng-untouched'); el.classList.add('ng-touched'); });
+  });
+}, 500);
+window.__fixture = { state: function () { return { username: form.userName, password: form.passWord }; } };
+</script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fernway Travel</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Poppins",sans-serif;background:#e0f2f1;overflow-x:hidden}
+header{display:flex;justify-content:space-between;padding:14px 30px;background:#00695c;color:#fff}
+header button{background:#ffb300;border:0;padding:8px 16px;border-radius:20px}
+.hero{padding:80px 40px;font-size:30px;color:#004d40}
+#join-panel{position:fixed;top:0;right:0;width:380px;height:100%;background:#fff;box-shadow:-4px 0 18px rgba(0,0,0,.2);padding:28px;box-sizing:border-box;transform:translateX(100%);transition:transform .3s}
+#join-panel.open{transform:none}
+#join-panel label{display:block;margin:12px 0 4px;font-size:13px}
+#join-panel input{width:100%;box-sizing:border-box;padding:9px;border:1px solid #80cbc4;border-radius:6px}
+.meter{height:5px;background:#eee;margin-top:6px}.meter div{height:100%;width:0;background:#00897b;transition:width .2s}
+</style>
+</head>
+<body>
+<header><b>Fernway</b><button id="join-btn" type="button">Join free</button></header>
+<div class="hero">Trips planned by people who have been there.</div>
+<aside id="join-panel" aria-hidden="true" hidden>
+  <h2>Create your Fernway account</h2>
+  <form action="#" onsubmit="return false">
+    <label for="j-name">Full name</label><input id="j-name" name="name" type="text" autocomplete="name">
+    <label for="j-email">Email</label><input id="j-email" name="email" type="email" autocomplete="email">
+    <label for="j-pass">Password</label><input id="j-pass" name="password" type="password" autocomplete="new-password">
+    <div class="meter"><div id="bar"></div></div>
+    <p><button type="submit">Join Fernway</button></p>
+  </form>
+</aside>
+<script>
+document.getElementById('join-btn').addEventListener('click', function () {
+  var p = document.getElementById('join-panel');
+  p.hidden = false;
+  p.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(function () { requestAnimationFrame(function () { p.classList.add('open'); }); });
+  setTimeout(function () { p.setAttribute('data-settled', ''); }, 380);
+});
+document.getElementById('j-pass').addEventListener('input', function () {
+  document.getElementById('bar').style.width = Math.min(100, this.value.length * 9) + '%';
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["full-name"] = val("#j-name");
+  o["username"] = val("#j-email");
+  o["new-password"] = val("#j-pass");
+  return o;
+} };
+</script>
+</body>
+</html>

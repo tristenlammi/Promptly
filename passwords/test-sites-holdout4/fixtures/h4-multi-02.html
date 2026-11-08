@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in to your account – Lumen ID</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;background:#e8eef3;font:15px "Segoe UI",sans-serif}
+.box{width:440px;margin:90px auto;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.2);padding:44px;overflow:hidden}
+.stage{position:relative;height:250px}
+.pane{position:absolute;inset:0;transition:transform .3s ease-out}
+.pane.off-right{transform:translateX(110%)}.pane.off-left{transform:translateX(-110%)}
+.pane input{width:100%;border:0;border-bottom:1px solid #666;padding:6px 0;font-size:15px;outline:none}
+.title{font-size:24px;font-weight:600;margin:10px 0 16px}
+.back{background:none;border:0;padding:0;font-size:15px;cursor:pointer}
+.btnrow{text-align:right;margin-top:30px}.btnrow input{background:#0067b8;color:#fff;border:0;padding:6px 30px;font-size:15px}
+</style>
+</head>
+<body>
+<div class="box">
+  <div style="font-weight:700;color:#0067b8">Lumen</div>
+  <div class="stage" id="stage">
+    <div class="pane" id="pane-email">
+      <div class="title">Sign in</div>
+      <input type="email" name="loginfmt" id="i0116" maxlength="113" placeholder="Email, phone, or Lumen ID" aria-label="Enter your email, phone, or Lumen ID" autocomplete="username">
+      <p><a href="#">Can't access your account?</a></p>
+      <div class="btnrow"><input type="submit" id="idSIButton9" value="Next"></div>
+    </div>
+    <div class="pane off-right" id="pane-pw" hidden>
+      <button class="back" type="button" id="backBtn">← <span id="displayName"></span></button>
+      <div class="title">Enter password</div>
+      <input name="passwd" type="password" id="i0118" autocomplete="current-password" placeholder="Password" aria-label="Enter the password for your account">
+      <p><a href="#">Forgot my password</a><br><a href="#">Sign in with a code instead</a></p>
+      <div class="btnrow"><input type="submit" id="idSIButton10" value="Sign in"></div>
+    </div>
+  </div>
+</div>
+<script>
+var who = '';
+document.getElementById('idSIButton9').addEventListener('click', function () {
+  who = document.getElementById('i0116').value;
+  document.getElementById('displayName').textContent = who;
+  var pe = document.getElementById('pane-email'), pp = document.getElementById('pane-pw');
+  pp.hidden = false;
+  requestAnimationFrame(function () {
+    pe.classList.add('off-left');
+    pp.classList.remove('off-right');
+  });
+  setTimeout(function () {
+    pe.hidden = true;
+    document.getElementById('stage').setAttribute('data-settled', 'pw');
+  }, 380);
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = who || document.getElementById("i0116").value;
+  o["password"] = val("input[name=\"passwd\"]");
+  return o;
+} };
+</script>
+</body>
+</html>

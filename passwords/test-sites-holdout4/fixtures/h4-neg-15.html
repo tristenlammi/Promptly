@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>New poll – Huddleboard</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px "Inter",sans-serif;background:#f3f4f6}
+form{width:460px;margin:50px auto;background:#fff;padding:24px;border-radius:10px}
+input{display:block;width:100%;box-sizing:border-box;padding:9px;margin:6px 0 12px;border:1px solid #d1d5db;border-radius:6px}
+</style>
+</head>
+<body>
+<form action="#" onsubmit="return false">
+  <h2>Create a poll</h2>
+  <label for="poll-q">Question</label><input id="poll-q" name="question" type="text" placeholder="Where should we have the team lunch?">
+  <label>Options</label>
+  <input id="opt-1" name="options[]" type="text" placeholder="Option 1">
+  <input id="opt-2" name="options[]" type="text" placeholder="Option 2">
+  <input id="opt-3" name="options[]" type="text" placeholder="Option 3">
+  <label for="poll-close">Closes on</label><input id="poll-close" name="closes" type="date">
+  <label style="display:flex;gap:6px"><input type="checkbox" name="anon" style="width:auto;margin:0"> Anonymous votes</label>
+  <button type="submit">Post poll</button>
+</form>
+<script>
+window.__fixture = { state: function () { return {}; } };
+</script>
+</body>
+</html>

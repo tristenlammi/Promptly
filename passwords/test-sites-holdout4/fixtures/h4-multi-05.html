@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Northbeam Mail</title>
+<link rel="icon" href="data:,">
+<style>
+body{margin:0;font:15px Verdana,sans-serif;background:#e9f0fb}
+.box{width:380px;margin:90px auto;background:#fff;padding:30px;border-radius:12px}
+input{width:100%;box-sizing:border-box;padding:10px;border:1px solid #9ab;border-radius:8px;margin:8px 0 16px}
+button{background:#3366cc;color:#fff;border:0;padding:10px 22px;border-radius:8px}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1 style="font-size:22px">Northbeam Mail</h1>
+  <form id="f1" action="#" onsubmit="return false">
+    <label for="login-email">Your Northbeam address</label>
+    <input id="login-email" type="email" name="login" autocomplete="username" placeholder="you@northbeam.example">
+    <button id="next" type="button">Next</button>
+  </form>
+  <p><a href="#">Create a free mailbox</a></p>
+</div>
+<script>
+sessionStorage.removeItem('nb-login');
+document.getElementById('next').addEventListener('click', function () {
+  sessionStorage.setItem('nb-login', document.getElementById('login-email').value);
+  location.href = '_steps/h4-multi-05-password.html';
+});
+window.__fixture = { state: function () {
+  function val(s) { var el = document.querySelector(s); return el ? el.value : ''; }
+  var o = {};
+  o["username"] = val("#login-email");
+  return o;
+} };
+</script>
+</body>
+</html>
