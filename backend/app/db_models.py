@@ -100,6 +100,7 @@ from app.passwords.models import (  # noqa: F401
     PwVault,
     PwVaultMember,
 )
+from app.passwords.accounts_models import PwMailScan, PwMailSite  # noqa: F401
 from app.maps.models import (  # noqa: F401
     MapLiveLocation,
     MapParked,

@@ -202,6 +202,13 @@ async def import_sweep(ctx: dict) -> int:
     return await sweep()
 
 
+async def pw_mail_accounts(ctx: dict) -> int:
+    """Passwords: keep "Accounts you have" fresh from new mail, a slice per person."""
+    from app.passwords.accounts import refresh_all
+
+    return await refresh_all()
+
+
 async def tus_sweep(ctx: dict) -> int:
     """Resumable uploads nobody finished within a week (WP-8.2)."""
     import asyncio
@@ -267,6 +274,8 @@ class WorkerSettings:
         cron(storage_check, hour=4, minute=15, run_at_startup=False, unique=True),
         cron(disk_check, minute=5, run_at_startup=False, unique=True),
         cron(zip_sweep, minute=50, run_at_startup=False, unique=True),
+        # Reads only mail it hasn't read yet, so it's cheap to run often.
+        cron(pw_mail_accounts, minute={7, 27, 47}, run_at_startup=False, unique=True, timeout=900),
         cron(tus_sweep, hour=4, minute=45, run_at_startup=False, unique=True),
         cron(import_sweep, hour=4, minute=55, run_at_startup=False, unique=True),
         cron(import_watchdog, minute={1, 11, 21, 31, 41, 51}, run_at_startup=False, unique=True),

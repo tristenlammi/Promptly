@@ -17,6 +17,7 @@ import { mailApi, personName, shortWhen, type Person, type InviteAnswer, type Kn
 import { AccountPicker, AccountSheet, MailboxSheet } from "./AccountSheet";
 import { asParagraphs, Composer, type Draft } from "./Composer";
 import { AttachmentViewer, SaveToFiles, useSavedAttachments } from "./AttachmentViewer";
+import { readComposeLink } from "./composeLink";
 import { useThreadDrag } from "./DragMove";
 import { LabelPicker, LabelPill, LabelsSheet, NewLabelSheet, RuleSheet, type LabelTarget } from "./Labels";
 import { labelRows, readFolded, saveFolded, unfolded } from "./labelTree";
@@ -106,6 +107,18 @@ export function MailApp() {
       }
     }
   }, [location.search, location.hash, location.pathname]);
+
+  // A new draft from a link (Passwords' account deletion request): filled in, never sent.
+  const composed = useRef("");
+  useEffect(() => {
+    if (!overview) return;
+    const link = readComposeLink(location.search, location.hash);
+    if (!link || composed.current === location.key) return;
+    composed.current = location.key;
+    window.history.replaceState(window.history.state, "", location.pathname);
+    const from = accounts.find((a) => a.id === link.from)?.id ?? accounts[0]?.id ?? "";
+    setDraft({ account_id: from, to: link.to, subject: link.subject, html: asParagraphs(link.body) });
+  }, [overview, accounts, location.search, location.hash, location.pathname, location.key]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setSearch(typed.trim()), 250);
