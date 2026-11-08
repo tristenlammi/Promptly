@@ -79,7 +79,7 @@ export async function openOnPhone(areaId?: string): Promise<void> {
   window.location.href = `promptlymaps://offline?${params.toString()}`;
   // Still here shortly after: nothing took the link.
   window.setTimeout(() => {
-    if (document.visibilityState === "visible") toast.info("Didn't open? Offline areas need the latest Promptly app, from Apps → Install apps.");
+    if (document.visibilityState === "visible") toast.info("Didn't open? Offline areas need the latest Promptly app for Android. The area is saved: your phone downloads it once it has that.");
   }, 2500);
 }
 
@@ -91,11 +91,11 @@ async function handOff(area: OfflineArea): Promise<void> {
     try {
       await openOnPhone(area.id);
     } catch (e) {
-      toast.error(apiErrorMessage(e, "Saved, but couldn't open the Promptly app. Your phone downloads it next time it's on Wi-Fi."));
+      toast.error(apiErrorMessage(e, "Saved, but couldn't open the Promptly app. Your phone downloads it on Wi-Fi when it has the latest Promptly app."));
     }
     return;
   }
-  toast.success(`Saved ${area.name} for offline${size}. Your phone downloads it next time it's on Wi-Fi.`, { duration: 6000 });
+  toast.success(`Saved ${area.name} for offline${size}. Your phone downloads it on Wi-Fi when it has the latest Promptly app.`, { duration: 6000 });
 }
 
 /** A route's corridor: the squares within 10 km of it. */
@@ -364,8 +364,8 @@ export function OfflinePanel({ view, moves, onClose, onSquares, onShowArea }: {
       {data && (
         <p className="px-4 pt-4 text-xs text-[var(--text-muted)]">
           {android
-            ? "Saving here opens the Promptly app to download it. Areas update themselves on Wi-Fi after the monthly map update."
-            : "Areas download to the Promptly app on your Android phones next time they're on Wi-Fi, and update themselves after the monthly map update. Get the app from Apps → Install apps."}
+            ? "Saving here opens the Promptly app to download it (offline areas need the latest Promptly app). Areas update themselves on Wi-Fi after the monthly map update."
+            : "Areas download to your Android phones on Wi-Fi once they have the latest Promptly app, and update themselves after the monthly map update. Get the app from Apps → Install apps."}
           {" "}{data.attribution}
         </p>
       )}
