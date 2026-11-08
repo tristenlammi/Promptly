@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Talking to Promptly (groundwork): a speed bench for the speech pipeline, `python -m app.talk.bench` (Whisper base/small per pass and as a live lane, Smart Turn, Kokoro to first audio, the voice model's first word), and an echo test page, `backend/app/talk/echo_test.html`, that shows whether a browser cancels its own playback. Nothing changes for users yet.
+
 ## [0.31.0] - 2026-11-08
 
 ### Added
