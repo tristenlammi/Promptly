@@ -15,10 +15,15 @@ BUILDS_URL=https://build-metadata.protomaps.dev/builds.json
 TILES_URL=https://build.protomaps.com
 MAX_AGE_DAYS=${MAPS_REFRESH_DAYS:-30}
 THREADS=${MAPS_BUILD_THREADS:-4}
+# Offline packs for phones (1-degree squares of map, routing and search), built
+# with each refresh. MAPS_OFFLINE=0 leaves them out (saves about 5 GB a build).
+OFFLINE=${MAPS_OFFLINE:-1}
+[ "$OFFLINE" = 0 ] && offline_json=false || offline_json=true
 
 status() {
   jq -n --arg state "$1" --arg step "${2:-}" --arg error "${3:-}" --arg at "$(date -u +%FT%TZ)" \
-    '{state:$state, step:$step, error:$error, at:$at}' > "$DATA/status.tmp"
+    --argjson offline "$offline_json" \
+    '{state:$state, step:$step, error:$error, at:$at, offline:$offline}' > "$DATA/status.tmp"
   mv -f "$DATA/status.tmp" "$DATA/status.json"
 }
 trap 'status failed "${STEP:-}" "Stopped at this step: see the Promptly-Maps log"' ERR
@@ -89,15 +94,28 @@ if [ -z "${MAPS_PBF_URL:-}" ] && step addresses; then
 fi
 
 if step search; then
-  rm -rf "$B/photon_data"
+  rm -rf "$B/photon_data" "$B/search.sqlite" "$B/search.sqlite.part" "$B/search.fifo"
+  # Offline search reads the same stream Photon imports, through a FIFO. If it
+  # fails, tee -p carries on and the build goes ahead without it.
+  copy=/dev/null
+  if [ "$OFFLINE" != 0 ]; then
+    copy="$B/search.fifo"
+    mkfifo "$copy"
+    python3 /opt/maps/search_index.py build "$B/search.sqlite" < "$copy" &
+    indexer=$!
+  fi
   if [ -f "$B/gnaf.zip" ]; then
-    curl -fsSL --retry 5 "$PHOTON_URL" | zstd -dc | python3 /opt/maps/addresses.py "$B/gnaf.zip" \
+    curl -fsSL --retry 5 "$PHOTON_URL" | zstd -dc | python3 /opt/maps/addresses.py "$B/gnaf.zip" | tee -p "$copy" \
       | java -Xmx"${MAPS_IMPORT_HEAP:-2g}" -jar /opt/photon.jar import -data-dir "$B" -import-file - -languages en
     echo "G-NAF" > "$B/addresses.source"
     rm -f "$B/gnaf.zip"
   else
-    curl -fsSL --retry 5 "$PHOTON_URL" | zstd -dc \
+    curl -fsSL --retry 5 "$PHOTON_URL" | zstd -dc | tee -p "$copy" \
       | java -Xmx"${MAPS_IMPORT_HEAP:-2g}" -jar /opt/photon.jar import -data-dir "$B" -import-file - -languages en
+  fi
+  if [ -n "${indexer:-}" ]; then
+    wait "$indexer" || { echo "maps: offline search failed; offline packs go without it" >&2; rm -f "$B/search.sqlite"; }
+    rm -f "$copy"
   fi
   done_step search
 fi
@@ -111,13 +129,32 @@ if step places; then
   done_step places
 fi
 
+# Offline packs: needs the map, the routing tiles, search.sqlite (from the
+# search step) and the cameras. A failure here never holds back the new map.
+if [ "$OFFLINE" != 0 ] && step areas; then
+  rm -f "$B/areas.failed"
+  if ! python3 /opt/maps/areas.py "$B" --threads "$THREADS"; then
+    echo "maps: offline packs failed; the map carries on without them" >&2
+    rm -rf "$B/areas.part"
+    touch "$B/areas.failed"
+  fi
+  rm -f "$B/search.sqlite"
+  done_step areas
+fi
+
 # Done: name it, swap it in, tidy up.
 STEP=finish
 osm_date=$(osmium fileinfo -g header.option.osmosis_replication_timestamp "$B/region.osm.pbf" 2>/dev/null || true)
-rm -f "$B/region.osm.pbf" "$B"/.done-*
+rm -f "$B/region.osm.pbf" "$B"/.done-* "$B/search.sqlite" "$B/search.fifo"
 name="build-$(date -u +%Y%m%d-%H%M)"
 jq -n --arg built "$(date -u +%FT%TZ)" --arg osm "$osm_date" --arg basemap "$(cat "$B/basemap.source")" \
   '{built_at:$built, osm_data:$osm, basemap:$basemap}' > "$B/manifest.json"
+# The packs' index names the build it belongs to.
+if [ -f "$B/areas/index.json" ]; then
+  jq --arg build "$name" --arg built "$(jq -r .built_at "$B/manifest.json")" '.build=$build | .built_at=$built' \
+    "$B/areas/index.json" > "$B/areas/index.tmp"
+  mv -f "$B/areas/index.tmp" "$B/areas/index.json"
+fi
 # The config names the folder it was built in.
 sed -i "s#$B/#$DATA/$name/#g" "$B/valhalla.json"
 mv "$B" "$DATA/$name"

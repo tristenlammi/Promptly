@@ -870,7 +870,8 @@ services:
     # P Maps: routing, search and the map itself, all on this server. On for
     # new installs through COMPOSE_PROFILES in .env. The first start downloads
     # Australia's map data and builds it (about an hour and 15 GB of disk while
-    # building, about 7 GB after), then rebuilds every MAPS_REFRESH_DAYS. Only
+    # building, about 7 GB after, or 12 GB with offline areas), then rebuilds
+    # every MAPS_REFRESH_DAYS next to the live data (about twice that at the peak). Only
     # downloads leave the server: searches, routes and locations never do.
     build:
       context: ./maps
@@ -887,6 +888,10 @@ services:
       - MAPS_BBOX=${MAPS_BBOX:-}
       - MAPS_SEARCH_HEAP=${MAPS_SEARCH_HEAP:-1g}
       - MAPS_ROUTE_THREADS=${MAPS_ROUTE_THREADS:-2}
+      # Offline areas for phones (maps-offline): each refresh also cuts the map,
+      # routing and search into 1-degree squares (about 4.5 GB more per build).
+      # 0 turns them off.
+      - MAPS_OFFLINE=${MAPS_OFFLINE:-1}
     volumes:
       - ./data/maps:/data
     expose:
