@@ -154,7 +154,6 @@ These need a paid Have I Been Pwned key. Without one, nothing is sent anywhere.
 
 ## Known follow-ups
 
-- **Fill the list of account deletion pages.** "Delete account" in Security check can link straight to a site's deletion page from JustDeleteMe's list (MIT), but the data file ships empty because downloading it needed your go-ahead. To fill it, pick the latest commit of https://github.com/jdm-contrib/jdm and run `python backend/scripts/update_deletion_sites.py --commit <sha>`, then check `backend/app/passwords/data/deletion_sites.json` and commit it. Until then it links to the site's account settings instead.
 - **Try "Accounts not in your vault" on your own mail.** It was only tested with made-up mail. See which of your sites it finds, which it misses and what it wrongly lists, and say which rules to change.
 
 - Deleting a user can leave a shared vault with no manager. The backend review found it, and it's not fixed.

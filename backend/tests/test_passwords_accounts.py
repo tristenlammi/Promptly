@@ -153,7 +153,11 @@ def test_deletion_lookup(monkeypatch, tmp_path):
 
 def test_shipped_deletion_data_loads():
     acc.deletion_sites.cache_clear()
-    assert isinstance(acc.deletion_sites(), dict)
+    sites = acc.deletion_sites()
+    # The JustDeleteMe list as shipped: thousands of domains, every page on https.
+    assert len(sites) > 1000
+    assert all(row["url"].startswith("https://") for row in sites.values() if "url" in row)
+    assert acc.deletion_for("123rf.com") is not None
 
 
 # ------------------------------------------------------------------ with the database

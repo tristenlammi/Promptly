@@ -313,7 +313,6 @@ Left open from those reviews:
 - **Never lock** is in the browser extension only. Web and Windows keep idle minutes.
 - **Passkey PIN** is a PIN, as you chose, not Windows Hello or a biometric. Anyone who knows it and has the unlocked browser can use your passkeys. The Windows app lists passkeys only, so it has no PIN.
 - **Expiry reminders and breach alerts** aren't on Android, which keeps the older "Document expires soon" button and has no Breaches section.
-- **Deletion pages:** the JustDeleteMe list ships empty until you allow the download (see `OWNER_STEPS.md`), so Delete account links to a site's account settings for now.
 
 **Not built by decision**
 
