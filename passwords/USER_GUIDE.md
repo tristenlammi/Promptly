@@ -71,6 +71,14 @@ A site decides when it asks for a passkey, and nothing can make it ask. When a p
 
 **Security check** looks for weak, reused, old and breached passwords, all worked out on your device. For breaches, only the first few characters of a hash leave, through your server. It also tells you about emails from your sites saying a password changed, and walks you through changing passwords one at a time: a new one is saved first, you change it on the site, then you say whether it worked.
 
+**Accounts not in your vault**, also in Security check, lists sites your Promptly Mail says you have an account with: welcome and sign-up emails, "verify your email", password resets, sign-in alerts, receipts and subscriptions. Sites you already have a login for are left out. That comparison happens on your device, and your server never sees your vault. For each one:
+
+- **Add login** opens a new login with the site and the address it wrote to already filled in.
+- **Not an account** hides it for good, on all your devices. Use it for a shop you only bought from once as a guest, say.
+- **Delete account** shows how: the site's deletion page if it's a known one, or its account settings, and a ready-made deletion request that opens in Mail as a draft for you to check and send. Nothing is sent for you. The row then says Deleting until you press It's gone.
+
+It only reads mail you were sent, not your Trash, Spam, Drafts or Sent mail, and it skips forwards, replies and newsletters. New mail is picked up in the background every 20 minutes.
+
 Keep an encrypted export now and then, from Import and export. That's the copy that survives if your server doesn't. The Windows app can make one on a schedule.
 
 Every six months or so you'll be asked whether you still have your kit. Check, and mean it.

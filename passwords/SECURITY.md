@@ -157,3 +157,12 @@ Bookmarks are encrypted items like any other, and only ones in your own vault co
 ## Passkeys in the extension
 
 A page can detect the wrapper: `navigator.credentials.get.toString()` isn't native, and on Chromium a stack trace shows the extension id. Without a gesture, the extension opens no window unless the vault's unlocked and holds a passkey for that site (D71). So such a site can notice the window, and at most every 30 seconds it can open it. One click in it then signs in, because an unlocked vault and a click count as user verification (D74). Nobody typing anything is part of what that choice gives up.
+
+## Accounts from your mail
+
+"Accounts not in your vault" is worked out in two halves.
+
+- **The server** reads your own mail, which it already holds, for signs of an account, and keeps a list per mailbox: the site, the address it wrote to, first and last dates, what kind of mail it was, and a link to the latest one. It only does this for people who have set up a vault, and only from their own mailboxes. This list says nothing the mail didn't, but it is a tidy summary of where you have accounts, so someone who gets the database gets that too, as they'd get the mail.
+- **Your device** compares the list with the vault, and keeps what you decide (not an account, deleting, gone) in the vault, encrypted. The server never learns which sites you have logins for, or which rows you hid.
+- **The deletion request** is a draft in Mail, so the server sees it as it sees any draft you write, and a site you send it to learns you want to leave. The draft's text travels in the part of the link after `#`, which isn't sent to the server or kept in its logs. Nothing is sent without you pressing Send.
+- **What's in an email is untrusted.** A forged welcome email can add a site to the list. The worst it does is show a row you can hide. Links from the list go to the site's own domain, its account settings, or your own Mail.
