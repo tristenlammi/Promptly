@@ -8,9 +8,11 @@ want to hear about"."""
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime, time
+from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, String, Text, Time, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -141,6 +143,27 @@ class PushPreferences(Base):
     form_response: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # Quiet hours (0320), in the person's own time zone. One setting for all
+    # of Promptly; ``dispatch.RULES`` says which categories they may hold.
+    # The weekend pair, when set, is used for quiet periods that end on a
+    # Saturday or Sunday (Friday and Saturday nights).
+    quiet_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    quiet_start: Mapped[time] = mapped_column(
+        Time, nullable=False, default=time(22, 0), server_default="22:00"
+    )
+    quiet_end: Mapped[time] = mapped_column(
+        Time, nullable=False, default=time(7, 0), server_default="07:00"
+    )
+    quiet_weekend_start: Mapped[time | None] = mapped_column(Time, nullable=True)
+    quiet_weekend_end: Mapped[time | None] = mapped_column(Time, nullable=True)
+    # Categories set to "Daily summary" instead of instant (0320).
+    summary_categories: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default="[]"
+    )
+    # The local day the daily summary last went out — claimed once a day.
+    summary_sent_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -151,4 +174,35 @@ class PushPreferences(Base):
         nullable=False,
         server_default=func.current_timestamp(),
         onupdate=func.current_timestamp(),
+    )
+
+
+class PushHeld(UUIDPKMixin, Base):
+    """A push kept back (0320): by quiet hours (``reason='quiet'``, sent when
+    they end) or because its category is set to the daily summary
+    (``reason='summary'``). ``notifications/loops.py`` sends them on as one
+    push per app, or as counts in the daily summary — never stranger text
+    in the summary. Push only: the inbox row was written when it happened."""
+
+    __tablename__ = "push_held"
+    __table_args__ = (Index("ix_push_held_user_reason", "user_id", "reason"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    tag: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    # The service worker's extra fields (icon, line, a per-app ``kind``).
+    extra: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reason: Mapped[str] = mapped_column(String(8), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.current_timestamp(),
     )

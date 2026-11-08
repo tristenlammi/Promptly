@@ -14,14 +14,14 @@ trigger on ``files`` does that for every trash path (single file, folder,
 bulk), so no caller can forget.
 
 Revision ID: 0290_forms_core
-Revises: 0260_pw_browsersync
+Revises: 0330_mail_html_clipped
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0290_forms_core"
-down_revision = "0260_pw_browsersync"
+down_revision = "0330_mail_html_clipped"
 branch_labels = None
 depends_on = None
 

@@ -290,8 +290,37 @@ async def get_or_create_subfolder(
     bucket on demand — the folders are auto-created at workspace
     creation, but a user may have deleted or renamed one, so callers
     (e.g. note creation) re-create the bucket rather than 500.
+
+    Concurrent requests (e.g. two board edits re-indexing back to back)
+    can both miss the SELECT and race to INSERT; the unique index
+    ``uq_file_folders_user_parent_name`` rejects the loser. Same recipe
+    as ``_ensure``: INSERT inside a SAVEPOINT so the conflict only rolls
+    back the savepoint, then re-fetch the winner's row.
     """
-    existing = (
+    existing = await _fetch_subfolder(
+        db, user_id=user_id, parent_id=parent_id, name=name
+    )
+    if existing is not None:
+        return existing
+    try:
+        async with db.begin_nested():
+            folder = FileFolder(user_id=user_id, parent_id=parent_id, name=name)
+            db.add(folder)
+            await db.flush()
+        return folder
+    except IntegrityError:
+        existing = await _fetch_subfolder(
+            db, user_id=user_id, parent_id=parent_id, name=name
+        )
+        if existing is None:  # pragma: no cover — defensive
+            raise
+        return existing
+
+
+async def _fetch_subfolder(
+    db: AsyncSession, *, user_id, parent_id, name: str
+) -> FileFolder | None:
+    return (
         await db.execute(
             select(FileFolder).where(
                 FileFolder.user_id == user_id,
@@ -301,12 +330,6 @@ async def get_or_create_subfolder(
             )
         )
     ).scalar_one_or_none()
-    if existing is not None:
-        return existing
-    folder = FileFolder(user_id=user_id, parent_id=parent_id, name=name)
-    db.add(folder)
-    await db.flush()
-    return folder
 
 
 async def create_workspace_folder_tree(

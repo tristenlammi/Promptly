@@ -119,6 +119,8 @@ export interface Message {
   seen: boolean;
   starred: boolean;
   remote_images: boolean;
+  /** Its HTML was too big to show safely, so `text` is shown instead. */
+  html_clipped?: boolean;
   reply_to: string;
   invite: MailInvite | null;
 }

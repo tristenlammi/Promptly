@@ -26,6 +26,22 @@ MAX_ATTACHMENTS = 10
 THUMB_EDGE = 720
 
 
+async def dm_refusal(db: AsyncSession, room: Room, user_id: uuid.UUID) -> str | None:
+    """In a 1:1 conversation, why ``user_id`` can't post (a block either
+    way, decision D7), or None. Spaces and group conversations: always
+    None. The wording for the blocked person never mentions a block."""
+    if room.space_id is not None or room.kind != "dm":
+        return None
+    from app.people.blocks import dm_refusal as refusal
+
+    others = [u for u in await core.member_ids(db, room) if u != user_id]
+    for other in others:
+        why = await refusal(db, user_id, other)
+        if why:
+            return why
+    return None
+
+
 def next_seq(room: Room) -> int:
     """The room's next message number (the room row must be locked)."""
     room.last_seq = (room.last_seq or 0) + 1
@@ -49,6 +65,9 @@ async def post_message(
     attachment_ids = list(dict.fromkeys(attachment_ids or []))[:MAX_ATTACHMENTS]
     if not body and not attachment_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty message")
+    why = await dm_refusal(db, room, user.id)
+    if why:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=why)
     if len(body) > core.MAX_BODY:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Messages are at most {core.MAX_BODY} characters")
     if reply_to_id is not None:
