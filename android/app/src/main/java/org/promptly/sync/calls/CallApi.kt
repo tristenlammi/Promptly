@@ -17,8 +17,9 @@ import java.util.concurrent.TimeUnit
  * call, this device, 12 hours).
  */
 class CallApi(private val server: String) {
-    /** 404 / 409: the call isn't there for you any more (ended, not ringing you). */
-    class Over(val code: Int) : IOException("call over ($code)")
+    /** 404 / 409: the call isn't there for you any more (ended, not ringing
+     *  you). [detail]: the server's word ("ended:declined" from refresh). */
+    class Over(val code: Int, val detail: String? = null) : IOException("call over ($code)")
 
     suspend fun answer(token: String): CallJoin =
         CallProtocol.parseJoin(post("/api/calls/answer", CallProtocol.answerBody(token)))
@@ -32,8 +33,8 @@ class CallApi(private val server: String) {
 
     suspend fun refresh(session: String): CallRefresh = try {
         CallRefresh.Ok(CallProtocol.parseJoin(post("/api/calls/session/refresh", CallProtocol.sessionBody(session))))
-    } catch (_: Over) {
-        CallRefresh.Gone
+    } catch (e: Over) {
+        CallRefresh.gone(e.detail)
     } catch (e: IOException) {
         CallRefresh.Failed(e.message ?: "network")
     } catch (e: IllegalArgumentException) {
@@ -52,7 +53,7 @@ class CallApi(private val server: String) {
             .build()
         http.newCall(req).execute().use { res ->
             when {
-                res.code == 404 || res.code == 409 -> throw Over(res.code)
+                res.code == 404 || res.code == 409 -> throw Over(res.code, detailOf(res.body.string()))
                 !res.isSuccessful -> throw IOException("HTTP ${res.code}")
                 else -> res.body.string()
             }
@@ -61,6 +62,12 @@ class CallApi(private val server: String) {
 
     companion object {
         private val JSON = "application/json".toMediaType()
+
+        /** FastAPI's `{"detail": "…"}`, or null. */
+        fun detailOf(body: String): String? = runCatching {
+            val o = kotlinx.serialization.json.Json.parseToJsonElement(body) as? kotlinx.serialization.json.JsonObject
+            (o?.get("detail") as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+        }.getOrNull()
         private val http = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)

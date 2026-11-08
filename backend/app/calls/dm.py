@@ -75,6 +75,9 @@ LOST_AFTER = 90  # in our state but not in LiveKit for this long = gone
 RERING_AFTER = 15  # seconds before the same person can be rung again
 SESSION_TTL = timedelta(hours=12)
 STALE_SID_TTL = 15 * 60
+# A connection that drops has this long to come back before it counts as
+# hanging up (LiveKit's full reconnect, Wi-Fi to mobile data; Calls WP-D5).
+LEFT_GRACE = 15
 
 K_ALONE = "call:alone:{}"
 K_STALE = "call:stale:{}:{}"  # LiveKit sids of a replaced device's connection
@@ -310,7 +313,7 @@ async def _defer(job: str, *args: Any, seconds: float) -> None:
         logger.warning("call timer %s: queue unavailable, using an in-process timer", job, exc_info=True)
     from app.background import spawn
 
-    fn = {"call_ring_timeout": ring_timeout, "call_alone_check": alone_check}[job]
+    fn = {"call_ring_timeout": ring_timeout, "call_alone_check": alone_check, "call_left_check": left_check}[job]
 
     async def later() -> None:
         await asyncio.sleep(seconds)
@@ -364,6 +367,17 @@ def join_out(user: User, call: Call, room: Room, parts: dict[uuid.UUID, CallPart
         "device": me.device,
         "max_stream": cs.max_stream,
     }
+
+
+async def join_out_titled(db: AsyncSession, user: User, call: Call, room: Room, parts: dict[uuid.UUID, CallParticipant], cs: access.CallsSettings) -> dict:
+    """``join_out`` plus ``title``: who the call is with, as this person
+    sees it (the other person, or the group's name). The Android app's
+    call screen and notification show it (Calls WP-D5)."""
+    from app.calls import ring
+
+    out = join_out(user, call, room, parts, cs)
+    out["title"] = await ring.conversation_name(db, room, user.id)
+    return out
 
 
 # ================================================================ who may call whom
@@ -513,7 +527,7 @@ async def start(db: AsyncSession, user: User, room: Room, cs: access.CallsSettin
     await ring.ring(db, call, room, user, targets, busy=busy, parts=parts)
     await _defer("call_ring_timeout", str(call.id), now.isoformat(), seconds=RING_SECONDS)
     await _publish_state(db, call, room)
-    return join_out(user, call, room, parts, cs)
+    return await join_out_titled(db, user, call, room, parts, cs)
 
 
 async def join(db: AsyncSession, user: User, call_id: uuid.UUID, cs: access.CallsSettings, device: str) -> dict:
@@ -578,7 +592,7 @@ async def join(db: AsyncSession, user: User, call_id: uuid.UUID, cs: access.Call
             await redis.expire(K_STALE.format(call.id, user.id), STALE_SID_TTL)
         await tell(user.id, {"type": "call_disconnected", "call_id": str(call.id), "session": old_session, "reason": "replaced"})
     await _publish_state(db, call, room)
-    return join_out(user, call, room, parts, cs)
+    return await join_out_titled(db, user, call, room, parts, cs)
 
 
 # ================================================================ decline / leave / end
@@ -879,8 +893,12 @@ async def refresh(db: AsyncSession, token: str) -> dict:
     uid, cid = uuid.UUID(claims["sub"]), uuid.UUID(claims["call"])
     user = await db.get(User, uid)
     call = await db.get(Call, cid)
-    if user is None or user.disabled or call is None or call.ended_at is not None:
+    if user is None or user.disabled or call is None:
         raise not_found()
+    if call.ended_at is not None:
+        # Over: how, for the app's last word ("No answer", "Call declined").
+        # Still a 404, like any session that's gone.
+        raise CallError(404, f"ended:{call.ended_reason or 'ended'}")
     room = await db.get(Room, call.room_id) if call.room_id else None
     parts = await _parts(db, cid)
     me = parts.get(uid)
@@ -890,7 +908,7 @@ async def refresh(db: AsyncSession, token: str) -> dict:
         or not await _is_member(db, room, uid) or not await access.voice_allowed(db, user, cs) or await refusal(db, room, uid)
     ):
         raise not_found()
-    out = join_out(user, call, room, parts, cs)
+    out = await join_out_titled(db, user, call, room, parts, cs)
     out["session"] = token
     return out
 
@@ -956,14 +974,15 @@ async def ring_state_with_token(db: AsyncSession, token: str) -> dict:
 
 
 CONTROL_TOPIC = "call.control"
-CONTROL_ACTIONS = ("mute", "unmute", "speaker_on", "speaker_off")
+CONTROL_ACTIONS = ("mute", "unmute", "speaker_on", "speaker_off", "camera_on", "camera_off", "flip")
 
 
 async def control(db: AsyncSession, user: User, call_id: uuid.UUID, action: str) -> dict:
     """The page driving the Android app's call (it holds the audio): mute,
-    unmute, loudspeaker on or off, sent to your own connection as LiveKit
-    data on ``call.control``. Best effort; the app's microphone state shows
-    on the page through LiveKit itself."""
+    unmute, loudspeaker on or off, and (WP-D5) the phone's camera on, off or
+    flipped, sent to your own connection as LiveKit data on
+    ``call.control``. Best effort; the app's microphone and camera show on
+    the page through LiveKit itself."""
     call, _room = await visible_call(db, user, call_id)
     me = (await _parts(db, call.id)).get(user.id)
     if call.ended_at is not None or me is None or me.in_call_since is None:
@@ -1340,7 +1359,34 @@ async def on_webhook(event) -> None:  # noqa: ANN001 — livekit.api.WebhookEven
             if await redis.sismember(K_STALE.format(cid, uid), p.sid):
                 return  # the device this call moved away from
             if me.lk_sid in (None, p.sid):
-                await leave(db, uid, cid, session=me.session, reason="lost", kick=False)
+                # Not at once: a dropped connection may be on its way back
+                # (a full reconnect leaves, then joins with a new sid).
+                await _defer("call_left_check", str(cid), str(uid), p.sid or "", seconds=LEFT_GRACE)
+
+
+async def left_check(call_id: str, user_id: str, sid: str) -> str:
+    """``LEFT_GRACE`` after someone's connection left LiveKit: back (a new
+    connection), or gone, which hangs them up (a 1:1 call ends)."""
+    from app.database import SessionLocal
+
+    cid, uid = uuid.UUID(call_id), uuid.UUID(user_id)
+    if sid and await redis.sismember(K_STALE.format(cid, uid), sid):
+        return "stale"
+    async with SessionLocal() as db:
+        call = await db.get(Call, cid)
+        me = (await _parts(db, cid)).get(uid) if call is not None else None
+        if call is None or call.ended_at is not None or me is None or me.in_call_since is None:
+            return "gone"
+        if me.lk_sid not in (None, sid):
+            return "back"
+        try:
+            now_in = {p.identity for p in await service.list_participants(lk_room(cid))}
+        except Exception:  # noqa: BLE001 — LiveKit unreachable: trust the leave
+            now_in = set()
+        if identity(uid) in now_in:
+            return "back"
+        await leave(db, uid, cid, session=me.session, reason="lost", kick=False)
+        return "left"
 
 
 async def _remove_identity(call_id: uuid.UUID, ident: str) -> None:

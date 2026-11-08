@@ -6,8 +6,10 @@ in the conversation ("Call · 12 min", "Missed call").
 
 * a Web Push in the ``call`` category: ``Urgency: high`` (wakes a dozing
   phone) and ``TTL: 45`` (a ring that can't arrive in 45 s is pointless).
-  Quiet hours never hold it (``dispatch.RULES["call"]`` is ``Rule(False)``);
-  a block either way drops it (``actor_user_id``). The service worker shows
+  Dispatch never holds it (``dispatch.RULES["call"]`` is ``Rule(False)``);
+  during your quiet hours it doesn't ring at all unless you let calls ring
+  through (``rings_quietly``), and the missed call is held until they end.
+  A block either way drops it (``actor_user_id``). The service worker shows
   it to every open tab with a ringtone; on Android, the app's
   ``Delegation`` turns a ``call:`` notification into a full-screen ring;
 * a ``call_ring`` event on the Rooms stream, for pages already open.
@@ -42,6 +44,20 @@ RING_TTL = 45  # seconds: Web Push TTL of a ring, and how long it rings
 ANSWER_TOKEN_TTL = 2 * 60
 MISSED_TTL = 24 * 3600
 ICON = "/item-icons/rooms-192.png"
+
+
+async def rings_quietly(db: AsyncSession, user_id: uuid.UUID) -> bool:
+    """It's this person's quiet hours and they haven't let calls ring
+    through (Account → Notifications): a call doesn't ring them; the
+    missed call is told when quiet hours end (Calls WP-D5)."""
+    from app.notifications import quiet
+    from app.notifications.models import PushPreferences
+
+    prefs = await db.get(PushPreferences, user_id)
+    if prefs is None or not prefs.quiet_enabled or prefs.call_ring_through:
+        return False
+    user = await db.get(User, user_id)
+    return quiet.is_quiet(prefs, quiet._now(), quiet.zone_of(user.settings if user is not None else None))
 
 
 async def _notify(**kw: Any) -> None:
@@ -89,6 +105,9 @@ async def ring(
     url = f"/rooms/r/{room.id}?call={call.id}"
     icon = caller.avatar_url or ICON
     for t in targets:
+        if await rings_quietly(db, t.id):
+            # Quiet hours: no ring anywhere (it rings out to a missed call).
+            continue
         conv = await conversation_name(db, room, t.id) if group else ""
         title = conv if group else caller.username
         body = f"{caller.username} is starting a {_kind_word(call)}" if group else f"Incoming {_kind_word(call)}"
@@ -163,16 +182,18 @@ async def missed(db: AsyncSession, call: Call, room: Room, user_ids: list[uuid.U
             body = f"{who} called {await conversation_name(db, room, uid)}"
         else:
             body = f"{who} tried to call you"
-        await _notify(
-            user_id=uid,
-            category="call",
-            title=title,
-            body=body,
-            url=f"/rooms/r/{room.id}",
-            tag=f"call:{call.id}",
-            actor_user_id=call.started_by,
-            inbox=False,
-            extra={
+        push = {
+            "user_id": uid,
+            "category": "call",
+            "title": title,
+            "body": body,
+            # The Calls tab's details for this call (call back, message,
+            # every call with them), as Messenger's missed call opens it.
+            "url": missed_url(call),
+            "tag": f"call:{call.id}",
+            "actor_user_id": call.started_by,
+            "inbox": False,
+            "extra": {
                 "kind": "call_missed",
                 "call_id": str(call.id),
                 "room_id": str(room.id),
@@ -180,13 +201,37 @@ async def missed(db: AsyncSession, call: Call, room: Room, user_ids: list[uuid.U
                 "caller": rooms_core.user_out(caller) if caller is not None else None,
                 "icon": (caller.avatar_url if caller is not None else None) or ICON,
             },
-            ttl=MISSED_TTL,
-        )
+            "ttl": MISSED_TTL,
+        }
+        if await rings_quietly(db, uid):
+            await _hold_missed(db, push)
+        else:
+            await _notify(**push)
         await rooms_core.publish([uid], {"type": "call_ring_stop", "call_id": str(call.id), "reason": "missed"})
         # The Calls tab's badge on their open pages.
         from app.calls.dm import publish_missed
 
         await publish_missed(db, uid)
+
+
+def missed_url(call: Call) -> str:
+    """Where a missed call's notification opens: that call in the Calls tab."""
+    return f"/rooms/calls/{call.id}"
+
+
+async def _hold_missed(db: AsyncSession, push: dict) -> None:
+    """A call missed during quiet hours: kept, and sent when they end (the
+    ``call`` rule never lets dispatch hold a push, since a ring can't wait)."""
+    from app.notifications import quiet
+    from app.notifications.dispatch import PushPayload
+    from app.notifications.models import PushPreferences
+
+    prefs = await db.get(PushPreferences, push["user_id"])
+    if prefs is None or not prefs.enabled or not prefs.call:
+        return
+    payload = PushPayload(title=push["title"], body=push["body"], url=push["url"], tag=push["tag"], category="call", extra=push["extra"])
+    await quiet.hold(db, user_id=push["user_id"], category="call", payload=payload, actor_user_id=push["actor_user_id"], reason="quiet")
+    await db.commit()
 
 
 # ---------------------------------------------------------------- the line in the conversation

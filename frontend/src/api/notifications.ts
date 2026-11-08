@@ -24,6 +24,8 @@ export interface NotificationPreferences {
   mail: boolean;
   /** Calls ringing you and missed calls (DM calls). */
   call: boolean;
+  /** Calls ring even during quiet hours (off: they become missed calls, told when quiet hours end). */
+  call_ring_through?: boolean;
   /** Quiet hours, "HH:MM" in your own time zone (one setting for all of Promptly). */
   quiet_enabled: boolean;
   quiet_start: string;
@@ -59,7 +61,8 @@ export type NotificationSwitch =
   | "calendar"
   | "passwords"
   | "mail"
-  | "call";
+  | "call"
+  | "call_ring_through";
 
 export interface NotificationRow {
   id: string;

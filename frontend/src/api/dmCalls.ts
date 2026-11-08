@@ -45,6 +45,9 @@ export interface DmCall {
   participants: CallParticipant[];
 }
 
+/** The page driving the Android app's call (``POST /calls/{id}/control``). */
+export type CallControl = "mute" | "unmute" | "speaker_on" | "speaker_off" | "camera_on" | "camera_off" | "flip";
+
 /** ``POST /api/calls`` and ``/join``: what a client connects with. */
 export interface CallJoin {
   call: DmCall;
@@ -60,6 +63,8 @@ export interface CallJoin {
   session_id: string;
   device: "web" | "android";
   max_stream: StreamQuality;
+  /** Who the call's with, as you see it (Calls WP-D5; the app shows it). */
+  title?: string;
 }
 
 /** ``call_ring``: a call ringing you (Rooms stream, and the push's fields). */
@@ -164,13 +169,14 @@ export const CALL_HISTORY_KEY = ["calls", "history"] as const;
 
 export const dmCallsApi = {
   /** Call a conversation (rings the others; joins its live call if one is on). */
-  async start(roomId: string, media: CallMedia): Promise<CallJoin> {
-    const { data } = await apiClient.post<CallJoin>("/calls", { room_id: roomId, media, device: "web" });
+  /** ``device: "android"``: the Promptly app on this phone holds the call (Calls WP-D5). */
+  async start(roomId: string, media: CallMedia, device: "web" | "android" = "web"): Promise<CallJoin> {
+    const { data } = await apiClient.post<CallJoin>("/calls", { room_id: roomId, media, device });
     return data;
   },
   /** Call people (opens the conversation with them first). */
-  async startDm(userIds: string[], media: CallMedia): Promise<CallJoin> {
-    const { data } = await apiClient.post<CallJoin>("/calls/dm", { user_ids: userIds, media, device: "web" });
+  async startDm(userIds: string[], media: CallMedia, device: "web" | "android" = "web"): Promise<CallJoin> {
+    const { data } = await apiClient.post<CallJoin>("/calls/dm", { user_ids: userIds, media, device });
     return data;
   },
   async live(): Promise<CallLive> {
@@ -205,7 +211,7 @@ export const dmCallsApi = {
     return data;
   },
   /** Mute or the loudspeaker for your call in the Android app. */
-  async control(callId: string, action: "mute" | "unmute" | "speaker_on" | "speaker_off"): Promise<{ delivered: boolean }> {
+  async control(callId: string, action: CallControl): Promise<{ delivered: boolean }> {
     const { data } = await apiClient.post<{ delivered: boolean }>(`/calls/${callId}/control`, { action });
     return data;
   },

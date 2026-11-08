@@ -266,6 +266,18 @@ async def hook(client, event, room, identity="", sid="PA_1"):
     assert r.status_code == 200, r.text
 
 
+async def run_left(jobs, expect=None):
+    """Run the latest dropped-connection grace check (WP-D5) now."""
+    from app.calls import dm
+
+    job = [j for j in jobs if j[0] == "call_left_check"][-1]
+    assert job[2] == dm.LEFT_GRACE
+    out = await dm.left_check(*job[1])
+    if expect is not None:
+        assert out == expect, out
+    return out
+
+
 async def run_timeout(jobs, call_id):
     """Run the latest ring timeout deferred for this call."""
     from app.calls import dm
@@ -839,7 +851,7 @@ async def test_one_live_conversation_at_a_time(client, db, lk, events):
     assert await voice.where(w.ann.id) is None
 
 
-async def test_a_second_device_takes_over_and_the_old_ones_leave_is_ignored(client, db, lk, events):
+async def test_a_second_device_takes_over_and_the_old_ones_leave_is_ignored(client, db, lk, events, jobs):
     w = await world(client, db)
     j = await start(client, w.ann, w.dm)
     cid = j["call"]["id"]
@@ -854,14 +866,16 @@ async def test_a_second_device_takes_over_and_the_old_ones_leave_is_ignored(clie
     await hook(client, "participant_joined", lk_room(cid), ident(w.ann), sid="PA_phone")
     # The old page's own "leave" with its session does nothing either.
     assert (await act(client, w.ann, cid, "leave", session=j["session_id"]))["left"] is False
-    # The phone's connection going does.
+    # The phone's connection going does, once its grace is over (WP-D5).
     await hook(client, "participant_left", lk_room(cid), ident(w.ann), sid="PA_phone")
+    assert (await call_row(db, cid)).ended_at is None
+    await run_left(jobs, "left")
     assert (await call_row(db, cid)).ended_reason == "completed"
     # ...and the call's room closes, so Ben (an Android phone needs telling) isn't left in it.
     assert lk_room(cid) in lk.deleted
 
 
-async def test_webhooks_kick_strangers_and_late_connections(client, db, lk):
+async def test_webhooks_kick_strangers_and_late_connections(client, db, lk, jobs):
     w = await world(client, db)
     cid = (await start(client, w.ann, w.dm))["call"]["id"]
     # Ben connecting while only rung (not answered): removed.
@@ -878,7 +892,30 @@ async def test_webhooks_kick_strangers_and_late_connections(client, db, lk):
     # Ann's connection drops before Ben answered: the call is cancelled.
     await hook(client, "participant_joined", lk_room(cid), ident(w.ann), sid="PA_a")
     await hook(client, "participant_left", lk_room(cid), ident(w.ann), sid="PA_a")
+    await run_left(jobs, "left")
     assert (await call_row(db, cid)).ended_reason == "cancelled"
+
+
+async def test_a_dropped_connection_that_comes_back_keeps_the_call(client, db, lk, jobs):
+    """WP-D5: LiveKit's full reconnect (Wi-Fi to mobile data) leaves and
+    joins again; the call carries on."""
+    w = await world(client, db)
+    cid = (await start(client, w.ann, w.dm))["call"]["id"]
+    await act(client, w.ben, cid, "join")
+    await hook(client, "participant_joined", lk_room(cid), ident(w.ann), sid="PA_1")
+    await hook(client, "participant_left", lk_room(cid), ident(w.ann), sid="PA_1")
+    await hook(client, "participant_joined", lk_room(cid), ident(w.ann), sid="PA_2")
+    await run_left(jobs, "back")
+    assert (await call_row(db, cid)).ended_at is None
+    # Back, but the joined webhook was lost: LiveKit's own list says so.
+    await hook(client, "participant_left", lk_room(cid), ident(w.ann), sid="PA_2")
+    lk.participants[lk_room(cid)] = [(ident(w.ann), "PA_3")]
+    await run_left(jobs, "back")
+    assert (await call_row(db, cid)).ended_at is None
+    # Gone for good.
+    lk.participants[lk_room(cid)] = []
+    await run_left(jobs, "left")
+    assert (await call_row(db, cid)).ended_reason == "completed"
 
 
 # ---------------------------------------------------------------- Android: session, push answer, view
@@ -953,6 +990,10 @@ async def test_the_page_controls_the_phones_call(client, db, lk):
     r = await act(client, w.ann, cid, "control", action="mute")
     assert r["delivered"] is True and r["device"] == "android"
     assert lk.data[-1] == (lk_room(cid), {"action": "mute"}, [ident(w.ann)], "call.control")
+    # WP-D5: the phone's camera, from the page.
+    for action in ("camera_on", "flip", "camera_off"):
+        await act(client, w.ann, cid, "control", action=action)
+        assert lk.data[-1] == (lk_room(cid), {"action": action}, [ident(w.ann)], "call.control")
     # Not in the call (ringing still), or an unknown action.
     await act(client, w.ben, cid, "control", action="mute", expect=409)
     await act(client, w.ann, cid, "control", action="explode", expect=422)
@@ -1317,3 +1358,102 @@ def test_length_words():
     from app.calls.ring import length_words
 
     assert [length_words(s) for s in (0, 45, 60, 12 * 60 + 5, 3600, 3900)] == ["1 sec", "45 sec", "1 min", "12 min", "1 h", "1 h 5 min"]
+
+
+# ---------------------------------------------------------------- WP-D5: hand-off, missed-call target, quiet hours
+
+
+async def test_missed_call_push_opens_that_call_in_the_calls_tab(client, db, lk, jobs, pushes):
+    w = await world(client, db)
+    cid = (await start(client, w.ann, w.dm))["call"]["id"]
+    pushes.clear()
+    assert await run_timeout(jobs, cid) == "missed"
+    [p] = pushes
+    assert p["url"] == f"/rooms/calls/{cid}" and p["extra"]["kind"] == "call_missed"
+
+
+async def test_a_call_started_on_a_phone_hands_off_to_the_app(client, db, lk, jobs):
+    """Starting from a phone with the app: the page asks for an Android
+    session, the app connects with it; it gets who the call's with, and
+    how it ended once it's over."""
+    from app.calls import dm
+
+    w = await world(client, db)
+    j = await start(client, w.ann, w.dm, device="android")
+    cid = j["call"]["id"]
+    assert j["title"] == w.ben.username and j["device"] == "android"
+    claims = dm.read_session(j["session"])
+    assert claims["dev"] == "android" and claims["call"] == cid and claims["sub"] == str(w.ann.id)
+    r = await client.post("/api/calls/session/refresh", json={"session": j["session"]})
+    assert r.status_code == 200 and r.json()["title"] == w.ben.username and r.json()["call"]["answered_at"] is None
+    # Nobody answered: the app hears how it ended.
+    assert await run_timeout(jobs, cid) == "missed"
+    r = await client.post("/api/calls/session/refresh", json={"session": j["session"]})
+    assert r.status_code == 404 and r.json()["detail"] == "ended:missed"
+
+    # Declined.
+    j = await start(client, w.ann, w.dm, device="android")
+    await act(client, w.ben, j["call"]["id"], "decline")
+    r = await client.post("/api/calls/session/refresh", json={"session": j["session"]})
+    assert r.status_code == 404 and r.json()["detail"] == "ended:declined"
+
+    # A group's title is its members' names (or its name), not yours.
+    j = await start(client, w.ben, w.group, device="android")
+    assert w.ben.username not in j["title"] and w.ann.username in j["title"]
+
+    # No app after all (the page takes the call): its join replaces the session.
+    j = await start(client, w.cat, w.group, device="android")
+    await act(client, w.cat, j["call"]["id"], "join")
+    assert (await client.post("/api/calls/session/refresh", json={"session": j["session"]})).status_code == 404
+
+
+async def _quiet_night(db, monkeypatch, user, ring_through=False):
+    import app.notifications.quiet as q
+    from zoneinfo import ZoneInfo
+
+    from app.notifications.models import PushPreferences
+
+    # 23:15 in Sydney; quiet hours 22:00-07:00.
+    monkeypatch.setattr(q, "_now", lambda: datetime.combine(date(2026, 11, 9), datetime.min.time().replace(hour=23, minute=15), tzinfo=ZoneInfo("Australia/Sydney")).astimezone(timezone.utc))
+    prefs = await db.get(PushPreferences, user.id)
+    if prefs is None:
+        prefs = PushPreferences(user_id=user.id)
+        db.add(prefs)
+    prefs.quiet_enabled = True
+    prefs.call_ring_through = ring_through
+    await db.commit()
+
+
+async def test_quiet_hours_calls_dont_ring_and_the_missed_call_waits(client, db, lk, jobs, events, pushes, monkeypatch):
+    from app.notifications.models import PushHeld
+
+    w = await world(client, db)
+    await _quiet_night(db, monkeypatch, w.ben)
+    pushes.clear()
+    cid = (await start(client, w.ann, w.dm))["call"]["id"]
+    # No ring push and no ring on Ben's open pages; it still rings out on the server.
+    assert kinds(pushes, w.ben) == []
+    assert not [e for to, e in of_type(events, "call_ring") if str(w.ben.id) in {str(x) for x in to}]
+    assert (await ring_of(db, cid))[str(w.ben.id)] == "ringing"
+    assert await run_timeout(jobs, cid) == "missed"
+    # The missed call is held for the morning, pointing at the call.
+    assert kinds(pushes, w.ben) == []
+    [held] = (await db.execute(select(PushHeld).where(PushHeld.user_id == w.ben.id))).scalars().all()
+    assert held.category == "call" and held.reason == "quiet" and held.url == f"/rooms/calls/{cid}" and held.extra["kind"] == "call_missed"
+    from app.notifications import quiet
+
+    assert quiet.phrase("call", [held]) == "1 missed call in Calls"
+
+    # "Let calls ring during quiet hours": they ring.
+    await _quiet_night(db, monkeypatch, w.ben, ring_through=True)
+    pushes.clear()
+    await start(client, w.ann, w.dm)
+    assert kinds(pushes, w.ben) == ["call_ring"]
+
+
+async def test_preferences_have_the_ring_through_switch(client, db):
+    w = await world(client, db)
+    r = await client.get("/api/notifications/preferences", headers=H(w.ann))
+    assert r.status_code == 200 and r.json()["call_ring_through"] is False
+    r = await client.patch("/api/notifications/preferences", headers=H(w.ann), json={"call_ring_through": True})
+    assert r.status_code == 200 and r.json()["call_ring_through"] is True

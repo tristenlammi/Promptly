@@ -58,14 +58,25 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Rooms: a Calls tab (Spaces · Messages · Calls on a phone, a phone button under Messages on a computer) with your call history: who, which way, how long, missed calls in red and the ones you haven't seen in bold, a call-back button on every row, All or Missed, and a red badge with the number of missed calls until you look. Each call opens to its details: every call with the same people, Call, Video call and Message, and Remove from call history. Removing a call, or clearing your whole history, only changes your own list.
 - New call: pick someone from the Calls tab, or call anyone straight from their person page or their contact card (Call and Video call, when they're on Promptly and can take calls).
 - Ctrl+K: "Call Mum" or "Video call Sam" calls someone by the name you know them by (a contact's name or nickname, what they are to you in Photos, or their username). People you've blocked, or who blocked you, aren't offered.
+<!-- Calls (DM calls), WP-D5 -->
+- Calls on Android phones with the Promptly app: Call and Video call on the phone now hand the call to the app (the first time, it asks), so the call you start keeps going with the screen locked, in other apps or with the page closed, just like a call you answer. The ringback plays in the app, Bluetooth headsets and the car see it as a call, and if Android puts it on hold for a phone call the other person is told. Needs the new app version; without the app the page holds the call as before.
+- Video calls on Android phones with the app: your phone's own camera in the call (on and off, switch front and back), everyone's video on the app's call screen, working over the lock screen, and picture-in-picture when you leave the call screen. Locking the phone pauses your camera and it comes back when you unlock. The conversation's page can turn the app's camera on and off and switch it too.
+- Call tones: the through tone when they answer, a tone when the connection drops and when it's back, a soft tone while the other person has you on hold, and one when the call ends. While the connection drops the call says "Reconnecting…", or "You're offline" when there's no network, and carries on by itself (also when a phone moves from Wi-Fi to mobile data).
+- Calls on a weak connection, or with Data saver on: video is taken and sent smaller, and the call says so. On Android, mobile data takes the middle quality and Android's Data Saver the lowest.
+- Account → Notifications → Calls: "Let calls ring during quiet hours".
 
 ### Changed
 <!-- Calls (voice channels), WP-V1 -->
 - The site now allows the camera and screen sharing for itself (for voice channels' cameras and Go Live) and WebAssembly (for noise suppression). Account → Voice is now Voice & video.
 <!-- Calls (voice channels), WP-V5 -->
 - Voice & video settings use Promptly's own colour (terracotta) for sliders, switches, focus rings and the selected options, also inside Rooms. Push to talk now says what to do in a game: voice activity keeps working while you play, with a "Use voice activity instead" link.
+<!-- Calls (DM calls), WP-D5 -->
+- Calls and quiet hours: during your quiet hours a call no longer rings you (unless you let calls ring through). It rings out to a missed call, and you're told about it when quiet hours end.
+- A missed call's notification now opens that call in the Calls tab (call back, message, or every call with them), rather than the conversation.
 
 ### Fixed
+<!-- Calls (DM calls), WP-D5 -->
+- Calls: a 1:1 call no longer ends when one side's connection drops for a moment and comes back (for example moving from Wi-Fi to mobile data). A connection now has 15 seconds to come back before it counts as hanging up.
 <!-- Calls (DM calls), WP-D2 -->
 - Voice channels: reloading the page, or joining the same channel on another device, could drop you straight back out when the old connection's goodbye arrived late.
 <!-- Calls (voice channels), WP-V4 -->

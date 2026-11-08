@@ -60,6 +60,8 @@ export interface CallPeer {
   camera: RemoteVideoTrack | null;
   screen: RemoteVideoTrack | null;
   connectionQuality: "excellent" | "good" | "poor" | "lost" | "unknown";
+  /** Their phone put the call on hold (they took a phone call; Calls WP-D5). */
+  held: boolean;
 }
 
 export interface IncomingCall extends CallRing {
@@ -116,6 +118,10 @@ export interface CallStoreState {
   pinned: string | null;
   audioBlocked: boolean;
   quality: "excellent" | "good" | "poor" | "lost" | "unknown";
+  /** The browser says there's no network (Wi-Fi to mobile data, a tunnel). */
+  offline: boolean;
+  /** Video is taken and sent smaller: a weak connection, or Data saver. */
+  lowered: "weak" | "saver" | null;
   problem: CallProblem | null;
   /** Just ended: how, how long, and who it was with (the screen says so
    *  for a moment after the connection's state is gone). */
@@ -146,6 +152,8 @@ export const initialCallConnection = {
   pinned: null,
   audioBlocked: false,
   quality: "unknown" as const,
+  offline: false,
+  lowered: null,
   problem: null,
 } satisfies Partial<CallStoreState>;
 

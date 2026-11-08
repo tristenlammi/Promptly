@@ -159,9 +159,15 @@ sealed class CallEvent {
     /** Hang up: the notification, the call screen, a headset or the car. */
     data class HangUp(val callId: String) : CallEvent()
     data class Connected(val callId: String) : CallEvent()
-    /** The call's over for this phone: [why] "ended" (the server's word), "replaced"
-     *  (taken on another device), "lost" (no way back), "failed" (couldn't answer). */
+    /** The call's over for this phone: [why] "ended" (the server's word, or
+     *  "ended:<reason>" when it said how: declined, missed, cancelled…),
+     *  "replaced" (taken on another device), "lost" (no way back), "failed"
+     *  (couldn't answer or start). */
     data class Ended(val callId: String, val why: String) : CallEvent()
+    /** You started a call on the page and it handed it to this app (Calls WP-D5). */
+    data class Outgoing(val handoff: CallHandoff) : CallEvent()
+    /** Someone answered the call you started. */
+    data class Answered(val callId: String) : CallEvent()
 }
 
 sealed class CallEffect {
@@ -180,19 +186,27 @@ sealed class CallEffect {
     data class TelecomEnd(val callId: String, val cause: EndCause) : CallEffect()
     /** Say something short ("This call has ended"). */
     data class Tell(val text: String) : CallEffect()
+    /** Start the in-call service on a call you started (the page's hand-off). */
+    data class Start(val handoff: CallHandoff) : CallEffect()
+    /** Telecom: a call you're making (dialling until it's answered). */
+    data class TelecomOutgoing(val callId: String, val video: Boolean, val title: String) : CallEffect()
 }
 
 /** Where this phone is with DM calls. */
 sealed class CallState {
     data object Idle : CallState()
     data class Ringing(val ring: Ring) : CallState()
-    /** In a call (connecting or connected), maybe with another ringing on top. */
+    /** In a call (connecting or connected), maybe with another ringing on top.
+     *  [outgoing]: you started it; [answered]: someone else has picked up
+     *  (always true for a call you answered). */
     data class Active(
         val callId: String,
         val video: Boolean,
         val title: String,
         val connected: Boolean,
         val waiting: Ring? = null,
+        val outgoing: Boolean = false,
+        val answered: Boolean = true,
     ) : CallState()
 }
 
@@ -232,6 +246,15 @@ class CallMachine {
             is CallEvent.Connected -> {
                 if (s is CallState.Active && s.callId == e.callId && !s.connected) {
                     state = s.copy(connected = true)
+                    // A call you're making stays "dialling" for Telecom until it's answered.
+                    if (s.answered) listOf(CallEffect.TelecomActive(s.callId)) else emptyList()
+                } else {
+                    emptyList()
+                }
+            }
+            is CallEvent.Answered -> {
+                if (s is CallState.Active && s.callId == e.callId && !s.answered) {
+                    state = s.copy(answered = true)
                     listOf(CallEffect.TelecomActive(s.callId))
                 } else {
                     emptyList()
@@ -240,17 +263,57 @@ class CallMachine {
             is CallEvent.Ended -> {
                 if (s is CallState.Active && s.callId == e.callId) {
                     state = after(s)
-                    val tell = when (e.why) {
-                        "failed" -> listOf(CallEffect.Tell("Couldn't answer: this call has ended."))
-                        "lost" -> listOf(CallEffect.Tell("Lost the connection to the call."))
+                    val reason = e.why.substringAfter("ended:", "")
+                    val unanswered = s.outgoing && !s.answered
+                    val tell = when {
+                        e.why == "failed" && s.outgoing -> listOf(CallEffect.Tell("Couldn't start the call."))
+                        e.why == "failed" -> listOf(CallEffect.Tell("Couldn't answer: this call has ended."))
+                        e.why == "lost" -> listOf(CallEffect.Tell("Lost the connection to the call."))
+                        unanswered && reason == "declined" -> listOf(CallEffect.Tell("Call declined."))
+                        unanswered && reason == "missed" -> listOf(CallEffect.Tell("No answer."))
                         else -> emptyList()
                     }
-                    listOf(CallEffect.TelecomEnd(s.callId, if (e.why == "failed") EndCause.MISSED else EndCause.REMOTE)) + tell + promoteWaiting(s)
+                    val cause = when {
+                        e.why == "failed" -> EndCause.MISSED
+                        unanswered && reason == "declined" -> EndCause.REJECTED
+                        else -> EndCause.REMOTE
+                    }
+                    listOf(CallEffect.TelecomEnd(s.callId, cause)) + tell + promoteWaiting(s)
                 } else {
                     emptyList()
                 }
             }
+            is CallEvent.Outgoing -> outgoing(s, e.handoff)
         }
+    }
+
+    /**
+     * A call you started on the page, handed to this app. It replaces
+     * whatever's here: the server has already taken you out of any other
+     * call; a call ringing here is left to ring out (it becomes missed).
+     */
+    private fun outgoing(s: CallState, h: CallHandoff): List<CallEffect> {
+        if (s is CallState.Active && s.callId == h.callId) return emptyList()
+        val out = mutableListOf<CallEffect>()
+        when (s) {
+            is CallState.Ringing -> {
+                out += CallEffect.CancelRing(s.ring.callId)
+                out += CallEffect.TelecomEnd(s.ring.callId, EndCause.MISSED)
+            }
+            is CallState.Active -> {
+                s.waiting?.let {
+                    out += CallEffect.CancelRing(it.callId)
+                    out += CallEffect.TelecomEnd(it.callId, EndCause.MISSED)
+                }
+                out += CallEffect.Leave(s.callId)
+                out += CallEffect.TelecomEnd(s.callId, EndCause.LOCAL)
+            }
+            CallState.Idle -> Unit
+        }
+        state = CallState.Active(h.callId, h.video, h.title, connected = false, outgoing = true, answered = false)
+        out += CallEffect.TelecomOutgoing(h.callId, h.video, h.title)
+        out += CallEffect.Start(h)
+        return out
     }
 
     private fun rang(s: CallState, e: CallEvent.Rang): List<CallEffect> {
@@ -345,6 +408,8 @@ data class CallJoin(
     val video: Boolean,
     val group: Boolean,
     val answeredAt: String?,
+    /** Who the call's with, as you see it (the server's `title`). */
+    val title: String? = null,
 )
 
 /** `POST /api/calls/answer/state`. */
@@ -368,6 +433,7 @@ object CallProtocol {
             video = call.str("media") == "video",
             group = call.bool("group") ?: false,
             answeredAt = call.str("answered_at"),
+            title = o.str("title")?.trim()?.take(120)?.ifBlank { null },
         )
     }
 
@@ -389,7 +455,7 @@ object CallProtocol {
     fun sessionBody(session: String): String = buildJsonObject { put("session", session) }.toString()
 
     /** The page's remote control (`dm.py::control`), from the server only. */
-    enum class Control { MUTE, UNMUTE, SPEAKER_ON, SPEAKER_OFF }
+    enum class Control { MUTE, UNMUTE, SPEAKER_ON, SPEAKER_OFF, CAMERA_ON, CAMERA_OFF, FLIP }
 
     const val CONTROL_TOPIC = "call.control"
 
@@ -401,6 +467,9 @@ object CallProtocol {
             "unmute" -> Control.UNMUTE
             "speaker_on" -> Control.SPEAKER_ON
             "speaker_off" -> Control.SPEAKER_OFF
+            "camera_on" -> Control.CAMERA_ON
+            "camera_off" -> Control.CAMERA_OFF
+            "flip" -> Control.FLIP
             else -> null
         }
     }
@@ -417,7 +486,18 @@ sealed class CallRefresh {
     data class Ok(val join: CallJoin) : CallRefresh()
     /** 404: the session's over (hung up, ended, taken on another device). */
     data object Gone : CallRefresh()
+    /** 404 "ended:<reason>": the call itself is over, and the server says how
+     *  (declined, missed, cancelled, completed). */
+    data class Ended(val reason: String) : CallRefresh()
     data class Failed(val why: String) : CallRefresh()
+
+    companion object {
+        /** A 404's detail: "ended:declined" → [Ended], anything else → [Gone]. */
+        fun gone(detail: String?): CallRefresh {
+            val r = detail?.takeIf { it.startsWith("ended:") }?.substringAfter("ended:")?.takeIf { it.matches(Regex("[a-z_]{1,24}")) }
+            return if (r != null) Ended(r) else Gone
+        }
+    }
 }
 
 /**
@@ -439,6 +519,7 @@ class CallRejoin(private val startedAt: Long, private val giveUpMs: Long = 2 * 6
     fun next(result: CallRefresh, now: Long): Step = when (result) {
         is CallRefresh.Ok -> Step.Connect(result.join)
         CallRefresh.Gone -> Step.Stop("ended")
+        is CallRefresh.Ended -> Step.Stop("ended:${result.reason}")
         is CallRefresh.Failed -> retry(now)
     }
 
@@ -463,14 +544,35 @@ data class CallNote(val title: String, val text: String, val muteLabel: String, 
     enum class Status { CONNECTING, CONNECTED, RECONNECTING }
 
     companion object {
-        fun of(name: String, video: Boolean, status: Status, muted: Boolean, speaker: Boolean, seconds: Long, others: Int, group: Boolean): CallNote {
+        /**
+         * @param calling you started it and nobody's answered yet
+         * @param held Android put this call on hold (you took a phone call)
+         * @param peerHeld someone in it put the call on hold
+         */
+        fun of(
+            name: String,
+            video: Boolean,
+            status: Status,
+            muted: Boolean,
+            speaker: Boolean,
+            seconds: Long,
+            others: Int,
+            group: Boolean,
+            calling: Boolean = false,
+            held: Boolean = false,
+            peerHeld: Boolean = false,
+        ): CallNote {
             val what = if (video) "Video call" else "Call"
-            val text = when (status) {
-                Status.CONNECTING -> "Connecting…"
-                Status.RECONNECTING -> "Reconnecting…"
-                Status.CONNECTED -> buildString {
+            val text = when {
+                status == Status.RECONNECTING -> "Reconnecting…"
+                calling -> if (group) "Ringing everyone…" else "Calling…"
+                status == Status.CONNECTING -> "Connecting…"
+                held -> "On hold · you're on another call"
+                peerHeld && !group -> "On hold"
+                else -> buildString {
                     append(elapsed(seconds))
                     if (group) append(if (others == 1) " · 1 other" else " · $others others")
+                    if (peerHeld) append(" · someone put the call on hold")
                     if (muted) append(" · you're muted")
                 }
             }

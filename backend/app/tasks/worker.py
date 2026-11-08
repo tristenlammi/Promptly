@@ -305,6 +305,13 @@ async def call_alone_check(ctx, call_id: str, token: str) -> str:
     return await alone_check(call_id, token)
 
 
+# Calls WP-D5: a dropped connection's grace before it counts as hanging up.
+async def call_left_check(ctx, call_id: str, user_id: str, sid: str) -> str:
+    from app.calls.dm import left_check
+
+    return await left_check(call_id, user_id, sid)
+
+
 async def calls_reaper(ctx) -> dict:
     from app.calls.dm import reap
 
@@ -341,6 +348,8 @@ class WorkerSettings:
         # Calls phase 2: DM call timers (ring timeout, alone in a group call).
         func(call_ring_timeout, timeout=60, max_tries=2, keep_result=0),
         func(call_alone_check, timeout=60, max_tries=2, keep_result=0),
+        # Calls WP-D5: a dropped connection's grace.
+        func(call_left_check, timeout=60, max_tries=2, keep_result=0),
     ]
     cron_jobs = [
         # Learn from chats that have gone quiet, then look after memory overnight.

@@ -49,6 +49,15 @@ object CallCenter : CallRings.Handler, CallTelecom.Events {
         val speaker: Boolean = false,
         val others: Int = 0,
         val group: Boolean = false,
+        /** You started it and nobody's answered yet (Calls WP-D5). */
+        val calling: Boolean = false,
+        /** Android put the call on hold (you're on a phone call). */
+        val held: Boolean = false,
+        /** Someone in it put the call on hold. */
+        val peerHeld: Boolean = false,
+        val camera: CameraState = CameraState(),
+        /** "Weak connection: video lowered", or null. */
+        val videoNote: String? = null,
     )
 
     private val main = Handler(Looper.getMainLooper())
@@ -135,6 +144,10 @@ object CallCenter : CallRings.Handler, CallTelecom.Events {
         }
     }
 
+    override fun systemHold(callId: String, on: Boolean) {
+        main.post { CallService.current?.setHeld(callId, on) }
+    }
+
     override fun systemDisconnect(callId: String) {
         main.post {
             when (val s = machine.state) {
@@ -155,6 +168,13 @@ object CallCenter : CallRings.Handler, CallTelecom.Events {
     fun hangUp(callId: String) = dispatch(CallEvent.HangUp(callId))
     fun connected(callId: String) = dispatch(CallEvent.Connected(callId))
     fun ended(callId: String, why: String) = dispatch(CallEvent.Ended(callId, why))
+    fun answeredByThem(callId: String) = dispatch(CallEvent.Answered(callId))
+
+    /** The page started a call and handed it to this app (CallStartActivity). */
+    fun startOutgoing(context: Context, h: CallHandoff) {
+        init(context)
+        dispatch(CallEvent.Outgoing(h))
+    }
 
     fun setMedia(m: Media) {
         _media.value = m
@@ -218,6 +238,16 @@ object CallCenter : CallRings.Handler, CallTelecom.Events {
                 }
             }
             is CallEffect.Leave -> CallService.leave(app, fx.callId)
+            is CallEffect.Start -> {
+                _media.value = Media(callId = fx.handoff.callId, calling = true, speaker = Routing.startsOnSpeaker(fx.handoff.video))
+                try {
+                    CallService.start(app, fx.handoff)
+                } catch (e: RuntimeException) {
+                    Log.w(TAG, "can't start the call service", e)
+                    ended(fx.handoff.callId, "failed")
+                }
+            }
+            is CallEffect.TelecomOutgoing -> telecom.outgoing(fx.callId, fx.title, fx.video)
             is CallEffect.TelecomIncoming -> telecom.incoming(fx.ring)
             is CallEffect.TelecomAnswer -> telecom.answer(fx.callId, fx.video)
             is CallEffect.TelecomActive -> telecom.active(fx.callId)

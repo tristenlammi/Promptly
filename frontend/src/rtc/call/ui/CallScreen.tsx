@@ -5,11 +5,16 @@
  * Mute, Camera, Share screen, Flip (phones), More (speaker, microphone,
  * camera, ring again, pop out), Hang up. Minimise keeps the call in a
  * small window you can drag around while you use Promptly; "Pop out" puts
- * the video in the browser's own picture-in-picture window.
+ * the video in the browser's own picture-in-picture window. While the
+ * connection drops it says so over the call ("Reconnecting…", "You're
+ * offline"), and a weak connection or Data saver says video is lowered.
  */
 import {
   BellRing,
   Check,
+  Loader2,
+  Pause,
+  WifiOff,
   ChevronDown,
   Maximize2,
   Mic,
@@ -36,7 +41,9 @@ import { cn } from "@/utils/cn";
 import { savedDevice, useMediaDevices } from "../../devices";
 import { canChooseSpeaker } from "../../livekit";
 import { Floating } from "../../ui/Floating";
+import { hasAndroidCallsOut } from "../../voice/androidApp";
 import { calls } from "../actions";
+import { loweredWords, reconnectWords } from "../link";
 import { useCallStore, type CallPeer, type CallStoreState } from "../store";
 import { clock, endedWords } from "../words";
 import {
@@ -73,7 +80,7 @@ function useCallView() {
   const group = !!s.call?.group || (s.ended?.peerIds.length ?? 0) > 1;
   const answeredAt = s.call?.answered_at ? Date.parse(s.call.answered_at) : null;
   const elapsed = useElapsed(s.status === "connected" || s.status === "reconnecting" ? (answeredAt ?? s.connectedAt) : null);
-  const status = statusWords(s, elapsed, group, peers.length);
+  const status = statusWords(s, elapsed, group, peers.length, !group && !!peers[0]?.held);
   // The person to show big in a 1:1 call (or whoever you're calling).
   const other = peers[0] ?? null;
   const otherId = other?.userId ?? s.call?.participants.find((p) => p.user_id !== self?.id)?.user_id ?? s.ended?.peerIds[0] ?? null;
@@ -81,7 +88,9 @@ function useCallView() {
   return { s, users, b, meUser, peers, title, ringing, group, status, other, otherUser };
 }
 
-function statusWords(s: CallStoreState, elapsed: number, group: boolean, people: number): string {
+function statusWords(s: CallStoreState, elapsed: number, group: boolean, people: number, onHold = false): string {
+  if (s.offline && s.status !== "ended") return "You're offline…";
+  if (onHold && s.status === "connected") return `On hold · ${clock(elapsed)}`;
   switch (s.status) {
     case "connecting":
       return "Connecting…";
@@ -348,7 +357,7 @@ function PeerTile({ peer, user, small }: { peer: CallPeer; user: RoomUser; small
         </span>
       )}
       <span className="absolute bottom-2 left-2 flex max-w-[calc(100%-1rem)] items-center gap-1.5 rounded-full bg-black/55 px-2 py-0.5 text-xs font-medium text-white">
-        {peer.micMuted && <MicOff className="h-3.5 w-3.5 shrink-0" aria-label="Muted" />}
+        {peer.held ? <Pause className="h-3.5 w-3.5 shrink-0" aria-label="On hold" /> : peer.micMuted && <MicOff className="h-3.5 w-3.5 shrink-0" aria-label="Muted" />}
         <span className="truncate">{user.username}</span>
       </span>
     </button>
@@ -432,7 +441,11 @@ function EndedStage({ s, who }: { s: CallStoreState; who: RoomUser | null }) {
 /** Problems and the browser holding sound back, over the stage. */
 function Notices({ s }: { s: CallStoreState }) {
   const problem = s.problem;
-  if (!problem && !s.audioBlocked && !s.screen && !s.phone) return null;
+  const back = reconnectWords(s);
+  // Only worth saying when there's video to lower.
+  const lowered = s.camera || Object.values(s.peers).some((p) => p.camera) ? loweredWords(s.lowered) : null;
+  const held = Object.values(s.peers).filter((p) => p.held);
+  if (!problem && !s.audioBlocked && !s.screen && !s.phone && !back && !lowered && !held.length) return null;
   const words: Record<string, string> = {
     "mic-denied": "Your browser is blocking the microphone, so they can't hear you. Allow it in the address bar, then try again.",
     "mic-missing": "No microphone found. Plug one in, then try again.",
@@ -443,6 +456,22 @@ function Notices({ s }: { s: CallStoreState }) {
   };
   return (
     <div className="absolute inset-x-0 top-2 z-20 flex flex-col items-center gap-2 px-3">
+      {back && (
+        <div role="status" className="inline-flex max-w-md items-center gap-2 rounded-2xl bg-white px-4 py-2.5 text-sm font-medium text-[#1c1917] shadow-lg" data-testid="call-reconnecting">
+          {s.offline ? <WifiOff className="h-4 w-4 shrink-0" aria-hidden /> : <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />}
+          {back}
+        </div>
+      )}
+      {held.length > 0 && (
+        <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-xs font-semibold text-white" data-testid="call-on-hold">
+          <Pause className="h-3.5 w-3.5" aria-hidden /> {held.length === 1 ? "On hold: they took another call" : `${held.length} people have the call on hold`}
+        </span>
+      )}
+      {lowered && !back && (
+        <span className="inline-flex items-center gap-2 rounded-full bg-black/55 px-3 py-1.5 text-xs font-semibold text-white" data-testid="call-lowered">
+          {lowered}
+        </span>
+      )}
       {s.audioBlocked && (
         <button
           type="button"
@@ -485,8 +514,10 @@ function Notices({ s }: { s: CallStoreState }) {
 /** The call is in the Promptly Android app (it holds the sound): its mute
  *  and loudspeaker from here, the camera by moving the call to this page. */
 function PhoneControls({ isPhone }: { isPhone: boolean }) {
-  const { muted, phoneSpeaker, callId, roomId } = useCallStore((s) => ({ muted: s.muted, phoneSpeaker: s.phoneSpeaker, callId: s.callId, roomId: s.roomId }));
+  const { muted, phoneSpeaker, callId, roomId, camera } = useCallStore((s) => ({ muted: s.muted, phoneSpeaker: s.phoneSpeaker, callId: s.callId, roomId: s.roomId, camera: s.camera }));
   const size = isPhone ? 60 : 56;
+  // The app holds the camera too (WP-D5); an older app can't, so the call moves here for it.
+  const appCamera = hasAndroidCallsOut();
   return (
     <div className="relative z-10 flex shrink-0 items-center justify-center gap-3 px-3 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-3 md:gap-4" role="toolbar" aria-label="Call controls">
       <RoundButton label={muted ? "Unmute" : "Mute"} tone={muted ? "on" : "plain"} pressed={muted} size={size} onClick={() => void calls.toggleMute()} testId="call-mute" focusFirst>
@@ -495,15 +526,28 @@ function PhoneControls({ isPhone }: { isPhone: boolean }) {
       <RoundButton label={phoneSpeaker ? "Speaker on" : "Speaker"} tone={phoneSpeaker ? "accent" : "plain"} pressed={phoneSpeaker} size={size} onClick={() => void calls.togglePhoneSpeaker()} testId="call-speaker">
         <Volume2 className="h-6 w-6" />
       </RoundButton>
-      <RoundButton
-        label="Turn camera on (the call moves to this page)"
-        tone="on"
-        size={size}
-        onClick={() => callId && void calls.answer(callId, { video: true, roomId, media: "video" })}
-        testId="call-camera"
-      >
-        <VideoOff className="h-6 w-6" />
-      </RoundButton>
+      {appCamera ? (
+        <>
+          <RoundButton label={camera ? "Turn camera off" : "Turn camera on"} tone={camera ? "plain" : "on"} pressed={camera} size={size} onClick={() => void calls.toggleCamera()} testId="call-camera">
+            {camera ? <Video className="h-6 w-6" /> : <VideoOff className="h-6 w-6" />}
+          </RoundButton>
+          {camera && (
+            <RoundButton label="Switch camera" size={size} onClick={() => void calls.flipCamera()} testId="call-flip">
+              <SwitchCamera className="h-6 w-6" />
+            </RoundButton>
+          )}
+        </>
+      ) : (
+        <RoundButton
+          label="Turn camera on (the call moves to this page)"
+          tone="on"
+          size={size}
+          onClick={() => callId && void calls.answer(callId, { video: true, roomId, media: "video" })}
+          testId="call-camera"
+        >
+          <VideoOff className="h-6 w-6" />
+        </RoundButton>
+      )}
       <RoundButton label="Hang up" tone="red" size={size + 8} onClick={() => void calls.hangUp()} testId="call-hangup">
         <PhoneOff className="h-7 w-7" />
       </RoundButton>

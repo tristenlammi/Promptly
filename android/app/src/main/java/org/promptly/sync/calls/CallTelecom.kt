@@ -34,6 +34,8 @@ class CallTelecom(context: Context, private val scope: CoroutineScope, private v
         fun systemAnswer(callId: String)
         /** Telecom asks to hang up or decline. */
         fun systemDisconnect(callId: String)
+        /** Telecom puts the call on hold (you took a phone call), or back (Calls WP-D5). */
+        fun systemHold(callId: String, on: Boolean)
     }
 
     /** Where the audio goes now, and where it could go (for the Speaker button). */
@@ -71,17 +73,22 @@ class CallTelecom(context: Context, private val scope: CoroutineScope, private v
     fun holds(callId: String): Boolean = calls[callId]?.control != null
 
     /** A call ringing this phone. */
-    fun incoming(ring: Ring) {
-        if (calls.containsKey(ring.callId) || !register()) return
+    fun incoming(ring: Ring) = add(ring.callId, ring.title, ring.video, CallAttributesCompat.DIRECTION_INCOMING)
+
+    /** A call you started (the page's hand-off): dialling until [active]. */
+    fun outgoing(callId: String, title: String, video: Boolean) = add(callId, title, video, CallAttributesCompat.DIRECTION_OUTGOING)
+
+    private fun add(callId: String, title: String, video: Boolean, direction: Int) {
+        if (calls.containsKey(callId) || !register()) return
         val attrs = CallAttributesCompat(
-            ring.title,
-            Uri.fromParts("sip", "promptly-" + ring.callId.take(8), null),
-            CallAttributesCompat.DIRECTION_INCOMING,
-            if (ring.video) CallAttributesCompat.CALL_TYPE_VIDEO_CALL else CallAttributesCompat.CALL_TYPE_AUDIO_CALL,
+            title,
+            Uri.fromParts("sip", "promptly-" + callId.take(8), null),
+            direction,
+            if (video) CallAttributesCompat.CALL_TYPE_VIDEO_CALL else CallAttributesCompat.CALL_TYPE_AUDIO_CALL,
             CallAttributesCompat.SUPPORTS_SET_INACTIVE,
             null,
         )
-        val id = ring.callId
+        val id = callId
         lateinit var held: Held
         val job = scope.launch {
             try {
@@ -89,8 +96,9 @@ class CallTelecom(context: Context, private val scope: CoroutineScope, private v
                     attrs,
                     { _ -> events.systemAnswer(id) },
                     { _ -> events.systemDisconnect(id) },
-                    { },
-                    { },
+                    // Back from hold, and on hold (another call took over).
+                    { events.systemHold(id, false) },
+                    { events.systemHold(id, true) },
                 ) {
                     held.control = this
                     launch { availableEndpoints.collect { list -> held.endpoints = list; publish(id) } }

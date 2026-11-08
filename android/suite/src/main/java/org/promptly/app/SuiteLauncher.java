@@ -48,7 +48,9 @@ public class SuiteLauncher extends LauncherActivity {
         // (the page hands Join over to it, frontend/src/rtc/voice/androidApp.ts).
         // calls: this app rings DM calls itself, full screen (Calls WP-D3), so the
         // page gives its rings the answer token and leaves the ringing to it.
-        return Uri.parse(Server.get(this) + path + sep + "source=android&caps=voice,calls");
+        // callout: Call / Video call on the page hands the call to this app too
+        // (promptly://call/start, Calls WP-D5), with the phone's own camera.
+        return Uri.parse(Server.get(this) + path + sep + "source=android&caps=voice,calls,callout");
     }
 
     /** A path to open instead of the launcher's own (see getLaunchingUrl). */

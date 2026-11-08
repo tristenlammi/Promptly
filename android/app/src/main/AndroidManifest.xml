@@ -52,6 +52,13 @@
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <!-- DM calls (Calls WP-D5): the phone's own camera in a video call, which keeps
+         going with the screen locked. Phones without a camera can still install. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
     <application
         android:name=".SyncApp"
@@ -302,11 +309,29 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true"
             android:taskAffinity="org.promptly.app.calls"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden"
             android:theme="@android:style/Theme.Material.NoActionBar" />
         <service
             android:name=".calls.CallService"
             android:exported="false"
-            android:foregroundServiceType="phoneCall|microphone|mediaPlayback" />
+            android:foregroundServiceType="phoneCall|microphone|camera|mediaPlayback" />
+        <!-- Calls WP-D5: Call / Video call on the page hands the call to this app
+             (promptly://call/start?…), which holds it like a call it answered. -->
+        <activity
+            android:name=".calls.CallStartActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.callstart"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptly" android:host="call" android:path="/start" />
+            </intent-filter>
+        </activity>
         <receiver android:name=".calls.CallActions" android:exported="false" />
 
         <!-- A checked update, given to Android's package installer. -->

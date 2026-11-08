@@ -11,6 +11,13 @@
  * connects with the token it hands back. Its events (``live.ts`` passes
  * them on) end the call here: ``call_ended``, and ``call_disconnected``
  * when you took the call elsewhere or joined another.
+ *
+ * On a phone with the Promptly app (Calls WP-D5), a call you start is
+ * handed to the app (``startViaApp``), which holds its sound and camera; this
+ * page then shows it over a listen-only connection (``viewCall``), as it does
+ * a call the app answered. Tones: ringback, through, reconnecting /
+ * reconnected, the other side's hold, and the end. A weak connection or Data
+ * saver lowers video (``link.ts``).
  */
 import type { Participant, RemoteParticipant, RemoteTrack, Room } from "livekit-client";
 
@@ -26,6 +33,8 @@ import { streamPlan } from "../voice/goLive";
 import { currentVoiceSettings } from "../voice/prefs";
 import { playVoiceSound, type VoiceSound } from "../voice/sounds";
 import { useVoiceStore } from "../voice/store";
+import { callHandoffUrl, hasAndroidCallsOut, openHandoff } from "../voice/androidApp";
+import { videoPlan, WeakLink, type LinkQuality } from "./link";
 import { playTone } from "./ringtone";
 import {
   inCallHere,
@@ -83,8 +92,13 @@ function me(): string | null {
   return useAuthStore.getState().user?.id ?? null;
 }
 
+const HOLD_TOPIC = "call.hold";
+
 export class CallEngine {
   private lk: LiveKit | null = null;
+  private weakLink = new WeakLink();
+  private linkTimer: ReturnType<typeof setInterval> | null = null;
+  private stopHold: (() => void) | null = null;
   private room: Room | null = null;
   private join: CallJoin | null = null;
   private ctx: AudioContext | null = null;
@@ -102,16 +116,71 @@ export class CallEngine {
   /** The server already said why it ended (wins over LiveKit's view). */
   private serverEnd: CallEndKind | null = null;
 
+  constructor() {
+    // Reconnect tones, and the hold tone while the other side holds.
+    useCallStore.subscribe((s, prev) => {
+      if (prev.status === "connected" && s.status === "reconnecting") this.sound("reconnecting");
+      else if (prev.status === "reconnecting" && s.status === "connected") this.sound("reconnected");
+      this.syncHoldTone(s);
+    });
+  }
+
   // ================================================================ getting in
 
   /** Call a conversation (rings the others). */
   start(roomId: string, media: CallMedia): Promise<boolean> {
+    if (hasAndroidCallsOut()) return this.startViaApp(() => dmCallsApi.start(roomId, media, "android"), roomId, media);
     return this.enter(() => dmCallsApi.start(roomId, media), { outgoing: true, video: media === "video", roomId, media });
   }
 
   /** Call people (Contacts, a person's page): opens the conversation first. */
   startWith(userIds: string[], media: CallMedia): Promise<boolean> {
+    if (hasAndroidCallsOut()) return this.startViaApp(() => dmCallsApi.startDm(userIds, media, "android"), null, media);
     return this.enter(() => dmCallsApi.startDm(userIds, media), { outgoing: true, video: media === "video", roomId: null, media });
+  }
+
+  /**
+   * A call started on a phone with the Promptly app (Calls WP-D5): the
+   * server starts it for the phone (``device: "android"``), the app takes it
+   * (``promptly://call/start``: it asks first, rings back, holds the sound
+   * and the camera with the screen locked), and this page shows it like a
+   * call the app answered. If the app can't take it, Chrome comes back with
+   * ``#call-no-app`` and ``takeHere`` moves the call into this page.
+   */
+  private async startViaApp(fetchJoin: () => Promise<CallJoin>, roomId: string | null, media: CallMedia): Promise<boolean> {
+    if (useVoiceStore.getState().status !== "idle") {
+      const { voice } = await import("../voice/actions");
+      await voice.leave().catch(() => undefined);
+    }
+    if (inCallHere(get())) await this.teardown();
+    const gen = ++this.gen;
+    this.clearEndTimer();
+    this.serverEnd = null;
+    this.ensureContext();
+    set({ ...initialCallConnection, ended: null, status: "connecting", outgoing: true, roomId, media, phone: true, phoneSpeaker: media === "video" });
+    let join: CallJoin;
+    try {
+      join = await fetchJoin();
+    } catch (err) {
+      if (gen !== this.gen) return false;
+      set({ ...initialCallConnection, problem: joinProblem(err) });
+      return false;
+    }
+    if (gen !== this.gen) {
+      void dmCallsApi.leave(join.call.id, join.session_id).catch(() => undefined);
+      return false;
+    }
+    // First, while the tap still counts: Chrome only opens an app from one.
+    openHandoff(callHandoffUrl(join));
+    return this.viewCall(join.call, { outgoing: true });
+  }
+
+  /** The app couldn't take the call you started here: hold it in this page. */
+  async takeHere(callId: string): Promise<boolean> {
+    const s = get();
+    const outgoing = s.callId === callId ? s.outgoing && !s.call?.answered_at : false;
+    const media = s.callId === callId ? s.media : "audio";
+    return this.enter(() => dmCallsApi.join(callId), { outgoing, video: media === "video", roomId: s.roomId, media });
   }
 
   /** Answer a call ringing you, join a live group call, or move your call here. */
@@ -137,6 +206,13 @@ export class CallEngine {
     }
     const mine = call.participants.find((p) => p.user_id === me());
     if (!call.live || !mine?.in_call || mine.device !== "android") return false;
+    // Opened while your call rings them from the app: still "Calling…".
+    return this.viewCall(call, { outgoing: call.started_by === me() && !call.answered_at });
+  }
+
+  /** Phone mode: show the app's call over a listen-only connection. */
+  private async viewCall(call: DmCall, opts: { outgoing: boolean }): Promise<boolean> {
+    const callId = call.id;
     const gen = ++this.gen;
     this.clearEndTimer();
     this.serverEnd = null;
@@ -144,7 +220,7 @@ export class CallEngine {
       ...initialCallConnection,
       ended: null,
       status: "connecting",
-      outgoing: false,
+      outgoing: opts.outgoing,
       callId: call.id,
       roomId: call.room_id,
       media: call.media,
@@ -177,8 +253,21 @@ export class CallEngine {
     }
     if (gen !== this.gen) return false;
     for (const p of room.remoteParticipants.values()) this.refreshPeer(p);
-    set({ status: "connected", connectedAt: Date.now() });
+    const ringing = opts.outgoing && !get().call?.answered_at && !this.othersIn(room);
+    set({ status: ringing ? "calling" : "connected", connectedAt: Date.now() });
+    this.startSession();
+    this.startLinkWatch();
     return true;
+  }
+
+  /** Someone other than you is connected (the app's own connection is you). */
+  private othersIn(room: Room): boolean {
+    const self = me();
+    for (const p of room.remoteParticipants.values()) {
+      const u = userOfIdentity(p.identity);
+      if (u && u !== self) return true;
+    }
+    return false;
   }
 
   /** Phone mode: watch cameras and screens (no sound: the app plays it),
@@ -191,6 +280,10 @@ export class CallEngine {
       const mic = p.getTrackPublication(S.Microphone);
       const muted = !mic || mic.isMuted;
       if (get().muted !== muted) set({ muted, ...(muted ? { speaking: false } : {}) });
+      // The app's camera (WP-D5): on when it's sending.
+      const cam = p.getTrackPublication(S.Camera);
+      const camera = !!cam && !cam.isMuted;
+      if (get().camera !== camera) set({ camera });
       return;
     }
     for (const pub of p.trackPublications.values()) {
@@ -297,6 +390,7 @@ export class CallEngine {
     set({ connectedAt: Date.now(), audioBlocked: !room.canPlaybackAudio });
     this.updateStatus();
     this.startSession();
+    this.startLinkWatch();
     await this.publishMic(room, ctx);
     if (opts.video && gen === this.gen) await this.setCamera(true);
     return gen === this.gen;
@@ -311,8 +405,9 @@ export class CallEngine {
       .on(E.ParticipantConnected, (p) => {
         if (!mine()) return;
         this.refreshPeer(p);
+        const wasConnected = get().status === "connected";
         this.updateStatus();
-        if (get().status === "connected") this.sound("peer-join");
+        if (wasConnected && userOfIdentity(p.identity) !== me()) this.sound("peer-join");
       })
       .on(E.ParticipantDisconnected, (p) => {
         if (!mine()) return;
@@ -347,10 +442,28 @@ export class CallEngine {
           return { peers, speaking };
         });
       })
+      .on(E.DataReceived, (payload, p, _kind, topic) => {
+        // Someone's phone put the call on hold (they took a phone call).
+        if (!mine() || topic !== HOLD_TOPIC || !p) return;
+        const uid = userOfIdentity(p.identity);
+        if (!uid || uid === me()) return;
+        let on: unknown;
+        try {
+          on = (JSON.parse(new TextDecoder().decode(payload)) as { hold?: unknown }).hold;
+        } catch {
+          return;
+        }
+        if (typeof on !== "boolean") return;
+        set((s) => (s.peers[uid] ? { peers: { ...s.peers, [uid]: { ...s.peers[uid], held: on as boolean } } } : {}));
+      })
       .on(E.ConnectionQualityChanged, (q, p) => {
         if (!mine()) return;
         const quality = (["excellent", "good", "poor", "lost"].includes(q) ? q : "unknown") as CallPeer["connectionQuality"];
-        if (p === room.localParticipant) set({ quality });
+        if (p === room.localParticipant) {
+          set({ quality });
+          this.weakLink.input(quality as LinkQuality, Date.now());
+          this.applyVideoPlan();
+        }
         else {
           const uid = userOfIdentity(p.identity);
           if (uid) set((s) => (s.peers[uid] ? { peers: { ...s.peers, [uid]: { ...s.peers[uid], connectionQuality: quality } } } : {}));
@@ -378,16 +491,18 @@ export class CallEngine {
   private updateStatus(force = false): void {
     const s = get();
     if (!this.room || (s.status !== "connecting" && s.status !== "calling" && !(force && s.status === "reconnecting"))) return;
-    const others = this.room.remoteParticipants.size > 0;
+    const others = this.othersIn(this.room);
     const answered = !!s.call?.answered_at || !s.outgoing;
     const next = others || answered ? "connected" : "calling";
     if (next !== s.status) set({ status: next });
-    if (next === "calling" && !this.stopRingback) {
+    // (On a phone whose app holds the call, the app plays the ringback.)
+    if (next === "calling" && !this.stopRingback && !s.phone) {
       this.stopRingback = playTone("ringback", { volume: currentVoiceSettings().prefs.output_volume / 100 });
+      this.note("ringback");
     } else if (next === "connected") {
       this.stopRingback?.();
       this.stopRingback = null;
-      if (s.status === "calling" || s.status === "connecting") this.sound("join");
+      if (s.status === "calling" || s.status === "connecting") this.sound("call-connect");
     }
   }
 
@@ -437,8 +552,8 @@ export class CallEngine {
     this.scheduleReconnect(callId, 0);
   }
 
-  private scheduleReconnect(callId: string, attempt: number): void {
-    const delay = RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
+  private scheduleReconnect(callId: string, attempt: number, delayMs?: number): void {
+    const delay = delayMs ?? RECONNECT_DELAYS_MS[Math.min(attempt, RECONNECT_DELAYS_MS.length - 1)];
     this.reconnectTimer = setTimeout(async () => {
       this.reconnectTimer = null;
       if (get().callId !== callId || get().status !== "reconnecting") return;
@@ -477,6 +592,7 @@ export class CallEngine {
       await room.startAudio().catch(() => undefined);
       for (const p of room.remoteParticipants.values()) this.refreshPeer(p);
       set({ status: "connected", problem: null });
+      this.applyVideoPlan();
       await this.publishMic(room, this.ensureContext());
       if (get().camera) {
         set({ camera: false });
@@ -520,10 +636,76 @@ export class CallEngine {
         /* LiveKit's own leave covers it */
       }
     };
+    // Wi-Fi to mobile data, a tunnel: say so, and try again the moment
+    // the network's back rather than wait out the backoff.
+    const onOffline = () => set({ offline: true });
+    const onOnline = () => {
+      set({ offline: false });
+      this.retryNow();
+    };
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("pagehide", onHide);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    if (typeof navigator !== "undefined" && navigator.onLine === false) set({ offline: true });
     this.unsubs.push(() => window.removeEventListener("keydown", onKey, true));
     this.unsubs.push(() => window.removeEventListener("pagehide", onHide));
+    this.unsubs.push(() => window.removeEventListener("offline", onOffline));
+    this.unsubs.push(() => window.removeEventListener("online", onOnline));
+  }
+
+  /** The network's back: reconnect now (if we're waiting to). */
+  private retryNow(): void {
+    const s = get();
+    if (s.status !== "reconnecting" || !s.callId || !this.reconnectTimer || s.phone) return;
+    clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.scheduleReconnect(s.callId, 0, 0);
+  }
+
+  // ================================================================ weak connections (WP-D5)
+
+  private startLinkWatch(): void {
+    this.weakLink = new WeakLink();
+    if (this.linkTimer) clearInterval(this.linkTimer);
+    this.linkTimer = setInterval(() => {
+      const was = this.weakLink.weak;
+      if (this.weakLink.tick(Date.now()) !== was) this.applyVideoPlan();
+    }, 2000);
+    this.applyVideoPlan();
+  }
+
+  private stopLinkWatch(): void {
+    if (this.linkTimer) clearInterval(this.linkTimer);
+    this.linkTimer = null;
+  }
+
+  /** Others' cameras at the low layer while it's weak or Data saver's on. */
+  private applyVideoPlan(): void {
+    const plan = videoPlan(this.weakLink.weak, currentVoiceSettings().prefs.data_saver);
+    if (plan.lowered !== get().lowered) set({ lowered: plan.lowered });
+    const room = this.room;
+    const lk = this.lk;
+    if (!room || !lk) return;
+    for (const p of room.remoteParticipants.values()) {
+      for (const pub of p.trackPublications.values()) {
+        if (pub.source === lk.Track.Source.Camera && pub.isSubscribed) pub.setVideoQuality(plan.receive === "low" ? lk.VideoQuality.LOW : lk.VideoQuality.HIGH);
+      }
+    }
+  }
+
+  // ================================================================ hold (WP-D5)
+
+  /** The hold tone while someone in a 1:1 call has you on hold. */
+  private syncHoldTone(s: CallStoreState): void {
+    const on = inCallHere(s) && s.status === "connected" && !s.call?.group && Object.values(s.peers).some((p) => p.held);
+    if (on && !this.stopHold) {
+      this.stopHold = playTone("hold", { volume: currentVoiceSettings().prefs.output_volume / 100 });
+      this.note("hold");
+    } else if (!on && this.stopHold) {
+      this.stopHold();
+      this.stopHold = null;
+    }
   }
 
   private stopSession(): void {
@@ -613,7 +795,7 @@ export class CallEngine {
     const peerIds = [...new Set([...Object.keys(s.peers), ...(s.call?.participants.map((p) => p.user_id) ?? [])])].filter((id) => id !== self);
     const roomId = s.roomId;
     await this.teardown();
-    if (!opts.quiet) this.sound("leave");
+    if (!opts.quiet) this.sound("call-end");
     // Moved to another device or call: no "ended" screen here.
     const showEnded = kind !== "replaced" && kind !== "elsewhere";
     set({ ...initialCallConnection, ended: showEnded ? { kind, seconds, at: Date.now(), roomId, peerIds } : null, status: showEnded ? "ended" : "idle" });
@@ -646,6 +828,9 @@ export class CallEngine {
     this.removedTimer = null;
     this.stopRingback?.();
     this.stopRingback = null;
+    this.stopHold?.();
+    this.stopHold = null;
+    this.stopLinkWatch();
     await this.dropRoom();
     this.pipeline?.destroy();
     this.pipeline = null;
@@ -713,6 +898,7 @@ export class CallEngine {
       camera: cam?.isSubscribed && cam.videoTrack && !cam.isMuted ? (cam.videoTrack as CallPeer["camera"]) : null,
       screen: scr?.isSubscribed && scr.videoTrack ? (scr.videoTrack as CallPeer["screen"]) : null,
       connectionQuality: prev?.connectionQuality ?? "unknown",
+      held: prev?.held ?? false,
     };
   }
 
@@ -737,6 +923,8 @@ export class CallEngine {
       if (track.sid) this.audioEls.set(track.sid, el);
       const speaker = savedDevice("speaker");
       if (speaker && "setSinkId" in el) void (el as HTMLMediaElement & { setSinkId(id: string): Promise<void> }).setSinkId(speaker).catch(() => undefined);
+    } else {
+      this.applyVideoPlan();
     }
     this.refreshPeer(p);
   }
@@ -825,13 +1013,26 @@ export class CallEngine {
   // ================================================================ camera and screen
 
   async setCamera(on: boolean): Promise<void> {
+    const s = get();
+    if (s.phone && s.callId) {
+      // The app's camera (WP-D5); what it does comes back over LiveKit.
+      if (!hasAndroidCallsOut()) return;
+      set({ camera: on });
+      try {
+        await dmCallsApi.control(s.callId, on ? "camera_on" : "camera_off");
+      } catch {
+        set({ camera: !on });
+      }
+      return;
+    }
     const room = this.room;
     const lk = this.lk;
     if (!room || !lk) return;
+    const small = videoPlan(this.weakLink.weak, currentVoiceSettings().prefs.data_saver).sendHeight === 360;
     try {
       const pub = await room.localParticipant.setCameraEnabled(
         on,
-        { deviceId: savedDevice("camera") || undefined, facingMode: get().facing, resolution: lk.VideoPresets.h720.resolution },
+        { deviceId: savedDevice("camera") || undefined, facingMode: get().facing, resolution: (small ? lk.VideoPresets.h360 : lk.VideoPresets.h720).resolution },
         { simulcast: true },
       );
       set({ camera: on, cameraTrack: on ? ((pub?.videoTrack as CallStoreState["cameraTrack"]) ?? null) : null, problem: null });
@@ -842,6 +1043,11 @@ export class CallEngine {
 
   /** Phones: the front or back camera. */
   async flipCamera(): Promise<void> {
+    const ps = get();
+    if (ps.phone && ps.callId) {
+      if (hasAndroidCallsOut()) void dmCallsApi.control(ps.callId, "flip").catch(() => undefined);
+      return;
+    }
     const room = this.room;
     const lk = this.lk;
     if (!room || !lk) return;
@@ -956,6 +1162,13 @@ export class CallEngine {
   private sound(s: VoiceSound): void {
     const prefs = currentVoiceSettings().prefs;
     if (!prefs.sounds) return;
+    this.note(s);
     playVoiceSound(this.ctx, s, prefs.output_volume / 100);
+  }
+
+  /** The e2e suite listens for the call's sounds (``window.__callSounds``). */
+  private note(s: string): void {
+    const w = window as unknown as { __callSounds?: string[] };
+    w.__callSounds?.push(s);
   }
 }

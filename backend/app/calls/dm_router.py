@@ -294,13 +294,13 @@ async def ring_again(call_id: uuid.UUID, body: RingIn | None = None, db: AsyncSe
 
 
 class ControlIn(BaseModel):
-    action: Literal["mute", "unmute", "speaker_on", "speaker_off"]
+    action: Literal["mute", "unmute", "speaker_on", "speaker_off", "camera_on", "camera_off", "flip"]
 
 
 @router.post("/{call_id}/control")
 async def control(call_id: uuid.UUID, body: ControlIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
-    """Mute or the loudspeaker for your call in the Android app, from the
-    page that shows the call's video."""
+    """Mute, the loudspeaker or the camera for your call in the Android
+    app, from the page that shows the call's video."""
     await access.require_voice(db, user)
     try:
         return await dm.control(db, user, call_id, body.action)

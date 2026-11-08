@@ -4,14 +4,16 @@
  *  - the ringtone for a call ringing you: a soft rising three-note phrase,
  *    twice, then a pause, over and over, with a vibration on phones;
  *  - the ringback while your call rings the others: the familiar long
- *    low tone, two seconds on, four off.
+ *    low tone, two seconds on, four off;
+ *  - the hold tone while the other person has put the call on hold (their
+ *    phone took a call): two soft short beeps every four seconds.
  *
  * One tone at a time per tab. When several Promptly tabs are open, only
  * one rings out loud (a Web Lock picks it, preferring a tab you can see);
  * the others show the incoming call quietly.
  */
 
-type Tone = "ring" | "ringback";
+type Tone = "ring" | "ringback" | "hold";
 
 let ctx: AudioContext | null = null;
 let playing: { tone: Tone; stop: () => void } | null = null;
@@ -52,6 +54,11 @@ function cycle(c: AudioContext, out: AudioNode, tone: Tone, t0: number): number 
     note(c, out, 440, t0, 2, 0.12);
     note(c, out, 480, t0, 2, 0.12);
     return 6;
+  }
+  if (tone === "hold") {
+    note(c, out, 620, t0, 0.14, 0.07);
+    note(c, out, 620, t0 + 0.3, 0.14, 0.07);
+    return 4;
   }
   // E5 G#5 B5, twice, then a pause.
   const phrase: [number, number][] = [
