@@ -315,6 +315,21 @@ class Settings(BaseSettings):
     TTS_MAX_CHARS: int = 4000
     TTS_TIMEOUT_S: int = 60
 
+    # ---- Calls (voice channels; LiveKit) ----
+    # The key pair shared with the livekit service (install.sh makes it).
+    # Empty or a "change-me" placeholder = calls aren't set up.
+    LIVEKIT_API_KEY: str = ""
+    LIVEKIT_API_SECRET: str = ""
+    # Where the backend reaches LiveKit's API. Empty = find it: the
+    # "livekit" container on Docker Desktop and in test stacks, else the
+    # host (Linux, host networking).
+    LIVEKIT_API_URL: str = ""
+    # LiveKit's Prometheus port (usage numbers in Admin > Calls) and the
+    # media ports the checklist tells the owner to forward.
+    LIVEKIT_METRICS_PORT: int = 6789
+    LIVEKIT_UDP_PORT: int = 7882
+    LIVEKIT_TCP_PORT: int = 7881
+
     # ---- Search ----
     SEARXNG_URL: str = "http://searxng:8080"
     # False when the operator installed without the bundled SearXNG

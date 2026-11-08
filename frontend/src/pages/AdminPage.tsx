@@ -10,12 +10,13 @@ import {
   Settings2,
   Terminal,
   Users,
-  Users2, KeyRound } from "lucide-react";
+  Users2, KeyRound, PhoneCall } from "lucide-react";
 
 import { AnalyticsPanel } from "@/components/admin/AnalyticsPanel";
 import { AppSettingsPanel } from "@/components/admin/AppSettingsPanel";
 import { AuditLogPanel } from "@/components/admin/AuditLogPanel";
 import { BackupsPanel } from "@/components/admin/BackupsPanel";
+import { CallsPanel } from "@/components/admin/CallsPanel";
 import { PasswordsPanel } from "@/components/admin/PasswordsPanel";
 import { StoragePanel } from "@/components/admin/StoragePanel";
 import { ConsolePanel } from "@/components/admin/ConsolePanel";
@@ -38,7 +39,8 @@ type TabId =
   | "passwords"
   | "storage"
   | "models"
-  | "connectors";
+  | "connectors"
+  | "calls";
 
 interface TabDef {
   id: TabId;
@@ -110,6 +112,12 @@ const TABS: TabDef[] = [
     label: "Storage",
     icon: <HardDrive className="h-3.5 w-3.5" />,
     subtitle: "Disk space, the nightly integrity check, and files to restore from a backup.",
+  },
+  {
+    id: "calls",
+    label: "Calls",
+    icon: <PhoneCall className="h-3.5 w-3.5" />,
+    subtitle: "Voice channels: turn them on, check they work from outside, and see who's in voice now.",
   },
   {
     id: "settings",
@@ -184,6 +192,7 @@ export function AdminPage() {
             {tab === "backups" && <BackupsPanel />}
             {tab === "passwords" && <PasswordsPanel />}
             {tab === "storage" && <StoragePanel />}
+            {tab === "calls" && <CallsPanel />}
             {tab === "settings" && <AppSettingsPanel />}
           </div>
         </div>

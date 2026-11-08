@@ -21,6 +21,16 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- Calls (voice channels), WP-V1 -->
+- Calls: the calls service (LiveKit, self-hosted) that voice channels in Rooms will use. New installs get it on. On an existing server, run the update once more after updating to this version: that run makes the calls key pair and starts the service (Admin → Calls says so if it hasn't). For voice from outside your home, forward UDP 7882 and TCP 7881 on your router.
+- Admin → Calls: turn voice on, choose everyone or certain groups, cap Go Live quality and how many people fit in a channel, a set-up checklist that says what's wrong and how to fix it (calls service running, keys, your internet address and CGNAT, works from outside, upload for streams), and live usage. Admins are alerted if the calls service stops or your home's address changes.
+- Account → Voice & video → Test calls: pick your microphone, speaker and camera, see your mic level, then make a real call to your server and hear yourself back, with how it connected in plain words ("Direct (best)", "Fallback over TCP (fine)", "Couldn't connect from here") and what to do about it. From outside your home it also estimates how many people could watch a stream.
+
+### Changed
+<!-- Calls (voice channels), WP-V1 -->
+- The site now allows the camera and screen sharing for itself (for voice channels' cameras and Go Live) and WebAssembly (for noise suppression). Account → Voice is now Voice & video.
+
 ## [0.31.0] - 2026-11-08
 
 ### Added

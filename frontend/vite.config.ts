@@ -313,6 +313,9 @@ export default defineConfig({
           "**/pdf.worker*.mjs",
           // pdf.js data files (CMaps, standard fonts, wasm) — WP-6.5.
           "**/pdfjs/**",
+          // Calls: the LiveKit client (~200 KB gz), fetched when someone
+          // joins voice or runs Test calls.
+          "**/livekit-*.js",
         ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },
@@ -413,6 +416,11 @@ export default defineConfig({
             /\/(mammoth|@xmldom|lop|underscore|bluebird|dingbat-to-unicode|option)\//.test(id)
           ) {
             return "word-import";
+          }
+          // Calls: the LiveKit client and its protocol/codec helpers, one
+          // lazy chunk kept out of the precache by name (see globIgnores).
+          if (id.includes("/livekit-client/") || id.includes("/@livekit/") || id.includes("/sdp-transform/") || id.includes("/webrtc-adapter/")) {
+            return "livekit";
           }
           if (id.includes("/docx-preview/")) return "word-preview";
           if (id.includes("/docx/")) return "word-export";

@@ -30,6 +30,7 @@ import { DevicesPanel } from "@/components/account/DevicesPanel";
 import { PasswordDevices } from "@/components/account/PasswordDevices";
 import { UsagePanel } from "@/components/account/UsagePanel";
 import { VoicePanel } from "@/components/account/VoicePanel";
+import { TestCallsPanel } from "@/components/calls/TestCallsPanel";
 import { MfaSettingsPanel } from "@/components/mfa/MfaSettingsPanel";
 import { TopNav } from "@/components/layout/TopNav";
 import { useAuthStore } from "@/store/authStore";
@@ -75,7 +76,7 @@ export function AccountSecurityPage() {
     { id: "memory", label: "Memory", icon: Brain, node: <MemoryPanel /> },
     { id: "data", label: "Import & export", icon: FolderInput, node: <ImportExportPanel /> },
     { id: "interface", label: "Interface", icon: LayoutGrid, node: <FeatureVisibilityPanel /> },
-    { id: "voice", label: "Voice", icon: Volume2, node: <VoicePanel /> },
+    { id: "voice", label: "Voice & video", icon: Volume2, node: <div className="space-y-4"><VoicePanel /><TestCallsPanel /></div> },
     { id: "usage", label: "Usage & cost", icon: BarChart3, node: <UsagePanel /> },
     { id: "prompts", label: "Saved prompts", icon: Bookmark, node: <SavedPromptsPanel /> },
     { id: "notifications", label: "Notifications", icon: Bell, node: <NotificationsPanel /> },

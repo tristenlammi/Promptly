@@ -788,3 +788,9 @@ app.include_router(
     prefix="/api/notifications",
     tags=["notifications"],
 )
+
+# ---- Calls (voice channels; app/calls, built on app/rtc) ----
+# LiveKit webhooks, Test calls and Admin > Calls (WP-V1).
+from app.calls.router import router as calls_router  # noqa: E402
+
+app.include_router(calls_router, prefix="/api/calls", tags=["calls"])

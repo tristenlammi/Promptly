@@ -257,6 +257,19 @@ async def memory_learning(ctx) -> dict[str, int]:
     return {"suggested": await nightly()}
 
 
+# ---- Calls (voice channels): is the calls service up, has the home's
+# address moved? One admin alert a day at most, only while voice is on.
+async def calls_check(ctx) -> dict:
+    from app.calls.access import load_settings
+    from app.calls.checks import hourly
+    from app.database import SessionLocal
+    from app.redis_client import redis
+
+    async with SessionLocal() as db:
+        s = await load_settings(db)
+    return await hourly(redis, enabled=s.enabled)
+
+
 class WorkerSettings:
     functions = [
         # Never retried by arq: a run interrupted mid-way is closed out by
@@ -310,6 +323,8 @@ class WorkerSettings:
             run_at_startup=False,
             unique=True,
         ),
+        # Calls: hourly check of the calls service (app/calls/checks.py).
+        cron(calls_check, minute=27, run_at_startup=False, unique=True, timeout=120),
     ]
     on_startup = wait_for_schema
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)
