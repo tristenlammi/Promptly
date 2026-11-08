@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+- Workspaces: two board edits close together (adding a card, then dragging it to Done) could leave the board's text in chat search out of date, because both tried to create the workspace's Boards folder at once and one crashed. Making a workspace folder is now safe when two requests race, for every folder kind.
+
 ## [0.31.0] - 2026-11-08
 
 ### Added
