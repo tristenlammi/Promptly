@@ -13,7 +13,7 @@ import { decideOffer, type SaveOffer } from "../../../frontend/src/passwords/cor
 import { afterFill, codeStep, flowFor, mayFillOnLoad, type TabFlow } from "../../../frontend/src/passwords/core/autofill/flow";
 import { openSignedPack, ruleForHost } from "../../../frontend/src/passwords/core/autofill/rules";
 import { generateForSite, generatePassphrase, generatePin, generateUsername, plusAddress } from "../../../frontend/src/passwords/core/generator";
-import { baseDomain, hostOf, lookalikeOf, matchItems, matchUrl } from "../../../frontend/src/passwords/core/match";
+import { baseDomain, hostOf, isPrimary, lookalikeOf, matchItems, matchUrl, siteName } from "../../../frontend/src/passwords/core/match";
 import { type Item, type ItemBody, newBody, type SiteRule } from "../../../frontend/src/passwords/core/model";
 import { IdbStore } from "../../../frontend/src/passwords/core/store";
 import { totpCode } from "../../../frontend/src/passwords/core/totp";
@@ -458,8 +458,10 @@ function canReveal(item: Item): boolean {
   return client?.canReveal(item.vaultId) ?? false;
 }
 
+/** Logins for this page, best first. Ones Auto judges to be for another service on the same
+ *  domain come last, marked `other`: they're listed apart, under "Other logins for ...". */
 function candidatesFor(url: string): Candidate[] {
-  return matchItems(loginItems(), url, recents).map(({ item, downgrade }) => ({
+  return matchItems(loginItems(), url, recents).map(({ item, downgrade, kind }) => ({
     id: item.id,
     title: item.body.title,
     username: item.body.username ?? "",
@@ -468,7 +470,15 @@ function candidatesFor(url: string): Candidate[] {
     kind: item.body.kind,
     downgrade,
     reprompt: !!item.body.reprompt,
+    other: !isPrimary(kind),
   }));
+}
+
+/** What a panel or menu shows for a page: its logins, the domain the other ones are on, and
+ *  the saved site it only looks like when nothing's offered (D93: never filled, but said). */
+function pageRows(list: Candidate[], url: string): { candidates: Candidate[]; site: string; lookalike: string | null } {
+  const host = hostOf(url);
+  return { candidates: list, site: siteName(url), lookalike: host && !list.length ? lookalikeOf(host, savedDomains()) : null };
 }
 
 /** Mid-flow, the item already chosen goes first (plan 6.3). */
@@ -699,7 +709,7 @@ async function fill(tabId: number, itemId: string, opts: FillOptions): Promise<F
     };
     // No prompt in an iframe only for an exact-host match to the item, on the page's site.
     const frameIsPlain = (r: { frameId: number; url: string }) => r.frameId === 0 || (exactHost(r.url) && sameSite(hostOf(r.url) ?? "", hostOf(topUrl) ?? ""));
-    const matching = reports.filter((r) => urls.some((u) => matchUrl(u, r.url)));
+    const matching = reports.filter((r) => urls.some((u) => matchUrl(u, r.url, { itemMatch: item.body.match })));
     let chosen = matching.find((r) => r.frameId === 0) ?? matching[0];
     if (!chosen) {
       // No saved URL matches anywhere here: the person chose it by hand from the popup.
@@ -821,7 +831,8 @@ async function updateBadge(tabId: number, url: string | undefined) {
     await ext.action.setTitle({ tabId, title: "Promptly Passwords: a passkey is ready for this site" }).catch(() => undefined);
     return;
   }
-  const n = client?.unlocked ? candidatesFor(url).length : 0;
+  // Only this site's own logins: another service's on the same domain isn't one to count.
+  const n = client?.unlocked ? candidatesFor(url).filter((c) => !c.other).length : 0;
   await ext.action.setBadgeText({ tabId, text: n ? String(n) : "" }).catch(() => undefined);
   await ext.action.setBadgeBackgroundColor({ tabId, color: "#D97757" }).catch(() => undefined);
   await ext.action.setTitle({ tabId, title: "Promptly Passwords" }).catch(() => undefined);
@@ -981,7 +992,8 @@ async function generateInto(tabId: number, frameId: number, url: string, chosen?
   const report = await reportOf(tabId, frameId);
   let target: Item | undefined;
   if (report?.kinds.includes("change-password")) {
-    const list = await orderedCandidates(tabId, url);
+    // A new password belongs to this site's own login, never another service's on the domain.
+    const list = (await orderedCandidates(tabId, url)).filter((x) => !x.other);
     const id = chosen && list.some((x) => x.id === chosen) ? chosen : list[0]?.id;
     target = id ? c.get(id) : undefined;
     // An item that asks for the master password isn't changed without it.
@@ -1129,10 +1141,9 @@ async function handlePage(m: PageRequest): Promise<unknown> {
     case "matches": {
       const tab = await ext.tabs.get(m.tabId);
       const url = m.url ?? tab.url ?? "";
-      const host = hostOf(url);
-      if (c.unlocked) await touchLockTimer();
-      const lookalike = host && c.unlocked && !candidatesFor(url).length ? lookalikeOf(host, savedDomains()) : null;
-      return { url, candidates: c.unlocked ? await orderedCandidates(m.tabId, url) : [], lookalike };
+      if (!c.unlocked) return { url, candidates: [], site: siteName(url), lookalike: null };
+      await touchLockTimer();
+      return { url, ...pageRows(await orderedCandidates(m.tabId, url), url) };
     }
     case "item":
       return c.unlocked ? (c.get(m.id)?.body ?? null) : null;
@@ -1574,7 +1585,8 @@ async function mailRows(kinds: string[], url: string | undefined): Promise<{ mai
 async function maybeAutofillOnLoad(tabId: number, frameId: number, kinds: string[], url: string | undefined) {
   // Every page reports, so the cheap checks go before matching against the whole vault.
   if (!url || frameId !== 0 || !kinds.includes("signin") || !client?.unlocked) return;
-  const matches = matchItems(loginItems(), url, recents);
+  // Another service's login on the same domain is no part of "the one clear match".
+  const matches = matchItems(loginItems(), url, recents).filter((m) => isPrimary(m.kind));
   const local = (u: URL) => u.hostname === "localhost" || u.hostname.endsWith(".localhost");
   const allowed = mayFillOnLoad({ url, frameId, kinds }, matches.map((m) => ({ kind: m.kind, optedIn: !!m.item.body.autofillOnLoad, reprompt: !!m.item.body.reprompt, downgrade: m.downgrade })), __TEST_BUILD__ ? local : undefined);
   if (!allowed) return;
@@ -1700,7 +1712,7 @@ async function handleMenu(m: MenuRequest, sender: chrome.runtime.MessageSender):
       const kinds = report?.kinds ?? [];
       // Firefox's menu doesn't act on a click, so its passkeys are in the toolbar panel.
       const passkeys = __ENGINE__ === "firefox" ? [] : await offerRows(tabId, client, hostFrame);
-      return { locked: false, candidates: list, kinds, url, passkeys, ...(await mailRows(kinds, url)) };
+      return { locked: false, ...pageRows(list, url), kinds, url, passkeys, ...(await mailRows(kinds, url)) };
     }
     case "menuPick": {
       if (!client?.unlocked) return { ok: false, reason: "locked" };
@@ -1869,7 +1881,7 @@ async function handleTest(m: { op: string; [k: string]: unknown }): Promise<unkn
       packRules = null;
       return { rules: (await shippedPack()).length };
     case "items":
-      return client!.allItems().map((i) => ({ id: i.id, title: i.body.title, username: i.body.username, password: i.body.password, pendingPassword: i.body.pendingPassword, tags: i.body.tags ?? [], urls: i.body.urls ?? [], history: i.body.passwordHistory?.length ?? 0 }));
+      return client!.allItems().map((i) => ({ id: i.id, title: i.body.title, username: i.body.username, password: i.body.password, pendingPassword: i.body.pendingPassword, tags: i.body.tags ?? [], urls: i.body.urls ?? [], match: i.body.match, history: i.body.passwordHistory?.length ?? 0 }));
     case "patchItem": {
       const it = client!.get(m.id as string);
       if (!it) throw new Error("No such item");

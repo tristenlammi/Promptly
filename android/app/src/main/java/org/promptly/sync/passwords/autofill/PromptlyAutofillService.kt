@@ -30,6 +30,7 @@ import androidx.autofill.inline.UiVersions
 import androidx.autofill.inline.v1.InlineSuggestionUi
 import org.promptly.sync.R
 import org.promptly.sync.passwords.Pw
+import org.promptly.sync.passwords.core.Match
 
 class PromptlyAutofillService : AutofillService() {
     private data class Walked(val nodes: List<FieldNode<AutofillId>>, val values: Map<AutofillId, String>)
@@ -105,7 +106,10 @@ class PromptlyAutofillService : AutofillService() {
         val recents = Pw.prefs.recents
         val cert = (target as? FillTarget.App)?.cert
         if (target is FillTarget.App && cert != null) AssetLinks.refreshInBackground(target.pkg, cert, AutofillIndex.vaultDomains(lookup))
-        val hits = AutofillIndex.matches(lookup, target, recents) { domain -> cert != null && AssetLinks.cached(pkg, cert, domain) == true }
+        val all = AutofillIndex.matches(lookup, target, recents) { domain -> cert != null && AssetLinks.cached(pkg, cert, domain) == true }
+        // Another service's login on this domain is offered only when this one has none (D89).
+        val hits = AutofillIndex.offered(all)
+        val elsewhere = hits.isNotEmpty() && hits.none { it.primary }
 
         val inline = if (Build.VERSION.SDK_INT >= 30) request.inlineSuggestionsRequest else null
         lastInlineCount = 0
@@ -146,8 +150,12 @@ class PromptlyAutofillService : AutofillService() {
             return if (added == 0) null else response.build()
         }
         if (form.hasLogin) {
+            val siteName = (target as? FillTarget.Web)?.let { Match.siteName(it.host) } ?: site
             for (h in hits.take(8)) {
-                addDataset(AutofillAuthActivity.MODE_LOGIN, h.entry.itemId, h.entry.title ?: "Login for $site", h.entry.username ?: if (Pw.unlocked) null else "Tap to unlock", h.downgrade)
+                val who = h.entry.username ?: if (Pw.unlocked) null else "Tap to unlock"
+                // Labelled, so it's clear this one's for another service on the domain.
+                val sub = if (elsewhere) listOfNotNull(who, "Other login for $siteName").joinToString(" · ") else who
+                addDataset(AutofillAuthActivity.MODE_LOGIN, h.entry.itemId, h.entry.title ?: "Login for $site", sub, h.downgrade)
             }
         }
         if (form.otps.isNotEmpty()) {

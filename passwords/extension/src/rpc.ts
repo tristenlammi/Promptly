@@ -4,7 +4,8 @@ export const ext: typeof chrome = (globalThis as unknown as { browser?: typeof c
 
 export type PageReport = { url: string; origin: string; kinds: string[]; roles: string[]; fieldCount: number; top: boolean };
 
-export type Candidate = { id: string; title: string; username: string; hasTotp: boolean; kind: string; downgrade: boolean; reprompt: boolean };
+/** `other`: a login for another service on the same domain, listed apart (match.ts, Auto). */
+export type Candidate = { id: string; title: string; username: string; hasTotp: boolean; kind: string; downgrade: boolean; reprompt: boolean; other?: boolean };
 
 export type StateOut = { connected: boolean; serverUrl: string | null; hasKit: boolean; unlocked: boolean; preview: boolean; onClickOnly: boolean; deviceRequests: number };
 

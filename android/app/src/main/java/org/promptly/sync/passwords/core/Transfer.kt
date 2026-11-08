@@ -400,7 +400,7 @@ object Importers {
 
     private fun bwMatch(m: JsonElement?): String? = when ((m as? JsonPrimitive)?.contentOrNull) {
         "0" -> "base"
-        "1" -> "host"
+        "1" -> "port"
         "2" -> "prefix"
         "3" -> "exact"
         "4" -> "regex"

@@ -61,7 +61,7 @@ Everything below needs hardware, a real browser or a real site, which I couldn't
 Set it up first: Settings → Passwords and accounts, pick Promptly as the autofill service and the Credential Manager provider, and in Chrome set Autofill to "using another service".
 
 - Chrome autofill: an ordinary login fills, including on a long form you've scrolled. This is the biggest gap, because Chrome on the emulator was blocked by its terms screen (and I'm not allowed to accept those).
-- A login saved for `https://nas.example:5001` isn't suggested, and Search asks first.
+- A login saved for `https://nas.example:5001` is now suggested on `nas.example` in Chrome, since Chrome doesn't tell autofill the port (D91). Two logins on `zyx.` and `abc.` of one domain: each site shows only its own, and saving a new password on one doesn't change the other.
 - App autofill in a few real apps.
 - A banking app that signs in through its own WebView: expect the "showing a web page" question unless the site's saved on that login.
 - A real passkey on a real site through Credential Manager, both creating and signing in. It asks for your passkey PIN now, not a fingerprint (D86). Check the PIN box comes up ready to type with the number keyboard, Done signs in, and five wrong PINs lock the vault and say so.
@@ -98,6 +98,7 @@ The checklist's install section needs a real install. Automated tests used the d
 - On Firefox, click a login in the menu under a login box, and check the toolbar panel opens with it at the top and fills on one click. Then submit a new login and press "Save in the panel" on the bar. Tests can't see the real panel, only the same page opened in a tab. If the panel ignores a click you meant, say so: it waits for the pointer to move after a page opens it (D79). On Firefox before 149 it can't open by itself.
 - On Chrome and Helium, copy a 2FA code and check that it arrives and then clears on time. The fix for lost clipboard writes is a timing pause (D76), so tell me if you ever see one fail.
 - Brave, Vivaldi and Opera aren't on this machine, so they're untested. Edge ran an earlier version of the code, and only the main extension tests.
+- Site matching (D89 to D94), on your own self-hosted services: each subdomain should offer only its own login, with the others under "Other logins for <domain>" in the toolbar panel. A login you saved with no port should fill on any port of that host. If a big site you use stops offering a login, edit it and pick Same domain under Match websites, and tell me which site.
 - Filling on the release (non-test) extension build was only smoke tested, because the tests drive hooks that release builds don't have.
 
 ## 5. Trial with low-value accounts for a few weeks

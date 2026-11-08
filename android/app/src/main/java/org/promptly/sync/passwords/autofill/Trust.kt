@@ -126,11 +126,16 @@ object TrustedBrowsers {
 /** What the page or app is, once we've decided what to believe. */
 sealed class FillTarget {
     /** `domain` keeps a port if whoever asked gave one. Android's own `webDomain` doesn't, so on
-     *  most fills the port isn't known, and only logins saved with no port match. `schemeKnown`
-     *  is false if nothing said whether this page is secure, which then gets a warning. */
+     *  most fills the port isn't known: then a login saved with a port on this very host is still
+     *  offered, as Match.Kind.ANYPORT (D91). `schemeKnown` is false if nothing said whether
+     *  this page is secure, which then gets a warning. */
     data class Web(val domain: String, val scheme: String, val pkg: String, val schemeKnown: Boolean = true) : FillTarget() {
         val url: String get() = "$scheme://$domain/"
         val host: String get() = url.toHttpUrlOrNull()?.host ?: domain.substringBefore(':')
+        val portKnown: Boolean get() = ':' in domain.substringAfterLast(']')
+
+        /** Logins for this page, with what's known about its port. */
+        fun matchItems(items: Collection<org.promptly.sync.passwords.core.Item>) = Match.matchItems(items, url, pagePortKnown = portKnown)
     }
 
     data class App(val pkg: String, val cert: String?, val claimedDomain: String?) : FillTarget()

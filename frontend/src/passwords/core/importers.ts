@@ -308,7 +308,7 @@ export function fromBitwardenJson(data: Any): ImportResult {
 }
 
 function bwMatch(m: unknown): LoginUrl["match"] {
-  return ({ 0: "base", 1: "host", 2: "prefix", 3: "exact", 4: "regex", 5: "never" } as Record<string, LoginUrl["match"]>)[String(m)] ?? undefined;
+  return ({ 0: "base", 1: "port", 2: "prefix", 3: "exact", 4: "regex", 5: "never" } as Record<string, LoginUrl["match"]>)[String(m)] ?? undefined;
 }
 
 // ---- 1Password .1pux ------------------------------------------------------------

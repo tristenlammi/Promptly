@@ -303,6 +303,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
   const [tabInfo, setTabInfo] = useState<chrome.tabs.Tab | null>(null);
   const [matches, setMatches] = useState<Candidate[]>([]);
   const [lookalike, setLookalike] = useState<string | null>(null);
+  const [site, setSite] = useState("");
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<Row[]>([]);
   const [message, setMessage] = useState("");
@@ -332,9 +333,10 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
       }
       setTabInfo(t ?? null);
       if (t?.id !== undefined) {
-        const r = await call<{ candidates: Candidate[]; lookalike: string | null }>({ t: "matches", tabId: t.id });
+        const r = await call<{ candidates: Candidate[]; lookalike: string | null; site?: string }>({ t: "matches", tabId: t.id });
         setMatches(r.candidates);
         setLookalike(r.lookalike);
+        setSite(r.site ?? "");
       }
     })();
   }, []);
@@ -412,7 +414,11 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
             A new device is asking to join your vault. Check it
           </button>
         )}
-        {lookalike && <p className="err">This site looks like {lookalike}, but it isn't. Be careful.</p>}
+        {lookalike && (
+          <p className="err" role="alert" data-testid="lookalike">
+            This is {pageHost(tabInfo?.url ?? "") ?? "a different site"}. Your login for {lookalike} isn't offered here. It looks like that site, but it isn't.
+          </p>
+        )}
         {picked && tab === "vault" && !searching && !adding && (
           <div data-testid="handoff" className="flex flex-col rounded border p-2">
             <p className="text-xs font-medium">You picked this in the menu on the page.</p>
@@ -440,7 +446,7 @@ function Open({ state, onLock }: { state: StateOut; onLock: () => void }) {
               {rows.length === 0 && <p className="muted">Nothing matches that.</p>}
             </div>
           ) : (
-            <VaultHome tab={tabInfo} matches={matches} pickedId={picked?.id} doFill={doFill} rowProps={rowProps} />
+            <VaultHome tab={tabInfo} matches={matches} site={site} pickedId={picked?.id} doFill={doFill} rowProps={rowProps} />
           )
         )}
         {tab === "codes" && <CodesTab query={q} {...rowProps} />}
@@ -480,7 +486,7 @@ const CATEGORIES: { id: string; label: string; icon: keyof typeof PATHS; count: 
 
 type RowProps = { onReprompt: (pass: () => void) => void; setMessage: (m: string) => void };
 
-function VaultHome({ tab, matches, pickedId, doFill, rowProps }: { tab: chrome.tabs.Tab | null; matches: Candidate[]; pickedId?: string; doFill: (id: string) => void; rowProps: RowProps }) {
+function VaultHome({ tab, matches, site, pickedId, doFill, rowProps }: { tab: chrome.tabs.Tab | null; matches: Candidate[]; site: string; pickedId?: string; doFill: (id: string) => void; rowProps: RowProps }) {
   const [counts, setCounts] = useState<Counts | null>(null);
   const [favourites, setFavourites] = useState<Row[]>([]);
   const [category, setCategory] = useState<{ id: string; label: string } | null>(null);
@@ -502,6 +508,9 @@ function VaultHome({ tab, matches, pickedId, doFill, rowProps }: { tab: chrome.t
     );
   }
   const here = new Set(matches.map((m) => m.id));
+  // Logins for other services on this domain go under their own heading (match.ts, Auto).
+  const own = matches.filter((m) => !m.other);
+  const others = matches.filter((m) => m.other);
   const stars = favourites.filter((f) => !here.has(f.id));
   return (
     <>
@@ -510,9 +519,15 @@ function VaultHome({ tab, matches, pickedId, doFill, rowProps }: { tab: chrome.t
       {tab?.id !== undefined && <MailRows tabId={tab.id} setMessage={rowProps.setMessage} />}
       <div className="flex flex-col">
         <p className="section">This site</p>
-        {matches.length === 0 && <p className="muted">Nothing saved for this site.</p>}
-        {matches.filter((m) => m.id !== pickedId).map((m) => <ItemRow key={m.id} row={m} here onFill={() => doFill(m.id)} {...rowProps} />)}
+        {own.length === 0 && <p className="muted">Nothing saved for this site.</p>}
+        {own.filter((m) => m.id !== pickedId).map((m) => <ItemRow key={m.id} row={m} here onFill={() => doFill(m.id)} {...rowProps} />)}
       </div>
+      {others.length > 0 && (
+        <div className="flex flex-col" data-testid="other-logins">
+          <p className="section">Other logins for {site || "this domain"}</p>
+          {others.map((m) => <ItemRow key={m.id} row={m} onFill={() => doFill(m.id)} {...rowProps} />)}
+        </div>
+      )}
       {stars.length > 0 && (
         <div className="flex flex-col">
           <p className="section">Favourites</p>
@@ -530,7 +545,7 @@ function VaultHome({ tab, matches, pickedId, doFill, rowProps }: { tab: chrome.t
           </button>
         ))}
       </div>
-      <PageTools tab={tab} matches={matches} setMessage={rowProps.setMessage} />
+      <PageTools tab={tab} matches={own} setMessage={rowProps.setMessage} />
     </>
   );
 }

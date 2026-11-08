@@ -3,7 +3,7 @@ import { Plus, RefreshCw, Trash2 } from "lucide-react";
 import { type FormEvent, useMemo, useState } from "react";
 
 import { generateForSite } from "../core/generator";
-import { hostOf } from "../core/match";
+import { hostOf, ITEM_MATCHES, URL_MATCHES } from "../core/match";
 import type { CustomField, ItemBody, ItemKind, LoginUrl, UrlMatch } from "../core/model";
 import { parseOtpauth } from "../core/totp";
 import { Button, Callout, errorText, IconButton, inputClass, Label, useVault } from "./kit";
@@ -79,15 +79,6 @@ const FIELDS: Partial<Record<ItemKind, FieldDef[]>> = {
   ],
 };
 
-const MATCHES: { value: UrlMatch; label: string }[] = [
-  { value: "base", label: "Same site (default)" },
-  { value: "host", label: "This exact host" },
-  { value: "exact", label: "This exact URL" },
-  { value: "prefix", label: "Starts with" },
-  { value: "regex", label: "Regular expression" },
-  { value: "never", label: "Never fill" },
-];
-
 export function ItemEditor({ initial, vaultId, id, onDone, onCancel }: { initial: ItemBody; vaultId: string; id?: string; onDone: (id: string) => void; onCancel: () => void }) {
   const { vault } = useVault();
   const [body, setBody] = useState<ItemBody>(initial);
@@ -161,6 +152,14 @@ export function ItemEditor({ initial, vaultId, id, onDone, onCancel }: { initial
 
   const urls = body.urls ?? [];
   const setUrl = (i: number, next: Partial<LoginUrl>) => set("urls", urls.map((u, n) => (n === i ? { ...u, ...next } : u)));
+  /** An address's own rule, or none to follow the login's. */
+  const setUrlMatch = (i: number, match: UrlMatch | "") =>
+    set("urls", urls.map((u, n) => {
+      if (n !== i) return u;
+      const { match: _old, ...rest } = u;
+      return match ? { ...rest, match } : rest;
+    }));
+  const itemMatch = ITEM_MATCHES.find((m) => m.value === (body.match ?? "auto")) ?? ITEM_MATCHES[0];
   const fields = body.fields ?? [];
   const setField = (i: number, next: Partial<CustomField>) => set("fields", fields.map((f, n) => (n === i ? { ...f, ...next } : f)));
   const defs = FIELDS[body.kind] ?? [];
@@ -197,11 +196,18 @@ export function ItemEditor({ initial, vaultId, id, onDone, onCancel }: { initial
           <StrengthMeter password={body.password ?? ""} inputs={[body.username ?? "", body.title]} />
           <div className="flex flex-col gap-2">
             <span className="text-sm font-medium text-[var(--text)]">Websites</span>
+            <Label text="Match websites" hint={itemMatch.hint}>
+              <select aria-label="How this login matches websites" data-testid="item-match" className={`${inputClass} w-auto`} value={itemMatch.value} onChange={(e) => set("match", e.target.value === "auto" ? undefined : (e.target.value as UrlMatch))}>
+                {ITEM_MATCHES.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </Label>
             {urls.map((u, i) => (
               <div key={i} className="flex flex-wrap items-center gap-2">
                 <input aria-label={`Website ${i + 1}`} className={`${inputClass} min-w-0 flex-1`} value={u.url} placeholder="https://example.com" onChange={(e) => setUrl(i, { url: e.target.value })} />
-                <select aria-label={`How website ${i + 1} matches`} className={`${inputClass} w-auto`} value={u.match ?? "base"} onChange={(e) => setUrl(i, { match: e.target.value as UrlMatch })}>
-                  {MATCHES.map((m) => (
+                <select aria-label={`How website ${i + 1} matches`} className={`${inputClass} w-auto`} value={u.match ?? ""} onChange={(e) => setUrlMatch(i, e.target.value as UrlMatch | "")}>
+                  {URL_MATCHES.map((m) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
                   ))}
                 </select>

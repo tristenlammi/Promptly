@@ -27,6 +27,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Changed
 - Passwords on Firefox: clicking a login in the menu under a login box opens the toolbar panel with it at the top, ready to fill with one more click, and the save bar's button opens the panel to save. Before, the menu and bar there only said to use the toolbar.
 - Passwords: a site is told you were verified only after the passkey PIN, not just for an unlocked vault and a click, and Android asks for the PIN instead of a fingerprint before using a passkey.
+- Passwords: logins for different services on one domain stay apart. On zyx.example.org only the zyx login is offered, and the abc.example.org one is listed under "Other logins for example.org". A login saved at a site's sign-in host, like accounts.example.com, still fills across the domain.
+- Passwords: a login saved with no port now fills on any port of the same host, such as nas.home:5001 or 192.168.1.10:8443. One saved with a port fills only on that port.
+- Passwords: on a site that only looks like one you have a login for, the toolbar panel and the menu under a login box now say so plainly, and still offer nothing.
+- Passwords: a new login on one service of a domain is saved beside the login for another service there, never over it, on Android too.
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed
@@ -58,6 +62,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ### Added
 - Passwords: Security check lists "Accounts not in your vault", sites your own email says you have an account with and no login for, worked out on your device. Each has Add login, Not an account, and Delete account, which links to the site's deletion or account page and opens a ready-to-send deletion request in Mail as a draft.
+- Passwords: each login has a match setting: Auto, Same domain, Exact host, Exact host and port, Starts with, or Never. Set it in the item editor on the web, in the extension and on Android. Each website can still have its own.
 - Passwords in the browser: choose how long the vault stays unlocked, from 1 minute to 12 hours, when the browser closes, or never, in the toolbar panel and in Settings.
 - Passwords on Android: security emails on the Security check, matched against your logins on the phone.
 - Passwords on Android: a change-password helper from the Security check, with a queue, a new password that waits until you confirm it, and autofill that offers the current and new password on the site's change form.
