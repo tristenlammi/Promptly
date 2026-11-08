@@ -200,6 +200,10 @@ class StreamRequest(BaseModel):
     # Speak the first clause on its own (cut to a few words if it runs long),
     # so audio starts ~300 ms in. Off when the caller already sends clauses.
     first_clause: bool = True
+    # Silence after the last piece. Talk sends a reply one piece per request
+    # (it can't wait for the whole reply), so the pause a sentence or clause
+    # ends with is asked for here (WP-T2).
+    tail_ms: int = Field(default=0, ge=0, le=1000)
 
 
 @app.post("/tts/stream")
@@ -220,6 +224,7 @@ async def tts_stream(req: StreamRequest) -> StreamingResponse:
     pieces = streaming.split_pieces(text, first_clause=req.first_clause)
     if not pieces:
         raise HTTPException(status_code=400, detail="Nothing to say.")
+    pieces[-1].gap_ms = req.tail_ms
     framer = streaming.OpusFramer(OPUS_BITRATE) if req.format == "opus" else None
 
     def encode(samples: np.ndarray) -> bytes:

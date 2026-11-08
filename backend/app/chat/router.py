@@ -7057,6 +7057,29 @@ async def _bridge_generator_to_session(
         session.push(chunk)
 
 
+async def start_spoken_reply(
+    stream_id: uuid.UUID,
+    conversation_id: uuid.UUID,
+    user: User,
+    connection: Any,
+) -> StreamSession:
+    """Talk (``app/talk``) starts a reply here, the same run a typed send
+    starts, and follows its session's events instead of an SSE response.
+    ``connection`` stands in for the request (audit rows read its client
+    address and headers). The stream context must already be enqueued."""
+    return await get_or_create_session(
+        stream_id=stream_id,
+        user_id=user.id,
+        conversation_id=conversation_id,
+        runner=lambda s: _bridge_generator_to_session(stream_id, user, connection, s),
+    )
+
+
+async def enforce_send_quotas(connection: Any, user: User, db: AsyncSession) -> None:
+    """The send-rate and budget checks a typed message gets, for Talk."""
+    await _enforce_send_quotas(connection, user, db)
+
+
 async def _subscribe_session_to_response(
     session: StreamSession, request: Request
 ) -> AsyncGenerator[str, None]:

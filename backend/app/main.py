@@ -793,3 +793,7 @@ app.include_router(
     prefix="/api/notifications",
     tags=["notifications"],
 )
+# Talking to Promptly (WP-T2): the spoken-conversation socket, /api/talk/ws.
+from app.talk.router import router as talk_router  # noqa: E402
+
+app.include_router(talk_router, prefix="/api/talk", tags=["talk"])

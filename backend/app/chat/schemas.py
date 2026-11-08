@@ -77,6 +77,9 @@ class MessageResponse(BaseModel):
     # short note left on a thumbs-down.
     feedback: Literal["up", "down"] | None = None
     feedback_reason: str | None = None
+    # Talk (0300): ``{spoken, interrupted, heard_chars, stt_ms}`` on a turn
+    # that was spoken; drives the "Spoken" mark and "Interrupted" note.
+    voice: dict[str, Any] | None = None
     # Phase 2.6 — in-thread regeneration versioning. ``parent_id`` is the
     # lineage link (the preceding message). The pager fields are only
     # populated for messages that actually have more than one sibling

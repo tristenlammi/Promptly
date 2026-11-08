@@ -1280,6 +1280,11 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
     feedback: Mapped[str | None] = mapped_column(String(8), nullable=True)
     feedback_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Talk (0300): a turn that was spoken, ``{spoken, interrupted,
+    # heard_chars, stt_ms}``. On a reply cut off by the person talking over
+    # it, ``content`` holds only what they heard. NULL on typed turns.
+    voice: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
     def __repr__(self) -> str:
         return f"<Message id={self.id} role={self.role}>"
 

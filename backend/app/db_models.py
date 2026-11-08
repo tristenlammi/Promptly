@@ -139,3 +139,5 @@ from app.trash.models import TrashEntry  # noqa: F401
 from app.links.models import EntityLink  # noqa: F401
 from app.today.models import RecentOpen  # noqa: F401
 from app.workspaces.meetings_models import MeetingJob  # noqa: F401
+# Talking to Promptly (WP-T2): per-turn timings.
+from app.talk.models import TalkMetric  # noqa: F401
