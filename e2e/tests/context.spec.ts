@@ -23,8 +23,9 @@ test.describe("context", () => {
     // (albums, sharing, relationships from a chat), and ~1.4k for the
     // Calendar and continuity tools (calendar_events/free_times/add/change,
     // my_day, search_apps, find_person), and ~0.6k for maps and the timeline
-    // (maps_search/directions/chargers, timeline_day/visits) — ~5.7k in all.
-    expect(size).toBeLessThan(5900);
+    // (maps_search/directions/chargers, timeline_day/visits), and ~0.5k for
+    // Forms (draft_form, read_form_responses) — ~6.2k in all.
+    expect(size).toBeLessThan(6400);
 
     // The meter reads that request and breaks it down.
     const pill = page.getByRole("button", { name: /\d.*\/ 32k/ });
