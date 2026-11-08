@@ -37,6 +37,7 @@ import { toast } from "@/store/toastStore";
 import { cn } from "@/utils/cn";
 
 import { ChoiceBars, ScaleColumns, pct, type ChoiceRow } from "./charts";
+import { SheetCard } from "./SheetCard";
 
 /**
  * The form builder's Responses tab (Forms WP-F1.4): a summary per question
@@ -58,12 +59,15 @@ export function ResponsesTab({
   canEdit,
   onSend,
   onCount,
+  formTitle = "",
 }: {
   fileId: string;
   canEdit: boolean;
   onSend: () => void;
   /** The total, for the tab's label. */
   onCount?: (n: number) => void;
+  /** For a new sheet's name, "<Form> (Responses)". */
+  formTitle?: string;
 }) {
   const qc = useQueryClient();
   const isPhone = useIsMobile();
@@ -133,6 +137,7 @@ export function ResponsesTab({
     <div className="promptly-scroll min-h-0 flex-1 overflow-y-auto bg-[var(--bg)]">
       <div className="mx-auto w-full max-w-3xl px-3 pb-16 pt-4 sm:px-4">
         <Header fileId={fileId} summary={data} newOnOpen={newOnOpen} canEdit={canEdit} />
+        <SheetCard fileId={fileId} summary={data} canEdit={canEdit} formTitle={formTitle} />
         {data.total === 0 ? (
           <div className="mt-4">
             <EmptyState
@@ -179,6 +184,7 @@ export function ResponsesTab({
                 onNumber={setNumber}
                 canDelete={data.can_delete}
                 isPhone={isPhone}
+                sheetLinked={!!data.sheet?.file_id}
               />
             )}
           </>
@@ -275,7 +281,7 @@ function Header({ fileId, summary, newOnOpen, canEdit }: { fileId: string; summa
         firstDescription={`All ${total === 1 ? "1 answer" : `${total} answers`} to this form will be deleted. The questions stay as they are.`}
         firstConfirmLabel="Continue"
         secondTitle="This can't be undone"
-        secondDescription="Download the answers first if you might want them later. Places on limited options open up again."
+        secondDescription={`Download the answers first if you might want them later. Places on limited options open up again.${summary.sheet?.file_id ? " Deleting answers here doesn't change your sheet." : ""}`}
         secondConfirmLabel="Delete all answers"
         destructive
         pending={busy}
@@ -684,6 +690,7 @@ function IndividualView({
   onNumber,
   canDelete,
   isPhone,
+  sheetLinked,
 }: {
   fileId: string;
   number: number | null;
@@ -692,6 +699,8 @@ function IndividualView({
   onNumber: (n: number) => void;
   canDelete: boolean;
   isPhone: boolean;
+  /** A sheet is linked: say that deleting here leaves it alone. */
+  sheetLinked: boolean;
 }) {
   const qc = useQueryClient();
   const { data, error, isLoading } = useQuery({
@@ -711,7 +720,7 @@ function IndividualView({
   const remove = async (r: OneResponse) => {
     const ok = await confirm({
       title: `Delete answer #${r.number}?`,
-      message: "It's deleted for good. If it took a place on a limited option, that place opens up again.",
+      message: `It's deleted for good. If it took a place on a limited option, that place opens up again.${sheetLinked ? " Deleting an answer here doesn't change your sheet." : ""}`,
       confirmLabel: "Delete answer",
       danger: true,
     });

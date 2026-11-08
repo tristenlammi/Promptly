@@ -1038,6 +1038,12 @@ class Spreadsheet(UUIDPKMixin, TimestampMixin, Base):
     text_file_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("files.id", ondelete="SET NULL"), nullable=True
     )
+    # Holds other people's words: a form's answers are written into it
+    # (0291, Forms WP-F1.5). Set while linked, kept after unlinking; a chat
+    # turn that retrieves from it is marked untrusted.
+    outside_content: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
     def __repr__(self) -> str:
         return f"<Spreadsheet id={self.id} title={self.title!r}>"

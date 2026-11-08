@@ -429,6 +429,10 @@ async def submit(
     from app.forms import notify
 
     notify.answer_arrived(form.id)
+    # …and the linked sheet gets the row (WP-F1.5).
+    from app.forms.sheet import sync_soon
+
+    sync_soon(form)
     if form.max_responses is not None and (form.response_count or 0) >= form.max_responses:
         try:
             await notify.tell_closed(db, form, shell, why="full")
@@ -519,6 +523,9 @@ async def edit(db: AsyncSession, token: str, body: Incoming, user: User | None) 
     await db.flush()
     await _grow_shell(db, shell.id, delta)
     await db.commit()
+    from app.forms.sheet import sync_soon
+
+    sync_soon(form)
     return {"number": r.number}
 
 

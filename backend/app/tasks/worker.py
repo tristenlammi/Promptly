@@ -276,6 +276,40 @@ async def forms_digest(ctx) -> int:
         return await send_email_digests(db)
 
 
+# Forms (WP-F1.5): answers written into a linked Sheet.
+async def forms_sheet_sync_job(ctx, form_id: str) -> int:
+    """An answer arrived or changed (or the questions did): write it."""
+    import uuid as _uuid
+
+    from app.forms.sheet import sync_form
+
+    return (await sync_form(_uuid.UUID(form_id))).written
+
+
+async def forms_sheet_reconcile_job(ctx, form_id: str) -> bool:
+    """A while after a live write: if the sheet's editor closed before its
+    autosave, bring the workbook JSON up to the room."""
+    import uuid as _uuid
+
+    from app.forms.sheet import reconcile
+
+    return await reconcile(_uuid.UUID(form_id))
+
+
+async def forms_sheet_tick(ctx) -> int:
+    """Cron: linked sheets still missing answers catch up."""
+    from app.forms.sheet import tick
+
+    return await tick()
+
+
+async def forms_sheet_nightly(ctx) -> int:
+    """Cron: every linked sheet checked against every answer."""
+    from app.forms.sheet import nightly
+
+    return await nightly()
+
+
 class WorkerSettings:
     functions = [
         # Never retried by arq: a run interrupted mid-way is closed out by
@@ -300,6 +334,9 @@ class WorkerSettings:
         func(run_import_job, timeout=24 * 3600, max_tries=1, keep_result=0),
         # Photos and videos are the media worker's (WP-7.4,
         # app.tasks.media_worker), on their own queue.
+        # Forms (WP-F1.5): one sync per form at a time (an advisory lock).
+        func(forms_sheet_sync_job, timeout=600, max_tries=2, keep_result=0),
+        func(forms_sheet_reconcile_job, timeout=300, max_tries=1, keep_result=0),
     ]
     cron_jobs = [
         # Learn from chats that have gone quiet, then look after memory overnight.
@@ -333,6 +370,10 @@ class WorkerSettings:
         # checks four times an hour (it goes at each person's own time).
         cron(forms_close_tick, minute=set(range(2, 60, 5)), run_at_startup=False, unique=True),
         cron(forms_digest, minute={7, 22, 37, 52}, run_at_startup=False, unique=True),
+        # Forms (WP-F1.5): linked sheets catch up every 10 minutes (collab was
+        # down, a sync was lost), and are checked in full overnight.
+        cron(forms_sheet_tick, minute={4, 14, 24, 34, 44, 54}, run_at_startup=False, unique=True, timeout=1800),
+        cron(forms_sheet_nightly, hour=3, minute=50, run_at_startup=False, unique=True, timeout=3600),
     ]
     on_startup = wait_for_schema
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

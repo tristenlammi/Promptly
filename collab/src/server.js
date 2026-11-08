@@ -501,6 +501,205 @@ function reauthSweep() {
   }
 }
 
+// --- Forms: writing answers into a sheet (Forms WP-F1.5) ----------------
+//
+// ``POST /internal/sheet-cells {room, cells, expect?, tabs?}`` — the backend
+// writes a form's answers into its linked sheet. The write goes through a
+// Hocuspocus direct connection, so it loads a closed room from Postgres
+// and, for an open one, reaches every editor like any other edit (the
+// update is broadcast to all connections whatever its origin). Then:
+//   * the room is stored (at once when no one else has it open; otherwise
+//     on the usual debounce, and the open editor's autosave carries the
+//     rows into the workbook JSON);
+//   * ``{live}`` says which it was, so the backend knows whether to rebuild
+//     the workbook JSON from the stored state itself.
+// ``cells``: ``{"<tab>!<r>,<c>": cell | null}`` (null clears). ``expect``:
+// ``{"<tab>!<r>,<c>": "text"}`` — what those cells must still say (the
+// Response # in column A of a row being rewritten, empty for new rows);
+// if someone sorted or typed there since the backend read the room, nothing
+// is written and the reply is 409 with the current state to plan again.
+// ``tabs``: ``{"<tab>": {name, order}}`` — added to the shared structure
+// when it doesn't have them (only once the room's structure is shared;
+// before that the first editor shares its own, read from the workbook).
+// A room never seeded is first seeded from ``spreadsheets.data`` exactly as
+// the first editor would, so its seeding logic isn't fooled.
+
+const SHEET_CELLS_MAX_BYTES = 16 * 1024 * 1024;
+const SHEET_CELLS_MAX = 200_000;
+const CELL_KEY_RE = /^[^!|]{1,64}![0-9]{1,6},[0-9]{1,4}$/;
+
+/** Every non-empty cell of a workbook, keyed as editors key them. */
+function workbookCells(data) {
+  const out = new Map();
+  if (!Array.isArray(data)) return out;
+  data.forEach((sheet, idx) => {
+    if (!sheet || typeof sheet !== "object") return;
+    const sid = sheet.id ?? `#${idx}`;
+    if (Array.isArray(sheet.celldata) && sheet.celldata.length) {
+      for (const cell of sheet.celldata) {
+        if (cell && cell.v != null && Number.isInteger(cell.r) && Number.isInteger(cell.c)) {
+          out.set(`${sid}!${cell.r},${cell.c}`, cell.v);
+        }
+      }
+      return;
+    }
+    if (!Array.isArray(sheet.data)) return;
+    sheet.data.forEach((row, r) => {
+      if (!Array.isArray(row)) return;
+      row.forEach((v, c) => {
+        if (v != null) out.set(`${sid}!${r},${c}`, v);
+      });
+    });
+  });
+  return out;
+}
+
+/** What a cell shows, for ``expect``. */
+function cellText(cell) {
+  if (cell == null) return "";
+  if (typeof cell !== "object") return String(cell);
+  const v = cell.v ?? cell.m;
+  if (v == null) return "";
+  if (typeof v === "object") return String(v.v ?? v.m ?? "");
+  return String(v);
+}
+
+function plainObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+async function sheetCells(request, reply) {
+  let raw = "";
+  for await (const chunk of request) {
+    raw += chunk;
+    if (raw.length > SHEET_CELLS_MAX_BYTES) {
+      reply(413, { error: "too large" });
+      return;
+    }
+  }
+  let body;
+  try {
+    body = JSON.parse(raw || "{}");
+  } catch {
+    reply(400, { error: "bad json" });
+    return;
+  }
+  const { room, cells = {}, expect = {}, tabs = {} } = body || {};
+  let parsed;
+  try {
+    parsed = parseRoom(room);
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || parsed.kind !== "sheet" || !plainObject(cells) || !plainObject(expect) || !plainObject(tabs)) {
+    reply(400, { error: "room, cells required" });
+    return;
+  }
+  const entries = Object.entries(cells);
+  if (entries.length > SHEET_CELLS_MAX) {
+    reply(413, { error: "too many cells" });
+    return;
+  }
+  for (const [k, v] of entries) {
+    if (!CELL_KEY_RE.test(k) || !(v === null || plainObject(v))) {
+      reply(400, { error: `bad cell ${k.slice(0, 80)}` });
+      return;
+    }
+    // Never a formula: a form answer is someone else's words.
+    if (v && v.f != null) {
+      reply(400, { error: "cells can't hold formulas" });
+      return;
+    }
+  }
+  for (const k of Object.keys(expect)) {
+    if (!CELL_KEY_RE.test(k)) {
+      reply(400, { error: `bad expect ${k.slice(0, 80)}` });
+      return;
+    }
+  }
+  if (isFrozen(room)) {
+    reply(409, { error: "frozen" });
+    return;
+  }
+
+  const open = server.hocuspocus.documents.get(room);
+  const live = !!open && open.getConnectionsCount() > 0;
+  const conn = await server.hocuspocus.openDirectConnection(room, { forms: true });
+  let othersOpen = live;
+  let result = null;
+  try {
+    const doc = conn.document;
+    const yCells = doc.getMap("cells");
+    const meta = doc.getMap("meta");
+    const yStruct = doc.getMap("struct");
+    // Seed a room no editor has opened yet, as the first editor would.
+    if (!(meta.get("seeded") === true || yCells.size > 0)) {
+      const { rows } = await pool.query("SELECT data FROM spreadsheets WHERE id = $1", [parsed.id]);
+      if (!rows[0]) {
+        result = [404, { error: "no such sheet" }];
+      } else {
+        const seed = workbookCells(rows[0].data);
+        await conn.transact(() => {
+          for (const [k, v] of seed) yCells.set(k, v);
+          meta.set("seeded", true);
+        });
+      }
+    }
+    if (!result) {
+      const moved = Object.entries(expect).some(([k, want]) => cellText(yCells.get(k)) !== String(want ?? ""));
+      if (moved) {
+        result = [409, { error: "moved", state: Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64") }];
+      }
+    }
+    if (!result) {
+      const structSeeded = meta.get("structSeeded") === true || yStruct.size > 0;
+      await conn.transact(() => {
+        for (const [k, v] of entries) {
+          if (v === null) yCells.delete(k);
+          else yCells.set(k, v);
+        }
+        if (structSeeded) {
+          for (const [tab, t] of Object.entries(tabs)) {
+            if (!/^[^!|]{1,64}$/.test(tab) || !plainObject(t)) continue;
+            if (yStruct.has(`${tab}|tab`)) continue;
+            yStruct.set(`${tab}|tab`, {
+              name: String(t.name ?? "Form responses").slice(0, 100),
+              order: Number.isFinite(t.order) ? t.order : 0,
+              color: null,
+              hide: 0,
+            });
+          }
+        }
+      });
+      othersOpen = doc.getConnectionsCount() > 1;
+      // A closed room: hand back what was stored, so the backend can bring
+      // the workbook JSON (export, search) up to date from it.
+      result = [
+        200,
+        {
+          live: othersOpen,
+          written: entries.length,
+          state: othersOpen ? null : Buffer.from(Y.encodeStateAsUpdate(doc)).toString("base64"),
+        },
+      ];
+    }
+  } catch (err) {
+    console.warn(`[collab] sheet-cells for ${room} failed:`, err?.message || err);
+    result = [500, { error: "write failed" }];
+  } finally {
+    // Store now when no one else has it open (and unload); otherwise the
+    // usual debounced store, like any editor's change. The reply waits for
+    // it, so a 200 for a closed room means it's in Postgres.
+    try {
+      await conn.disconnect({ unloadImmediately: !othersOpen });
+    } catch (err) {
+      console.warn(`[collab] sheet-cells store for ${room} failed:`, err?.message || err);
+      if (result && result[0] === 200) result = [500, { error: "store failed" }];
+    }
+  }
+  reply(result[0], result[1]);
+}
+
 // --- Hocuspocus server -------------------------------------------------
 
 const server = new Server({
@@ -534,6 +733,9 @@ const server = new Server({
     document.broadcastStateless(JSON.stringify({ type: "comments-changed" }), (c) => c !== connection);
   },
   onDisconnect: async ({ documentName, document, clientsCount, context }) => {
+    // A Forms write into a closed sheet (``/internal/sheet-cells``) isn't
+    // a session ending: no "client" line, and no version snapshot per answer.
+    if (context?.forms) return;
     console.log(`[collab] client disconnected from ${documentName}`);
     if (context?.perm === "write") noteAuthor(documentName, context?.user?.id);
     if (clientsCount === 0 && document) await snapshotOnLastDisconnect(documentName, document);
@@ -547,13 +749,17 @@ const server = new Server({
       response.writeHead(code, { "content-type": "application/json" });
       response.end(JSON.stringify(body));
     };
-    const known = ["/internal/drop", "/internal/reset", "/internal/release", "/internal/state"];
+    const known = ["/internal/drop", "/internal/reset", "/internal/release", "/internal/state", "/internal/sheet-cells"];
     if (request.method !== "POST" || !known.includes(request.url)) {
       reply(404, { error: "not found" });
       throw null;
     }
     if (!internalAuthOk(request.headers.authorization)) {
       reply(403, { error: "forbidden" });
+      throw null;
+    }
+    if (request.url === "/internal/sheet-cells") {
+      await sheetCells(request, reply);
       throw null;
     }
     if (["/internal/reset", "/internal/release", "/internal/state"].includes(request.url)) {

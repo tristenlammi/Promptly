@@ -131,6 +131,59 @@ async def release_room(room: str) -> None:
         logger.info("collab release for %s didn't reach collab", room, exc_info=True)
 
 
+class SheetWriteMoved(Exception):
+    """``/internal/sheet-cells`` refused: a cell it was told to expect has
+    changed (someone sorted or typed there). Carries the room's state now."""
+
+    def __init__(self, state: bytes | None) -> None:
+        super().__init__("the sheet changed while planning the write")
+        self.state = state
+
+
+class CollabUnavailable(Exception):
+    """Collab couldn't take the write (down, restarting, or the room is
+    being restored). Nothing was written; try again later."""
+
+
+async def sheet_cells(
+    room: str,
+    cells: dict[str, dict | None],
+    *,
+    expect: dict[str, str] | None = None,
+    tabs: dict[str, dict] | None = None,
+) -> tuple[bool, bytes | None]:
+    """Write ``cells`` into a sheet's room (Forms WP-F1.5): live to anyone
+    who has it open, stored either way. Returns ``(live, state)`` — ``state``
+    is the stored Y state when no one had it open (to rebuild the workbook
+    JSON from), ``None`` when live. Raises :class:`SheetWriteMoved` when an
+    ``expect``ed cell changed, :class:`CollabUnavailable` otherwise."""
+    import base64
+
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(
+                f"{COLLAB_INTERNAL_URL}/internal/sheet-cells",
+                json={"room": room, "cells": cells, "expect": expect or {}, "tabs": tabs or {}},
+                headers={"Authorization": f"Bearer {internal_token()}"},
+            )
+    except Exception as exc:  # noqa: BLE001 — the caller retries later
+        raise CollabUnavailable(str(exc) or type(exc).__name__) from exc
+    body: dict = {}
+    try:
+        body = r.json()
+    except ValueError:
+        pass
+    if r.status_code == 409 and body.get("error") == "moved":
+        state = body.get("state")
+        raise SheetWriteMoved(base64.b64decode(state) if state else None)
+    if r.status_code != 200:
+        raise CollabUnavailable(f"collab sheet-cells returned {r.status_code}: {body.get('error', '')}")
+    state = body.get("state")
+    return bool(body.get("live")), (base64.b64decode(state) if state else None)
+
+
 def drop_user_soon(user_id: uuid.UUID, *, room: str | None = None) -> None:
     """Fire-and-forget :func:`drop_user` (after the revoking commit)."""
     from app.background import spawn

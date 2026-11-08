@@ -281,6 +281,23 @@ export interface NotifySettings {
   can_email: boolean;
 }
 
+/** What can be wrong with the linked sheet (WP-F1.5). */
+export type SheetProblem = "waiting" | "full" | "tab_deleted" | "trashed" | "deleted";
+
+/** The Sheet card: the linked sheet and how up to date it is. */
+export interface LinkedSheet {
+  file_id: string | null;
+  title: string | null;
+  tab_name: string;
+  synced_at: string | null;
+  /** Answers not written into it yet. */
+  pending: number;
+  problem: SheetProblem | null;
+  message: string | null;
+  /** You can open the sheet itself. */
+  can_open: boolean;
+}
+
 export interface ResponsesSummary {
   total: number;
   first_number: number | null;
@@ -290,6 +307,9 @@ export interface ResponsesSummary {
   accepting: boolean;
   notify: NotifySettings;
   questions: SummaryQuestion[];
+  /** ``null``: no sheet linked. */
+  sheet: LinkedSheet | null;
+  can_link_sheet: boolean;
 }
 
 export interface QuestionAnswers {
@@ -404,6 +424,20 @@ export const formsApi = {
       }
     }
     return { blob: res.data, filename };
+  },
+  /** Link a sheet: a new spreadsheet (``name``) or a "Form responses" tab in one you have (``file_id``). */
+  async linkSheet(fileId: string, body: { mode: "new"; name?: string } | { mode: "existing"; file_id: string }): Promise<LinkedSheet | null> {
+    const { data } = await apiClient.post<{ sheet: LinkedSheet | null }>(`/forms/${fileId}/sheet`, body, { timeout: 120_000 });
+    return data.sheet;
+  },
+  /** Bring the linked sheet up to date now. */
+  async syncSheet(fileId: string): Promise<LinkedSheet | null> {
+    const { data } = await apiClient.post<{ sheet: LinkedSheet | null }>(`/forms/${fileId}/sheet/sync`, undefined, { timeout: 120_000 });
+    return data.sheet;
+  },
+  /** Stop updating the sheet (it's kept). */
+  async unlinkSheet(fileId: string): Promise<void> {
+    await apiClient.delete(`/forms/${fileId}/sheet`);
   },
   async setNotify(fileId: string, changes: { mode?: NotifyMode; email_daily?: boolean }): Promise<NotifySettings> {
     const { data } = await apiClient.put<NotifySettings>(`/forms/${fileId}/notify`, changes);

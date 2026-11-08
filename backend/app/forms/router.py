@@ -20,6 +20,9 @@ downloaded like any office file. These routes are the builder's:
   · ``GET /{file_id}/export?format=csv|xlsx`` — the Responses tab
   (WP-F1.4); ``PUT /{file_id}/notify`` and ``POST /{file_id}/seen`` — your
   notifications for this form.
+* ``POST /{file_id}/sheet`` (link a new or existing sheet) ·
+  ``POST /{file_id}/sheet/sync`` (Sync now) · ``DELETE /{file_id}/sheet``
+  (unlink) — the linked Sheet (WP-F1.5, :mod:`app.forms.sheet`).
 
 Every route checks :mod:`app.forms.access`; anything you can't open is a
 404, never a 403.
@@ -222,6 +225,10 @@ async def save_definition(
     await db.commit()
     await db.refresh(form)
     await db.refresh(shell)
+    # New or renamed questions reach the linked sheet's header (WP-F1.5).
+    from app.forms.sheet import sync_soon
+
+    sync_soon(form)
     from app.files.router import _file_to_response
 
     return {
@@ -282,6 +289,11 @@ async def update_settings(
     await db.commit()
     await db.refresh(form)
     await db.refresh(shell)
+    if "collect_email" in changes or "audience" in changes:
+        # An Email or Account column may be needed now (WP-F1.5).
+        from app.forms.sheet import sync_soon
+
+        sync_soon(form)
     return await _view(db, shell, form, access, user)
 
 
@@ -453,6 +465,11 @@ async def responses_summary(
     out["can_delete"] = access == "edit"
     out["accepting"] = bool(form.accepting)
     out["notify"] = await notify.settings_for(db, shell, form, user)
+    # The Sheet card (WP-F1.5).
+    from app.forms import sheet
+
+    out["sheet"] = await sheet.status(db, form, user)
+    out["can_link_sheet"] = access == "edit"
     return out
 
 
@@ -551,6 +568,102 @@ async def export_responses(
             "Cache-Control": "no-store",
         },
     )
+
+
+# --------------------------------------------------------------------
+# The linked sheet (WP-F1.5)
+# --------------------------------------------------------------------
+class _LinkSheet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    # "new": make "<Form> (Responses)"; "existing": add a tab to ``file_id``.
+    mode: Literal["new", "existing"] = "new"
+    name: str | None = Field(default=None, max_length=200)
+    file_id: uuid.UUID | None = None
+
+
+async def _sheet_reply(db: AsyncSession, form, user: User) -> dict:
+    from app.forms import sheet
+
+    await db.refresh(form)
+    return {"sheet": await sheet.status(db, form, user)}
+
+
+@router.post("/{file_id:uuid}/sheet")
+async def link_sheet(
+    file_id: uuid.UUID,
+    payload: _LinkSheet,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Link a sheet: a new spreadsheet next to the form (the default), or a
+    "Form responses" tab added to one you can edit. The header row is
+    written from the questions and the answers so far go in at once; after
+    that each answer is added as it arrives. A form whose sheet was deleted
+    (or is in the bin, or full) can link a new one."""
+    from app.forms import sheet
+
+    shell, form, _access = await load_form(db, file_id, user, need="edit", lock=True)
+    if form.sheet_tab_id is not None:
+        current = await sheet.status(db, form, user)
+        if current and current["problem"] not in ("deleted", "trashed", "tab_deleted", "full"):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This form already has a sheet. Unlink it first to use another.",
+            )
+    try:
+        if payload.mode == "existing":
+            if payload.file_id is None:
+                raise sheet.SheetLinkError("Pick a spreadsheet.")
+            await sheet.link_existing(db, form, user, payload.file_id)
+        else:
+            await sheet.link_new(db, shell, form, user, name=payload.name)
+    except sheet.SheetLinkError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from None
+    await db.commit()
+    form_id = form.id
+    try:
+        await sheet.sync_form(form_id)
+    except Exception:  # noqa: BLE001 — linked; the catch-up tick writes the rows
+        import logging
+
+        logging.getLogger("promptly.forms").exception("forms: first sheet sync failed")
+    return await _sheet_reply(db, form, user)
+
+
+@router.post("/{file_id:uuid}/sheet/sync")
+async def sync_sheet_now(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """"Sync now": bring the linked sheet up to date (and every answer
+    checked against it)."""
+    from app.forms import sheet
+
+    _shell, form, _access = await load_form(db, file_id, user, need="edit")
+    if form.sheet_tab_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This form has no sheet.")
+    await db.commit()  # don't hold anything while the sync runs
+    await sheet.sync_form(form.id, everything=True)
+    return await _sheet_reply(db, form, user)
+
+
+@router.delete("/{file_id:uuid}/sheet")
+async def unlink_sheet(
+    file_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Stop updating the sheet. The sheet itself is kept as it is."""
+    from app.forms import sheet
+
+    _shell, form, _access = await load_form(db, file_id, user, need="edit", lock=True)
+    await sheet._lock(db, form.id)  # not in the middle of a sync
+    sheet.unlink(form)
+    await db.commit()
+    return {"sheet": None}
 
 
 class _Notify(BaseModel):

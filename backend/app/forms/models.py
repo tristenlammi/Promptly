@@ -28,6 +28,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
 
+# ``forms.event_id`` points at ``cal_events``: the table must be known
+# wherever forms are loaded (the arq worker doesn't import the calendar app).
+import app.calendars.models  # noqa: E402,F401
+
 
 class Form(Base):
     __tablename__ = "forms"
@@ -60,6 +64,9 @@ class Form(Base):
     sheet_tab_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sheet_synced_seq: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0, server_default="0")
     sheet_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The linked tab's columns as Forms wrote them (0291, WP-F1.5).
+    sheet_columns: Mapped[list[Any] | None] = mapped_column(JSONB, nullable=True)
+    sheet_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
     response_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     last_response_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

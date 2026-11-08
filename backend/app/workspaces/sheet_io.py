@@ -1080,6 +1080,10 @@ def to_xlsx(data: Any) -> bytes:
                 target = ws.cell(row=r + 1, column=c + 1)
                 if value is not None:
                     target.value = value
+                    if isinstance(value, str) and value.startswith("=") and not (isinstance(v, dict) and v.get("f")):
+                        # Text that looks like a formula (a form answer such as
+                        # "=IMPORTXML(…)") stays text in Excel too.
+                        target.data_type = "s"
                 if fmt:
                     target.number_format = fmt
             if not isinstance(v, dict) or target is None:
@@ -1167,6 +1171,18 @@ def to_xlsx(data: Any) -> bytes:
     return out.getvalue()
 
 
+def _csv_text(v: Any) -> str:
+    """A cell for CSV. Text typed as text that a spreadsheet would read as a
+    formula (``= + - @``) gets a leading ``'`` — a form answer written into a
+    sheet must not run when the CSV is opened in Excel."""
+    shown = _shown(v)
+    if isinstance(v, dict) and not v.get("f") and shown[:1] in ("=", "+", "-", "@"):
+        ct = v.get("ct") if isinstance(v.get("ct"), dict) else {}
+        if ct.get("fa") == "@":
+            return "'" + shown
+    return shown
+
+
 def to_csv(data: Any, tab_index: int = 0) -> str:
     tabs = _tabs(data)
     tab = tabs[tab_index] if 0 <= tab_index < len(tabs) else (tabs[0] if tabs else {})
@@ -1181,7 +1197,7 @@ def to_csv(data: Any, tab_index: int = 0) -> str:
         row = []
         for c in range(max_c + 1):
             cell = grid.get((r, c))
-            row.append("" if cell is None else _shown(cell.get("v")))
+            row.append("" if cell is None else _csv_text(cell.get("v")))
         w.writerow(row)
     return buf.getvalue()
 
