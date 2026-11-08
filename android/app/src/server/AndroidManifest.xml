@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The APK your Promptly server hands out updates itself (Updater). The Google Play
+     build (src/play) is updated by Play, so none of this is in it: Play asks for a
+     declaration for REQUEST_INSTALL_PACKAGES. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Installing an update the app has downloaded and checked against its hash. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <application>
+        <!-- A checked update, given to Android's package installer. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.updates"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
+    </application>
+
+    <queries>
+        <intent>
+            <!-- The updater hands its file to the system's installer by name. -->
+            <action android:name="android.intent.action.VIEW" />
+            <data android:mimeType="application/vnd.android.package-archive" />
+        </intent>
+    </queries>
+</manifest>

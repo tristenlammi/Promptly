@@ -33,8 +33,6 @@
     <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
     <!-- Only for "Back up right away instead" — asked, never assumed. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- Installing an update the app has downloaded and checked against its hash. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Hides other apps' overlays over the unlock and fill screens, where Android allows it. -->
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
     <!-- Only what Chrome's documented autofill-state provider asks of a caller. -->
@@ -281,15 +279,6 @@
             </intent-filter>
         </service>
 
-        <!-- A checked update, given to Android's package installer. -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.updates"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
-        </provider>
-
         <!-- WorkManager's foreground service, for long backups. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
@@ -312,11 +301,6 @@
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
-        </intent>
-        <intent>
-            <!-- The updater hands its file to the system's installer by name. -->
-            <action android:name="android.intent.action.VIEW" />
-            <data android:mimeType="application/vnd.android.package-archive" />
         </intent>
         <package android:name="com.android.chrome" />
         <package android:name="com.chrome.beta" />

@@ -394,7 +394,8 @@ private fun StatusScreen(store: Store, account: Store.Account, onChooseFolders: 
         battery = Power.read(ctx) // back from the battery settings
         onPauseOrDispose { }
     }
-    LaunchedEffect(Unit) { if (!installedFromPlay(ctx)) update = withContext(Dispatchers.IO) { Api.update(account.server) } }
+    // Play updates its own build; only the server's APK checks the server for a newer one.
+    LaunchedEffect(Unit) { if (BuildConfig.SELF_UPDATE && !installedFromPlay(ctx)) update = withContext(Dispatchers.IO) { Api.update(account.server) } }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Spacer(Modifier.height(12.dp))

@@ -13,6 +13,16 @@
 # on the first run. BACK THAT FOLDER UP: Android only installs an update signed
 # with the same key, so losing it means every phone has to uninstall and
 # reinstall the app.
+#
+# -Play: the Google Play build instead (the "play" flavor: no self-updater, no
+# REQUEST_INSTALL_PACKAGES), as an app bundle signed with the same key (Play's
+# "upload key"), into android/dist/Promptly-play-<version>.aab (gitignored). Upload it
+# to Play Console → Internal testing. Same versionCode numbering as the APK: Play
+# refuses a versionCode it has seen. Nothing is copied to frontend/public.
+# Play re-signs with its own app-signing key: its SHA-256 goes in
+# frontend/public/.well-known/assetlinks.json (see docs/maps-offline-plan.md, WP-A2).
+
+param([switch]$Play)
 
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
@@ -42,20 +52,39 @@ if (-not (Test-Path $props)) {
     Write-Host "Made $store - BACK UP $keyDir (both files)." -ForegroundColor Yellow
 }
 
+$gradle = Get-Content (Join-Path $root "app\build.gradle.kts") -Raw
+$code = [int]([regex]::Match($gradle, 'versionCode\s*=\s*(\d+)').Groups[1].Value)
+$name = [regex]::Match($gradle, 'versionName\s*=\s*"([^"]+)"').Groups[1].Value
+
+if ($Play) {
+    Push-Location $root
+    try {
+        & .\gradlew.bat :app:bundlePlayRelease "-Psigning=$props" --console=plain
+        if ($LASTEXITCODE -ne 0) { throw "Gradle build failed" }
+    } finally {
+        Pop-Location
+    }
+    $aab = Join-Path $root "app\build\outputs\bundle\playRelease\app-play-release.aab"
+    if (-not (Test-Path $aab)) { throw "No signed bundle at $aab" }
+    $dist = Join-Path $root "dist"
+    New-Item -ItemType Directory -Force $dist | Out-Null
+    $out = Join-Path $dist "Promptly-play-$name.aab"
+    Copy-Item $aab $out -Force
+    Write-Host "Promptly for Android $name ($code), Play build -> android/dist/Promptly-play-$name.aab ($([math]::Round((Get-Item $out).Length / 1MB, 1)) MB)" -ForegroundColor Green
+    Write-Host "Upload it in Play Console -> Test and release -> Testing -> Internal testing -> Create new release."
+    exit 0
+}
+
 Push-Location $root
 try {
-    & .\gradlew.bat assembleRelease "-Psigning=$props" --console=plain
+    & .\gradlew.bat :app:assembleServerRelease "-Psigning=$props" --console=plain
     if ($LASTEXITCODE -ne 0) { throw "Gradle build failed" }
 } finally {
     Pop-Location
 }
 
-$apk = Join-Path $root "app\build\outputs\apk\release\app-release.apk"
+$apk = Join-Path $root "app\build\outputs\apk\server\release\app-server-release.apk"
 if (-not (Test-Path $apk)) { throw "No signed APK at $apk" }
-
-$gradle = Get-Content (Join-Path $root "app\build.gradle.kts") -Raw
-$code = [int]([regex]::Match($gradle, 'versionCode\s*=\s*(\d+)').Groups[1].Value)
-$name = [regex]::Match($gradle, 'versionName\s*=\s*"([^"]+)"').Groups[1].Value
 
 $out = Join-Path $root "..\frontend\public\downloads"
 New-Item -ItemType Directory -Force $out | Out-Null
