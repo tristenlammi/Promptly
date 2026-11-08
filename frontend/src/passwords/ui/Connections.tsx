@@ -524,7 +524,7 @@ export function PinPanel() {
         <>
           <p className="text-xs text-[var(--text-muted)]">Unlocks again until you close the app. Five wrong tries and it's gone. It's weaker than your master password, so it's off unless you set one.</p>
           <Label text="Master password"><input className={inputClass} type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} /></Label>
-          <Label text="PIN, 4 to 12 digits"><input className={inputClass} type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value)} /></Label>
+          <Label text="PIN, 6 to 12 digits"><input className={inputClass} type="password" inputMode="numeric" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value)} /></Label>
           <Button
             className="w-fit"
             disabled={!pw || !pin}

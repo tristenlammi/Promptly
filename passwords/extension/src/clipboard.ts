@@ -15,9 +15,11 @@ declare const __TEST_BUILD__: boolean;
 export const CLIP_ALARM = "clip-clear";
 const ALARM_FLOOR_MS = 30_000;
 const CLOSE_AFTER_MS = 300;
+/** A clear that doesn't take is tried again this many times, an alarm's floor apart. */
+const CLEAR_TRIES = 5;
 const session = ext.storage.session;
 
-type ClipRecord = { salt: string; hash: string };
+type ClipRecord = { salt: string; hash: string; tries?: number };
 
 let timer: ReturnType<typeof setTimeout> | null = null;
 let beat: ReturnType<typeof setInterval> | null = null;
@@ -97,18 +99,31 @@ export async function watchClipboard(text: string, seconds: number): Promise<voi
   timer = setTimeout(() => void clearClipboardIfOurs(), ms);
 }
 
-/** Due. Clears unless we can tell the person has copied something else since. */
+/** Forget what was copied, unless something newer has been copied since and is waiting. */
+async function forget(rec: ClipRecord): Promise<void> {
+  const still = (await session.get("clip")).clip as ClipRecord | undefined;
+  if (still?.salt === rec.salt) await session.remove("clip");
+}
+
+/** Due. Clears unless we can tell the person has copied something else since. A clear that
+ *  doesn't take is tried again, so a secret isn't left there because the browser said no once.
+ *  It can't reach copies the system kept elsewhere, like Windows clipboard history. */
 export async function clearClipboardIfOurs(): Promise<void> {
   stopTimers();
   const rec = (await session.get("clip")).clip as ClipRecord | undefined;
   await ext.alarms.clear(CLIP_ALARM);
   if (!rec) return;
-  await session.remove("clip");
   // Empty, or a failed read, says nothing about the person's copying. Only something else
   // actually there means leave it alone.
   const now = await readClipboard();
-  if (now && (await hashOf(now, rec.salt)) !== rec.hash) return;
-  await writeClipboard("");
+  if (now && (await hashOf(now, rec.salt)) !== rec.hash) return forget(rec);
+  if (await writeClipboard("")) return forget(rec);
+  const tries = (rec.tries ?? 0) + 1;
+  if (tries >= CLEAR_TRIES) return forget(rec);
+  const still = (await session.get("clip")).clip as ClipRecord | undefined;
+  if (still?.salt !== rec.salt) return;
+  await session.set({ clip: { ...rec, tries } satisfies ClipRecord });
+  await ext.alarms.create(CLIP_ALARM, { when: Date.now() + ALARM_FLOOR_MS });
 }
 
 export const clipboardTest = {

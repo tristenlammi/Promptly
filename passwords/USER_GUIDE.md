@@ -30,7 +30,7 @@ Install the extension from your server's Install page, connect it to your server
 - To change how a login matches, edit it and pick **Match websites**. Auto suits nearly everything. Same domain offers it on every host of the domain. Exact host keeps it to one host. Exact host and port keeps it to one host and port. Starts with keeps it to addresses that start with the one saved. Never stops it being offered; you can still search for it. Each website can have its own setting too.
 - Cards and addresses always ask first.
 
-Settings has more: filling only when you click the toolbar button, a short PIN for the browser, and offering codes from your Promptly Mail.
+Settings has more: filling only when you click the toolbar button, a PIN of 6 to 12 digits for the browser (it stops working 8 hours after the vault locks), and offering codes from your Promptly Mail.
 
 ## Bookmarks
 
@@ -70,7 +70,7 @@ A site decides when it asks for a passkey, and nothing can make it ask. When a p
 
 **Sends** are for one password or file to anyone, even someone with no account. Set how long it lasts and how often it opens. If you post the link through Rooms or Mail, the link passes through your server, so add a password and tell them that some other way.
 
-**Emergency access** lets someone you trust ask for your vault if you can't reach it. You get a push and an email, and you can refuse. If you don't refuse before the wait runs out, it opens. Choose someone you'd trust with all of it.
+**Emergency access** lets someone you trust ask for your vault if you can't reach it. You get a push and an email, and you can refuse. If you don't refuse before the wait runs out, it opens. Choose someone you'd trust with all of it. It covers your own vault and vaults you made and haven't shared; once you remove someone, they stay removed on all your devices.
 
 ## Staying safe
 

@@ -279,6 +279,42 @@ async def test_ip_rate_limit_counts_only_wrong_proofs(db, monkeypatch):
             rate_limit._settings.RATE_LIMIT_ENABLED = True
 
 
+async def test_wrong_proofs_from_one_address_are_limited_before_the_account_lock(db, monkeypatch):
+    """Review F5: the per-address limit was checked under a different key from the one it was
+    counted under, so only the account's own lock ever applied."""
+    from limits import parse
+    from limits.aio.storage import MemoryStorage
+    from limits.aio.strategies import FixedWindowRateLimiter
+
+    from app import rate_limit
+    from app.main import app
+    from app.passwords import router as pw_router
+    from app.passwords.models import PwAccount
+
+    monkeypatch.setattr(rate_limit, "_limiter", FixedWindowRateLimiter(MemoryStorage()))
+    monkeypatch.setattr(pw_router, "_PROOF_LIMIT", parse("3/minute"))
+    u = await make_user(db)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as c:
+        rate_limit._settings.RATE_LIMIT_ENABLED = False
+        v = await setup_vault(c, u)
+        rate_limit._settings.RATE_LIMIT_ENABLED = True
+        try:
+            here = {**bearer(u), "CF-Connecting-IP": "203.0.113.78", "X-Real-IP": "203.0.113.78"}
+            codes = [(await c.post("/api/passwords/session", headers=here, json={"auth_key": b64(os.urandom(32))})).status_code for _ in range(5)]
+            assert codes == [401, 401, 401, 429, 429]
+            # Refused at the door: those didn't count towards pausing the account.
+            from sqlalchemy import select
+
+            account = await db.scalar(select(PwAccount).where(PwAccount.user_id == u.id).execution_options(populate_existing=True))
+            assert account.failed_attempts == 3
+            # The person, somewhere else, still gets in.
+            there = {**bearer(u), "CF-Connecting-IP": "198.51.100.9", "X-Real-IP": "198.51.100.9"}
+            ok = await c.post("/api/passwords/session", headers=there, json={"auth_key": b64(v.auth_key)})
+            assert ok.status_code == 200
+        finally:
+            rate_limit._settings.RATE_LIMIT_ENABLED = True
+
+
 async def test_rekey_replaces_the_proof_and_ends_other_sessions(client, db):
     u = await make_user(db)
     v = await setup_vault(client, u)

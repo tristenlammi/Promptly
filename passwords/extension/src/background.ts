@@ -4,11 +4,10 @@
 // default in both engines), and top-level listeners re-register on every start.
 import jsQR from "jsqr";
 
-import { agoText, commitPending, linkIsSafe, type MailCode, rankMailCodes, savedDomainsOf, unwrapUnlockSecret, withPending, wrapUnlockSecret } from "../../../frontend/src/passwords/core/connections";
+import { agoText, commitPending, linkIsSafe, type MailCode, rankMailCodes, savedDomainsOf, withPending } from "../../../frontend/src/passwords/core/connections";
 import { parseOtpauth } from "../../../frontend/src/passwords/core/totp";
-import { argon2, KDF_FLOOR } from "../../../frontend/src/passwords/core/primitives";
 import { ApiError, OfflineError, VaultApi } from "../../../frontend/src/passwords/core/api";
-import { fromB64u, b64u, randomBytes, utf8 } from "../../../frontend/src/passwords/core/bytes";
+import { fromB64u, b64u, randomBytes } from "../../../frontend/src/passwords/core/bytes";
 import { decideOffer, type SaveOffer } from "../../../frontend/src/passwords/core/autofill/capture";
 import { afterFill, codeStep, flowFor, mayFillOnLoad, type TabFlow } from "../../../frontend/src/passwords/core/autofill/flow";
 import { openSignedPack, ruleForHost } from "../../../frontend/src/passwords/core/autofill/rules";
@@ -18,6 +17,7 @@ import { type Item, type ItemBody, newBody, type SiteRule } from "../../../front
 import { IdbStore } from "../../../frontend/src/passwords/core/store";
 import { totpCode } from "../../../frontend/src/passwords/core/totp";
 import { VaultClient } from "../../../frontend/src/passwords/core/vault";
+import { PIN_KEEP_AFTER_LOCK_MS, type PinRecord, UnlockPin } from "../../../frontend/src/passwords/core/unlockpin";
 import { canCheckClipboard, CLIP_ALARM, clearClipboardIfOurs, clipboardTest, watchClipboard, writeClipboard } from "./clipboard";
 import { BrowserBookmarks, VaultBookmarks } from "./bookmarks";
 import { type Base, bookmarkHash, bookmarksHtml, reconcile, syncableUrl, validItem } from "../../../frontend/src/passwords/core/bookmarks";
@@ -192,6 +192,9 @@ async function lock() {
   await store.deleteMeta(KEPT_UNLOCK).catch(() => undefined);
   // The keys go at once. Only telling the server waits, and it may not answer.
   const ending = client?.lock().catch(() => undefined);
+  // A PIN works for a while after a lock, then goes (unlockpin.ts).
+  await unlockPin.locked().catch(() => undefined);
+  ext.alarms.create(PIN_ALARM, { delayInMinutes: PIN_KEEP_AFTER_LOCK_MS / 60000 + 1 });
   await session.remove(["unlock", "vaultSession", "flows", "pendingSave", "typedUsers", "deviceRequests", "beat", "onLoadDone"]);
   await ext.alarms.clear(KEEPALIVE);
   await ext.alarms.clear(LOCK_ALARM);
@@ -228,6 +231,7 @@ ext.alarms.onAlarm.addListener(async (a) => {
   if (a.name === LOCK_ALARM && typeof (await lockChoice()).when === "number") await lock();
   if (a.name === KEEPALIVE) await noticeSleep();
   if (a.name === CLIP_ALARM) await clearClipboardIfOurs();
+  if (a.name === PIN_ALARM) await unlockPin.expireIfStale();
   if (a.name === SYNC_ALARM && client?.unlocked) {
     await safeSync();
     await runBookmarks();
@@ -1194,8 +1198,8 @@ async function handlePage(m: PageRequest): Promise<unknown> {
     }
     case "extSettings": {
       const s = await extSettings();
-      const pin = (await session.get("pin")).pin as PinRecord | undefined;
-      return { onClickOnly: await fillsOnClickOnly(), mailCodes: s.mailCodes, pin: !!pin, clipCheck: await canCheckClipboard() };
+      const pin = await unlockPin.status();
+      return { onClickOnly: await fillsOnClickOnly(), mailCodes: s.mailCodes, pin: pin.has, pinShort: pin.short, clipCheck: await canCheckClipboard() };
     }
     case "lockChoice":
       return lockChoice();
@@ -1258,42 +1262,20 @@ async function handlePage(m: PageRequest): Promise<unknown> {
       return { ok: true };
     case "setPin": {
       if (m.pin === null) {
-        await session.remove("pin");
+        await unlockPin.clear();
         return { ok: true };
       }
       const { unlock } = await session.get("unlock");
       if (!unlock) throw new Error("Unlock first");
-      if (!/^\d{4,12}$/.test(m.pin)) throw new Error("Use 4 to 12 digits.");
-      const salt = randomBytes(16);
-      const stretched = await argon2(utf8(m.pin), salt, KDF_FLOOR);
-      const wrapped = await wrapUnlockSecret(stretched, salt, fromB64u(unlock as string), "pin-unlock");
-      stretched.fill(0);
-      await session.set({ pin: { salt: b64u(salt), wrapped, tries: 0 } satisfies PinRecord });
+      await unlockPin.set(m.pin, fromB64u(unlock as string));
       return { ok: true };
     }
     case "pinUnlock": {
-      const pin = (await session.get("pin")).pin as PinRecord | undefined;
-      if (!pin) throw new Error("There's no PIN on this browser. Use your master password.");
-      const salt = fromB64u(pin.salt);
-      const stretched = await argon2(utf8(m.pin), salt, KDF_FLOOR);
-      let secret: Uint8Array;
-      try {
-        secret = await unwrapUnlockSecret(stretched, salt, pin.wrapped, "pin-unlock");
-      } catch {
-        const tries = pin.tries + 1;
-        if (tries >= PIN_TRIES) {
-          await session.remove("pin");
-          throw new Error("That was the last try. Use your master password.");
-        }
-        await session.set({ pin: { ...pin, tries } });
-        throw new Error(`That PIN isn't right. ${PIN_TRIES - tries} tries left.`);
-      } finally {
-        stretched.fill(0);
-      }
+      // One try at a time, each counted before it's checked (unlockpin.ts).
+      const secret = await unlockPin.open(String(m.pin ?? ""));
       const locksBefore = locks;
       await c.unlockWithSecret(secret);
       await saveSecret(secret, c.api.session, locksBefore);
-      await session.set({ pin: { ...pin, tries: 0 } });
       startKeepAlive();
       await touchLockTimer();
       updateBadgeAll();
@@ -1461,36 +1443,30 @@ async function shippedPack(): Promise<SiteRule[]> {
 /** The person's own taught rule wins over anything in the pack. */
 async function findRule(host: string): Promise<SiteRule | null> {
   if (client?.unlocked) {
-    const rules = client.allItems({ includeSystem: true }).filter((i) => i.body.kind === "site_rule" && i.body.rule).map((i) => i.body.rule!);
+    // Only from your own vault: anyone who can write to a shared vault could plant one, to stop a
+    // site filling or to aim a fill at another box.
+    const c = client;
+    const rules = c.allItems({ includeSystem: true }).filter((i) => i.body.kind === "site_rule" && i.body.rule && c.isOwn(i.vaultId)).map((i) => i.body.rule!);
     const taught = ruleForHost(rules, host);
     if (taught) return taught;
   }
   return ruleForHost(await shippedPack(), host);
 }
 
-const PIN_TRIES = 5;
-type PinRecord = { salt: string; wrapped: string; tries: number };
+const PIN_ALARM = "pin-expire";
+
+/** The unlock PIN's record lives in session storage, under "pin". */
+const unlockPin = new UnlockPin({
+  get: async () => (await session.get("pin")).pin as PinRecord | undefined,
+  set: (r) => session.set({ pin: r }),
+  remove: () => session.remove("pin"),
+});
 
 /** Is this the person? For a passkey prompt that has to say so to a site. Five wrong PINs
  *  wipe it, as they do at the unlock screen, and a master password has no such limit. */
 async function isThePerson(c: VaultClient, typed: string): Promise<boolean> {
   if (await c.checkPassword(typed)) return true;
-  const pin = (await session.get("pin")).pin as PinRecord | undefined;
-  if (!pin || !/^\d{4,12}$/.test(typed)) return false;
-  const salt = fromB64u(pin.salt);
-  const stretched = await argon2(utf8(typed), salt, KDF_FLOOR);
-  try {
-    await unwrapUnlockSecret(stretched, salt, pin.wrapped, "pin-unlock");
-    await session.set({ pin: { ...pin, tries: 0 } });
-    return true;
-  } catch {
-    const tries = pin.tries + 1;
-    if (tries >= PIN_TRIES) await session.remove("pin");
-    else await session.set({ pin: { ...pin, tries } });
-    return false;
-  } finally {
-    stretched.fill(0);
-  }
+  return unlockPin.check(typed);
 }
 
 async function fetchMailCodes(): Promise<MailCode[]> {

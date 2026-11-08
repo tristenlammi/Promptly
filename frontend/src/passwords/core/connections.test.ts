@@ -176,15 +176,25 @@ describe("clock and PIN", () => {
     const pin = memoryPin();
     const secret = randomBytes(64);
     expect(pin.has()).toBe(false);
-    await expect(pin.set("12", secret)).rejects.toThrow("4 to 12");
-    await pin.set("4821", secret);
-    expect(await pin.open("4821")).toEqual(secret);
-    for (const left of [4, 3, 2, 1]) await expect(pin.open("0000")).rejects.toThrow(`${left} tries left`);
-    expect(await pin.open("4821")).toEqual(secret);
-    for (let i = 0; i < 4; i++) await expect(pin.open("0000")).rejects.toThrow("tries left");
-    await expect(pin.open("0000")).rejects.toThrow("last try");
+    await expect(pin.set("12", secret)).rejects.toThrow("6 to 12");
+    await expect(pin.set("4821", secret)).rejects.toThrow("6 to 12");
+    await pin.set("482193", secret);
+    expect(await pin.open("482193")).toEqual(secret);
+    for (const left of [4, 3, 2, 1]) await expect(pin.open("000000")).rejects.toThrow(`${left} tries left`);
+    expect(await pin.open("482193")).toEqual(secret);
+    for (let i = 0; i < 4; i++) await expect(pin.open("000000")).rejects.toThrow("tries left");
+    await expect(pin.open("000000")).rejects.toThrow("last try");
     expect(pin.has()).toBe(false);
-    await expect(pin.open("4821")).rejects.toThrow("no PIN");
+    await expect(pin.open("482193")).rejects.toThrow("no PIN");
+  }, 120_000);
+
+  it("a memory PIN's limit holds against tries sent side by side", async () => {
+    const pin = memoryPin();
+    await pin.set("482193", randomBytes(64));
+    const out = await Promise.allSettled(["000001", "000002", "000003", "000004", "000005", "000006", "482193"].map((g) => pin.open(g)));
+    // Five wrong ones used it up; the right one, sent last, finds it gone.
+    expect(out.every((r) => r.status === "rejected")).toBe(true);
+    expect(pin.has()).toBe(false);
   }, 120_000);
 
   it("warns only when codes are at risk", () => {

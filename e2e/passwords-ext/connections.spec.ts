@@ -245,11 +245,15 @@ test("a pending new password fills the new boxes, and the old one the current bo
   await v.close();
 });
 
-test("a short PIN unlocks, and five wrong tries wipe it", async () => {
+test("a PIN unlocks, needs 6 digits, and five wrong tries wipe it", async () => {
   const v = await vaultPage();
   await v.getByRole("navigation", { name: "Passwords" }).getByText("Settings").click();
   const s = v.getByTestId("settings");
-  await s.getByLabel("A short PIN for this browser").fill("4821");
+  // Review F3: four digits isn't enough for a new PIN.
+  await s.getByLabel(/A PIN for this browser/).fill("4821");
+  await s.getByRole("button", { name: "Set PIN" }).click();
+  await expect(s.getByText("Use 6 to 12 digits.")).toBeVisible({ timeout: 30_000 });
+  await s.getByLabel(/A PIN for this browser/).fill("482193");
   await s.getByRole("button", { name: "Set PIN" }).click();
   await expect(s.getByRole("button", { name: "Remove my PIN" })).toBeVisible({ timeout: 30_000 });
   await v.close();
@@ -258,7 +262,7 @@ test("a short PIN unlocks, and five wrong tries wipe it", async () => {
   const anchor = await rig.ctx.newPage();
   await anchor.goto(siteA("login.html"));
   let pop = await popupFor(rig, anchor);
-  await pop.getByLabel("PIN", { exact: true }).fill("4821");
+  await pop.getByLabel("PIN", { exact: true }).fill("482193");
   await pop.getByRole("button", { name: "Use PIN" }).click();
   await expect(pop.getByLabel("Search your vault")).toBeVisible({ timeout: 30_000 });
   await pop.close();
@@ -266,11 +270,11 @@ test("a short PIN unlocks, and five wrong tries wipe it", async () => {
   await lockExt(rig);
   pop = await popupFor(rig, anchor);
   for (let i = 0; i < 4; i++) {
-    await pop.getByLabel("PIN", { exact: true }).fill("0000");
+    await pop.getByLabel("PIN", { exact: true }).fill("000000");
     await pop.getByRole("button", { name: "Use PIN" }).click();
     await expect(pop.getByText(`${4 - i} tries left`).or(pop.getByText("1 tries left"))).toBeVisible({ timeout: 30_000 });
   }
-  await pop.getByLabel("PIN", { exact: true }).fill("0000");
+  await pop.getByLabel("PIN", { exact: true }).fill("000000");
   await pop.getByRole("button", { name: "Use PIN" }).click();
   await expect(pop.getByText("That was the last try")).toBeVisible({ timeout: 30_000 });
   await expect(pop.getByRole("button", { name: "Use PIN" })).toHaveCount(0);

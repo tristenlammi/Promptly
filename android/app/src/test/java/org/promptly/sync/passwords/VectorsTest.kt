@@ -20,6 +20,7 @@ import org.junit.Test
 import org.promptly.sync.passwords.core.BouncyCastleArgon2
 import org.promptly.sync.passwords.core.ItemBody
 import org.promptly.sync.passwords.core.KdfParams
+import org.promptly.sync.passwords.core.Ownership
 import org.promptly.sync.passwords.core.Primitives
 import org.promptly.sync.passwords.core.SecretKeys
 import org.promptly.sync.passwords.core.Totp
@@ -195,6 +196,18 @@ class VectorsTest {
             input[0] = (input[0] + 1).toByte()
             assertFalse(Primitives.ed25519Verify(c.b("sig_hex"), input, c.b("pub_hex")))
         }
+    }
+
+    /** "This vault is my own" (CRYPTO_SPEC.md section 6), as the client builds and checks it. */
+    @Test fun ownVaultStatement() {
+        val c = section("signature").first { it.s("purpose") == "personal_vault" }
+        val (user, vault) = c.getValue("fields").jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(c.s("input_hex"), hex(Ownership.homeInput(user, vault)))
+        val sig = org.promptly.sync.passwords.core.b64u(c.b("sig_hex"))
+        assertTrue(Ownership.verifyHome(sig, user, vault, c.b("pub_hex")))
+        assertFalse(Ownership.verifyHome(sig, user, "33333333-3333-4333-8333-333333333333", c.b("pub_hex")))
+        assertFalse(Ownership.verifyHome(sig, vault, user, c.b("pub_hex")))
+        assertFalse(Ownership.verifyHome("not base64!", user, vault, c.b("pub_hex")))
     }
 
     @Test fun keyset() {

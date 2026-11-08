@@ -137,22 +137,43 @@ Identity keys are trust-on-first-use, with safety words to compare (section 7). 
 
 ### Trust book
 
-A system item of kind `trust` in the personal vault, in the same format as any item, so it syncs and the server can't read or alter it:
+A system item of kind `trust` in the personal vault, in the same format as any item, so it syncs and the server can't read or alter it. Its body carries three fields:
 
 ```
 trustBook = {
   people:      { user_id: { x25519, ed25519, firstSeen, verified?, username? } },
   accepted:    [ vault_id ],   // shared vaults this person chose to open
-  contacts:    [ user_id ],    // emergency contacts this person named
+  contacts:    [ user_id ],    // emergency contacts named now (kept for older clients)
   generations: { vault_id: n } // highest vault key generation seen
 }
+trustState = {                 // beside trustBook: older clients rebuild trustBook and would drop new fields
+  contacts: { user_id: n },    // odd = named, even = removed; the higher number wins on merge
+  made:     [ vault_id ],      // vaults this person made themselves; only grows
+  shared:   [ vault_id ]       // of those, ones they've ever added someone to; only grows
+}
+homeSig = b64u(Ed25519(identity, signing_input("personal_vault", [user_id, vault_id])))
+          // vault_id is the vault this item is in
 ```
+
+Merging: `people`, `accepted` and `generations` as before (union, highest generation). Contact counters take the highest per person; a contact in a plain `contacts` list with no counter counts as 1 (named). Naming someone moves an even counter to the next odd one; removing moves an odd one to the next even one. So a removal on one device isn't undone by another device's older list.
+
+### Your own vault
+
+What the server calls a vault (`kind: "personal"` or `"shared"`) is never trusted. A shared vault you made has a grant signed by you, and every member holds its key, so "self-signed and called personal" doesn't make a vault yours. Each device keeps its own list of vaults it knows are yours (`own_vaults`, local only):
+
+1. The device that made the account pins the vault it made.
+2. A device from before this rule pins, once, the vault it last saved to (`personal_vault`), or else the one self-signed vault it already had cached as personal, if there was exactly one.
+3. Any device adds a self-signed vault holding a trust item whose `homeSig` verifies under your own identity key for that vault's id. No member or server can make one, and it can't be moved: it names the vault. Every device with a pinned vault writes it on its next sync if it's missing.
+
+Trust items are read only from pinned vaults, and written only to them. A pinned vault the server calls anything else, or another self-signed vault the server calls personal once one is pinned, is a rollback warning; the pinned one stays yours and the other is treated as shared. A device with nothing pinned yet (new, before any of your devices has signed) saves new items to the one vault called personal, as before, but reads no trust book from it, writes none to it, and seals no emergency keys.
+
+`homeSig` is a new signed statement, not a change to any existing blob, grant or signature, so older clients read and keep it (an unknown body field) and the format stays 1. Binding `kind` into the grant signature instead would have needed every vault re-granted and a server change.
 
 Rules every client follows:
 
 - A person's keys are remembered only when they act: accepting an invitation, adding a member, naming a contact, marking safety words as checked. Never from a background sync.
 - A vault opens only if it's self-granted or in `accepted`. The server's own flag doesn't count.
-- Emergency keys are sealed only to someone in `contacts`, and only while their live keys match what's remembered.
+- Emergency keys are sealed only to someone named by their contact counter, only while their live keys match what's remembered and their words have been compared, and only for your pinned vault plus vaults in `made` and not in `shared`. A member count from the server doesn't count.
 - Every recipient of a rotation goes through the same check, and your own key comes from your keyset, not the list.
 - A lower `member_generation` than the highest seen is refused and warned about.
 
@@ -216,4 +237,4 @@ Same KDF limits as section 2.
 
 ## 12. Vectors
 
-`vectors.json` has RFC known answers (HKDF, AES-GCM, X25519, Ed25519, Argon2id), and our own formats generated from fixed inputs: Secret Key text, padding, root keys, blobs, sealed boxes, signatures, keysets, item blobs, safety words, and a list of negative cases that must fail. Regenerate only with a format change.
+`vectors.json` has RFC known answers (HKDF, AES-GCM, X25519, Ed25519, Argon2id), and our own formats generated from fixed inputs: Secret Key text, padding, root keys, blobs, sealed boxes, signatures (a vault key grant, and the `personal_vault` statement), keysets, item blobs, safety words, and a list of negative cases that must fail. Regenerate only with a format change. The `personal_vault` vector was added on 2026-11-08; regenerating left every other vector byte for byte as it was.

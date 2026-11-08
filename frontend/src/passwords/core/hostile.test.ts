@@ -6,6 +6,7 @@ import { ApiError, VaultApi } from "./api";
 import { b64u, fromB64u, randomBytes } from "./bytes";
 import { aad, openSealed, sealTo } from "./format";
 import { decryptItem, deriveRootRaw, encryptItem, grantInput, sealField } from "./keys";
+import { homeInput } from "./ownership";
 import { newBody } from "./model";
 import { aesKey, ed25519Public, ed25519Sign, KDF_FLOOR, x25519Public } from "./primitives";
 import { MemoryStore } from "./store";
@@ -476,3 +477,146 @@ function api_accept(s: any, c: VaultClient) {
   (c.api as any).acceptVault = async () => undefined;
   void s;
 }
+
+// The 2026-11-08 review (F1, F2, F6): a shared vault you made has a grant you signed, and every
+// member holds its key. A server that calls it "personal" mustn't make it count as yours.
+describe("a member of a shared vault you made, with the server", () => {
+  const MALLORY = "55555555-5555-4555-8555-555555555555";
+  const CAROL = "33333333-3333-4333-8333-333333333333";
+
+  async function plantedTeam() {
+    const f = await fresh();
+    const { s, c } = f;
+    const realId = await c.personalVaultId();
+    await c.saveNew(realId, newBody("login", "Bank", { password: "hunter2-secret" }));
+    const vid = await c.createSharedVault("Team");
+    const mallory = persona("mallory");
+    s.userKeys.set(MALLORY, mallory.keys);
+    await c.addMember(vid, MALLORY, "edit");
+    await c.sync();
+    const K = await vaultKeyVia(mallory, vid, MALLORY, s.members.get(vid).find((m: any) => m.user_id === MALLORY).grant.wrapped_key);
+    // Mallory writes a trust book into the vault she's in, naming herself checked and a contact,
+    // with a "this is my own vault" statement she signed herself.
+    const itemId = "99999999-bbbb-4bbb-8bbb-999999999999";
+    const planted = newBody("trust", "trust-book", {
+      trustBook: { people: { [MALLORY]: { x25519: mallory.keys.x25519_pub, ed25519: mallory.keys.ed25519_pub, firstSeen: "", verified: true, username: "mallory" } }, accepted: [], contacts: [MALLORY], generations: {} },
+      trustState: { contacts: { [MALLORY]: 99 }, made: [], shared: [] },
+      homeSig: b64u(ed25519Sign(mallory.e, homeInput(ALICE, vid))),
+    });
+    const v = s.vaults.get(vid);
+    v.revision += 1;
+    const plantedBlob = b64u(await encryptItem(await aesKey(K), vid, itemId, planted));
+    s.items.set(itemId, { id: itemId, vaultId: vid, revision: v.revision, blob: plantedBlob, deleted: false, purged: false, updated_at: new Date().toISOString() });
+    // The server calls it personal, and makes up an accepted emergency row for her.
+    v.kind = "personal";
+    s.emergency = [{ id: "e9", grantor_id: ALICE, grantor: "alice", grantee_id: MALLORY, grantee: "mallory", wait_days: 1, state: "accepted", requested_at: null, opens_at: null, wrapped: {}, opened_vaults: [] }];
+    return { ...f, realId, vid, mallory, K, itemId, plantedBlob };
+  }
+
+  it("can't get your vault keys sealed to her by calling it your personal vault", async () => {
+    const { s, c, realId, vid, itemId, plantedBlob } = await plantedTeam();
+    const r = await c.sync();
+    await c.refreshEmergency();
+    expect(s.wrapped).toEqual([]);
+    expect(r.rollback).toContain(vid);
+    expect((await c.trustEntries())[MALLORY]?.verified).toBeFalsy();
+    expect(await c.personalVaultId()).toBe(realId);
+    // And after a lock and unlock, from the offline copy.
+    await c.lock();
+    await c.unlock(MASTER);
+    await c.refreshEmergency();
+    expect(s.wrapped).toEqual([]);
+    expect(await c.personalVaultId()).toBe(realId);
+    // Her trust book was never written over with the real one, where she could read it.
+    expect(s.items.get(itemId).blob).toBe(plantedBlob);
+    expect(c.isOwn(vid)).toBe(false);
+  });
+
+  it("can't do it on your other device either, even with the labels swapped", async () => {
+    const { s, c, api, secretKey, realId, vid } = await plantedTeam();
+    await c.sync();
+    // The real one called shared, the shared one called personal.
+    s.vaults.get(realId).kind = "shared";
+    const c2 = new VaultClient(api, new MemoryStore());
+    await c2.unlock(MASTER, secretKey);
+    await c2.refreshEmergency();
+    expect(s.wrapped).toEqual([]);
+    expect(await c2.personalVaultId()).toBe(realId);
+    expect(c2.isOwn(vid)).toBe(false);
+    expect((await c2.trustEntries())[MALLORY]?.verified).toBeFalsy();
+    const saved = await c2.saveNew(await c2.personalVaultId(), newBody("login", "From the phone", { password: "phone-secret" }));
+    await c2.sync();
+    expect(s.items.get(saved.id)?.vaultId).toBe(realId);
+    void c;
+  });
+
+  it("a device from before this fix keeps its own vault, and doesn't fall for it", async () => {
+    const { s, c, store, realId } = await plantedTeam();
+    // As an older version left it: no pinned list, just the vault it saved to.
+    await store.deleteMeta("own_vaults");
+    await c.lock();
+    await c.unlock(MASTER);
+    await c.refreshEmergency();
+    expect(s.wrapped).toEqual([]);
+    expect(await c.personalVaultId()).toBe(realId);
+    expect(await store.getMeta("own_vaults")).toEqual([realId]);
+  });
+
+  it("can't get another member's logins sealed to your contact by saying you're alone in the vault", async () => {
+    const { s, c } = await fresh();
+    const carol = persona("carol");
+    s.userKeys.set(CAROL, carol.keys);
+    const team = await c.createSharedVault("Team");
+    const bobId = "22222222-2222-4222-8222-222222222222";
+    s.userKeys.set(bobId, persona("bob").keys);
+    await c.addMember(team, bobId, "edit");
+    const solo = await c.createSharedVault("Just me");
+    await c.sync();
+    s.vaults.get(team).member_count = 1;
+    await c.emergencyInvite(CAROL, 3);
+    await c.markVerified(CAROL);
+    await c.sync();
+    await c.refreshEmergency();
+    const sealed = s.wrapped.flatMap((w: any) => w.grants.map((g: any) => g.vault_id));
+    expect(sealed).toContain(await c.personalVaultId());
+    expect(sealed).toContain(solo);
+    expect(sealed).not.toContain(team);
+  });
+
+  it("a removed emergency contact stays removed, whatever your other devices remember", async () => {
+    const { s, c, api, secretKey } = await fresh();
+    s.userKeys.set(CAROL, persona("carol").keys);
+    const real = api.request;
+    api.request = async (m: string, p: string, b: any) => (m === "DELETE" ? {} : real(m, p, b));
+    await c.emergencyInvite(CAROL, 3);
+    await c.markVerified(CAROL);
+    await c.sync();
+    const c2 = new VaultClient(api, new MemoryStore());
+    await c2.unlock(MASTER, secretKey);
+    const dana = "77777777-7777-4777-8777-777777777777";
+    const erin = "88888888-8888-4888-8888-888888888888";
+    s.userKeys.set(dana, persona("dana").keys);
+    s.userKeys.set(erin, persona("erin").keys);
+    await c2.markVerified(dana);
+    expect(await c2.store.getMeta("trust_contacts")).toContain(CAROL);
+    const row = s.emergency[0];
+    await c.emergencyEnd(row);
+    s.emergency = [];
+    // The other device saves its trust book from its older list, as it would after any change.
+    await c2.markVerified(erin);
+    await c2.sync();
+    await c.sync();
+    // The server brings the row back, and both devices are asked to seal.
+    s.wrapped.length = 0;
+    s.emergency = [{ ...row, state: "accepted", wrapped: {} }];
+    await c.refreshEmergency();
+    await c2.refreshEmergency();
+    expect(s.wrapped).toEqual([]);
+    // Naming her again is the person's own act, and works.
+    await c2.emergencyInvite(CAROL, 3);
+    await c2.sync();
+    await c.sync();
+    await c.refreshEmergency();
+    expect(s.wrapped.length).toBeGreaterThan(0);
+  });
+});

@@ -222,40 +222,51 @@ export async function unwrapUnlockSecret(wrappingInput: Uint8Array, salt: Uint8A
 
 const PIN_TRIES = 5;
 
-/** A short PIN, held only in this process's memory: closing the app loses it, and five
- *  wrong tries wipe it. It's weaker than the master password, and off unless set. */
+/** A PIN of 6 to 12 digits, held only in this process's memory: closing the app loses it, and
+ *  five wrong tries wipe it. It's weaker than the master password, and off unless set. Tries go
+ *  one at a time, each counted before it's checked, so tries sent side by side can't get round
+ *  the limit (unlockpin.ts does the same for the extension). */
 export function memoryPin() {
   let rec: { salt: Uint8Array; wrapped: string; tries: number } | null = null;
+  let queue: Promise<unknown> = Promise.resolve();
+  const serial = <T>(fn: () => Promise<T>): Promise<T> => {
+    const run = queue.then(fn, fn);
+    queue = run.catch(() => undefined);
+    return run;
+  };
   return {
     has: () => rec !== null,
     clear: () => {
       rec = null;
     },
-    set: async (pin: string, secret: Uint8Array) => {
-      if (!/^\d{4,12}$/.test(pin)) throw new Error("Use 4 to 12 digits.");
-      const salt = randomBytes(16);
-      const stretched = await argon2(utf8(pin), salt, KDF_FLOOR);
-      rec = { salt, wrapped: await wrapUnlockSecret(stretched, salt, secret, "pin-unlock"), tries: 0 };
-      stretched.fill(0);
-    },
-    open: async (pin: string): Promise<Uint8Array> => {
-      if (!rec) throw new Error("There's no PIN set. Use your master password.");
-      const stretched = await argon2(utf8(pin), rec.salt, KDF_FLOOR);
-      try {
-        const secret = await unwrapUnlockSecret(stretched, rec.salt, rec.wrapped, "pin-unlock");
-        rec.tries = 0;
-        return secret;
-      } catch {
-        rec.tries += 1;
-        if (rec.tries >= PIN_TRIES) {
-          rec = null;
-          throw new Error("That was the last try. Use your master password.");
-        }
-        throw new Error(`That PIN isn't right. ${PIN_TRIES - rec.tries} tries left.`);
-      } finally {
+    set: (pin: string, secret: Uint8Array) =>
+      serial(async () => {
+        if (!/^\d{6,12}$/.test(pin)) throw new Error("Use 6 to 12 digits.");
+        const salt = randomBytes(16);
+        const stretched = await argon2(utf8(pin), salt, KDF_FLOOR);
+        rec = { salt, wrapped: await wrapUnlockSecret(stretched, salt, secret, "pin-unlock"), tries: 0 };
         stretched.fill(0);
-      }
-    },
+      }),
+    open: (pin: string): Promise<Uint8Array> =>
+      serial(async () => {
+        const r = rec;
+        if (!r) throw new Error("There's no PIN set. Use your master password.");
+        r.tries += 1;
+        const tries = r.tries;
+        if (tries >= PIN_TRIES) rec = null;
+        const stretched = await argon2(utf8(pin), r.salt, KDF_FLOOR);
+        try {
+          const secret = await unwrapUnlockSecret(stretched, r.salt, r.wrapped, "pin-unlock");
+          r.tries = 0;
+          rec = r;
+          return secret;
+        } catch {
+          if (tries >= PIN_TRIES) throw new Error("That was the last try. Use your master password.");
+          throw new Error(`That PIN isn't right. ${PIN_TRIES - tries} tries left.`);
+        } finally {
+          stretched.fill(0);
+        }
+      }),
   };
 }
 

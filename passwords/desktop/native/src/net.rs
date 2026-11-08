@@ -67,6 +67,11 @@ pub fn check_request(server: &str, url: &str, method: &str) -> Result<String, Ne
         return Err(NetError::BadMethod);
     }
     let rest = url.strip_prefix(server).ok_or(NetError::NotVaultApi)?;
+    // A URL parser drops tabs and newlines, so `.<TAB>.` would turn into `..` after this check
+    // and walk out of the vault API. Nothing but plain printable ASCII is let through.
+    if rest.bytes().any(|b| b <= 0x20 || b >= 0x7f) {
+        return Err(NetError::NotVaultApi);
+    }
     if !rest.starts_with(API_PREFIX) || rest.contains("..") || rest.contains('\\') || rest.contains('#') {
         return Err(NetError::NotVaultApi);
     }
@@ -136,6 +141,13 @@ mod tests {
             ("https://home.example.org/api/passwords\\..\\auth", "GET"),
             ("http://home.example.org/api/passwords/account", "GET"),
             ("https://home.example.org/", "GET"),
+            // Review W1: what a URL parser drops, so the dots meet afterwards.
+            ("https://home.example.org/api/passwords/.\t./auth/me", "GET"),
+            ("https://home.example.org/api/passwords/.\n./auth/me", "GET"),
+            ("https://home.example.org/api/passwords/.\r./.\r./api/auth/me", "GET"),
+            ("https://home.example.org/api/passwords/account x", "GET"),
+            ("https://home.example.org/api/passwords/\u{7f}", "GET"),
+            ("https://home.example.org/api/passwords/caf\u{e9}", "GET"),
         ] {
             assert_eq!(check_request(s, url, method), Err(NetError::NotVaultApi), "{url}");
         }
