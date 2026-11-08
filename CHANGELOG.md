@@ -42,6 +42,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed
+- Passwords in the browser: the extension no longer offers to save your master password, Secret Key or PINs as a login when you type them on your own vault's pages.
 - Passwords: a Windows checkout could change the line endings of the signed autofill rules file, so its signature no longer matched. Git now leaves that file's bytes alone.
 - Passwords: your devices now decide for themselves which vault is your own, instead of going by what the server calls it, so a server can no longer pass a shared vault off as your personal one. Your devices mark your own vault on their next sync.
 - Passwords: removing an emergency contact now holds on all your devices, and emergency access no longer covers vaults that other people's logins are in.

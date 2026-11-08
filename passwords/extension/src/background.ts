@@ -930,8 +930,21 @@ async function rememberTyped(tabId: number, username: string, url: string | unde
   await session.set({ typedUsers: typed });
 }
 
+/** The vault's own pages on our server, where the master password, Secret Key and PINs are
+ *  typed. Those are never offered as a login to save. Promptly's ordinary sign-in still is. */
+function isOwnVaultPage(url: string | undefined): boolean {
+  if (!url || !serverUrl) return false;
+  try {
+    const u = new URL(url);
+    return u.origin === new URL(serverUrl).origin && /^\/passwords(\/|$)/.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
 async function onCaptured(tabId: number, sender: chrome.runtime.MessageSender, c: Extract<ContentRequest, { t: "captured" }>["capture"]) {
   if (!client?.unlocked || !(await mayOffer(sender))) return;
+  if (isOwnVaultPage(sender.url ?? c.url)) return;
   const s = await extSettings();
   // Where it came from is the browser's word, not the message's.
   const url = sender.url ?? c.url;
@@ -1436,7 +1449,7 @@ async function handleContent(m: ContentRequest, sender: chrome.runtime.MessageSe
       await onCaptured(tabId, sender, m.capture);
       return null;
     case "capturedUser":
-      if (await mayOffer(sender)) await rememberTyped(tabId, m.username, sender.url);
+      if ((await mayOffer(sender)) && !isOwnVaultPage(sender.url)) await rememberTyped(tabId, m.username, sender.url);
       return null;
     case "submitFailed":
       await setPending(tabId, sender.frameId ?? 0, null);
