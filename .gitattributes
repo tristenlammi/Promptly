@@ -13,3 +13,7 @@ install.sh     text eol=lf
 # and PS handles LF too, but CRLF is the documented default for the
 # tooling and makes diffs against PS-edited copies stable.
 *.ps1          text eol=crlf
+
+# Signed files: the signature covers the exact bytes, so git must never touch line endings.
+passwords/extension/rules/pack.json -text
+passwords/extension/rules/pack.sig -text

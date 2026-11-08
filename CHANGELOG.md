@@ -34,6 +34,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed
+- Passwords: a Windows checkout could change the line endings of the signed autofill rules file, so its signature no longer matched. Git now leaves that file's bytes alone.
 - Passwords: your devices now decide for themselves which vault is your own, instead of going by what the server calls it, so a server can no longer pass a shared vault off as your personal one. Your devices mark your own vault on their next sync.
 - Passwords: removing an emergency contact now holds on all your devices, and emergency access no longer covers vaults that other people's logins are in.
 - Passwords in the browser: the unlock PIN's five-try limit can't be got round by sending many tries at once, new PINs need 6 to 12 digits, a shorter old one is flagged to change, and a PIN stops working 8 hours after the vault locks.
