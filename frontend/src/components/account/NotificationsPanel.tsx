@@ -335,6 +335,14 @@ export function NotificationsPanel() {
                 onChange={(v) => toggle("passwords", v)}
                 dimmed={!prefs.enabled}
               />
+              <CategoryRow
+                title="Notes"
+                subtitle="Someone shared a note with you. Reminders on notes come from Tasks."
+                checked={prefs.notes ?? true}
+                busy={prefsBusy === "notes"}
+                onChange={(v) => toggle("notes", v)}
+                dimmed={!prefs.enabled}
+              />
             </div>
           )}
           {prefsError && (

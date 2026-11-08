@@ -4,7 +4,7 @@ Two kinds of deleted thing are shown together:
 
 * **in place** — rows that already soft-delete with ``trashed_at``: Drive
   files and folders (Item Store files and photos are Drive files),
-  workspaces and workspace items. Restore / purge go through each app's
+  workspaces and workspace items, and notes (``app/notes``, owner's only). Restore / purge go through each app's
   own endpoint code, so the rules (nearest live parent, workspace-owned
   files, blob tombstones, RAG chunk purge) stay in one place.
 * **snapshots** (:class:`~app.trash.models.TrashEntry`) — things whose app
@@ -504,6 +504,12 @@ async def list_all(db: AsyncSession, user: User) -> list[dict[str, Any]]:
                 )
             )
 
+    # Notes — in place; a trashed note is its owner's alone (app/notes).
+    from app.notes.service import display_title, trashed_notes
+
+    for n in await trashed_notes(db, user):
+        out.append(_item("note", n.id, "notes", "note", display_title(n), n.trashed_at, "Notes"))
+
     # Snapshots: calendar events, albums, tasks, contacts.
     for e in (
         await db.execute(select(TrashEntry).where(_entry_visible(user)).order_by(TrashEntry.deleted_at.desc()))
@@ -544,6 +550,9 @@ async def restore(
 
         ws = await db.get(Workspace, uuid.UUID(workspace_id))
         return ws.title if ws is not None else "Workspace"
+    if type_ == "note":
+        await _restore_note(db, user, id_)
+        return "Notes"
     entry = await _find_entry(db, user, type_, id_)
     where = await _restore_entry(db, user, entry)
     await db.commit()
@@ -578,6 +587,9 @@ async def purge(
             workspace_id=uuid.UUID(workspace_id), item_id=uuid.UUID(id_), request=request, db=db, user=user
         )
         return 1
+    if type_ == "note":
+        await _purge_note(db, user, id_)
+        return 1
     entry = await _find_entry(db, user, type_, id_)
     await db.delete(entry)
     await db.commit()
@@ -611,6 +623,43 @@ async def empty(db: AsyncSession, user: User, request: Request | None) -> int:
         except HTTPException:
             await db.rollback()
     return n
+
+
+# ------------------------------------------------------------------ notes
+
+
+async def _trashed_note(db: AsyncSession, user: User, id_: str) -> Any:
+    from app.notes import access as notes_access
+
+    try:
+        nid = uuid.UUID(id_)
+    except ValueError:
+        raise _gone() from None
+    try:
+        return await notes_access.load(db, user, nid, lock=True, trashed=True)
+    except HTTPException:
+        raise _gone() from None
+
+
+async def _restore_note(db: AsyncSession, user: User, id_: str) -> None:
+    from app.notes import access as notes_access
+    from app.notes import events as notes_events
+    from app.notes import service as notes
+
+    note = await _trashed_note(db, user, id_)
+    await notes.restore(db, user, note)
+    await db.commit()
+    await notes_events.publish(await notes_access.participants(db, note), notes_events.note_event(note))
+
+
+async def _purge_note(db: AsyncSession, user: User, id_: str) -> None:
+    from app.notes import events as notes_events
+    from app.notes import service as notes
+
+    note = await _trashed_note(db, user, id_)
+    await notes.purge(db, [note])
+    await db.commit()
+    await notes_events.publish([user.id], notes_events.gone_event(note.id))
 
 
 # ------------------------------------------------------------------ retention

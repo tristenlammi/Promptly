@@ -4,7 +4,8 @@ Every read is the caller's own tags only, and "everything tagged X" keeps
 only what the caller can still open right now: files and app files by
 Drive's one read rule (:func:`app.files.access.readable_predicate` — so a
 file that was unshared or trashed drops out), calendar events they're on
-(not free/busy-only), albums they own or were added to.
+(not free/busy-only), albums they own or were added to, notes they can
+open (:mod:`app.notes.access`).
 """
 from __future__ import annotations
 
@@ -20,6 +21,8 @@ from app.tags import items_sync as S
 from app.tags.models import Tag, TagAssignment
 
 NATIVE = {"file": "File", "event": "Event", "album": "Album"}
+# Notes (app/notes): labels are #tags, per person on a shared note.
+NATIVE["note"] = "Note"
 KINDS = set(NATIVE) | set(S.BY_ENTITY)
 _HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -207,6 +210,10 @@ async def can_see(db: AsyncSession, user: User, kind: str, entity_id: str) -> bo
             return await _event_visible(db, user, uuid.UUID(entity_id))
         if kind == "album":
             return await _album_visible(db, user, uuid.UUID(entity_id))
+        if kind == "note":
+            from app.notes.access import can_open
+
+            return await can_open(db, user, uuid.UUID(entity_id))
         src = S.BY_ENTITY.get(kind)
         if src is None:
             return False
@@ -345,6 +352,7 @@ async def tagged(db: AsyncSession, user: User, tag: Tag, limit: int = 1000) -> l
     out += await _files_out(db, user, by_kind)
     out += await _events_out(db, user, [e for e, _ in by_kind.get("event", [])])
     out += await _albums_out(db, user, [e for e, _ in by_kind.get("album", [])])
+    out += await _notes_out(db, user, [e for e, _ in by_kind.get("note", [])])
     return out
 
 
@@ -460,6 +468,26 @@ async def _albums_out(db: AsyncSession, user: User, raw: list[str]) -> list[dict
     ).scalars()
     return [{"kind": "album", "id": str(a.id), "app": "Photos", "title": a.title, "detail": "Album",
              "url": f"/photos/albums/{a.id}"} for a in rows]
+
+
+async def _notes_out(db: AsyncSession, user: User, raw: list[str]) -> list[dict[str, Any]]:
+    from app.notes.access import visible_predicate
+    from app.notes.models import Note
+    from app.notes.service import display_title
+
+    ids = []
+    for e in raw:
+        try:
+            ids.append(uuid.UUID(e))
+        except ValueError:
+            continue
+    if not ids:
+        return []
+    rows = (
+        await db.execute(select(Note).where(Note.id.in_(ids), visible_predicate(user.id)).order_by(Note.updated_at.desc()))
+    ).scalars()
+    return [{"kind": "note", "id": str(n.id), "app": "Notes", "title": display_title(n), "detail": "Note",
+             "url": f"/notes/n/{n.id}"} for n in rows]
 
 
 # ------------------------------------------------------------------ search

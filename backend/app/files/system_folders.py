@@ -70,6 +70,10 @@ class SystemKind(str, Enum):
     # Attachments you saved from Mail. Not the old EMAIL_ATTACHMENTS kind, which
     # migration 0106 deleted.
     MAIL_ATTACHMENTS = "mail_attachments"
+    # Notes (app/notes): recordings and images added to notes —
+    # ``My files/Notes/``. Kept out of Photos (``hide_from_photos``); a photo
+    # picked from the library is referenced, not copied here.
+    NOTES = "notes"
     # NOTE: a Phase-12 ``EMAIL_ATTACHMENTS`` kind used to live here, lazily
     # seeded on first email-account connect. Email/calendar integration was
     # removed, and migration ``0106_remove_email_attachments_folder`` deletes
@@ -86,6 +90,7 @@ DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
     SystemKind.CAMERA_UPLOADS: "Photos",
     SystemKind.APPS: "Apps",
     SystemKind.MAIL_ATTACHMENTS: "Email Attachments",
+    SystemKind.NOTES: "Notes",
 }
 
 # The per-type subfolders auto-created inside each workspace's Drive
@@ -129,6 +134,16 @@ async def _fetch(
 async def ensure_mail_attachments(db: AsyncSession, user) -> FileFolder:  # noqa: ANN001
     """Made the first time you save something from Mail."""
     return await _ensure(db, user.id, SystemKind.MAIL_ATTACHMENTS)
+
+
+async def ensure_notes(db: AsyncSession, user) -> FileFolder:  # noqa: ANN001
+    """``My files/Notes``, made the first time something is added to a note.
+    Its pictures never show in Photos."""
+    folder = await _ensure(db, user.id, SystemKind.NOTES)
+    if not folder.hide_from_photos:
+        folder.hide_from_photos = True
+        await db.flush()
+    return folder
 
 
 async def _ensure(

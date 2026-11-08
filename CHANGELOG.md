@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Notes (groundwork for the new Notes app): notes and checklists you can pin, colour, label with your #tags, archive, share with chosen people on this server (who can edit, or leave) and restore from earlier versions. Ticking and adding list items never clash between people, and everyone on a note sees changes live. Nothing about a note is ever shown to someone it isn't shared with.
+- Notes: a "Notes" switch in Notifications, for when someone shares a note with you.
+- Notes: deleted notes go to the Trash for 30 days, with Restore and Delete forever, and show in the one Trash under "Notes".
+
 ## [0.31.0] - 2026-11-08
 
 ### Added

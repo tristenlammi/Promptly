@@ -412,6 +412,19 @@ Maps and directions with nothing sent to Google (decided 2026-11-04): all map da
 - **Android Auto screens** `maps/CarApp.kt` + `maps/CarRoutes.kt`: the map with Where to / Home / Work; picking a place goes to `CarPreview`, which asks `POST /api/maps/route` from a fresh fix and shows `RoutePreviewNavigationTemplate` (route lines on the map, time, distance, Go) on the root `DriveScreen`; Go calls `Nav.start` with the chosen route's `through`. `CarTemplates` builds the templates apart from the screens so `CarTemplatesTest` (Robolectric) can run them through the car library's rule checks; apps like this can only use Google's templates, not draw their own panels as Waze does.
 - **Android Auto risk**: sideloaded Car App Library apps need Unknown sources, and one report (Android Auto 17.9, Android 16) says template apps are refused even so. Test on a real phone.
 
+## Notes
+
+Promptly's Google Keep (`app/notes`, migration `0261_notes_core`, plan `docs/notes-plan.md`): its own built-in app, not an Item Store kind, because each note is shared on its own. Being built in work packages N1.1–N1.7; N1.1 (the backend core) is in.
+
+- **Access** `access.py` is the one rule: `can_open` (owner, or a row in `note_members`, and not trashed) and its SQL twin `visible_predicate`. Every reader goes through them, including tags (`tags/service.py` `can_see`, kind `note`), links (`links/refs.py`, kind `note`, also a mention source) and the One trash. Anyone else gets 404, never 403. Sharing is only with named people on this server: there's no link table and no public route. `sharing_refused` is the single hook for blocks; it reads `user_blocks` as soon as that table exists.
+- **Data** (`models.py`): `notes` (title, a TipTap `body_doc` cleaned to a small schema by `body.py`, derived `body_text` ≤ 20,000 chars, colour from a fixed palette, `search_text` + generated `tsv`), `note_items` (one row per checklist item, ids made by the client, one level of indent), `note_members`, `note_user_state` (each person's pin, archive, order, seen mark), `note_attachments` and `note_reminders` (filled in by N1.3 / N1.4), `note_versions`. Labels are #tags with `entity_kind='note'`, so they're per person.
+- **Sync**: `revision` covers title, body, colour, kind and list options; a save with an older `base_revision` gets 409 with the current note, unless it only repeats what's already there (a retry), which succeeds without a change. `change_seq` moves on every change, items included, and drives the "changed" dot. Item ops never conflict and retries with the same id are safe.
+- **Versions**: before a change, at most one per 10 minutes of editing, plus one before every restore (and, later, AI changes); the last 30 are kept.
+- **Live**: `GET /api/notes/events`, one SSE stream per person over Redis pub/sub. Events carry ids and counters only (`events.EVENT_KEYS`); `gone` tells someone they lost a note. The client refetches through the checked routes.
+- **Trash**: in place (`trashed_at`), the owner's alone; listed in the One trash as app `notes`; expires after 30 days in the nightly storage maintenance.
+- **Push**: one category, `notes` (`push_preferences.notes`), only for "Sam shared a note with you", all through `notes/push.py`. Nothing time-critical uses it (reminders come from Tasks), so quiet hours can hold it.
+- **Files**: `SystemKind.NOTES` (`My files/Notes`, hidden from Photos) holds recordings and pictures added to notes, from N1.3.
+
 ## 8. Chat tools, research, search, code, image gen & MCP
 
 ### 8.1 Tool framework (`chat/tools/`)

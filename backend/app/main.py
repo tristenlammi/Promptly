@@ -788,3 +788,7 @@ app.include_router(
     prefix="/api/notifications",
     tags=["notifications"],
 )
+# --- Notes (app/notes; docs/notes-plan.md) ---
+from app.notes.router import router as notes_router  # noqa: E402
+
+app.include_router(notes_router, prefix="/api/notes", tags=["notes"])

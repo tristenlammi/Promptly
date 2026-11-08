@@ -137,6 +137,10 @@ class PushPreferences(Base):
     calendar: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # Notes (0261): someone shared a note with you. Reminders come from Tasks.
+    notes: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -138,3 +138,13 @@ from app.trash.models import TrashEntry  # noqa: F401
 from app.links.models import EntityLink  # noqa: F401
 from app.today.models import RecentOpen  # noqa: F401
 from app.workspaces.meetings_models import MeetingJob  # noqa: F401
+# --- Notes (0261_notes_core) ---
+from app.notes.models import (  # noqa: F401
+    Note,
+    NoteAttachment,
+    NoteItem,
+    NoteMember,
+    NoteReminder,
+    NoteUserState,
+    NoteVersion,
+)

@@ -348,6 +348,8 @@ function systemFolderTooltip(kind: SystemFolderKind): string | undefined {
       return "Generated images, audio, and video.";
     case "camera_uploads":
       return "Phone backups and shared photos land here, in a folder for each year and month.";
+    case "notes":
+      return "Recordings and pictures you add to notes. They don't show in Photos.";
     default:
       return undefined;
   }

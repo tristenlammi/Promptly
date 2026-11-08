@@ -80,6 +80,9 @@ Category = Literal[
     "mail",
     # New-device approvals and shared-vault invites. Never any vault data.
     "passwords",
+    # Notes: someone shared a note with you (app/notes/push.py). Nothing
+    # time-critical — a note's reminders arrive as ``item_reminder``.
+    "notes",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -102,6 +105,7 @@ CATEGORIES: tuple[str, ...] = (
     "calendar",
     "mail",
     "passwords",
+    "notes",
     "test",
 )
 

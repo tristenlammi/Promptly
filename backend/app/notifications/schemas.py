@@ -52,6 +52,7 @@ class PreferencesSchema(BaseModel):
     calendar: bool = True
     passwords: bool = True
     mail: bool = True
+    notes: bool = True
 
 
 class PreferencesUpdate(BaseModel):
@@ -72,6 +73,7 @@ class PreferencesUpdate(BaseModel):
     calendar: bool | None = None
     passwords: bool | None = None
     mail: bool | None = None
+    notes: bool | None = None
 
 
 class NotificationActor(BaseModel):

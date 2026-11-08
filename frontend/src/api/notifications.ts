@@ -22,6 +22,7 @@ export interface NotificationPreferences {
   calendar: boolean;
   passwords: boolean;
   mail: boolean;
+  notes: boolean;
 }
 
 export interface NotificationRow {

@@ -11,9 +11,11 @@ export type TrashType =
   | "calendar_event"
   | "album"
   | "task"
-  | "contact";
+  | "contact"
+  // A note in Notes (trashed in place, by its id).
+  | "note";
 
-export type TrashApp = "drive" | "photos" | "apps" | "workspaces" | "calendar" | "tasks" | "contacts" | string;
+export type TrashApp = "drive" | "photos" | "apps" | "workspaces" | "calendar" | "tasks" | "contacts" | "notes" | string;
 
 export interface TrashItem {
   type: TrashType;
