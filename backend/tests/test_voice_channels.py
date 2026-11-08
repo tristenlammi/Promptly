@@ -487,6 +487,9 @@ async def test_second_device_moves_you_and_the_session_refresh(client, db, lk, e
     r = await client.post("/api/rooms/voice/refresh", json={"session": phone["session"]})
     assert r.status_code == 200, r.text
     assert tokens.decode(r.json()["token"])["identity"] == ident(w.sam) and r.json()["session"] == phone["session"]
+    # Names for the phone's notification ("🔊 Lounge · The Lads").
+    assert (r.json()["channel_name"], r.json()["space_name"]) == ("Lounge", "The Lads")
+    assert (phone["channel_name"], phone["space_name"]) == ("Lounge", "The Lads")
     # The web session's token no longer works; a forged one never did.
     assert (await client.post("/api/rooms/voice/refresh", json={"session": web["session"]})).status_code == 404
     assert (await client.post("/api/rooms/voice/refresh", json={"session": phone["session"][:-4] + "abcd"})).status_code == 404
@@ -953,6 +956,8 @@ async def test_the_android_service_reports_with_its_session(client, db, lk, even
     r = await client.post("/api/rooms/voice/session/speaking", json={"voice_session": vs, "on": False})
     assert r.status_code == 204 and of_type(events, "voice_speaking")
     assert (await client.post("/api/rooms/voice/session/still-here", json={"voice_session": vs})).status_code == 200
+    # Answered on the phone: the question goes away on Sam's other devices.
+    assert [to for to, _e in of_type(events, "voice_still_here")] == [{str(w.sam.id)}]
     # A bad or replaced session is refused.
     assert (await client.post("/api/rooms/voice/session/state", json={"voice_session": vs[:-3] + "xyz", "muted": False})).status_code == 404
     web = await join(client, w.sam, w.lounge)

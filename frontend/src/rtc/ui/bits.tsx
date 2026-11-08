@@ -14,7 +14,14 @@ import type { VoiceConnectionInfo } from "../voice/store";
 
 /** Discord's speaking green: the ring everyone recognises. */
 export const SPEAKING = "#23a55a";
-export const ACCENT = "var(--item-accent, var(--accent))";
+/** Promptly's own accent (terracotta) for the voice sheets and menus, even
+ *  inside an app with its own (Rooms is Discord blurple): sliders, toggles,
+ *  focus rings and selected options. */
+export const ACCENT = "var(--accent)";
+/** Promptly's terracotta under ``--item-accent`` for everything inside (the
+ *  shared Toggle, Segmented and primary buttons read it), in its deeper
+ *  shade so white button text stays readable (4.9:1). */
+export const VOICE_ACCENT_STYLE = { "--item-accent": "var(--accent-strong, var(--accent))" } as CSSProperties;
 
 export function VoiceAvatar({
   user,

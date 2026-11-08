@@ -50,7 +50,7 @@ from app.calls.models import BITRATES, Call, CallParticipant, RoomVoice
 from app.config import get_settings
 from app.redis_client import redis
 from app.rooms import core as rooms_core
-from app.rooms.models import Room, RoomSpaceMember
+from app.rooms.models import Room, RoomSpace, RoomSpaceMember
 from app.rtc import config as rtc_config
 from app.rtc import names, service, tokens, webhooks
 
@@ -349,6 +349,9 @@ def join_out(user: User, room: Room, rv: RoomVoice, sm: RoomSpaceMember | None, 
         "identity": identity(user.id),
         "room_id": str(room.id),
         "space_id": str(room.space_id),
+        # For the Android service's notification ("🔊 Lounge · The Lads").
+        "channel_name": room.name,
+        "space_name": "",  # filled by the caller
         "lk_room": lk_room(room.id),
         "session": _session_token(user.id, room.id, m["session"], m["device"]),
         "session_id": m["session"],
@@ -485,6 +488,9 @@ async def still_here(db: AsyncSession, user: User) -> dict:
     alone = _loads(await redis.get(K_ALONE.format(rid)))
     if alone and alone.get("user_id") == str(user.id):
         await _start_alone(rid, str(user.id), int(alone.get("minutes") or 15))
+    # Answered on one device (the phone's notification, say): the question
+    # goes away on the others.
+    await tell(user.id, {"type": "voice_still_here", "room_id": rid})
     return {"ok": True}
 
 
@@ -559,7 +565,13 @@ async def _join_locked(
     await publish_state(db, room.id, room.space_id)
     out = join_out(user, room, rv, sm, flags, m, cs)
     out["members"] = await members(room.id)
+    out["space_name"] = await _space_name(db, room)
     return out
+
+
+async def _space_name(db: AsyncSession, room: Room) -> str:
+    space = await db.get(RoomSpace, room.space_id) if room.space_id else None
+    return space.name if space is not None else ""
 
 
 async def drop(
@@ -665,6 +677,7 @@ async def refresh(db: AsyncSession, token: str) -> dict:
     out = join_out(user, room, rv, sm, flags, {**m, "session": cur["session"], "device": cur["device"]}, cs)
     out["session"] = token  # unchanged: it's the same session
     out["members"] = await members(room.id)
+    out["space_name"] = await _space_name(db, room)
     return out
 
 

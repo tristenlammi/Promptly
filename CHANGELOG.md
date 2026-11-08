@@ -43,10 +43,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Voice messages in plain words: "Still there?" with a countdown, "You're muted" when you talk while muted, "You might be too quiet", moved by an admin, every way a call can end, microphone and camera problems with how to allow them, a reconnecting and "Rejoin" state, and a one-time tip the first time you join.
 - Voice on a phone: a full-screen channel with big buttons and hold-to-talk for push to talk, a bar at the top of every screen to get back or leave, the screen kept awake while you're in the channel, and a note that voice may stop if you lock the phone.
 - Ctrl+K: "join lounge" joins a voice channel; Mute, Deafen and Leave voice while you're in one. Today shows who's hanging out in voice now, with Join. Export my library includes voice.json: your time in voice channels (which channel, when, how long; nothing said is ever recorded).
+<!-- Calls (voice channels), WP-V5 -->
+- Voice channels on Android phones with the Promptly app: tapping Join in P Rooms hands the channel to the app, which keeps you in it with the screen off or while you use other apps, through Bluetooth earbuds, a car or the loudspeaker. Its notification says who's talking and has Mute, Deafen and Leave; the channel page stays the remote control and still shows cameras and streams while it's open. Spoken directions from P Maps play over the channel, and "Still there?" asks on the phone too. Needs the new app version; iPhones and phones without the app keep the page awake instead, as before.
 
 ### Changed
 <!-- Calls (voice channels), WP-V1 -->
 - The site now allows the camera and screen sharing for itself (for voice channels' cameras and Go Live) and WebAssembly (for noise suppression). Account → Voice is now Voice & video.
+<!-- Calls (voice channels), WP-V5 -->
+- Voice & video settings use Promptly's own colour (terracotta) for sliders, switches, focus rings and the selected options, also inside Rooms. Push to talk now says what to do in a game: voice activity keeps working while you play, with a "Use voice activity instead" link.
 
 ### Fixed
 <!-- Calls (voice channels), WP-V4 -->

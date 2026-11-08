@@ -101,9 +101,11 @@ export function useSpeaking(roomId: string | null | undefined, userId: string): 
     if (!roomId) return false;
     const here = s.roomId === roomId && s.status === "connected";
     if (here) {
-      if (userId === meId) return s.speaking && !s.muted && !s.deafened && !s.serverMuted;
+      if (userId === meId && !s.remote) return s.speaking && !s.muted && !s.deafened && !s.serverMuted;
       const p = s.peers[userId];
-      if (p) return p.speaking;
+      // (With the phone's app holding the audio, this page's connection
+      // hears nobody, so LiveKit doesn't say who's talking: the server does.)
+      if (p && !s.remote) return p.speaking;
     }
     return !!s.speakingIn[roomId]?.[userId];
   });

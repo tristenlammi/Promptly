@@ -19,6 +19,7 @@ import {
   RectangleHorizontal,
   ScreenShareOff,
   Settings,
+  Smartphone,
   Video,
   VideoOff,
   Volume2,
@@ -46,6 +47,43 @@ import { useVoiceUi } from "./uiStore";
 import { problemWords } from "./words";
 
 const PHONE_WARNED_KEY = "promptly.voice.phoneWarned";
+const APP_NOTED_KEY = "promptly.voice.appNoted";
+
+/** On a phone where the Promptly app holds the sound: say so (once), and
+ *  what's happening while it takes over. */
+function AppNote({ joining }: { joining: boolean }) {
+  const [seen, setSeen] = useState(() => {
+    try {
+      return window.localStorage.getItem(APP_NOTED_KEY) === "1";
+    } catch {
+      return true;
+    }
+  });
+  if (!joining && seen) return null;
+  const dismiss = () => {
+    setSeen(true);
+    try {
+      window.localStorage.setItem(APP_NOTED_KEY, "1");
+    } catch {
+      /* shown again next time */
+    }
+  };
+  return (
+    <div className="m-3 flex items-start gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3 text-xs text-[var(--text)]" role="status" data-testid="voice-app-note">
+      <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
+      <span className="flex-1">
+        {joining
+          ? "Handing over to the Promptly app, which keeps you connected with the screen off…"
+          : "The Promptly app has the sound, so you can lock your phone or switch apps. Mute, Deafen and Leave are in its notification too."}
+      </span>
+      {!joining && (
+        <button type="button" aria-label="Dismiss" onClick={dismiss} className="-m-1 rounded-md p-1 hover:bg-[var(--hover)]">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
 
 const barBtn =
   "inline-flex h-11 w-11 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--text)] transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent,var(--accent))] disabled:opacity-40";
@@ -82,6 +120,7 @@ export function VoiceChannelView({
     live: v.live,
     canVideo: v.canVideo,
     problem: v.problem,
+    remote: v.remote,
   }));
   const here = s.roomId === room.id && s.status !== "idle";
   const members = useChannelMembers(room.id);
@@ -123,9 +162,10 @@ export function VoiceChannelView({
   }, [theatre, setTheatre]);
   useEffect(() => () => setTheatre(false), [setTheatre]);
 
-  // Phones: keep the screen on while you're in the channel here.
+  // Phones: keep the screen on while you're in the channel here (not
+  // needed when the Promptly app has the sound).
   useEffect(() => {
-    if (!isPhone || !here || s.status !== "connected") return;
+    if (!isPhone || !here || s.status !== "connected" || s.remote) return;
     const nav = navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<{ release: () => Promise<void> }> } };
     if (!nav.wakeLock) return;
     let lock: { release: () => Promise<void> } | null = null;
@@ -147,7 +187,7 @@ export function VoiceChannelView({
       document.removeEventListener("visibilitychange", take);
       void lock?.release().catch(() => undefined);
     };
-  }, [isPhone, here, s.status]);
+  }, [isPhone, here, s.status, s.remote]);
 
   const [phoneWarned, setPhoneWarned] = useState(() => {
     try {
@@ -371,7 +411,7 @@ export function VoiceChannelView({
       >
         <PhoneOff className="h-5 w-5" />
       </button>
-      {isPhone && prefs.input_mode === "ptt" && <HoldToTalk />}
+      {isPhone && prefs.input_mode === "ptt" && !s.remote && <HoldToTalk />}
     </div>
   );
 
@@ -379,7 +419,8 @@ export function VoiceChannelView({
     lobby
   ) : (
     <div ref={stage} className="flex min-h-0 flex-1 flex-col bg-[var(--bg)]" data-testid="voice-stage">
-      {isPhone && !phoneWarned && (
+      {isPhone && s.remote && <AppNote joining={s.status === "joining"} />}
+      {isPhone && !phoneWarned && !s.remote && (
         <div className="m-3 flex items-start gap-2 rounded-xl border border-[var(--warning-border)] bg-[var(--warning-bg)] p-3 text-xs text-[var(--text)]" role="note">
           <span className="flex-1">Voice may stop if you lock your phone or switch apps. On Android, install the Promptly app to stay connected.</span>
           <button type="button" aria-label="Dismiss" onClick={dismissPhoneWarning} className="-m-1 rounded-md p-1 hover:bg-[var(--hover)]">

@@ -39,6 +39,13 @@
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
     <!-- Only what Chrome's documented autofill-state provider asks of a caller. -->
     <uses-permission android:name="android.permission.READ_USER_DICTIONARY" />
+    <!-- Rooms voice channels (VoiceService): the microphone and sound in the
+         background, Bluetooth headsets and the car, and staying awake on Wi-Fi. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <application
         android:name=".SyncApp"
@@ -257,6 +264,26 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
+        <!-- Rooms voice channels: Join in P Rooms hands the channel to the app
+             (promptly://voice/join?…), which keeps you in it in the background. -->
+        <activity
+            android:name=".voice.VoiceHandoffActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity="org.promptly.app.voice"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptly" android:host="voice" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".voice.VoiceService"
+            android:exported="false"
+            android:foregroundServiceType="microphone|mediaPlayback" />
 
         <!-- A checked update, given to Android's package installer. -->
         <provider

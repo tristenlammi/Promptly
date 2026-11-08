@@ -44,6 +44,9 @@ export interface VoiceJoin {
   identity: string;
   room_id: string;
   space_id: string;
+  /** For the Android app's notification ("🔊 Lounge · The Lads"). */
+  channel_name?: string;
+  space_name?: string;
   lk_room: string;
   /** The signed voice session (the Android service's key). */
   session: string;
@@ -86,7 +89,9 @@ export type VoiceServerEvent =
   | { type: "voice_speaking"; room_id: string; user_id: string; on: boolean }
   | { type: "voice_moved"; from_room_id: string; to_room_id: string; by: string; session: string; handled?: boolean }
   | { type: "voice_disconnected"; room_id: string; session: string | null; reason: VoiceEndReason; by?: string }
-  | { type: "voice_still_there"; room_id: string; deadline: string; seconds: number };
+  | { type: "voice_still_there"; room_id: string; deadline: string; seconds: number }
+  /** "Still there?" was answered (on any of your devices). */
+  | { type: "voice_still_here"; room_id: string };
 
 export interface VoiceStateReport {
   session?: string;
@@ -120,6 +125,12 @@ export const voiceApi = {
   },
   async stillHere(): Promise<void> {
     await apiClient.post("/rooms/voice/still-here");
+  },
+  /** A listen-only second connection for cameras and streams, while the
+   *  Android app holds your audio (``u:<id>:view``). */
+  async view(roomId: string): Promise<{ url: string; identity: string; lk_room: string; token: string }> {
+    const { data } = await apiClient.post<{ url: string; identity: string; lk_room: string; token: string }>(`/rooms/rooms/${roomId}/voice/view`);
+    return data;
   },
   async control(action: "mute" | "unmute" | "deafen" | "undeafen" | "leave"): Promise<{ delivered: boolean }> {
     const { data } = await apiClient.post<{ ok: boolean; delivered: boolean }>("/rooms/voice/control", { action });

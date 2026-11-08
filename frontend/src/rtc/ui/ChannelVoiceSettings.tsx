@@ -15,6 +15,7 @@ import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
+import { VOICE_ACCENT_STYLE } from "./bits";
 import { QUALITY_WORDS } from "./words";
 
 const DEFAULTS: VoiceChannelSettings = {
@@ -66,7 +67,7 @@ export function ChannelVoiceSettings({ room, isAdmin }: { room: Room; isAdmin: b
   }
 
   return (
-    <div className="flex flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4" data-testid="channel-voice-settings">
+    <div className="flex flex-col gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4" style={VOICE_ACCENT_STYLE} data-testid="channel-voice-settings">
       <p className="flex items-center gap-2 text-sm font-semibold text-[var(--text)]">
         <Volume2 className="h-4 w-4 text-[var(--text-muted)]" /> Voice
       </p>
@@ -95,8 +96,8 @@ export function ChannelVoiceSettings({ room, isAdmin }: { room: Room; isAdmin: b
               aria-checked={v.quality === q}
               onClick={() => void save({ quality: q })}
               className={cn(
-                "flex flex-col rounded-xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)]",
-                v.quality === q ? "border-[var(--item-accent)] bg-[color-mix(in_srgb,var(--item-accent)_8%,transparent)]" : "border-[var(--border)] hover:bg-[var(--hover)]",
+                "flex flex-col rounded-xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                v.quality === q ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_8%,transparent)]" : "border-[var(--border)] hover:bg-[var(--hover)]",
               )}
             >
               <span className="text-sm font-medium text-[var(--text)]">{QUALITY_WORDS[q].label}</span>

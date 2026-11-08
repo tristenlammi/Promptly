@@ -5,7 +5,7 @@
  * gain, cameras and Go Live defaults, data saver and sounds. Device
  * choices stay on this browser; everything else follows you.
  */
-import { Headphones, Keyboard, Loader2, Mic, MonitorUp, Play, Square, Video, Volume2 } from "lucide-react";
+import { Gamepad2, Headphones, Keyboard, Loader2, Mic, MonitorUp, Play, Square, Video, Volume2 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { ItemButton, Segmented, Select, Sheet, Toggle } from "@/items/ui";
@@ -18,7 +18,7 @@ import { voice } from "../voice/actions";
 import { allowedQualities, qualityWords, type StreamHint } from "../voice/goLive";
 import { useMicTest, useVoice, useVoiceLevel, useVoiceSettings } from "../voice/hooks";
 import type { VoicePrefs } from "../voice/prefs";
-import { ACCENT } from "./bits";
+import { ACCENT, VOICE_ACCENT_STYLE } from "./bits";
 import { useVoiceUi } from "./uiStore";
 import { keyName, permissionSteps, SHORTCUTS } from "./words";
 
@@ -149,7 +149,7 @@ function KeybindButton({ value, onChange }: { value: string; onChange: (code: st
       onClick={() => setListening((v) => !v)}
       aria-label={listening ? "Press the key to use for push to talk (Escape to cancel)" : `Push to talk key: ${keyName(value)}. Change`}
       className={cn(
-        "inline-flex h-10 min-w-[9rem] items-center justify-center gap-2 rounded-xl border px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent,var(--accent))]",
+        "inline-flex h-10 min-w-[9rem] items-center justify-center gap-2 rounded-xl border px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
         listening ? "border-[var(--danger)] text-[var(--danger)]" : "border-[var(--border)] bg-[var(--surface-2)] text-[var(--text)]",
       )}
       data-testid="ptt-keybind"
@@ -209,7 +209,7 @@ export function VoiceSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-4" data-testid="voice-settings">
+    <div className="flex flex-col gap-4" style={VOICE_ACCENT_STYLE} data-testid="voice-settings">
       <Group title="Microphone and speaker" icon={<Mic className="h-4 w-4" />}>
         <div className="grid gap-3 py-2.5 md:grid-cols-2">
           <label className="flex flex-col gap-1">
@@ -343,6 +343,21 @@ export function VoiceSettings() {
             <Row title="Push to talk key" text="Hold it to talk. Works while a Promptly window is focused: browsers can't hear keys pressed in other apps.">
               <KeybindButton value={prefs.ptt_key} onChange={(code) => set({ ptt_key: code })} />
             </Row>
+            <div className="flex items-start gap-2 py-2.5 text-xs leading-relaxed text-[var(--text-muted)]" data-testid="ptt-game-tip">
+              <Gamepad2 className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <p>
+                Playing a game or working in another app? Voice activity keeps working there, and Enhanced noise suppression filters
+                out most keyboard and mouse clicks.{" "}
+                <button
+                  type="button"
+                  onClick={() => set({ input_mode: "vad" })}
+                  className="rounded font-medium text-[var(--accent-text)] underline underline-offset-2 hover:text-[var(--text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                  data-testid="use-voice-activity"
+                >
+                  Use voice activity instead
+                </button>
+              </p>
+            </div>
             <Slider label="Release delay" value={prefs.ptt_release_ms} min={0} max={1000} step={20} unit=" ms" onChange={(v) => set({ ptt_release_ms: v })} />
           </>
         )}
@@ -359,12 +374,12 @@ export function VoiceSettings() {
               aria-checked={prefs.noise === o.value}
               onClick={() => set({ noise: o.value })}
               className={cn(
-                "flex items-start gap-3 rounded-xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent,var(--accent))]",
-                prefs.noise === o.value ? "border-[var(--item-accent,var(--accent))] bg-[color-mix(in_srgb,var(--item-accent,var(--accent))_8%,transparent)]" : "border-[var(--border)] hover:bg-[var(--hover)]",
+                "flex items-start gap-3 rounded-xl border px-3 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                prefs.noise === o.value ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_8%,transparent)]" : "border-[var(--border)] hover:bg-[var(--hover)]",
               )}
             >
               <span
-                className={cn("mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2", prefs.noise === o.value ? "border-[var(--item-accent,var(--accent))] bg-[var(--item-accent,var(--accent))]" : "border-[var(--border)]")}
+                className={cn("mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2", prefs.noise === o.value ? "border-[var(--accent)] bg-[var(--accent)]" : "border-[var(--border)]")}
                 aria-hidden
               />
               <span>

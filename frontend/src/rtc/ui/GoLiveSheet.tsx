@@ -14,6 +14,7 @@ import { cn } from "@/utils/cn";
 import { voice } from "../voice/actions";
 import { allowedQualities, capQuality, qualityWords, type StreamHint } from "../voice/goLive";
 import { useVoice, useVoiceSettings } from "../voice/hooks";
+import { VOICE_ACCENT_STYLE } from "./bits";
 import { useVoiceUi } from "./uiStore";
 
 type Surface = "monitor" | "window" | "browser";
@@ -92,7 +93,7 @@ export function GoLiveSheet() {
       title="Go Live"
       size="md"
       footer={
-        <div className="flex w-full items-center justify-end gap-2">
+        <div className="flex w-full items-center justify-end gap-2" style={VOICE_ACCENT_STYLE}>
           <ItemButton variant="secondary" onClick={close}>
             Cancel
           </ItemButton>
@@ -102,7 +103,7 @@ export function GoLiveSheet() {
         </div>
       }
     >
-      <div className="flex flex-col gap-5" data-testid="go-live-sheet">
+      <div className="flex flex-col gap-5" style={VOICE_ACCENT_STYLE} data-testid="go-live-sheet">
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-2 text-xs font-medium text-[var(--text-muted)]">What to share</legend>
           <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="What to share">
@@ -114,9 +115,9 @@ export function GoLiveSheet() {
                 aria-checked={surface === o.value}
                 onClick={() => setSurface(o.value)}
                 className={cn(
-                  "flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent,var(--accent))]",
+                  "flex flex-col items-center gap-1.5 rounded-xl border p-3 text-center transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
                   surface === o.value
-                    ? "border-[var(--item-accent,var(--accent))] bg-[color-mix(in_srgb,var(--item-accent,var(--accent))_10%,transparent)]"
+                    ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]"
                     : "border-[var(--border)] hover:bg-[var(--hover)]",
                 )}
               >

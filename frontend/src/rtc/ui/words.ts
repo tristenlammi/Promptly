@@ -55,6 +55,13 @@ export function problemWords(p: VoiceProblem, channel?: string | null): ProblemW
       return { title: "Your camera didn't start", text: "Another app may be using it, or there's no camera. Pick another in Voice & video settings.", retry: false, permissionHelp: false };
     case "screen-failed":
       return { title: "Couldn't go live", text: "Your browser couldn't share that. Try again, or pick another screen, window or tab.", retry: false, permissionHelp: false };
+    case "app-failed":
+      return {
+        title: "The Promptly app didn't pick up",
+        text: `It should have taken over ${ch} so you stay connected with the screen off. Open the Promptly app once and try again, or use this page for voice (keep it open).`,
+        retry: true,
+        permissionHelp: false,
+      };
   }
 }
 

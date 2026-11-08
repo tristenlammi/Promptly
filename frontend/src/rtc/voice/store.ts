@@ -35,7 +35,8 @@ export type VoiceProblemKind =
   | "connect-failed" // couldn't reach the calls service
   | "camera-denied"
   | "camera-failed"
-  | "screen-failed"; // Go Live couldn't start (not a cancel)
+  | "screen-failed" // Go Live couldn't start (not a cancel)
+  | "app-failed"; // the Promptly app on this phone didn't take the channel
 
 export interface VoiceProblem {
   kind: VoiceProblemKind;
@@ -98,6 +99,9 @@ export interface VoiceStoreState {
   spaceId: string | null;
   /** While joining another channel from this one. */
   joiningRoomId: string | null;
+  /** The Promptly app on this phone holds your audio (its voice service);
+   *  this page is the remote control and shows cameras and streams. */
+  remote: boolean;
   /** This connection's session id (reports name it). */
   session: string | null;
   joinedAt: number | null;
@@ -167,6 +171,7 @@ export const initialVoiceState: VoiceStoreState = {
   roomId: null,
   spaceId: null,
   joiningRoomId: null,
+  remote: false,
   session: null,
   joinedAt: null,
   quality: null,

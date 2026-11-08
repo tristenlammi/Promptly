@@ -39,7 +39,16 @@ public class SuiteLauncher extends LauncherActivity {
         } catch (PackageManager.NameNotFoundException ignored) {
             // Can't happen for our own activity; "/" is a fine fallback.
         }
+        // A page inside this launcher's app, from the app itself (the voice
+        // notification opens its channel). Paths on our own server only.
+        String open = getIntent() != null ? getIntent().getStringExtra(EXTRA_OPEN_PATH) : null;
+        if (open != null && open.startsWith("/") && !open.startsWith("//") && !open.contains("\\")) path = open;
         String sep = path.contains("?") ? "&" : "?";
-        return Uri.parse(Server.get(this) + path + sep + "source=android");
+        // caps=voice: this app can hold a voice channel in the background
+        // (the page hands Join over to it, frontend/src/rtc/voice/androidApp.ts).
+        return Uri.parse(Server.get(this) + path + sep + "source=android&caps=voice");
     }
+
+    /** A path to open instead of the launcher's own (see getLaunchingUrl). */
+    public static final String EXTRA_OPEN_PATH = "org.promptly.app.OPEN_PATH";
 }

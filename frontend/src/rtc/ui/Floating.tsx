@@ -9,6 +9,8 @@ import { createPortal } from "react-dom";
 
 import { cn } from "@/utils/cn";
 
+import { VOICE_ACCENT_STYLE } from "./bits";
+
 export function Floating({
   open,
   onClose,
@@ -122,7 +124,7 @@ export function Floating({
       ref={panel}
       role="dialog"
       aria-label={label}
-      style={{ position: "fixed", left: pos?.left ?? -9999, top: pos?.top ?? -9999, width: Math.min(width, window.innerWidth - 16), zIndex: 90 }}
+      style={{ ...VOICE_ACCENT_STYLE, position: "fixed", left: pos?.left ?? -9999, top: pos?.top ?? -9999, width: Math.min(width, window.innerWidth - 16), zIndex: 90 }}
       className={cn(
         "overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] text-[var(--text)] shadow-[var(--shadow-lg)]",
         className,

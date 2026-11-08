@@ -1,6 +1,8 @@
 // First: catch the browser's install prompt even if it fires before React
 // mounts (InstallPromptCard reads it from here).
 import "./lib/installPrompt";
+// The Promptly Android app says it can hold voice channels (?caps=voice).
+import "./rtc/voice/androidApp";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { MutationCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";

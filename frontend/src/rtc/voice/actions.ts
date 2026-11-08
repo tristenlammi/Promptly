@@ -47,6 +47,12 @@ export const voice = {
     return roomId ? e.joinChannel(roomId) : Promise.resolve(false);
   }),
   leave: withEngine((e) => e.leave()),
+  /** Join on this page even though the phone's Promptly app could hold the
+   *  audio ("Use this page instead"). */
+  joinHere: withEngine((e, roomId: string) => e.joinChannel(roomId, { here: true })),
+  /** Show a channel the phone's Promptly app is already in (page opened
+   *  while you're in voice there). */
+  attachToApp: withEngine((e, roomId: string, spaceId: string | null, sessionId: string | null) => e.attachToApp(roomId, spaceId, sessionId)),
   /** Warm up (hovering a channel): library, suppressor, connection. */
   prepare: withEngine((e) => e.prepare()),
 

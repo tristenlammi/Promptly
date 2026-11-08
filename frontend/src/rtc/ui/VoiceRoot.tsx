@@ -19,8 +19,10 @@ import { toast } from "@/store/toastStore";
 
 import { fallbackWords } from "../audio/engines";
 import { voice, voiceEngine } from "../voice/actions";
+import { forgetAndroidVoiceApp, hasAndroidVoiceApp, onNoApp } from "../voice/androidApp";
 import { useVoice, useVoiceSettings } from "../voice/hooks";
 import { useVoiceLevels, useVoiceStore } from "../voice/store";
+import { VOICE_ACCENT_STYLE } from "./bits";
 import { findChannel, nameOf } from "./directory";
 import { GoLiveSheet } from "./GoLiveSheet";
 import { PersonMenu } from "./PersonMenu";
@@ -33,6 +35,7 @@ const REJOIN_WITHIN_MS = 60_000;
 
 export function VoiceRoot() {
   useRejoinAfterReload();
+  useAndroidApp();
   useEffect(() => {
     // Developer builds and the e2e suite (localStorage "promptly.dev" =
     // "voice"): the voice state, for measuring what's heard.
@@ -87,6 +90,40 @@ function useRejoinAfterReload() {
         .catch(() => undefined);
     }
     return () => window.removeEventListener("pagehide", save);
+  }, []);
+}
+
+/** On a phone with the Promptly app: show the channel the app is in when
+ *  this page opens, and fall back to this page if the app can't take a
+ *  hand-off (removed, or too old). */
+function useAndroidApp() {
+  useEffect(() => {
+    const off = onNoApp(() => {
+      forgetAndroidVoiceApp();
+      toast.info("The Promptly app couldn't take over, so this page holds your voice. Keep it open while you talk.");
+      const target = useVoiceStore.getState().roomId ?? useVoiceUi.getState().lastJoinRoomId;
+      if (target) {
+        void voice.joinHere(target);
+        return;
+      }
+      void voiceApi
+        .me()
+        .then((me) => {
+          if (me.room_id && me.device === "android") void voice.joinHere(me.room_id);
+        })
+        .catch(() => undefined);
+    });
+    if (hasAndroidVoiceApp()) {
+      void voiceApi
+        .me()
+        .then((me) => {
+          if (me.room_id && me.device === "android" && useVoiceStore.getState().status === "idle") {
+            void voice.attachToApp(me.room_id, me.space_id ?? null, me.session_id ?? null);
+          }
+        })
+        .catch(() => undefined);
+    }
+    return off;
   }, []);
 }
 
@@ -150,7 +187,7 @@ function StillThere() {
       title="Still there?"
       size="sm"
       footer={
-        <div className="flex w-full justify-end gap-2">
+        <div className="flex w-full justify-end gap-2" style={VOICE_ACCENT_STYLE}>
           <ItemButton variant="secondary" onClick={() => void voice.leave()}>
             Leave
           </ItemButton>
@@ -193,6 +230,7 @@ function ProblemCard() {
   return (
     <div
       role="alert"
+      style={VOICE_ACCENT_STYLE}
       className="fixed left-1/2 top-3 z-[95] w-[min(28rem,calc(100vw-1.5rem))] -translate-x-1/2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-lg)]"
       data-testid="voice-problem"
     >
@@ -211,6 +249,19 @@ function ProblemCard() {
             {w.permissionHelp && !steps && (
               <ItemButton size="sm" variant="secondary" onClick={() => setSteps(true)}>
                 How to allow it
+              </ItemButton>
+            )}
+            {problem.kind === "app-failed" && target && (
+              <ItemButton
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  void voice.dismissProblem();
+                  void voice.joinHere(target);
+                }}
+                data-testid="voice-use-page"
+              >
+                Use this page instead
               </ItemButton>
             )}
             {problem.kind === "connect-failed" && isAdmin && (
@@ -263,6 +314,7 @@ function FirstTimeTip() {
     <div
       role="dialog"
       aria-label="You're in voice"
+      style={VOICE_ACCENT_STYLE}
       className="fixed bottom-4 left-1/2 z-[85] w-[min(26rem,calc(100vw-1.5rem))] -translate-x-1/2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4 shadow-[var(--shadow-lg)] md:left-auto md:right-4 md:translate-x-0"
       data-testid="voice-tip"
     >
