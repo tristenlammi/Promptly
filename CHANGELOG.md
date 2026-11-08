@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Passwords: a Duplicates page in the vault's sidebar, with a count, finds logins saved twice (same site and username) and ones that are probably the same (same site and password, another username or none), all on your device. Pick which to keep and Merge (the others go to Trash for 30 days, with Undo), mark a group Not a duplicate (remembered in your encrypted vault), or Merge all sure duplicates at once.
+
 ## [0.32.1] - 2026-11-09
 
 ### Fixed

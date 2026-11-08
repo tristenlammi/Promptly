@@ -5,7 +5,7 @@ import { b64u, fromB64u, randomBytes, utf8 } from "./bytes";
 import quirks from "./data/change-password-URLs.json";
 import { aad, open, seal } from "./format";
 import { baseDomain, hostOf, lookalikeOf, sharedWith } from "./match";
-import { type AttachmentRef, type HistoryEntry, type Item, type ItemBody, touch } from "./model";
+import { type Item, type ItemBody, touch } from "./model";
 import { aesKey, argon2, hkdf, KDF_FLOOR } from "./primitives";
 
 // ---- Mail codes ----------------------------------------------------------------------
@@ -138,63 +138,9 @@ export function dropPending(body: ItemBody): ItemBody {
 
 // ---- Duplicates ----------------------------------------------------------------------
 
-const sites = (b: ItemBody) => (b.urls ?? []).map((u) => { const h = hostOf(u.url); return h ? baseDomain(h) : null; }).filter(Boolean) as string[];
-
-/** Same site, same username: almost always the same login saved twice. */
-export function findDuplicates(items: Item[]): Item[][] {
-  const groups = new Map<string, Item[]>();
-  for (const i of items) {
-    if (i.body.kind !== "login" || !i.body.username) continue;
-    for (const site of new Set(sites(i.body))) {
-      const key = `${i.vaultId}|${site}|${i.body.username.toLowerCase()}`;
-      groups.set(key, [...(groups.get(key) ?? []), i]);
-    }
-  }
-  const seen = new Set<string>();
-  const out: Item[][] = [];
-  for (const g of groups.values()) {
-    if (g.length < 2) continue;
-    const key = g.map((i) => i.id).sort().join();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(g);
-  }
-  return out;
-}
-
-/** Keeps the newest as the main one, and nothing else is thrown away: other passwords
- *  go to history, and other URLs, notes, 2FA, passkeys and fields come across. */
-/** An attachment's chunks are bound to the item they were uploaded on, so one on a dropped copy
- *  can't just be listed on the kept item: `moves` says which to seal again under it first. */
-export function mergeDuplicates(group: Item[]): { keep: Item; body: ItemBody; drop: Item[]; moves: { from: Item; ref: AttachmentRef }[] } {
-  const order = [...group].sort((a, b) => b.body.updatedAt.localeCompare(a.body.updatedAt));
-  const keep = order[0];
-  const drop = order.slice(1);
-  const body: ItemBody = { ...keep.body };
-  const history: HistoryEntry[] = [];
-  const seenUrls = new Set((body.urls ?? []).map((u) => u.url));
-  const urls = [...(body.urls ?? [])];
-  const notes: string[] = body.notes ? [body.notes] : [];
-  const fields = [...(body.fields ?? [])];
-  const passkeys = [...(body.passkeys ?? [])];
-  const attachments = [...(body.attachments ?? [])];
-  const moves: { from: Item; ref: AttachmentRef }[] = [];
-  // Someone who asked for the master password on any copy still wants that on what's left.
-  if (drop.some((d) => d.body.reprompt)) body.reprompt = true;
-  for (const d of drop) {
-    if (d.body.password && d.body.password !== body.password && !history.some((h) => h.password === d.body.password)) history.push({ password: d.body.password, at: d.body.updatedAt });
-    if (d.body.pendingPassword && d.body.pendingPassword !== body.password && !history.some((h) => h.password === d.body.pendingPassword)) history.push({ password: d.body.pendingPassword, at: new Date().toISOString() });
-    for (const u of d.body.urls ?? []) if (!seenUrls.has(u.url)) { seenUrls.add(u.url); urls.push(u); }
-    if (d.body.notes && !notes.includes(d.body.notes)) notes.push(d.body.notes);
-    for (const f of d.body.fields ?? []) if (!fields.some((x) => x.name === f.name && x.value === f.value)) fields.push(f);
-    for (const p of d.body.passkeys ?? []) if (!passkeys.some((x) => x.credentialId === p.credentialId)) passkeys.push(p);
-    for (const a of d.body.attachments ?? []) if (!attachments.some((x) => x.id === a.id) && !moves.some((m) => m.ref.id === a.id)) moves.push({ from: d, ref: a });
-    if (!body.totp && d.body.totp) body.totp = d.body.totp;
-  }
-  // What's being merged in comes first, as the copies are about to go. Older history fills the rest.
-  for (const h of [...(body.passwordHistory ?? []), ...drop.flatMap((d) => d.body.passwordHistory ?? [])]) if (!history.some((x) => x.password === h.password)) history.push(h);
-  return { keep, drop, moves, body: touch(keep.body, { ...body, urls, notes: notes.join("\n\n") || undefined, fields, passkeys, attachments, passwordHistory: history.slice(0, 20) }) };
-}
+// Moved to duplicates.ts, which also finds logins that are probably the same. Kept here so
+// what imported them from this file still works.
+export { findDuplicates, mergeDuplicates } from "./duplicates";
 
 // ---- Clock ---------------------------------------------------------------------------
 

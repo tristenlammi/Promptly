@@ -3,14 +3,14 @@
 // and unlocking with a passkey.
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { changePageUrl, clockDriftText, commitPending, createPasskeyUnlock, dropPending, findDuplicates, mergeDuplicates, type PasskeyUnlock, type SecurityAlert, securityAlerts, type SecurityEvent, withPending } from "../core/connections";
+import { changePageUrl, clockDriftText, commitPending, createPasskeyUnlock, dropPending, type PasskeyUnlock, type SecurityAlert, securityAlerts, type SecurityEvent, withPending } from "../core/connections";
 import { buildKitPdf } from "../core/kit";
 import { encodeSecretKey, lastGroup } from "../core/keys";
 import { checkPasskeyPin, clearPinTries, makePinVerifier, passkeyPinOf, PIN_LOCKED_TEXT, pinProblem, savePasskeyPin } from "../core/passkeypin";
 import { generateForSite } from "../core/generator";
 import { hostOf } from "../core/match";
 import { type Item, newBody } from "../core/model";
-import { downloadAttachment, moveAttachment, uploadAttachment } from "../core/attachments";
+import { downloadAttachment, uploadAttachment } from "../core/attachments";
 import { equalBytes } from "../core/bytes";
 import { Reprompt } from "./ItemView";
 import { Button, Callout, errorText, inputClass, Label, Modal, safeHref, useVault } from "./kit";
@@ -220,43 +220,6 @@ export function RotationQueue({ items, onDone }: { items: Item[]; onDone: () => 
     );
   }
   return <ChangePassword key={items[i].id} item={items[i]} onDone={onDone} next={() => setI(i + 1)} />;
-}
-
-export function DuplicatesPanel() {
-  const { vault, version, bump, toast, platform } = useVault();
-  const groups = useMemo(() => {
-    void version;
-    return findDuplicates(vault.allItems());
-  }, [vault, version]);
-  if (!groups.length) return null;
-  const merge = async (group: Item[]) => {
-    const { keep, body, drop, moves } = mergeDuplicates(group);
-    try {
-      // Before anything's changed, so a failure here leaves all the copies as they were.
-      const moved = [];
-      for (const m of moves) moved.push(await moveAttachment(platform.api, { vaultId: m.from.vaultId, itemId: m.from.id }, { vaultId: keep.vaultId, itemId: keep.id }, m.ref));
-      if (moved.length) body.attachments = [...(body.attachments ?? []), ...moved];
-      await vault.update(keep.id, body);
-      for (const d of drop) await vault.trashItem(d.id);
-      vault.sync().catch(() => undefined);
-      bump();
-      toast("Merged. The others are in Trash for 30 days.");
-    } catch (e) {
-      toast(errorText(e), "err");
-    }
-  };
-  return (
-    <section data-testid="duplicates" className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-[var(--text)]">Saved twice</h2>
-      <p className="text-xs text-[var(--text-muted)]">Same site, same username. Merging keeps the newest, and moves other passwords to its history, so nothing's lost.</p>
-      {groups.map((g) => (
-        <div key={g.map((i) => i.id).join()} className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] p-2 text-sm text-[var(--text)]">
-          <span className="min-w-0 flex-1 truncate">{g[0].body.title} · {g[0].body.username} · {g.length} copies</span>
-          <Button small onClick={() => merge(g)}>Merge</Button>
-        </div>
-      ))}
-    </section>
-  );
 }
 
 type DriveFile = { id: string; name: string; size_bytes: number; mime_type: string };

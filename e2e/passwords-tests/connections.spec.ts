@@ -115,8 +115,13 @@ test("duplicates merge, and travel mode takes a vault off this browser", async (
   await addLogin(page, { title: "Site two", username: "ana", password: "Pass-Two-2!", url: "https://login.example.com/" });
   await nav(page, "Security check");
   const dupes = page.getByTestId("duplicates");
-  await expect(dupes).toContainText("2 copies");
-  await dupes.getByRole("button", { name: "Merge" }).click();
+  await expect(dupes).toContainText("1 login is saved twice.");
+  await dupes.getByRole("button", { name: "Review duplicates" }).click();
+  const group = page.getByTestId("dupe-group");
+  await expect(group).toHaveCount(1);
+  await group.getByRole("button", { name: "Merge", exact: true }).click();
+  await expect(page.getByTestId("dupes-empty")).toBeVisible();
+  await nav(page, "Security check");
   await expect(dupes).toHaveCount(0);
 
   await nav(page, "Settings");
