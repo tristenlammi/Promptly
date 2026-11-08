@@ -140,10 +140,14 @@ async def test_refusals_come_before_any_bytes(client, db, user, root, monkeypatc
     async def tiny(_db):
         return 100
 
+    real_cap = tus_hooks.large_max_bytes
     monkeypatch.setattr(tus_hooks, "large_max_bytes", tiny)
     reply = await _hook(client, "pre-create", _event(user, size=101, meta={"filename": "big.txt", "scope": "mine"}))
     assert _rejected(reply)[0] == 413
-    monkeypatch.undo()
+    # Put back only the cap: monkeypatch.undo() would also undo the fixtures'
+    # patches (no hook secret, uploads under tmp), which only passed where the
+    # environment happened to have no TUS_HOOK_SECRET.
+    monkeypatch.setattr(tus_hooks, "large_max_bytes", real_cap)
     # A name to ask about — the client asks before sending 4 GB.
     await client.post("/api/files/", files={"file": ("plan.txt", b"x", "text/plain")}, data={"scope": "mine"}, headers=_auth(user))
     reply = await _hook(client, "pre-create", _event(user, size=5, meta={"filename": "plan.txt", "scope": "mine", "on_conflict": "ask"}))
