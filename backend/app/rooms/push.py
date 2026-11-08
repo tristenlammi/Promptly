@@ -82,7 +82,7 @@ async def fan_out(message_id: uuid.UUID) -> int:
                     else f"sent {'a file' if len(atts) == 1 else f'{len(atts)} files'}"
                 )
         if space is not None:
-            title = f"{space.name} · #{room.name}"
+            title = f"{space.name} · {'🔊 ' if room.kind == 'voice' else '#'}{room.name}"
             body = f"{who}: {text}"
         elif room.kind == "dm":
             title, body = who, text

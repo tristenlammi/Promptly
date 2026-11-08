@@ -139,3 +139,5 @@ from app.trash.models import TrashEntry  # noqa: F401
 from app.links.models import EntityLink  # noqa: F401
 from app.today.models import RecentOpen  # noqa: F401
 from app.workspaces.meetings_models import MeetingJob  # noqa: F401
+# Calls (voice channels): channel settings and voice-session history (0281).
+from app.calls.models import Call, CallParticipant, RoomVoice  # noqa: F401

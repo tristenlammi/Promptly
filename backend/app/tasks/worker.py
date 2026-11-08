@@ -270,6 +270,26 @@ async def calls_check(ctx) -> dict:
     return await hourly(redis, enabled=s.enabled)
 
 
+# ---- Calls: voice channel timers (app/calls/voice.py). Deferred per
+# channel / per move; the reaper reconciles Redis with LiveKit.
+async def voice_alone_check(ctx, room_id: str, token: str) -> str:
+    from app.calls.voice import alone_check
+
+    return await alone_check(room_id, token)
+
+
+async def voice_move_check(ctx, user_id: str, from_room: str, session: str) -> str:
+    from app.calls.voice import move_check
+
+    return await move_check(user_id, from_room, session)
+
+
+async def voice_reaper(ctx) -> dict:
+    from app.calls.voice import reap
+
+    return await reap()
+
+
 class WorkerSettings:
     functions = [
         # Never retried by arq: a run interrupted mid-way is closed out by
@@ -294,6 +314,9 @@ class WorkerSettings:
         func(run_import_job, timeout=24 * 3600, max_tries=1, keep_result=0),
         # Photos and videos are the media worker's (WP-7.4,
         # app.tasks.media_worker), on their own queue.
+        # Calls: voice channel timers ("Still there?", a move's grace).
+        func(voice_alone_check, timeout=60, max_tries=2, keep_result=0),
+        func(voice_move_check, timeout=60, max_tries=2, keep_result=0),
     ]
     cron_jobs = [
         # Learn from chats that have gone quiet, then look after memory overnight.
@@ -325,6 +348,8 @@ class WorkerSettings:
         ),
         # Calls: hourly check of the calls service (app/calls/checks.py).
         cron(calls_check, minute=27, run_at_startup=False, unique=True, timeout=120),
+        # Calls: match voice channels' live state with LiveKit (app/calls/voice.py).
+        cron(voice_reaper, minute=set(range(2, 60, 5)), run_at_startup=False, unique=True, timeout=240),
     ]
     on_startup = wait_for_schema
     redis_settings = RedisSettings.from_dsn(get_settings().REDIS_URL)

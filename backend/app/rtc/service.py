@@ -97,3 +97,39 @@ async def send_data(room: str, payload: bytes, *, identities: list[str] | None =
         req.topic = topic
     async with room_service() as rs:
         await rs.send_data(req)
+
+
+# What a token's source names are in LiveKit's permission messages.
+_SOURCES = {
+    "microphone": api.TrackSource.MICROPHONE,
+    "camera": api.TrackSource.CAMERA,
+    "screen_share": api.TrackSource.SCREEN_SHARE,
+    "screen_share_audio": api.TrackSource.SCREEN_SHARE_AUDIO,
+}
+
+
+async def update_permissions(room: str, identity: str, *, sources: list[str], can_subscribe: bool = True) -> bool:
+    """Change what a connected participant may publish and whether they
+    hear anyone (server-mute / server-deafen). Tracks they may no longer
+    publish are muted too. False when they aren't in the room."""
+    perm = api.ParticipantPermission(
+        can_subscribe=can_subscribe,
+        can_publish=bool(sources),
+        can_publish_data=True,
+        can_publish_sources=[_SOURCES[s] for s in sources if s in _SOURCES],
+    )
+    async with room_service() as rs:
+        try:
+            info = await rs.update_participant(api.UpdateParticipantRequest(room=room, identity=identity, permission=perm))
+        except Exception as exc:  # noqa: BLE001
+            if getattr(exc, "status", None) == 404 or str(getattr(exc, "code", "")) == "not_found":
+                return False
+            raise
+        allowed = {_SOURCES[s] for s in sources if s in _SOURCES}
+        for t in getattr(info, "tracks", []) or []:
+            if t.source not in allowed and not t.muted:
+                try:
+                    await rs.mute_published_track(api.MuteRoomTrackRequest(room=room, identity=identity, track_sid=t.sid, muted=True))
+                except Exception:  # noqa: BLE001 — the permission change already stops it
+                    logger.debug("couldn't mute %s of %s", t.sid, identity, exc_info=True)
+        return True

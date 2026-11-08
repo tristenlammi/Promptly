@@ -192,6 +192,28 @@ TODAY_SECTIONS = (
 )
 
 
+class VoicePrefs(BaseModel):
+    """Voice & video settings (Calls), stored as ``user.settings.voice``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_mode: Literal["vad", "ptt"] | None = None
+    ptt_key: str | None = Field(default=None, max_length=32)
+    ptt_release_ms: int | None = Field(default=None, ge=0, le=1000)
+    auto_sensitivity: bool | None = None
+    sensitivity_db: float | None = Field(default=None, ge=-100, le=0)
+    noise: Literal["off", "standard", "enhanced"] | None = None
+    echo: bool | None = None
+    agc: bool | None = None
+    input_volume: int | None = Field(default=None, ge=0, le=200)
+    output_volume: int | None = Field(default=None, ge=0, le=200)
+    sounds: bool | None = None
+    stream_quality: Literal["720p30", "1080p30", "1080p60"] | None = None
+    stream_hint: Literal["detail", "motion"] | None = None
+    data_saver: bool | None = None
+    tips_seen: bool | None = None
+
+
 class UserPreferencesUpdate(BaseModel):
     """Body for ``PATCH /api/auth/me/preferences``.
 
@@ -332,6 +354,42 @@ class UserPreferencesUpdate(BaseModel):
     spellcheck_autocorrect: bool | None = None
     spellcheck_lang: str | None = Field(default=None, max_length=8)
     spellcheck_words: list[str] | None = None
+    # Voice channels (Calls): Voice & video settings that follow you to
+    # every device (device choices stay in the browser). ``voice`` is
+    # merged key by key; ``voice_volumes`` ({user id: 0-200 %}) and
+    # ``voice_local_mutes`` ([user id]) replace the whole value.
+    voice: VoicePrefs | None = None
+    voice_volumes: dict[str, int] | None = None
+    voice_local_mutes: list[str] | None = None
+
+    @field_validator("voice_volumes")
+    @classmethod
+    def _clean_voice_volumes(cls, v: dict[str, int] | None) -> dict[str, int] | None:
+        if v is None:
+            return None
+        out: dict[str, int] = {}
+        for k, pct in list(v.items())[:500]:
+            try:
+                key = str(uuid.UUID(str(k)))
+            except ValueError:
+                continue
+            out[key] = max(0, min(200, int(pct)))
+        return out
+
+    @field_validator("voice_local_mutes")
+    @classmethod
+    def _clean_voice_local_mutes(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        out: list[str] = []
+        for k in v[:500]:
+            try:
+                key = str(uuid.UUID(str(k)))
+            except ValueError:
+                continue
+            if key not in out:
+                out.append(key)
+        return out
 
     @field_validator("spellcheck_lang")
     @classmethod

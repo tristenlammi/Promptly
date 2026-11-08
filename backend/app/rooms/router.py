@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -86,11 +88,26 @@ async def bootstrap(db: AsyncSession = Depends(get_db), user: User = Depends(get
                 "rooms": [by_id[str(r.id)] for r in rooms if r.space_id == s.id],
             }
         )
+    # Voice channels (Calls): who's in each right now, and where you are.
+    # Voice off for the server or for you: channels show without people.
+    from app.calls import access as calls_access
+    from app.calls import voice as calls_voice
+
+    voice_on = await calls_access.voice_allowed(db, user)
+    voice_ids = [r.id for r in rooms if r.kind == "voice"]
+    voice_me = await calls_voice.where(user.id) if voice_on else None
     return {
         "me": core.user_out(user),
         "spaces": out_spaces,
         "dms": [by_id[str(r.id)] for r in dms],
         "users": await core.users_map(db, people),
+        "voice_available": voice_on,
+        "voice": await calls_voice.members_map(voice_ids) if voice_on else {},
+        "voice_me": (
+            {k: voice_me.get(k) for k in ("room_id", "space_id", "device", "joined_at")} | {"session_id": voice_me.get("session")}
+            if voice_me
+            else None
+        ),
     }
 
 
@@ -183,6 +200,9 @@ async def delete_space(space_id: uuid.UUID, db: AsyncSession = Depends(get_db), 
         raise core.forbidden("Only the owner can delete a space")
     members = await core.space_member_ids(db, space.id)
     room_ids = list((await db.execute(select(Room.id).where(Room.space_id == space.id))).scalars())
+    from app.calls import voice as calls_voice
+
+    await calls_voice.rooms_gone(db, room_ids, space.id)
     await db.delete(space)
     await db.commit()
     for rid in room_ids:
@@ -235,6 +255,11 @@ async def set_role(space_id: uuid.UUID, user_id: uuid.UUID, body: RoleIn, db: As
         raise core.forbidden("Only the space's admins can change roles")
     target.role = body.role
     await db.commit()
+    from app.calls import voice as calls_voice
+
+    await calls_voice.regrant(db, space.id, target.user_id)
+    if body.role == "owner":
+        await calls_voice.regrant(db, space.id, user.id)
     await _space_event(db, space.id)
     return {"ok": True}
 
@@ -254,6 +279,9 @@ async def remove_member(space_id: uuid.UUID, user_id: uuid.UUID, db: AsyncSessio
     room_ids = select(Room.id).where(Room.space_id == space.id)
     await db.execute(delete(RoomMember).where(RoomMember.user_id == user_id, RoomMember.room_id.in_(room_ids)))
     await db.commit()
+    from app.calls import voice as calls_voice
+
+    await calls_voice.space_member_removed(db, space.id, user_id)
     await core.publish(members, {"type": "space", "space_id": str(space.id)})
     await core.publish([user_id], {"type": "space_delete", "space_id": str(space.id)})
 
@@ -284,6 +312,8 @@ async def space_me(space_id: uuid.UUID, body: NotifyIn, db: AsyncSession = Depen
 class RoomIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     topic: str = Field(default="", max_length=300)
+    # "voice": a voice channel (Calls). Its name keeps its spaces and capitals.
+    kind: Literal["text", "voice"] = "text"
 
 
 class RoomPatch(BaseModel):
@@ -295,6 +325,10 @@ class RoomPatch(BaseModel):
 
 def _room_name(name: str) -> str:
     return "-".join(name.strip().lstrip("#").lower().split())[:80] or "room"
+
+
+def _voice_name(name: str) -> str:
+    return " ".join(name.strip().split())[:80] or "Voice"
 
 
 async def _room_event(db: AsyncSession, room: Room) -> None:
@@ -310,9 +344,20 @@ async def create_room(space_id: uuid.UUID, body: RoomIn, db: AsyncSession = Depe
     space, me = await core.load_space(db, space_id, user)
     if not core.is_admin(me):
         raise core.forbidden("Only the space's admins can add rooms")
+    if body.kind == "voice":
+        from app.calls import access as calls_access
+
+        if not await calls_access.voice_allowed(db, user):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Voice isn't turned on for you on this server")
     top = (await db.execute(select(func.max(Room.position)).where(Room.space_id == space.id))).scalar() or 0
-    room = Room(space_id=space.id, kind="text", name=_room_name(body.name), topic=body.topic.strip(), position=top + 1, created_by=user.id)
+    name = _voice_name(body.name) if body.kind == "voice" else _room_name(body.name)
+    room = Room(space_id=space.id, kind=body.kind, name=name, topic=body.topic.strip(), position=top + 1, created_by=user.id)
     db.add(room)
+    if body.kind == "voice":
+        from app.calls.models import RoomVoice
+
+        await db.flush()
+        db.add(RoomVoice(room_id=room.id))
     await db.commit()
     await _room_event(db, room)
     return await core.room_out(db, room, user)
@@ -331,7 +376,7 @@ async def update_room(room_id: uuid.UUID, body: RoomPatch, db: AsyncSession = De
         if not core.is_admin(sm):
             raise core.forbidden("Only the space's admins can change rooms")
         if data.get("name"):
-            room.name = _room_name(data["name"])
+            room.name = _voice_name(data["name"]) if room.kind == "voice" else _room_name(data["name"])
         if data.get("topic") is not None:
             room.topic = data["topic"].strip()
         if data.get("position") is not None:
@@ -350,6 +395,10 @@ async def delete_room(room_id: uuid.UUID, db: AsyncSession = Depends(get_db), us
     if room.space_id is None or not core.is_admin(sm):
         raise core.forbidden("Only the space's admins can delete rooms")
     members = await core.member_ids(db, room)
+    if room.kind == "voice":
+        from app.calls import voice as calls_voice
+
+        await calls_voice.rooms_gone(db, [room.id])
     await db.delete(room)
     await db.commit()
     service.remove_room_files(room_id)

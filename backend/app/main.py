@@ -799,3 +799,8 @@ app.include_router(
 from app.calls.router import router as calls_router  # noqa: E402
 
 app.include_router(calls_router, prefix="/api/calls", tags=["calls"])
+# Voice channels in Rooms (WP-V2): join/leave/state/moderation under /api/rooms;
+# importing app.calls.voice registers its LiveKit webhook handlers ("v_").
+from app.calls.voice_router import router as calls_voice_router  # noqa: E402
+
+app.include_router(calls_voice_router, prefix="/api/rooms", tags=["calls"])
