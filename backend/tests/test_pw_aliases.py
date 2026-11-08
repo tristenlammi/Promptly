@@ -342,6 +342,10 @@ async def test_the_setup_check(client, db, monkeypatch):  # noqa: F811
     assert r.status_code == 200 and r.json()["status"] == "checking"
     test = sent[-1]
     assert test["To"].startswith(al.CHECK_PREFIX) and test["To"].endswith("@" + DOMAIN)
+    # Once a minute at most.
+    assert (await client.post(url, headers=a.h)).status_code == 429
+    assert len(sent) == 1
+    monkeypatch.setattr(pw, "CHECK_EVERY", timedelta(0))
     assert al.CHECK_SENDER_PREFIX in test["From"]
 
     # It arrives, From unchanged: the catch-all works and so does sending as the domain.

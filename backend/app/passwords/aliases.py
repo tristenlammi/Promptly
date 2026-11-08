@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 from typing import Any, Literal
@@ -29,6 +29,7 @@ from app.passwords.deps import SCOPE_MAIL_CODES, VaultSession, require_enabled, 
 from app.passwords.router import _QuietRoute
 
 router = APIRouter(route_class=_QuietRoute, dependencies=[Depends(require_enabled)])
+CHECK_EVERY = timedelta(minutes=1)
 
 
 def _mail_scope(session: VaultSession) -> None:
@@ -206,6 +207,9 @@ async def check_domain(domain_id: uuid.UUID, session: VaultSession = Depends(req
 
     d = await _my_domain(db, session, domain_id)
     account = await _my_account(db, session, d.account_id)
+    # One email a minute at most: it goes to an address on a domain someone typed.
+    if d.check_started_at and datetime.now(timezone.utc) - d.check_started_at < CHECK_EVERY:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Give the last check a minute first.")
     try:
         await asyncio.to_thread(imap.check_host, account.smtp_host, may_reach_private_network(session.user))
     except imap.MailError as e:

@@ -194,6 +194,7 @@ A WebView gives no form at all on an `http` page, which matches "HTTP sites need
 - **Email codes:** the row doesn't know there's a code before it's picked (A51). Links open in the browser, not the page. No code for SMS-only flows here: the separate SMS User Consent button in 2FA does that.
 - **Change-password helper:** Android's autofill row doesn't say a change is waiting, since the index holds nothing about it. Nothing fills on a page Android's autofill doesn't reach.
 - **Documents:** the picker lists what `/drive/files` gives, 50 at most, with search. No folders.
+- **Aliases on your own domain:** not on Android yet. An alias made elsewhere is just the login's username here. The API is `/api/passwords/aliases` (`backend/app/passwords/aliases.py`); a phone would need New alias in `Items.kt`'s editor and the list in `Tools.kt`.
 
 ## Follow-ups outside `android/`
 
