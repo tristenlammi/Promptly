@@ -231,6 +231,10 @@ async def sweep(db: AsyncSession) -> dict[str, int]:
     orphaned = await db.execute(delete(PwVault).where(~PwVault.id.in_(select(PwVaultMember.vault_id))))
     out["empty_vaults"] = orphaned.rowcount or 0
     await db.commit()
+    # Browser sync: history past its days, sent tabs nobody collected, stale open tabs (SYNC.md).
+    from app.passwords.browsersync import sweep as sweep_browser_sync
+
+    out.update({f"browser_{k}": v for k, v in (await sweep_browser_sync(db)).items()})
 
     # Attachment folders with no vault row left.
     root = attachment_root()

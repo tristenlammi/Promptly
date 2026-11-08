@@ -572,6 +572,8 @@ class AlertsOut(s._Base):
     device_requests: int
     invitations: int
     emergency: int
+    # Tabs sent to this device from another browser (browsersync.py). Zero without a device token.
+    sent_tabs: int = 0
 
 
 @router.get("/alerts", response_model=AlertsOut)
@@ -590,7 +592,10 @@ async def alerts(identity: VaultIdentity = Depends(get_vault_user), db: AsyncSes
             | ((PwEmergency.grantee_id == identity.user.id) & (PwEmergency.state == "invited"))
         )
     )
-    return AlertsOut(device_requests=int(requests or 0), invitations=int(invited or 0), emergency=int(emergency or 0))
+    from app.passwords.browsersync import sent_waiting
+
+    sent = await sent_waiting(db, identity.device.id) if identity.device is not None else 0
+    return AlertsOut(device_requests=int(requests or 0), invitations=int(invited or 0), emergency=int(emergency or 0), sent_tabs=sent)
 
 
 __all__ = ["router", "post_to_dm"]
