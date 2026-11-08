@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   BellOff,
   BellRing,
   Check,
   Loader2,
+  Moon,
   Smartphone,
   Trash2,
 } from "lucide-react";
@@ -12,6 +13,7 @@ import {
 import {
   notificationsApi,
   type NotificationPreferences,
+  type NotificationSwitch,
   type SubscriptionSummary,
 } from "@/api/notifications";
 import { Button } from "@/components/shared/Button";
@@ -24,19 +26,20 @@ import { cn } from "@/utils/cn";
  *     from push. Handles permission prompts and the "server not
  *     configured" edge case. A diagnostic "Send test" button lives
  *     here too.
- *  2. **Categories** — the per-event toggles. Flipping a toggle
+ *  2. **Quiet hours** — one setting for all of Promptly; held pushes
+ *     arrive when they end (``notifications/quiet.py``).
+ *  3. **Categories** — the per-event toggles. Flipping a toggle
  *     PATCHes the backend immediately; optimistic UI with a tiny
- *     spinner on the row that's still in flight.
- *  3. **Other devices** — the rest of the user's subscribed
+ *     spinner on the row that's still in flight. Rooms and Mail can be
+ *     set to the daily summary instead of straight away.
+ *  4. **Other devices** — the rest of the user's subscribed
  *     browsers. Each row is individually unsubscribe-able.
  */
 export function NotificationsPanel() {
   const push = usePushSubscription();
 
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
-  const [prefsBusy, setPrefsBusy] = useState<
-    keyof NotificationPreferences | null
-  >(null);
+  const [prefsBusy, setPrefsBusy] = useState<string | null>(null);
   const [prefsError, setPrefsError] = useState<string | null>(null);
 
   const [subs, setSubs] = useState<SubscriptionSummary[] | null>(null);
@@ -61,23 +64,53 @@ export function NotificationsPanel() {
     })();
   }, [push.serverConfigured, push.subscribed]);
 
-  async function toggle(key: keyof NotificationPreferences, next: boolean) {
+  /** Save a change straight away: show it first, put it back if the
+   *  server says no. */
+  async function save(patch: Partial<NotificationPreferences>, busyKey: string) {
     if (!prefs) return;
-    const previous = prefs[key];
+    const previous = prefs;
     setPrefsError(null);
-    setPrefs({ ...prefs, [key]: next });
-    setPrefsBusy(key);
+    setPrefs({ ...prefs, ...patch });
+    setPrefsBusy(busyKey);
     try {
-      const fresh = await notificationsApi.updatePreferences({ [key]: next });
+      const fresh = await notificationsApi.updatePreferences(patch);
       setPrefs(fresh);
     } catch (e) {
-      setPrefs((p) => (p ? { ...p, [key]: previous } : p));
+      setPrefs(previous);
       setPrefsError(
         (e as Error)?.message ?? "Couldn't update preference."
       );
     } finally {
       setPrefsBusy(null);
     }
+  }
+
+  function toggle(key: NotificationSwitch, next: boolean) {
+    void save({ [key]: next }, key);
+  }
+
+  /** "Straight away" or "In my daily summary", for a category that offers it. */
+  function summaryMode(category: string): ReactNode {
+    if (!prefs || !prefs.summary_capable.includes(category)) return null;
+    const inSummary = prefs.summary_categories.includes(category);
+    return (
+      <select
+        aria-label="When to tell you"
+        value={inSummary ? "summary" : "instant"}
+        disabled={prefsBusy === `summary:${category}`}
+        onChange={(e) => {
+          const rest = prefs.summary_categories.filter((c) => c !== category);
+          void save(
+            { summary_categories: e.target.value === "summary" ? [...rest, category] : rest },
+            `summary:${category}`
+          );
+        }}
+        className="mt-1 rounded border border-[var(--border)] bg-[var(--background)] px-1.5 py-0.5 text-[11px]"
+      >
+        <option value="instant">Straight away</option>
+        <option value="summary">In my daily summary ({prefs.summary_time})</option>
+      </select>
+    );
   }
 
   async function sendTest() {
@@ -228,6 +261,15 @@ export function NotificationsPanel() {
             )}
           </div>
 
+          {/* -- Quiet hours -- */}
+          {prefs && (
+            <QuietHours
+              prefs={prefs}
+              busy={prefsBusy === "quiet"}
+              onSave={(patch) => void save(patch, "quiet")}
+            />
+          )}
+
           {/* -- Category toggles -- */}
           {prefs && (
             <div className="mb-4 overflow-hidden rounded-md border border-[var(--border)]">
@@ -310,6 +352,7 @@ export function NotificationsPanel() {
                 busy={prefsBusy === "room_message"}
                 onChange={(v) => toggle("room_message", v)}
                 dimmed={!prefs.enabled}
+                extra={(prefs.room_message ?? true) && summaryMode("room_message")}
               />
               <CategoryRow
                 title="Calendar"
@@ -326,6 +369,7 @@ export function NotificationsPanel() {
                 busy={prefsBusy === "mail"}
                 onChange={(v) => toggle("mail", v)}
                 dimmed={!prefs.enabled}
+                extra={(prefs.mail ?? true) && summaryMode("mail")}
               />
               <CategoryRow
                 title="Passwords"
@@ -372,6 +416,79 @@ export function NotificationsPanel() {
   );
 }
 
+/** One quiet-hours setting for all of Promptly: start and end in your own
+ *  time zone, optionally different on Friday and Saturday nights. */
+function QuietHours({
+  prefs,
+  busy,
+  onSave,
+}: {
+  prefs: NotificationPreferences;
+  busy: boolean;
+  onSave: (patch: Partial<NotificationPreferences>) => void;
+}) {
+  const time = (
+    label: string,
+    value: string,
+    key: "quiet_start" | "quiet_end" | "quiet_weekend_start" | "quiet_weekend_end"
+  ) => (
+    <input
+      type="time"
+      aria-label={label}
+      value={value}
+      onChange={(e) => {
+        // A cleared or half-typed time isn't saved.
+        if (/^\d{2}:\d{2}$/.test(e.target.value)) onSave({ [key]: e.target.value });
+      }}
+      className="rounded border border-[var(--border)] bg-[var(--background)] px-1.5 py-0.5 text-xs tabular-nums"
+    />
+  );
+  return (
+    <div className="mb-4 overflow-hidden rounded-md border border-[var(--border)]">
+      <CategoryRow
+        title="Quiet hours"
+        subtitle="Notifications wait until quiet hours end, then arrive together. Calls, Calendar reminders, item reminders, Passwords and admin alerts always get through."
+        checked={prefs.quiet_enabled}
+        busy={busy}
+        onChange={(v) => onSave({ quiet_enabled: v })}
+        icon={<Moon className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />}
+      />
+      {prefs.quiet_enabled && (
+        <div className="flex flex-col gap-2 border-t border-[var(--border)] px-3 py-2.5 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="w-32 text-[var(--text-muted)]">
+              {prefs.quiet_weekend ? "Sunday to Thursday" : "Every night"}
+            </span>
+            {time("Quiet hours start", prefs.quiet_start, "quiet_start")}
+            <span className="text-[var(--text-muted)]">to</span>
+            {time("Quiet hours end", prefs.quiet_end, "quiet_end")}
+          </div>
+          {prefs.quiet_weekend && (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="w-32 text-[var(--text-muted)]">Friday and Saturday</span>
+              {time("Weekend quiet hours start", prefs.quiet_weekend_start ?? prefs.quiet_start, "quiet_weekend_start")}
+              <span className="text-[var(--text-muted)]">to</span>
+              {time("Weekend quiet hours end", prefs.quiet_weekend_end ?? prefs.quiet_end, "quiet_weekend_end")}
+            </div>
+          )}
+          <label className="inline-flex w-fit cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              checked={prefs.quiet_weekend}
+              onChange={(e) => onSave({ quiet_weekend: e.target.checked })}
+            />
+            Different times on Friday and Saturday nights
+          </label>
+          <p className="text-[11px] text-[var(--text-muted)]">
+            Times are in your time zone ({prefs.timezone.replace(/_/g, " ")}).
+            {prefs.quiet_now && " Quiet hours are on right now."}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CategoryRow({
   title,
   subtitle,
@@ -379,6 +496,8 @@ function CategoryRow({
   busy,
   onChange,
   dimmed,
+  extra,
+  icon,
 }: {
   title: string;
   subtitle?: string;
@@ -386,6 +505,9 @@ function CategoryRow({
   busy?: boolean;
   onChange: (v: boolean) => void;
   dimmed?: boolean;
+  /** Under the subtitle (the daily-summary choice). */
+  extra?: ReactNode;
+  icon?: ReactNode;
 }) {
   return (
     <div
@@ -394,11 +516,13 @@ function CategoryRow({
         dimmed && "opacity-60"
       )}
     >
+      {icon}
       <div className="min-w-0 flex-1">
         <div className="text-sm font-medium">{title}</div>
         {subtitle && (
           <div className="text-[11px] text-[var(--text-muted)]">{subtitle}</div>
         )}
+        {extra}
       </div>
       <label className="relative inline-flex cursor-pointer items-center">
         <input

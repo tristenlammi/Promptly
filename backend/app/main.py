@@ -98,6 +98,10 @@ async def lifespan(_: FastAPI):
     from app.today.push import start_today_loops
 
     today_loops_task = start_today_loops()
+    # Held pushes: quiet hours ending and the daily summary (app/notifications/loops.py).
+    from app.notifications.loops import start_notification_loops
+
+    notification_loops_task = start_notification_loops()
     # Passwords: expired Sends and requests, Trash past 30 days (app/passwords/service.py).
     from app.passwords.service import start_password_loops
 
@@ -163,6 +167,7 @@ async def lifespan(_: FastAPI):
             item_loops_task,
             calendar_loops_task,
             today_loops_task,
+            notification_loops_task,
             password_loops_task,
             reconcile_task,
             chat_upload_sweeper_task,
