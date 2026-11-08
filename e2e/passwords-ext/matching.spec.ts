@@ -86,7 +86,7 @@ test("on a host of the domain with no login of its own, both are offered under t
   await expect(menu.getByText("Other logins for gymserver.localhost")).toBeVisible();
   await expect(menu.getByRole("button", { name: "Fill Gym ABC" })).toBeVisible();
   await expect(menu.getByRole("button", { name: "Fill Gym ZYX" })).toBeVisible();
-  expect(await badge(page)).toBe("");
+  await expect.poll(() => badge(page)).toBe("");
   await page.close();
 });
 
@@ -151,7 +151,7 @@ test("ports: an address with no port fills on any port, and a saved port is its 
 test("the item's match setting, from the vault page's editor", async () => {
   const v = await rig.ctx.newPage();
   await v.goto(`chrome-extension://${rig.extId}/vault.html#/all`);
-  await v.getByRole("list", { name: "Items" }).getByRole("button", { name: /^NAS\b(?! DSM)/ }).first().click();
+  await v.getByRole("list", { name: "Items" }).getByRole("button").filter({ hasText: "NAS" }).filter({ hasNotText: "DSM" }).first().click();
   await v.getByRole("button", { name: "Edit" }).click();
   const select = v.getByLabel("How this login matches websites");
   await expect(select).toHaveValue("auto");
