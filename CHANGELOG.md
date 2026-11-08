@@ -21,6 +21,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Passwords: "Remind me" on IDs, licences and cards with an expiry date puts an event in Calendar and/or a task in Tasks, with a heads-up some weeks before. It moves when the date changes and goes when the item is deleted. Off unless you turn it on, and it says that the wording and date go on the server.
+- Passwords: the Security check lists what's expired or expiring in the next three months, worked out on your device.
+- Passwords: breach alerts for your email addresses, from Have I Been Pwned. An admin adds a paid HIBP key in Admin, Passwords; each person turns alerts on for themselves on the Security check, which shows the breaches each address is in and the change helper for logins at those sites. New breaches arrive as a notification.
+
 ### Changed
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 

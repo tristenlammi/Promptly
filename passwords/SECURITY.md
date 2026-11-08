@@ -10,6 +10,11 @@ Opaque blobs, the size of each blob (padded into buckets), timestamps, revision 
 
 Not on the server: titles, URLs, usernames, passwords, notes, folders, tags, item types, the master password, the Secret Key.
 
+Two things you can turn on are exceptions, and each says so first:
+
+- **Expiry reminders.** For each item you choose: its id, a short label such as "Passport", its expiry date and how many weeks ahead to remind you. They're in `pw_reminders` and in your Calendar and Tasks, in plain text. The label never holds a run of three or more digits or any of the item's secrets: the device strips them, and the server strips digits again.
+- **Breach alerts.** Your account's email address, your Mail accounts' addresses, and the names and dates of the breaches each is in. Your server sends the addresses to Have I Been Pwned about once a day, so HIBP sees them and your server's address. An admin can read the list. Which of your logins a breach touches is worked out on your device.
+
 ## Attackers
 
 | Attacker | Result | How |
@@ -123,7 +128,9 @@ If you lose both the master password and the recovery kit, the vault is gone. No
 - Mail codes and security emails are read from what the server already has. The vault's sites never go to the server, because the client does the matching.
 - What's in an email is untrusted. Codes are shown as text and fill on a click. A sign-in link is offered only if it's https and goes to the sender's own domain, and not at all from a look-alike of a site you have.
 - Mail codes in an extension are off until you turn them on.
-- A Calendar reminder for a document says "Document expires soon", because Calendar isn't end-to-end encrypted.
+- A reminder added from the move-from-Files screen, or from Android, says "Document expires soon", because Calendar isn't end-to-end encrypted. "Remind me" on an item uses the label you see, such as "Passport expires", and the date. See "What's on the server".
+- The HIBP key is Fernet-encrypted with the server's `SECRET_KEY`, like the SMTP password, so the server can read it. Anyone with the database and that key can use your HIBP plan. It's kept outside the Passwords code, which never uses server-side encryption.
+- A breach alert's push shows the breach, what it exposed, and your address with all but its first letter hidden.
 - A short PIN is weaker than the master password. It only exists until the app or browser closes, and five wrong tries wipe it.
 - Travel mode takes a vault off the device. It's still on your server, and your master password brings it back, so it only helps if you don't do that in front of whoever's asking.
 

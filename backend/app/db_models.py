@@ -100,6 +100,14 @@ from app.passwords.models import (  # noqa: F401
     PwVault,
     PwVaultMember,
 )
+from app.passwords.reminder_models import PwReminder  # noqa: F401
+from app.breach_watch.models import (  # noqa: F401
+    BreachAddress,
+    BreachCatalog,
+    BreachConfig,
+    BreachHit,
+    BreachWatch,
+)
 from app.maps.models import (  # noqa: F401
     MapLiveLocation,
     MapParked,

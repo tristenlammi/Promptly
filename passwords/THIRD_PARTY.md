@@ -20,6 +20,7 @@ Promptly is MIT. Only permissive sources are used here. No code was copied from 
 | Data | Licence | Attribution |
 |---|---|---|
 | EFF Large Wordlist | CC BY 3.0 US | Electronic Frontier Foundation, https://www.eff.org/dice. `frontend/src/passwords/core/eff_large_wordlist.json` is the list reformatted as JSON. |
+| Have I Been Pwned breach data (breach alerts) | CC BY 4.0 | Troy Hunt's Have I Been Pwned, https://haveibeenpwned.com. Credited with a link in the Security check's Breaches section, and in each alert. Fetched at run time with the admin's key, not bundled. |
 
 ## Windows app (`passwords/desktop/`)
 

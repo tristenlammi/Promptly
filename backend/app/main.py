@@ -688,10 +688,16 @@ from app.passwords.router import admin_router as passwords_admin_router  # noqa:
 from app.passwords.router import router as passwords_router  # noqa: E402
 from app.passwords.connections import router as passwords_connections_router  # noqa: E402
 from app.passwords.share import router as passwords_share_router  # noqa: E402
+from app.passwords.reminders import router as passwords_reminders_router  # noqa: E402
+from app.passwords.breaches import admin_router as passwords_breach_admin_router  # noqa: E402
+from app.passwords.breaches import router as passwords_breaches_router  # noqa: E402
 
 app.include_router(passwords_extras_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_share_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_connections_router, prefix="/api/passwords", tags=["passwords"])
+app.include_router(passwords_reminders_router, prefix="/api/passwords", tags=["passwords"])
+app.include_router(passwords_breaches_router, prefix="/api/passwords", tags=["passwords"])
+app.include_router(passwords_breach_admin_router, prefix="/api/passwords", tags=["passwords"])
 
 app.include_router(passwords_admin_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_router, prefix="/api/passwords", tags=["passwords"])

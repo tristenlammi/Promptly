@@ -124,6 +124,18 @@ Point a reviewer at [CRYPTO_SPEC.md](CRYPTO_SPEC.md), [SECURITY.md](SECURITY.md)
 
 Admin → Passwords → "Show the Preview warning". Do this only after steps 5 to 7.
 
+## 9. Optional: breach alerts for email addresses
+
+These need a paid Have I Been Pwned key. Without one, nothing is sent anywhere.
+
+1. Go to https://haveibeenpwned.com/API/Key, sign in with your email, and choose a plan. Core 1 was US$4.39 a month for 10 checks a minute in November 2026, which covers hundreds of people checked once a day. Read the API's terms there.
+2. Copy the key: 32 characters, 0-9 and a-f.
+3. Admin, Passwords, "Breach alerts for email addresses": paste it and press Save key. It should show your plan's name. If it says it couldn't check, the next run tries again. If it says the key isn't valid, copy it again.
+4. In Passwords, Security check, Breaches: turn it on for yourself. It shows the addresses it will send first. The first check runs within ten minutes.
+5. Tell the people on your server it's there. It's off for each of them until they turn it on (D-ALERTS-3).
+
+**Tests to run once this branch is on the stack:** from `e2e/`, `npx playwright test -c passwords.config.ts passwords-tests/alerts.spec.ts`, and the changed test in `passwords-tests/gaps.spec.ts` ("a typed document can get its Calendar reminder too"). They set no HIBP key and never reach HIBP.
+
 ## Known follow-ups
 
 - Deleting a user can leave a shared vault with no manager. The backend review found it, and it's not fixed.
@@ -131,3 +143,4 @@ Admin → Passwords → "Show the Preview warning". Do this only after steps 5 t
 - Android `lintDebug` reports 12 errors in older code (`CarApp`, `PhoneActions`, `Crashes`), none in Passwords. `lintVitalRelease` passes.
 - `npm audit` lists 27 production advisories in the main app's existing dependencies (excalidraw, mermaid, dompurify and others). The bundle check shows none of them are in the vault's page, but they're still there for the main app.
 - iOS is design only: see [IOS_NOTES.md](IOS_NOTES.md).
+- Expiry reminders and the Breaches section are on web, the extension's vault page and Windows. Android still has only the older "Document expires soon" button, and no Breaches section.

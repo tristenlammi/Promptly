@@ -340,6 +340,7 @@ test("a typed document can get its Calendar reminder too", async ({ browser }) =
   await page.getByLabel("Expires").fill("2032-02-02");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   const view = page.getByRole("article", { name: "Licence" });
-  await view.getByRole("button", { name: "Remind me in Calendar" }).click();
+  await view.getByRole("button", { name: "Remind me before it expires" }).click();
+  await view.getByRole("button", { name: "Set reminder" }).click();
   await expect(view.getByText("A reminder is on your Calendar")).toBeVisible({ timeout: 15_000 });
 });

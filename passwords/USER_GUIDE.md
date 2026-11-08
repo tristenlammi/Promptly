@@ -71,6 +71,12 @@ A site decides when it asks for a passkey, and nothing can make it ask. When a p
 
 **Security check** looks for weak, reused, old and breached passwords, all worked out on your device. For breaches, only the first few characters of a hash leave, through your server. It also tells you about emails from your sites saying a password changed, and walks you through changing passwords one at a time: a new one is saved first, you change it on the site, then you say whether it worked.
 
+**Expiring soon**, on the Security check, lists IDs, licences and cards that have expired or expire in the next three months. It's worked out on your device.
+
+**Remind me before the expiry date**, when you edit an ID, licence or card, puts an event in Calendar, a task in Tasks, or both, with a heads-up 1 to 26 weeks before. Calendar and Tasks aren't end-to-end encrypted, so the wording and the date go on your server in plain text. The wording starts as the document's type, such as "Passport", and you can change it. Long numbers are always left out. Change the date in your vault and the event moves; delete the item and it goes. If you reword the event in Calendar, that's kept.
+
+**Breaches**, on the Security check, tells you when one of your email addresses turns up in a data breach. Your admin has to add a Have I Been Pwned key first, and then it's off until you turn it on. It checks your account's address and your Mail accounts' addresses about once a day. It shows each breach, what it exposed, and your logins at that site with a Change password button. A new breach arrives as a notification. Turning it off forgets what was found. Breach data is from Have I Been Pwned.
+
 Keep an encrypted export now and then, from Import and export. That's the copy that survives if your server doesn't. The Windows app can make one on a schedule.
 
 Every six months or so you'll be asked whether you still have your kit. Check, and mean it.
