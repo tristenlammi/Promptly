@@ -43,3 +43,7 @@ The owner asked for this during the build (2026-11-07): the extension keeps book
 ## Permission
 
 `bookmarks` is an optional permission, asked for when the box is ticked and given back when it's unticked. It reads as "Read and change your bookmarks" in the prompt.
+
+## Tabs, history and the reading list
+
+Open tabs, sending a tab, history and the reading list sync the same way, between browsers from different makers. [SYNC.md](SYNC.md) has them.

@@ -35,6 +35,17 @@ They sync about once a minute while your vault's unlocked, and catch up when you
 
 Bookmarklets (`javascript:` addresses) and browser pages stay in the browser they're in. Bookmarks don't sync to the phone app, since Chrome on Android has no extensions. If you also use a browser's own bookmark sync, turn that off. [BOOKMARKS.md](BOOKMARKS.md) has the details.
 
+## Tabs, history and the reading list
+
+Like bookmarks, these work across Chrome, Firefox and the others, encrypted so your server can't read them. Turn each one on in the extension's Settings, under "Sync with this browser", in each browser you use.
+
+- **Open tabs.** Tick "Share this browser's open tabs". The panel's Browse section, under Tabs, shows what's open on your other browsers, how long ago each updated, and lets you open any of them here. Private windows are never shared.
+- **Send a tab.** In the panel's Browse section, "Send this tab" lists your other browsers and your phone. Or right-click a page or link and use "Send to your device". It opens in the other browser within a minute, while that browser's vault is unlocked. Your phone tells you within half an hour, and opens it when you unlock Passwords.
+- **History.** Off unless you tick "Sync this browser's history". From then on, the pages you visit there can be searched from your other browsers and the vault's "Tabs and history" screen. Private windows are never included. List sites to leave out, and it's kept for 90 days unless you change that. "Delete all synced history" is on the Tabs and history screen. Your browsers' own history isn't touched.
+- **Reading list.** "Save for later" in the panel, or on the right-click menu. It syncs everywhere, with read and unread. On Chrome you can also keep Chrome's own reading list the same. Firefox has no reading list extensions can use, so ours is the one there.
+
+[SYNC.md](SYNC.md) has the details.
+
 ## On your phone
 
 In Promptly for Android, open P Passwords and connect. Settings walks you through turning on autofill and passkeys. Chrome needs one extra setting, and the app takes you to it.

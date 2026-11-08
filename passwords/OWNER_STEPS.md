@@ -92,6 +92,7 @@ The checklist's install section needs a real install. Automated tests used the d
 - Install each extension for real, from its store or as a signed file, and use it on sites you actually sign in to. **Use low-value accounts only.**
 - To try it now in Helium or Chrome: turn on developer mode on the extensions page, then "Load unpacked" and pick `passwords/extension/dist/chrome`. Reload it there after each new build.
 - Check bookmark sync with a second browser, using a profile whose bookmarks you don't mind changing. Read [BOOKMARKS.md](BOOKMARKS.md) first. It's off until you turn it on.
+- Try tabs, sending a tab, history and the reading list between Chrome or Helium and Firefox ([SYNC.md](SYNC.md)). Each is off until you tick it in Settings, "Sync with this browser", and history is the one to think about first. Send a tab to your phone: the alert can take up to 30 minutes, and unlocking Passwords opens it. None of this has run against your real browsers or phone, and its e2e tests haven't run on the stack yet.
 - Google's password step: you saw no fill there. If it still misses, "Describe this form" in the panel gives me what I need, with no secrets in it.
 - Never lock on Firefox: restart with a signed build. Tests could only simulate the restart.
 - On Chrome and Helium, copy a 2FA code and check that it arrives and then clears on time. The fix for lost clipboard writes is a timing pause (D76), so tell me if you ever see one fail.

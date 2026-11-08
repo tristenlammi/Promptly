@@ -22,6 +22,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ## [Unreleased]
 
 ### Changed
+- Passwords: the panel's Bookmarks section is now Browse, with bookmarks, tabs, the reading list and history.
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed
@@ -52,6 +53,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: passkeys imported from Bitwarden now work: their ids are converted to the form sites use.
 
 ### Added
+- Passwords in the browser: open tabs on your other browsers, sending a tab to another browser or your phone, synced history (off until turned on) and a reading list, between Chrome, Firefox and the others, end-to-end encrypted. Turn each on under Settings, "Sync with this browser"; the panel's Browse section and the vault's Tabs and history screen show them.
 - Passwords in the browser: choose how long the vault stays unlocked, from 1 minute to 12 hours, when the browser closes, or never, in the toolbar panel and in Settings.
 - Passwords on Android: security emails on the Security check, matched against your logins on the phone.
 - Passwords on Android: a change-password helper from the Security check, with a queue, a new password that waits until you confirm it, and autofill that offers the current and new password on the site's change form.

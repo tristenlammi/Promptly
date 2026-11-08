@@ -8,7 +8,7 @@ For store review, and for anyone who wants to know. Nothing is collected or sent
 | `activeTab` | "Only when I click" mode: fills the current tab after a click on the toolbar button, with no standing site access. |
 | `scripting` | Registers the content script when the person chooses all-site filling, and injects it on a click in "on click" mode. |
 | `alarms` | Auto-lock timer, periodic sync, clearing a copied secret when it's due, and keeping the decrypted index alive while unlocked. |
-| `contextMenus` | "Fill" and "Generate a password here" on the right-click menu. |
+| `contextMenus` | "Fill" and "Generate a password here" on the right-click menu, and "Save for later" and "Send to your device" on a page or link. |
 | `idle` | Locks the vault when the machine locks or sleeps. |
 | `webNavigation` | Lists a tab's frames, to compare each frame's real origin with the login before filling. Notices when a single-page site changes route, so the page's forms get looked at again. |
 | `clipboardWrite` | Copies a 2FA code once a sign-in has moved on, and clears copied secrets. |
@@ -21,6 +21,16 @@ For store review, and for anyone who wants to know. Nothing is collected or sent
 `clipboardRead`. Not granted at install, and only asked for if the person ticks "Don't clear the clipboard if I've copied something else since" in Settings. It lets the extension compare what's on the clipboard with a salted hash of what it copied, when a clear is due. Nothing read is kept or sent. Without it, a clear goes ahead whatever's on the clipboard, because there's no way to tell.
 
 `bookmarks`. Not granted at install, and only asked for if the person ticks "Keep my bookmarks the same in every browser" on the Bookmarks screen. Unticking gives it back. It reads and changes the browser's bookmarks, to keep them in step with an encrypted copy in the person's own vault. Nothing is sent anywhere except that encrypted copy, to their own server.
+
+`tabs`. Not granted at install, and only asked for if the person ticks "Share this browser's open tabs" in Settings. Unticking gives it back. It reads the addresses and titles of open tabs in normal windows, to share an encrypted list with the person's other devices. Private windows, browser pages and extension pages are left out. Sending the tab in front, or one from the right-click menu, doesn't need it: the click gives `activeTab`.
+
+`history`. Not granted at install, and only asked for if the person ticks "Sync this browser's history". Unticking gives it back. It reads visits made after it's turned on, leaves out sites the person lists, and sends them encrypted to their own server. It never deletes anything from the browser's history; when the person clears their browser history, the extension deletes what that browser synced.
+
+`notifications`. Only asked for if the person ticks "Show a notification for a tab sent here". The notification names the device a tab came from, never the page.
+
+`readingList` (Chrome family only). Only asked for if the person ticks "Keep this browser's own reading list the same". It reads and changes the browser's reading list to match the person's encrypted one. Firefox has no such API, and its manifest doesn't name it.
+
+Not used: `sessions`. Chromium's `sessions.getDevices` only lists devices signed in to Chrome's own sync, and recently closed tabs aren't part of this.
 
 ## Host permissions
 
