@@ -22,7 +22,9 @@ const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreen
 fn allowed_navigation(url: &tauri::Url) -> bool {
     match url.scheme() {
         "tauri" => url.host_str() == Some("localhost"),
-        "http" | "https" => url.host_str() == Some("tauri.localhost"),
+        // The app's own pages have no port. Something listening on tauri.localhost:PORT
+        // (a local proxy, say) isn't the app.
+        "http" | "https" => url.host_str() == Some("tauri.localhost") && url.port().is_none(),
         "blob" => url.path().starts_with("http://tauri.localhost/"),
         "about" => url.as_str() == "about:blank",
         _ => false,
@@ -297,5 +299,9 @@ mod tests {
         assert!(!allowed_navigation(&url("file:///c:/windows/system32/calc.exe")));
         assert!(!allowed_navigation(&url("blob:https://evil.example.org/1234")));
         assert!(!allowed_navigation(&url("javascript:alert(1)")));
+        // Review W2: the same name on another port is somebody else.
+        assert!(!allowed_navigation(&url("http://tauri.localhost:8080/")));
+        assert!(!allowed_navigation(&url("https://tauri.localhost:8443/index.html")));
+        assert!(!allowed_navigation(&url("blob:http://tauri.localhost:8080/1234")));
     }
 }

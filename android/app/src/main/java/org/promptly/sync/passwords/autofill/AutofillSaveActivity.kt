@@ -69,10 +69,7 @@ class AutofillSaveActivity : FragmentActivity() {
         return (save.username ?: "") == u && hitsTarget(save.target, item)
     }
 
-    private fun hitsTarget(t: FillTarget, item: Item): Boolean = when (t) {
-        is FillTarget.Web -> Match.matchItems(listOf(item), t.url).isNotEmpty()
-        is FillTarget.App -> item.body.urls.any { u -> Match.parseAppUrl(u.url)?.let { it.pkg == t.pkg && it.cert == t.cert } == true }
-    }
+    private fun hitsTarget(t: FillTarget, item: Item): Boolean = SaveMatch.hitsTarget(t, item)
 
     @Composable
     private fun SavePane(save: PendingSaves.Save) {
@@ -160,5 +157,16 @@ class AutofillSaveActivity : FragmentActivity() {
 
     companion object {
         const val EXTRA_ID = "pw.save.id"
+    }
+}
+
+/** Which saved login a save is about. An app counts only by its package and signing certificate
+ *  together: a login imported with no certificate, or an app whose certificate couldn't be read,
+ *  is never "this app", or a sideloaded app with the same package name could be offered to
+ *  overwrite its password. As every other app matcher here. */
+internal object SaveMatch {
+    fun hitsTarget(t: FillTarget, item: Item): Boolean = when (t) {
+        is FillTarget.Web -> Match.matchItems(listOf(item), t.url).isNotEmpty()
+        is FillTarget.App -> t.cert != null && item.body.urls.any { u -> Match.parseAppUrl(u.url)?.let { it.pkg == t.pkg && it.cert != null && it.cert == t.cert } == true }
     }
 }
