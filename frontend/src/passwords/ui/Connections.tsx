@@ -620,7 +620,7 @@ export function PasskeyPinPanel() {
       <Label text="New passkey PIN">
         <input data-testid="passkey-pin-new" className={inputClass} type="password" inputMode="numeric" autoComplete="off" maxLength={12} value={pin} onChange={(e) => setPin(e.target.value)} />
       </Label>
-      <Label text="Type it again">
+      <Label text="Type the new PIN again">
         <input data-testid="passkey-pin-again" className={inputClass} type="password" inputMode="numeric" autoComplete="off" maxLength={12} value={again} onChange={(e) => setAgain(e.target.value)} />
       </Label>
       {error && <Callout kind="danger">{error}</Callout>}

@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { By, until } from "selenium-webdriver";
+import { By, Key, until } from "selenium-webdriver";
 
 import { BASE, button, byText, click, fill, labelled, makeUsers, MASTER, newFirefox, onboard, see, signIn } from "./lib.mjs";
 
@@ -550,7 +550,7 @@ async function typePasskeyPin(pin = PASSKEY_PIN) {
 /** Wrong PINs, and what the window says. */
 async function wrongPasskeyPin(said) {
   const box = await driver.wait(until.elementLocated(By.css("#pin")), 15000);
-  await box.sendKeys("907153\n");
+  await box.sendKeys("907153", Key.ENTER);
   await driver.wait(async () => (await driver.findElement(By.css("#pin-error")).getText()).includes(said), 30000, said);
 }
 
@@ -609,7 +609,7 @@ test("Firefox: a passkey made and used here satisfies an independent WebAuthn li
   await driver.switchTo().window(lockWin);
   for (const said of ["4 tries left", "3 tries left", "2 tries left", "One more wrong"]) await wrongPasskeyPin(said);
   const box = await driver.findElement(By.css("#pin"));
-  await box.sendKeys("907153\n");
+  await box.sendKeys("907153", Key.ENTER);
   await see(driver, byText("Five wrong passkey PINs in a row, so your vault is locked."));
   // Typed into the page, a PIN goes nowhere near this window.
   await driver.switchTo().window(pg);
@@ -626,6 +626,10 @@ test("Firefox: a passkey made and used here satisfies an independent WebAuthn li
   await driver.wait(async () => driver.executeScript("return window.__res !== null"), 15000);
   assert.equal((await driver.executeScript("return window.__res")).error, undefined);
   await closeTabs();
+  // The lock sent the vault page back to its locked screen. A reload picks up the background's unlock, for the tests after this.
+  await driver.switchTo().window(extTab);
+  await driver.navigate().refresh();
+  await see(driver, By.css('nav[aria-label="Passwords"]'), 30000);
 });
 
 test("Firefox: a quiet passkey request is answered from the toolbar, and verified by a library", async () => {
@@ -686,7 +690,7 @@ test("Firefox: a page asking for a passkey with no click gets our window when it
   await see(driver, button("Use another device or security key"));
   // No click needed first: the PIN box is focused, and Enter signs in.
   assert.equal(await driver.executeScript("return document.activeElement && document.activeElement.id"), "pin");
-  await driver.findElement(By.css("#pin")).sendKeys(PASSKEY_PIN + "\n");
+  await driver.findElement(By.css("#pin")).sendKeys(PASSKEY_PIN, Key.ENTER);
   await driver.sleep(400);
   await driver.switchTo().window(pg);
   await driver.wait(async () => driver.executeScript("return window.__result !== null"), 15000);

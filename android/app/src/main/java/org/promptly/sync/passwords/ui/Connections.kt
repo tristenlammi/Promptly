@@ -200,7 +200,7 @@ fun PasskeyPinSetting(client: VaultClient) {
     )
     SecretField(proof, { proof = it }, if (known) "Master password or current passkey PIN" else "Master password", "passkey-pin-proof")
     PinField(pin, { pin = it }, "New passkey PIN", "passkey-pin-new", { save() })
-    PinField(again, { again = it }, "Type it again", "passkey-pin-again", { save() })
+    PinField(again, { again = it }, "Type the new PIN again", "passkey-pin-again", { save() })
     error?.let { ErrorCard(it) }
     done?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("passkey-pin-done")) }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
