@@ -230,7 +230,7 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 val at = uiState?.location
                 if (at != null) {
                     CoroutineScope(Dispatchers.IO).launch {
-                        runCatching { Maps.park(carContext, at.coordinates.lat, at.coordinates.lng, "auto") }
+                        runCatching { Parking.save(carContext, at.coordinates.lat, at.coordinates.lng, "auto") }
                     }
                 }
                 // Arrived and switched the car off: that trip is over.
@@ -401,8 +401,10 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 Nav.arrivedAt,
                 onPark = {
                     scope.launch {
-                        val ok = Nav.parkHere()
-                        CarToast.makeText(carContext, if (ok) "Parked here" else "Couldn't save that", CarToast.LENGTH_SHORT).show()
+                        val saved = Nav.parkHere()
+                        // The car's toasts are short: "Parked here" either way, with no signal said plainly.
+                        val text = if (saved == Parking.Saved.LATER) "Parked here. Saved when there's signal" else Parking.said(saved)
+                        CarToast.makeText(carContext, text, CarToast.LENGTH_LONG).show()
                         Nav.finishArrival()
                     }
                 },
@@ -502,6 +504,7 @@ private class OnTheWayScreen(context: CarContext, category: String, private val 
                 screenManager.popToRoot()
             }
             val detail = listOfNotNull(
+                if (n.stop.offline) "Offline" else null,
                 n.addsMinutes?.let { if (it < 1) "No extra time" else "+$it min" },
                 n.aheadKm?.let { String.format(java.util.Locale.ENGLISH, "%.1f km ahead", it) },
             ).joinToString(" · ")
@@ -542,7 +545,11 @@ private class PlacesScreen(context: CarContext) : Screen(context) {
             .setActionStrip(ActionStrip.Builder().addAction(search).build())
         val rows = places
         when {
-            failed -> builder.setSingleList(ItemList.Builder().setNoItemsMessage("Couldn't reach your server.").build())
+            failed -> builder.setSingleList(
+                ItemList.Builder().setNoItemsMessage(
+                    if (org.promptly.sync.maps.offline.Offline.online(carContext)) "Couldn't reach your server." else "No signal, and no saved places on this phone yet. Search instead.",
+                ).build(),
+            )
             rows == null -> builder.setLoading(true)
             else -> builder.setSingleList(CarTemplates.places(carContext, rows, carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_PLACE_LIST), "Nothing saved yet. Search, or save places in P Maps.", { distanceTo(it, here) }) { go(it) })
         }
@@ -562,6 +569,7 @@ private class SearchScreen(context: CarContext, initial: String = "") : Screen(c
     private var query = ""
     private var searching = false
     private var failed = false
+    private var emptyText = "Nothing found for that."
     private var waiting: kotlinx.coroutines.Job? = null
     private var here: android.location.Location? = null
 
@@ -590,8 +598,10 @@ private class SearchScreen(context: CarContext, initial: String = "") : Screen(c
             // Nearest first, as you'd expect from a map.
             here = runCatching { Nav.locationProvider.lastLocation() }.getOrNull()
             val near = here?.let { it.latitude to it.longitude }
-            val found = runCatching { Maps.search(carContext, words.trim(), near) }
-            results = found.getOrDefault(emptyList())
+            // Your server first; with no signal (or no answer in 4 s) the offline areas on the phone.
+            val found = runCatching { PlaceSearch.find(carContext, words.trim(), near) }
+            results = found.getOrNull()?.stops.orEmpty()
+            emptyText = found.getOrNull()?.empty ?: "Nothing found for that."
             failed = found.isFailure
             searching = false
             invalidate()
@@ -609,9 +619,9 @@ private class SearchScreen(context: CarContext, initial: String = "") : Screen(c
             .setInitialSearchText(query)
         if (searching) return builder.setLoading(true).build()
         val empty = when {
-            failed -> "Couldn't reach your server."
+            failed -> "Couldn't search just now."
             query.trim().length < 2 -> "Search for a place or address"
-            else -> "Nothing found for that."
+            else -> emptyText
         }
         return builder.setItemList(
             CarTemplates.places(carContext, results, carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_LIST), empty, { distanceTo(it, here) }) {

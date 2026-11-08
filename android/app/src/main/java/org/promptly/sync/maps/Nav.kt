@@ -518,10 +518,11 @@ object Nav {
         _arrived.value = false
     }
 
-    /** "Save where I parked", from the arrival screen on the phone or in the car. */
-    suspend fun parkHere(): Boolean = withContext(Dispatchers.IO) {
-        val at = lastFix ?: return@withContext false
-        runCatching { Maps.park(app, at.coordinates.lat, at.coordinates.lng, "manual") }.isSuccess
+    /** "Save where I parked", from the arrival screen on the phone or in the car: now, or
+     *  with no signal kept on the phone and sent when there's a connection. */
+    suspend fun parkHere(): Parking.Saved = withContext(Dispatchers.IO) {
+        val at = lastFix ?: return@withContext Parking.Saved.NO
+        Parking.save(app, at.coordinates.lat, at.coordinates.lng, "manual")
     }
 
     /** Done with the trip you arrived at. */

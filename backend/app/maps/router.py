@@ -636,6 +636,8 @@ class ParkedBody(BaseModel):
     lon: float = Lon
     note: str | None = Field(default=None, max_length=400)
     source: Literal["manual", "auto"] = "manual"
+    # When you parked, for a place the phone saved with no signal and sends later.
+    at: datetime | None = None
 
 
 def _parked(p: MapParked) -> dict[str, Any]:
@@ -645,12 +647,20 @@ def _parked(p: MapParked) -> dict[str, Any]:
 @router.put("/parked")
 async def set_parked(body: ParkedBody, db: AsyncSession = Depends(get_db), user: User = Depends(maps_user)) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
-    values = {"lat": body.lat, "lon": body.lon, "note": body.note, "source": body.source, "at": now}
+    at = now
+    if body.at is not None:
+        # Sent late, from a dead spot: it keeps its own time, never one in the future, and
+        # never replaces a place saved after it (from the web, or another phone).
+        at = min(body.at if body.at.tzinfo else body.at.replace(tzinfo=timezone.utc), now)
+        current = await db.get(MapParked, user.id)
+        if current is not None and current.at is not None and current.at >= at:
+            return _parked(current)
+    values = {"lat": body.lat, "lon": body.lon, "note": body.note, "source": body.source, "at": at}
     await db.execute(
         insert(MapParked).values(user_id=user.id, **values).on_conflict_do_update(index_elements=["user_id"], set_=values)
     )
     await db.commit()
-    return {**values, "at": now.isoformat()}
+    return {**values, "at": at.isoformat()}
 
 
 @router.delete("/parked", status_code=status.HTTP_204_NO_CONTENT)

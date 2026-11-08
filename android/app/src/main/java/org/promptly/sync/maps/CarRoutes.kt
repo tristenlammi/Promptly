@@ -45,7 +45,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
@@ -56,12 +55,6 @@ import org.maplibre.compose.sources.rememberGeoJsonSource
 import org.maplibre.compose.util.MaplibreComposable
 import org.promptly.sync.R
 import org.promptly.sync.maps.offline.Offline
-import com.stadiamaps.ferrostar.core.location.toUserLocation
-import uniffi.ferrostar.GeographicCoordinate
-import uniffi.ferrostar.RouteRequest
-import uniffi.ferrostar.Waypoint
-import uniffi.ferrostar.WaypointKind
-import uniffi.ferrostar.createValhallaRequestGenerator
 import java.io.IOException
 import java.util.Locale
 
@@ -130,8 +123,9 @@ object CarPreview {
         asking = scope.launch {
             try {
                 val here = runCatching { Nav.locationProvider.lastLocation() }.getOrNull()
-                val found = Maps.search(context, words, here?.let { it.latitude to it.longitude }).firstOrNull()
-                if (found == null) giveUp("Couldn't find $words.") else show(context, found, options)
+                val result = PlaceSearch.find(context, words, here?.let { it.latitude to it.longitude })
+                val found = result.stops.firstOrNull()
+                if (found == null) giveUp(if (result.offline) "Couldn't find $words offline." else "Couldn't find $words.") else show(context, found, options)
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -173,44 +167,9 @@ object CarPreview {
         withTimeoutOrNull(12_000) { Nav.locationProvider.locationUpdates(1000L).first { System.currentTimeMillis() - it.time < 60_000 } }
             ?: withTimeoutOrNull(8_000) { Nav.locationProvider.locationUpdates(1000L).first() }
 
-    /** The ways there: your server's (with traffic), or with no signal the phone's own,
-     *  from the downloaded squares (up to three, no traffic). */
-    private suspend fun routesTo(context: Context, here: Location, stop: Stop, options: TripOptions): List<CarRoute> = withContext(Dispatchers.IO) {
+    private suspend fun routesTo(context: Context, here: Location, stop: Stop, options: TripOptions): List<CarRoute> {
         appContext = context.applicationContext
-        val stops = JSONArray()
-            .put(JSONObject().put("lat", here.latitude).put("lon", here.longitude).put("name", "Your location"))
-            .put(JSONObject().put("lat", stop.lat).put("lon", stop.lon).put("name", stop.name))
-        val body = JSONObject().put("stops", stops).put("mode", "drive")
-            .put("avoid_tolls", options.tolls).put("avoid_highways", options.highways).put("avoid_ferries", options.ferries)
-        val problem = if (!Offline.online(context)) IOException("No connection") else try {
-            return@withContext parseRoutes(Maps.send(context, "POST", "/api/maps/route", body, PREVIEW_TIMEOUT_SECONDS))
-        } catch (e: IOException) {
-            // "Server said 422" is an answer (no route), not a missing server.
-            if (e.message?.startsWith("Server said 4") == true && e.message?.startsWith("Server said 401") != true) throw e
-            e
-        }
-        Log.i(TAG, "Route preview from the phone: ${problem.message}")
-        phoneRoutes(context, here, stop, options)
-    }
-
-    /** How long the preview waits for your server before the phone answers. */
-    private const val PREVIEW_TIMEOUT_SECONDS = 10L
-
-    /** Up to three ways there from Valhalla on the phone, asked the same way as the server. */
-    private fun phoneRoutes(context: Context, here: Location, stop: Stop, options: TripOptions): List<CarRoute> {
-        val ask = ServerRoutes.requestOptions(options).put("alternates", 2)
-        val generator = createValhallaRequestGenerator("https://promptly.invalid/route", ServerRoutes.profileOf(options), ask.toString())
-        val request = generator.generateRequest(here.toUserLocation(), listOf(Waypoint(coordinate = GeographicCoordinate(stop.lat, stop.lon), kind = WaypointKind.BREAK)))
-            as? RouteRequest.HttpPost ?: throw IOException("Unexpected route request")
-        val cells = HybridRouting.cellsOf(listOf(here.latitude to here.longitude, stop.lat to stop.lon))
-        val answer = try {
-            Offline.router(context).route(String(request.body), cells)
-        } catch (e: org.promptly.sync.maps.offline.LocalRouter.MissingSquares) {
-            throw OfflineRouteUnavailable(true, e.cells, e)
-        } catch (e: org.promptly.sync.maps.offline.LocalRouter.NoRoute) {
-            throw OfflineRouteUnavailable(false, emptyList(), e)
-        }
-        return parsePhoneRoutes(JSONObject(answer))
+        return Routing.plan(context, here, stop, options)
     }
 
     /** Valhalla's OSRM-style answer (with alternates) as the car's route rows. The first
@@ -312,10 +271,15 @@ object CarPreview {
 @MaplibreComposable
 fun PreviewRoutesOnMap() {
     val plan by CarPreview.plan.collectAsState()
-    val routes = plan?.routes.orEmpty()
-    val picked = plan?.selected ?: 0
+    RoutesOnMap(plan?.routes.orEmpty(), plan?.selected ?: 0)
+}
+
+/** Routes to choose from, the picked one on top (the car's preview, the phone's Drive screen). */
+@Composable
+@MaplibreComposable
+fun RoutesOnMap(routes: List<CarRoute>, picked: Int, colour: Color = Color(0xFF3D5AFE)) {
     PreviewLine("promptly-preview-others", routes.filterIndexed { i, _ -> i != picked }, Color(0xFF9AA0A6), 5)
-    PreviewLine("promptly-preview", listOfNotNull(routes.getOrNull(picked)), Color(0xFF3D5AFE), 8)
+    PreviewLine("promptly-preview", listOfNotNull(routes.getOrNull(picked)), colour, 8)
 }
 
 @Composable
@@ -462,7 +426,7 @@ internal object CarTemplates {
             "home" -> R.drawable.ic_map_home
             "work" -> R.drawable.ic_map_work
             "favourite", "list" -> R.drawable.ic_map_star
-            "recent" -> R.drawable.ic_map_recent
+            "recent", "usual" -> R.drawable.ic_map_recent
             "parked" -> R.drawable.ic_map_car
             else -> R.drawable.ic_map_place
         }
@@ -471,6 +435,7 @@ internal object CarTemplates {
             .setImage(icon(context, res, tint = true))
             .setOnClickListener { onPick(stop) }
         val line = listOfNotNull(
+            if (stop.offline) "Offline" else null,
             metres?.let { if (it < 1000) "${it.toInt()} m" else String.format(Locale.ENGLISH, "%.1f km", it / 1000) },
             stop.address?.takeIf { it.isNotBlank() },
         ).joinToString(" · ")

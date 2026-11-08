@@ -190,6 +190,31 @@ async def test_parking_is_one_spot_and_yours(db, user, client):
     assert (await client.get("/api/maps/places", headers=_hdr(user))).json()["parked"] is None
 
 
+async def test_parking_saved_with_no_signal_keeps_its_time(db, user, client):
+    """The phone sends a place it saved in a dead spot later, with when you parked:
+    it keeps that time, and never replaces a place saved after it."""
+    from datetime import datetime, timedelta, timezone
+
+    early = (datetime.now(timezone.utc) - timedelta(hours=2)).isoformat()
+    r = await client.put("/api/maps/parked", headers=_hdr(user), json={"lat": -33.0, "lon": 151.0, "at": early})
+    assert r.status_code == 200 and r.json()["at"].startswith(early[:16])
+    # Parked again since (the web, another phone)...
+    assert (await client.put("/api/maps/parked", headers=_hdr(user), json={"lat": -27.0, "lon": 153.0})).status_code == 200
+    # ...so the dead spot's place, arriving late, doesn't win.
+    late = (datetime.now(timezone.utc) - timedelta(minutes=30)).isoformat()
+    r = await client.put("/api/maps/parked", headers=_hdr(user), json={"lat": -33.5, "lon": 151.5, "at": late})
+    assert r.status_code == 200 and r.json()["lat"] == -27.0
+    assert (await client.get("/api/maps/places", headers=_hdr(user))).json()["parked"]["lat"] == -27.0
+    # A time in the future is now, and a newer offline one does replace an older one.
+    future = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
+    r = await client.put("/api/maps/parked", headers=_hdr(user), json={"lat": -34.0, "lon": 150.0, "at": future, "source": "auto"})
+    assert r.status_code == 200 and r.json()["lat"] == -34.0
+    parked = (await client.get("/api/maps/places", headers=_hdr(user))).json()["parked"]
+    assert parked["lat"] == -34.0 and datetime.fromisoformat(parked["at"]) <= datetime.now(timezone.utc)
+    # No time at all keeps today's behaviour: now, whatever was there.
+    assert (await client.put("/api/maps/parked", headers=_hdr(user), json={"lat": -35.0, "lon": 149.0})).json()["lat"] == -35.0
+
+
 async def test_recents_keep_one_row_per_place(user, client):
     spot = {"name": "Cafe", "lat": -27.5, "lon": 153.0}
     for name in ("Cafe", "Cafe renamed"):

@@ -156,6 +156,8 @@ object Offline {
         val api = api(context) ?: throw SignedOut()
         try {
             val overview = refresh(context)
+            // Home, Work, recents and usual routes go with the map, for search with no signal.
+            runCatching { org.promptly.sync.maps.MyPlaces.refresh(context) }
             if (!overview.enabled) throw OffOnServer()
             if (!overview.ready) throw StillBuilding()
             val areas = overview.areas.filter { it.id !in store.state.deleted }

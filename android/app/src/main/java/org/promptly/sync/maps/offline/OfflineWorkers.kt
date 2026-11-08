@@ -129,6 +129,8 @@ class OfflineDownloadWorker(context: Context, params: WorkerParameters) : Corout
 class OfflineSyncWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val ctx = applicationContext
+        // Your places, recents and usual routes for the offline map and search, fresh each day.
+        runCatching { org.promptly.sync.maps.MyPlaces.refresh(ctx) }
         val overview = runCatching { Offline.refresh(ctx) }.getOrElse { return@withContext Result.retry() }
         if (!overview.enabled || !overview.ready) return@withContext Result.success()
         val store = Offline.store(ctx)

@@ -110,12 +110,17 @@ class MapLinkActivity : ComponentActivity() {
         Toast.makeText(this, "Finding ${ask.query}…", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch {
             val here = runCatching { withTimeoutOrNull(3_000) { Nav.locationProvider.lastLocation() } }.getOrNull()
-            val found = runCatching { Maps.search(this@MapLinkActivity, ask.query, here?.let { it.latitude to it.longitude }) }
-            val best = found.getOrNull()?.firstOrNull()
+            val found = runCatching { PlaceSearch.find(this@MapLinkActivity, ask.query, here?.let { it.latitude to it.longitude }) }
+            val best = found.getOrNull()?.stops?.firstOrNull()
             when {
                 best != null -> drive(best, ask.options)
                 found.isFailure -> {
                     Toast.makeText(this@MapLinkActivity, "Couldn't reach your server.", Toast.LENGTH_LONG).show()
+                    finish()
+                }
+                // No signal and nothing on the phone: the web app can't help either.
+                found.getOrNull()?.offline == true -> {
+                    Toast.makeText(this@MapLinkActivity, found.getOrNull()!!.empty, Toast.LENGTH_LONG).show()
                     finish()
                 }
                 // Nothing by that name nearby: P Maps' own search, to look further.

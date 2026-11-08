@@ -71,6 +71,17 @@ class CarTemplatesTest {
     }
 
     @Test
+    fun an_offline_result_says_so() {
+        // WP-M6: results from the phone's offline areas, and usual routes, in the car's list.
+        val offline = CarTemplates.placeRow(context, Stop(-33.0, 151.0, "12 Macquarie Street", "address", "Dubbo NSW 2830", offline = true), 1234f) {}
+        assertEquals("Offline · 1.2 km · Dubbo NSW 2830", offline.texts.single().toString())
+        val online = CarTemplates.placeRow(context, Stop(-33.0, 151.0, "Caltex", "place", "Dubbo"), 800f) {}
+        assertEquals("800 m · Dubbo", online.texts.single().toString())
+        val list = CarTemplates.places(context, listOf(Stop(-33.0, 151.0, "School", "usual", "Usual route")), 6, "Nothing found offline.", { null }) {}
+        assertEquals(1, list.items.size)
+    }
+
+    @Test
     fun ending_a_trip_asks() {
         val t = CarTemplates.confirmStop({}, {}) as MessageTemplate
         assertEquals(2, t.actions.size)

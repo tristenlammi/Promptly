@@ -20,8 +20,8 @@ import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-/** One stop on a trip. */
-data class Stop(val lat: Double, val lon: Double, val name: String, val kind: String? = null, val address: String? = null)
+/** One stop on a trip. [offline]: found on the phone (no signal), not by your server. */
+data class Stop(val lat: Double, val lon: Double, val name: String, val kind: String? = null, val address: String? = null, val offline: Boolean = false)
 
 /** Talking to the P Maps part of your Promptly server, and nothing else. The
  *  phone signs in with the same kind of app password as photo backup. */
@@ -132,11 +132,19 @@ object Maps {
     /** One stop you could make, and what it would cost. */
     data class Nearby(val stop: Stop, val addsMinutes: Int?, val aheadKm: Double?)
 
-    /** Fuel, food and so on along the rest of this trip. */
+    /** Fuel, food and so on along the rest of this trip: your server's (with the time each
+     *  adds), or with no signal the downloaded squares' (with how far ahead each is). */
     suspend fun onTheWay(context: Context, category: String, shape: String, here: Stop, to: Stop): List<Nearby> = withContext(Dispatchers.IO) {
         fun spot(s: Stop) = JSONObject().put("lat", s.lat).put("lon", s.lon).put("name", s.name)
         val body = JSONObject().put("category", category).put("shapes", JSONArray().put(shape)).put("here", spot(here)).put("to", spot(to))
-        val rows = send(context, "POST", "/api/maps/nearby/along", body).getJSONArray("results")
+        val rows = try {
+            if (!org.promptly.sync.maps.offline.Offline.online(context)) throw IOException("No connection")
+            send(context, "POST", "/api/maps/nearby/along", body, DRIVING_TIMEOUT_SECONDS / 2).getJSONArray("results")
+        } catch (e: IOException) {
+            if (e.message?.startsWith("Server said 4") == true && e.message?.startsWith("Server said 401") != true) throw e
+            val line = CarPreview.decodeShape(shape).map { (lon, lat) -> lat to lon }
+            return@withContext org.promptly.sync.maps.offline.LocalSearch(org.promptly.sync.maps.offline.Offline.store(context).search.file).along(category, line)
+        }
         List(rows.length()) { i ->
             val r = rows.getJSONObject(i)
             Nearby(
@@ -203,27 +211,17 @@ object Maps {
         }
     }
 
-    fun park(context: Context, lat: Double, lon: Double, source: String) {
-        send(context, "PUT", "/api/maps/parked", JSONObject().put("lat", lat).put("lon", lon).put("source", source))
+    /** Where you parked. [at]: when (ISO 8601), for one saved with no signal and sent later;
+     *  the server keeps a newer one it already has. */
+    fun park(context: Context, lat: Double, lon: Double, source: String, at: String? = null, timeoutSeconds: Long = 40) {
+        val body = JSONObject().put("lat", lat).put("lon", lon).put("source", source)
+        at?.let { body.put("at", it) }
+        send(context, "PUT", "/api/maps/parked", body, timeoutSeconds)
     }
 
-    /** Places to pick from on the car's screen. With no answer in time, the ones from
-     *  last time: home is still home on one bar of signal. */
-    suspend fun myPlaces(context: Context): List<Stop> = withContext(Dispatchers.IO) {
-        val saved = File(context.filesDir, "maps-places.json")
-        val server = server(context) ?: throw IOException("Not signed in")
-        val mine = try {
-            get(context, "/api/maps/places", CAR_TIMEOUT_SECONDS).also {
-                saved.writeText(JSONObject().put("server", server).put("places", it).toString())
-            }
-        } catch (e: IOException) {
-            // Only this server's places, never another account's.
-            val kept = runCatching { JSONObject(saved.readText()) }.getOrNull()
-            if (kept == null || kept.optString("server") != server) throw e
-            kept.getJSONObject("places")
-        }
-        placesFrom(mine)
-    }
+    /** Places to pick from: your server's, or with no answer in time the ones kept on the
+     *  phone ([MyPlaces]). Home is still home on one bar of signal. */
+    suspend fun myPlaces(context: Context): List<Stop> = MyPlaces.load(context)
 
     internal fun placesFrom(mine: JSONObject): List<Stop> {
         val out = mutableListOf<Stop>()
@@ -246,11 +244,10 @@ object Maps {
         return out.distinctBy { "%.4f,%.4f".format(java.util.Locale.ROOT, it.lat, it.lon) }
     }
 
-    suspend fun search(context: Context, query: String, near: Pair<Double, Double>?): List<Stop> = withContext(Dispatchers.IO) {
-        val q = java.net.URLEncoder.encode(query, "UTF-8")
-        val at = near?.let { "&lat=${it.first}&lon=${it.second}" } ?: ""
-        val rows = get(context, "/api/maps/search?q=$q$at", CAR_TIMEOUT_SECONDS).getJSONArray("results")
-        List(rows.length()) { i ->
+    /** The server's search answer as stops. */
+    internal fun stopsFrom(answer: JSONObject): List<Stop> {
+        val rows = answer.getJSONArray("results")
+        return List(rows.length()) { i ->
             val r = rows.getJSONObject(i)
             Stop(r.getDouble("lat"), r.getDouble("lon"), r.getString("name"), r.optString("kind").ifEmpty { null }, textOf(r, "address"))
         }

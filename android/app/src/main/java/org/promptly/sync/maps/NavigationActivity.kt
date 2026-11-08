@@ -69,6 +69,7 @@ import com.stadiamaps.ferrostar.maplibreui.runtime.rememberNavigationMapState
 import com.stadiamaps.ferrostar.maplibreui.views.DynamicallyOrientingNavigationView
 import kotlinx.coroutines.launch
 import org.maplibre.compose.style.BaseStyle
+import org.promptly.sync.maps.offline.Offline
 
 /** The driving screen: `promptlymaps://navigate?server=…&code=…&stops=…`.
  *  Native because voice with the screen off and steady GPS need an app, not a
@@ -331,8 +332,8 @@ class NavigationActivity : ComponentActivity() {
                     at = Nav.arrivedAt,
                     onPark = {
                         scope.launch {
-                            val ok = Nav.parkHere()
-                            Toast.makeText(context, if (ok) "Parked here" else "Couldn't save that", Toast.LENGTH_SHORT).show()
+                            val saved = Nav.parkHere()
+                            Toast.makeText(context, Parking.said(saved), if (saved == Parking.Saved.LATER) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
                             Nav.finishArrival()
                             onDone()
                         }
@@ -426,8 +427,12 @@ private fun AddStopSheet(onClose: () -> Unit) {
                     val found = rows
                     when {
                         found == null -> CircularProgressIndicator()
-                        found.isEmpty() -> Text("Nothing close to your route.")
-                        else -> found.take(6).forEach { n ->
+                        found.isEmpty() -> Text(if (Offline.online(context)) "Nothing close to your route." else "No signal, and nothing close to your route in your offline areas.")
+                        else -> {
+                            if (found.any { it.stop.offline }) {
+                                Text("No signal: from your offline map, without detour times.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            found.take(6).forEach { n ->
                             Column(Modifier.fillMaxWidth().clickable {
                                 Nav.addStop(n.stop)
                                 onClose()
@@ -439,6 +444,7 @@ private fun AddStopSheet(onClose: () -> Unit) {
                                 ).joinToString(" · ")
                                 if (detail.isNotEmpty()) Text(detail, fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
+                        }
                         }
                     }
                 }
