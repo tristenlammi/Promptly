@@ -190,7 +190,7 @@ A page can detect the wrapper: `navigator.credentials.get.toString()` isn't nati
 
 ## Find stray passwords
 
-Security check can look for passwords and other secrets left in plain text in your own Mail, Files and Photos (D-STRAY-1 to 8).
+Security check can look for passwords and other secrets left in plain text in your own Mail, Files and Photos (D107 to 8).
 
 **What's read.** Your server reads what it already holds: the text of your mail (not Trash or Spam), the text of your own files as Drive's search index has it (or a small text file such as a `.env` straight from disk), and the words read out of your own photos. Nothing shared with you, and nobody else's. The vault isn't read: the server can't. Nothing goes to an AI model, and the patterns are plain rules in `backend/app/passwords/stray.py`.
 

@@ -430,7 +430,7 @@ async def tick() -> int:
 
 async def enqueue_scan(user_id: uuid.UUID) -> None:
     """In the API process, not the arq worker: ``app/tasks`` runs automations, and a test
-    keeps it from importing anything of Passwords (D-STRAY-9). The pattern matching runs
+    keeps it from importing anything of Passwords (D115). The pattern matching runs
     in a thread, so it doesn't hold up requests."""
     from app.background import spawn
 
