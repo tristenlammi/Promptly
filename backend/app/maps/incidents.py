@@ -52,6 +52,27 @@ async def _spend(name: str, limit: int) -> bool:
     return used <= limit
 
 
+NAV_RECHECK_SECONDS = 300
+
+
+async def closures_due(user_id: Any, reroute: bool) -> bool:
+    """Should this turn-by-turn route request look for closed roads? A trip you
+    start always does. A reroute after a wrong turn only does if this person's
+    last check was at least five minutes ago, so a run of wrong turns costs one
+    incident request, not one each. Only the time of the check is kept, never
+    TomTom's answer."""
+    from app.redis_client import redis
+
+    key = f"maps:nav-closures:{user_id}"
+    try:
+        if not reroute:
+            await redis.set(key, "1", ex=NAV_RECHECK_SECONDS)
+            return True
+        return bool(await redis.set(key, "1", ex=NAV_RECHECK_SECONDS, nx=True))
+    except Exception:  # noqa: BLE001 — without Redis, check as before
+        return True
+
+
 def boxes_for(lines: list[list[tuple[float, float]]]) -> list[tuple[float, float, float, float]]:
     """Map areas covering these routes, in driving order, each under TomTom's
     10,000 km² limit. A very long trip gets its first few hundred km."""

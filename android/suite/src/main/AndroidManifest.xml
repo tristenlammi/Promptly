@@ -153,6 +153,7 @@
             android:theme="@style/Launch"
             android:exported="true">
             <meta-data android:name="org.promptly.app.PATH" android:value="/maps" />
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts_maps" />
             <meta-data android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR" android:resource="@color/bar" />
             <meta-data android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR" android:resource="@color/bar" />
             <intent-filter>

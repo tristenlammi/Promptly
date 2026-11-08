@@ -80,7 +80,7 @@ class TimelineService : Service() {
         val observer = Observer<Int> { type ->
             val connected = type == CarConnection.CONNECTION_TYPE_PROJECTION
             if (inCar && !connected) {
-                last?.let { at -> scope.launch { runCatching { Maps.park(this@TimelineService, at.latitude, at.longitude, "auto") } } }
+                last?.let { at -> scope.launch { runCatching { Parking.save(this@TimelineService, at.latitude, at.longitude, "auto") } } }
             }
             inCar = connected
         }

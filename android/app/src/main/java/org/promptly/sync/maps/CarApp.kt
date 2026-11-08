@@ -50,7 +50,11 @@ import com.rallista.car.app.compose.ComposableScreen
 import com.stadiamaps.ferrostar.car.app.navigation.NavigationManagerBridge
 import com.stadiamaps.ferrostar.car.app.navigation.TurnByTurnNotificationManager
 import com.stadiamaps.ferrostar.car.app.template.icons.InterfaceCarIcons
-import com.stadiamaps.ferrostar.car.app.template.models.FerrostarRoutingInfo
+import com.stadiamaps.ferrostar.core.extensions.currentStep
+import com.stadiamaps.ferrostar.core.extensions.progress
+import com.stadiamaps.ferrostar.core.extensions.visualInstruction
+import org.promptly.sync.BuildConfig
+import uniffi.ferrostar.DrivingSide
 import com.stadiamaps.ferrostar.car.app.template.models.toCarDistance
 import com.stadiamaps.ferrostar.composeui.config.VisualNavigationViewConfig
 import com.stadiamaps.ferrostar.composeui.config.withSpeedLimitStyle
@@ -66,6 +70,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
@@ -73,11 +78,18 @@ import org.promptly.sync.R
 
 /** P Maps on the car's screen (Android Auto). */
 class PromptlyCarService : CarAppService() {
-    // Sideloaded with no Play listing, so there's no allowlist of hosts to check against.
-    override fun createHostValidator(): HostValidator = HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+    override fun createHostValidator(): HostValidator = carHosts(this, BuildConfig.DEBUG)
 
     override fun onCreateSession(sessionInfo: SessionInfo): Session = PromptlyCarSession()
 }
+
+/** Which apps may show P Maps on a screen. A release build only talks to Google's own
+ *  car hosts (Android Auto, and Android Automotive's template host), from the car
+ *  library's list of their signing keys. A debug build talks to any, for the Desktop
+ *  Head Unit and test hosts. */
+internal fun carHosts(context: android.content.Context, debug: Boolean): HostValidator =
+    if (debug) HostValidator.ALLOW_ALL_HOSTS_VALIDATOR
+    else HostValidator.Builder(context).addAllowedHosts(androidx.car.app.R.array.hosts_allowlist_sample).build()
 
 class PromptlyCarSession : Session() {
     private val styleScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -92,7 +104,38 @@ class PromptlyCarSession : Session() {
         if (Maps.server(carContext) == null) {
             return NotReady(carContext, "Open P Maps on your phone and start a trip once, then come back.")
         }
-        return DriveScreen(carContext)
+        // The car's map draws from the same tiles as the phone's, offline too.
+        org.promptly.sync.maps.offline.MapTiles.install(carContext)
+        val screen = DriveScreen(carContext)
+        // Opened by "navigate to…" from another app or the assistant. Once this screen
+        // is on the car, so anything it opens goes on top of it.
+        android.os.Handler(android.os.Looper.getMainLooper()).post { handle(intent, screen) }
+        return screen
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        val root = carContext.getCarService(androidx.car.app.ScreenManager::class.java)
+        if (Maps.server(carContext) == null) return
+        root.popToRoot()
+        handle(intent, root.top as? DriveScreen ?: return)
+    }
+
+    private fun handle(intent: Intent, screen: DriveScreen) {
+        // Only the car drives: another app's "walk there" still gets the drive preview.
+        val drive = Nav.driveOptions()
+        when (val ask = MapLinks.read(intent, drive)) {
+            is MapLinks.Ask.Navigate ->
+                if (ask.addStop && Nav.onTrip()) {
+                    Nav.addStop(ask.stop)
+                    CarToast.makeText(carContext, "Adding ${ask.stop.name}", CarToast.LENGTH_SHORT).show()
+                } else {
+                    CarPreview.show(carContext, ask.stop, if (ask.options.mode == "drive") ask.options else drive)
+                }
+            is MapLinks.Ask.NavigateTo -> CarPreview.showQuery(carContext, ask.query, if (ask.options.mode == "drive") ask.options else drive)
+            is MapLinks.Ask.Show -> CarPreview.show(carContext, ask.stop, drive)
+            is MapLinks.Ask.Search -> screen.screenManager.push(SearchScreen(carContext, ask.query))
+            null -> Unit
+        }
     }
 }
 
@@ -125,14 +168,21 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
     init {
         Nav.loadCarStyle(scope, carContext.isDarkMode)
         bridge.start(scope)
+        // Nav itself watches the trip for arriving, cameras and warnings, so a trip
+        // the car started still has them with the phone in a pocket.
         vm.navigationUiState.onEach {
             val wasNavigating = uiState?.isNavigating() == true
             uiState = it
-            it.location?.let { at -> Nav.onLocation(at.coordinates.lat, at.coordinates.lng) }
             if (wasNavigating != it.isNavigating() || it.isNavigating()) invalidate()
         }.launchIn(scope)
         Nav.carStyle.onEach { invalidate() }.launchIn(scope)
         Nav.traffic.onEach { invalidate() }.launchIn(scope)
+        Nav.arrived.onEach { invalidate() }.launchIn(scope)
+        // The voice says it; the screen shows it too, for when the music's loud.
+        Nav.cameraWarning.onEach { alert ->
+            val text = alert.limit?.let { "Speed camera · $it" } ?: "Speed camera ahead"
+            CarToast.makeText(carContext, text, CarToast.LENGTH_LONG).show()
+        }.launchIn(scope)
         CarPreview.plan.onEach {
             backFromPreview.isEnabled = it != null
             invalidate()
@@ -146,6 +196,17 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
             invalidate()
         }
         Nav.faster.onEach { invalidate() }.launchIn(scope)
+        // No signal: once a session, say the map and directions now come from the phone.
+        var toldOffline = false
+        combine(Nav.noSignal, Nav.routeSource) { none, source -> none || source == RouteSource.PHONE }.onEach { offline ->
+            if (offline && !toldOffline) {
+                toldOffline = true
+                CarToast.makeText(carContext, "No signal: using your offline map", CarToast.LENGTH_LONG).show()
+            }
+            invalidate()
+        }.launchIn(scope)
+        // Off the route with nothing downloaded there: what to do, on the screen as well.
+        Nav.offRoute.onEach { said -> if (said != null) CarToast.makeText(carContext, said, CarToast.LENGTH_LONG).show() }.launchIn(scope)
         // What the assistant said, on the screen as well.
         Voice.reply.onEach { said ->
             if (said != null) {
@@ -169,9 +230,11 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 val at = uiState?.location
                 if (at != null) {
                     CoroutineScope(Dispatchers.IO).launch {
-                        runCatching { Maps.park(carContext, at.coordinates.lat, at.coordinates.lng, "auto") }
+                        runCatching { Parking.save(carContext, at.coordinates.lat, at.coordinates.lng, "auto") }
                     }
                 }
+                // Arrived and switched the car off: that trip is over.
+                if (Nav.arrived.value) Nav.finishArrival()
                 bridge.stop()
                 scope.cancel()
             }
@@ -256,9 +319,18 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
                 )
                 .build(),
         )
-        state.tripState?.let { trip ->
-            FerrostarRoutingInfo.Builder(carContext).setTripState(trip).build()?.let { builder.setNavigationInfo(it) }
-        }
+        // Our own card rather than Ferrostar's: it adds the lanes (with their picture,
+        // which the car requires) and says when a new route is being worked out.
+        val trip = state.tripState
+        val step = trip?.currentStep()
+        CarTemplates.routingInfo(
+            carContext,
+            instruction = trip?.visualInstruction(),
+            metresToTurn = trip?.progress()?.distanceToNextManeuver,
+            side = step?.drivingSide ?: DrivingSide.LEFT,
+            exit = step?.roundaboutExitNumber?.toInt(),
+            rerouting = state.isCalculatingNewRoute == true,
+        )?.let { builder.setNavigationInfo(it) }
         state.progress?.let { progress ->
             val traffic = Nav.traffic.value
             val arrive = traffic?.arriveAt ?: java.time.Instant.now().plusSeconds(progress.durationRemaining.toLong())
@@ -278,6 +350,11 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
 
     /** The car's own microphone, only when you press its button. */
     private fun askFromCar() {
+        if (!org.promptly.sync.maps.offline.Offline.online(carContext)) {
+            // The assistant needs your server: no signal is said plainly (Voice.press), with no mic.
+            Voice.press(carContext)
+            return
+        }
         if (!Voice.allowed(carContext)) {
             CarToast.makeText(carContext, "Allow the microphone on your phone first", CarToast.LENGTH_LONG).show()
             return
@@ -318,11 +395,33 @@ private class DriveScreen(context: CarContext) : ComposableScreen(context) {
         if (state?.isNavigating() == true) {
             return drivingTemplate(state)
         }
+        if (Nav.arrived.value) {
+            return CarTemplates.arrival(
+                carContext,
+                Nav.arrivedAt,
+                onPark = {
+                    scope.launch {
+                        val saved = Nav.parkHere()
+                        // The car's toasts are short: "Parked here" either way, with no signal said plainly.
+                        val text = if (saved == Parking.Saved.LATER) "Parked here. Saved when there's signal" else Parking.said(saved)
+                        CarToast.makeText(carContext, text, CarToast.LENGTH_LONG).show()
+                        Nav.finishArrival()
+                    }
+                },
+                onDone = { Nav.finishArrival() },
+            )
+        }
         CarPreview.plan.value?.let { plan ->
-            return CarTemplates.preview(plan, carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_ROUTE_LIST), onSelect = CarPreview::select, onGo = {
-                CarToast.makeText(carContext, "Starting your trip", CarToast.LENGTH_SHORT).show()
-                CarPreview.go()
-            })
+            return CarTemplates.preview(
+                plan,
+                carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_ROUTE_LIST),
+                onSelect = CarPreview::select,
+                onGo = {
+                    CarToast.makeText(carContext, "Starting your trip", CarToast.LENGTH_SHORT).show()
+                    CarPreview.go()
+                },
+                carApi = carContext.carAppApiLevel,
+            )
         }
         return CarTemplates.landing(
             carContext,
@@ -405,6 +504,7 @@ private class OnTheWayScreen(context: CarContext, category: String, private val 
                 screenManager.popToRoot()
             }
             val detail = listOfNotNull(
+                if (n.stop.offline) "Offline" else null,
                 n.addsMinutes?.let { if (it < 1) "No extra time" else "+$it min" },
                 n.aheadKm?.let { String.format(java.util.Locale.ENGLISH, "%.1f km ahead", it) },
             ).joinToString(" · ")
@@ -445,7 +545,11 @@ private class PlacesScreen(context: CarContext) : Screen(context) {
             .setActionStrip(ActionStrip.Builder().addAction(search).build())
         val rows = places
         when {
-            failed -> builder.setSingleList(ItemList.Builder().setNoItemsMessage("Couldn't reach your server.").build())
+            failed -> builder.setSingleList(
+                ItemList.Builder().setNoItemsMessage(
+                    if (org.promptly.sync.maps.offline.Offline.online(carContext)) "Couldn't reach your server." else "No signal, and no saved places on this phone yet. Search instead.",
+                ).build(),
+            )
             rows == null -> builder.setLoading(true)
             else -> builder.setSingleList(CarTemplates.places(carContext, rows, carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_PLACE_LIST), "Nothing saved yet. Search, or save places in P Maps.", { distanceTo(it, here) }) { go(it) })
         }
@@ -458,12 +562,14 @@ private class PlacesScreen(context: CarContext) : Screen(context) {
     }
 }
 
-private class SearchScreen(context: CarContext) : Screen(context) {
+/** Search, optionally already asked: "search for coffee" from another app. */
+private class SearchScreen(context: CarContext, initial: String = "") : Screen(context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var results: List<Stop> = emptyList()
     private var query = ""
     private var searching = false
     private var failed = false
+    private var emptyText = "Nothing found for that."
     private var waiting: kotlinx.coroutines.Job? = null
     private var here: android.location.Location? = null
 
@@ -471,6 +577,7 @@ private class SearchScreen(context: CarContext) : Screen(context) {
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) = scope.cancel()
         })
+        if (initial.trim().length >= 2) search(initial, 0)
     }
 
     private fun search(words: String, pause: Long) {
@@ -491,8 +598,10 @@ private class SearchScreen(context: CarContext) : Screen(context) {
             // Nearest first, as you'd expect from a map.
             here = runCatching { Nav.locationProvider.lastLocation() }.getOrNull()
             val near = here?.let { it.latitude to it.longitude }
-            val found = runCatching { Maps.search(carContext, words.trim(), near) }
-            results = found.getOrDefault(emptyList())
+            // Your server first; with no signal (or no answer in 4 s) the offline areas on the phone.
+            val found = runCatching { PlaceSearch.find(carContext, words.trim(), near) }
+            results = found.getOrNull()?.stops.orEmpty()
+            emptyText = found.getOrNull()?.empty ?: "Nothing found for that."
             failed = found.isFailure
             searching = false
             invalidate()
@@ -510,9 +619,9 @@ private class SearchScreen(context: CarContext) : Screen(context) {
             .setInitialSearchText(query)
         if (searching) return builder.setLoading(true).build()
         val empty = when {
-            failed -> "Couldn't reach your server."
+            failed -> "Couldn't search just now."
             query.trim().length < 2 -> "Search for a place or address"
-            else -> "Nothing found for that."
+            else -> emptyText
         }
         return builder.setItemList(
             CarTemplates.places(carContext, results, carLimit(carContext, ConstraintManager.CONTENT_LIMIT_TYPE_LIST), empty, { distanceTo(it, here) }) {

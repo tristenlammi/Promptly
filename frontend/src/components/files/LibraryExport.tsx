@@ -56,7 +56,7 @@ export function LibraryExport() {
       <p className="mt-1 text-xs text-[var(--text-muted)]">
         Everything you own as an ordinary folder tree: your files in their folders with their names and dates, documents
         as Word files, spreadsheets as Excel, and beside each photo its date, place, description and albums (as .json and
-        .xmp, which other photo apps read). Unzip every part into one place. Another Promptly can import it as “A folder of
+        .xmp, which other photo apps read), plus your P Maps offline areas. Unzip every part into one place. Another Promptly can import it as “A folder of
         photos”.
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-2">

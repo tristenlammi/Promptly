@@ -45,6 +45,9 @@ _INFO = b"promptly/media-url/v1"
 # A link lives 3–6 hours: issued for the current 3-hour window plus the next.
 WINDOW_SECONDS = 3 * 3600
 BASEMAP_WINDOW_SECONDS = 7 * 24 * 3600
+# An offline pack's link lives 1–2 days: long enough for a big download over
+# a slow connection. The phone asks for a new one if it runs out mid-way.
+OFFLINE_WINDOW_SECONDS = 24 * 3600
 
 RENDITIONS = ("thumb", "preview", "poster", "video", "original")
 # A zip download (WP-7.6): the "file" is the zip job. A version of an
@@ -56,6 +59,9 @@ _CODE = {name: i + 1 for i, name in enumerate((
     *RENDITIONS, "zip", "version", "export", "face", "thumb_edit", "preview_edit", "basemap",
     # Forms (WP-F1.6): a file someone sent with an answer, and its tile.
     "form_upload", "form_thumb",
+    # P Maps offline packs: the "file" is one file of a 1-degree square (or a
+    # shared one), ``ver`` the build it's from.
+    "offline",
 ))}
 _NAME = {v: k for k, v in _CODE.items()}
 # What each rendition is on disk under derived/<file_id>/.
@@ -161,6 +167,41 @@ def sign_basemap(user_id: uuid.UUID, token_version: int, ver: int, *, now: float
     return f"/m/{_b64(payload + mac)}"
 
 
+# An offline file in the "file" field: kind, the square's west and south (or
+# the level-0 tile), padded to 16 bytes.
+_OFFLINE_FILE = struct.Struct(">Bhhi7x")
+OFFLINE_KINDS = ("map", "route", "places", "addresses", "l0", "cameras", "chargers")
+
+
+def offline_expiry(now: float | None = None) -> int:
+    now = time.time() if now is None else now
+    return (int(now) // OFFLINE_WINDOW_SECONDS + 2) * OFFLINE_WINDOW_SECONDS
+
+
+def sign_offline(
+    user_id: uuid.UUID, token_version: int, kind: str, ver: int, *,
+    west: int = 0, south: int = 0, tile: int = 0, now: float | None = None,
+) -> str:
+    """A link to one offline file: a square's ``map``/``route``/``places``/
+    ``addresses`` (by ``west``/``south``), a level-0 tile (``l0``, by
+    ``tile``), or ``cameras``/``chargers``. ``ver`` is the build's tag, so a
+    link from an older build stops working when a new one goes live."""
+    file = _OFFLINE_FILE.pack(OFFLINE_KINDS.index(kind) + 1, west, south, tile)
+    payload = _PAYLOAD.pack(
+        _VERSION, _CODE["offline"], offline_expiry(now), file, user_id.bytes, int(token_version) & 0xFFFFFFFF, ver & 0xFFFFFFFF,
+    )
+    mac = hmac.new(_keys()[0], payload, hashlib.sha256).digest()[:16]
+    return f"/m/{_b64(payload + mac)}"
+
+
+def offline_file(claim: "MediaClaim") -> tuple[str, int, int, int] | None:
+    """(kind, west, south, tile) from an ``offline`` claim; None if mangled."""
+    code, west, south, tile = _OFFLINE_FILE.unpack(claim.file_id.bytes)
+    if not 1 <= code <= len(OFFLINE_KINDS):
+        return None
+    return OFFLINE_KINDS[code - 1], west, south, tile
+
+
 def verify(token: str, *, now: float | None = None) -> MediaClaim | None:
     """The claim a token carries, or None if it's forged, mangled or
     expired. (Whether the user may still read the file is the caller's
@@ -183,6 +224,6 @@ def verify(token: str, *, now: float | None = None) -> MediaClaim | None:
 
 
 __all__ = [
-    "MediaClaim", "RENDITIONS", "RENDITION_FILE", "WINDOW_SECONDS", "expiry", "rendition_tag", "shown", "sign", "sign_basemap", "sign_shown", "verify",
-    "version_tag",
+    "MediaClaim", "OFFLINE_KINDS", "RENDITIONS", "RENDITION_FILE", "WINDOW_SECONDS", "expiry", "offline_expiry", "offline_file", "rendition_tag",
+    "shown", "sign", "sign_basemap", "sign_offline", "sign_shown", "verify", "version_tag",
 ]

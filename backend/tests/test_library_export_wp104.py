@@ -74,6 +74,7 @@ async def test_the_whole_library_as_a_folder_tree(client, db, user, tmp_path):
     assert {beach, beach + ".json", beach + ".xmp", F + "Google Drive/Plans/Budget.xlsx",
             F + "Trips/Packing list.docx", F + "Trips/Empty for now/"} <= names
     assert not any(n.endswith("old.txt") for n in names)  # the trash isn't exported
+    assert "Promptly/maps/offline-areas.json" not in names  # no P Maps offline areas, no file
 
     side = json.loads(z.read(beach + ".json"))
     assert side["photoTakenTime"]["timestamp"] == str(T2019)
@@ -167,3 +168,44 @@ async def _other_user(db):
     await db.commit()
     await db.refresh(row)
     return row
+
+
+@pytest.mark.asyncio
+async def test_p_maps_offline_areas_come_too(client, db, user):
+    """P Maps offline areas (maps-offline) are in the first part, yours only,
+    with what your phones said they have; they're enough for an export alone."""
+    from app.maps.models import MapOfflineArea
+
+    other = await _other_user(db)
+    db.add(MapOfflineArea(
+        user_id=user.id, name="Mudgee", kind="view", west=149.3, south=-32.8, east=149.9, north=-32.4,
+        cells=["149_-33"], with_addresses=False,
+        devices={"p1": {"name": "Pixel 9", "state": "ready", "build": "build-1", "bytes": 1234, "at": "2026-11-03T10:00:00+00:00"}},
+    ))
+    await db.commit()  # made first, listed first
+    db.add(MapOfflineArea(
+        user_id=user.id, name="Dubbo to Mudgee", kind="route", west=148.6, south=-32.6, east=149.6, north=-32.2,
+        shape="_c`|@_c`|@", cells=["148_-33", "149_-33"], devices={},
+    ))
+    db.add(MapOfflineArea(user_id=other.id, name="Not yours", kind="view", west=151, south=-34, east=151.5, north=-33.5, cells=["151_-34"], devices={}))
+    await db.commit()
+
+    r = await client.post("/api/files/exports", json={"part_gb": 2}, headers=_auth(user))
+    assert r.status_code == 201, r.text
+    z = await _download(client, r.json()["parts"][0]["url"])
+    got = json.loads(z.read("Promptly/maps/offline-areas.json"))
+    assert got["format"] == 1
+    for a in got["areas"]:
+        assert a.pop("created_at") and a.pop("updated_at")
+    assert got["areas"] == [
+        {
+            "name": "Mudgee", "kind": "view", "box": {"west": 149.3, "south": -32.8, "east": 149.9, "north": -32.4},
+            "shape": None, "squares": ["149_-33"], "with_house_numbers": False,
+            "phones": [{"name": "Pixel 9", "state": "ready", "map_build": "build-1", "bytes": 1234, "reported_at": "2026-11-03T10:00:00+00:00"}],
+        },
+        {
+            "name": "Dubbo to Mudgee", "kind": "route", "box": {"west": 148.6, "south": -32.6, "east": 149.6, "north": -32.2},
+            "shape": "_c`|@_c`|@", "squares": ["148_-33", "149_-33"], "with_house_numbers": True, "phones": [],
+        },
+    ]
+    assert "maps/offline-areas.json" in z.read("Promptly/README.txt").decode()

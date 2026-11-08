@@ -16,7 +16,7 @@ COPY --from=protomaps/go-pmtiles:v1.31.2 /go-pmtiles /usr/local/bin/pmtiles
 ADD --checksum=sha256:a89707c0045e4807b2a1180e132e68e108d998709f48b6c94b98a6e281f571a5 \
     https://github.com/komoot/photon/releases/download/1.3.0/photon-1.3.0.jar /opt/photon.jar
 
-COPY entry.sh refresh.sh extract_pois.py addresses.py /opt/maps/
+COPY entry.sh refresh.sh extract_pois.py addresses.py areas.py search_index.py /opt/maps/
 RUN sed -i 's/\r$//' /opt/maps/*.sh && chmod +x /opt/maps/*.sh
 
 ENTRYPOINT ["/opt/maps/entry.sh"]

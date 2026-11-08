@@ -15,12 +15,13 @@ import org.json.JSONObject
 import org.promptly.sync.Api
 import org.promptly.sync.PairLink
 import org.promptly.sync.Store
+import org.promptly.sync.maps.offline.MapTiles
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-/** One stop on a trip. */
-data class Stop(val lat: Double, val lon: Double, val name: String, val kind: String? = null, val address: String? = null)
+/** One stop on a trip. [offline]: found on the phone (no signal), not by your server. */
+data class Stop(val lat: Double, val lon: Double, val name: String, val kind: String? = null, val address: String? = null, val offline: Boolean = false)
 
 /** Talking to the P Maps part of your Promptly server, and nothing else. The
  *  phone signs in with the same kind of app password as photo backup. */
@@ -31,13 +32,20 @@ object Maps {
 
     fun server(context: Context): String? = account(context)?.server
 
-    /** An HTTP client that signs each request in. */
-    fun client(context: Context): OkHttpClient {
+    /** How long anything the driving screens wait on may take, on one bar of signal:
+     *  long enough for a route on a slow connection, short enough to say so and retry. */
+    const val DRIVING_TIMEOUT_SECONDS = 20L
+
+    /** The car's lists and search: you're looking at the screen, waiting. */
+    const val CAR_TIMEOUT_SECONDS = 12L
+
+    /** An HTTP client that signs each request in, giving up after [timeoutSeconds]. */
+    fun client(context: Context, timeoutSeconds: Long = 40): OkHttpClient {
         val auth = account(context)
         return OkHttpClient.Builder()
-            .connectTimeout(10, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(40, TimeUnit.SECONDS)
+            .connectTimeout(minOf(10L, timeoutSeconds / 2), TimeUnit.SECONDS)
+            .readTimeout(minOf(30L, timeoutSeconds), TimeUnit.SECONDS)
+            .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .addInterceptor(Interceptor { chain ->
                 val request = chain.request()
                 val signed = if (auth != null && request.url.toString().startsWith(auth.server)) {
@@ -48,21 +56,21 @@ object Maps {
             .build()
     }
 
-    private fun call(context: Context, build: Request.Builder.() -> Unit): Pair<Int, String> {
+    private fun call(context: Context, timeoutSeconds: Long = 40, build: Request.Builder.() -> Unit): Pair<Int, String> {
         val request = Request.Builder().apply(build).build()
-        client(context).newCall(request).execute().use { r -> return r.code to r.body.string() }
+        client(context, timeoutSeconds).newCall(request).execute().use { r -> return r.code to r.body.string() }
     }
 
-    fun get(context: Context, path: String): JSONObject {
+    fun get(context: Context, path: String, timeoutSeconds: Long = 40): JSONObject {
         val server = server(context) ?: throw IOException("Not signed in")
-        val (code, text) = call(context) { url("$server$path") }
+        val (code, text) = call(context, timeoutSeconds) { url("$server$path") }
         if (code !in 200..299) throw IOException("Server said $code")
         return JSONObject(text)
     }
 
-    fun send(context: Context, method: String, path: String, body: JSONObject): JSONObject {
+    fun send(context: Context, method: String, path: String, body: JSONObject, timeoutSeconds: Long = 40): JSONObject {
         val server = server(context) ?: throw IOException("Not signed in")
-        val (code, text) = call(context) { url("$server$path").method(method, body.toString().toRequestBody(JSON)) }
+        val (code, text) = call(context, timeoutSeconds) { url("$server$path").method(method, body.toString().toRequestBody(JSON)) }
         if (code !in 200..299) throw IOException("Server said $code: ${text.take(300)}")
         return if (text.isBlank()) JSONObject() else JSONObject(text)
     }
@@ -71,12 +79,25 @@ object Maps {
      *  or the one-time code the web app just sent along. */
     suspend fun signIn(context: Context, server: String?, code: String?) = withContext(Dispatchers.IO) {
         val usable = account(context)?.let { a ->
-            (server == null || a.server == server.trimEnd('/')) && runCatching { get(context, "/api/maps/config") }.isSuccess
+            (server == null || a.server == server.trimEnd('/')) && signedIn(context)
         } ?: false
         if (usable) return@withContext
         if (server == null || code == null) throw IOException("Open this from P Maps.")
         val account = Api.claim(PairLink(server.trimEnd('/'), code), Api.deviceName())
         Store(context).account = account
+    }
+
+    /** Whether this phone's sign-in works. With no signal it can't be checked, and the
+     *  phone carries on with what it has (offline maps need no server); only the server
+     *  saying no (401, 403) means signing in again. */
+    private fun signedIn(context: Context): Boolean {
+        val server = server(context) ?: return false
+        return try {
+            val (code, _) = call(context, CAR_TIMEOUT_SECONDS) { url("$server/api/maps/config") }
+            code !in listOf(401, 403)
+        } catch (e: IOException) {
+            true
+        }
     }
 
     /** What you said, as sound or tapped words, and what to do about it. */
@@ -111,11 +132,19 @@ object Maps {
     /** One stop you could make, and what it would cost. */
     data class Nearby(val stop: Stop, val addsMinutes: Int?, val aheadKm: Double?)
 
-    /** Fuel, food and so on along the rest of this trip. */
+    /** Fuel, food and so on along the rest of this trip: your server's (with the time each
+     *  adds), or with no signal the downloaded squares' (with how far ahead each is). */
     suspend fun onTheWay(context: Context, category: String, shape: String, here: Stop, to: Stop): List<Nearby> = withContext(Dispatchers.IO) {
         fun spot(s: Stop) = JSONObject().put("lat", s.lat).put("lon", s.lon).put("name", s.name)
         val body = JSONObject().put("category", category).put("shapes", JSONArray().put(shape)).put("here", spot(here)).put("to", spot(to))
-        val rows = send(context, "POST", "/api/maps/nearby/along", body).getJSONArray("results")
+        val rows = try {
+            if (!org.promptly.sync.maps.offline.Offline.online(context)) throw IOException("No connection")
+            send(context, "POST", "/api/maps/nearby/along", body, DRIVING_TIMEOUT_SECONDS / 2).getJSONArray("results")
+        } catch (e: IOException) {
+            if (e.message?.startsWith("Server said 4") == true && e.message?.startsWith("Server said 401") != true) throw e
+            val line = CarPreview.decodeShape(shape).map { (lon, lat) -> lat to lon }
+            return@withContext org.promptly.sync.maps.offline.LocalSearch(org.promptly.sync.maps.offline.Offline.store(context).search.file).along(category, line)
+        }
         List(rows.length()) { i ->
             val r = rows.getJSONObject(i)
             Nearby(
@@ -126,40 +155,76 @@ object Maps {
         }
     }
 
-    /** The map style with this server's addresses filled in, as a local file. */
+    /**
+     * The map style as a local file, for the phone's screens and the car's. Its map,
+     * fonts and sprites all point at [MapTiles.HOST], answered on the phone (downloaded
+     * squares, the trip cache, then this server). The style itself is the copy offline
+     * downloads keep, else this server's, else the one saved last time, so a car
+     * session started with no signal still gets a map.
+     */
     suspend fun styleFile(context: Context, forceDark: Boolean? = null): String = withContext(Dispatchers.IO) {
         val server = server(context) ?: throw IOException("Not signed in")
-        val config = get(context, "/api/maps/config")
-        val basemap = config.optString("basemap").takeIf { it.isNotEmpty() && it != "null" }
-            ?: throw IOException("Maps aren't set up on this server yet.")
         val dark = forceDark ?: (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
         val flavor = if (dark) "dark" else "light"
-        val (code, text) = call(context) { url("$server/map-assets/style-$flavor.json") }
-        if (code != 200) throw IOException("Server said $code")
-        val style = text.replace("__ORIGIN__", server).replace("__BASEMAP__", "$server$basemap")
-        val file = File(context.cacheDir, "map-style-$flavor.json")
-        file.writeText(style)
+        val file = File(context.filesDir, "map-style-$flavor.json")
+        val kept = File(org.promptly.sync.maps.offline.Offline.store(context).assetsDir, "style-$flavor.json")
+        val raw: String? = if (kept.isFile) {
+            kept.readText()
+        } else {
+            try {
+                val config = get(context, "/api/maps/config", CAR_TIMEOUT_SECONDS)
+                if (config.optString("basemap").let { it.isEmpty() || it == "null" }) throw NotSetUp()
+                val (code, text) = call(context, CAR_TIMEOUT_SECONDS) { url("$server/map-assets/style-$flavor.json") }
+                if (code != 200) throw IOException("Server said $code")
+                text
+            } catch (e: NotSetUp) {
+                throw IOException("Maps aren't set up on this server yet.")
+            } catch (e: IOException) {
+                // On a weak signal, the copy saved last time, rather than a blank screen
+                // (one made for the phone's own tiles, not an older app's server link).
+                if (!file.isFile || !file.readText().contains(MapTiles.HOST)) throw e
+                null
+            }
+        }
+        if (raw != null) {
+            val style = MapTiles.style(raw)
+            val fresh = File(context.filesDir, "map-style-$flavor.json.new")
+            fresh.writeText(style)
+            if (!fresh.renameTo(file)) {
+                file.writeText(style)
+                fresh.delete()
+            }
+        }
         "file://${file.absolutePath}"
     }
+
+    private class NotSetUp : Exception()
 
     /** Speed cameras within a few metres of this route. */
     suspend fun cameras(context: Context, shape: String): List<Camera> = withContext(Dispatchers.IO) {
         val body = JSONObject().put("shapes", JSONArray().put(shape))
-        val rows = send(context, "POST", "/api/maps/cameras/along", body).getJSONArray("cameras")
+        // Quick: with no answer, the cameras downloaded for offline use stand in.
+        val rows = send(context, "POST", "/api/maps/cameras/along", body, DRIVING_TIMEOUT_SECONDS / 2).getJSONArray("cameras")
         List(rows.length()) { i ->
             val c = rows.getJSONObject(i)
             Camera(c.getDouble("lat"), c.getDouble("lon"), c.optDouble("maxspeed").takeUnless { it.isNaN() })
         }
     }
 
-    fun park(context: Context, lat: Double, lon: Double, source: String) {
-        send(context, "PUT", "/api/maps/parked", JSONObject().put("lat", lat).put("lon", lon).put("source", source))
+    /** Where you parked. [at]: when (ISO 8601), for one saved with no signal and sent later;
+     *  the server keeps a newer one it already has. */
+    fun park(context: Context, lat: Double, lon: Double, source: String, at: String? = null, timeoutSeconds: Long = 40) {
+        val body = JSONObject().put("lat", lat).put("lon", lon).put("source", source)
+        at?.let { body.put("at", it) }
+        send(context, "PUT", "/api/maps/parked", body, timeoutSeconds)
     }
 
-    /** Places to pick from on the car's screen. */
-    suspend fun myPlaces(context: Context): List<Stop> = withContext(Dispatchers.IO) {
+    /** Places to pick from: your server's, or with no answer in time the ones kept on the
+     *  phone ([MyPlaces]). Home is still home on one bar of signal. */
+    suspend fun myPlaces(context: Context): List<Stop> = MyPlaces.load(context)
+
+    internal fun placesFrom(mine: JSONObject): List<Stop> {
         val out = mutableListOf<Stop>()
-        val mine = get(context, "/api/maps/places")
         val places = mine.getJSONArray("places")
         val rows = List(places.length()) { places.getJSONObject(it) }
         for (kind in listOf("home", "work", "favourite", "list")) {
@@ -176,14 +241,13 @@ object Maps {
             val r = recents.getJSONObject(i)
             out += Stop(r.getDouble("lat"), r.getDouble("lon"), r.getString("name"), "recent", textOf(r, "address"))
         }
-        out.distinctBy { "%.4f,%.4f".format(it.lat, it.lon) }
+        return out.distinctBy { "%.4f,%.4f".format(java.util.Locale.ROOT, it.lat, it.lon) }
     }
 
-    suspend fun search(context: Context, query: String, near: Pair<Double, Double>?): List<Stop> = withContext(Dispatchers.IO) {
-        val q = java.net.URLEncoder.encode(query, "UTF-8")
-        val at = near?.let { "&lat=${it.first}&lon=${it.second}" } ?: ""
-        val rows = get(context, "/api/maps/search?q=$q$at").getJSONArray("results")
-        List(rows.length()) { i ->
+    /** The server's search answer as stops. */
+    internal fun stopsFrom(answer: JSONObject): List<Stop> {
+        val rows = answer.getJSONArray("results")
+        return List(rows.length()) { i ->
             val r = rows.getJSONObject(i)
             Stop(r.getDouble("lat"), r.getDouble("lon"), r.getString("name"), r.optString("kind").ifEmpty { null }, textOf(r, "address"))
         }

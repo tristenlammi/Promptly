@@ -96,6 +96,8 @@ async def serve(token: str, request: Request, db: AsyncSession = Depends(get_db)
         raise _not_found()
     if claim.rendition == "basemap":
         return await _serve_basemap(request)
+    if claim.rendition == "offline":
+        return await _serve_offline(claim, request)
     if claim.rendition == "zip":
         return await _serve_zip(claim, request)
     if claim.rendition == "version":
@@ -172,6 +174,37 @@ async def _serve_basemap(request: Request) -> Response:
         headers["X-Accel-Redirect"] = urllib.parse.quote(f"/_maps/{build}/basemap.pmtiles", safe="/")
         return Response(status_code=status.HTTP_200_OK, media_type="application/octet-stream", headers=headers)
     return FileResponse(path=str(path), media_type="application/octet-stream", headers=headers)
+
+
+async def _serve_offline(claim: media_urls.MediaClaim, request: Request) -> Response:
+    """A P Maps offline pack file (maps-offline): only from the live build,
+    and only the build the link was issued for, so a phone never gets routing
+    tiles from two builds. nginx serves it with Range, so downloads resume."""
+    import asyncio
+
+    from app.maps import data, offline
+
+    target = media_urls.offline_file(claim)
+    if target is None or not await asyncio.to_thread(offline.enabled):
+        raise _not_found()
+    found = await asyncio.to_thread(offline.file_path, *target)
+    if found is None:
+        raise _not_found()
+    build, rel = found
+    if claim.ver != offline.build_tag(build):
+        raise _not_found()
+    left = max(claim.exp - int(datetime.now(timezone.utc).timestamp()), 0)
+    headers = {
+        # The URL names this build's file, which never changes.
+        "Cache-Control": f"private, max-age={left}, immutable",
+        "Content-Disposition": "attachment",
+        "X-Content-Type-Options": "nosniff",
+        "Cross-Origin-Resource-Policy": "same-origin",
+    }
+    if request.headers.get("x-promptly-accel") == "1":
+        headers["X-Accel-Redirect"] = urllib.parse.quote(f"/_maps/{build}/{rel}", safe="/")
+        return Response(status_code=status.HTTP_200_OK, media_type="application/octet-stream", headers=headers)
+    return FileResponse(path=str(data.root() / build / rel), media_type="application/octet-stream", headers=headers)
 
 
 async def _serve_version(db: AsyncSession, claim: media_urls.MediaClaim, user: User, request: Request) -> Response:

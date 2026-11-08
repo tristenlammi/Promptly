@@ -1,7 +1,7 @@
 # Passwords tests on the emulator, against the isolated :8092 stack. Throwaway users only.
 #   .\android\run-passwords-tests.ps1               all instrumented classes
 #   .\android\run-passwords-tests.ps1 AutofillE2ETest
-# JVM tests are separate: gradlew :app:testDebugUnitTest "-Dpw.stack=http://localhost:8092"
+# JVM tests are separate: gradlew :app:testServerDebugUnitTest "-Dpw.stack=http://localhost:8092"
 # Chrome on the emulator is never opened: its first-run terms stay unaccepted.
 param([string]$Class = "", [string]$Serial = "emulator-5554", [switch]$NoBuild)
 
@@ -14,9 +14,9 @@ $adb = Join-Path $env:ANDROID_HOME "platform-tools\adb.exe"
 Push-Location $root
 try {
     if (-not $NoBuild) {
-        & .\gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest :pwtestapp:assemblePlainDebug :pwtestapp:assembleBrowserDebug --console=plain -q
+        & .\gradlew.bat :app:assembleServerDebug :app:assembleServerDebugAndroidTest :pwtestapp:assemblePlainDebug :pwtestapp:assembleBrowserDebug --console=plain -q
         if ($LASTEXITCODE -ne 0) { throw "Gradle build failed" }
-        foreach ($apk in "app\build\outputs\apk\debug\app-debug.apk", "app\build\outputs\apk\androidTest\debug\app-debug-androidTest.apk", "pwtestapp\build\outputs\apk\plain\debug\pwtestapp-plain-debug.apk", "pwtestapp\build\outputs\apk\browser\debug\pwtestapp-browser-debug.apk") {
+        foreach ($apk in "app\build\outputs\apk\server\debug\app-server-debug.apk", "app\build\outputs\apk\androidTest\server\debug\app-server-debug-androidTest.apk", "pwtestapp\build\outputs\apk\plain\debug\pwtestapp-plain-debug.apk", "pwtestapp\build\outputs\apk\browser\debug\pwtestapp-browser-debug.apk") {
             & $adb -s $Serial install -r -t -g $apk | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "Install failed: $apk" }
         }

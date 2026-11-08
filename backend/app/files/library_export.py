@@ -21,7 +21,8 @@ What's inside a part, under ``Promptly/``:
   and ``<name>.xmp`` (date, place, description) for Lightroom, digiKam,
   darktable and the like. The date and place are yours (corrections
   included; a location you removed is left out).
-* ``albums.json`` and ``README.txt`` in the first part.
+* ``albums.json`` and ``README.txt`` in the first part, and
+  ``maps/offline-areas.json`` (P Maps offline areas) when you have any.
 
 A Promptly export imported as "A folder of photos" comes back with its
 dates, places, favourites and albums (``imports.folders``).
@@ -233,6 +234,8 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
         for a in album_rows
     ]
 
+    maps = {"offline_areas": await _offline_areas(db, user)}
+
     # Parts: in order, each up to the chosen size (a bigger single file
     # gets a part of its own).
     limit = int(part_gb) * _GB
@@ -247,9 +250,37 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
         used += size
     return {
         "user_id": str(user.id), "created": time.time(), "part_gb": int(part_gb),
-        "parts": parts, "albums": albums, "counts": counts,
+        "parts": parts, "albums": albums, "maps": maps, "counts": counts,
         "bytes": sum(e["s"] for e in entries), "zone": str(zone) if zone else None,
     }
+
+
+async def _offline_areas(db: AsyncSession, user: Any) -> list[dict[str, Any]]:
+    """P Maps offline areas (maps-offline): what each was made from, its
+    squares, and what your phones last said they have of it."""
+    from app.maps.models import MapOfflineArea
+
+    rows = (
+        await db.execute(select(MapOfflineArea).where(MapOfflineArea.user_id == user.id).order_by(MapOfflineArea.created_at))
+    ).scalars().all()
+    return [
+        {
+            "name": a.name,
+            "kind": a.kind,
+            "box": {"west": a.west, "south": a.south, "east": a.east, "north": a.north},
+            # The route, as an encoded polyline (precision 6), for a route's corridor.
+            "shape": a.shape,
+            "squares": list(a.cells or []),
+            "with_house_numbers": a.with_addresses,
+            "phones": [
+                {"name": d.get("name"), "state": d.get("state"), "map_build": d.get("build"), "bytes": d.get("bytes"), "reported_at": d.get("at")}
+                for d in sorted((a.devices or {}).values(), key=lambda d: d.get("at") or "", reverse=True)
+            ],
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+            "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+        }
+        for a in rows
+    ]
 
 
 def _safe(name: str) -> str:
@@ -364,7 +395,13 @@ def readme(state: dict[str, Any]) -> bytes:
         "                           import a Takeout read these;\n"
         "              <name>.xmp   date, place and description for Lightroom, digiKam,\n"
         "                           darktable and similar.\n"
-        "albums.json  your albums and the photos in each.\n\n"
+        "albums.json  your albums and the photos in each.\n"
+        + (
+            "maps/offline-areas.json  your P Maps offline areas: each one's name, the map box,\n"
+            "            the route it follows (if any), its 1-degree squares and your phones.\n"
+            if (state.get("maps") or {}).get("offline_areas") else ""
+        )
+        + "\n"
         "To bring it into another Promptly: Files -> Import -> A folder of photos, and add\n"
         "the parts. Dates, places, favourites and albums come with it.\n\n"
         "Your passwords aren't here. This server can't read them, so it can't export them.\n"
@@ -503,6 +540,12 @@ async def stream_part(export_id: str, n: int) -> AsyncIterator[bytes]:
                 _info(ROOT + "albums.json", int(planned["created"]), zone, zipfile.ZIP_DEFLATED),
                 json.dumps(planned["albums"], ensure_ascii=False, indent=2).encode("utf-8"),
             )
+            areas = (planned.get("maps") or {}).get("offline_areas")
+            if areas:
+                zf.writestr(
+                    _info(ROOT + "maps/offline-areas.json", int(planned["created"]), zone, zipfile.ZIP_DEFLATED),
+                    json.dumps({"format": 1, "areas": areas}, ensure_ascii=False, indent=2).encode("utf-8"),
+                )
             yield sink.take()
         for e in entries:
             arc = e["a"]

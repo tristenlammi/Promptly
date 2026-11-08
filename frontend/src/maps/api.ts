@@ -261,7 +261,81 @@ export const mapsApi = {
   async pairCode() {
     return (await apiClient.post<{ code: string }>("/devices/pair", { origin: window.location.origin })).data.code;
   },
+  // ---- Offline areas (maps-offline): kept on your Android phones ----
+  async offline() {
+    return (await apiClient.get<OfflineOverview>("/maps/offline")).data;
+  },
+  async offlineEstimate(box: [number, number, number, number], addresses: boolean) {
+    const [west, south, east, north] = box;
+    return (await apiClient.get<OfflineEstimate>("/maps/offline/estimate", { params: { west, south, east, north, addresses } })).data;
+  },
+  async saveOffline(body: OfflineAreaBody) {
+    return (await apiClient.post<OfflineArea>("/maps/offline/areas", body)).data;
+  },
+  async editOffline(id: string, patch: { name?: string; with_addresses?: boolean }) {
+    return (await apiClient.patch<OfflineArea>(`/maps/offline/areas/${id}`, patch)).data;
+  },
+  async deleteOffline(id: string) {
+    await apiClient.delete(`/maps/offline/areas/${id}`);
+  },
 };
+
+// ---- Offline areas (maps-offline) ----
+
+/** What a phone last said it has of an area. */
+export type OfflinePhoneState = "waiting" | "downloading" | "ready" | "update" | "failed" | "no_space";
+
+export interface OfflinePhone {
+  device_id: string;
+  name: string;
+  state: OfflinePhoneState;
+  build: string | null;
+  bytes: number;
+  at: string;
+}
+
+export interface OfflineArea {
+  id: string;
+  name: string;
+  kind: "view" | "route" | "around";
+  box: { west: number; south: number; east: number; north: number };
+  shape: string | null;
+  /** 1-degree squares, "<west>_<south>". */
+  cells: string[];
+  squares: number;
+  with_addresses: boolean;
+  /** Download size, with house numbers if they're on; null until the server has packs. */
+  bytes: number | null;
+  addresses_bytes: number | null;
+  devices: OfflinePhone[];
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+export interface OfflineOverview {
+  enabled: boolean;
+  ready: boolean;
+  building: boolean;
+  build: string | null;
+  built_at: string | null;
+  attribution: string;
+  max_areas: number;
+  areas: OfflineArea[];
+}
+
+export interface OfflineEstimate {
+  ready: boolean;
+  cells: string[];
+  squares: number;
+  too_big: boolean;
+  max_squares: number;
+  bytes: number | null;
+  addresses_bytes: number | null;
+}
+
+export type OfflineAreaBody =
+  | { name: string; kind: "view"; box: { west: number; south: number; east: number; north: number }; with_addresses: boolean }
+  | { name: string; kind: "route"; shape: string[]; with_addresses: boolean };
 
 /** (lon, lat) pairs from a route's encoded shape. */
 export function decodeShape(encoded: string): [number, number][] {

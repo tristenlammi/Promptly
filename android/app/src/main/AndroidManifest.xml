@@ -33,8 +33,6 @@
     <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES" />
     <!-- Only for "Back up right away instead" — asked, never assumed. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
-    <!-- Installing an update the app has downloaded and checked against its hash. -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Hides other apps' overlays over the unlock and fill screens, where Android allows it. -->
     <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
     <!-- Only what Chrome's documented autofill-state provider asks of a caller. -->
@@ -84,6 +82,46 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="promptlymaps" android:host="navigate" />
+            </intent-filter>
+        </activity>
+        <!-- "Navigate to" and "show on a map" from other apps and the assistant:
+             google.navigation: starts driving, geo: shows the place in P Maps. -->
+        <activity
+            android:name=".maps.MapLinkActivity"
+            android:label="P Maps"
+            android:icon="@mipmap/ic_maps"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="org.promptly.app.maps"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="geo" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="google.navigation" />
+            </intent-filter>
+        </activity>
+        <!-- P Maps offline areas: what's kept on this phone for no signal. The web's
+             hand-off is promptlymaps://offline?server=&code=[&area=]. -->
+        <activity
+            android:name=".maps.offline.OfflineAreasActivity"
+            android:label="Offline areas"
+            android:icon="@mipmap/ic_maps"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="org.promptly.app.maps.offline"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="promptlymaps" android:host="offline" />
             </intent-filter>
         </activity>
         <activity
@@ -258,15 +296,6 @@
             </intent-filter>
         </service>
 
-        <!-- A checked update, given to Android's package installer. -->
-        <provider
-            android:name="androidx.core.content.FileProvider"
-            android:authorities="${applicationId}.updates"
-            android:exported="false"
-            android:grantUriPermissions="true">
-            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
-        </provider>
-
         <!-- WorkManager's foreground service, for long backups. -->
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
@@ -289,11 +318,6 @@
             <action android:name="android.intent.action.VIEW" />
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
-        </intent>
-        <intent>
-            <!-- The updater hands its file to the system's installer by name. -->
-            <action android:name="android.intent.action.VIEW" />
-            <data android:mimeType="application/vnd.android.package-archive" />
         </intent>
         <package android:name="com.android.chrome" />
         <package android:name="com.chrome.beta" />

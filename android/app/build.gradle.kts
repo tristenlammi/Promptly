@@ -63,6 +63,25 @@ android {
         }
     }
 
+    // Two ways the same app (same package, same versionCode) reaches a phone:
+    //  - server: the APK your Promptly server hands out, which updates itself
+    //    (Updater, REQUEST_INSTALL_PACKAGES; src/server).
+    //  - play: the Google Play build (internal test track), which Play updates. No
+    //    self-updater and no install-packages permission (src/play). Real cars only
+    //    run Android Auto apps installed from Play. build-release.ps1 -Play builds it.
+    flavorDimensions += "store"
+    productFlavors {
+        create("server") {
+            dimension = "store"
+            isDefault = true
+            buildConfigField("boolean", "SELF_UPDATE", "true")
+        }
+        create("play") {
+            dimension = "store"
+            buildConfigField("boolean", "SELF_UPDATE", "false")
+        }
+    }
+
     // A release build tried on the emulator talks to the test stack on the host. Nothing that ships.
     if (hasProperty("emulatorAbi")) sourceSets.getByName("release").res.srcDir("src/emulatorRelease/res")
 
@@ -122,8 +141,8 @@ androidComponents {
     }
 }
 
-// The instrumented tests drive this app too: `gradlew :app:connectedDebugAndroidTest`.
-tasks.matching { it.name == "connectedDebugAndroidTest" }.configureEach {
+// The instrumented tests drive this app too: `gradlew :app:connectedServerDebugAndroidTest`.
+tasks.matching { it.name == "connectedServerDebugAndroidTest" || it.name == "connectedPlayDebugAndroidTest" }.configureEach {
     dependsOn(":pwtestapp:installPlainDebug", ":pwtestapp:installBrowserDebug")
 }
 
@@ -167,6 +186,10 @@ dependencies {
     implementation("org.maplibre.compose:maplibre-compose-android:0.13.0")
     implementation("androidx.car.app:app:1.7.0")
     implementation("io.github.rallista:car-app-compose:0.0.2")
+    // P Maps offline routing: Valhalla 3.9.0 on the phone (MIT), reading the server's
+    // 3.9.1 tiles (checked in WP-M0). Bump it together with maps/Dockerfile's Valhalla.
+    // Its native library follows the ABI filters above: arm64 only in release.
+    implementation("io.github.rallista:valhalla-mobile:0.6.4")
 
     // The car's rules are checked when a template is built, so build them in a test.
     testImplementation("junit:junit:4.13.2")

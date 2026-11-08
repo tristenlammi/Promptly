@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowUpRight, Download, KeyRound, Loader2, Monitor, Share, Smartphone } from "lucide-react";
+import { ArrowUpRight, Car, Download, KeyRound, Loader2, Monitor, Share, Smartphone } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -132,6 +132,44 @@ function AndroidAppCard({ kinds }: { kinds: string[] }) {
             Set up the app
           </a>
           <span className="text-xs text-[var(--text-muted)]">connects it to this Promptly</span>
+        </li>
+      </ol>
+    </section>
+  );
+}
+
+/** P Maps on a car's screen: Android Auto only runs apps installed from Google Play, so
+ *  the car needs the Play copy of Promptly for Android, not the download above. */
+function AndroidAutoCard() {
+  return (
+    <section aria-labelledby="android-auto-title" className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-4">
+      <div className="flex items-center gap-3">
+        <img src="/item-icons/maps-192.png" alt="" className="h-12 w-12 shrink-0 rounded-2xl" />
+        <div className="min-w-0 flex-1">
+          <h2 id="android-auto-title" className="flex items-center gap-1.5 text-sm font-semibold text-[var(--text)]">
+            <Car className="h-4 w-4 text-[var(--accent-text)]" /> P Maps in your car (Android Auto)
+          </h2>
+          <p className="text-xs text-[var(--text-muted)]">
+            Turn-by-turn on the car&apos;s screen, with your places, traffic and the car&apos;s microphone. Cars only show apps
+            installed from Google Play, so this needs the Play copy of Promptly for Android. It&apos;s the same app, kept up to
+            date by Play instead of this server.
+          </p>
+        </div>
+      </div>
+      <ol className="flex flex-col gap-2 text-sm text-[var(--text)]">
+        <li>
+          1. Ask whoever runs this Promptly to add your Google account as a tester. You&apos;ll get a testing link.
+        </li>
+        <li>
+          2. On your phone, open the link, choose <b>Become a tester</b>, then <b>Download it on Google Play</b>.
+        </li>
+        <li>
+          3. Already have the app from this page? Uninstall it first: Play can&apos;t replace a copy signed differently. Then
+          open P Maps once and sign in again (photo backup too).
+        </li>
+        <li>
+          4. Plug your phone into the car. <b>P Maps</b> appears in Android Auto&apos;s apps; if not, look under Android Auto →
+          Customise launcher.
         </li>
       </ol>
     </section>
@@ -350,6 +388,7 @@ export function InstallAppsPage() {
             Promptly menus around it. Everything stays in your Promptly, so search and chats still see it.
           </p>
           {isAndroid() && <AndroidAppCard kinds={(apps ?? []).map((a) => a.kind)} />}
+          {!isIos() && <AndroidAutoCard />}
           {isWindows() && <WindowsPasswordsCard />}
           {!isAndroid() && !isIos() && <BrowserExtensionCard />}
           {isIos() && (

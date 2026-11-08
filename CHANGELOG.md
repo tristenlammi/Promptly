@@ -40,6 +40,33 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Export my library: files people sent with form answers are saved beside each form's .zip.
 - Notifications: quiet hours for all of Promptly (Account → Notifications), with start and end in your own time zone and different times on Friday and Saturday nights if you like. Notifications wait and arrive together when quiet hours end; calls, Calendar reminders, item reminders, Passwords and admin alerts always get through. Rooms and Mail can go in a daily summary instead, one push of counts at your Today summary time. And you can block someone from their profile or your 1:1 conversation: neither of you can message the other one-to-one, you get no notifications about what they do, and they aren't told. Account → Blocked people lists them, with Unblock.
 - `scripts/stack.sh` (and `scripts/stack.ps1`) runs a separate copy of Promptly for a worktree on its own port (`up`, `down`, `ls`, `e2e`), with its own containers, images, data and throwaway secrets, so testing a branch never touches the main app.
+<!-- P Maps offline (maps-offline) -->
+- P Maps in the car: "You've arrived at …" on the car's screen, with Save parking and Done, including for trips started from the car with the phone in a pocket.
+- P Maps in the car: lane guidance on the turn card at junctions where the map knows the lanes.
+- P Maps in the car: a "Speed camera · 60" note on the car's screen as well as the voice.
+- P Maps: "Finding a new route…" on the phone and the car's loading card while a new way is worked out after a wrong turn.
+- P Maps: "navigate to" and map links from other apps and assistants open P Maps (a navigate link starts driving; a place or a search opens it in P Maps), on the phone and in the car.
+- Promptly for Android: a Google Play build (for Android Auto, which only runs Play-installed apps) that Play keeps up to date, plus a "P Maps in your car" card in Apps → Install apps explaining how to get it.
+- P Maps: the server now makes offline map packs with each monthly map update: the map, directions and search (house numbers included) for all of Australia, in squares a phone can download. `MAPS_OFFLINE=0` turns them off.
+- P Maps: offline areas you save (a view, a route's corridor or around a place) and signed, resumable downloads of their packs, for the Android app's offline maps. Admin → App settings says if making the packs failed.
+- Promptly for Android: Offline areas (P Maps on the web hand-off, Photo backup → Offline maps, or the download notification): choose an area on a map and see its size first, or save the area around Home; it downloads on Wi-Fi (or now, on mobile data, if you say so), carries on from where it stopped after a lost connection or a restart, checks every file, and updates itself after your server's monthly map update. Shows the space used and free, says plainly when there isn't room, and deleting an area frees its space at once.
+- Promptly for Android: P Maps' map now comes from your offline areas first, on the phone and in the car, so it draws in full with no signal and saves data with it. Outside your areas it uses the map along each trip you've started in the last week (Offline areas → Keep each trip's map for a week, on by default), then your server; with neither, the route still shows on a plain map.
+- Promptly for Android: P Maps finds routes on the phone when your server can't be reached (no signal, or it takes more than 6 seconds). Inside your offline areas you can start a trip, and a wrong turn gets a new route from the phone within a few seconds; the screen shows "Offline route", "No signal · no traffic info" and, where there's no downloaded map, "No offline map here"; speed cameras still warn, and Ask Promptly says plainly that it needs signal. Outside your areas it tells you to head back to the route, and picks you up when you do. Back in signal, routes come from your server again. In the car, a one-off "No signal: using your offline map" note, and the route list works offline too.
+- Promptly for Android: P Maps search works with no signal, on the phone and in the car: places by name ("Caltex Mudgee", nearest you first), street addresses with house numbers ("12 Macquarie St Dubbo", "3/12 …"), "fuel" or "the nearest servo", and your saved places, recents and usual routes, kept on the phone. Your server answers first; if it can't within 4 seconds, the phone does, and the results say they're offline ones.
+- Promptly for Android: Add stop with no signal lists fuel, food and the rest along the road ahead from your offline areas, with how far ahead each is.
+- P Maps on the web: Offline areas. Save the map's view for your Android phone with its size shown first (the squares it keeps are shaded on the map), or a route's roads with Save for offline next to Start; see what each of your phones has of each area ("Ready on Pixel 9 · 3 Nov", "Not on a phone yet"); rename, delete, or leave out house numbers. On an Android phone, saving opens the Promptly app to download it; elsewhere your phone downloads it next time it's on Wi-Fi.
+- Admin → App settings: an "Offline maps for phones" card with the packs' state, the disk they use and how many areas people have saved.
+- Export my library includes your P Maps offline areas (`maps/offline-areas.json`).
+- Promptly for Android: opening P Maps with no signal now opens its own map, Drive, instead of a web page that can't load: your location, Where to?, Home, Work and your places, and a place's routes from your offline areas with Start. Long-press the P Maps icon for Drive and Offline areas. A map link from another app with no signal opens there too.
+
+### Changed
+<!-- P Maps offline (maps-offline) -->
+- P Maps in the car uses the avoid choices (tolls, highways, ferries) of your last drive started on the phone, and the route list says so.
+- P Maps: a trip started on the phone with avoid options now shows on the car's screen too, and wrong turns get the new road's speed cameras.
+- P Maps: on a weak signal, routes give up sooner with a clear message, and the car's map and saved places use the copies from last time instead of waiting.
+- P Maps: wrong turns check for road closures at most once every 5 minutes, so a bad day doesn't use up the day's closure checks (Admin → App settings explains this).
+- P Maps in the car: the route choice uses the newer car screen on cars that support it.
+- P Maps (Android): ending a trip (on the phone, in the car, or on arriving) goes back to P Maps' Drive map, ready for the next place, and a trip that can't start says why there.
 
 ### Fixed
 - Sheets: text that looks like a formula (typed as text) stays text when the sheet is downloaded as Excel or CSV, instead of turning into a formula there.
@@ -47,6 +74,14 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Chat: a workspace sheet holding form answers (other people's words) now counts as outside content in a workspace chat, like a web page, so it can't make the chat change things on its own.
 - Mail: a very large or tangled HTML email could still tie up the mail worker for minutes while it was cleaned. Cleaning now stops after 3 seconds, and an email it can't finish shows as plain text, with a note saying so. Sending works the same way, so a draft like that no longer holds up the app.
 - Workspaces: two board edits close together (adding a card, then dragging it to Done) could leave the board's text in chat search out of date, because both tried to create the workspace's Boards folder at once and one crashed. Making a workspace folder is now safe when two requests race, for every folder kind.
+<!-- P Maps offline (maps-offline) -->
+- P Maps (Android): your speed on the driving screen now turns red when you're over the road's speed limit. It never did, because the limit was read the wrong way.
+- P Maps: ending a trip from the car (or by voice) now closes the phone's driving screen instead of leaving a map with no trip.
+- P Maps (Android): Back while the driving screen's Add stop list is open now closes the list (or goes back to the kinds of stop) instead of leaving the driving screen.
+- P Maps (Android): the driving screen no longer restarts its trip when Android rebuilds it (the phone switching to dark mode at sunset, or reopening it after Android closed it in the background), mid-drive or after you've arrived.
+- P Maps: the map's "© OpenStreetMap contributors · Protomaps" credit is stored so no app can show it garbled as "Â©".
+- Android Auto: release builds only talk to Google's own car hosts.
+- P Maps (Android): "Save where I parked" with no signal is no longer lost: it's kept on the phone and saved to P Maps when there's signal, with the time you parked (a place saved since, on the web or another phone, isn't overwritten). The car's own parking note and the timeline's work the same way.
 
 ## [0.31.0] - 2026-11-08
 

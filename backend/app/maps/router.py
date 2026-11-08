@@ -82,7 +82,7 @@ async def config(db: AsyncSession = Depends(get_db), user: User = Depends(maps_u
 
 
 @router.get("/data-status")
-async def data_status(admin: User = Depends(require_admin)) -> dict[str, Any]:
+async def data_status(admin: User = Depends(require_admin), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """For the admin panel: how the map data's doing."""
     _ = admin
     state = await asyncio.to_thread(data.status)
@@ -95,6 +95,9 @@ async def data_status(admin: User = Depends(require_admin)) -> dict[str, Any]:
         "built_at": (manifest or {}).get("built_at"),
         "addresses": await asyncio.to_thread(data.addresses_state),
         "overdue_days": 0 if state.get("state") == "building" else data.overdue_days((manifest or {}).get("built_at"), get_settings().MAPS_REFRESH_DAYS),
+        # Offline packs for phones (maps-offline): off | building | waiting | failed | ready.
+        # Plus the build, its date and how many areas people saved (counts only).
+        "offline": await offline_admin_status(db),
     }
 
 
@@ -409,11 +412,17 @@ _NAV_FIELDS = {
 
 
 @router.post("/navigate/route")
-async def navigate_route(body: dict[str, Any], db: AsyncSession = Depends(get_db), user: User = Depends(maps_user)) -> dict[str, Any]:
-    """A route for turn-by-turn on the phone, in the format its library reads."""
+async def navigate_route(
+    body: dict[str, Any], request: Request, db: AsyncSession = Depends(get_db), user: User = Depends(maps_user)
+) -> dict[str, Any]:
+    """A route for turn-by-turn on the phone, in the format its library reads.
+    The phone marks the ones its navigation library asks for after a wrong turn
+    (``X-Promptly-Reroute: 1``): those check for closures every few minutes, not
+    every time."""
     locations = body.get("locations")
     if not isinstance(locations, list) or not 2 <= len(locations) <= 20:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Two to twenty stops.")
+    check = await incidents.closures_due(user.id, request.headers.get("x-promptly-reroute") == "1")
     ask = {k: v for k, v in body.items() if k in _NAV_FIELDS}
     # A plain A to B follows the way you prefer, including after a wrong turn.
     from . import planning
@@ -424,10 +433,10 @@ async def navigate_route(body: dict[str, Any], db: AsyncSession = Depends(get_db
         if found:
             ask = {**planning.with_through(ask, found[1]), "alternates": ask.get("alternates", 0)}
             try:
-                return await planning.around_for_navigation(db, ask)
+                return await planning.around_for_navigation(db, ask, check)
             except HTTPException:
                 ask = {k: v for k, v in body.items() if k in _NAV_FIELDS}
-    return await planning.around_for_navigation(db, ask)
+    return await planning.around_for_navigation(db, ask, check)
 
 
 # ---- The way you prefer ------------------------------------------------------
@@ -628,6 +637,8 @@ class ParkedBody(BaseModel):
     lon: float = Lon
     note: str | None = Field(default=None, max_length=400)
     source: Literal["manual", "auto"] = "manual"
+    # When you parked, for a place the phone saved with no signal and sends later.
+    at: datetime | None = None
 
 
 def _parked(p: MapParked) -> dict[str, Any]:
@@ -637,12 +648,20 @@ def _parked(p: MapParked) -> dict[str, Any]:
 @router.put("/parked")
 async def set_parked(body: ParkedBody, db: AsyncSession = Depends(get_db), user: User = Depends(maps_user)) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
-    values = {"lat": body.lat, "lon": body.lon, "note": body.note, "source": body.source, "at": now}
+    at = now
+    if body.at is not None:
+        # Sent late, from a dead spot: it keeps its own time, never one in the future, and
+        # never replaces a place saved after it (from the web, or another phone).
+        at = min(body.at if body.at.tzinfo else body.at.replace(tzinfo=timezone.utc), now)
+        current = await db.get(MapParked, user.id)
+        if current is not None and current.at is not None and current.at >= at:
+            return _parked(current)
+    values = {"lat": body.lat, "lon": body.lon, "note": body.note, "source": body.source, "at": at}
     await db.execute(
         insert(MapParked).values(user_id=user.id, **values).on_conflict_do_update(index_elements=["user_id"], set_=values)
     )
     await db.commit()
-    return {**values, "at": now.isoformat()}
+    return {**values, "at": at.isoformat()}
 
 
 @router.delete("/parked", status_code=status.HTTP_204_NO_CONTENT)
@@ -719,3 +738,10 @@ async def cameras_along(body: AlongBody, user: User = Depends(maps_user)) -> dic
 async def cameras(bbox: str, user: User = Depends(maps_user)) -> dict[str, Any]:
     rows = await asyncio.to_thread(data.cameras)
     return {"cameras": data.in_box(rows, _box(bbox))[:1000]}
+
+
+# ---- Offline areas (maps-offline) ---------------------------------------------
+# Their own module, included here so main.py isn't touched.
+from .offline import admin_status as offline_admin_status, router as offline_router  # noqa: E402
+
+router.include_router(offline_router)

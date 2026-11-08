@@ -350,3 +350,58 @@ async def test_the_layer_has_its_own_smaller_allowance(monkeypatch):
     # A layer square that's over its share never touches the driving allowance.
     assert await traffic.fetch_tile("k", __import__("uuid").uuid4(), "relative", 10, 1, 1, layer=True) is None
     assert spent == ["layer"]
+
+
+class _SetRedis:
+    """Just enough of Redis's SET (with EX and NX) to follow the clock-less rule."""
+
+    def __init__(self) -> None:
+        self.keys: dict[str, str] = {}
+
+    async def set(self, key: str, value: str, ex: int | None = None, nx: bool = False) -> bool | None:
+        if nx and key in self.keys:
+            return None
+        self.keys[key] = value
+        return True
+
+
+async def test_wrong_turns_check_closures_once_every_few_minutes(monkeypatch):
+    import app.redis_client as rc
+
+    fake = _SetRedis()
+    monkeypatch.setattr(rc, "redis", fake)
+    me, other = "user-a", "user-b"
+    # Starting a trip always checks.
+    assert await incidents.closures_due(me, reroute=False) is True
+    # A wrong turn straight after: no new check.
+    assert await incidents.closures_due(me, reroute=True) is False
+    assert await incidents.closures_due(me, reroute=True) is False
+    # Someone else's trip is their own.
+    assert await incidents.closures_due(other, reroute=True) is True
+    # Five minutes on (the key has expired): the next wrong turn checks again.
+    fake.keys.pop(f"maps:nav-closures:{me}")
+    assert await incidents.closures_due(me, reroute=True) is True
+    assert await incidents.closures_due(me, reroute=True) is False
+
+
+async def test_without_redis_every_route_still_checks(monkeypatch):
+    import app.redis_client as rc
+
+    class Broken:
+        async def set(self, *_: Any, **__: Any) -> None:
+            raise ConnectionError("down")
+
+    monkeypatch.setattr(rc, "redis", Broken())
+    assert await incidents.closures_due("u", reroute=True) is True
+
+
+async def test_a_reroute_between_checks_spends_nothing(monkeypatch):
+    async def router(path: str, body: dict[str, Any]) -> dict[str, Any]:
+        return {"routes": [{"geometry": encode(ROAD)}]}
+
+    fetch = AsyncMock(return_value=[incident()])
+    monkeypatch.setattr(engine, "valhalla", router)
+    monkeypatch.setattr(incidents, "fetch", fetch)
+    answer = await planning.around_for_navigation(None, {"locations": STOPS, "costing": "auto"}, check_closures=False)
+    assert answer["routes"][0]["geometry"] == encode(ROAD)
+    fetch.assert_not_called()
