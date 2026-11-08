@@ -95,6 +95,8 @@ async def data_status(admin: User = Depends(require_admin)) -> dict[str, Any]:
         "built_at": (manifest or {}).get("built_at"),
         "addresses": await asyncio.to_thread(data.addresses_state),
         "overdue_days": 0 if state.get("state") == "building" else data.overdue_days((manifest or {}).get("built_at"), get_settings().MAPS_REFRESH_DAYS),
+        # Offline packs for phones (maps-offline): off | building | waiting | failed | ready.
+        "offline": await asyncio.to_thread(offline_state),
     }
 
 
@@ -725,3 +727,10 @@ async def cameras_along(body: AlongBody, user: User = Depends(maps_user)) -> dic
 async def cameras(bbox: str, user: User = Depends(maps_user)) -> dict[str, Any]:
     rows = await asyncio.to_thread(data.cameras)
     return {"cameras": data.in_box(rows, _box(bbox))[:1000]}
+
+
+# ---- Offline areas (maps-offline) ---------------------------------------------
+# Their own module, included here so main.py isn't touched.
+from .offline import router as offline_router, state as offline_state  # noqa: E402
+
+router.include_router(offline_router)

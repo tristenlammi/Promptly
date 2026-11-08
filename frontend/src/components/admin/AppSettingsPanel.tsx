@@ -1107,6 +1107,8 @@ interface MapDataStatus {
   built_at: string | null;
   addresses: "ok" | "missing" | "unknown";
   overdue_days: number;
+  // Offline packs for phones (maps-offline).
+  offline?: { state: "off" | "building" | "waiting" | "failed" | "ready"; squares: number; bytes: number };
 }
 
 /** Warns when the map data is missing something. Quiet when maps aren't set up at all. */
@@ -1133,6 +1135,12 @@ function MapDataWarning() {
     problems.push({
       title: "The last P Maps data update failed",
       detail: `It stopped at the ${status.step ?? "unknown"} step. ${status.ready ? "The current map stays in use." : "Maps won't work until it finishes."} It's tried again automatically; the Promptly-Maps log has the details.`,
+    });
+  }
+  if (status.offline?.state === "failed") {
+    problems.push({
+      title: "P Maps offline areas weren't made",
+      detail: "Making the offline map packs for phones failed during the last map build, so phones can't download new offline areas. Maps still work, and phones keep the areas they have. It's tried again at the next monthly map refresh; the Promptly-Maps log has the details.",
     });
   }
   if (status.overdue_days > 0) {

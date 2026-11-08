@@ -30,6 +30,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps: "navigate to" and map links from other apps and assistants open P Maps (a navigate link starts driving; a place or a search opens it in P Maps), on the phone and in the car.
 - Promptly for Android: a Google Play build (for Android Auto, which only runs Play-installed apps) that Play keeps up to date, plus a "P Maps in your car" card in Apps → Install apps explaining how to get it.
 - P Maps: the server now makes offline map packs with each monthly map update: the map, directions and search (house numbers included) for all of Australia, in squares a phone can download. `MAPS_OFFLINE=0` turns them off.
+- P Maps: offline areas you save (a view, a route's corridor or around a place) and signed, resumable downloads of their packs, for the Android app's offline maps. Admin → App settings says if making the packs failed.
 
 ### Changed
 <!-- P Maps offline (maps-offline) -->

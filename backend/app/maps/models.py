@@ -7,12 +7,12 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
-from app.db_types import CreatedAtMixin, UUIDPKMixin
+from app.db_types import CreatedAtMixin, TimestampMixin, UUIDPKMixin
 
 
 class MapPlace(UUIDPKMixin, CreatedAtMixin, Base):
@@ -128,3 +128,28 @@ class MapLiveLocation(Base):
     destination: Mapped[str | None] = mapped_column(String(200), nullable=True)
     eta: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class MapOfflineArea(UUIDPKMixin, TimestampMixin, Base):
+    """An area someone keeps on their phones for when there's no signal: a
+    framed view, a route's corridor, or around a place. The squares are the
+    server's 1-degree packs; what each phone has actually downloaded is what
+    that phone reports in ``devices``."""
+
+    __tablename__ = "map_offline_areas"
+    __table_args__ = (CheckConstraint("kind IN ('view', 'route', 'around')", name="ck_map_offline_areas_kind"),)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    west: Mapped[float] = mapped_column(Float, nullable=False)
+    south: Mapped[float] = mapped_column(Float, nullable=False)
+    east: Mapped[float] = mapped_column(Float, nullable=False)
+    north: Mapped[float] = mapped_column(Float, nullable=False)
+    # A route's line (polyline6, simplified to at most 20 KB). Kind "route" only.
+    shape: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # The squares, as "<west>_<south>" (e.g. "151_-34"). At most 400.
+    cells: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    with_addresses: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    # {device_id: {name, state, build, bytes, at}}, as each phone reports.
+    devices: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
