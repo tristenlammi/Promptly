@@ -23,6 +23,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useModelStore } from "@/store/modelStore";
 import { applyTheme } from "@/store/themeStore";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
+import { voiceHarnessEnabled } from "@/pages/dev/flags";
 
 // Route-level code splitting. Every page used to be imported eagerly,
 // so opening a chat downloaded the admin console, the automations flow
@@ -227,6 +228,10 @@ const WorkspacesPage = lazyWithRetry(
   () => import("@/pages/WorkspacesPage").then((m) => ({ default: m.WorkspacesPage })),
   "WorkspacesPage"
 );
+
+// Calls WP-V3: the voice engine's developer harness (dev builds, or with
+// localStorage "promptly.dev" = "voice").
+const VoiceHarnessPage = lazyWithRetry(() => import("@/pages/dev/VoiceHarnessPage"), "VoiceHarnessPage");
 
 const RoomsApp = lazyWithRetry(
   () => import("@/rooms/RoomsApp").then((m) => ({ default: m.RoomsApp })),
@@ -709,6 +714,16 @@ export default function App() {
           </Suspense>
         }
       />
+      {voiceHarnessEnabled() && (
+        <Route
+          path="/dev/voice"
+          element={
+            <Suspense fallback={<FullScreenLoading />}>
+              <VoiceHarnessPage />
+            </Suspense>
+          }
+        />
+      )}
       <Route element={<AppLayout />}>
         <Route path="/" element={<Navigate to="/chat" replace />} />
         <Route path="/chat" element={<ChatPage />} />

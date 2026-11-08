@@ -1,4 +1,5 @@
 import { apiClient } from "@/api/client";
+import type { VoiceChannelSettings, VoiceMember, VoiceServerEvent, VoiceWhere } from "@/api/voiceChannels";
 
 /**
  * Rooms — spaces of text rooms + direct messages (docs/rooms-plan.md).
@@ -8,7 +9,7 @@ import { apiClient } from "@/api/client";
 
 export type NotifyLevel = "all" | "mentions" | "none";
 export type SpaceRole = "owner" | "admin" | "member";
-export type RoomKind = "text" | "dm" | "group";
+export type RoomKind = "text" | "dm" | "group" | "voice";
 export type MessageKind = "user" | "promptly" | "system";
 
 export interface RoomUser {
@@ -48,6 +49,8 @@ export interface Room {
   blocked?: boolean;
   /** 1:1 conversations: false when a block (either way) closed it. */
   can_send?: boolean;
+  /** Voice channels (kind "voice"): their settings (Calls). */
+  voice?: VoiceChannelSettings;
 }
 
 export interface Space {
@@ -68,6 +71,12 @@ export interface Bootstrap {
   spaces: Space[];
   dms: Room[];
   users: Record<string, RoomUser>;
+  /** Calls: voice is on for you. Absent on servers without Calls. */
+  voice_available?: boolean;
+  /** Calls: who's in each voice channel now (empty channels left out). */
+  voice?: Record<string, VoiceMember[]>;
+  /** Calls: where you are in voice, if anywhere. */
+  voice_me?: VoiceWhere | null;
 }
 
 export interface Attachment {
@@ -142,7 +151,9 @@ export type RoomEvent =
   | { type: "room"; room: Room }
   | { type: "room_delete"; room_id: string }
   | { type: "space"; space_id: string }
-  | { type: "space_delete"; space_id: string };
+  | { type: "space_delete"; space_id: string }
+  // Calls: voice channels' live state (handled by rtc/voice).
+  | VoiceServerEvent;
 
 export const ROOMS_EVENTS_PATH = "/rooms/events";
 

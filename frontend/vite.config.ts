@@ -316,6 +316,9 @@ export default defineConfig({
           // Calls: the LiveKit client (~200 KB gz), fetched when someone
           // joins voice or runs Test calls.
           "**/livekit-*.js",
+          // Voice: the microphone's AudioWorklet (the noise suppressors'
+          // .wasm files aren't in globPatterns anyway), fetched on joining.
+          "**/voiceWorklet-*.js",
         ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
       },

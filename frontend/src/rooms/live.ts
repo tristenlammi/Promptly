@@ -1,26 +1,18 @@
 /**
- * The Rooms live feed: one fetch-based SSE stream per open Rooms app
- * (``GET /api/rooms/events``), applied to the bootstrap cache + the
- * message windows. ``fetch`` not ``EventSource`` because auth is a bearer
- * token in memory (see ``useDiscussionEvents``); we reconnect ourselves
- * with a capped backoff, and every (re)connect after the first refetches
- * the bootstrap and the open room's tail so a drop never loses messages.
+ * The Rooms live feed: the shared Rooms stream (``./stream``, one SSE
+ * connection per tab, also used by voice) applied to the bootstrap cache +
+ * the message windows while the Rooms app is open. Every reconnect after
+ * the first refetches the bootstrap and the open room's tail so a drop
+ * never loses messages.
  */
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 
-import { API_BASE_URL, authHeader, refreshAccessToken } from "@/api/client";
-import { ROOMS_EVENTS_PATH, type Bootstrap, type RoomEvent } from "@/api/rooms";
+import { type Bootstrap, type RoomEvent } from "@/api/rooms";
 
 import { BOOTSTRAP_KEY, findRoom, patchRoom, refreshTail, removeRoom, updateBootstrap, upsertRoom } from "./cache";
 import { useRoomsStore } from "./store";
-
-const BASE_RETRY_MS = 1000;
-const MAX_RETRY_MS = 30000;
-// The server pings every 20 s. Silence for longer means a dead connection
-// a proxy is still holding open (a backend restart, a laptop waking up):
-// drop it and reconnect, which also catches up on what was missed.
-const STALL_MS = 50000;
+import { subscribeRoomsStream } from "./stream";
 
 /** Which room the person is reading right now (visible + focused + at the
  *  bottom) — those messages don't count as unread. Set by the message list. */
@@ -32,83 +24,13 @@ export function useRoomsEvents(openRoomId: string | null) {
   openRef.current = openRoomId;
 
   useEffect(() => {
-    let cancelled = false;
-    let controller: AbortController | null = null;
-    let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    let attempt = 0;
-    let connectedBefore = false;
-    let lastByte = Date.now();
-    const watchdog = setInterval(() => {
-      if (controller && Date.now() - lastByte > STALL_MS) {
-        lastByte = Date.now();
-        controller.abort();
-      }
-    }, 10000);
-
     const resync = () => {
       void qc.invalidateQueries({ queryKey: BOOTSTRAP_KEY });
       const open = openRef.current;
       if (open) void refreshTail(open).catch(() => undefined);
     };
 
-    const connect = async () => {
-      if (cancelled) return;
-      controller = new AbortController();
-      lastByte = Date.now();
-      try {
-        let resp = await fetch(`${API_BASE_URL}${ROOMS_EVENTS_PATH}`, {
-          method: "GET",
-          headers: { ...authHeader(), Accept: "text/event-stream" },
-          signal: controller.signal,
-        });
-        if (resp.status === 401) {
-          // The access token expired while we were away: refresh and retry once.
-          if (await refreshAccessToken()) {
-            resp = await fetch(`${API_BASE_URL}${ROOMS_EVENTS_PATH}`, {
-              method: "GET",
-              headers: { ...authHeader(), Accept: "text/event-stream" },
-              signal: controller.signal,
-            });
-          }
-        }
-        if (!resp.ok || !resp.body) throw new Error(`Rooms stream failed (${resp.status})`);
-        attempt = 0;
-        if (connectedBefore) resync();
-        connectedBefore = true;
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder("utf-8");
-        let buffer = "";
-        while (!cancelled) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          lastByte = Date.now();
-          buffer += decoder.decode(value, { stream: true });
-          const frames = buffer.split("\n\n");
-          buffer = frames.pop() ?? "";
-          for (const frame of frames) {
-            const data = frame
-              .split("\n")
-              .filter((l) => l.startsWith("data:"))
-              .map((l) => l.slice(5).trimStart())
-              .join("\n");
-            if (!data) continue;
-            try {
-              applyRoomEvent(qc, JSON.parse(data) as RoomEvent);
-            } catch {
-              // A malformed frame shouldn't kill the stream.
-            }
-          }
-        }
-      } catch {
-        // Expected: navigation, proxy timeout, sleep.
-      }
-      if (cancelled) return;
-      attempt += 1;
-      const delay = Math.min(BASE_RETRY_MS * 2 ** (attempt - 1), MAX_RETRY_MS);
-      retryTimer = setTimeout(() => void connect(), delay);
-    };
-
-    void connect();
+    const unsubscribe = subscribeRoomsStream({ onEvent: (ev) => applyRoomEvent(qc, ev), onReconnect: resync });
 
     // Coming back to the window: catch up even if the stream looked alive.
     let lastFocus = 0;
@@ -123,10 +45,7 @@ export function useRoomsEvents(openRoomId: string | null) {
     document.addEventListener("visibilitychange", onFocus);
 
     return () => {
-      cancelled = true;
-      clearInterval(watchdog);
-      if (retryTimer) clearTimeout(retryTimer);
-      controller?.abort();
+      unsubscribe();
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onFocus);
     };
