@@ -311,8 +311,15 @@ async def test_busy_and_admin_close_are_form_pushes(client, db, pushes, monkeypa
     await db.execute(update(User).where(User.id == admin.id).values(role="admin"))
     await db.commit()
     f = await make_form(client, owner)
+    from limits.aio.storage import RedisStorage
+    from limits.aio.strategies import FixedWindowRateLimiter
+
     from app import rate_limit
 
+    # A limiter with a Redis connection of this test's own: the shared one may
+    # hold a pooled connection from an earlier test's event loop, which hangs
+    # (as in test_forms_answer's ``limited`` fixture).
+    monkeypatch.setattr(rate_limit, "_limiter", FixedWindowRateLimiter(RedisStorage(rate_limit._settings.REDIS_URL)))
     rate_limit._settings.RATE_LIMIT_ENABLED = True
     monkeypatch.setattr(abuse, "PER_FORM_PER_HOUR", 0)
     from app.redis_client import redis
