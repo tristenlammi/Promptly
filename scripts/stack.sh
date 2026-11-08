@@ -199,6 +199,11 @@ cmd_e2e() {
   wt="$(meta "$STATE/stack.json" worktree)"
   url="http://localhost:$port"
   curl -fsS --max-time 5 "$url/api/health" >/dev/null 2>&1 || die "stack $name isn't answering at $url"
+  # Some specs (unit-editor-sync and friends) import the frontend's own packages.
+  if [ ! -d "$wt/frontend/node_modules" ]; then
+    echo "installing the frontend's packages for the specs that import them (once per worktree)"
+    (cd "$wt/frontend" && npm ci)
+  fi
   cd "$wt/e2e"
   if [ ! -d node_modules ]; then
     npm ci
