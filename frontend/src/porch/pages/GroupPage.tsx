@@ -17,6 +17,7 @@ import { EditGroupSheet, InviteSheet } from "../components/GroupSheets";
 import { PostCard, PostList } from "../components/PostCard";
 import { ActionSheet, Column, GroupTile, LoadError, PageHeader, PorchAvatar, PostSkeleton, VisibilityTag, peopleCount, shortAgo, type MenuAction } from "../components/ui";
 import { usePorch } from "../context";
+import { GroupBell } from "../notify";
 import { useSentinel } from "../scroll";
 import { Unavailable } from "./PostPage";
 
@@ -55,7 +56,7 @@ export function GroupPage({ groupId }: { groupId: string }) {
   }
   // Your tick lives in bootstrap (the chips change it): show that one.
   const mine = b.groups.find((x) => x.id === g.id);
-  const group: PorchGroup = mine ? { ...g, in_feed: mine.in_feed } : g;
+  const group: PorchGroup = mine ? { ...g, in_feed: mine.in_feed, notify: mine.notify ?? g.notify } : g;
   return group.view === "member" ? <MemberView g={group} /> : <OutlineView g={group} />;
 }
 
@@ -216,6 +217,7 @@ function MemberView({ g }: { g: PorchGroup }) {
           {g.in_feed && <Check className="h-4 w-4" aria-hidden />}
           In feed
         </button>
+        <GroupBell group={g} className="border border-[var(--border)] bg-[var(--surface)]" />
         {g.can_invite && (
           <ItemButton variant="secondary" icon={<UserPlus className="h-4 w-4" />} onClick={() => setInviting(true)}>
             Invite

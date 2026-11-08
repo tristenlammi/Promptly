@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, Bell, Heart, MessageCircle, Reply } from "lucide-react";
+import { AtSign, Bell, Heart, MessageCircle, Reply, ShieldAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import { Link } from "react-router-dom";
 
@@ -18,6 +18,7 @@ const ICONS: Record<ActivityItem["kind"], ComponentType<{ className?: string }>>
   reply: Reply,
   mention: AtSign,
   reaction: Heart,
+  removed: ShieldAlert,
 };
 
 /** "Sam", "Sam and Mum", "Sam, Mum and 3 others". */
@@ -39,7 +40,57 @@ function itemWords(it: ActivityItem): { lead: string; rest: string; quote: strin
       return { lead, rest: it.comment_id ? "mentioned you in a comment" : "mentioned you in a post", quote };
     case "reaction":
       return { lead, rest: `reacted ${(it.emoji ?? []).join("")} to your ${it.target === "comment" ? "comment" : "post"}`, quote: null };
+    case "removed":
+      return { lead: "", rest: "", quote };
   }
+}
+
+/** A server admin took down your post or comment (or took it out of
+ *  Everyone): what, and the reason they gave. Only you see this. */
+function RemovedRow({ it }: { it: ActivityItem }) {
+  const what = it.target === "comment" ? "comment" : "post";
+  const where = it.removed?.scope === "everyone" ? " from Everyone" : "";
+  const reason = it.removed?.reason?.trim();
+  const inner = (
+    <>
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--text-muted)]" aria-hidden>
+        <ShieldAlert className="h-5 w-5" />
+      </span>
+      <span className="min-w-0 flex-1 text-sm leading-snug text-[var(--text)]">
+        <b className="font-semibold">
+          Your {what} was removed{where}
+        </b>
+        {reason ? <span className="text-[var(--text-muted)]">: “{reason}”</span> : <span className="text-[var(--text-muted)]"> by the person who runs this Promptly.</span>}
+        {it.text && <span className="mt-0.5 block truncate text-xs text-[var(--text-muted)]">{it.text}</span>}
+        <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
+          <time dateTime={it.at} title={fullTime(it.at)}>
+            {shortAgo(it.at)}
+          </time>
+          {it.unseen && <span className="sr-only"> · new</span>}
+        </span>
+      </span>
+    </>
+  );
+  const cls = cn(
+    "flex min-h-[64px] items-center gap-3 px-3 py-2.5",
+    it.unseen && "bg-[color-mix(in_srgb,var(--item-accent)_7%,transparent)]",
+  );
+  if (!it.post) {
+    return (
+      <div data-activity="removed" className={cls}>
+        {inner}
+      </div>
+    );
+  }
+  return (
+    <Link
+      to={`/porch/p/${it.post.id}`}
+      data-activity="removed"
+      className={cn(cls, "transition hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]")}
+    >
+      {inner}
+    </Link>
+  );
 }
 
 function bucket(iso: string, now = new Date()): "Today" | "This week" | "Earlier" {
@@ -60,9 +111,14 @@ function Thumb({ src, text }: { src: string | null; text: string }) {
 }
 
 function ItemRow({ it }: { it: ActivityItem }) {
+  if (it.kind === "removed" || !it.post) return <RemovedRow it={it} />;
+  return <TalkRow it={it} post={it.post} />;
+}
+
+function TalkRow({ it, post }: { it: ActivityItem; post: NonNullable<ActivityItem["post"]> }) {
   const Icon = ICONS[it.kind];
   const w = itemWords(it);
-  const to = `/porch/p/${it.post.id}${it.comment_id ? `#comment-${it.comment_id}` : ""}`;
+  const to = `/porch/p/${post.id}${it.comment_id ? `#comment-${it.comment_id}` : ""}`;
   return (
     <Link
       to={to}
@@ -88,7 +144,7 @@ function ItemRow({ it }: { it: ActivityItem }) {
           {it.unseen && <span className="sr-only"> · new</span>}
         </span>
       </span>
-      <Thumb src={it.post.thumb} text={it.post.body} />
+      <Thumb src={post.thumb} text={post.body} />
     </Link>
   );
 }

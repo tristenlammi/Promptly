@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Heart, MessageCircle, MoreHorizontal, Pencil, Send, Trash2, X } from "lucide-react";
+import { Heart, MessageCircle, MoreHorizontal, Pencil, Send, Trash2, TriangleAlert, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { HEART, porchApi, REACTIONS, type PorchComment, type PorchPost, type PorchUser } from "@/api/porch";
@@ -12,6 +12,7 @@ import { cn } from "@/utils/cn";
 import { commentsKey, refreshPost } from "../cache";
 import { MentionBox, mentionedIn } from "./composer/MentionBox";
 import { ReactionPicker, ReactionsLine, useLongPress, WhoReactedSheet } from "./Reactions";
+import { ReportSheet } from "./ReportSheet";
 import { RichText } from "./RichText";
 import { ActionSheet, PersonLink, PorchAvatar, fullTime, shortAgo, type MenuAction } from "./ui";
 
@@ -259,8 +260,10 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
   const [busy, setBusy] = useState(false);
   const [picker, setPicker] = useState<{ x: number; y: number } | null>(null);
   const [who, setWho] = useState(false);
+  const [reporting, setReporting] = useState(false);
   const heart = useLongPress((at) => setPicker(at));
-  const hold = useLongPress(() => (c.can_edit || c.can_delete) && setMenu(true), 550);
+  // Long-press: your own comment's Edit / Delete, or Report someone else's.
+  const hold = useLongPress(() => setMenu(true), 550);
 
   const set = (next: PorchComment, mode: "replace" | "remove" = "replace") => qc.setQueryData<Thread>(commentsKey(post.id), (t) => placeComment(t, next, mode));
 
@@ -323,6 +326,7 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
   if (c.can_edit) actions.push({ label: "Edit", icon: Pencil, onClick: () => { setDraft(c.body); setEditing(true); } });
   if (c.can_delete) actions.push({ label: "Delete", icon: Trash2, danger: true, hint: c.mine ? undefined : "It's on your post, so you can delete it", onClick: () => void remove() });
   const name = c.author?.name ?? "Someone";
+  if (!c.mine) actions.push({ label: "Report", icon: TriangleAlert, danger: true, hint: "Tell the person who runs this Promptly", onClick: () => setReporting(true) });
   const r = c.reactions;
 
   return (
@@ -413,6 +417,7 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
       )}
       <ReactionPicker open={!!picker} at={picker} current={r.mine} onPick={(e) => void react(e)} onClose={() => setPicker(null)} label={`React to ${name}'s comment`} />
       <ActionSheet open={menu} onClose={() => setMenu(false)} title={c.mine ? "Your comment" : `${name}'s comment`} actions={actions} />
+      {!c.mine && <ReportSheet open={reporting} onClose={() => setReporting(false)} target="comment" id={c.id} who={name} />}
       {c.mine && <WhoReactedSheet target="comment" id={c.id} open={who} onClose={() => setWho(false)} />}
     </div>
   );

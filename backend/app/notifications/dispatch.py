@@ -80,6 +80,9 @@ Category = Literal[
     "mail",
     # New-device approvals and shared-vault invites. Never any vault data.
     "passwords",
+    # Porch (0272): posts, comments, mentions, tags, invites, reactions,
+    # birthdays — one switch here; per kind in Porch → Settings.
+    "porch",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -102,6 +105,7 @@ CATEGORIES: tuple[str, ...] = (
     "calendar",
     "mail",
     "passwords",
+    "porch",
     "test",
 )
 
@@ -149,6 +153,21 @@ RULES: dict[str, Rule] = {
     "mail": Rule(True, app="Mail", one="new email", many="new emails", url="/mail", summary=True),
     "passwords": Rule(False),
     "test": Rule(False),
+    # Porch (WP-P1.7): holdable, summary-capable, counted per kind.
+    "porch": Rule(
+        True, app="Porch", one="update", many="updates", url="/porch/", summary=True,
+        kinds=(
+            ("post", "new post", "new posts"),
+            ("comment", "comment", "comments"),
+            ("reply", "reply", "replies"),
+            ("mention", "mention", "mentions"),
+            ("reaction", "reaction", "reactions"),
+            ("tag", "tag request", "tag requests"),
+            ("invite", "group invite", "group invites"),
+            ("birthday", "birthday", "birthdays"),
+            ("removed", "note from the admin", "notes from the admin"),
+        ),
+    ),
 }
 _missing = set(CATEGORIES) - set(RULES)
 assert not _missing, f"notification categories without a quiet-hours rule: {_missing}"

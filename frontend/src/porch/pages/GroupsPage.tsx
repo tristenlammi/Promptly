@@ -11,6 +11,7 @@ import { useGroupActions } from "../actions";
 import { discoverKey } from "../cache";
 import { Column, GroupTile, LoadError, PageHeader, VisibilityTag, peopleCount } from "../components/ui";
 import { usePorch } from "../context";
+import { GroupBell } from "../notify";
 import { usePorchStore } from "../store";
 
 /** An invite to answer: "Sam invited you to 🍻 The Lads · 6 people". */
@@ -129,10 +130,10 @@ export function GroupsPage() {
           </Section>
         )}
 
-        <Section title="Your groups" hint="Ticked groups are in your feed.">
+        <Section title="Your groups" hint="Ticked groups are in your feed. The bell sends a notification for every new post.">
           <List>
             {b.groups.map((g) => (
-              <div key={g.id} className="flex items-center gap-1 pr-2">
+              <div key={g.id} className="flex items-center gap-0.5 pr-2">
                 <Link to={`/porch/g/${g.id}`} className="flex min-h-[60px] min-w-0 flex-1 items-center gap-3 px-3 py-2 hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]">
                   <GroupTile group={g} size={44} />
                   <span className="min-w-0">
@@ -161,6 +162,7 @@ export function GroupsPage() {
                   </span>
                   In feed
                 </button>
+                <GroupBell group={g} />
               </div>
             ))}
           </List>

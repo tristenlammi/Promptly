@@ -13,11 +13,10 @@ something you can't see any more: only posts you can see
 (``porch_profiles.activity_seen_at``), which clears the badge.
 
 Live: :func:`tell` sends ``{"type": "activity"}`` to the people something
-new is for, so their badge and list refresh. **Push notifications (WP-P1.7)
-hook in here**: the same calls know who to tell and why (``after_comment``,
-``after_post``, reactions and tags call :func:`tell`); P1.7 adds the
-per-kind push (comments, mentions, tags, invites, reactions) next to the
-live event, with ``actor_user_id`` so blocks drop it centrally.
+new is for, so their badge and list refresh. Push notifications
+(:mod:`app.porch.push`) go from the same places: ``after_comment``,
+``after_post``, reactions, invites. A server admin's removals
+(``porch_removals``) show here too, with the reason, to the poster only.
 """
 from __future__ import annotations
 
@@ -35,7 +34,7 @@ from app.auth.models import User
 from app.database import get_db
 from app.people import blocks
 
-from . import access, core, media
+from . import access, core, media, push
 from .deps import require_porch
 from .models import PorchComment, PorchPost, PorchProfile, PorchReaction, PorchTag
 
@@ -66,12 +65,16 @@ async def after_comment(db: AsyncSession, post: PorchPost, c: PorchComment, pare
         who.add(parent.author_id)
     who |= {uuid.UUID(m) for m in (c.mentions or [])}
     await tell(db, who, actor=c.author_id)
+    await push.comment_added(db, post, c, parent)
 
 
-async def after_post(db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID]) -> None:
-    """A new or changed post: anyone newly @mentioned or asked about a tag."""
+async def after_post(db: AsyncSession, post: PorchPost, mentioned: Iterable[str | uuid.UUID], tagged: Iterable[uuid.UUID], *, created: bool = False) -> None:
+    """A new or changed post: anyone newly @mentioned or asked about a tag
+    (and, for a new post, the pushes for bells and "Notify me when they post")."""
+    mentioned, tagged = list(mentioned), list(tagged)
     who = {uuid.UUID(str(m)) for m in mentioned} | set(tagged)
     await tell(db, who, actor=post.author_id)
+    await push.post_created(db, post, mentioned, tagged, created=created)
 
 
 # ------------------------------------------------------------------ reading
@@ -221,6 +224,31 @@ async def collect(db: AsyncSession, user: User) -> dict[str, Any]:
         }
         for t, p in tag_rows
     ]
+    # A server admin took something of yours down: what, where, and why.
+    from .reports import removals_for
+
+    for r in await removals_for(db, me, since):
+        items.append(
+            {
+                "id": f"x:{r.id}",
+                "kind": "removed",
+                "at": r.created_at.isoformat(),
+                "actors": [],
+                "others": 0,
+                # Something to open only while the post is still up (out of
+                # Everyone, or a comment taken off a post).
+                "post": {"id": str(r.post_id), "kind": None, "thumb": None, "body": r.snippet, "mine": True}
+                if r.post_id and not (r.target_type == "post" and r.scope == "all")
+                else None,
+                "text": r.snippet,
+                "emoji": None,
+                "target": r.target_type,
+                "comment_id": str(r.target_id) if r.target_type == "comment" else None,
+                "removed": {"scope": r.scope, "reason": r.reason},
+                "unseen": seen is None or r.created_at > seen,
+            }
+        )
+    items.sort(key=lambda i: i["at"], reverse=True)
     invites = await _invites(db, user)
     unseen = sum(1 for i in items if i["unseen"]) + len(tag_requests) + len(invites)
     return {

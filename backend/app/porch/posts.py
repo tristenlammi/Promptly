@@ -405,7 +405,7 @@ async def create_post(body: PostIn, db: AsyncSession = Depends(get_db), user: Us
     await db.commit()
     await db.refresh(post)
     await core.publish(await access.audience_ids(db, post), {"type": "post", "post_id": str(post.id)})
-    await activity.after_post(db, post, post.mentions or [], asked)
+    await activity.after_post(db, post, post.mentions or [], asked, created=True)
     return await post_out(db, user, post)
 
 

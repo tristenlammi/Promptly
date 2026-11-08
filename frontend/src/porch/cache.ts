@@ -25,6 +25,8 @@ export const profileKey = (id: string) => ["porch", "profile", id] as const;
 export const savedKey = ["porch", "list", "saved"] as const;
 export const commentsKey = (postId: string) => ["porch", "comments", postId] as const;
 export const ACTIVITY_KEY = ["porch", "activity"] as const;
+export const NOTIFY_KEY = ["porch", "notifications"] as const;
+export const ALERTS_KEY = ["porch", "alerts"] as const;
 
 /** Change one post wherever it's cached (lists and its own query). */
 export function patchPost(qc: QueryClient, id: string, fn: (p: PorchPost) => PorchPost): void {

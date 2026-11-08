@@ -320,8 +320,14 @@ async def serve(db: AsyncSession, claim: media_urls.MediaClaim, user: User, requ
     if claim.rendition == "porch_cover":
         return await _serve_cover(db, claim, user, request)
     pm = await db.get(PorchPostMedia, claim.file_id)
-    if pm is None or not await access.can_see_post(db, user, pm.post_id):
+    if pm is None:
         raise _not_found()
+    if not await access.can_see_post(db, user, pm.post_id):
+        # A server admin looking at a reported post in Admin → Porch.
+        from .reports import admin_may_review
+
+        if not await admin_may_review(db, user, pm.post_id):
+            raise _not_found()
     row = await db.get(UserFile, pm.file_id)
     if row is None or row.trashed_at is not None or not row.storage_path:
         raise _not_found()

@@ -207,6 +207,10 @@ test("tag someone on a photo; they say yes from Activity; the badge; an outsider
   test.setTimeout(240_000);
   const [aAuth, bAuth, dAuth] = [await bearer(alice), await bearer(bob), await bearer(dana)];
   const [aliceId, bobId] = [await porchReady(alice, aAuth), await porchReady(bob, bAuth), await porchReady(dana, dAuth)];
+  // A reused stack can hold tag requests from earlier runs that stopped part
+  // way: answer them first, so this run's request is the only one waiting.
+  const left = await (await porch(bob, bAuth).get("/porch/activity")).json();
+  for (const t of left.tag_requests as { id: string }[]) await porch(bob, bAuth).post(`/porch/tags/${t.id}/decline`);
   const fam = `Tags ${stamp}`;
   const famId = await groupWith(alice, aAuth, fam, [[bob, bAuth, bobId]]);
   const pic = await libraryPhoto(alice, aAuth, "FAMILY");

@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -16,6 +17,7 @@ import {
   type NotificationSwitch,
   type SubscriptionSummary,
 } from "@/api/notifications";
+import { porchApi } from "@/api/porch";
 import { Button } from "@/components/shared/Button";
 import { usePushSubscription } from "@/hooks/usePushSubscription";
 import { cn } from "@/utils/cn";
@@ -37,6 +39,8 @@ import { cn } from "@/utils/cn";
  */
 export function NotificationsPanel() {
   const push = usePushSubscription();
+  // Porch's row only for people Porch is on for.
+  const { data: porchOn } = useQuery({ queryKey: ["porch", "available"], queryFn: porchApi.available, staleTime: 5 * 60_000 });
 
   const [prefs, setPrefs] = useState<NotificationPreferences | null>(null);
   const [prefsBusy, setPrefsBusy] = useState<string | null>(null);
@@ -371,6 +375,17 @@ export function NotificationsPanel() {
                 dimmed={!prefs.enabled}
                 extra={(prefs.mail ?? true) && summaryMode("mail")}
               />
+              {porchOn && (
+              <CategoryRow
+                title="Porch"
+                subtitle="Posts, comments, mentions, tags, invites, reactions and birthdays. Choose which, and how, in Porch → Settings."
+                checked={prefs.porch ?? true}
+                busy={prefsBusy === "porch"}
+                onChange={(v) => toggle("porch", v)}
+                dimmed={!prefs.enabled}
+                extra={(prefs.porch ?? true) && summaryMode("porch")}
+              />
+              )}
               <CategoryRow
                 title="Passwords"
                 subtitle="A new device asking to join your vault, or someone sharing a vault with you. These never carry anything from the vault."

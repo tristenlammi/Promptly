@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Bell, Bookmark, Check, Home, Loader2, Newspaper, PenSquare, Plus, Search, UserRound, Users } from "lucide-react";
+import { Bell, Bookmark, Check, Home, Loader2, Newspaper, PenSquare, Plus, Search, Settings, UserRound, Users } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 
@@ -29,6 +29,7 @@ import { EditPostPage, NewPostPage } from "./pages/NewPostPage";
 import { PostPage } from "./pages/PostPage";
 import { ProfilePage } from "./pages/ProfilePage";
 import { SavedPage } from "./pages/SavedPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { SCROLLER_ID } from "./scroll";
 import { usePorchStore } from "./store";
 
@@ -37,6 +38,7 @@ type Route =
   | { page: "groups" }
   | { page: "activity" }
   | { page: "saved" }
+  | { page: "settings" }
   | { page: "new" }
   | { page: "edit"; id: string }
   | { page: "post"; id: string }
@@ -52,6 +54,7 @@ function parse(path: string): Route {
   if (p === "/porch/groups") return { page: "groups" };
   if (p === "/porch/activity") return { page: "activity" };
   if (p === "/porch/saved") return { page: "saved" };
+  if (p === "/porch/settings") return { page: "settings" };
   if (p === "/porch/new") return { page: "new" };
   let m = new RegExp(`^/porch/p/${ID}$`).exec(p);
   if (m) return { page: "post", id: m[1] };
@@ -183,6 +186,9 @@ export function PorchApp({ embedded = false }: { embedded?: boolean } = {}) {
       break;
     case "saved":
       page = <SavedPage />;
+      break;
+    case "settings":
+      page = <SettingsPage />;
       break;
     case "new":
       page = <NewPostPage key={location.search} />;
@@ -326,6 +332,9 @@ function SideNav({ b, route, embedded }: { b: Bootstrap; route: Route; embedded:
       </button>
       <Link to={`/porch/u/${b.me.id}`} aria-current={me ? "page" : undefined} className={item(me)}>
         <UserRound className="h-[18px] w-[18px]" aria-hidden /> Profile
+      </Link>
+      <Link to="/porch/settings" aria-current={route.page === "settings" ? "page" : undefined} className={item(route.page === "settings")}>
+        <Settings className="h-[18px] w-[18px]" aria-hidden /> Settings
       </Link>
 
       <div className="mt-4 flex items-center justify-between px-3 pb-1">

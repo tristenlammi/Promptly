@@ -170,7 +170,7 @@ export interface CommentLine {
   body: string;
 }
 
-export type ActivityKind = "comment" | "reply" | "mention" | "reaction";
+export type ActivityKind = "comment" | "reply" | "mention" | "reaction" | "removed";
 
 export interface PostRef {
   id: string;
@@ -187,12 +187,17 @@ export interface ActivityItem {
   actors: PorchUser[];
   /** How many more people than ``actors``. */
   others: number;
-  post: PostRef;
+  /** Null only for ``removed`` when there's nothing left to open. */
+  post: PostRef | null;
   text: string | null;
   emoji: string[] | null;
   target: "post" | "comment";
   comment_id: string | null;
   unseen: boolean;
+  /** ``removed``: a server admin took your post or comment down (``all``)
+   *  or out of Everyone (``everyone``), and why. ``post`` is then null when
+   *  nothing is left to open. */
+  removed?: { scope: "all" | "everyone"; reason: string } | null;
 }
 
 export interface TagRequest {
@@ -344,6 +349,8 @@ export interface Profile {
   shared_groups?: GroupLabel[];
   /** What they are to you, from your own Contacts and Photos people. */
   relation?: { name: string; label: string | null } | null;
+  /** Someone else's: "Notify me when they post" is on. */
+  alert?: boolean;
 }
 
 export interface Member extends PorchUser {
@@ -630,6 +637,125 @@ export const porchApi = {
   async uses(fileIds: string[]): Promise<{ posts: number; photos: number }> {
     const { data } = await apiClient.post<{ posts: number; photos: number }>("/porch/files/uses", { file_ids: fileIds });
     return data;
+  },
+
+  // ---- notifications, reports (WP-P1.7)
+  async notifications(): Promise<NotificationSettings> {
+    const { data } = await apiClient.get<NotificationSettings>("/porch/me/notifications");
+    return data;
+  },
+  async setNotifications(patch: { modes?: Partial<Record<PushKind, PushMode>>; porch?: boolean }): Promise<NotificationSettings> {
+    const { data } = await apiClient.patch<NotificationSettings>("/porch/me/notifications", patch);
+    return data;
+  },
+  /** People you're told about when they post. */
+  async alerts(): Promise<PorchUser[]> {
+    const { data } = await apiClient.get<PorchUser[]>("/porch/alerts");
+    return data;
+  },
+  async setAlert(userId: string, on: boolean): Promise<void> {
+    if (on) await apiClient.put(`/porch/alerts/${userId}`);
+    else await apiClient.delete(`/porch/alerts/${userId}`);
+  },
+  /** Report a post or comment to the people who run this Promptly. */
+  async report(targetType: "post" | "comment", targetId: string, reason: string): Promise<void> {
+    await apiClient.post("/porch/reports", { target_type: targetType, target_id: targetId, reason });
+  },
+};
+
+// ---- WP-P1.7: push settings
+
+export type PushKind = "post" | "comment" | "reply" | "mention" | "tag" | "invite" | "reaction" | "birthday";
+export type PushMode = "on" | "summary" | "off";
+
+export interface NotificationSettings {
+  modes: Record<PushKind, PushMode>;
+  defaults: Record<PushKind, PushMode>;
+  kinds: PushKind[];
+  account: {
+    /** Account → Notifications: notifications on at all. */
+    push_enabled: boolean;
+    /** Account → Notifications: Porch's own switch. */
+    porch: boolean;
+    quiet_enabled: boolean;
+    quiet_start: string;
+    quiet_end: string;
+    summary_time: string;
+    timezone: string;
+  };
+}
+
+// ---- WP-P1.7: Admin → Porch
+
+export interface PorchAdminSettings {
+  enabled: boolean;
+  /** null: everyone on this Promptly. */
+  user_group_ids: string[] | null;
+  video_max_seconds: number;
+  video_max_mb: number;
+  everyone_name: string;
+  everyone_emoji: string;
+  /** How many people Porch is on for. */
+  people: number;
+  user_groups: { id: string; name: string; member_count: number }[];
+  open_reports: number;
+}
+
+export interface ReportTarget {
+  type: "post" | "comment";
+  id: string;
+  /** Already deleted, by its author or someone else. */
+  gone: boolean;
+  author: PorchUser | null;
+  post_id?: string;
+  kind?: PostKind;
+  created_at?: string;
+  body?: string;
+  /** A comment's post, a few words of it. */
+  post_body?: string;
+  groups?: { in_everyone: boolean; named: GroupLabel[]; others: number };
+  media?: { thumb: string | null; preview: string | null; alt: string; video: boolean }[];
+}
+
+export interface ReportItem {
+  /** The report to answer (every open report on the same thing goes with it). */
+  id: string;
+  target: ReportTarget;
+  reports: { id: string; reporter: PorchUser | null; reason: string; created_at: string }[];
+  first_at: string;
+}
+
+export interface HandledReport {
+  id: string;
+  target_type: "post" | "comment";
+  status: "removed" | "kept";
+  note: string;
+  handled_at: string | null;
+  handled_by: PorchUser | null;
+}
+
+export const porchAdminApi = {
+  async get(): Promise<PorchAdminSettings> {
+    const { data } = await apiClient.get<PorchAdminSettings>("/admin/porch");
+    return data;
+  },
+  async patch(body: Partial<Pick<PorchAdminSettings, "enabled" | "user_group_ids" | "video_max_seconds" | "video_max_mb" | "everyone_name" | "everyone_emoji">>): Promise<PorchAdminSettings> {
+    const { data } = await apiClient.patch<PorchAdminSettings>("/admin/porch", body);
+    return data;
+  },
+  async reports(): Promise<ReportItem[]> {
+    const { data } = await apiClient.get<ReportItem[]>("/admin/porch/reports", { params: { status: "open" } });
+    return data;
+  },
+  async handled(): Promise<HandledReport[]> {
+    const { data } = await apiClient.get<HandledReport[]>("/admin/porch/reports", { params: { status: "handled" } });
+    return data;
+  },
+  async decide(reportId: string, action: "remove" | "keep", reason: string): Promise<void> {
+    await apiClient.post(`/admin/porch/reports/${reportId}`, { action, reason });
+  },
+  async removeFromEveryone(postId: string, reason: string): Promise<void> {
+    await apiClient.post(`/admin/porch/posts/${postId}/remove-from-everyone`, { reason });
   },
 };
 

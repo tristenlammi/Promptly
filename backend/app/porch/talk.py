@@ -37,7 +37,7 @@ from app.auth.models import User
 from app.database import get_db
 from app.people import blocks
 
-from . import access, activity, core
+from . import access, activity, core, push
 from .deps import require_porch
 from .models import PorchComment, PorchPollOption, PorchPollVote, PorchPost, PorchReaction, PorchSave
 
@@ -391,6 +391,7 @@ async def edit_comment(comment_id: uuid.UUID, body: CommentPatch, db: AsyncSessi
     new = [uuid.UUID(m) for m in c.mentions if m not in before]
     if new:
         await activity.tell(db, new, actor=user.id)
+        await push.comment_added(db, post, c, None, mentioned=new)
     hidden = await blocks.hidden_ids(db, user.id)
     rx = await _reactions(db, "comment", [c.id], hidden)
     people = await core.users_map(db, {user.id} | {uuid.UUID(m) for m in c.mentions} | {r.user_id for r in rx[c.id]})
@@ -455,6 +456,7 @@ async def react_post(post_id: uuid.UUID, body: ReactionIn, db: AsyncSession = De
     await core.publish(await access.audience_ids(db, post), {"type": "post_change", "post_id": str(post.id)})
     if fresh and post.author_id != user.id:
         await activity.tell(db, [post.author_id], actor=user.id)
+        await push.reacted(db, post, user, emoji)
     return await _summary(db, user, "post", post.id, post.author_id == user.id)
 
 
@@ -484,6 +486,7 @@ async def react_comment(comment_id: uuid.UUID, body: ReactionIn, db: AsyncSessio
     await _comment_event(db, post, c.id)
     if fresh and c.author_id != user.id:
         await activity.tell(db, [c.author_id], actor=user.id)
+        await push.reacted(db, post, user, emoji, comment=c)
     return await _summary(db, user, "comment", c.id, c.author_id == user.id)
 
 

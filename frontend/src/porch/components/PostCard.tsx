@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Baby,
+  BellRing,
   Briefcase,
   CalendarPlus,
   Download,
@@ -15,8 +16,10 @@ import {
   MessagesSquare,
   MoreHorizontal,
   Pencil,
+  ShieldMinus,
   Sparkles,
   Trash2,
+  TriangleAlert,
   UserX,
 } from "lucide-react";
 import { useLayoutEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
@@ -31,7 +34,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { useBlock } from "../actions";
-import { putPost } from "../cache";
+import { profileKey, putPost } from "../cache";
 import { usePorch } from "../context";
 import { usePostTalk } from "../talkActions";
 import { CommentsSheet, InlineComments } from "./Comments";
@@ -39,6 +42,7 @@ import { MakeEventSheet } from "./MakeEventSheet";
 import { MediaCarousel } from "./MediaCarousel";
 import { PollCard } from "./PollCard";
 import { PostActions } from "./PostActions";
+import { RemoveFromEveryoneSheet, ReportSheet } from "./ReportSheet";
 import { RichText } from "./RichText";
 import { ActionSheet, PorchAvatar, PersonLink, dayWords, fullTime, groupsLine, shortAgo, type MenuAction } from "./ui";
 
@@ -139,8 +143,10 @@ export function PostCard({ post, full = false, media = true, className }: { post
   const [talk, setTalk] = useState<null | { focus: boolean }>(null);
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const [reporting, setReporting] = useState(false);
+  const [unEveryone, setUnEveryone] = useState(false);
   const block = useBlock();
-  const { isPhone } = usePorch();
+  const { isPhone, b } = usePorch();
   const { react } = usePostTalk();
   const ref = useRef<HTMLElement>(null);
   const openComments = (focus: boolean) => {
@@ -211,7 +217,29 @@ export function PostCard({ post, full = false, media = true, className }: { post
   if (post.media.some((m) => m.full)) {
     actions.push({ label: post.media.length > 1 ? "Save photos" : post.media[0]?.kind === "video" ? "Save video" : "Save photo", icon: Download, onClick: () => setSaving(true) });
   }
+  if (!post.mine && author) {
+    actions.push({
+      label: `Turn on posts from ${who}`,
+      icon: BellRing,
+      hint: `A notification when ${who} posts. Turn it off on their profile.`,
+      onClick: async () => {
+        try {
+          await porchApi.setAlert(author.id, true);
+          void qc.invalidateQueries({ queryKey: profileKey(author.id) });
+          toast.success(`You'll get a notification when ${who} posts.`);
+        } catch (err) {
+          toast.error(apiErrorMessage(err, "Couldn't turn that on. Try again."));
+        }
+      },
+    });
+  }
+  // Server admins run Everyone: they can take someone's post out of it.
+  const inEveryone = post.groups.some((g) => g.kind === "everyone");
+  if (!post.mine && b?.me?.is_admin && inEveryone) {
+    actions.push({ label: `Remove from ${b.everyone.name}`, icon: ShieldMinus, hint: "Asks for a reason, which they'll see", danger: true, onClick: () => setUnEveryone(true) });
+  }
   if (!post.mine && author) actions.push({ label: `Block ${who}`, icon: UserX, danger: true, onClick: () => void block(author) });
+  if (!post.mine) actions.push({ label: "Report", icon: TriangleAlert, hint: "Tell the person who runs this Promptly", danger: true, onClick: () => setReporting(true) });
   if (post.can_delete) {
     actions.push({
       label: "Delete post",
@@ -315,6 +343,17 @@ export function PostCard({ post, full = false, media = true, className }: { post
       {!full && isPhone && <CommentsSheet post={post} open={!!talk} onClose={() => setTalk(null)} />}
 
       <ActionSheet open={menu} onClose={() => setMenu(false)} title={post.mine ? "Your post" : `${who}'s post`} actions={actions} />
+      {!post.mine && <ReportSheet open={reporting} onClose={() => setReporting(false)} target="post" id={post.id} who={who} />}
+      {!post.mine && b?.me?.is_admin && inEveryone && (
+        <RemoveFromEveryoneSheet
+          open={unEveryone}
+          onClose={() => setUnEveryone(false)}
+          postId={post.id}
+          who={who}
+          everyone={b.everyone.name}
+          onDone={() => void qc.invalidateQueries({ queryKey: ["porch"] })}
+        />
+      )}
       {saving && <SaveSheet post={post} onClose={() => setSaving(false)} />}
       <SendToSheet
         open={sharing}

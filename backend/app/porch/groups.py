@@ -30,7 +30,7 @@ from app.auth.models import User
 from app.database import get_db
 from app.people import blocks
 
-from . import access, core, deps, media
+from . import access, core, deps, media, push
 from .deps import require_porch
 from .models import PorchGroup, PorchGroupMember
 
@@ -194,6 +194,7 @@ async def create_group(body: GroupIn, db: AsyncSession = Depends(get_db), user: 
     invited = await _invite(db, user, g, body.invite)
     await db.commit()
     await core.publish(invited, {"type": "invite", "group_id": str(g.id)})
+    await push.invited(db, user, g, invited)
     out = await group_out(db, user, g, me, access.MEMBER)
     out["invited"] = [str(u) for u in invited]
     return out
@@ -421,6 +422,7 @@ async def invite(group_id: uuid.UUID, body: InviteIn, db: AsyncSession = Depends
     invited = await _invite(db, user, g, body.user_ids)
     await db.commit()
     await core.publish(invited, {"type": "invite", "group_id": str(g.id)})
+    await push.invited(db, user, g, invited)
     return {"invited": [str(u) for u in invited]}
 
 

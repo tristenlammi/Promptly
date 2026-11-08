@@ -322,16 +322,16 @@ self.addEventListener("notificationclick", (event) => {
         type: "window",
         includeUncontrolled: true,
       });
-      // Rooms, Calendar and Photos install as their own apps: a push for one goes to
+      // Rooms, Calendar, Photos and Porch install as their own apps: a push for one goes to
       // a window already in that app, else opens fresh (so the installed
       // app, which owns that scope, handles it) — never hijacks Promptly.
       const target0 = new URL(url, self.location.origin);
-      const scope = ["/rooms/", "/calendar/", "/photos/", "/passwords/"].find((s) => target0.pathname.startsWith(s) || target0.pathname === s.slice(0, -1)) ?? null;
+      const scope = ["/rooms/", "/calendar/", "/photos/", "/passwords/", "/porch/"].find((s) => target0.pathname.startsWith(s) || target0.pathname === s.slice(0, -1)) ?? null;
       // "/calendar?event=…" → "/calendar/?event=…", inside the installed app's scope.
       if (scope && target0.pathname === scope.slice(0, -1)) url = scope + target0.search + target0.hash;
       const inScope = (w: WindowClient | Client) => {
         const p = new URL(w.url).pathname;
-        return scope ? p.startsWith(scope) : !p.startsWith("/rooms/") && !p.startsWith("/calendar/") && !p.startsWith("/photos/") && !p.startsWith("/passwords");
+        return scope ? p.startsWith(scope) : !p.startsWith("/rooms/") && !p.startsWith("/calendar/") && !p.startsWith("/photos/") && !p.startsWith("/passwords") && !p.startsWith("/porch/");
       };
       const target = wins.find((w) => new URL(w.url).origin === self.location.origin && inScope(w));
       if (target) {

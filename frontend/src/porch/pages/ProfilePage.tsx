@@ -15,6 +15,7 @@ import { BOOTSTRAP_KEY, listPosts, profileKey, userPostsKey } from "../cache";
 import { LIFE_EVENTS, PostCard, PostList } from "../components/PostCard";
 import { ActionSheet, Column, LoadError, PageHeader, PorchAvatar, PostSkeleton, dayWords, type MenuAction } from "../components/ui";
 import { isStandalone, usePorch } from "../context";
+import { AlertButton } from "../notify";
 import { useSentinel } from "../scroll";
 import { PhotoGrid } from "./GroupPage";
 import { Unavailable } from "./PostPage";
@@ -155,9 +156,12 @@ export function ProfilePage({ userId }: { userId: string }) {
               )}
             </>
           ) : (
-            <ItemButton variant="primary" icon={<MessageCircle className="h-4 w-4" />} disabled={messaging} onClick={() => void message()}>
-              Message
-            </ItemButton>
+            <>
+              <ItemButton variant="primary" icon={<MessageCircle className="h-4 w-4" />} disabled={messaging} onClick={() => void message()}>
+                Message
+              </ItemButton>
+              <AlertButton userId={p.user.id} name={p.user.name} on={!!p.alert} />
+            </>
           )}
         </div>
       </div>
@@ -181,7 +185,7 @@ export function ProfilePage({ userId }: { userId: string }) {
           <h2 className="px-1 text-sm font-semibold text-[var(--text)]">Settings</h2>
           <List>
             <ListRow leading={<Bookmark className="h-4 w-4 text-[var(--text-muted)]" />} title="Saved" subtitle="Posts you've saved. Only you can see them." onClick={() => navigate("/porch/saved")} />
-            <ListRow leading={<Bell className="h-4 w-4 text-[var(--text-muted)]" />} title="Quiet hours" subtitle="Set in Account → Notifications" onClick={() => navigate("/account/notifications")} />
+            <ListRow leading={<Bell className="h-4 w-4 text-[var(--text-muted)]" />} title="Notifications" subtitle="What Porch tells you about, and when" onClick={() => navigate("/porch/settings")} />
             <ListRow leading={<UserX className="h-4 w-4 text-[var(--text-muted)]" />} title="Blocked people" subtitle="Set in Account → Blocked people" onClick={() => navigate("/account/blocked")} />
           </List>
         </div>

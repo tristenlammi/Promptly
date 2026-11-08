@@ -38,6 +38,11 @@ LABELS = {
     "cal_snooze": "Snooze 10 min",
     "task_done": "Done",
     "task_snooze": "Snooze 1 hour",
+    # Porch (WP-P1.7): a group invite, a tag waiting for your yes.
+    "porch_join": "Join",
+    "porch_decline": "Not now",
+    "porch_tag_yes": "Show it",
+    "porch_tag_no": "Not me",
 }
 
 
@@ -125,6 +130,13 @@ async def perform(db: AsyncSession, token: str) -> str:
         return await _task_done(db, user, target)
     if action == "task_snooze":
         return await _task_snooze(db, user, target)
+    if action.startswith("porch_"):
+        from app.porch import push as porch_push
+
+        try:
+            return await porch_push.do_action(db, user, action, target)
+        except LookupError as exc:
+            raise ActionRefused("gone") from exc
     raise ActionRefused("bad token")
 
 

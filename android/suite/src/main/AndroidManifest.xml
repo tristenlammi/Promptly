@@ -364,5 +364,31 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".PorchLauncher"
+            android:label="P Porch"
+            android:enabled="false"
+            android:icon="@mipmap/ic_porch"
+            android:roundIcon="@mipmap/ic_porch"
+            android:taskAffinity="org.promptly.app.porch"
+            android:theme="@style/Launch"
+            android:exported="true">
+            <meta-data android:name="org.promptly.app.PATH" android:value="/porch/" />
+            <meta-data android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR" android:resource="@color/bar" />
+            <meta-data android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR" android:resource="@color/bar" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data android:name="android.support.customtabs.trusted.METADATA_SHARE_TARGET" android:resource="@string/share_target_porch" />
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

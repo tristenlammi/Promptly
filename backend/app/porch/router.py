@@ -25,7 +25,7 @@ from app.auth.models import User
 from app.database import get_db
 from app.people import blocks
 
-from . import access, activity, compose, core, deps, events, groups, handoffs, media, posts, search, tags, talk
+from . import access, activity, compose, core, deps, events, groups, handoffs, media, posts, prefs, reports, search, tags, talk
 from .deps import require_porch
 from .models import PorchGroup, PorchGroupMember, PorchProfile
 
@@ -39,6 +39,8 @@ router.include_router(tags.router)
 router.include_router(activity.router)
 router.include_router(handoffs.router)
 router.include_router(search.router)
+router.include_router(prefs.router)
+router.include_router(reports.router)
 
 
 def _profile_out(p: PorchProfile, *, me: bool) -> dict[str, Any]:
@@ -152,6 +154,7 @@ async def profile(user_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: 
     }
     if not me:
         out["relation"] = await _relation(db, user, other)
+        out["alert"] = await prefs.has_alert(db, user, other.id)
         theirs = select(PorchGroupMember.group_id).where(PorchGroupMember.user_id == other.id, PorchGroupMember.status == "member")
         shared = (
             await db.execute(

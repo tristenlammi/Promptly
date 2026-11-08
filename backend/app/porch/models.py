@@ -117,6 +117,8 @@ class PorchProfile(Base):
     last_groups: Mapped[Any] = mapped_column(JSONB, nullable=True)
     # Per-kind push modes (on / summary / off), WP-P1.7.
     push: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    # The local day today's birthday pushes went (0272): claimed once a day.
+    birthday_pushed_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -224,9 +226,31 @@ class PorchReport(UUIDPKMixin, CreatedAtMixin, Base):
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="open", server_default="open")
     handled_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     handled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # What the admin wrote when they handled it (0272); a removal's reason
+    # is also kept with the removal, where the poster sees it.
+    note: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
+
+
+class PorchRemoval(UUIDPKMixin, CreatedAtMixin, Base):
+    """A post or comment a server admin took down (0272): from a report
+    (``scope='all'``: gone for everyone) or out of Everyone only
+    (``scope='everyone'``: it stays in the poster's other groups). The poster
+    sees it in Activity with the reason; nobody else is told."""
+
+    __tablename__ = "porch_removals"
+
+    author_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    target_type: Mapped[str] = mapped_column(String(8), nullable=False)  # post | comment
+    target_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
+    post_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("porch_posts.id", ondelete="CASCADE"), nullable=True)
+    scope: Mapped[str] = mapped_column(String(8), nullable=False, default="all", server_default="all")
+    reason: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
+    # A few words of what was removed, so the poster knows which one.
+    snippet: Mapped[str] = mapped_column(String(200), nullable=False, default="", server_default="")
+    removed_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
 
 
 __all__ = [
     "KINDS", "NOTIFY", "ROLES", "STATUSES", "TAG_STATUSES", "PorchAlert", "PorchComment", "PorchGroup", "PorchGroupMember", "PorchPollOption",
-    "PorchPollVote", "PorchPost", "PorchPostGroup", "PorchPostMedia", "PorchProfile", "PorchReaction", "PorchReport", "PorchSave", "PorchTag",
+    "PorchPollVote", "PorchPost", "PorchPostGroup", "PorchPostMedia", "PorchProfile", "PorchReaction", "PorchRemoval", "PorchReport", "PorchSave", "PorchTag",
 ]
