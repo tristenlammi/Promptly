@@ -50,6 +50,42 @@ _BLOCK_END = re.compile(r"<(br|/p|/div|/tr|/li|/h[1-6])\b[^>]*>", re.IGNORECASE)
 _ANY_TAG = re.compile(r"<[^>]+>")
 _SPACE = re.compile(r"\s+")
 
+# bleach reads HTML with html5lib, which is plain Python and slower than linear on
+# shapes a stranger can send: thousands of attributes in one tag, elements nested
+# thousands deep, thousands of siblings that each hold something, bold left open
+# again and again, a long run of stray "<" or "&". At 1 MB those take from 20 seconds
+# to minutes, holding up the mail worker (or, sending, the whole app). An email past
+# any of these limits is shown as plain text instead, like Gmail's "message clipped".
+# Real mail is far inside them (Gmail itself clips at 102 KB); together they keep the
+# slowest page that fits to about a second here (see test_mail_parse.py).
+MAX_HTML = 256 * 1024
+# Every "<", "&" and NUL starts a tag or a new piece of text, so this also caps how
+# badly anything not counted below can go: about two seconds.
+_MAX_MARKS = 20_000
+_MAX_ATTR_WORK = 2_000_000  # attributes in a tag, squared, summed over the tags
+_MAX_DEPTH_WORK = 1_500_000  # elements open at each tag, summed over the tags
+_MAX_WIDTH_WORK = 40_000_000  # for each element, its children times those with children
+# A formatting tag that's closed by the block around it, not by its own end tag, is
+# copied into every later block (bold, then a hundred paragraphs: a hundred bolds),
+# which costs the most of all.
+_MAX_FORMAT_WORK = 50_000  # such formatting tags at each tag, summed over the tags
+_FORMATTING = frozenset("a b big code em font i nobr s small strike strong tt u".split())
+# Opening one of these closes a paragraph, and the formatting inside it.
+_CLOSES_P = frozenset(
+    "address article aside blockquote center dd details dialog dir div dl dt fieldset figcaption figure footer form "
+    "h1 h2 h3 h4 h5 h6 header hgroup hr li listing main menu nav ol p plaintext pre section summary table ul xmp".split()
+)
+# Tags read the way html5lib reads them, so attributes can't hide from the count: only
+# these five are spaces, "/" also separates, and only a value after "=" is quoted.
+_HWS = "\t\n\f\r "
+_VALUE = rf"""(?:[{_HWS}]*=[{_HWS}]*(?:"[^"]*"|'[^']*'|[^{_HWS}>]*))?"""
+_ATTR = re.compile(rf"[^{_HWS}/>][^{_HWS}/>=]*{_VALUE}")
+_TAG = re.compile(rf"<(/?)([A-Za-z][^{_HWS}/>]*)((?:[{_HWS}/]+|[^{_HWS}/>][^{_HWS}/>=]*{_VALUE})*)")
+_VOID = frozenset("area base basefont bgsound br col embed frame hr image img input keygen link menuitem meta param source track wbr".split())
+# Opening one of these closes the last one still open, so a page that never closes
+# its paragraphs or cells isn't counted as nested.
+_PEERS = frozenset("dd dt li optgroup option p rb rp rt td th tr".split())
+
 
 def _drop_with_content(raw: str, replacement: str) -> str:
     """Remove ``<script>…</script>`` and the like, contents and all. Like
@@ -111,6 +147,8 @@ class Parsed:
     sent_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     text: str = ""
     html: str = ""
+    # There was HTML, but too much to clean quickly, so only ``text`` is shown.
+    html_clipped: bool = False
     snippet: str = ""
     attachments: list[dict[str, Any]] = field(default_factory=list)
     unsubscribe: str = ""
@@ -137,6 +175,84 @@ def html_to_text(raw: str) -> str:
     cleaned = _sub_tags(_ANY_TAG, " ", cleaned)
     text = html.unescape(cleaned)
     return re.sub(r"\n\s*\n+", "\n\n", re.sub(r"[ \t\xa0]+", " ", text)).strip()
+
+
+def html_fits(raw: str) -> bool:
+    """Whether ``safe_html`` can clean this quickly. One pass over the tags, guessing
+    on the high side how much work html5lib will do."""
+    if len(raw) > MAX_HTML or raw.count("<") + raw.count("&") + raw.count("\x00") > _MAX_MARKS:
+        return False
+    attr_work = depth_work = width_work = format_work = depth = copied = 0
+    # How deep: an end tag closes only its own element here, so nothing html5lib
+    # might keep open is let off.
+    still_open: dict[str, int] = {}
+    # Who holds whom: closing an element closes what's inside it, as html5lib mostly
+    # does. Each open element is [name, children, children with children, formatting].
+    stack: list[list[Any]] = [["", 0, 0, None]]
+    on_stack: dict[str, int] = {}
+    # Formatting tags not closed by their own end tag, by tag and attributes, and how
+    # many of those are still open. html5lib copies the rest, up to three alike.
+    unclosed: dict[tuple[str, str], int] = {}
+    held: dict[tuple[str, str], int] = {}
+    unclosed_by_name: dict[str, list[tuple[str, str]]] = {}
+
+    def recount(key: tuple[str, str], more_unclosed: int, more_held: int) -> None:
+        nonlocal copied
+        copied -= max(0, min(3, unclosed.get(key, 0)) - held.get(key, 0))
+        unclosed[key] = unclosed.get(key, 0) + more_unclosed
+        held[key] = held.get(key, 0) + more_held
+        copied += max(0, min(3, unclosed[key]) - held[key])
+
+    def pop() -> int:
+        name, children, parents, key = stack.pop()
+        on_stack[name] -= 1
+        if key:
+            recount(key, 0, -1)
+        if children:
+            stack[-1][2] += 1
+        return children * parents
+
+    def close(name: str) -> int:
+        work = 0
+        while stack[-1][0] != name:
+            work += pop()
+        return work + pop()
+
+    for tag in _TAG.finditer(raw):
+        attrs = len(_ATTR.findall(tag.group(3)))
+        attr_work += attrs * attrs
+        name = tag.group(2).lower()
+        if tag.group(1):
+            if on_stack.get(name):
+                width_work += close(name)
+            if still_open.get(name):
+                still_open[name] -= 1
+                depth -= 1
+            if unclosed_by_name.get(name):
+                recount(unclosed_by_name[name].pop(), -1, 0)
+        else:
+            if name in _PEERS and on_stack.get(name):
+                width_work += close(name)
+            if name in _CLOSES_P and on_stack.get("p"):
+                width_work += close("p")
+            stack[-1][1] += 1
+            if name not in _VOID:
+                key = (name, tag.group(3).strip()) if name in _FORMATTING else None
+                stack.append([name, 0, 0, key])
+                on_stack[name] = on_stack.get(name, 0) + 1
+                if key:
+                    unclosed_by_name.setdefault(name, []).append(key)
+                    recount(key, 1, 1)
+                if not (name in _PEERS and still_open.get(name)):
+                    still_open[name] = still_open.get(name, 0) + 1
+                    depth += 1
+        depth_work += depth
+        format_work += copied
+        if attr_work > _MAX_ATTR_WORK or depth_work > _MAX_DEPTH_WORK or width_work > _MAX_WIDTH_WORK or format_work > _MAX_FORMAT_WORK:
+            return False
+    while len(stack) > 1:
+        width_work += pop()
+    return width_work + stack[0][1] * stack[0][2] <= _MAX_WIDTH_WORK
 
 
 def safe_html(raw: str, inline: dict[str, str] | None = None) -> str:
@@ -237,7 +353,10 @@ def parse(raw: bytes) -> Parsed:
                     continue
             attachments.append({"part": index, "name": _clean_header(name)[:255] or "attachment", "mime": kind[:120], "size": len(payload)})
     out.text = plain or html_to_text(rich)
-    out.html = safe_html(rich, inline) if rich else ""
+    if rich and html_fits(rich):
+        out.html = safe_html(rich, inline)
+    else:
+        out.html_clipped = bool(rich)
     out.attachments = attachments[:100]
     out.snippet = _SPACE.sub(" ", _strip_quoted(out.text))[:240].strip()
     return out

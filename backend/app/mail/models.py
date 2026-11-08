@@ -88,6 +88,8 @@ class MailMessage(UUIDPKMixin, Base):
     snippet: Mapped[str] = mapped_column(String(240), nullable=False, default="", server_default="")
     body_text: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     body_html: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    # Its HTML was too big to clean safely, so it shows as plain text (``parse.html_fits``).
+    html_clipped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     attachments: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False, default=list, server_default="[]")
     unsubscribe: Mapped[str] = mapped_column(String(1000), nullable=False, default="", server_default="")
     seen: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

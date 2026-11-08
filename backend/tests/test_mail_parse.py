@@ -171,3 +171,91 @@ def test_quick_image_handling_matches_the_plain_pattern(raw, monkeypatch):
     parse.safe_html(raw, {"logo": "data:image/png;base64,AAAA"})
     plain = re.compile(r"""<img\b[^>]*?\bsrc\s*=\s*(["'])(.*?)\1""", re.I | re.S)
     assert seen == [m.group(2).strip() for m in plain.finditer(raw)]
+
+
+# ---- HTML too big or tangled to clean quickly
+#
+# Even with the regexes fixed, bleach's parser (html5lib) is slower than linear on
+# some shapes: at 1 MB these took 20 seconds to 2 minutes. Past ``html_fits`` the
+# email is shown as plain text. Measured on the dev machine: a 256 KB newsletter
+# cleans in 0.2 s, and the slowest shape that still fits takes about a second.
+
+
+def _newsletter(stories: int) -> str:
+    story = (
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;background-color:#ffffff">'
+        '<tr><td style="padding:24px;font-family:Helvetica,Arial,sans-serif;font-size:16px;color:#333333">'
+        '<h2 style="margin:0 0 12px">Story {i}</h2><p style="margin:0 0 16px">' + "Plenty of words about what happened this week. " * 12 + "&nbsp;&copy;</p>"
+        '<a href="https://example.com/r?id={i}&amp;u=1" style="color:#ffffff;background-color:#B85C38">Read more</a>'
+        '<img src="https://cdn.example.com/{i}.png" width="536" alt="Story {i}"></td></tr></table>'
+    )
+    return "<html><body><center>" + "".join(story.format(i=i) for i in range(stories)) + "</center></body></html>"
+
+
+_TOO_MUCH = {
+    "1 MB of <img": "<img " * 209_715,
+    "1 MB of <": "<" * 1_048_576,
+    "1 MB of <br": "<br " * 262_144,
+    "nested 20,000 deep": "<div>" * 20_000,
+    "60,000 attributes": "<p " + "a " * 60_000,
+    "20,000 different attributes": "<p " + "".join(f"a{i} " for i in range(20_000)),
+    "attributes after a quoted >": '<p z=">" ' + "a " * 60_000,
+    "30,000 unclosed <b>": "<b>" * 30_000,
+    "100,000 stray &": "&" * 100_000,
+    "siblings with something inside": "<b><p></b>" * 15_000,
+    "a newsletter over 256 KB": _newsletter(250),
+}
+
+
+@pytest.mark.parametrize("name", list(_TOO_MUCH))
+def test_html_too_big_to_clean_quickly_shows_the_text_part(name):
+    raw = build(html=_TOO_MUCH[name], text="The plain version")
+    took = _seconds(lambda: parse.parse(raw))
+    found = parse.parse(raw)
+    assert took < 3
+    assert found.html == "" and found.html_clipped
+    assert found.text.strip() == "The plain version"
+
+
+def test_without_a_text_part_the_html_is_turned_into_text():
+    found = parse.parse(build(html="<p>Hello <b>there</b></p>" + "<p>More news &amp; views.</p>" * 12_000, text=None))
+    assert found.html == "" and found.html_clipped
+    assert found.text.startswith("Hello there") and "More news & views." in found.text
+    assert found.snippet.startswith("Hello there")
+
+
+def test_a_big_ordinary_newsletter_is_still_formatted():
+    raw = _newsletter(200)
+    assert 200 * 1024 < len(raw) < parse.MAX_HTML and parse.html_fits(raw)
+    took = _seconds(lambda: parse.parse(build(html=raw)))
+    found = parse.parse(build(html=raw))
+    assert not found.html_clipped and found.html.strip() == parse.safe_html(raw)
+    assert "<table" in found.html and 'data-remote-src="https://cdn.example.com/7.png"' in found.html
+    assert took < 3
+
+
+def test_mail_without_html_isnt_marked_clipped():
+    found = parse.parse(build())
+    assert found.html == "" and not found.html_clipped
+
+
+# The slowest shapes found that still fit: each is just under one of the limits.
+_JUST_FITS = {
+    "nesting": "<div>" * 1_700,
+    "attributes": "<p " + "a " * 1_400,
+    "stray <": "<" * 19_000,
+    "siblings with something inside": "<b><p></b>" * 6_000,
+    "unclosed formatting": "".join(f"<b x={i}>" for i in range(1_700)),
+    "formatting copied into each paragraph": "".join(f"<p><b x={i}>" for i in range(200)),
+}
+
+
+@pytest.mark.parametrize("name", list(_JUST_FITS))
+def test_the_slowest_html_that_fits_is_still_quick(name):
+    assert parse.html_fits(_JUST_FITS[name])
+    assert _seconds(lambda: parse.safe_html(_JUST_FITS[name])) < 5
+
+
+def test_checking_whether_it_fits_is_quick():
+    for raw in [*_TOO_MUCH.values(), *_JUST_FITS.values()]:
+        assert _seconds(lambda: parse.html_fits(raw)) < 0.5

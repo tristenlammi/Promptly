@@ -58,6 +58,41 @@ def test_what_you_type_cant_add_script_or_headers():
     assert m["Bcc"] is None and m["Subject"] == "Hi Bcc: evil@example.com"
 
 
+def test_a_draft_too_big_to_clean_quickly_goes_as_plain_text():
+    import time
+
+    # Sending runs in the app itself, so a tangled draft mustn't hold it up.
+    tangled = "<p>Hi <b>there</b></p>" + "<div>" * 20_000
+    start = time.perf_counter()
+    m = compose.build(_account(), compose.Draft(to=["b@example.com"], cc=[], subject="s", text="Hi there", html=tangled))
+    assert time.perf_counter() - start < 3
+    rich = m.get_body(("html",)).get_content()
+    assert "<div>" not in rich and "<b>" not in rich and rich.startswith("Hi there")
+    # Without a text version, the words come from the HTML.
+    m = compose.build(_account(), compose.Draft(to=["b@example.com"], cc=[], subject="s", text="", html=tangled))
+    assert m.get_body(("plain",)).get_content().startswith("Hi there")
+
+
+async def test_an_email_too_big_to_clean_is_kept_as_text_and_says_so(client, db):  # noqa: F811
+    u = await mk_user(db, "owner")
+    account = await mk_account(db, u)
+    folder = MailFolder(account_id=account.id, path="INBOX", name="Inbox", role="inbox")
+    db.add(folder)
+    await db.commit()
+    from email.message import EmailMessage
+
+    m = EmailMessage()
+    m["From"], m["To"], m["Subject"], m["Message-ID"] = "sam@example.com", "me@example.com", "Huge", "<huge@x>"
+    m.set_content("The plain version")
+    m.add_alternative("<div>" * 20_000 + "Tangled", subtype="html")
+    await worker._store(account.id, folder.id, [(7, [], m.as_bytes())])
+    row = await db.scalar(select(MailMessage).where(MailMessage.folder_id == folder.id, MailMessage.uid == 7))
+    shown = (await client.get(f"/api/mail/threads/{account.id}/{row.thread_key}", headers=H(u))).json()["messages"][0]
+    assert shown["html_clipped"] is True and shown["html"] == "" and shown["text"].strip() == "The plain version"
+    ordinary = await mk_message(db, account)
+    assert (await client.get(f"/api/mail/threads/{account.id}/{ordinary.thread_key}", headers=H(u))).json()["messages"][0]["html_clipped"] is False
+
+
 def test_attachments_go_along_and_odd_names_and_types_are_tamed():
     files = [compose.File("a\r\nX-Evil: 1.pdf", "application/pdf", b"pdf"), compose.File("b.eml", "message/rfc822", b"x"), compose.File("c", "not a type", b"y")]
     raw = compose.build(_account(), compose.Draft(to=["b@example.com"], cc=[], subject="s", text="x", files=files)).as_bytes()

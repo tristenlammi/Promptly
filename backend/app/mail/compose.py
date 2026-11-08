@@ -65,7 +65,12 @@ def build(account: MailAccount, draft: Draft, reply_to: MailMessage | None = Non
         message["References"] = " ".join(x for x in (reply_to.references, reply_to.message_id) if x)
 
     text = draft.text.rstrip()
-    rich = parse.safe_html(draft.html) if draft.html.strip() else _escaped(text)
+    if draft.html.strip() and parse.html_fits(draft.html):
+        rich = parse.safe_html(draft.html)
+    else:
+        # No HTML, or too much to clean quickly (sending runs in the app, so it would hold everyone up).
+        text = text or parse.html_to_text(draft.html)
+        rich = _escaped(text)
     if account.signature:
         text += f"\n\n-- \n{account.signature}"
         rich += f"<br><br>-- <br>{_escaped(account.signature)}"

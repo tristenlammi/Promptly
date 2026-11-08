@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+- Mail: a very large or deeply tangled HTML email could still tie up the mail worker for minutes while it was cleaned. Such an email now shows as plain text, with a note saying so. Sending a draft that big goes out as plain text too.
+
 ## [0.30.0] - 2026-11-08
 
 ### Fixed

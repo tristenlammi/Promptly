@@ -431,7 +431,7 @@ async def thread(account_id: uuid.UUID, key: str, db: AsyncSession = Depends(get
             "to": m.to_addrs, "cc": m.cc_addrs, "at": m.sent_at.isoformat(), "text": m.body_text, "html": m.body_html,
             "attachments": m.attachments, "unsubscribe": m.unsubscribe, "seen": m.seen, "starred": m.flagged, "reply_to": m.reply_to,
             "invite": {**m.invite, **(await apps.invite_state(db, user, m.invite["uid"]))} if m.invite else None,
-            "remote_images": "data-remote-src" in m.body_html,
+            "remote_images": "data-remote-src" in m.body_html, "html_clipped": m.html_clipped,
         })
     labels = (await db.execute(select(MailThreadLabel.label_id).where(MailThreadLabel.account_id == account_id, MailThreadLabel.thread_key == key))).scalars()
     snooze = await db.get(MailSnooze, (account_id, key))
