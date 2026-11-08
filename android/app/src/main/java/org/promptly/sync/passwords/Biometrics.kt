@@ -2,7 +2,7 @@
 // Keystore key that needs a strong biometric for every use and dies when a new biometric
 // is enrolled. The master password never reaches the Keystore. Reprompt uses `confirm`,
 // which has to open what's sealed under that same key. Passkeys ask for the passkey PIN
-// instead (D-PIN-1), and after five wrong PINs a biometric won't unlock until the master
+// instead (D86), and after five wrong PINs a biometric won't unlock until the master
 // password has.
 package org.promptly.sync.passwords
 

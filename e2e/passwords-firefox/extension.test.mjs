@@ -537,7 +537,7 @@ test("Firefox: a content script can't read storage.session, or ask for secrets",
   await closeTabs();
 });
 
-/** The passkey PIN (D-PIN-1), typed into our passkey window. The first time, it's typed twice. */
+/** The passkey PIN (D86), typed into our passkey window. The first time, it's typed twice. */
 const PASSKEY_PIN = "482913";
 async function typePasskeyPin(pin = PASSKEY_PIN) {
   const box = await driver.wait(until.elementLocated(By.css("#pin")), 15000);

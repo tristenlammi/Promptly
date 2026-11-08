@@ -1,5 +1,5 @@
 // The passkey PIN: asked before every passkey sign-in and every new passkey, on every client
-// (DECISIONS D-PIN-1). One per account, synced: only a verifier is kept, inside a system item
+// (DECISIONS D86). One per account, synced: only a verifier is kept, inside a system item
 // in the personal vault, so the server sees an encrypted item like any other. It's a check that
 // the person is there and means it while the vault is unlocked. It isn't encryption: nothing is
 // sealed under it. Wrong tries are counted on each device, where no web page can reach the count.

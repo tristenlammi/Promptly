@@ -1,4 +1,4 @@
-// The passkey PIN: asked before every passkey sign-in and every new passkey (DECISIONS D-PIN-1).
+// The passkey PIN: asked before every passkey sign-in and every new passkey (DECISIONS D86).
 // Mirrors passkeypin.ts, so a PIN set on one client works on all. One per account, synced: only a
 // verifier is kept, in a "prefs" system item in the personal vault, encrypted like any item. It's
 // a check that the person is there and means it while the vault is unlocked, not encryption.

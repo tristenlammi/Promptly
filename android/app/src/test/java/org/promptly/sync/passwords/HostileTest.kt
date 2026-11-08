@@ -445,7 +445,7 @@ class HostileTest {
         assertEquals(before, s.authKeys.size)
     }
 
-    /** D-PIN-1: five wrong passkey PINs leave only the master password, against the real client and
+    /** D86: five wrong passkey PINs leave only the master password, against the real client and
      *  a real (if hostile) server, and the PIN itself syncs as a system item the server can't read. */
     @Test fun fiveWrongPasskeyPinsLeaveOnlyTheMasterPassword() {
         val w = fresh()

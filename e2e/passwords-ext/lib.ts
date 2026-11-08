@@ -192,7 +192,7 @@ export function menuFrame(page: Page): Frame | undefined {
   return page.frames().find((f) => f.url().includes("/menu.html"));
 }
 
-/** The passkey PIN every test vault ends up with (D-PIN-1). */
+/** The passkey PIN every test vault ends up with (D86). */
 export const PASSKEY_PIN = "482913";
 
 /** Types the passkey PIN in our passkey window. The first time, there's a box to type it again. */

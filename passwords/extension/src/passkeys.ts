@@ -356,7 +356,7 @@ export async function handlePasskey(
     if (allPasskeys(c).some((p) => p.passkey.rpId === o._rp && excluded.includes(siteCredentialId(p.passkey.credentialId)))) return finish(fail("InvalidStateError", "That passkey is already saved here."));
   }
 
-  // The passkey PIN, every time (D-PIN-1). Only after it's right does the site hear the person
+  // The passkey PIN, every time (D86). Only after it's right does the site hear the person
   // was verified. The window can't be reached by a page, and the count lives where a page can't
   // reset it. No guard means no way to count, so nothing's signed.
   if (!guard) return { error: "locked" };

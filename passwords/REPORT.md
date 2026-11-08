@@ -42,7 +42,7 @@ Three things matter most:
 - A five-section toolbar panel (D64).
 - Passkey offers, and a passkey window with no click when a saved passkey matches (D66, D71).
 - A lock setting for each browser, up to Never (D75).
-- User verification from an unlocked vault plus a click (D74), since replaced by a passkey PIN every time (D-PIN-1).
+- User verification from an unlocked vault plus a click (D74), since replaced by a passkey PIN every time (D86).
 
 D75 knowingly weakens what the plan asked for. `SECURITY.md` says how.
 

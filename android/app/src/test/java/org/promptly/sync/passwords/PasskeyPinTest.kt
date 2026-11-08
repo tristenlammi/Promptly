@@ -1,4 +1,4 @@
-// The passkey PIN's rules, verifier and wrong-try count (D-PIN-1), mirroring passkeypin.test.ts.
+// The passkey PIN's rules, verifier and wrong-try count (D86), mirroring passkeypin.test.ts.
 // The fixed vector is the same one, so a PIN set on Android works in the extension and back.
 package org.promptly.sync.passwords
 

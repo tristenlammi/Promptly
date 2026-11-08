@@ -180,7 +180,7 @@ test("an item marked to ask still asks, whatever the site wants, and a wrong ans
   await page.close();
 });
 
-// ---- The passkey PIN (D-PIN-1) --------------------------------------------------------------
+// ---- The passkey PIN (D86) --------------------------------------------------------------
 
 async function askForAna(page: Page) {
   await page.goto(siteA("webauthn.html"));

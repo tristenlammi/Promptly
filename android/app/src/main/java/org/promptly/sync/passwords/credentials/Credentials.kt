@@ -416,7 +416,7 @@ class CredentialActivity : FragmentActivity() {
             r.onSuccess { (held, seen) ->
                 val (t, origin, hash) = held
                 val (req, item, chosen) = t
-                // The passkey PIN, every time (D-PIN-1). UV is reported only after it. An item marked
+                // The passkey PIN, every time (D86). UV is reported only after it. An item marked
                 // to ask for more still asks, after the PIN.
                 val sign = Step.Pin("Sign in to ${req.rpId}", "As ${chosen.passkey.userName}", choosing) {
                     if (item.body.reprompt) step = Step.Biometric("Confirm it's you", item.body.title) { signPasskey(client, item, chosen, req.challenge, origin, hash) }
@@ -527,7 +527,7 @@ class CredentialActivity : FragmentActivity() {
                             failCreate(CreatePublicKeyCredentialDomException(InvalidStateError(), "A passkey for this account already exists here."))
                             return@onSuccess
                         }
-                        // The passkey PIN, every time (D-PIN-1). UV is reported only after it.
+                        // The passkey PIN, every time (D86). UV is reported only after it.
                         step = Step.Pin("Create a passkey for ${parsed.rpId}", "As ${parsed.userName}", choosing) {
                             lifecycleScopeLaunch {
                                 // It goes in the vault off this thread, and a lock can come on the way.

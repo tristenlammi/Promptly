@@ -212,7 +212,7 @@ fun answerPasskeyPin(choosing: Boolean, pin: String, again: String): PinOutcome 
     }
 }
 
-/** Asked before every passkey sign-in and every new passkey (D-PIN-1). The box has the focus, and
+/** Asked before every passkey sign-in and every new passkey (D86). The box has the focus, and
  *  Done signs. The first time, it's chosen here, typed twice. */
 @Composable
 fun PasskeyPinPane(heading: String, detail: String?, choosing: Boolean, onConfirmed: () -> Unit, onCancel: () -> Unit) {

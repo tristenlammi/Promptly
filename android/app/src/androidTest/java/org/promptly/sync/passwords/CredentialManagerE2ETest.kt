@@ -158,7 +158,7 @@ class CredentialManagerE2ETest {
 
         start("createPasskey", "--es json64 ${b64u(utf8(createJson))}")
         pickOurEntry("Continue", "Save passkey to Passwords", "Create")
-        // No passkey PIN yet: it's chosen here, typed twice (D-PIN-1). An easy one is refused.
+        // No passkey PIN yet: it's chosen here, typed twice (D86). An easy one is refused.
         waitFor(By.res("pin-choose"), 25_000)
         Harness.fill("passkey-pin", "1234")
         Harness.fill("passkey-pin-again", "1234")
@@ -203,7 +203,7 @@ class CredentialManagerE2ETest {
         assertEquals(b64u(utf8("user-1")), auth.getValue("userHandle").jsonPrimitive.content)
     }
 
-    /** D-PIN-1: five wrong passkey PINs lock the vault, the sheet says so, and only the master
+    /** D86: five wrong passkey PINs lock the vault, the sheet says so, and only the master
      *  password opens it again, with a fresh count. */
     @Test fun fiveWrongPasskeyPinsLockTheVault() {
         serveAssetLinks(assetLinksFor(TEST_APP, certOf(TEST_APP)))
