@@ -53,6 +53,11 @@ RENDITIONS = ("thumb", "preview", "poster", "video", "original")
 # or animal's crop (PH-3): the "file" is the face (or animal). An edited
 # photo's tile and preview (PH-7). New codes only ever go on the end.
 _CODE = {name: i + 1 for i, name in enumerate((*RENDITIONS, "zip", "version", "export", "face", "thumb_edit", "preview_edit", "basemap"))}
+# Porch (app/porch/media.py): a post's photo or video — the "file" is the
+# ``porch_post_media`` row, so the link names the post — and a group's cover
+# (the "file" is the group). Served only while the viewer can see them.
+PORCH_RENDITIONS = ("porch_thumb", "porch_preview", "porch_poster", "porch_video", "porch_full", "porch_cover")
+_CODE.update({name: len(_CODE) + 1 + i for i, name in enumerate(PORCH_RENDITIONS)})
 _NAME = {v: k for k, v in _CODE.items()}
 # What each rendition is on disk under derived/<file_id>/.
 RENDITION_FILE = {
@@ -179,6 +184,6 @@ def verify(token: str, *, now: float | None = None) -> MediaClaim | None:
 
 
 __all__ = [
-    "MediaClaim", "RENDITIONS", "RENDITION_FILE", "WINDOW_SECONDS", "expiry", "rendition_tag", "shown", "sign", "sign_basemap", "sign_shown", "verify",
+    "MediaClaim", "PORCH_RENDITIONS", "RENDITIONS", "RENDITION_FILE", "WINDOW_SECONDS", "expiry", "rendition_tag", "shown", "sign", "sign_basemap", "sign_shown", "verify",
     "version_tag",
 ]

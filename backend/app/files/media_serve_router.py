@@ -104,6 +104,12 @@ async def serve(token: str, request: Request, db: AsyncSession = Depends(get_db)
         return await _serve_export(claim)
     if claim.rendition == "face":
         return await _serve_crop(db, claim, request)
+    if claim.rendition in media_urls.PORCH_RENDITIONS:
+        # A Porch photo: checked against the post (or group), never against
+        # the poster's file — readable_predicate isn't widened for Porch.
+        from app.porch import media as porch_media
+
+        return await porch_media.serve(db, claim, user, request)
     try:
         row = await _load_readable_file(db, claim.file_id, user)
     except HTTPException:

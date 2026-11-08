@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Porch (being built): the groundwork for sharing photos and news with the people on your server through groups. Groups can be public (anyone can join with one tap) or private (invite only, invisible from outside), with an owner, admins and invites to accept; everyone is in the built-in Everyone group. Posts go to all your groups, one, or a few, and only people in those groups can see them or their photos, which stay in your own Photos library. The Porch app itself comes next.
+
 ## [0.31.0] - 2026-11-08
 
 ### Added

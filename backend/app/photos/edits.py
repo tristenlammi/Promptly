@@ -429,13 +429,21 @@ def _open_full(path: Path, kind: str):  # noqa: ANN201
     return ImageOps.exif_transpose(im)
 
 
-def render(path: Path, file_id: uuid.UUID, kind: str, ops: dict[str, Any], size: tuple[int, int] | None) -> dict[str, Any]:
-    """The edited tile and preview (sync, CPU). → renditions entries."""
+def render(
+    path: Path, file_id: uuid.UUID, kind: str, ops: dict[str, Any], size: tuple[int, int] | None,
+    names: tuple[str, str] = EDIT_FILES,
+) -> dict[str, Any]:
+    """The edited tile and preview (sync, CPU). → renditions entries.
+
+    ``names`` are the (tile, preview) file names under ``derived/<file_id>/``:
+    the library's edited renditions by default; a Porch post's own crop or
+    filter writes ``porch-<media_id>.*`` there instead (app/porch/media.py)."""
     from PIL import Image
 
-    from app.files.derivatives import PREVIEW, THUMB, _save_webp, open_source, rendition_path
+    from app.files.derivatives import PREVIEW, THUMB, _save_webp, derived_dir, open_source
     from app.files.thumbhash import image_to_thumbhash
 
+    thumb_name, preview_name = names
     src = open_source(path, kind)
     if size is None:
         size = src.size
@@ -443,10 +451,10 @@ def render(path: Path, file_id: uuid.UUID, kind: str, ops: dict[str, Any], size:
     im = im.convert("RGBA" if im.mode in ("RGBA", "LA", "PA") else "RGB")
     big = im.copy()
     big.thumbnail((PREVIEW, PREVIEW), Image.LANCZOS, reducing_gap=3.0)
-    out: dict[str, Any] = {"preview.edit.webp": _save_webp(big, rendition_path(file_id, "preview.edit.webp"), 82)}
+    out: dict[str, Any] = {preview_name: _save_webp(big, derived_dir(file_id) / preview_name, 82)}
     small = big.copy()
     small.thumbnail((THUMB, THUMB), Image.LANCZOS)
-    out["thumb.edit.webp"] = _save_webp(small, rendition_path(file_id, "thumb.edit.webp"), 76)
+    out[thumb_name] = _save_webp(small, derived_dir(file_id) / thumb_name, 76)
     w, h = edited_size(size[0], size[1], ops)
     out["edit"] = {"width": w, "height": h, "thumbhash": image_to_thumbhash(small)}
     return out

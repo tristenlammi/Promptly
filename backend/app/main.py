@@ -793,3 +793,8 @@ app.include_router(
     prefix="/api/notifications",
     tags=["notifications"],
 )
+
+# Porch: posts shared through groups, between the people on this Promptly (app/porch).
+from app.porch.router import router as porch_router  # noqa: E402
+
+app.include_router(porch_router, prefix="/api/porch", tags=["porch"])
