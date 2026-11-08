@@ -692,6 +692,10 @@ from app.passwords.share import router as passwords_share_router  # noqa: E402
 app.include_router(passwords_extras_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_share_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_connections_router, prefix="/api/passwords", tags=["passwords"])
+# Stray passwords in your own Mail, Files and Photos (app/passwords/stray_scan.py).
+from app.passwords.stray_scan import router as passwords_stray_router  # noqa: E402
+
+app.include_router(passwords_stray_router, prefix="/api/passwords", tags=["passwords"])
 
 app.include_router(passwords_admin_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_router, prefix="/api/passwords", tags=["passwords"])

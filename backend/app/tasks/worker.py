@@ -222,6 +222,20 @@ async def zip_sweep(ctx: dict) -> int:
     return await asyncio.to_thread(sweep) + await asyncio.to_thread(library_export.sweep)
 
 
+async def pw_stray_scan_job(ctx: dict, user_id: str) -> None:
+    """Passwords: "Find stray passwords" in someone's own Mail, Files and Photos."""
+    from app.passwords.stray_scan import run_scan_job
+
+    await run_scan_job(user_id)
+
+
+async def pw_stray_tick(ctx: dict) -> int:
+    """Passwords: hourly, read only what's new since last time, for the stray count."""
+    from app.passwords.stray_scan import tick
+
+    return await tick()
+
+
 # Arq registers functions by their ``__name__``; pin it to the shared constant
 # so the enqueue side (queue.RUN_TASK) and the worker always agree.
 execute_task_run.__name__ = RUN_TASK
@@ -253,6 +267,7 @@ class WorkerSettings:
         func(index_import_job, timeout=2 * 3600, max_tries=1, keep_result=0),
         # The import itself; the watchdog restarts one that lost its worker.
         func(run_import_job, timeout=24 * 3600, max_tries=1, keep_result=0),
+        func(pw_stray_scan_job, timeout=1800, max_tries=1, keep_result=0),
         # Photos and videos are the media worker's (WP-7.4,
         # app.tasks.media_worker), on their own queue.
     ]
@@ -270,6 +285,7 @@ class WorkerSettings:
         cron(tus_sweep, hour=4, minute=45, run_at_startup=False, unique=True),
         cron(import_sweep, hour=4, minute=55, run_at_startup=False, unique=True),
         cron(import_watchdog, minute={1, 11, 21, 31, 41, 51}, run_at_startup=False, unique=True),
+        cron(pw_stray_tick, minute=35, run_at_startup=False, unique=True),
         cron(
             refresh_connector_catalogs,
             hour={1, 7, 13, 19},
