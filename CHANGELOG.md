@@ -22,6 +22,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ## [Unreleased]
 
 ### Added
+- Passwords: once the Firefox add-on is signed by Mozilla, Install apps offers it with one click from your own server, and it updates itself. `passwords/extension/sign-firefox.mjs` does the signing.
 - Passwords: a passkey PIN, asked every time you sign in with a passkey or make one, in the browser extension and on Android. You choose it the first time, it syncs to all your devices, and it can be changed in Settings. Five wrong in a row lock the vault until the master password.
 - Passwords: "Find stray passwords", in Security check, finds passwords, keys, Wi-Fi passwords, recovery codes and 2FA setup keys left in plain text in your own Mail, Files and Photos. "Save to vault" fills in a new item, then offers to move the original to Trash; "Ignore" hides one for good. It runs when you ask and checks new mail and files hourly.
 - Passwords: aliases on your own domain. Point a domain you own at your mail provider with a catch-all, add it in Passwords → Aliases and run the check, then make a different address for each login from the item editor or the extension's Generator, which fills it into the sign-up form.
@@ -42,7 +43,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 
 ### Fixed
-- Passwords in the browser: on your own vault's pages, the extension no longer offers to save your master password, Secret Key or PINs as a login, and no longer opens its menu over those boxes and the page's buttons.
+- Passwords in the browser: on your own vault's pages, the extension no longer offers to save your master password, Secret Key or PINs as a login, and no longer opens its menu over those boxes and the page's buttons, even before the extension is connected (it used to cover Create vault).
 - Passwords: a Windows checkout could change the line endings of the signed autofill rules file, so its signature no longer matched. Git now leaves that file's bytes alone.
 - Passwords: your devices now decide for themselves which vault is your own, instead of going by what the server calls it, so a server can no longer pass a shared vault off as your personal one. Your devices mark your own vault on their next sync.
 - Passwords: removing an emergency contact now holds on all your devices, and emergency access no longer covers vaults that other people's logins are in.

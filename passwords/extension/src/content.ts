@@ -254,7 +254,7 @@ function main() {
   async function hello() {
     const r = (await send({ t: "hello", url: location.href })) as { r?: { rule: SiteRule | null; pendingSave: boolean; submittedKind?: string; unlocked: boolean; inlineMenu: boolean } } | null;
     rule = r?.r?.rule ?? null;
-    inlineMenu = !!r?.r?.inlineMenu;
+    inlineMenu = !!r?.r?.inlineMenu && !isVaultPage();
     analyze();
     publish();
     // A page that focused its own box before we were ready: that focus was its moment.
@@ -529,7 +529,15 @@ function main() {
     return c;
   }
 
+  /** The vault's own page says so (frontend/passwords.html), for an extension that isn't
+   *  connected yet, or is connected to another server. A page saying it only turns our menu
+   *  and save offer off, never on, so there's nothing to gain by faking it. */
+  function isVaultPage(): boolean {
+    return !!document.querySelector('meta[name="promptly-passwords"][content="vault"]');
+  }
+
   function grab(form0?: FormInfo, snapshot?: Captured) {
+    if (isVaultPage()) return;
     if (!form0 && !snapshot && !best) analyze();
     const form = form0 ?? forms.find((f) => f.fields.some((x) => isPassword(x.role))) ?? best;
     if (!form && !snapshot) return;

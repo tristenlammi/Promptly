@@ -26,6 +26,15 @@ write("PromptlyPasswords.json", { version, ...setup });
 
 const chrome = publish(path.join(here, `../extension/dist/promptly-passwords-chrome-${extVersion}.zip`), "promptly-passwords-chrome.zip");
 const firefox = publish(path.join(here, `../extension/dist/promptly-passwords-firefox-${extVersion}.zip`), "promptly-passwords-firefox.zip");
-write("PromptlyPasswordsExtension.json", { version: extVersion, chrome, firefox });
+// Signed by Mozilla (extension/sign-firefox.mjs): installs with one click and updates itself.
+// Without one for this version, the install page offers the temporary add-on.
+const signedXpi = path.join(here, `../extension/dist/signed/promptly-passwords-firefox-${extVersion}.xpi`);
+const staleXpi = path.join(out, "promptly-passwords-firefox.xpi");
+const firefoxSigned = fs.existsSync(signedXpi) ? publish(signedXpi, "promptly-passwords-firefox.xpi") : null;
+if (!firefoxSigned) fs.rmSync(staleXpi, { force: true });
+write("PromptlyPasswordsExtension.json", { version: extVersion, chrome, firefox, ...(firefoxSigned ? { firefox_signed: firefoxSigned } : {}) });
 
-console.log(`published installer ${version} (${setup.size_bytes} bytes), extension ${extVersion} (${chrome.size_bytes} and ${firefox.size_bytes} bytes)`);
+console.log(
+  `published installer ${version} (${setup.size_bytes} bytes), extension ${extVersion} (${chrome.size_bytes} and ${firefox.size_bytes} bytes)` +
+    (firefoxSigned ? `, signed Firefox add-on (${firefoxSigned.size_bytes} bytes)` : ", no signed Firefox add-on for this version"),
+);

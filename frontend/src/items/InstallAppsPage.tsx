@@ -203,7 +203,7 @@ function WindowsPasswordsCard() {
   );
 }
 
-type ExtensionInfo = { version: string; chrome: { size_bytes: number }; firefox: { size_bytes: number } };
+type ExtensionInfo = { version: string; chrome: { size_bytes: number }; firefox: { size_bytes: number }; firefox_signed?: { size_bytes: number } };
 
 /** The browser extension, until it's in the stores: loaded by hand from a zip. */
 function BrowserExtensionCard() {
@@ -218,8 +218,11 @@ function BrowserExtensionCard() {
             <KeyRound className="h-4 w-4 text-[var(--accent-text)]" /> Promptly Passwords browser extension
           </h2>
           <p className="text-xs text-[var(--text-muted)]">
-            Fills your logins, 2FA codes and passkeys on websites. It isn't in the browser stores yet, so it's installed by hand,
-            and doesn't update itself. Version {info.version}.
+            Fills your logins, 2FA codes and passkeys on websites. It isn't in the browser stores yet.{" "}
+            {info.firefox_signed
+              ? "On Firefox it installs from here and updates itself; on the others it's installed by hand and doesn't."
+              : "It's installed by hand, and doesn't update itself."}{" "}
+            Version {info.version}.
           </p>
         </div>
       </div>
@@ -242,18 +245,34 @@ function BrowserExtensionCard() {
           </li>
         </ol>
         <h3 className="mt-1 font-semibold">Firefox</h3>
-        <ol className="flex flex-col gap-2">
-          <li className="flex flex-wrap items-center gap-2">
-            <span>1.</span>
-            <a href="/downloads/promptly-passwords-firefox.zip" download className={DOWNLOAD_BUTTON}>
-              <Download className="h-4 w-4" /> Download ({megabytes(info.firefox.size_bytes)})
-            </a>
-          </li>
-          <li>
-            2. Go to <code className="font-mono text-xs">about:debugging#/runtime/this-firefox</code>, choose <b>Load Temporary Add-on</b>, and pick the zip.
-          </li>
-          <li>Firefox removes it when it closes, until there's a signed version.</li>
-        </ol>
+        {info.firefox_signed ? (
+          <ol className="flex flex-col gap-2">
+            <li className="flex flex-wrap items-center gap-2">
+              <span>1.</span>
+              {/* No download attribute: Firefox installs a signed add-on it's sent from a link. */}
+              <a href="/downloads/promptly-passwords-firefox.xpi" className={DOWNLOAD_BUTTON} data-testid="firefox-install">
+                <Download className="h-4 w-4" /> Install in Firefox ({megabytes(info.firefox_signed.size_bytes)})
+              </a>
+            </li>
+            <li>
+              2. Firefox asks whether to let this site install it: choose <b>Continue to installation</b>, then <b>Add</b>.
+            </li>
+            <li>It's signed by Mozilla, and Firefox keeps it up to date from then on.</li>
+          </ol>
+        ) : (
+          <ol className="flex flex-col gap-2">
+            <li className="flex flex-wrap items-center gap-2">
+              <span>1.</span>
+              <a href="/downloads/promptly-passwords-firefox.zip" download className={DOWNLOAD_BUTTON}>
+                <Download className="h-4 w-4" /> Download ({megabytes(info.firefox.size_bytes)})
+              </a>
+            </li>
+            <li>
+              2. Go to <code className="font-mono text-xs">about:debugging#/runtime/this-firefox</code>, choose <b>Load Temporary Add-on</b>, and pick the zip.
+            </li>
+            <li>Firefox removes it when it closes, until there's a signed version.</li>
+          </ol>
+        )}
       </div>
     </section>
   );

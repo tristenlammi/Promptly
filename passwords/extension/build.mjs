@@ -18,6 +18,8 @@ const esbuild = await import(pathToFileURL(require.resolve("esbuild")).href);
 const target = process.argv[2] ?? "all";
 const TEST = process.argv.includes("--test");
 const pkg = JSON.parse(fs.readFileSync(path.join(here, "package.json"), "utf8"));
+/** Where a signed Firefox release looks for updates: the list sign-firefox.mjs keeps, on main. */
+const FIREFOX_UPDATE_URL = "https://raw.githubusercontent.com/tristenlammi/Promptly/main/passwords/extension/updates.json";
 const COMMANDS = {
   "fill-last": { suggested_key: { default: "Ctrl+Shift+L" }, description: "Fill the login you used last on this site" },
   "open-menu": { suggested_key: { default: "Ctrl+Shift+Y" }, description: "Open the fill menu on the focused field" },
@@ -62,7 +64,17 @@ function manifest(engine) {
     ...base,
     background: { scripts: ["background.js"], type: "module" },
     sidebar_action: { default_panel: "vault.html", default_title: "Passwords", default_icon: { 16: "icons/16.png", 32: "icons/32.png" } },
-    browser_specific_settings: { gecko: { id: "passwords@promptly.app", strict_min_version: "140.0", data_collection_permissions: { required: ["none"] } }, gecko_android: { strict_min_version: "142.0" } },
+    browser_specific_settings: {
+      gecko: {
+        id: "passwords@promptly.app",
+        strict_min_version: "140.0",
+        data_collection_permissions: { required: ["none"] },
+        // A release is signed by Mozilla as self-distributed (sign-firefox.mjs), so Firefox
+        // checks here for new versions. Test builds are loaded by hand and never update.
+        ...(TEST ? {} : { update_url: FIREFOX_UPDATE_URL }),
+      },
+      gecko_android: { strict_min_version: "142.0" },
+    },
   };
 }
 

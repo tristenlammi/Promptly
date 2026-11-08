@@ -27,7 +27,7 @@ I can't do any of these for you.
 | What | What you need to do | Until then |
 |---|---|---|
 | Chrome Web Store | Developer account and listing. Upload the Chrome zip. Use `passwords/extension/PERMISSIONS.md` for the permissions form. | Load unpacked only |
-| Firefox AMO | Developer account and signing key. Sign the Firefox zip. | Temporary add-on only, gone on restart |
+| Firefox, self-distributed | Below: a Mozilla developer account and API key, then `sign-firefox.mjs`. No store listing needed | Temporary add-on only, gone on restart |
 | Edge Add-ons | Optional. Same Chrome zip. | Edge can install from the Chrome Web Store |
 | Windows code signing | A certificate, then sign the installer | SmartScreen warns on the installer |
 | Tauri updater | Make an updater key. Fill in `pubkey` and `endpoints` in `passwords/desktop/src-tauri/tauri.conf.json`. | Both are empty, so the Windows app can't update itself |
@@ -46,6 +46,16 @@ node rules/sign-pack.mjs --key C:\somewhere-safe\promptly-pack-key.jwk.json
 ```
 
 `rules/test-key.jwk.json` is a throwaway key that only test builds trust. It isn't in release builds, and it has no value.
+
+**Firefox from your own Promptly.** Mozilla signs add-ons you hand out yourself ("unlisted"), for free and with no store page. A signed copy installs with one click from Install apps on your server, and updates itself from `passwords/extension/updates.json` on `main` in the GitHub repo.
+
+1. Make an account at https://addons.mozilla.org and create an API key at https://addons.mozilla.org/developers/addon/api/key/. Keep the secret out of the repo.
+2. In `passwords/extension`: `node build.mjs firefox`, then, with the key in `WEB_EXT_API_KEY` and `WEB_EXT_API_SECRET`, `node sign-firefox.mjs`. It sends the build and the source it came from to Mozilla, waits for the signature (usually minutes, up to 15), and adds the version to `updates.json`.
+3. Run the `gh release create` line it prints. That puts the signed file on a GitHub release, where `updates.json` points.
+4. Commit `updates.json` and push it to `main`. Copies already installed pick up the new version within about a day.
+5. In `passwords/desktop`: `node publish-downloads.mjs`, then rebuild the frontend. Install apps then shows "Install in Firefox" instead of the temporary steps.
+
+Every later version: bump `version` in `passwords/extension/package.json`, then steps 2 to 5. The first signing claims the add-on id `passwords@promptly.app` for your account. If Mozilla says it's taken, change `id` in `build.mjs` and `ID` in `sign-firefox.mjs` to another address you control, before anyone has installed it.
 
 **Android and Play.**
 - `REQUEST_INSTALL_PACKAGES` and `HIDE_OVERLAY_WINDOWS` are in the manifest. Play asks for a reason for the first, and it may not accept it, so a Play build may have to drop the updater.

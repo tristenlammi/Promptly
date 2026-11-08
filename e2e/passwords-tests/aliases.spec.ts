@@ -111,7 +111,8 @@ test("an alias made in the item editor is saved with the login, counted, flagged
   // "This sender is fine" clears it; then the alias is turned off.
   await row.getByRole("button", { name: "This sender is fine" }).click();
   await expect(row.getByTestId("alias-warning")).toHaveCount(0);
-  await row.getByLabel(`${address} is on`).uncheck();
+  // The box follows the server, so it changes once the answer is back, not on the click.
+  await row.getByLabel(`${address} is on`).click();
   await expect(row.getByLabel(`${address} is on`)).not.toBeChecked();
   await expect(row).toContainText("off since");
   await ctx.close();

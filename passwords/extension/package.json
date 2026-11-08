@@ -9,7 +9,7 @@
     "build:firefox": "node build.mjs firefox",
     "build": "node build.mjs all",
     "build:test": "node build.mjs all --test",
-    "lint:firefox": "web-ext lint --source-dir dist/firefox",
+    "lint:firefox": "web-ext lint --self-hosted --source-dir dist/firefox",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
