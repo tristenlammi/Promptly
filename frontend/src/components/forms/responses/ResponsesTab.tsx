@@ -38,6 +38,7 @@ import { cn } from "@/utils/cn";
 
 import { ChoiceBars, ScaleColumns, pct, type ChoiceRow } from "./charts";
 import { FileList, FileStrip } from "./Files";
+import { Summarise } from "./Summarise";
 import { SheetCard } from "./SheetCard";
 
 /**
@@ -173,7 +174,7 @@ export function ResponsesTab({
         ) : (
           <>
             <ViewSwitch view={view} onView={setView} />
-            {view === "summary" && <SummaryView summary={data} narrow={isPhone} onQuestion={openQuestion} onAnswer={showAnswer} />}
+            {view === "summary" && <SummaryView fileId={fileId} summary={data} narrow={isPhone} onQuestion={openQuestion} onAnswer={showAnswer} />}
             {view === "question" && (
               <QuestionView
                 fileId={fileId}
@@ -438,11 +439,13 @@ function Card({ q, children }: { q: SummaryQuestion; children: ReactNode }) {
 }
 
 function SummaryView({
+  fileId,
   summary,
   narrow,
   onQuestion,
   onAnswer,
 }: {
+  fileId: string;
   summary: ResponsesSummary;
   narrow: boolean;
   onQuestion: (id: string) => void;
@@ -453,6 +456,7 @@ function SummaryView({
       {summary.questions.map((q) => (
         <Card key={q.id} q={q}>
           {q.answered === 0 ? <p className="text-sm text-[var(--text-muted)]">No answers to this question yet.</p> : <QuestionSummary q={q} narrow={narrow} onQuestion={onQuestion} onAnswer={onAnswer} />}
+          {TEXTY.has(q.kind) && <Summarise fileId={fileId} questionId={q.id} answered={q.answered} onAnswer={onAnswer} />}
         </Card>
       ))}
     </div>

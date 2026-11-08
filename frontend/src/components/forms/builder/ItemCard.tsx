@@ -7,13 +7,20 @@ import {
   GripVertical,
   Image as ImageIcon,
   ImagePlus,
+  Loader2,
   MoreVertical,
   Plus,
+  Sparkles,
   Square,
   Trash2,
   X,
 } from "lucide-react";
 import { forwardRef, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+
+import { editorAiApi } from "@/api/editorAi";
+import { NO_MODEL_MESSAGE, useEditorModel } from "@/lib/editorModel";
+import { toast } from "@/store/toastStore";
+import { apiErrorMessage } from "@/utils/apiError";
 
 import type {
   CheckboxesConfig,
@@ -750,6 +757,89 @@ export function goToChoices(sections: SectionInfo[], fromIndex: number): { value
   return out;
 }
 
+/** "Suggest options" (AI, WP-F1.7): a few options for this question, shown
+ *  first — Add them, or don't. */
+function SuggestOptions({
+  fileId,
+  question,
+  existing,
+  room,
+  onAdd,
+}: {
+  fileId: string;
+  question: string;
+  existing: string[];
+  room: number;
+  onAdd: (labels: string[]) => void;
+}) {
+  const { providerId, modelId } = useEditorModel();
+  const [busy, setBusy] = useState(false);
+  const [got, setGot] = useState<string[] | null>(null);
+  const run = async () => {
+    if (!question.trim()) {
+      toast.error("Give the question a title first, so the AI knows what to suggest.");
+      return;
+    }
+    if (!providerId || !modelId) {
+      toast.error(NO_MODEL_MESSAGE);
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await editorAiApi.form(fileId, {
+        provider_id: providerId,
+        model_id: modelId,
+        mode: "options",
+        question,
+        existing: existing.filter((x) => !/^Option \d+$/.test(x)),
+      });
+      setGot(r.options.map((o) => o.label).slice(0, Math.max(0, room)));
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "No options came back. Try again."));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <button
+        type="button"
+        className="inline-flex min-h-[40px] items-center gap-1.5 rounded-md px-2 font-medium text-[var(--accent-text)] hover:bg-[var(--hover)] disabled:opacity-40"
+        disabled={busy || room <= 0}
+        onClick={() => void run()}
+      >
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Sparkles className="h-4 w-4" aria-hidden="true" />} Suggest options
+      </button>
+      {got && (
+        <div className="mt-1 flex w-full flex-col gap-2 rounded-md border border-dashed border-[var(--border)] p-2" role="group" aria-label="Suggested options">
+          <ul className="flex flex-wrap gap-1.5">
+            {got.map((l) => (
+              <li key={l} className="rounded-full bg-[var(--hover)] px-2.5 py-1 text-xs text-[var(--text-muted)]">
+                {l}
+              </li>
+            ))}
+          </ul>
+          <span className="flex gap-1">
+            <button
+              type="button"
+              className="min-h-[36px] rounded-md bg-[var(--accent)] px-3 text-xs font-medium text-white"
+              onClick={() => {
+                onAdd(got);
+                setGot(null);
+              }}
+            >
+              Add these
+            </button>
+            <button type="button" className="min-h-[36px] rounded-md px-3 text-xs text-[var(--text-muted)] hover:bg-[var(--hover)]" onClick={() => setGot(null)}>
+              No thanks
+            </button>
+          </span>
+        </div>
+      )}
+    </>
+  );
+}
+
 function ChoiceEditor(p: KindEditorProps) {
   const { item, setConfig } = p;
   const c = item.config as MultipleChoiceConfig | CheckboxesConfig | DropdownConfig;
@@ -915,6 +1005,19 @@ function ChoiceEditor(p: KindEditorProps) {
         >
           <Plus className="h-4 w-4" /> Add option
         </button>
+        <SuggestOptions
+          fileId={p.fileId}
+          question={item.title}
+          existing={c.options.map((o) => o.label)}
+          room={100 - c.options.length}
+          onAdd={(labels) => {
+            // Blank "Option 1"s the form started with make way for the suggestions.
+            setOptions((list) => {
+              const kept = list.filter((o) => !/^Option \d+$/.test(o.label) || o.limit || o.image_asset_id);
+              return [...kept, ...labels.map((l) => newOption(l))].slice(0, 100);
+            });
+          }}
+        />
         {kind !== "dropdown" && !other && (
           <>
             <span className="text-[var(--text-muted)]">or</span>

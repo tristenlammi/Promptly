@@ -79,8 +79,9 @@ test("the owner reads, steps through, deletes and downloads answers", async ({ a
   // Today says how many are new (never what they say).
   await alice.goto("/today");
   const card = alice.locator("section").filter({ has: alice.getByRole("heading", { name: "Forms", exact: true }) });
-  await expect(card.getByText("3 new answers")).toBeVisible({ timeout: 20_000 });
-  await expect(card.getByText(title)).toBeVisible();
+  // This form's row says 3 new (other specs' forms may have new answers too,
+  // so the card's total isn't checked here).
+  await expect(card.getByRole("link", { name: new RegExp(title) })).toContainText("3 new", { timeout: 20_000 });
   await expect(card.getByText("HYPERLINK")).toHaveCount(0);
 
   // The Responses tab: total, "new since you last looked", the summary.

@@ -238,7 +238,7 @@ test("every question type, sections, settings and the look", async ({ alice: pag
   const made = await page.request.post("/api/forms", { headers: { Authorization: auth }, data: {} });
   const fileId = (await made.json()).file.id as string;
   await page.goto(`/files/form/${fileId}`);
-  await expect(page.getByText("No questions yet. Add your first one.")).toBeVisible();
+  await expect(page.getByText(/^No questions yet\. Add your first one/)).toBeVisible();
 
   const kinds: [string, string][] = [
     ["Short answer", "short_text"],

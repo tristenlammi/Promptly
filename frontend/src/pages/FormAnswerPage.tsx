@@ -1,4 +1,4 @@
-import { CloudOff, Flag, Loader2, LogIn } from "lucide-react";
+import { CalendarPlus, CloudOff, Flag, Loader2, LogIn } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 
@@ -450,6 +450,7 @@ export function FormAnswerPage() {
                 Change your answer
               </button>
             )}
+            {page.event && <AddToCalendar token={token} title={page.event.title} />}
             {s.allow_another && !(s.one_per_person && signedIn) && (
               <button type="button" className="pf-btn pf-btn-ghost border" style={{ borderColor: "var(--pf-border)" }} onClick={anotherAnswer}>
                 Send another answer
@@ -640,6 +641,40 @@ function Message({ title, text, children }: { title: string; text: string; child
         </p>
       </div>
     </Shell>
+  );
+}
+
+/** "Add to my calendar": the event this RSVP is for, as an .ics file. */
+function AddToCalendar({ token, title }: { token: string; title: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "error">("idle");
+  const go = async () => {
+    setState("busy");
+    try {
+      const blob = await formAnswerApi.ics(token);
+      const url = URL.createObjectURL(new Blob([blob], { type: "text/calendar" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${title.replace(/[^\w \-]+/g, "").trim() || "event"}.ics`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      setState("idle");
+    } catch {
+      setState("error");
+    }
+  };
+  return (
+    <>
+      <button type="button" className="pf-btn pf-btn-ghost border" style={{ borderColor: "var(--pf-border)" }} onClick={() => void go()} disabled={state === "busy"}>
+        <CalendarPlus className="h-4 w-4" aria-hidden="true" /> Add to my calendar
+      </button>
+      {state === "error" && (
+        <p role="alert" className="w-full text-sm" style={{ color: "var(--pf-error)" }}>
+          The event couldn&apos;t be downloaded. Try again.
+        </p>
+      )}
+    </>
   );
 }
 

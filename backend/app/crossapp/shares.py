@@ -10,6 +10,13 @@ room access" (:func:`grant_room`) where the thing can be shared — a Drive
 file or folder (a view-only share), a photo (its file) or an album (added
 as viewers). Tasks, recipes and trips live inside an app file that holds
 all of them, so they're seen by whoever the app file is already shared with.
+
+A **form** (Forms WP-F1.7) is different: its card is for answering, not
+opening the form. Anyone the form's audience lets answer sees it — every
+signed-in person for a form for people on this server, everyone for a link
+form — with the title, a line of its description, when it closes, and
+**Fill in** (its answer link). It never gives access to the form itself
+(``id`` is the form's file id; Porch posts show the same card).
 """
 from __future__ import annotations
 
@@ -23,10 +30,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import User
 
-KINDS = ("file", "folder", "photo", "album", "task", "recipe", "trip")
+KINDS = ("file", "folder", "photo", "album", "task", "recipe", "trip", "form")
 LABELS = {
     "file": "a file", "folder": "a folder", "photo": "a photo", "album": "an album",
-    "task": "a task", "recipe": "a recipe", "trip": "a trip",
+    "task": "a task", "recipe": "a recipe", "trip": "a trip", "form": "a form",
 }
 # Kinds whose own sharing can let the room in.
 GRANTABLE = ("file", "folder", "photo", "album")
@@ -247,6 +254,49 @@ async def _item_card(db: AsyncSession, user: User, share: dict, kind: str) -> di
     }
 
 
+async def _form_card(db: AsyncSession, user: User, share: dict) -> dict | None:
+    """A form to fill in: for anyone its audience lets answer, through its
+    live answer link (no link, in the trash, or "doesn't exist" for them:
+    no card)."""
+    from app.files.models import UserFile
+    from app.forms import service
+    from app.forms.access import answer_state, form_access, form_for_shell, link_answers_allowed
+
+    fid = _uuid(share.get("id"))
+    shell = await db.get(UserFile, fid) if fid else None
+    if shell is None or shell.source_kind != "form" or shell.trashed_at is not None:
+        return None
+    form = await form_for_shell(db, shell)
+    link = await service.live_link(db, shell) if form is not None else None
+    if form is None or link is None:
+        return None
+    state = answer_state(form=form, shell=shell, link=link, user=user, link_answers_allowed=await link_answers_allowed(db))
+    if state in ("gone", "sign_in"):
+        return None
+    defn = form.definition or {}
+    bits = ["Form"]
+    if state == "closed":
+        bits.append("Closed")
+    elif form.close_at is not None:
+        from app.notifications.quiet import zone_of
+
+        local = form.close_at.astimezone(zone_of(user.settings))
+        bits.append(f"Closes {local:%a} {local.day} {local:%b}, " + local.strftime("%I:%M %p").lstrip("0").lower())
+    desc = " ".join(str(defn.get("description") or "").split())
+    out = {
+        "title": defn.get("title") or "Untitled form",
+        "subtitle": " · ".join(bits),
+        "description": desc[:140] + ("…" if len(desc) > 140 else ""),
+        "thumb": None,
+        "href": f"/f/{link.token}",
+        "action": "View" if state == "closed" else "Fill in",
+    }
+    # People who can change the form also get a way to it (never granted here).
+    if await form_access(db, shell, user) != "none":
+        out["manage_href"] = f"/files/form/{shell.id}?tab=responses"
+    return out
+
+
 async def card(db: AsyncSession, user: User, share: dict) -> dict | None:
     """The card as ``user`` sees it — None when they can't open the thing
     (or it's gone): the client then draws "you don't have access"."""
@@ -259,6 +309,8 @@ async def card(db: AsyncSession, user: User, share: dict) -> dict | None:
         out = await _album_card(db, user, share)
     elif kind in IN_ITEM:
         out = await _item_card(db, user, share, kind)
+    elif kind == "form":
+        out = await _form_card(db, user, share)
     else:
         out = None
     if out is None:

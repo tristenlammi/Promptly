@@ -20,6 +20,10 @@ downloaded like any office file. These routes are the builder's:
   · ``GET /{file_id}/export?format=csv|xlsx`` — the Responses tab
   (WP-F1.4); ``PUT /{file_id}/notify`` and ``POST /{file_id}/seen`` — your
   notifications for this form.
+* ``POST /{file_id}/ai/summary`` — Summarise the answers to a text
+  question (WP-F1.7): themes with counts and short quotes, the answers
+  sent as data; nothing stored. ``POST /from-event`` — an RSVP form for a
+  Calendar event, linked to it.
 * ``POST /{file_id}/uploads/{upload_id}/save`` — Save to Files: a copy of
   a file someone sent, into your own Drive (WP-F1.6).
 * ``POST /{file_id}/sheet`` (link a new or existing sheet) ·
@@ -570,6 +574,95 @@ async def export_responses(
             "Cache-Control": "no-store",
         },
     )
+
+
+class _Summarise(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question_id: str = Field(min_length=1, max_length=40)
+    provider_id: uuid.UUID | None = None
+    model_id: str | None = Field(default=None, max_length=200)
+
+
+@router.post("/{file_id:uuid}/ai/summary")
+async def summarise_answers(
+    file_id: uuid.UUID,
+    payload: _Summarise,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """Summarise the answers to one text question: a few themes with counts
+    and short quotes that link to their answers. The answers are other
+    people's words — sent to the model as data inside
+    ``<untrusted_content>``, on a call with no tools — and the result is
+    shown as text and never stored or remembered."""
+    from sqlalchemy import text as sql_text
+
+    from app.files.editor_ai import EditorAiError, _http, _quotas, complete, parse_json, resolve_model
+    from app.forms import ai as form_ai_mod
+    from app.forms.definition import questions
+    from app.models_config.provider import ChatMessage
+
+    _shell, form, _access = await load_form(db, file_id, user)
+    q = next((x for x in questions(form.definition or {}, include_deleted=True) if x["id"] == payload.question_id), None)
+    if q is None or q.get("kind") not in ("short_text", "paragraph"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Only written answers can be summarised.")
+    rows = (
+        await db.execute(
+            sql_text(
+                "SELECT r.number, r.answers ->> CAST(:q AS text) FROM form_responses r "
+                "WHERE r.form_id = :f AND r.deleted_at IS NULL AND jsonb_exists(r.answers, CAST(:q AS text)) "
+                "ORDER BY r.number DESC LIMIT :n"
+            ),
+            {"f": form.id, "q": payload.question_id, "n": form_ai_mod.SUMMARY_ANSWERS},
+        )
+    ).all()
+    answers = [(int(n), str(t or "")) for n, t in rows if (t or "").strip()]
+    if len(answers) < 2:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="There aren't enough answers to summarise yet.")
+    await _quotas(request, user, db)
+    provider, model_id = await resolve_model(db, user, payload.provider_id, payload.model_id)
+    title = (q.get("title") or "").strip() or "Untitled question"
+    prompt = (
+        f"The question was: {title[:300]}\n"
+        f"There are {len(answers)} answers. Everything inside the untrusted_content block is what people wrote:\n\n"
+        + form_ai_mod.untrusted_block(answers)
+    )
+    # No tools on this call: complete() streams a plain answer.
+    raw = await complete(provider, model_id, system=form_ai_mod.SUMMARY_SYSTEM,
+                         messages=[ChatMessage(role="user", content=prompt)], max_tokens=2500, temperature=0.2)
+    try:
+        themes = form_ai_mod.themes_from(parse_json(raw), dict(answers))
+    except EditorAiError as exc:
+        raise _http(exc) from exc
+    if not themes:
+        raise _http(EditorAiError("The summary didn't come back in a usable shape. Try again."))
+    return {"question_id": q["id"], "answers": len(answers), "themes": themes}
+
+
+class _FromEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: uuid.UUID
+
+
+@router.post("/from-event", status_code=status.HTTP_201_CREATED)
+async def rsvp_from_event(
+    payload: _FromEvent,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    """"Add an RSVP form" on a Calendar event: an RSVP form with the
+    event's title, time and place written into its description, linked to
+    the event (both ways). An event that already has one gets it back."""
+    from app.files.router import _file_to_response
+    from app.forms.calendar_link import rsvp_for_event
+
+    shell, made = await rsvp_for_event(db, user, payload.event_id)
+    await db.commit()
+    await db.refresh(shell)
+    return {"file": _file_to_response(shell, caller=user).model_dump(mode="json"), "made": made}
 
 
 @router.post("/{file_id:uuid}/uploads/{upload_id:uuid}/save", status_code=status.HTTP_201_CREATED)

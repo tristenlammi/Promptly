@@ -111,6 +111,22 @@ def _editor_ai_reply(system: str, messages: list) -> str | None:
             {"title": "What the file says", "bullets": ["First point", "Second point"], "notes": "Walk through it.", "sources": [sid]},
             {"title": "Thanks", "bullets": ["Questions?"], "notes": "Close.", "sources": [sid]},
         ]})
+    if system.startswith("You design forms"):
+        # Make with AI (Forms WP-F1.7): two questions, whatever was asked.
+        return json.dumps({"title": "E2E picnic", "description": "Who's coming and what they'll bring", "items": [
+            {"kind": "multiple_choice", "title": "Are you coming?", "required": True, "options": ["Yes", "Maybe", "No"]},
+            {"kind": "paragraph", "title": "Anything we should know?"},
+        ]})
+    if system.startswith("You suggest the options"):
+        return json.dumps({"options": ["Small", "Medium", "Large"]})
+    if system.startswith("You summarise the answers"):
+        # One theme, quoting the newest answer exactly.
+        import re
+
+        m = re.search(r"\[#(\d+)\] (.+)", prompt)
+        quotes = [{"number": int(m.group(1)), "text": m.group(2)[:60]}] if m else []
+        return json.dumps({"themes": [{"title": "E2E theme", "count": len(re.findall(r"\[#\d+\]", prompt)),
+                                       "summary": "What people said.", "quotes": quotes}]})
     return None
 
 

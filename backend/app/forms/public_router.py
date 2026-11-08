@@ -17,6 +17,8 @@ need it.
 * ``GET  /{token}/mine?edit=`` · ``PUT /{token}/mine`` — change your answer
   (signed in, or with the edit token from the confirmation).
 * ``POST /{token}/report`` — ``{reason}``, link forms only.
+* ``GET  /{token}/ics`` — the linked event as a one-event ``.ics`` (title,
+  time and place only), for "Add to my calendar" (WP-F1.7).
 * ``POST /{token}/uploads`` (multipart: ``file``, ``question_id``,
   ``draft_key``) — stage a file for a file question (WP-F1.6);
   ``DELETE /{token}/uploads/{id}?draft_key=`` takes it back.
@@ -242,6 +244,32 @@ async def remove_upload(
         await responses.remove_file(db, token, user, upload_id, draft_key)
     except Refusal as exc:
         raise _raise(exc) from None
+
+
+@router.get("/{token}/ics")
+async def event_ics(token: str, request: Request, db: AsyncSession = Depends(get_db)):
+    """"Add to my calendar": the event this form is for, if any."""
+    from fastapi.responses import Response
+
+    from app.forms.calendar_link import ics_for, linked_event
+
+    user = await _who(request, db)
+    ctx = await responses.load(db, token, user)
+    if ctx.state in ("gone", "sign_in") or ctx.form is None:
+        raise _raise(responses.gone())
+    ev = await linked_event(db, ctx.form)
+    if ev is None:
+        raise _raise(responses.gone())
+    name = "".join(ch for ch in ev.title if ch.isalnum() or ch in " -_")[:60].strip() or "event"
+    return Response(
+        content=ics_for(ev),
+        media_type="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{name}.ics"',
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.post("/{token}/report", status_code=204)

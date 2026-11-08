@@ -357,6 +357,13 @@ export interface OneResponse {
   }[];
 }
 
+/** "Summarise" on a text question (AI): themes with counts and quotes. */
+export interface AnswerSummary {
+  question_id: string;
+  answers: number;
+  themes: { title: string; count: number; summary: string; quotes: { number: number; text: string }[] }[];
+}
+
 export const formsApi = {
   async get(fileId: string): Promise<FormView> {
     const { data } = await apiClient.get<FormView>(`/forms/${fileId}`);
@@ -426,6 +433,15 @@ export const formsApi = {
   },
   async response(fileId: string, number: number): Promise<OneResponse> {
     const { data } = await apiClient.get<OneResponse>(`/forms/${fileId}/responses/${number}`);
+    return data;
+  },
+  async summarise(fileId: string, questionId: string, model: { provider_id: string; model_id: string }): Promise<AnswerSummary> {
+    const { data } = await apiClient.post(`/forms/${fileId}/ai/summary`, { question_id: questionId, ...model }, { timeout: 240_000 });
+    return data;
+  },
+  /** "Add an RSVP form" on a Calendar event (the one it has, or a new one). */
+  async fromEvent(eventId: string): Promise<{ file: { id: string }; made: boolean }> {
+    const { data } = await apiClient.post(`/forms/from-event`, { event_id: eventId });
     return data;
   },
   /** Save to Files: a copy of a file someone sent, into your own Drive. */

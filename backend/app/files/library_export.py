@@ -194,6 +194,16 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
             arc = unique(folder + _safe(stem or "Untitled") + ext)
             entries.append({"a": arc, "k": "shell", "f": str(f.id), "s": int(f.size_bytes or 0), "t": mtime})
             counts["documents"] += 1
+            if f.source_kind == GeneratedKind.FORM.value:
+                # Files people sent with their answers (Forms WP-F1.7), beside
+                # the form's .zip — streamed like any file, never held in memory.
+                from app.forms.uploads import export_entries
+
+                for name, path, size, when in await export_entries(db, f):
+                    entries.append({
+                        "a": unique(folder + _safe(stem or "Untitled") + " (files sent)/" + name),
+                        "k": "blob", "p": path, "s": size, "t": when,
+                    })
         elif f.storage_path:
             arc = unique(folder + _safe(f.filename))
             entry: dict[str, Any] = {"a": arc, "k": "blob", "p": f.storage_path, "s": int(f.size_bytes or 0), "t": mtime}
@@ -346,6 +356,8 @@ def readme(state: dict[str, Any]) -> bytes:
         "My files/   everything you own, in its folders, with its original name and date.\n"
         "            Documents are .docx, spreadsheets .xlsx, whiteboards .excalidraw\n"
         "            (open them at excalidraw.com).\n"
+        "            Forms are a .zip with the questions (form.json) and the answers as\n"
+        "            CSV; files people sent are beside it in \"<form> (files sent)\".\n"
         "            Beside each photo and video:\n"
         "              <name>.json  date taken, place, description, favourite, archived and\n"
         "                           albums, in Google Takeout's format — photo apps that\n"

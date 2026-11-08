@@ -96,6 +96,8 @@ export interface CalEvent {
   source?: EventSource | null;
   /** Rooms (that I'm in) it was planned in or shared to — only on single-event fetches. */
   rooms?: EventRoom[];
+  /** Its RSVP form (Forms), for people who can change the event. */
+  rsvp_form?: { file_id: string; title: string; answers: number; state: "open" | "closed" | "trashed" } | null;
 }
 
 export interface EventRoom {

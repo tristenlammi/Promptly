@@ -47,6 +47,8 @@ export interface AnswerPageOpen {
   closes_at: string | null;
   /** File questions: who may send files here, and what the picker takes per question. */
   uploads: { mode: "all" | "link" | "none"; accept: Record<string, string> };
+  /** The event this form is for (an RSVP from Calendar): "Add to my calendar". */
+  event: { title: string } | null;
 }
 
 /** A file picked on the answer page, kept until the answer is sent. */
@@ -165,6 +167,11 @@ export const formAnswerApi = {
       },
     });
     return data;
+  },
+  /** The linked event as a one-event .ics (title, time and place). */
+  async ics(token: string): Promise<Blob> {
+    const { data } = await apiClient.get(`${base(token)}/ics`, { responseType: "blob" });
+    return data as Blob;
   },
   /** Take back a staged file. */
   async removeUpload(token: string, uploadId: string, draftKey: string): Promise<void> {

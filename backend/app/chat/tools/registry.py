@@ -19,6 +19,7 @@ from app.chat.tools.crossapp import FindPersonTool, MyDayTool, PostToRoomTool, R
 from app.chat.tools.deep_research import DeepResearchTool
 from app.chat.tools.echo import EchoTool
 from app.chat.tools.fetch_url import FetchUrlTool
+from app.chat.tools.forms import DraftFormTool, ReadFormResponsesTool
 from app.chat.tools.mail import MailDraftReplyTool, MailReadTool, MailReplyTool, MailSearchTool
 from app.chat.tools.files import ListMyFilesTool, ProposeFileChangesTool, ReadFileTool
 from app.chat.tools.generate_image import GenerateImageTool
@@ -128,6 +129,10 @@ REGISTRY: list[Tool] = [
     # Rooms (category "rooms"): for people in a space or conversation.
     ReadRoomTool(),
     PostToRoomTool(),
+    # Forms (category "apps"): a draft form to check and send, and a form's
+    # answers (other people's words — outside content).
+    DraftFormTool(),
+    ReadFormResponsesTool(),
 ]
 
 # Quick name -> instance lookup so dispatch isn't an O(n) scan over the

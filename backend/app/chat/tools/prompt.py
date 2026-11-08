@@ -167,6 +167,7 @@ def build_tools_system_prompt(
                 ("Tasks, Budget, Trips, Meal planner/recipes/groceries, Workouts, Habits, Journal, Contacts", "list_my_items → read_item/use_item"),
                 ("people", "find_person"),
                 ("Rooms", "read_room/post_to_room"),
+                ("Forms (a draft to check and send; a form's answers)", "draft_form/read_form_responses"),
                 ("photos", "search_photos"),
                 ("files", "search_my_files"),
                 ("anything by name", "search_apps"),

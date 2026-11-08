@@ -228,8 +228,19 @@ async def page(db: AsyncSession, ctx: AnswerCtx, user: User | None, token: str) 
         "closes_at": form.close_at.isoformat() if form.close_at else None,
         # File questions (WP-F1.6): who may send files, and what to pick.
         "uploads": page_rules(defn, files),
+        # "Add to my calendar" after sending (WP-F1.7): the linked event's
+        # title, time and place only, as a one-event .ics.
+        "event": await _event_brief(db, form),
     }
 
+
+async def _event_brief(db: AsyncSession, form: Form) -> dict[str, Any] | None:
+    from app.forms.calendar_link import linked_event
+
+    ev = await linked_event(db, form)
+    if ev is None:
+        return None
+    return {"title": ev.title}
 
 
 # --------------------------------------------------------------------

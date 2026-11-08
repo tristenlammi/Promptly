@@ -341,6 +341,11 @@ async def get_event(event_id: uuid.UUID, db: AsyncSession = Depends(get_db), use
     from . import reach
 
     out.update(await reach.detail_extra(db, ev, user, out["can_edit"]))
+    # Forms (WP-F1.7): its RSVP form, for people who can change the event.
+    if out["can_edit"]:
+        from app.forms.calendar_link import event_form
+
+        out["rsvp_form"] = await event_form(db, ev, user)
     people = {a.user_id for a in atts} | ({ev.created_by} if ev.created_by else set())
     return {"event": out, "users": await core.users_map(db, people)}
 

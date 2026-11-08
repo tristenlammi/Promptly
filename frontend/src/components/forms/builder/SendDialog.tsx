@@ -1,11 +1,14 @@
-import { AlertTriangle, Check, Copy, Download, Globe, Link2Off, RefreshCw, Send, Users, X } from "lucide-react";
+import { AlertTriangle, Check, Copy, Download, Globe, Link2Off, Mail, MessagesSquare, RefreshCw, Send, Users, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 import type { DirectoryUser } from "@/api/auth";
 import { formsApi, type FormView } from "@/api/forms";
 import { Button } from "@/components/shared/Button";
 import { Callout } from "@/components/shared/Callout";
 import { UserPicker, type UserPickerValue } from "@/components/shared/UserPicker";
+import { SendToSheet } from "@/components/share/SendToSheet";
+import { mailApi } from "@/mail/api";
 import { Sheet } from "@/items/ui/Sheet";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -15,8 +18,11 @@ import { fieldCls } from "./ui";
 /**
  * Send (Forms WP-F1.3): the form's answer link with Copy and a QR code (a
  * PNG for a flyer), Reset link and Turn off; sending it to people on this
- * server (a notification that opens it); and adding collaborators, who edit
- * the form and see its answers. A bottom sheet on a phone.
+ * server (a notification that opens it); a "Fill in" card in a room or a
+ * conversation, and an email from your own Mail account (WP-F1.7 — the
+ * composer opens filled in; nothing goes until you press Send); and adding
+ * collaborators, who edit the form and see its answers. A bottom sheet on a
+ * phone.
  *
  * The link is made the first time this opens. It's for answering only:
  * opening it never gives anyone the form itself.
@@ -47,6 +53,7 @@ export function SendDialog({
   // Reset / Turn off ask first, inside the sheet (a separate confirm dialog
   // would open underneath it).
   const [asking, setAsking] = useState<null | "reset" | "off">(null);
+  const [roomOpen, setRoomOpen] = useState(false);
   const tried = useRef(false);
   const link = view.link;
   const s = view.form.settings;
@@ -111,6 +118,7 @@ export function SendDialog({
       : [];
 
   return (
+    <>
     <Sheet open={open} onClose={onClose} title="Send" size="md">
       <div className="flex flex-col gap-5 px-4 pb-5 pt-1 sm:px-5" data-form-send>
         {!s.accepting ? (
@@ -220,6 +228,27 @@ export function SendDialog({
 
         <SendToPeople fileId={fileId} onLink={() => void formsApi.get(fileId).then(onView).catch(() => undefined)} />
 
+        {link && (
+          <section aria-labelledby="send-else-h" className="flex flex-col gap-2 border-t border-[var(--border)] pt-4">
+            <h3 id="send-else-h" className="text-sm font-semibold text-[var(--text)]">
+              Send it somewhere
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => {
+                  onClose();
+                  setRoomOpen(true);
+                }}
+              >
+                <MessagesSquare className="h-4 w-4" aria-hidden="true" /> To a room or person
+              </Button>
+              <EmailButton title={view.form.definition.title || "Untitled form"} url={url} onGo={onClose} />
+            </div>
+          </section>
+        )}
+
         {isOwner && (
           <section aria-labelledby="send-collab-h" className="flex flex-col gap-1.5 border-t border-[var(--border)] pt-4">
             <h3 id="send-collab-h" className="text-sm font-semibold text-[var(--text)]">
@@ -233,6 +262,75 @@ export function SendDialog({
         )}
       </div>
     </Sheet>
+    <SendToSheet
+      open={roomOpen}
+      onClose={() => setRoomOpen(false)}
+      target={{ kind: "form", id: fileId, title: view.form.definition.title || "Untitled form" }}
+      canGrant={false}
+    />
+    </>
+  );
+}
+
+/** The email's words: a short note and the link to fill it in. */
+export function emailText(title: string, url: string): { subject: string; body: string } {
+  return {
+    subject: title,
+    body: `Hi,\n\nCould you fill in “${title}”? It only takes a minute:\n\n${url}\n\nThanks!`,
+  };
+}
+
+/** Email: your own Mail account's composer, filled in (nothing is sent until
+ *  you press Send there); without a Mail account, the words to copy. */
+function EmailButton({ title, url, onGo }: { title: string; url: string; onGo: () => void }) {
+  const navigate = useNavigate();
+  const [checking, setChecking] = useState(false);
+  const [copyText, setCopyText] = useState<string | null>(null);
+  const { subject, body } = emailText(title, url);
+  const go = async () => {
+    setChecking(true);
+    try {
+      const o = await mailApi.overview();
+      if (o.accounts.length) {
+        const hash = new URLSearchParams({ subject, body });
+        onGo();
+        navigate(`/mail?compose=1#${hash.toString()}`);
+        return;
+      }
+      setCopyText(`${subject}\n\n${body}`);
+    } catch {
+      setCopyText(`${subject}\n\n${body}`);
+    } finally {
+      setChecking(false);
+    }
+  };
+  return (
+    <>
+      <Button size="sm" variant="secondary" loading={checking} onClick={() => void go()}>
+        <Mail className="h-4 w-4" aria-hidden="true" /> Email
+      </Button>
+      {copyText !== null && (
+        <div className="flex w-full flex-col gap-1.5">
+          <p className="text-xs text-[var(--text-muted)]">
+            You don&apos;t have a Mail account in Promptly yet. Copy this into an email instead:
+          </p>
+          <textarea readOnly value={copyText} rows={6} className={`${fieldCls} h-auto py-2 text-sm`} onFocus={(e) => e.target.select()} aria-label="Email to copy" />
+          <Button
+            size="sm"
+            variant="ghost"
+            className="self-start"
+            onClick={() =>
+              void navigator.clipboard
+                .writeText(copyText)
+                .then(() => toast.success("Copied"))
+                .catch(() => toast.error("Couldn't copy. Select the text and copy it."))
+            }
+          >
+            <Copy className="h-4 w-4" aria-hidden="true" /> Copy
+          </Button>
+        </div>
+      )}
+    </>
   );
 }
 

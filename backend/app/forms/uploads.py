@@ -619,6 +619,37 @@ async def strip_for(db: AsyncSession, form: Form, user: User, question_id: str) 
 
 
 # --------------------------------------------------------------------
+# Export my library (WP-F1.7)
+# --------------------------------------------------------------------
+_UNSAFE = set('\\/:*?"<>|\r\n\t')
+
+
+async def export_entries(db: AsyncSession, shell: UserFile) -> list[tuple[str, str, int, int]]:
+    """``(name, storage path, size, mtime)`` for every file sent with a
+    live answer to this form, named ``Response <n>/<file name>``."""
+    from app.forms.access import form_for_shell
+
+    form = await form_for_shell(db, shell)
+    if form is None:
+        return []
+    rows = (
+        await db.execute(
+            select(FormResponse.number, UserFile.filename, UserFile.storage_path, UserFile.size_bytes, UserFile.created_at)
+            .select_from(FormUpload)
+            .join(FormResponse, FormResponse.id == FormUpload.response_id)
+            .join(UserFile, UserFile.id == FormUpload.file_id)
+            .where(FormUpload.form_id == form.id, FormResponse.deleted_at.is_(None), UserFile.storage_path.is_not(None))
+            .order_by(FormResponse.number, FormUpload.created_at)
+        )
+    ).all()
+    out = []
+    for number, name, path, size, created in rows:
+        safe = "".join("_" if ch in _UNSAFE else ch for ch in (name or "file"))[:150] or "file"
+        out.append((f"Response {number}/{safe}", path, int(size or 0), int(created.timestamp()) if created else 0))
+    return out
+
+
+# --------------------------------------------------------------------
 # Serving (``/m/`` claims ``form_upload`` and ``form_thumb``)
 # --------------------------------------------------------------------
 async def readable(db: AsyncSession, file_id: uuid.UUID, user: User) -> UserFile | None:
@@ -704,6 +735,7 @@ __all__ = [
     "drop",
     "drop_for_form",
     "drop_for_response",
+    "export_entries",
     "file_cards",
     "ids_in",
     "mode_for",

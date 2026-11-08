@@ -11,7 +11,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { FileInput, Heading, Image as ImageIcon, Palette, Plus, SeparatorHorizontal } from "lucide-react";
+import { FileInput, Heading, Image as ImageIcon, Palette, Plus, SeparatorHorizontal, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import type { FormDefinition, FormItem, ItemKind } from "@/api/forms";
@@ -24,6 +24,7 @@ import { duplicateItem, isQuestion, liveItems, newItem, sectionsOf, type Section
 import { themeVars } from "../theme";
 import { ImportQuestions } from "./ImportQuestions";
 import { ItemCard, goToChoices } from "./ItemCard";
+import { MakeWithAi } from "./MakeWithAi";
 import { PicturePicker } from "./PicturePicker";
 import { AutoTextarea, fieldCls } from "./ui";
 import type { FormDoc } from "./useFormDoc";
@@ -54,6 +55,7 @@ export function QuestionsTab({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [pickImage, setPickImage] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const live = useMemo(() => liveItems(def), [def]);
   const sections = useMemo(() => sectionsOf(def), [def]);
   const sectionOf = useMemo(() => {
@@ -260,22 +262,32 @@ export function QuestionsTab({
             {live.length === 0 && !readOnly && (
               <div className="pf-card flex flex-col items-center gap-3 px-4 py-8 text-center">
                 <p className="text-sm" style={{ color: "var(--pf-muted)" }}>
-                  No questions yet. Add your first one.
+                  No questions yet. Add your first one, or describe your form and let AI suggest some.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => add("multiple_choice")}
-                  className="inline-flex min-h-[44px] items-center gap-2 rounded-full px-5 text-sm font-semibold"
-                  style={{ background: "var(--pf-accent)", color: "var(--pf-on-accent)" }}
-                >
-                  <Plus className="h-4 w-4" /> Add question
-                </button>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => add("multiple_choice")}
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-full px-5 text-sm font-semibold"
+                    style={{ background: "var(--pf-accent)", color: "var(--pf-on-accent)" }}
+                  >
+                    <Plus className="h-4 w-4" /> Add question
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAiOpen(true)}
+                    className="inline-flex min-h-[44px] items-center gap-2 rounded-full border px-5 text-sm font-semibold"
+                    style={{ borderColor: "var(--pf-border)" }}
+                  >
+                    <Sparkles className="h-4 w-4" /> Describe your form
+                  </button>
+                </div>
               </div>
             )}
           </div>
           {!readOnly && !isPhone && (
             <div className="sticky top-4 hidden self-start md:block">
-              <AddBar onAdd={add} onAddImage={() => setPickImage(true)} onImport={() => setImporting(true)} vertical />
+              <AddBar onAdd={add} onAddImage={() => setPickImage(true)} onImport={() => setImporting(true)} onAi={() => setAiOpen(true)} vertical />
             </div>
           )}
         </div>
@@ -283,7 +295,7 @@ export function QuestionsTab({
       {aside}
       {!readOnly && isPhone && (
         <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--border)] bg-[var(--surface)] pb-safe">
-          <AddBar onAdd={add} onAddImage={() => setPickImage(true)} onImport={() => setImporting(true)} />
+          <AddBar onAdd={add} onAddImage={() => setPickImage(true)} onImport={() => setImporting(true)} onAi={() => setAiOpen(true)} />
         </div>
       )}
       {pickImage && (
@@ -294,6 +306,30 @@ export function QuestionsTab({
           onPicked={(a) => {
             doc.addAssetUrl(a.id, a.url);
             insert({ ...newItem("image"), image_asset_id: a.id });
+          }}
+        />
+      )}
+      {aiOpen && (
+        <MakeWithAi
+          fileId={fileId}
+          open
+          onClose={() => setAiOpen(false)}
+          untitled={!def.title.trim() || /^untitled form$/i.test(def.title.trim())}
+          onTitle={(title, description) =>
+            doc.update((d) => ({ ...d, title: title.slice(0, 300), description: d.description || description }))
+          }
+          onAdd={(items) => {
+            if (live.length + items.length > 200) {
+              toast.error("That would make more than 200 questions and blocks.");
+              return false;
+            }
+            setItems((all) => {
+              const at = activeId ? all.findIndex((x) => x.id === activeId) : -1;
+              if (at < 0) return [...all.filter((x) => !x.deleted), ...items, ...all.filter((x) => x.deleted)];
+              return [...all.slice(0, at + 1), ...items, ...all.slice(at + 1)];
+            });
+            toast.success(items.length === 1 ? "Added 1 question" : `Added ${items.length}`);
+            return true;
           }}
         />
       )}
@@ -434,11 +470,13 @@ function AddBar({
   onAdd,
   onAddImage,
   onImport,
+  onAi,
   vertical,
 }: {
   onAdd: (kind: ItemKind) => void;
   onAddImage: () => void;
   onImport: () => void;
+  onAi: () => void;
   vertical?: boolean;
 }) {
   const actions = [
@@ -447,6 +485,7 @@ function AddBar({
     { label: "Add image", icon: ImageIcon, onClick: onAddImage },
     { label: "Add section", icon: SeparatorHorizontal, onClick: () => onAdd("section") },
     { label: "Import questions", icon: FileInput, onClick: onImport },
+    { label: "Make with AI", icon: Sparkles, onClick: onAi },
   ];
   return (
     <div
@@ -473,7 +512,7 @@ function AddBar({
           )}
         >
           <a.icon className="h-5 w-5" aria-hidden="true" />
-          {!vertical && <span aria-hidden="true">{a.label.replace(/^Add /, "").replace("Import questions", "Import").replace("title & text", "Text").replace(/^\w/, (c) => c.toUpperCase())}</span>}
+          {!vertical && <span aria-hidden="true">{a.label.replace(/^Add /, "").replace("Import questions", "Import").replace("Make with AI", "AI").replace("title & text", "Text").replace(/^\w/, (c) => c.toUpperCase())}</span>}
         </button>
       ))}
     </div>

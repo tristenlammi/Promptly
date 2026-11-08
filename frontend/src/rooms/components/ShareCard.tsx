@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   CheckSquare,
   ChefHat,
+  ClipboardList,
   File as FileIcon,
   Folder,
   Image as ImageIcon,
@@ -22,9 +23,11 @@ const FilePreviewModal = lazy(() => import("@/components/files/FilePreviewModal"
 
 /**
  * Something sent to the room with "Send to…" (the message's ``meta.share``):
- * a file, folder, photo, album, task, recipe or trip, drawn from the live
- * thing as *you* can see it. If you can't open it, a neutral card says so —
- * the message itself never carries its name.
+ * a file, folder, photo, album, task, recipe, trip or form, drawn from the
+ * live thing as *you* can see it. If you can't open it, a neutral card says
+ * so — the message itself never carries its name. A form's card is for
+ * answering it ("Fill in"), for anyone the form lets answer; it never opens
+ * the form itself (Forms WP-F1.7 — the one card Porch posts show too).
  */
 
 const ICONS: Record<ShareKind, LucideIcon> = {
@@ -35,6 +38,7 @@ const ICONS: Record<ShareKind, LucideIcon> = {
   task: CheckSquare,
   recipe: ChefHat,
   trip: Plane,
+  form: ClipboardList,
 };
 
 export const shareKey = (messageId: string) => ["rooms", "share-card", messageId] as const;
@@ -107,9 +111,16 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-[var(--text)]">{card.title}</span>
           <span className="block truncate text-xs text-[var(--text-muted)]">{card.subtitle}</span>
+          {card.description && <span className="mt-0.5 line-clamp-2 block text-xs text-[var(--text-muted)]">{card.description}</span>}
         </span>
-        <span className="inline-flex shrink-0 items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-[var(--item-accent)]">
-          Open <ArrowUpRight className="h-3.5 w-3.5" />
+        <span
+          className={
+            card.action
+              ? "inline-flex shrink-0 items-center gap-0.5 rounded-lg bg-[var(--item-accent)] px-2.5 py-1.5 text-xs font-semibold text-white"
+              : "inline-flex shrink-0 items-center gap-0.5 rounded-lg px-2 py-1 text-xs font-semibold text-[var(--item-accent)]"
+          }
+        >
+          {card.action ?? "Open"} <ArrowUpRight className="h-3.5 w-3.5" />
         </span>
       </button>
       {preview && (

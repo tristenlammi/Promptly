@@ -10,6 +10,10 @@
 * ``POST /api/files/{id}/ai/deck`` — "Generate a deck from these files"
   (Stage 12): slides drafted from files the person can read, each naming
   the files it came from; the presentation adds them.
+* ``POST /api/files/{id}/ai/form`` — Make with AI in the form builder
+  (Forms WP-F1.7): questions from a description (``draft``), or options
+  for one choice question (``options``) — a preview the builder adds only
+  when the person picks Add.
 * ``POST /api/files/office/convert-ai`` — Convert with AI: a photo or PDF of
   a table becomes a Sheet, a scanned letter becomes a Doc — a new file next
   to the original, never a change to it. Images and scanned pages are read
@@ -505,6 +509,73 @@ async def sheet_ai(
             if isinstance(r, list):
                 table.append([_num(c) for c in r[: len(columns)]] + [""] * max(0, len(columns) - len(r)))
         return SheetAiResponse(title=str(data.get("title") or "")[:120] or None, columns=columns, table=table)
+    except EditorAiError as exc:
+        raise _http(exc) from exc
+
+
+# --------------------------------------------------------------------- forms
+
+
+class FormAiRequest(BaseModel):
+    provider_id: uuid.UUID | None = None
+    model_id: str | None = Field(default=None, max_length=200)
+    mode: Literal["draft", "options"] = "draft"
+    prompt: str = Field(default="", max_length=4000)
+    # ``options``: the question to suggest options for.
+    question: str = Field(default="", max_length=1000)
+    existing: list[str] = Field(default_factory=list, max_length=100)
+
+
+class FormAiResponse(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    options: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.post("/{file_id:uuid}/ai/form", response_model=FormAiResponse)
+async def form_ai(
+    file_id: uuid.UUID,
+    body: FormAiRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> FormAiResponse:
+    """Make with AI / Suggest options — a preview; nothing is added to the
+    form here."""
+    from app.forms import ai as form_ai_mod
+    from app.forms.access import load_form
+    from app.forms.definition import DefinitionError
+    from app.models_config.provider import ChatMessage
+
+    await load_form(db, file_id, user, need="edit")
+    if body.mode == "draft" and not body.prompt.strip():
+        raise _http(EditorAiError("Describe the form you want."))
+    if body.mode == "options" and not (body.question.strip() or body.prompt.strip()):
+        raise _http(EditorAiError("Give the question a title first."))
+    await _quotas(request, user, db)
+    provider, model_id = await resolve_model(db, user, body.provider_id, body.model_id)
+    try:
+        if body.mode == "options":
+            prompt = f"Question: {body.question.strip()}\n"
+            if body.prompt.strip():
+                prompt += f"What the options should be: {body.prompt.strip()}\n"
+            if body.existing:
+                prompt += "Options it already has: " + "; ".join(x[:100] for x in body.existing[:50]) + "\n"
+            raw = await complete(provider, model_id, system=form_ai_mod.OPTIONS_SYSTEM,
+                                 messages=[ChatMessage(role="user", content=prompt)], max_tokens=1200, temperature=0.4)
+            have = {x.strip().lower() for x in body.existing}
+            opts = [o for o in form_ai_mod.options_from(parse_json(raw)) if o["label"].lower() not in have]
+            if not opts:
+                raise EditorAiError("No new options came back. Try saying what kind of options you want.")
+            return FormAiResponse(options=opts)
+        raw = await complete(provider, model_id, system=form_ai_mod.DRAFT_SYSTEM,
+                             messages=[ChatMessage(role="user", content=body.prompt.strip())], max_tokens=6000, temperature=0.4)
+        try:
+            draft = form_ai_mod.items_from(parse_json(raw))
+        except DefinitionError as exc:
+            raise EditorAiError(str(exc)) from exc
+        return FormAiResponse(title=draft["title"], description=draft["description"], items=draft["items"])
     except EditorAiError as exc:
         raise _http(exc) from exc
 
