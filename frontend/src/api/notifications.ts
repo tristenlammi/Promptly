@@ -22,6 +22,8 @@ export interface NotificationPreferences {
   calendar: boolean;
   passwords: boolean;
   mail: boolean;
+  /** Calls ringing you and missed calls (DM calls). */
+  call: boolean;
   /** Quiet hours, "HH:MM" in your own time zone (one setting for all of Promptly). */
   quiet_enabled: boolean;
   quiet_start: string;
@@ -56,7 +58,8 @@ export type NotificationSwitch =
   | "room_message"
   | "calendar"
   | "passwords"
-  | "mail";
+  | "mail"
+  | "call";
 
 export interface NotificationRow {
   id: string;

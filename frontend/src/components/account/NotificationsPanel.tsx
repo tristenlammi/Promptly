@@ -372,6 +372,14 @@ export function NotificationsPanel() {
                 extra={(prefs.mail ?? true) && summaryMode("mail")}
               />
               <CategoryRow
+                title="Calls"
+                subtitle="Someone calling you in Rooms, and calls you missed. Calls ring even during quiet hours."
+                checked={prefs.call ?? true}
+                busy={prefsBusy === "call"}
+                onChange={(v) => toggle("call", v)}
+                dimmed={!prefs.enabled}
+              />
+              <CategoryRow
                 title="Passwords"
                 subtitle="A new device asking to join your vault, or someone sharing a vault with you. These never carry anything from the vault."
                 checked={prefs.passwords ?? true}

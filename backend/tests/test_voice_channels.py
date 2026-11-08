@@ -512,6 +512,39 @@ async def test_second_device_moves_you_and_the_session_refresh(client, db, lk, e
     assert (await client.post("/api/rooms/voice/refresh", json={"session": phone["session"]})).status_code == 404
 
 
+async def raw_sid(room_id, user):
+    from app.calls import voice
+
+    return (await voice.raw_members(room_id))[str(user.id)].get("lk_sid")
+
+
+async def test_a_reload_or_second_device_survives_the_old_connections_late_leave(client, db, lk, events):
+    """Rejoining the same channel (a reload, or another device) starts a
+    session with no LiveKit sid yet; the old connection's leave arrives
+    after it and must not end the new session (phase-1 bug found in D1)."""
+    w = await world(client, db)
+    await join(client, w.sam, w.lounge)
+    await hook(client, "participant_joined", lk_room(w.lounge), ident(w.sam), sid="PA_tab1")
+    again = await join(client, w.sam, w.lounge)
+    assert (await raw_sid(w.lounge, w.sam)) == ""
+    # The old tab's leave (and a late duplicate of its join) come in before
+    # the new connection's join: the new session stays.
+    await hook(client, "participant_left", lk_room(w.lounge), ident(w.sam), sid="PA_tab1")
+    assert (await where(w.sam))["session"] == again["session_id"]
+    await hook(client, "participant_joined", lk_room(w.lounge), ident(w.sam), sid="PA_tab1")
+    assert (await raw_sid(w.lounge, w.sam)) == ""
+    await hook(client, "participant_joined", lk_room(w.lounge), ident(w.sam), sid="PA_tab2")
+    assert (await raw_sid(w.lounge, w.sam)) == "PA_tab2"
+    # Same again with the old leave after the new join.
+    phone = await join(client, w.sam, w.lounge, device="android")
+    await hook(client, "participant_joined", lk_room(w.lounge), ident(w.sam), sid="PA_phone")
+    await hook(client, "participant_left", lk_room(w.lounge), ident(w.sam), sid="PA_tab2")
+    assert (await where(w.sam))["session"] == phone["session_id"]
+    # The new connection's own leave still counts.
+    await hook(client, "participant_left", lk_room(w.lounge), ident(w.sam), sid="PA_phone")
+    assert await where(w.sam) is None and await in_room(w.lounge) == {}
+
+
 async def test_refresh_refused_after_access_changes(client, db, lk):
     w = await world(client, db)
     phone = await join(client, w.jo, w.lounge, device="android")

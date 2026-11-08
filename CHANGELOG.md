@@ -48,6 +48,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Calls (DM calls), WP-D1 -->
 - Calls in DMs, the server side (the call screen comes next): voice and video calls in 1:1 and group conversations. A call rings everyone else on every device for 45 seconds, even during quiet hours; answer on one device and the others stop ringing. Decline from the notification, or let it ring out: the conversation then shows "Missed call" and you get a "Missed call" notification. A finished call leaves "Call · 12 min" in the conversation. Anyone in a group conversation can join its call while it is on, and a group call can ring someone again. You are only ever in one call or voice channel at a time. Blocking someone refuses calls both ways and ends a call with them.
 - Account → Notifications gains a Calls switch (on by default) for ringing and missed calls.
+<!-- Calls (DM calls), WP-D2 -->
+- Calls in DMs, the call screen: phone and camera buttons in every 1:1 and group conversation. A call rings in every open Promptly tab with a ringtone and a big Answer and Decline (Voice only for a video call; "End and answer" when you're already on a call or in a voice channel), and as a notification with Answer and Decline when Promptly isn't in front. In the call: mute, camera on and off, switch camera on a phone, share your screen, speaker, microphone and camera choice, a timer, a green ring on whoever is talking, a grid for group calls, and Ring again. Minimise to a small window you can drag around while you use Promptly, or pop the video out into picture-in-picture.
+- Rooms: a green "Call in progress · 2 people · Join" bar in a conversation with a call on, and "Switch here" when you're in it on another device. Call lines in the conversation in your own words ("Missed call from Sam · Call back", "No answer · Call again", "Video call · 12 min"). On a phone, the conversation's header keeps the call buttons and moves Search, Events, Pinned and Block into More.
 
 ### Changed
 <!-- Calls (voice channels), WP-V1 -->
@@ -56,6 +59,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Voice & video settings use Promptly's own colour (terracotta) for sliders, switches, focus rings and the selected options, also inside Rooms. Push to talk now says what to do in a game: voice activity keeps working while you play, with a "Use voice activity instead" link.
 
 ### Fixed
+<!-- Calls (DM calls), WP-D2 -->
+- Voice channels: reloading the page, or joining the same channel on another device, could drop you straight back out when the old connection's goodbye arrived late.
 <!-- Calls (voice channels), WP-V4 -->
 - Rooms: making a new room without a topic failed ("Couldn't create the room").
 - Mail: a very large or tangled HTML email could still tie up the mail worker for minutes while it was cleaned. Cleaning now stops after 3 seconds, and an email it can't finish shows as plain text, with a note saying so. Sending works the same way, so a draft like that no longer holds up the app.

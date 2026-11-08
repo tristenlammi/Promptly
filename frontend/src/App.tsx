@@ -25,6 +25,7 @@ import { applyTheme } from "@/store/themeStore";
 import { lazyWithRetry } from "@/utils/lazyWithRetry";
 import { voiceHarnessEnabled } from "@/pages/dev/flags";
 import { VoiceRoot } from "@/rtc/ui/VoiceRoot";
+import { CallRoot } from "@/rtc/call/ui/CallRoot";
 
 // Route-level code splitting. Every page used to be imported eagerly,
 // so opening a chat downloaded the admin console, the automations flow
@@ -820,6 +821,8 @@ export default function App() {
       {authedApp}
       {/* Calls: voice prompts and sheets, on every page. */}
       <VoiceRoot />
+      {/* Calls: DM calls ringing and the call screen, on every page. */}
+      <CallRoot />
       <UpdateBanner />
       <ToastViewport />
       <ConfirmHost />

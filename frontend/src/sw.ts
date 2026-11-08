@@ -162,6 +162,78 @@ interface PushPayload {
    * carries a signed token the worker POSTs to ``/api/notifications/action``
    * (it has no sign-in of its own). See ``app/notifications/actions.py``. */
   actions?: { action: string; title: string; token: string }[];
+  /** Calls (``category: "call"``): ``call_ring`` / ``call_stop`` /
+   * ``call_missed``, and the ring's fields (see ``backend/app/calls/ring.py``). */
+  kind?: string;
+  call_id?: string;
+  answer_url?: string;
+  require_interaction?: boolean;
+  silent?: boolean;
+}
+
+/** Calls: give every open Promptly tab the push (they show the incoming
+ * call and play the ringtone, or stop it), and say whether one of them is
+ * in front (then a ring needs no notification of its own). */
+async function passCallToTabs(payload: PushPayload): Promise<boolean> {
+  const wins = (await self.clients.matchAll({ type: "window", includeUncontrolled: true })) as WindowClient[];
+  for (const w of wins) {
+    try {
+      w.postMessage({ type: "promptly-call", payload });
+    } catch {
+      // A tab that's going away.
+    }
+  }
+  return wins.some((w) => w.focused && w.visibilityState === "visible");
+}
+
+/** A call push: ring (every tab, and a notification that stays until it's
+ * answered, declined or stopped), stop (replace the ring, then close it at
+ * once: Chrome wants every push to show something), or missed. */
+async function showCall(payload: PushPayload): Promise<void> {
+  const inFront = await passCallToTabs(payload);
+  const tag = payload.tag || (payload.call_id ? `call:${payload.call_id}` : "call");
+  if (payload.kind === "call_stop") {
+    await self.registration.showNotification(payload.title || "Promptly", { body: payload.body, tag, silent: true, icon: "/pwa-192.png", badge: "/pwa-192.png", data: { url: payload.url ?? "/" } } as NotificationOptions);
+    for (const n of await self.registration.getNotifications({ tag })) n.close();
+    return;
+  }
+  if (payload.kind === "call_ring") {
+    if (inFront) {
+      // The page in front rings; clear any older notification for this call.
+      for (const n of await self.registration.getNotifications({ tag })) n.close();
+      return;
+    }
+    const maxActions = (Notification as unknown as { maxActions?: number }).maxActions ?? 2;
+    const buttons = (payload.actions ?? []).slice(0, maxActions);
+    await self.registration.showNotification(payload.title, {
+      body: payload.body,
+      tag,
+      renotify: true,
+      requireInteraction: payload.require_interaction !== false,
+      icon: payload.icon || "/pwa-192.png",
+      badge: "/pwa-192.png",
+      vibrate: [400, 200, 400, 200, 400],
+      timestamp: Date.now(),
+      actions: buttons.map((a) => ({ action: a.action, title: a.title })),
+      data: {
+        url: payload.url ?? "/rooms/",
+        answer_url: payload.answer_url ?? payload.url ?? "/rooms/",
+        category: "call",
+        tokens: Object.fromEntries(buttons.map((a) => [a.action, a.token])),
+      },
+    } as NotificationOptions);
+    return;
+  }
+  // Missed call (and anything else about a call): an ordinary notification.
+  await self.registration.showNotification(payload.title, {
+    body: payload.body,
+    tag,
+    renotify: true,
+    icon: payload.icon || "/pwa-192.png",
+    badge: "/pwa-192.png",
+    timestamp: Date.now(),
+    data: { url: payload.url ?? "/rooms/", category: "call" },
+  } as NotificationOptions);
 }
 
 /** How many stacked lines a room's notification shows before "+N more". */
@@ -188,6 +260,11 @@ self.addEventListener("push", (event) => {
     }
   } catch {
     // Keep the fallback payload.
+  }
+
+  if (payload.category === "call") {
+    event.waitUntil(showCall(payload));
+    return;
   }
 
   event.waitUntil(
@@ -290,6 +367,9 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data ?? {};
   let url = (data.url as string) || "/";
+  // A ringing call's Answer: open the conversation and answer there (the
+  // call needs a page for the microphone).
+  if (event.action === "call_answer" && data.answer_url) url = data.answer_url as string;
   const token = event.action ? (data.tokens as Record<string, string> | undefined)?.[event.action] : undefined;
   if (token) {
     event.waitUntil(
