@@ -10,6 +10,11 @@ Opaque blobs, the size of each blob (padded into buckets), timestamps, revision 
 
 Not on the server: titles, URLs, usernames, passwords, notes, folders, tags, item types, the master password, the Secret Key.
 
+Two things you can turn on are exceptions, and each says so first:
+
+- **Expiry reminders.** For each item you choose: its id, a short label such as "Passport", its expiry date and how many weeks ahead to remind you. They're in `pw_reminders` and in your Calendar and Tasks, in plain text. The label never holds a run of three or more digits or any of the item's secrets: the device strips them, and the server strips digits again.
+- **Breach alerts.** Your account's email address, your Mail accounts' addresses, and the names and dates of the breaches each is in. Your server sends the addresses to Have I Been Pwned about once a day, so HIBP sees them and your server's address. An admin can read the list. Which of your logins a breach touches is worked out on your device.
+
 ## Attackers
 
 | Attacker | Result | How |
@@ -134,9 +139,11 @@ If you lose both the master password and the recovery kit, the vault is gone. No
 - Mail codes and security emails are read from what the server already has. The vault's sites never go to the server, because the client does the matching.
 - What's in an email is untrusted. Codes are shown as text and fill on a click. A sign-in link is offered only if it's https and goes to the sender's own domain, and not at all from a look-alike of a site you have.
 - Mail codes in an extension are off until you turn them on.
-- A Calendar reminder for a document says "Document expires soon", because Calendar isn't end-to-end encrypted.
+- A reminder added from the move-from-Files screen, or from Android, says "Document expires soon", because Calendar isn't end-to-end encrypted. "Remind me" on an item uses the label you see, such as "Passport expires", and the date. See "What's on the server".
 - The extension's unlock PIN is weaker than the master password. A new one has 6 to 12 digits; an older shorter one keeps working until it's changed, and the settings say to change it. It lasts until the browser closes, or 8 hours after the vault locks, whichever comes first. Five wrong tries in the extension remove it, and tries are taken one at a time, so sending many at once doesn't get round that. What the limit doesn't stop: the PIN's record (the unlock secret, wrapped under a key stretched from the PIN) sits in the browser's session storage, and someone at the computer who opens the extension's developer tools can copy it, then guess offline with no limit. Six digits is a million guesses at the cost of the key stretching each, which takes hours to days on one ordinary computer, not years. So the PIN protects against someone trying it at the unlock screen, not against someone who can use your unlocked computer for a minute. Locking the screen when you step away matters more than the PIN. The Windows app's PIN is held only in the app's memory, with the same 6 digits and five tries, and goes when the app closes.
 - A copied secret is cleared from the clipboard after the time you chose, and the clear is tried again if the browser refuses it. It can't reach copies the system keeps elsewhere: Windows clipboard history (Win+V) and cloud clipboard, and clipboard managers, keep their own. Turn those off if that matters.
+- The HIBP key is Fernet-encrypted with the server's `SECRET_KEY`, like the SMTP password, so the server can read it. Anyone with the database and that key can use your HIBP plan. It's kept outside the Passwords code, which never uses server-side encryption.
+- A breach alert's push shows the breach, what it exposed, and your address with all but its first letter hidden.
 - Travel mode takes a vault off the device. It's still on your server, and your master password brings it back, so it only helps if you don't do that in front of whoever's asking.
 
 ## Android

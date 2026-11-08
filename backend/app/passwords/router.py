@@ -874,6 +874,11 @@ async def write_items(vault_id: str, body: s.ItemBatch, session: VaultSession = 
     entries = [{"id": e.id, "base_revision": e.base_revision, "blob": e.blob, "deleted": e.deleted, "purge": e.purge} for e in body.items]
     result = await service.write_batch(db, vault.id, entries)
     await db.commit()
+    gone = [e.id for e in body.items if (e.deleted or e.purge) and str(e.id) in result["applied"]]
+    if gone:
+        from app.passwords.reminders import remove_for_items
+
+        await remove_for_items(db, gone)  # Their Calendar events and tasks go too.
     return s.BatchOut(
         revision=result["revision"],
         applied=[uuid.UUID(x) for x in result["applied"]],

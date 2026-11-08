@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 
 import { coarseCounts, type HealthReport, runHealth, type TwoFaDirectory } from "../core/health";
 import { ChangePassword, DuplicatesPanel, MailAlerts, RotationQueue, SurvivalPanel } from "./Connections";
+import { BreachAlerts } from "./BreachAlerts";
+import { ExpiringSoon } from "./ExpiryAlerts";
 import type { Item } from "../core/model";
 import { MailAccounts } from "./MailAccounts";
 import { Button, Callout, errorText, Spinner, useVault } from "./kit";
@@ -90,6 +92,8 @@ export function SecurityScreen() {
       <SurvivalPanel />
       <MailAlerts onChange={setChanging} />
       <MailAccounts />
+      <BreachAlerts onChange={setChanging} />
+      <ExpiringSoon />
       <DuplicatesPanel />
       <StrayPanel />
       <p className="text-sm text-[var(--text-muted)]">Worked out on this device. For breaches, only the first five characters of each password's hash go out, through your server.</p>

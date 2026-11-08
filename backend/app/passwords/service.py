@@ -251,6 +251,10 @@ async def _loop() -> None:
         try:
             async with SessionLocal() as db:
                 await sweep(db)
+                # Expiry reminders whose item went some way that didn't pass through sync.
+                from app.passwords.reminders import sweep as sweep_reminders
+
+                await sweep_reminders(db)
         except Exception:  # noqa: BLE001 — the loop must outlive one bad sweep
             logger.exception("Passwords sweep failed")
         try:

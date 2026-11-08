@@ -229,6 +229,14 @@ async def zip_sweep(ctx: dict) -> int:
     return await asyncio.to_thread(sweep) + await asyncio.to_thread(library_export.sweep)
 
 
+async def breach_watch_tick(ctx: dict) -> dict:
+    """Breach alerts for people's own addresses: due ones, within the HIBP key's rate
+    limit. It never touches a vault (app/breach_watch)."""
+    from app.breach_watch.service import breach_tick
+
+    return await breach_tick(ctx)
+
+
 # Arq registers functions by their ``__name__``; pin it to the shared constant
 # so the enqueue side (queue.RUN_TASK) and the worker always agree.
 execute_task_run.__name__ = RUN_TASK
@@ -279,6 +287,8 @@ class WorkerSettings:
         cron(tus_sweep, hour=4, minute=45, run_at_startup=False, unique=True),
         cron(import_sweep, hour=4, minute=55, run_at_startup=False, unique=True),
         cron(import_watchdog, minute={1, 11, 21, 31, 41, 51}, run_at_startup=False, unique=True),
+        # Each run stays under eight minutes, so they never overlap.
+        cron(breach_watch_tick, minute={3, 13, 23, 33, 43, 53}, run_at_startup=False, unique=True),
         cron(
             refresh_connector_catalogs,
             hour={1, 7, 13, 19},

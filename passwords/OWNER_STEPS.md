@@ -138,6 +138,18 @@ Built and tested against a throwaway GreenMail, never against a real provider. T
 4. Make an alias for a low-value sign-up from the item editor and from the extension's Generator, and check that Mail shows the alias on its email, that turning it off sends new mail to Trash, and that a reply goes out from the alias.
 5. After merge, run `cd e2e && npx playwright test --config passwords.config.ts aliases.spec.ts` on the stack. It wasn't run here.
 
+## 9. Optional: breach alerts for email addresses
+
+These need a paid Have I Been Pwned key. Without one, nothing is sent anywhere.
+
+1. Go to https://haveibeenpwned.com/API/Key, sign in with your email, and choose a plan. Core 1 was US$4.39 a month for 10 checks a minute in November 2026, which covers hundreds of people checked once a day. Read the API's terms there.
+2. Copy the key: 32 characters, 0-9 and a-f.
+3. Admin, Passwords, "Breach alerts for email addresses": paste it and press Save key. It should show your plan's name. If it says it couldn't check, the next run tries again. If it says the key isn't valid, copy it again.
+4. In Passwords, Security check, Breaches: turn it on for yourself. It shows the addresses it will send first. The first check runs within ten minutes.
+5. Tell the people on your server it's there. It's off for each of them until they turn it on (D-ALERTS-3).
+
+**Tests to run once this branch is on the stack:** from `e2e/`, `npx playwright test -c passwords.config.ts passwords-tests/alerts.spec.ts`, and the changed test in `passwords-tests/gaps.spec.ts` ("a typed document can get its Calendar reminder too"). They set no HIBP key and never reach HIBP.
+
 ## Known follow-ups
 
 - **Fill the list of account deletion pages.** "Delete account" in Security check can link straight to a site's deletion page from JustDeleteMe's list (MIT), but the data file ships empty because downloading it needed your go-ahead. To fill it, pick the latest commit of https://github.com/jdm-contrib/jdm and run `python backend/scripts/update_deletion_sites.py --commit <sha>`, then check `backend/app/passwords/data/deletion_sites.json` and commit it. Until then it links to the site's account settings instead.
@@ -150,3 +162,4 @@ Built and tested against a throwaway GreenMail, never against a real provider. T
 - iOS is design only: see [IOS_NOTES.md](IOS_NOTES.md).
 - From the 2026-11-08 review: once this is merged, open each of your devices (web vault, browser, phone, Windows) and let it sync once, so each marks your own vault; a device added before any of them has done that is weaker until it has. If you set a 4- or 5-digit PIN in the browser, set a 6-digit one. The Android passkey items in SECURITY.md are for the passkey-PIN branch. Check whether the `com.android.browser` certificate in `android/app/src/main/assets/passwords/privileged_apps.json` is the public AOSP test key; if it is, remove that entry.
 - **Find stray passwords** (Security check) hasn't been run in a browser yet. Its e2e test, `e2e/passwords-tests/stray.spec.ts`, needs the stack: `cd e2e && npx playwright test -c passwords.config.ts passwords-tests/stray.spec.ts`. The first time you run it on your own data, it will list real secrets from your mail and files. Look for false alarms and anything it missed, and tell me. Once merged, the hourly pass starts reading new mail and files for everyone with a vault, without anyone pressing the button.
+- Expiry reminders and the Breaches section are on web, the extension's vault page and Windows. Android still has only the older "Document expires soon" button, and no Breaches section.

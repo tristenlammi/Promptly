@@ -10,6 +10,7 @@ import { parseOtpauth } from "../core/totp";
 import { Button, Callout, errorText, IconButton, inputClass, Label, useVault } from "./kit";
 import { NewAliasButton } from "./Aliases";
 import { StrengthMeter } from "./Onboarding";
+import { ReminderFields, syncReminder } from "./ExpiryAlerts";
 import { decodeQrFile, scanQrFromCamera } from "./qr";
 
 export const KIND_LABEL: Record<string, string> = {
@@ -147,7 +148,9 @@ export function ItemEditor({ initial, vaultId, id, onDone, onCancel }: { initial
       }
       const saved = id ? await vault.update(id, clean) : await vault.saveNew(target, clean);
       if (newAlias && !id) await aliasApi(vault.api).edit(newAlias, { item_id: saved.id }).catch(() => undefined);
-      vault.sync().catch(() => undefined);
+      const synced = vault.sync().catch(() => undefined);
+      // If it fails, the item's view says so and offers to put it back.
+      await syncReminder(vault, saved, synced).catch(() => undefined);
       onDone(saved.id);
     } catch (err) {
       setError(errorText(err));
@@ -266,6 +269,8 @@ export function ItemEditor({ initial, vaultId, id, onDone, onCancel }: { initial
           )}
         </Label>
       ))}
+
+      <ReminderFields body={body} onChange={(p) => set("expiryReminder", p)} />
 
       {body.kind === "wifi" && (
         <Label text="Security">

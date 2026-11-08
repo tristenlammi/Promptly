@@ -115,6 +115,12 @@ It only reads mail you were sent, not your Trash, Spam, Drafts or Sent mail, and
 
 **Find stray passwords**, in Security check, looks through your own Mail, Files and Photos for passwords, Wi-Fi passwords, API keys, recovery codes and 2FA setup keys left in plain text, plus files like `passwords.txt`, `.env` or a leftover export. Your server does the looking, in your things only, and keeps just where it found something. For each one, "Save to vault" fills in a new item for you to check and save. Then you're asked whether to move the original to its Trash. "Ignore" hides one for good. It also checks new mail and files every hour, so the count stays up to date. A password that sat in plain text is worth changing too.
 
+**Expiring soon**, on the Security check, lists IDs, licences and cards that have expired or expire in the next three months. It's worked out on your device.
+
+**Remind me before the expiry date**, when you edit an ID, licence or card, puts an event in Calendar, a task in Tasks, or both, with a heads-up 1 to 26 weeks before. Calendar and Tasks aren't end-to-end encrypted, so the wording and the date go on your server in plain text. The wording starts as the document's type, such as "Passport", and you can change it. Long numbers are always left out. Change the date in your vault and the event moves; delete the item and it goes. If you reword the event in Calendar, that's kept.
+
+**Breaches**, on the Security check, tells you when one of your email addresses turns up in a data breach. Your admin has to add a Have I Been Pwned key first, and then it's off until you turn it on. It checks your account's address and your Mail accounts' addresses about once a day. It shows each breach, what it exposed, and your logins at that site with a Change password button. A new breach arrives as a notification. Turning it off forgets what was found. Breach data is from Have I Been Pwned.
+
 Keep an encrypted export now and then, from Import and export. That's the copy that survives if your server doesn't. The Windows app can make one on a schedule.
 
 Every six months or so you'll be asked whether you still have your kit. Check, and mean it.

@@ -1,6 +1,7 @@
 // One item, read-only, with copy buttons. Secrets stay as dots until asked for.
 import { b64u, randomBytes, randomUuid } from "../core/bytes";
-import { ChangePassword, ClockWarning, ExpiryReminder, FromFiles } from "./Connections";
+import { ChangePassword, ClockWarning, FromFiles } from "./Connections";
+import { ReminderPanel } from "./ExpiryAlerts";
 import { ArchiveRestore, Archive, Download, ExternalLink, History, Pencil, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 
@@ -394,7 +395,7 @@ export function ItemView({ item, onClosed }: { item: Item; onClosed: () => void 
         {b.documentType && <PlainRow label="Type" value={b.documentType} copyable={false} />}
         {b.expiresOn && <PlainRow label="Expires" value={b.expiresOn} copyable={false} />}
         {b.totp?.secret && <ClockWarning />}
-        {b.kind === "document" && b.expiresOn && canEdit && <ExpiryReminder item={item} />}
+        <ReminderPanel item={item} canEdit={canEdit} />
         {!fillOnly && secretFields.map((r) => <SecretRow key={r.label} label={r.label} value={r.value} />)}
         {b.fields?.map((f, i) =>
           f.type === "hidden" && fillOnly ? null : f.type === "hidden" ? <SecretRow key={i} label={f.name || "Field"} value={f.value} mono={false} /> : <PlainRow key={i} label={f.name || "Field"} value={f.value} />,

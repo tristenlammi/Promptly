@@ -21,6 +21,7 @@ Promptly is MIT. Only permissive sources are used here. No code was copied from 
 |---|---|---|
 | EFF Large Wordlist | CC BY 3.0 US | Electronic Frontier Foundation, https://www.eff.org/dice. `frontend/src/passwords/core/eff_large_wordlist.json` is the list reformatted as JSON. |
 | JustDeleteMe site list (`_data/sites.json`) | MIT | Copyright (c) 2013-2020 Robb Lewis, The JDM Contrib Team, & various contributors. https://github.com/jdm-contrib/jdm. `backend/app/passwords/data/deletion_sites.json` keeps each site's deletion page, difficulty, contact address and name, made by `backend/scripts/update_deletion_sites.py` at the commit recorded in the file. Credited in the app where a deletion page is shown. |
+| Have I Been Pwned breach data (breach alerts) | CC BY 4.0 | Troy Hunt's Have I Been Pwned, https://haveibeenpwned.com. Credited with a link in the Security check's Breaches section, and in each alert. Fetched at run time with the admin's key, not bundled. |
 
 ## Windows app (`passwords/desktop/`)
 

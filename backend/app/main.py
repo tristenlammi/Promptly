@@ -691,6 +691,9 @@ from app.passwords.accounts import router as passwords_accounts_router  # noqa: 
 from app.passwords.share import router as passwords_share_router  # noqa: E402
 from app.passwords.aliases import router as passwords_aliases_router  # noqa: E402
 from app.mail.aliases import router as mail_aliases_router  # noqa: E402
+from app.passwords.reminders import router as passwords_reminders_router  # noqa: E402
+from app.passwords.breaches import admin_router as passwords_breach_admin_router  # noqa: E402
+from app.passwords.breaches import router as passwords_breaches_router  # noqa: E402
 
 app.include_router(passwords_extras_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_share_router, prefix="/api/passwords", tags=["passwords"])
@@ -703,6 +706,9 @@ app.include_router(passwords_stray_router, prefix="/api/passwords", tags=["passw
 # Aliases on your own domain: the vault side, and what Mail shows (app/mail/aliases.py).
 app.include_router(passwords_aliases_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(mail_aliases_router, prefix="/api/mail", tags=["mail"])
+app.include_router(passwords_reminders_router, prefix="/api/passwords", tags=["passwords"])
+app.include_router(passwords_breaches_router, prefix="/api/passwords", tags=["passwords"])
+app.include_router(passwords_breach_admin_router, prefix="/api/passwords", tags=["passwords"])
 
 app.include_router(passwords_admin_router, prefix="/api/passwords", tags=["passwords"])
 app.include_router(passwords_router, prefix="/api/passwords", tags=["passwords"])

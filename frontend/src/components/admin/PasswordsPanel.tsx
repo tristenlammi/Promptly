@@ -5,6 +5,7 @@ import { apiClient } from "@/api/client";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 
+import { PasswordsBreachSettings } from "./PasswordsBreachSettings";
 import { SettingsCard } from "./SettingsCard";
 
 type Policy = {
@@ -87,6 +88,7 @@ export function PasswordsPanel() {
           />
           <span className="text-xs text-[var(--text-muted)]">Going higher slows unlocking on older phones.</span>
         </label>
+        <PasswordsBreachSettings />
       </div>
     </SettingsCard>
   );

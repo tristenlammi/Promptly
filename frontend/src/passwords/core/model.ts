@@ -147,6 +147,8 @@ export type ItemBody = {
   documentNumber?: string;
   expiresOn?: string;
   remindExpiry?: boolean;
+  /** A reminder in Calendar and/or Tasks before it expires (core/alerts.ts). Cards use it too. */
+  expiryReminder?: { on: boolean; weeks: number; calendar: boolean; task: boolean; label: string };
 
   // folder
   parentId?: string | null;
