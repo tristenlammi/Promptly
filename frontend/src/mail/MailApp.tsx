@@ -8,7 +8,9 @@ import { Link as RouterLink, useLocation } from "react-router-dom";
 import { ModelSelector } from "@/components/chat/ModelSelector";
 import { ContextMenu, type ContextMenuItem } from "@/components/files/ContextMenu";
 import { UserAvatar } from "@/components/shared/UserAvatar";
+import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { showsPromptlyNav } from "@/lib/appLaunch";
 import { useSelectedModel } from "@/store/modelStore";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -428,7 +430,8 @@ export function MailApp() {
 
   if (accounts.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 bg-[var(--bg,transparent)] px-6 text-center">
+      <div className="relative flex h-full flex-col items-center justify-center gap-3 bg-[var(--bg,transparent)] px-6 text-center">
+        {isMobile && showsPromptlyNav("mail") && <PromptlyMenuButton className="absolute left-2 top-2" />}
         <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#D97757]/15"><Mail className="h-7 w-7 text-[#D97757]" /></span>
         <h1 className="text-xl font-semibold text-[var(--text)]">All your email, in one calm place</h1>
         <p className="max-w-sm text-sm text-[var(--text-muted)]">Connect any mailbox: Gmail, Proton, Fastmail, your work address. Your mail stays where it is, and you can add as many as you like.</p>
@@ -653,6 +656,8 @@ export function MailApp() {
     <section aria-label="Conversations" className={`flex min-h-0 flex-col ${isMobile ? "w-full flex-1" : "w-96 shrink-0 border-r border-[var(--border)]"}`}>
       {isMobile && <div className="px-2 pt-2">{picker}</div>}
       <div className="flex items-center gap-2 p-3">
+        {/* Inside Promptly on a phone: its menu (AppLayout's drawer). Not in the installed Mail app. */}
+        {isMobile && showsPromptlyNav("mail") && <PromptlyMenuButton className="-ml-1" />}
         <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-xl bg-[var(--hover)] px-3">
           <Search className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
           <input id="mail-search" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Search your mail" aria-label="Search your mail" className="min-w-0 flex-1 bg-transparent text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)]" />

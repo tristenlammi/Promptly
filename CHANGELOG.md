@@ -106,6 +106,11 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Calls (voice channels), WP-V4 -->
 - Rooms: making a new room without a topic failed ("Couldn't create the room").
 
+## [0.32.1] - 2026-11-09
+
+### Fixed
+- Apps opened inside Promptly keep Promptly's menu, in a browser and in the installed Promptly window: Passwords now shows Promptly's navigation beside your vault (a menu button on a phone), and Rooms, Mail, Calendar, Maps and Photos on a phone, and Photos and installed-app pages on a big screen, no longer leave you with no way back. Only an app installed on its own (or the browser extension) shows just that app.
+
 ## [0.32.0] - 2026-11-09
 
 ### Added

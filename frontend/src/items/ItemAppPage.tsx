@@ -18,8 +18,12 @@ import { ItemPage } from "./ItemPage";
  *
  * In a normal browser tab it offers to install itself (Chrome/Edge/Android
  * via the browser's prompt; iPhone/iPad with Share → Add to Home Screen).
+ *
+ * ``inPromptly``: opened from inside Promptly rather than as the installed
+ * app (App.tsx's ItemAppGate) — Promptly's layout is around it, so it fills
+ * that and keeps its Back button.
  */
-export function ItemAppPage() {
+export function ItemAppPage({ inPromptly = false }: { inPromptly?: boolean } = {}) {
   const { fileId = "" } = useParams<{ fileId: string }>();
   const { data: doc } = useQuery({
     queryKey: ["item", fileId],
@@ -46,7 +50,7 @@ export function ItemAppPage() {
   }, [doc]);
 
   return (
-    <div className="flex h-[100dvh] flex-col bg-[var(--bg)]">
+    <div className={`flex ${inPromptly ? "h-full min-h-0" : "h-[100dvh]"} flex-col bg-[var(--bg)]`}>
       {doc && <InstallBanner name={doc.title} color={doc.spec?.color ?? "var(--accent)"} kind={doc.kind} />}
       {doc && (
         <InstallFromLink
@@ -56,7 +60,7 @@ export function ItemAppPage() {
         />
       )}
       <div className="min-h-0 flex-1">
-        <ItemPage standalone />
+        <ItemPage standalone={!inPromptly} />
       </div>
     </div>
   );

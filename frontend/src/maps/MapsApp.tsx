@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
 import { useIsMobile } from "@/hooks/useIsMobile";
+import { PromptlyMenuButton } from "@/components/layout/PromptlyNavDrawer";
 import { confirm } from "@/components/shared/ConfirmDialog";
 import { apiErrorMessage } from "@/utils/apiError";
 import { isAndroidDevice } from "@/lib/installPrompt";
@@ -57,7 +58,9 @@ function locationProblemText(e: GeolocationPositionError): string {
   return e.message ? `${why} (${e.message})` : why;
 }
 
-export function MapsApp({ embedded = false }: { embedded?: boolean }) {
+/** ``promptlyNav``: full screen on a phone but inside Promptly (not the
+ *  installed Maps app), so the search bar starts with Promptly's menu. */
+export function MapsApp({ embedded = false, promptlyNav = false }: { embedded?: boolean; promptlyNav?: boolean }) {
   const qc = useQueryClient();
   const isMobile = useIsMobile();
   const keyboard = useKeyboardInset();
@@ -506,6 +509,7 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
   if (config && !config.basemap) {
     return (
       <Shell embedded={embedded}>
+        {promptlyNav && <PromptlyMenuButton className="absolute left-3 top-3 z-10" />}
         <div className="flex h-full items-center justify-center p-6 text-center">
           <div className="max-w-sm">
             <Navigation className="mx-auto mb-3 h-8 w-8 text-[var(--accent-text)]" />
@@ -727,6 +731,7 @@ export function MapsApp({ embedded = false }: { embedded?: boolean }) {
           {panel !== "route" && (
             <div className="pointer-events-auto relative">
               <div className="flex h-12 items-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-3 shadow-lg">
+                {promptlyNav && <PromptlyMenuButton className="-ml-1.5" />}
                 {searching ? <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[var(--text-muted)]" /> : <Search className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />}
                 <input
                   value={query}

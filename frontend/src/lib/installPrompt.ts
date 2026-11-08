@@ -1,5 +1,7 @@
 import { useSyncExternalStore } from "react";
 
+import { appKeyFor, isStandaloneDisplay, launchedAppKey } from "./appLaunch";
+
 /**
  * Early capture of the browser's install prompt.
  *
@@ -82,49 +84,9 @@ export async function promptInstall(): Promise<"accepted" | "dismissed" | "unava
   }
 }
 
-/** Running as an installed app (its own window), not in a browser tab. */
-export function isStandaloneDisplay(): boolean {
-  if (typeof window === "undefined") return false;
-  return (
-    window.matchMedia?.("(display-mode: standalone)").matches ||
-    window.matchMedia?.("(display-mode: window-controls-overlay)").matches ||
-    (navigator as Navigator & { standalone?: boolean }).standalone === true
-  );
-}
-
-/** Which of Promptly's apps a path belongs to (each installs separately). */
-export function appKeyFor(path: string): string {
-  if (path === "/photos" || path.startsWith("/photos/")) return "photos";
-  if (path === "/rooms" || path.startsWith("/rooms/")) return "rooms";
-  if (path === "/calendar" || path.startsWith("/calendar/")) return "calendar";
-  if (path === "/maps" || path.startsWith("/maps/")) return "maps";
-  if (path === "/mail" || path.startsWith("/mail/")) return "mail";
-  const m = /^\/app\/([^/]+)/.exec(path);
-  return m ? `app:${m[1]}` : "promptly";
-}
-
-// An installed app's window can't tell which app it is from the display
-// mode alone, so remember the app the window opened as (the first page an
-// installed window loads is its start_url). sessionStorage lives as long
-// as the window does.
-const LAUNCH_KEY = "promptly:launched-app";
-if (typeof window !== "undefined" && isStandaloneDisplay()) {
-  try {
-    if (!sessionStorage.getItem(LAUNCH_KEY)) sessionStorage.setItem(LAUNCH_KEY, appKeyFor(location.pathname));
-  } catch {
-    /* storage blocked: treat the window as Promptly */
-  }
-}
-
-/** The app this installed window was launched as ("promptly", "photos", "app:<id>"). */
-export function launchedAppKey(): string | null {
-  if (!isStandaloneDisplay()) return null;
-  try {
-    return sessionStorage.getItem(LAUNCH_KEY) ?? "promptly";
-  } catch {
-    return "promptly";
-  }
-}
+// Which window this is (Promptly or an app installed on its own) lives in
+// appLaunch, which the isolated Passwords page shares.
+export { appKeyFor, isStandaloneDisplay, launchedAppKey };
 
 export function isAndroidDevice(): boolean {
   return typeof navigator !== "undefined" && /android/i.test(navigator.userAgent);

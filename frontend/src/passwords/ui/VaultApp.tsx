@@ -46,6 +46,7 @@ import { CREATABLE, ItemEditor, KIND_LABEL } from "./ItemEditor";
 import { ItemView } from "./ItemView";
 import { Button, Callout, type Ctx, DEFAULT_SETTINGS, IconButton, inputClass, Modal, type Settings, Spinner, useVault, VaultContext } from "./kit";
 import { Onboarding } from "./Onboarding";
+import { PromptlyMenuSlot } from "./PromptlyNav";
 import type { Platform } from "./platform";
 import { QrCameraHost } from "./qr";
 import { ActivityScreen, CodesScreen, ConnectScreen, DevicesScreen, GeneratorScreen, SettingsScreen, TrashScreen } from "./Screens";
@@ -502,6 +503,7 @@ function Main({ platform, vault, preview, onLock }: { platform: Platform; vault:
           <MainNotices onNeedKit={needKit} />
           {kitNeeded && <KitGate onDone={() => setKitNeeded(false)} />}
           <header className="flex items-center gap-2 border-b border-[var(--border)] bg-[var(--surface)] p-2 md:hidden">
+            <PromptlyMenuSlot />
             <IconButton label="Menu" onClick={() => setDrawer(true)}><Menu className="h-5 w-5" /></IconButton>
             <span className="font-semibold text-[var(--text)]">Passwords</span>
             {preview && <span className="rounded bg-[var(--warning)]/20 px-1.5 py-0.5 text-[10px] font-medium text-[var(--text)]">Preview</span>}

@@ -5,7 +5,9 @@ import { createRoot } from "react-dom/client";
 
 import "../../index.css";
 
+import { showsPromptlyNav } from "../../lib/appLaunch";
 import { webPlatform } from "./platform";
+import { PromptlyFrame } from "./PromptlyNav";
 import { VaultApp } from "./VaultApp";
 
 // Follow the theme the person chose in Promptly, else the system's.
@@ -25,6 +27,11 @@ applyTheme();
 // A Send opens for anyone with the link, with no account and nothing of the vault loaded.
 const SendView = lazy(() => import("./SendView").then((m) => ({ default: m.SendView })));
 const isSend = location.pathname.startsWith("/passwords/send/");
+const platform = webPlatform();
+// Opened inside Promptly (a browser tab, the installed Promptly window), the
+// vault keeps Promptly's navigation; as the installed Passwords app it's on
+// its own. A Send is for anyone with the link, so never.
+const promptlyNav = !isSend && showsPromptlyNav("passwords");
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -32,8 +39,12 @@ createRoot(document.getElementById("root")!).render(
       <Suspense fallback={null}>
         <SendView />
       </Suspense>
+    ) : promptlyNav ? (
+      <PromptlyFrame auth={platform.api.auth}>
+        <VaultApp platform={platform} />
+      </PromptlyFrame>
     ) : (
-      <VaultApp platform={webPlatform()} />
+      <VaultApp platform={platform} />
     )}
   </StrictMode>,
 );
