@@ -404,6 +404,13 @@ async def open_dm(body: DmIn, db: AsyncSession = Depends(get_db), user: User = D
             st.hidden = False
             await db.commit()
             return await core.room_out(db, existing, user)
+        # A block either way: no new 1:1 conversation (decision D7). The
+        # blocked person's wording never mentions the block.
+        from app.people.blocks import dm_refusal
+
+        why = await dm_refusal(db, user.id, next(iter(others)))
+        if why:
+            raise core.forbidden(why)
     room = Room(space_id=None, kind="dm" if len(others) == 1 else "group", created_by=user.id)
     db.add(room)
     await db.flush()

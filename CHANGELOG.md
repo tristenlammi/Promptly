@@ -24,9 +24,15 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Added
 - Talking to Promptly (groundwork): a speed bench for the speech pipeline, `python -m app.talk.bench` (Whisper base/small per pass and as a live lane, Smart Turn, Kokoro to first audio, the voice model's first word), and an echo test page, `backend/app/talk/echo_test.html`, that shows whether a browser cancels its own playback. Nothing changes for users yet.
 - Talking to Promptly (groundwork): the speech services can now listen and speak live. Whisper hears a conversation as it happens, shows words as you say them, and knows when you've finished talking (about a fifth of a second after your last word) without cutting you off when you pause mid-thought; it uses the small `base` model for this, so dictation and meetings keep theirs. The voice service starts speaking about 0.3 s into a reply instead of after the whole sentence, and stops the moment it's interrupted. Not used by the app until Talk is switched on in a later update.
+- Notifications: quiet hours for all of Promptly (Account → Notifications), with start and end in your own time zone and different times on Friday and Saturday nights if you like. Notifications wait and arrive together when quiet hours end; calls, Calendar reminders, item reminders, Passwords and admin alerts always get through. Rooms and Mail can go in a daily summary instead, one push of counts at your Today summary time. And you can block someone from their profile or your 1:1 conversation: neither of you can message the other one-to-one, you get no notifications about what they do, and they aren't told. Account → Blocked people lists them, with Unblock.
+- `scripts/stack.sh` (and `scripts/stack.ps1`) runs a separate copy of Promptly for a worktree on its own port (`up`, `down`, `ls`, `e2e`), with its own containers, images, data and throwaway secrets, so testing a branch never touches the main app.
 
 ### Changed
 - Read-aloud runs Kokoro on 4 threads (`TTS_THREADS`) instead of one per core, which was 2–3× slower when the server was busy.
+
+### Fixed
+- Mail: a very large or tangled HTML email could still tie up the mail worker for minutes while it was cleaned. Cleaning now stops after 3 seconds, and an email it can't finish shows as plain text, with a note saying so. Sending works the same way, so a draft like that no longer holds up the app.
+- Workspaces: two board edits close together (adding a card, then dragging it to Done) could leave the board's text in chat search out of date, because both tried to create the workspace's Boards folder at once and one crashed. Making a workspace folder is now safe when two requests race, for every folder kind.
 
 ## [0.31.0] - 2026-11-08
 

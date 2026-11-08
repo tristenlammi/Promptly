@@ -78,6 +78,13 @@ export interface PersonPage {
   /** Rooms you're both in — names only. */
   rooms: { room_id: string; name: string; space: string | null; kind: string }[];
   files: PersonFile[];
+  /** Whether you blocked them (never whether they blocked you). */
+  blocked?: boolean;
+}
+
+/** Someone you've blocked (Account → Blocked people). */
+export interface BlockedPerson extends RoomUser {
+  blocked_at: string;
 }
 
 /** One row of the people picker. ``user`` null: not on Promptly (can't be picked). */
@@ -114,4 +121,17 @@ export const peopleHubApi = {
     const { data } = await apiClient.get<{ people: PickerPerson[] }>("/people/search", { params: { q, details: opts.details || undefined } });
     return data.people;
   },
+  /** The people you've blocked, newest first. */
+  async listBlocked(): Promise<BlockedPerson[]> {
+    return (await apiClient.get<BlockedPerson[]>("/people/blocks")).data;
+  },
+  /** Block someone. They aren't told. */
+  async block(userId: string): Promise<void> {
+    await apiClient.put(`/people/blocks/${userId}`);
+  },
+  async unblock(userId: string): Promise<void> {
+    await apiClient.delete(`/people/blocks/${userId}`);
+  },
 };
+
+export const BLOCKED_KEY = ["people", "blocked"];

@@ -323,6 +323,47 @@ async def _get_or_create_prefs(
     return row
 
 
+def _hhmm(t) -> str | None:  # noqa: ANN001
+    return t.strftime("%H:%M") if t is not None else None
+
+
+def _clock(v: str):  # noqa: ANN202
+    from datetime import time as _time
+
+    hh, mm = (int(x) for x in v.split(":"))
+    return _time(hh, mm)
+
+
+async def _prefs_out(db: AsyncSession, user: User, prefs: PushPreferences) -> PreferencesSchema:
+    """The toggles plus quiet hours, the daily-summary choices, and the
+    context the page shows (summary time, time zone, quiet right now)."""
+    from app.notifications import quiet
+    from app.notifications.dispatch import SUMMARY_CATEGORIES
+    from app.today.push import prefs as today_prefs
+
+    try:
+        summary_time = (await today_prefs(db, user))["time"]
+    except Exception:  # noqa: BLE001 — the page still works without it
+        logger.warning("couldn't read the Today summary time", exc_info=True)
+        summary_time = "08:00"
+    tz = quiet.zone_of(user.settings)
+    base = {c.key: getattr(prefs, c.key) for c in PushPreferences.__table__.columns if isinstance(getattr(prefs, c.key), bool)}
+    weekend = prefs.quiet_weekend_start is not None and prefs.quiet_weekend_end is not None
+    return PreferencesSchema(
+        **base,
+        quiet_start=_hhmm(prefs.quiet_start) or "22:00",
+        quiet_end=_hhmm(prefs.quiet_end) or "07:00",
+        quiet_weekend=weekend,
+        quiet_weekend_start=_hhmm(prefs.quiet_weekend_start) if weekend else None,
+        quiet_weekend_end=_hhmm(prefs.quiet_weekend_end) if weekend else None,
+        summary_categories=[c for c in (prefs.summary_categories or []) if c in SUMMARY_CATEGORIES],
+        summary_capable=list(SUMMARY_CATEGORIES),
+        summary_time=summary_time,
+        timezone=str(tz.key),
+        quiet_now=quiet.is_quiet(prefs, datetime.now(timezone.utc), tz),
+    )
+
+
 @router.get("/preferences", response_model=PreferencesSchema)
 async def get_preferences(
     db: AsyncSession = Depends(get_db),
@@ -330,7 +371,7 @@ async def get_preferences(
 ) -> PreferencesSchema:
     prefs = await _get_or_create_prefs(db, user)
     await db.commit()
-    return PreferencesSchema.model_validate(prefs)
+    return await _prefs_out(db, user, prefs)
 
 
 @router.patch("/preferences", response_model=PreferencesSchema)
@@ -339,13 +380,40 @@ async def update_preferences(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> PreferencesSchema:
+    from app.notifications.dispatch import SUMMARY_CATEGORIES
+
     prefs = await _get_or_create_prefs(db, user)
     data = payload.model_dump(exclude_unset=True)
+    if "summary_categories" in data:
+        cats = data.pop("summary_categories") or []
+        bad = [c for c in cats if c not in SUMMARY_CATEGORIES]
+        if bad:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"These can't go in the daily summary: {', '.join(bad)}",
+            )
+        prefs.summary_categories = list(dict.fromkeys(cats))
+    for key in ("quiet_start", "quiet_end"):
+        if key in data:
+            value = data.pop(key)
+            if value is not None:
+                setattr(prefs, key, _clock(value))
+    weekend = data.pop("quiet_weekend", None)
+    w_start = data.pop("quiet_weekend_start", None)
+    w_end = data.pop("quiet_weekend_end", None)
+    if weekend is False:
+        prefs.quiet_weekend_start = prefs.quiet_weekend_end = None
+    elif weekend is True or w_start or w_end:
+        on = weekend is True or prefs.quiet_weekend_start is not None
+        if on:
+            prefs.quiet_weekend_start = _clock(w_start) if w_start else (prefs.quiet_weekend_start or prefs.quiet_start)
+            prefs.quiet_weekend_end = _clock(w_end) if w_end else (prefs.quiet_weekend_end or prefs.quiet_end)
     for key, value in data.items():
-        setattr(prefs, key, value)
+        if value is not None:
+            setattr(prefs, key, value)
     await db.commit()
     await db.refresh(prefs)
-    return PreferencesSchema.model_validate(prefs)
+    return await _prefs_out(db, user, prefs)
 
 
 # ---------------------------------------------------------------------
