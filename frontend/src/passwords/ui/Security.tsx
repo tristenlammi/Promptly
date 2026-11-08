@@ -6,6 +6,7 @@ import { coarseCounts, type HealthReport, runHealth, type TwoFaDirectory } from 
 import { ChangePassword, DuplicatesPanel, MailAlerts, RotationQueue, SurvivalPanel } from "./Connections";
 import type { Item } from "../core/model";
 import { Button, Callout, errorText, Spinner, useVault } from "./kit";
+import { StrayPanel } from "./Stray";
 
 function Row({ item, detail }: { item: Item; detail?: string }) {
   const { go } = useVault();
@@ -88,6 +89,7 @@ export function SecurityScreen() {
       <SurvivalPanel />
       <MailAlerts onChange={setChanging} />
       <DuplicatesPanel />
+      <StrayPanel />
       <p className="text-sm text-[var(--text-muted)]">Worked out on this device. For breaches, only the first five characters of each password's hash go out, through your server.</p>
       <label className="flex items-center gap-2 text-sm text-[var(--text)]">
         <input type="checkbox" checked={breach} onChange={(e) => setBreach(e.target.checked)} />

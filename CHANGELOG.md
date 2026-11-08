@@ -21,6 +21,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+- Passwords: "Find stray passwords", in Security check, finds passwords, keys, Wi-Fi passwords, recovery codes and 2FA setup keys left in plain text in your own Mail, Files and Photos. "Save to vault" fills in a new item, then offers to move the original to Trash; "Ignore" hides one for good. It runs when you ask and checks new mail and files hourly.
+
 ### Changed
 - Passwords: Settings is grouped into Locking, Filling, Clipboard and Appearance, with password, keys and recovery folded away.
 

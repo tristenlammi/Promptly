@@ -680,6 +680,7 @@ const hostName = (url?: string) => {
 
 const MORE_LINKS: { route: string; label: string; icon: keyof typeof PATHS }[] = [
   { route: "security", label: "Security check", icon: "shield" },
+  { route: "stray", label: "Find stray passwords", icon: "shield" },
   { route: "shared", label: "Shared vaults", icon: "user" },
   { route: "sends", label: "Secure Send", icon: "external" },
   { route: "devices", label: "Devices", icon: "globe" },

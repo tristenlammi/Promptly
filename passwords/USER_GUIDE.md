@@ -71,6 +71,8 @@ A site decides when it asks for a passkey, and nothing can make it ask. When a p
 
 **Security check** looks for weak, reused, old and breached passwords, all worked out on your device. For breaches, only the first few characters of a hash leave, through your server. It also tells you about emails from your sites saying a password changed, and walks you through changing passwords one at a time: a new one is saved first, you change it on the site, then you say whether it worked.
 
+**Find stray passwords**, in Security check, looks through your own Mail, Files and Photos for passwords, Wi-Fi passwords, API keys, recovery codes and 2FA setup keys left in plain text, plus files like `passwords.txt`, `.env` or a leftover export. Your server does the looking, in your things only, and keeps just where it found something. For each one, "Save to vault" fills in a new item for you to check and save. Then you're asked whether to move the original to its Trash. "Ignore" hides one for good. It also checks new mail and files every hour, so the count stays up to date. A password that sat in plain text is worth changing too.
+
 Keep an encrypted export now and then, from Import and export. That's the copy that survives if your server doesn't. The Windows app can make one on a schedule.
 
 Every six months or so you'll be asked whether you still have your kit. Check, and mean it.
