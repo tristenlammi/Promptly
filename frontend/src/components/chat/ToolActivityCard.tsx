@@ -10,6 +10,7 @@ import {
   FolderInput,
   FolderOpen,
   Globe,
+  History,
   Image as ImageIcon,
   Images,
   LayoutGrid,
@@ -123,6 +124,13 @@ const TOOL_INFO: Record<
     icon: Users,
   },
   // Your files (WP-5.2 / 5.3).
+  search_past_chats: {
+    verb: "Looking through past chats",
+    past: "Looked through past chats",
+    noun: (n) => (n === 1 ? "search" : "searches"),
+    once: true,
+    icon: History,
+  },
   search_my_files: {
     verb: "Searching your files",
     past: "Searched your files",

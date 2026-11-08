@@ -76,6 +76,12 @@ class Conversation(UUIDPKMixin, TimestampMixin, Base):
         Boolean, nullable=False, default=False, server_default="false"
     )
 
+    # How far the background memory pass has read. Empty means not yet.
+    memory_captured_through: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Nothing up to here may reach memory: said while paused, while temporary, or copied
+    # from another chat. Going back through older chats doesn't pass it.
+    memory_private_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Connectors switched off for this chat (R-161). Every reachable
     # connector's tools used to ride along on every Tools-on turn — a
     # GitHub tool in a recipe chat. Off is the exception, so it's stored.
@@ -1186,6 +1192,8 @@ class Message(UUIDPKMixin, CreatedAtMixin, Base):
     # 'user' | 'assistant' | 'system'
     role: Mapped[str] = mapped_column(String(32), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    # This reply drew on outside content, so what it says isn't evidence about you.
+    read_outside_content: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     # DeepSeek thinking-mode chain-of-thought. Captured from
     # ``delta.reasoning_content`` on streamed responses and replayed

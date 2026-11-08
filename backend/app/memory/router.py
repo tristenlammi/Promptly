@@ -21,23 +21,34 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.deps import get_current_user
 from app.auth.models import User
 from app.database import get_db
+from app.memory.capture import ask_to_read_older_chats
 from app.memory.constants import (
+    ACTIVE,
+    DISMISSED,
+    RETIRED,
+    SUGGESTED,
     MAX_CONTENT_CHARS,
     MAX_MEMORIES,
     MAX_PINNED_MEMORIES,
     MEMORY_CATEGORIES,
 )
-from app.memory.models import UserMemory
-from app.memory.schemas import MemoryCreate, MemoryResponse, MemoryUpdate
+from app.memory.models import UserMemory, UserMemoryProfile, UserMemoryVersion
+from app.memory.schemas import MemoryCreate, MemoryProfileResponse, MemoryResponse, MemoryUpdate, MemoryVersionResponse
 from app.memory.service import (
     _is_duplicate,
     _normalise,
     apply_memory_edits,
     consolidate_memories,
+    count_memories,
     embed_memory_row,
+    keep_version,
     load_memories,
     plan_memory_edits,
 )
+
+from app.memory.learning import choices, learn_for, mail_allowed
+from app.memory.people import links_for_panel
+from app.memory.upkeep import refresh_profile
 
 logger = logging.getLogger("promptly.memory")
 
@@ -162,6 +173,8 @@ async def update_memory(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail="Memory text is required",
             )
+        if content != row.content:
+            keep_version(db, row, "user")
         row.content = content
         should_reembed = True
 
@@ -189,6 +202,136 @@ async def update_memory(
     return row
 
 
+@router.get("/people-links")
+async def people_links(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, list[str]]:
+    """Who each fact is about, by the names in your Contacts and Photos."""
+    return {str(k): v for k, v in (await links_for_panel(db, user)).items()}
+
+
+class LearningChoices(BaseModel):
+    mail: bool = False
+    calendar: bool = False
+    health: bool = False
+
+
+@router.get("/learning")
+async def get_learning(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    return {**choices(user), "mail_allowed": await mail_allowed(db)}
+
+
+@router.put("/learning")
+async def set_learning(body: LearningChoices, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    allowed = await mail_allowed(db)
+    if body.mail and not allowed:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="The admin has turned off AI reading mail on this server.")
+    user.settings = {**(user.settings or {}), "memory_learning": body.model_dump()}
+    await db.commit()
+    return {**choices(user), "mail_allowed": allowed}
+
+
+@router.post("/learning/check")
+async def check_learning(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, int]:
+    """Look now instead of waiting for tonight."""
+    return {"suggested": await learn_for(db, user)}
+
+
+@router.get("/suggestions", response_model=list[MemoryResponse])
+async def list_suggestions(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[UserMemory]:
+    """Waiting for you to say yes: sensitive details, and what other apps suggested."""
+    rows = await db.execute(select(UserMemory).where(UserMemory.user_id == user.id, UserMemory.status == SUGGESTED).order_by(UserMemory.created_at.desc()))
+    return list(rows.scalars())
+
+
+@router.get("/past", response_model=list[MemoryResponse])
+async def list_past(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[UserMemory]:
+    """No longer true, newest first. Each can be put back."""
+    rows = await db.execute(
+        select(UserMemory).where(UserMemory.user_id == user.id, UserMemory.status == RETIRED).order_by(UserMemory.valid_until.desc().nulls_last()).limit(300)
+    )
+    return list(rows.scalars())
+
+
+@router.post("/{memory_id}/approve", response_model=MemoryResponse)
+async def approve_suggestion(memory_id: uuid.UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> UserMemory:
+    row = await _get_owned(memory_id, user, db)
+    if row.status != SUGGESTED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That isn't waiting for approval.")
+    # You've said it's true, so it now counts as something you stated.
+    row.status, row.source, row.unannounced = ACTIVE, "manual", False
+    await db.flush()
+    await embed_memory_row(db, row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.post("/{memory_id}/dismiss", status_code=status.HTTP_204_NO_CONTENT)
+async def dismiss_suggestion(memory_id: uuid.UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> Response:
+    """Kept only so it isn't suggested again. It's never shown to a model."""
+    row = await _get_owned(memory_id, user, db)
+    if row.status != SUGGESTED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That isn't waiting for approval.")
+    row.status, row.unannounced = DISMISSED, False
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{memory_id}/restore", response_model=MemoryResponse)
+async def restore_memory(memory_id: uuid.UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> UserMemory:
+    """It was wrong to retire this one."""
+    row = await _get_owned(memory_id, user, db)
+    if row.status != RETIRED:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="That's still in use.")
+    if await count_memories(db, user.id) >= MAX_MEMORIES:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Memory is full ({MAX_MEMORIES} saved). Remove a few first.")
+    row.status, row.valid_until, row.retired_reason, row.superseded_by, row.expires_at = ACTIVE, None, None, None, None
+    # Otherwise tonight's upkeep would retire it again for not being used.
+    row.last_used_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.get("/{memory_id}/history", response_model=list[MemoryVersionResponse])
+async def memory_history(memory_id: uuid.UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[UserMemoryVersion]:
+    """What it used to say, newest first."""
+    row = await _get_owned(memory_id, user, db)
+    versions = await db.execute(select(UserMemoryVersion).where(UserMemoryVersion.memory_id == row.id).order_by(UserMemoryVersion.replaced_at.desc()))
+    return list(versions.scalars())
+
+
+@router.post("/{memory_id}/history/{version_id}/restore", response_model=MemoryResponse)
+async def restore_version(memory_id: uuid.UUID, version_id: uuid.UUID, user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> UserMemory:
+    row = await _get_owned(memory_id, user, db)
+    version = await db.get(UserMemoryVersion, version_id)
+    if version is None or version.memory_id != row.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="That version doesn't exist.")
+    keep_version(db, row, "user")
+    row.content, row.category = version.content, version.category
+    await db.flush()
+    await embed_memory_row(db, row)
+    await db.commit()
+    await db.refresh(row)
+    return row
+
+
+@router.post("/read-older-chats")
+async def read_older_chats(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict[str, int]:
+    """Go back through the last 90 days of chats, a few at a time, in the background."""
+    return {"chats": await ask_to_read_older_chats(db, user.id)}
+
+
+@router.get("/profile", response_model=MemoryProfileResponse | None)
+async def get_profile(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> UserMemoryProfile | None:
+    return await db.get(UserMemoryProfile, user.id)
+
+
+@router.post("/profile/rebuild", response_model=MemoryProfileResponse | None)
+async def rebuild_profile(user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> UserMemoryProfile | None:
+    await refresh_profile(db, user.id, force=True)
+    return await db.get(UserMemoryProfile, user.id)
+
+
 @router.delete("/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_memory(
     memory_id: uuid.UUID,
@@ -209,6 +352,7 @@ async def clear_memories(
     """Wipe every saved fact for the caller (the 'forget everything'
     button in account settings)."""
     await db.execute(delete(UserMemory).where(UserMemory.user_id == user.id))
+    await db.execute(delete(UserMemoryProfile).where(UserMemoryProfile.user_id == user.id))
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -287,8 +431,10 @@ async def export_memories(
             "last_used_at": m.last_used_at.isoformat() if m.last_used_at else None,
             "created_at": m.created_at.isoformat() if m.created_at else None,
             "updated_at": m.updated_at.isoformat() if m.updated_at else None,
+            "expires_at": m.expires_at.isoformat() if m.expires_at else None,
         }
-        for m in memories
+        # A project's facts stay with the project: imported, they'd apply everywhere.
+        for m in memories if m.workspace_id is None
     ]
     body = json.dumps(payload, indent=2, ensure_ascii=False)
     return StreamingResponse(
@@ -491,6 +637,8 @@ async def import_memories(
             # Strictly richer than an existing fact: enrich it in place.
             idx = next(i for i, (k, _, _) in enumerate(entries) if k and k in key)
             _, row, is_new = entries[idx]
+            if not is_new:
+                keep_version(db, row, "user")
             row.content = content
             if row.category is None and category:
                 row.category = category

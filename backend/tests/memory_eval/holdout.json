@@ -1,0 +1,1439 @@
+{
+ "_about": "A second, independent test set for the memory scorecard, written without sight of the memory code so nothing has been tuned against it. Everyone here is made up. Same format and matching as golden.json: lowercase word fragments; groups in 'expect' are all required; inside a group any fragment will do.",
+ "persona": [
+  {
+   "text": "User's name is Noor Lindqvist",
+   "category": "identity"
+  },
+  {
+   "text": "Close friends call the user Nonny",
+   "category": "identity"
+  },
+  {
+   "text": "User's pronouns are she/her",
+   "category": "identity"
+  },
+  {
+   "text": "User teaches welding at Wirrabeen TAFE",
+   "category": "identity"
+  },
+  {
+   "text": "User was a boilermaker at Kestrel Yards for 14 years before she started teaching",
+   "category": "identity"
+  },
+  {
+   "text": "User lives in Wirrabeen",
+   "category": "identity"
+  },
+  {
+   "text": "User's birthday is 22 October",
+   "category": "identity"
+  },
+  {
+   "text": "User is married to Tomasz",
+   "category": "identity"
+  },
+  {
+   "text": "User has a daughter, Ottilie, who is 11",
+   "category": "identity"
+  },
+  {
+   "text": "User has a stepson, Kasper, who is 16",
+   "category": "identity"
+  },
+  {
+   "text": "User's home is a weatherboard cottage on Sallow Street in Wirrabeen",
+   "category": "context"
+  },
+  {
+   "text": "User's husband Tomasz is a paramedic who mostly works nights",
+   "category": "context"
+  },
+  {
+   "text": "User's daughter Ottilie has coeliac disease",
+   "category": "context"
+  },
+  {
+   "text": "User's stepson Kasper goes to Port Alder High",
+   "category": "context"
+  },
+  {
+   "text": "User's stepson Kasper is on his L plates",
+   "category": "context"
+  },
+  {
+   "text": "User's daughter Ottilie plays goalie in a water polo club",
+   "category": "context"
+  },
+  {
+   "text": "User is lactose intolerant",
+   "category": "context"
+  },
+  {
+   "text": "User gets an upset stomach from milk and avoids dairy where she can",
+   "category": "context"
+  },
+  {
+   "text": "User is allergic to sulfa drugs",
+   "category": "context"
+  },
+  {
+   "text": "User has asthma and uses a preventer inhaler",
+   "category": "context"
+  },
+  {
+   "text": "User has partial hearing loss in her left ear from shipyard noise",
+   "category": "context"
+  },
+  {
+   "text": "User gets seasick on small boats",
+   "category": "context"
+  },
+  {
+   "text": "User's father Bengt has early dementia and lives at Larkfield House",
+   "category": "context"
+  },
+  {
+   "text": "User's mother Nawal grew up in Lebanon",
+   "category": "context"
+  },
+  {
+   "text": "User's brother Yusuf owns a bike shop in Port Alder",
+   "category": "context"
+  },
+  {
+   "text": "User's best friend Ximena is a wedding florist",
+   "category": "context"
+  },
+  {
+   "text": "User's head of department is Hamish Drury",
+   "category": "context"
+  },
+  {
+   "text": "User's mortgage broker is Genevieve Tran",
+   "category": "context"
+  },
+  {
+   "text": "User has a retired racing greyhound called Waffles who panics during thunderstorms",
+   "category": "context"
+  },
+  {
+   "text": "User drives an old blue Subaru Forester",
+   "category": "context"
+  },
+  {
+   "text": "User teaches a night class on Thursdays from 6 to 9 pm",
+   "category": "context"
+  },
+  {
+   "text": "User doesn't teach on Mondays",
+   "category": "context"
+  },
+  {
+   "text": "User sings alto in a community choir called The Low Tides",
+   "category": "context"
+  },
+  {
+   "text": "User's choir rehearses on Monday nights",
+   "category": "context"
+  },
+  {
+   "text": "User follows the Port Alder Herons in netball",
+   "category": "context"
+  },
+  {
+   "text": "User has lemons and a finger lime growing in pots",
+   "category": "context"
+  },
+  {
+   "text": "User doesn't like emoji in anything she writes",
+   "category": "preferences"
+  },
+  {
+   "text": "User prefers plain language without corporate jargon",
+   "category": "preferences"
+  },
+  {
+   "text": "User wants how-to answers as numbered steps",
+   "category": "preferences"
+  },
+  {
+   "text": "User uses Moodle for her course materials",
+   "category": "preferences"
+  },
+  {
+   "text": "User tracks household money in YNAB",
+   "category": "preferences"
+  },
+  {
+   "text": "User drinks cardamom tea and gave up coffee",
+   "category": "preferences"
+  },
+  {
+   "text": "User reads mostly Nordic crime novels",
+   "category": "preferences"
+  },
+  {
+   "text": "User is restoring a 1967 Vespa Sprint",
+   "category": "projects"
+  },
+  {
+   "text": "User is hunting for an original left-side cowl for the Vespa",
+   "category": "projects"
+  },
+  {
+   "text": "User is building a workshop shed behind the cottage",
+   "category": "projects"
+  },
+  {
+   "text": "User's shed application with the council is DA-2291",
+   "category": "projects"
+  },
+  {
+   "text": "User's electrician for the shed is Copperline Electrical",
+   "category": "projects"
+  },
+  {
+   "text": "User is training for the Cape Harriet Ocean Swim in March",
+   "category": "projects"
+  },
+  {
+   "text": "User swims laps at the Wirrabeen rock pool on Saturday mornings",
+   "category": "projects"
+  },
+  {
+   "text": "User is learning Arabic for a family trip to Byblos",
+   "category": "projects"
+  },
+  {
+   "text": "User's fixed-rate home loan rolls off in June",
+   "category": "projects"
+  },
+  {
+   "text": "User wants the mortgage paid off by 2035",
+   "category": "projects"
+  }
+ ],
+ "captured": [
+  {
+   "id": "partner-sideways",
+   "turns": [
+    [
+     "tomasz got in at 7am again after a double, the ambos are so understaffed rn. whats a dinner i can leave in the fridge for him that reheats ok",
+     "A chicken and vegetable traybake reheats well and keeps for a couple of days."
+    ]
+   ],
+   "expect": [
+    [
+     "tomasz"
+    ]
+   ]
+  },
+  {
+   "id": "typo-allergy",
+   "turns": [
+    [
+     "im alergic to latex so which gloves are ok for cleaning out the gutters? is nitrile fine",
+     "Yes, nitrile is latex-free. Pick a thicker pair for rough work."
+    ]
+   ],
+   "expect": [
+    [
+     "latex"
+    ]
+   ]
+  },
+  {
+   "id": "medication-sideways",
+   "turns": [
+    [
+     "been on sertraline 50mg since last month. is it a problem if i have a beer or two at the staff thing friday?",
+     "A small amount is usually tolerated, but it can add to drowsiness. Your GP or pharmacist can advise for your case."
+    ]
+   ],
+   "expect": [
+    [
+     "sertraline"
+    ]
+   ]
+  },
+  {
+   "id": "nephew-over-turns",
+   "turns": [
+    [
+     "need a present idea",
+     "Happy to help. Who is it for?"
+    ],
+    [
+     "my nephew hassan",
+     "How old is he, and what is he into?"
+    ],
+    [
+     "turns 7 in feb. trains. only trains. it's all he talks about",
+     "A wooden railway expansion set or a day on a heritage line would go down well."
+    ]
+   ],
+   "expect": [
+    [
+     "hassan"
+    ],
+    [
+     "train"
+    ]
+   ]
+  },
+  {
+   "id": "side-business-over-turns",
+   "turns": [
+    [
+     "can you help me word something to my landlord",
+     "Sure. What is it about?"
+    ],
+    [
+     "roof over the unit at tannery lane is leaking again and its the third time",
+     "Is the unit your home or a business premises?"
+    ],
+    [
+     "business i guess, its where i do up old scooters on weekends and flog them",
+     "Then point to the repair clause in your commercial lease and put a date on it."
+    ]
+   ],
+   "expect": [
+    [
+     "tannery"
+    ],
+    [
+     "scooter"
+    ]
+   ]
+  },
+  {
+   "id": "german-midwife",
+   "turns": [
+    [
+     "Ich arbeite als Hebamme in Graz und mein Sohn Jonas kommt im Herbst in die Schule. Was gehört in eine Schultüte?",
+     "Kleine Süßigkeiten, Buntstifte und ein kleines Spielzeug passen gut."
+    ]
+   ],
+   "expect": [
+    [
+     "hebamme",
+     "midwife"
+    ],
+    [
+     "jonas"
+    ]
+   ]
+  },
+  {
+   "id": "french-bookshop",
+   "turns": [
+    [
+     "Mon mari Étienne et moi tenons une petite librairie à Annecy. Comment garder les clients fidèles pendant l'hiver ?",
+     "Organisez des soirées lecture et proposez une carte de fidélité."
+    ]
+   ],
+   "expect": [
+    [
+     "librair",
+     "bookshop",
+     "bookstore",
+     "book shop"
+    ],
+    [
+     "annecy"
+    ]
+   ]
+  },
+  {
+   "id": "japanese-child-allergy",
+   "turns": [
+    [
+     "娘のハナは卵アレルギーです。お弁当のおかずを教えてください。",
+     "鶏の照り焼きや野菜の胡麻和えはいかがでしょうか。"
+    ]
+   ],
+   "expect": [
+    [
+     "卵",
+     "egg"
+    ],
+    [
+     "hana",
+     "ハナ"
+    ]
+   ]
+  },
+  {
+   "id": "no-flattery",
+   "turns": [
+    [
+     "pls stop with the 'great question' stuff and just answer. how long do i rest a brisket",
+     "At least an hour, wrapped."
+    ]
+   ],
+   "expect": [
+    [
+     "great question",
+     "praise",
+     "flatter",
+     "filler",
+     "preamble",
+     "pleasantries",
+     "direct",
+     "straight to"
+    ]
+   ]
+  },
+  {
+   "id": "units-sideways",
+   "turns": [
+    [
+     "can u redo that in fahrenheit and cups, grew up in ohio and metric still breaks my brain",
+     "Sure: 350°F for 40 minutes, with 2 cups of flour."
+    ]
+   ],
+   "expect": [
+    [
+     "fahrenheit",
+     "imperial",
+     "cups",
+     "us units",
+     "us customary",
+     "american"
+    ]
+   ]
+  },
+  {
+   "id": "dated-trip",
+   "turns": [
+    [
+     "we're in hanoi 3-17 april with the kids. do aussie passports need a visa",
+     "Yes, Australians currently need an e-visa for Vietnam. Apply online a couple of weeks ahead."
+    ]
+   ],
+   "expect": [
+    [
+     "hanoi",
+     "vietnam"
+    ]
+   ]
+  },
+  {
+   "id": "job-implied",
+   "turns": [
+    [
+     "my first year apprentices keep undercutting their welds. whats a good way to explain travel speed so it sticks",
+     "Have them run the same bead at three speeds and cut the samples open to compare."
+    ]
+   ],
+   "expect": [
+    [
+     "apprentice",
+     "weld"
+    ]
+   ]
+  },
+  {
+   "id": "pregnant-implied",
+   "turns": [
+    [
+     "31 weeks now and the heartburn is brutal. what can i actually take",
+     "Calcium-based antacids are generally considered fine in pregnancy. Check with your midwife or doctor."
+    ]
+   ],
+   "expect": [
+    [
+     "pregnan",
+     "31 weeks",
+     "expecting"
+    ]
+   ]
+  },
+  {
+   "id": "custody-sideways",
+   "turns": [
+    [
+     "my ex has the kids every second weekend so ive got the place to myself this sat. good solo walk within 2 hrs of hobart?",
+     "Cape Raoul is a great full-day walk within reach."
+    ]
+   ],
+   "expect": [
+    [
+     "second weekend",
+     "other weekend",
+     "alternate weekend",
+     "custody",
+     "co-parent",
+     "fortnight",
+     "user's ex",
+     "her ex",
+     "his ex",
+     "their ex"
+    ]
+   ]
+  },
+  {
+   "id": "work-tool",
+   "turns": [
+    [
+     "all our jobs live in servicem8 and the office is drowning. how do i make it text customers when the tech is on the way",
+     "Use an automated on-my-way message from the job card."
+    ]
+   ],
+   "expect": [
+    [
+     "servicem8"
+    ]
+   ]
+  },
+  {
+   "id": "bees",
+   "turns": [
+    [
+     "got 40 hives out past mudgee now and bulk honey prices are rubbish. hows the best way to start selling direct",
+     "Start with farmers markets and a simple online order form."
+    ]
+   ],
+   "expect": [
+    [
+     "hive",
+     "honey",
+     "beekeep"
+    ]
+   ]
+  },
+  {
+   "id": "flatmate",
+   "turns": [
+    [
+     "my flatmate ines never does the dishes. how do i bring it up without it turning into a whole thing",
+     "Pick a calm moment and suggest a simple shared routine."
+    ]
+   ],
+   "expect": [
+    [
+     "ines"
+    ]
+   ]
+  },
+  {
+   "id": "recurring-condition",
+   "turns": [
+    [
+     "migraines are back, i get them every month with my period. does magnesium actually do anything?",
+     "Some studies suggest it can help prevent migraines. Worth raising with your GP."
+    ]
+   ],
+   "expect": [
+    [
+     "migraine"
+    ]
+   ]
+  },
+  {
+   "id": "self-corrects-mid-sentence",
+   "turns": [
+    [
+     "so we've got three kids, sorry four, beatrix arrived in august and i still forget lol. whats a decent double pram",
+     "Look for one with a narrow frame and a seat that can fold flat."
+    ]
+   ],
+   "expect": [
+    [
+     "beatrix"
+    ]
+   ]
+  },
+  {
+   "id": "sober",
+   "turns": [
+    [
+     "i dont drink, six yrs sober this june. whats something nice to bring to a housewarming that isnt wine",
+     "A good olive oil or a potted herb always goes down well."
+    ]
+   ],
+   "expect": [
+    [
+     "sober",
+     "don't drink",
+     "doesn't drink",
+     "does not drink",
+     "alcohol"
+    ]
+   ]
+  },
+  {
+   "id": "reply-language",
+   "turns": [
+    [
+     "from now on answer me in portuguese please, my mum reads these with me and her english isnt great",
+     "Claro, a partir de agora respondo em português."
+    ]
+   ],
+   "expect": [
+    [
+     "portugu"
+    ]
+   ]
+  },
+  {
+   "id": "birthday-sideways",
+   "turns": [
+    [
+     "turning 40 on the 9th of august and dreading it. help me plan something that isnt a party",
+     "A long lunch with a few close friends, or a trip you have always wanted to take."
+    ]
+   ],
+   "expect": [
+    [
+     "august"
+    ]
+   ]
+  },
+  {
+   "id": "skip-roleplay",
+   "turns": [
+    [
+     "Pretend you're a pirate captain and I'm your first mate Ambrose with the wooden leg. Say good morning to me.",
+     "Arr, good mornin' to ye, Ambrose, ye old peg-legged rascal!"
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "ambrose",
+    "wooden leg",
+    "pirate"
+   ]
+  },
+  {
+   "id": "skip-door-code",
+   "turns": [
+    [
+     "garage keypad beeps when i put in 4471 but the door doesnt open. is it the battery?",
+     "Probably. Replace the keypad battery and try again."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "4471"
+   ]
+  },
+  {
+   "id": "skip-pasted-cv",
+   "turns": [
+    [
+     "Proofread this for my cousin: \"I am head chef at Little Fennel, fluent in Italian, and I have managed a team of nine.\"",
+     "It reads well. You could change 'have managed' to 'manage' if it is still current."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "little fennel",
+    "head chef",
+    "italian"
+   ]
+  },
+  {
+   "id": "skip-daydream",
+   "turns": [
+    [
+     "just dreaming here, but if i chucked it all in and moved to portugal to run a surf camp how much would i need saved?",
+     "Roughly two years of living costs plus setup, so somewhere around 150,000 euros."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "surf camp",
+    "portugal"
+   ]
+  },
+  {
+   "id": "skip-hangover",
+   "turns": [
+    [
+     "bit hungover lol. fastest fix before a 10am?",
+     "Water, salty food, and a short walk."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "hungover",
+    "hangover"
+   ]
+  },
+  {
+   "id": "skip-limerick",
+   "turns": [
+    [
+     "write me a limerick about a plumber from kalgoorlie",
+     "A plumber from out Kalgoorlie way, fixed taps for a schooner a day..."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "plumber",
+    "kalgoorlie"
+   ]
+  },
+  {
+   "id": "skip-general-knowledge",
+   "turns": [
+    [
+     "how many teaspoons in a tablespoon, is it different in australia?",
+     "Yes. Four in Australia, three in most other places."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "teaspoon",
+    "tablespoon"
+   ]
+  },
+  {
+   "id": "skip-asking-for-a-friend",
+   "turns": [
+    [
+     "asking for a friend, she thinks she might be pregnant. which tests work the earliest?",
+     "Early-result urine tests can work a few days before a missed period."
+    ]
+   ],
+   "expect": [],
+   "forbid": [
+    "pregnan"
+   ]
+  }
+ ],
+ "found": [
+  {
+   "id": "council-number",
+   "query": "any idea what i should be chasing on DA-2291 this week",
+   "expect": [
+    [
+     "2291"
+    ]
+   ]
+  },
+  {
+   "id": "business-name",
+   "query": "write a short msg to copperline asking when they can come back",
+   "expect": [
+    [
+     "copperline"
+    ]
+   ]
+  },
+  {
+   "id": "person-gift",
+   "query": "whats a gud thank you present for ximena",
+   "expect": [
+    [
+     "florist"
+    ]
+   ]
+  },
+  {
+   "id": "person-boss",
+   "query": "How do I ask Hamish for next term off without it sounding like I'm leaving?",
+   "expect": [
+    [
+     "hamish"
+    ]
+   ]
+  },
+  {
+   "id": "meal-plan-constraints",
+   "query": "nobody here can agree on food, do me a mon to fri meal plan and shopping list",
+   "expect": [
+    [
+     "coeliac",
+     "gluten"
+    ],
+    [
+     "lactose",
+     "dairy"
+    ]
+   ]
+  },
+  {
+   "id": "drug-without-naming",
+   "query": "doc wants me on bactrim for a UTI, ok to just start it tonight?",
+   "expect": [
+    [
+     "sulfa"
+    ]
+   ]
+  },
+  {
+   "id": "fumes-without-naming",
+   "query": "is it ok to do a full day on galvanised steel with just the roller door open",
+   "expect": [
+    [
+     "asthma"
+    ]
+   ]
+  },
+  {
+   "id": "event-without-naming",
+   "query": "give me a twelve week plan to build up my distance in open water",
+   "expect": [
+    [
+     "cape harriet",
+     "ocean swim"
+    ]
+   ]
+  },
+  {
+   "id": "dog-pronoun",
+   "query": "hes shaking under the bed again, what can i do",
+   "history": [
+    "thunder all night and the dog is a wreck"
+   ],
+   "expect": [
+    [
+     "waffles",
+     "greyhound"
+    ]
+   ]
+  },
+  {
+   "id": "short-follow-up",
+   "query": "ok go on then",
+   "history": [
+    "still cant find a left cowl for the scooter anywhere",
+    "maybe i should try the specialist forums?"
+   ],
+   "expect": [
+    [
+     "vespa"
+    ]
+   ]
+  },
+  {
+   "id": "writing-style",
+   "query": "Write a notice to my students saying the workshop is shut next week.",
+   "expect": [
+    [
+     "emoji",
+     "jargon",
+     "plain language"
+    ]
+   ]
+  },
+  {
+   "id": "schedule-clash",
+   "query": "can i do the parent teacher thing thurs around 7?",
+   "expect": [
+    [
+     "night class"
+    ]
+   ]
+  },
+  {
+   "id": "car-unnamed",
+   "query": "how often should the timing belt on my car get done",
+   "expect": [
+    [
+     "subaru",
+     "forester"
+    ]
+   ]
+  },
+  {
+   "id": "monday-clash",
+   "query": "would monday night trivia at the pub work for me?",
+   "expect": [
+    [
+     "choir",
+     "rehears"
+    ]
+   ]
+  },
+  {
+   "id": "school-unnamed",
+   "query": "Who do I ring about Kasper's absence note?",
+   "expect": [
+    [
+     "alder high"
+    ]
+   ]
+  },
+  {
+   "id": "sport-unnamed",
+   "query": "find me a coach for my daughter, she wants to get better in goal",
+   "expect": [
+    [
+     "water polo"
+    ]
+   ]
+  },
+  {
+   "id": "budget-tool",
+   "query": "where should i log the new car insurance payment",
+   "expect": [
+    [
+     "ynab"
+    ]
+   ]
+  },
+  {
+   "id": "books",
+   "query": "need something to read over the long weekend",
+   "expect": [
+    [
+     "crime",
+     "nordic"
+    ]
+   ]
+  },
+  {
+   "id": "garden-unnamed",
+   "query": "leaves on my pots have gone all yellow, what do they need?",
+   "expect": [
+    [
+     "lemon",
+     "lime"
+    ]
+   ]
+  },
+  {
+   "id": "arabic-query",
+   "query": "علمني بعض العبارات المفيدة للسفر إلى لبنان",
+   "expect": [
+    [
+     "arabic",
+     "byblos",
+     "leban"
+    ]
+   ]
+  },
+  {
+   "id": "french-query",
+   "query": "Mon frère a besoin d'aide pour la comptabilité de son magasin de vélos, tu as des idées ?",
+   "expect": [
+    [
+     "yusuf"
+    ]
+   ]
+  },
+  {
+   "id": "hearing-unnamed",
+   "query": "i keep missing what students say to me in the workshop, any tricks?",
+   "expect": [
+    [
+     "hearing",
+     "left ear"
+    ]
+   ]
+  },
+  {
+   "id": "boat-unnamed",
+   "query": "should i book the whale watching boat for the school holidays?",
+   "expect": [
+    [
+     "seasick"
+    ]
+   ]
+  },
+  {
+   "id": "dad",
+   "query": "what can i bring Dad on sunday that he'll actually recognise",
+   "expect": [
+    [
+     "bengt",
+     "larkfield",
+     "dementia"
+    ]
+   ]
+  },
+  {
+   "id": "refinance",
+   "query": "rates are moving again, should i be looking at refinancing soon?",
+   "expect": [
+    [
+     "june",
+     "fixed",
+     "genevieve"
+    ]
+   ]
+  }
+ ],
+ "corrected": [
+  {
+   "id": "job-change-indirect",
+   "facts": [
+    "User teaches welding at Wirrabeen TAFE"
+   ],
+   "turns": [
+    [
+     "last day at the tafe was friday, i start at harcourt marine on monday as their QA inspector. what do i need to sort on the super side?",
+     "Give them your super fund details and check the rollover."
+    ]
+   ],
+   "current": [
+    [
+     "harcourt"
+    ]
+   ],
+   "gone": [
+    "user teaches welding at"
+   ]
+  },
+  {
+   "id": "breakup-sideways",
+   "facts": [
+    "User's partner is Rafferty"
+   ],
+   "turns": [
+    [
+     "rafferty moved out in september, its just me now. how do i get his name off the electricity bill",
+     "Call the retailer and ask to remove him as an account holder."
+    ]
+   ],
+   "current": [],
+   "gone": [
+    "user's partner is rafferty"
+   ]
+  },
+  {
+   "id": "diagnosis-changed",
+   "facts": [
+    "User is lactose intolerant"
+   ],
+   "turns": [
+    [
+     "so the gastro says it was never lactose, its fructose. milk is back on! which fruit can i eat",
+     "Berries and citrus tend to be lower in fructose."
+    ]
+   ],
+   "current": [
+    [
+     "fructose"
+    ]
+   ],
+   "gone": [
+    "user is lactose intolerant"
+   ]
+  },
+  {
+   "id": "kid-changed-school",
+   "facts": [
+    "User's son Arlo goes to Bellbird Primary"
+   ],
+   "turns": [
+    [
+     "arlo's first term at ridgeway high has been rough. how do i help him make friends",
+     "Clubs and team sports are an easy way in."
+    ]
+   ],
+   "current": [
+    [
+     "ridgeway"
+    ]
+   ],
+   "gone": [
+    "goes to bellbird"
+   ]
+  },
+  {
+   "id": "pet-died",
+   "facts": [
+    "User has a greyhound called Waffles"
+   ],
+   "turns": [
+    [
+     "we said goodbye to waffles on tuesday. the vet was lovely. how do i help an 11 yr old through it",
+     "Let her talk about him, and keep a small ritual to remember him."
+    ]
+   ],
+   "current": [],
+   "gone": [
+    "user has a greyhound"
+   ]
+  },
+  {
+   "id": "moved-indirect",
+   "facts": [
+    "User lives in Perth"
+   ],
+   "turns": [
+    [
+     "removalists dropped the last boxes in launceston yesterday and its colder than i thought. what should i know about heat pumps down here",
+     "Pick one rated for low temperatures and check for rebates."
+    ]
+   ],
+   "current": [
+    [
+     "launceston"
+    ]
+   ],
+   "gone": [
+    "user lives in perth"
+   ]
+  },
+  {
+   "id": "spanish-moved",
+   "facts": [
+    "User lives in Seville"
+   ],
+   "turns": [
+    [
+     "Ya no vivo en Sevilla, nos mudamos a Bilbao en agosto. ¿Dónde tengo que empadronarme?",
+     "En la oficina de atención ciudadana del Ayuntamiento de Bilbao."
+    ]
+   ],
+   "current": [
+    [
+     "bilbao"
+    ]
+   ],
+   "gone": [
+    "user lives in seville"
+   ]
+  },
+  {
+   "id": "medication-swap",
+   "facts": [
+    "User takes metformin"
+   ],
+   "turns": [
+    [
+     "doc swapped me off the metformin onto ozempic last month and the nausea is wild. any tips",
+     "Smaller meals and avoiding fatty food can help. Tell your doctor if it continues."
+    ]
+   ],
+   "current": [
+    [
+     "ozempic",
+     "semaglutide"
+    ]
+   ],
+   "gone": [
+    "user takes metformin"
+   ]
+  },
+  {
+   "id": "units-flip",
+   "facts": [
+    "User wants recipes in cups and Fahrenheit"
+   ],
+   "turns": [
+    [
+     "been here 5 yrs, i should just use grams and celsius like everyone else. do that from now on. banana bread?",
+     "Mash 3 bananas, add 250 g flour, and bake at 175°C for 50 minutes."
+    ]
+   ],
+   "current": [
+    [
+     "gram",
+     "celsius",
+     "metric"
+    ]
+   ],
+   "gone": [
+    "wants recipes in cups"
+   ]
+  },
+  {
+   "id": "plan-cancelled",
+   "facts": [
+    "User is saving for a caravan trip around Australia next year"
+   ],
+   "turns": [
+    [
+     "trip's off, dad's not well enough for us to be away that long. what should we do with the caravan money, term deposit?",
+     "A term deposit is a safe place while you decide. Check the rates."
+    ]
+   ],
+   "current": [],
+   "gone": [
+    "is saving for a caravan"
+   ]
+  },
+  {
+   "id": "kept-despite-mention",
+   "facts": [
+    "User is allergic to bee stings and carries an EpiPen",
+    "User drives a green Mazda CX-5",
+    "User's sister Imogen lives in Cairns"
+   ],
+   "turns": [
+    [
+     "imogen's flying down from cairns next week. getting the mazda serviced friday so she can borrow it. what do they check at 60k?",
+     "Fluids, brakes, filters, and usually the spark plugs."
+    ]
+   ],
+   "current": [
+    [
+     "bee"
+    ],
+    [
+     "mazda"
+    ],
+    [
+     "imogen"
+    ]
+   ],
+   "gone": []
+  },
+  {
+   "id": "someone-elses-change",
+   "facts": [
+    "User works as a dental nurse"
+   ],
+   "turns": [
+    [
+     "my sister just quit dental nursing to become a real estate agent. any tips for someone starting out?",
+     "Find a good mentor, and expect the first year to be slow."
+    ]
+   ],
+   "current": [
+    [
+     "dental"
+    ]
+   ],
+   "gone": [
+    "user works as a real estate",
+    "user is a real estate"
+   ]
+  }
+ ],
+ "unanswered": [
+  {
+   "id": "git",
+   "query": "why does git keep saying detached HEAD after my rebase",
+   "not_injected": [
+    "coeliac",
+    "greyhound",
+    "choir",
+    "sulfa"
+   ]
+  },
+  {
+   "id": "thirty-years-war",
+   "query": "what actually started the thirty years war?",
+   "not_injected": [
+    "vespa",
+    "asthma",
+    "lemon",
+    "mortgage"
+   ]
+  },
+  {
+   "id": "percentage",
+   "query": "whats 15% of 2340",
+   "not_injected": [
+    "tomasz",
+    "ottilie",
+    "coeliac",
+    "greyhound"
+   ]
+  },
+  {
+   "id": "mongolia",
+   "query": "¿Cuál es la capital de Mongolia?",
+   "not_injected": [
+    "greyhound",
+    "subaru",
+    "choir"
+   ]
+  },
+  {
+   "id": "tides",
+   "query": "how do tides actually work",
+   "not_injected": [
+    "coeliac",
+    "sulfa",
+    "subaru",
+    "vespa"
+   ]
+  },
+  {
+   "id": "networking",
+   "query": "difference between TCP and UDP, one sentence",
+   "not_injected": [
+    "lactose",
+    "greyhound",
+    "choir"
+   ]
+  },
+  {
+   "id": "vaccines",
+   "query": "How do vaccines train the immune system?",
+   "not_injected": [
+    "vespa",
+    "choir",
+    "subaru",
+    "ottilie"
+   ]
+  },
+  {
+   "id": "german-heat-pump",
+   "query": "Wie funktioniert eine Wärmepumpe?",
+   "not_injected": [
+    "greyhound",
+    "coeliac",
+    "sulfa",
+    "choir"
+   ]
+  },
+  {
+   "id": "ask-unknown-passport",
+   "query": "whats my passport number again",
+   "abstain": true,
+   "not_injected": []
+  },
+  {
+   "id": "ask-unknown-dentist",
+   "query": "whats my dentist called",
+   "abstain": true,
+   "not_injected": []
+  },
+  {
+   "id": "ask-unknown-rego",
+   "query": "When does my car rego expire?",
+   "abstain": true,
+   "not_injected": []
+  },
+  {
+   "id": "ask-unknown-hotel",
+   "query": "what was the hotel we stayed at in byblos",
+   "abstain": true,
+   "not_injected": []
+  },
+  {
+   "id": "ask-unknown-fees",
+   "query": "How much are Kasper's school fees per term?",
+   "abstain": true,
+   "not_injected": []
+  },
+  {
+   "id": "ask-unknown-middle-name",
+   "query": "whats tomasz's middle name",
+   "abstain": true,
+   "not_injected": []
+  }
+ ],
+ "past_chats": {
+  "chats": [
+   {
+    "id": "galvanised",
+    "turns": [
+     [
+      "is it safe to mig over galvanised railing if i grind the zinc off first",
+      "Grind back at least 25 mm and use fume extraction, because zinc fume fever is real."
+     ]
+    ]
+   },
+   {
+    "id": "refund",
+    "turns": [
+     [
+      "airline cancelled our cairns leg and only offered a voucher, can i push for cash?",
+      "Yes. Under consumer law you can ask for a refund when they cancel, so put it in writing."
+     ]
+    ]
+   },
+   {
+    "id": "school-choice",
+    "turns": [
+     [
+      "should ottilie sit the year 7 selective exam or just stick with the local school",
+      "Selective tests suit some kids, but the commute and pressure matter too."
+     ],
+     [
+      "ok we'll skip it and stay local",
+      "Reasonable. You can revisit it in Year 9."
+     ]
+    ]
+   },
+   {
+    "id": "choir-solo",
+    "turns": [
+     [
+      "nervous about my alto solo at the low tides concert, stabat mater",
+      "Practise the entry on a slow breath and sing it to a friend first."
+     ]
+    ]
+   },
+   {
+    "id": "heater",
+    "turns": [
+     [
+      "the gas heater in the lounge cuts out after ten mins",
+      "It is probably a dirty thermocouple or oxygen sensor. Have a licensed gasfitter clean it."
+     ]
+    ]
+   },
+   {
+    "id": "carburettor",
+    "turns": [
+     [
+      "the sprint bogs down above half throttle, reckon its the main jet",
+      "Try going up one jet size and check the float height."
+     ]
+    ]
+   },
+   {
+    "id": "home-loan",
+    "turns": [
+     [
+      "our fixed rate is rolling off, do we fix again or go variable",
+      "A split gives you some certainty and still lets you make extra repayments."
+     ]
+    ]
+   },
+   {
+    "id": "tatin",
+    "turns": [
+     [
+      "Comment faire une tarte tatin sans gluten ?",
+      "Utilisez une pâte à la farine de riz et caramélisez bien les pommes."
+     ]
+    ]
+   }
+  ],
+  "questions": [
+   {
+    "id": "assistant-only-word",
+    "query": "thermocouple",
+    "expect": "heater"
+   },
+   {
+    "id": "decision",
+    "query": "what did we decide about ottilie and the selective exam",
+    "expect": "school-choice"
+   },
+   {
+    "id": "group-name",
+    "query": "low tides solo",
+    "expect": "choir-solo"
+   },
+   {
+    "id": "said-differently",
+    "query": "scooter losing power when i open it up",
+    "expect": "carburettor"
+   },
+   {
+    "id": "synonyms",
+    "query": "compensation for a cancelled flight",
+    "expect": "refund"
+   },
+   {
+    "id": "by-topic",
+    "query": "fix or float the mortgage",
+    "expect": "home-loan"
+   },
+   {
+    "id": "across-languages",
+    "query": "gluten free apple tart",
+    "expect": "tatin"
+   },
+   {
+    "id": "nothing-there",
+    "query": "solar inverter warranty",
+    "expect": null
+   }
+  ]
+ }
+}

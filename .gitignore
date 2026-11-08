@@ -112,3 +112,6 @@ frontend/public/excalidraw-assets/
 # (untracked). Claude Code still loads it from disk regardless of git.
 # Recovery kit (secrets) — never commit.
 promptly-recovery-kit.txt
+
+# The memory scorecard's latest results
+backend/tests/memory_eval/last_run.json

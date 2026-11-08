@@ -157,6 +157,8 @@ interface SSEPayload {
   // silent: no chip, no tool card, nothing in scrollback.
   facts?: string[];
   ids?: string[];
+  previous?: Record<string, { content: string; category?: string | null }>;
+  suggested?: number;
   count?: number;
   // tool_started / tool_finished events (Phase A1)
   id?: string;
@@ -281,14 +283,32 @@ function handleAfterReplyEvent(
           ? {
               label: "Undo",
               onClick: () => {
-                void memoryApi
-                  .bulkRemove(ids)
-                  .then(() => toast.success("Removed from memory"));
+                // A fact that was changed goes back to what it said; only a
+                // new one is removed.
+                const previous = data.previous ?? {};
+                void Promise.all([
+                  memoryApi.bulkRemove(ids.filter((id) => !previous[id])),
+                  ...ids.filter((id) => previous[id]).map((id) => memoryApi.update(id, { content: previous[id].content, category: previous[id].category ?? null })),
+                ]).then(() => toast.success("Undone"));
               },
             }
           : undefined,
       }
     );
+    return true;
+  }
+  if (data.event === "memory_learned") {
+    // Worked out from earlier chats once they'd gone quiet. Said once, quietly.
+    const count = data.count ?? 0;
+    const waiting = data.suggested ?? 0;
+    const lines = (data.facts ?? []).map((f) => `• ${f}`);
+    if (count > 5) lines.push(`…and ${count - 5} more`);
+    if (waiting) lines.push(`${waiting} waiting for you to approve`);
+    toast.info(lines.join("\n"), {
+      title: count ? `Learned ${count} thing${count === 1 ? "" : "s"} from your chats` : "A suggestion for your memory",
+      duration: 10_000,
+      action: { label: "Review", onClick: () => { window.location.assign("/account/memory"); } },
+    });
     return true;
   }
   if (data.event === "memory_proposed" && data.facts?.length) {
@@ -312,16 +332,14 @@ function handleAfterReplyEvent(
   if (data.event === "memory_removed" && data.facts?.length) {
     // The background pass dropped facts it judged outdated ("I no longer
     // use Vim"). Never silent, and one click puts them back (R-267).
-    const facts = data.facts as unknown as { content: string; category?: string | null }[];
+    const facts = data.facts as unknown as { id: string; content: string; category?: string | null }[];
     toast.info(facts.map((f) => `“${f.content}”`).join("\n"), {
       title: facts.length === 1 ? "Removed from memory" : `Removed ${facts.length} things from memory`,
       duration: 12_000,
       action: {
         label: "Undo",
         onClick: () => {
-          void Promise.all(
-            facts.map((f) => memoryApi.create(f.content, { category: f.category ?? null }))
-          ).then(() => toast.success("Restored to memory"));
+          void Promise.all(facts.map((f) => memoryApi.restore(f.id))).then(() => toast.success("Restored to memory"));
         },
       },
     });

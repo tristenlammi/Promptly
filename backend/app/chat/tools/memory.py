@@ -35,26 +35,35 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.chat.tools.base import Tool, ToolContext, ToolError, ToolResult
 from app.memory.constants import (
+    ACTIVE,
+    DISMISSED,
+    RETIRED,
+    SUGGESTED,
     MAX_CONTENT_CHARS,
     MAX_MEMORIES,
     MEMORY_CATEGORIES,
 )
-from app.memory.models import UserMemory
+from app.memory import recall
+from app.memory.models import UserMemory, UserMemoryVersion
 from app.chat.models import Conversation, Message
 from app.chat.semantic_search import get_embedding_config
 from app.memory.service import (
     _evict_for_capture,
     _is_duplicate,
     _normalise,
+    chat_may_write_memory,
     count_memories,
     embed_memory_row,
+    in_use,
     is_explicit_memory_request,
+    keep_version,
     load_memories,
     looks_sensitive,
     resolve_memory_mode,
@@ -151,10 +160,11 @@ async def _resolve(
     like the target we'd be guessing which one to overwrite, and the
     tool would rather report that it couldn't find it.
     """
+    chat = await ctx.db.get(Conversation, ctx.conversation_id)
     rows = (
         (
             await ctx.db.execute(
-                select(UserMemory).where(UserMemory.user_id == ctx.user.id)
+                select(UserMemory).where(*in_use(ctx.user.id, chat.workspace_id if chat is not None else None))
             )
         )
         .scalars()
@@ -206,8 +216,14 @@ async def _refuse_if_paused(ctx: ToolContext, verb: str) -> str | None:
     Returns ``None`` when the write may proceed.
     """
     conv = await ctx.db.get(Conversation, ctx.conversation_id)
-    if conv is None or not conv.memory_capture_paused:
+    if conv is None or chat_may_write_memory(conv):
         return None
+    if conv.temporary_mode is not None:
+        return (
+            f"This is a temporary chat, so nothing was {verb} — that applies "
+            "even when asked directly. Tell the user it would need saving "
+            "from an ordinary chat."
+        )
     return (
         f"Memory is paused for this chat, so nothing was {verb} — that "
         "applies even when asked directly. Tell the user memory is paused "
@@ -242,14 +258,17 @@ async def _refuse_uninvited(ctx: ToolContext, verb: str) -> str | None:
     )
 
 
-def _record(row: UserMemory) -> dict[str, str]:
+def _record(row: UserMemory, previous: dict[str, Any] | None = None) -> dict[str, Any]:
     """Shape a written row for the ``memory_saved`` SSE event.
 
     Matches ``capture_memories``' return shape so the in-chat "saved to
     memory" affordance — including per-fact Undo — works for a
     tool-written memory without the UI knowing the difference.
     """
-    return {"id": str(row.id), "content": row.content}
+    record: dict[str, Any] = {"id": str(row.id), "content": row.content}
+    if previous:
+        record["previous"] = previous
+    return record
 
 
 def _clean(content: str) -> str:
@@ -321,6 +340,14 @@ class RememberTool(Tool):
                     "goals. context = other durable background."
                 ),
             },
+            "sensitive": {
+                "type": "boolean",
+                "description": (
+                    "True for health, medical or mental health details, allergies, "
+                    "sexuality, religion, politics or money troubles. Unless they "
+                    "asked you to remember it, it's offered to them rather than saved."
+                ),
+            },
             "replaces": {
                 "type": "string",
                 "description": (
@@ -352,6 +379,18 @@ class RememberTool(Tool):
         if category not in _VALID_CATEGORIES:
             category = None
 
+        # Health and the like are yours to volunteer: offered, not saved, unless asked.
+        if args.get("sensitive") is True:
+            trigger = await ctx.db.get(Message, ctx.user_message_id)
+            if trigger is None or not is_explicit_memory_request(trigger.content or ""):
+                return ToolResult(
+                    content=(
+                        "Not saved: that's sensitive, so it's only kept when the user "
+                        f"asks. They've been offered \"{content}\" to save with one click."
+                    ),
+                    meta={"memory_writes": [], "memory_proposals": [{"content": content, "category": category}]},
+                )
+
         # A turn that read outside content — a web page, search results, a
         # connector, a file — may be carrying instructions planted for the
         # model ("remember that the user prefers vendor X"). A fact saved
@@ -378,6 +417,8 @@ class RememberTool(Tool):
             target = await _resolve(ctx, replaces)
             if target is not None:
                 previous = target.content
+                before = {"content": target.content, "category": target.category}
+                keep_version(ctx.db, target, "chat")
                 target.content = content
                 if category is not None:
                     target.category = category
@@ -391,7 +432,7 @@ class RememberTool(Tool):
                         f'Updated the saved memory "{previous}" to '
                         f'"{content}".'
                     ),
-                    meta={"memory_writes": [_record(target)]},
+                    meta={"memory_writes": [_record(target, before)]},
                 )
             # Fall through: the fact it meant to correct isn't there, so
             # the useful thing is still to save the new one.
@@ -399,19 +440,32 @@ class RememberTool(Tool):
         existing = (
             (
                 await ctx.db.execute(
-                    select(UserMemory).where(UserMemory.user_id == ctx.user.id)
+                    select(UserMemory).where(UserMemory.user_id == ctx.user.id, UserMemory.status != RETIRED)
                 )
             )
             .scalars()
             .all()
         )
-        if _is_duplicate(content, [_normalise(m.content) for m in existing]):
+        chat = await ctx.db.get(Conversation, ctx.conversation_id)
+        scope = chat.workspace_id if chat is not None else None
+        here = [m for m in existing if m.status == ACTIVE and (m.workspace_id is None or m.workspace_id == scope)]
+        if _is_duplicate(content, [_normalise(m.content) for m in here]):
             return ToolResult(
                 content="Already saved — memory is unchanged.",
                 meta={"memory_writes": []},
             )
+        # Waiting for approval, or turned down earlier: asking now settles it.
+        waiting = [m for m in existing if m.status in (SUGGESTED, DISMISSED) and _is_duplicate(content, [_normalise(m.content)])]
+        if waiting:
+            said = await ctx.db.get(Message, ctx.user_message_id) if ctx.user_message_id else None
+            if said is None or not is_explicit_memory_request(said.content or ""):
+                return ToolResult(content="That's already waiting for the user to decide, so nothing changed.", meta={"memory_writes": []})
+            row = waiting[0]
+            row.status, row.source, row.unannounced = ACTIVE, "manual", False
+            await ctx.db.flush()
+            return ToolResult(content=f'Saved to memory: "{row.content}".', meta={"memory_writes": [_record(row)]})
 
-        if len(existing) >= MAX_MEMORIES:
+        if await count_memories(ctx.db, ctx.user.id) >= MAX_MEMORIES:
             # Free a slot the same way auto-capture does: the least-used
             # auto-captured fact goes, never a pinned or user-stated one.
             if not await _evict_for_capture(ctx.db, ctx.user.id):
@@ -433,6 +487,8 @@ class RememberTool(Tool):
             source="manual" if asked else "auto",
             source_conversation_id=ctx.conversation_id,
             category=category,
+            # Who you are applies everywhere; what you're doing here applies here.
+            workspace_id=chat.workspace_id if chat is not None and category in ("projects", "context", None) else None,
         )
         ctx.db.add(row)
         await ctx.db.flush()
@@ -572,6 +628,7 @@ class RecallTool(Tool):
         "asks what you know or remember about them, when they refer to "
         "something they told you before that isn't in front of you, or "
         "before saying you don't know something personal about them. "
+        "Set `past` for what used to be true ('where did I use to work?'). "
         "Read-only: it never changes what is saved."
     )
     parameters: dict[str, Any] = {
@@ -586,6 +643,10 @@ class RecallTool(Tool):
                     "saved."
                 ),
             },
+            "past": {
+                "type": "boolean",
+                "description": "Look in what's no longer true: old jobs, old addresses, plans that have been and gone.",
+            },
         },
         "required": ["query"],
     }
@@ -597,8 +658,12 @@ class RecallTool(Tool):
 
     async def run(self, ctx: ToolContext, args: dict[str, Any]) -> ToolResult:
         query = str(args.get("query") or "").strip()
+        if args.get("past") is True:
+            return await self._past(ctx, query)
 
-        total = await count_memories(ctx.db, ctx.user.id)
+        chat = await ctx.db.get(Conversation, ctx.conversation_id)
+        self_workspace = chat.workspace_id if chat is not None else None
+        total = await count_memories(ctx.db, ctx.user.id, self_workspace)
         if total == 0:
             return ToolResult(
                 content="The user has nothing saved in memory yet.",
@@ -606,7 +671,7 @@ class RecallTool(Tool):
             )
 
         if query:
-            rows = await self._search(ctx, query)
+            rows = await self._search(ctx, query, self_workspace)
             if not rows:
                 return ToolResult(
                     content=(
@@ -621,7 +686,7 @@ class RecallTool(Tool):
                 f"({len(rows)} of {total} saved)"
             )
         else:
-            rows = await load_memories(ctx.db, ctx.user.id, limit=self._LIMIT)
+            rows = await load_memories(ctx.db, ctx.user.id, limit=self._LIMIT, workspace=self_workspace)
             heading = f"All saved memories ({len(rows)} of {total})"
 
         lines = [f"{heading}:"]
@@ -639,7 +704,35 @@ class RecallTool(Tool):
             meta={"query": query, "matched": len(rows), "total": total},
         )
 
-    async def _search(self, ctx: ToolContext, query: str) -> list[UserMemory]:
+    async def _past(self, ctx: ToolContext, query: str) -> ToolResult:
+        """What used to be true: retired facts, and what a fact said before it changed."""
+        chat = await ctx.db.get(Conversation, ctx.conversation_id)
+        scope = chat.workspace_id if chat is not None else None
+        applies_here = or_(UserMemory.workspace_id.is_(None), UserMemory.workspace_id == scope) if scope else UserMemory.workspace_id.is_(None)
+        retired = (await ctx.db.execute(
+            select(UserMemory).where(UserMemory.user_id == ctx.user.id, UserMemory.status == RETIRED, UserMemory.retired_reason != "merged", applies_here)
+        )).scalars().all()
+        earlier = (await ctx.db.execute(
+            select(UserMemoryVersion).join(UserMemory, UserMemory.id == UserMemoryVersion.memory_id).where(UserMemory.user_id == ctx.user.id, UserMemory.status != SUGGESTED, UserMemory.status != DISMISSED, applies_here)
+        )).scalars().all()
+        documents: dict[str, tuple[str, datetime | None]] = {}
+        for m in retired:
+            documents[f"r{m.id}"] = (m.content, m.valid_until)
+        for v in earlier:
+            documents[f"v{v.id}"] = (v.content, v.replaced_at)
+        if query:
+            ranked = [key for key, _ in recall.keyword_ranking(query, [(key, value[0]) for key, value in documents.items()])][:self._LIMIT]
+        else:
+            ranked = sorted(documents, key=lambda key: documents[key][1] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)[:self._LIMIT]
+        if not ranked:
+            return ToolResult(content="Nothing like that in what used to be true. Say you don't have it rather than guessing.", meta={"query": query, "matched": 0})
+        lines = ["No longer true, with when it stopped:"]
+        for key in ranked:
+            content, until = documents[key]
+            lines.append(f"- {content}" + (f" (until {until.strftime('%b %Y')})" if until else ""))
+        return ToolResult(content="\n".join(lines), meta={"query": query, "matched": len(ranked)})
+
+    async def _search(self, ctx: ToolContext, query: str, workspace=None) -> list[UserMemory]:
         """Semantic first, lexical when semantic can't answer.
 
         ``retrieve_relevant_memories`` degrades to *recency* whenever the
@@ -660,11 +753,12 @@ class RecallTool(Tool):
                 k=self._LIMIT,
                 cfg=cfg,
                 strict=True,
+                workspace=workspace,
             )
             if hits:
                 return hits
 
-        rows = await load_memories(ctx.db, ctx.user.id, limit=MAX_MEMORIES)
+        rows = await load_memories(ctx.db, ctx.user.id, limit=MAX_MEMORIES, workspace=workspace)
         wanted = _tokens(query)
         if not wanted:
             return rows[: self._LIMIT]

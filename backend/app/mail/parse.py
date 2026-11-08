@@ -37,9 +37,62 @@ _CSS = CSSSanitizer(allowed_css_properties=[
     "padding-bottom", "padding-left", "padding-right", "padding-top", "text-align", "text-decoration", "text-indent",
     "text-transform", "vertical-align", "white-space", "width", "word-break",
 ])
-_DROP_WITH_CONTENT = re.compile(r"<(script|style|head|title|iframe|object|embed|svg|math|template|noscript)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+# Each of these, run with plain ``re.sub``, rescans to the end of the message from
+# every place a match fails, so a stranger can send a page that takes minutes per
+# megabyte. The helpers below give the same result, but each skips the places that
+# are already known to fail.
+_DROPPED = ("script", "style", "head", "title", "iframe", "object", "embed", "svg", "math", "template", "noscript")
+_DROP_OPEN = re.compile(rf"<({'|'.join(_DROPPED)})\b", re.IGNORECASE)
+_DROP_CLOSE = {tag: re.compile(rf"</{tag}\s*>", re.IGNORECASE) for tag in _DROPPED}
+_IMG_OPEN = re.compile(r"<img\b", re.IGNORECASE)
 _TAG_SRC = re.compile(r"""<img\b[^>]*?\bsrc\s*=\s*(["'])(.*?)\1""", re.IGNORECASE | re.DOTALL)
+_BLOCK_END = re.compile(r"<(br|/p|/div|/tr|/li|/h[1-6])\b[^>]*>", re.IGNORECASE)
+_ANY_TAG = re.compile(r"<[^>]+>")
 _SPACE = re.compile(r"\s+")
+
+
+def _drop_with_content(raw: str, replacement: str) -> str:
+    """Remove ``<script>…</script>`` and the like, contents and all. Like
+    ``<(script|…)\\b.*?</\\1\\s*>``, but once a kind of tag has no closing tag left
+    in the message, its later openings are skipped instead of each rescanning."""
+    out: list[str] = []
+    kept = at = 0
+    unclosed: set[str] = set()
+    while (opening := _DROP_OPEN.search(raw, at)) is not None:
+        tag = opening.group(1).lower()
+        closing = None if tag in unclosed else _DROP_CLOSE[tag].search(raw, opening.end())
+        if closing is None:
+            unclosed.add(tag)
+            at = opening.end()
+            continue
+        out += [raw[kept:opening.start()], replacement]
+        kept = at = closing.end()
+    out.append(raw[kept:])
+    return "".join(out)
+
+
+def _sub_img_src(raw: str, replace: Any) -> str:
+    """``_TAG_SRC.sub(replace, raw)``. When an ``<img`` has no usable ``src`` before
+    its ``>``, no other ``<img`` before that ``>`` has one either, so skip past it."""
+    out: list[str] = []
+    kept = at = 0
+    while (opening := _IMG_OPEN.search(raw, at)) is not None:
+        match = _TAG_SRC.match(raw, opening.start())
+        if match is None:
+            close = raw.find(">", opening.start())
+            at = len(raw) if close < 0 else close + 1
+            continue
+        out += [raw[kept:match.start()], replace(match)]
+        kept = at = match.end()
+    out.append(raw[kept:])
+    return "".join(out)
+
+
+def _sub_tags(pattern: re.Pattern[str], replacement: str, raw: str) -> str:
+    """For a pattern whose every match ends in ``>``: nothing after the last ``>``
+    can match, so don't let each ``<`` there rescan to the end."""
+    end = raw.rfind(">") + 1
+    return pattern.sub(replacement, raw[:end]) + raw[end:]
 
 
 from . import invites  # noqa: E402
@@ -79,9 +132,9 @@ def _people(msg: EmailMessage, name: str) -> list[dict[str, str]]:
 
 
 def html_to_text(raw: str) -> str:
-    cleaned = _DROP_WITH_CONTENT.sub(" ", raw)
-    cleaned = re.sub(r"<(br|/p|/div|/tr|/li|/h[1-6])\b[^>]*>", "\n", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+    cleaned = _drop_with_content(raw, " ")
+    cleaned = _sub_tags(_BLOCK_END, "\n", cleaned)
+    cleaned = _sub_tags(_ANY_TAG, " ", cleaned)
     text = html.unescape(cleaned)
     return re.sub(r"\n\s*\n+", "\n\n", re.sub(r"[ \t\xa0]+", " ", text)).strip()
 
@@ -100,7 +153,7 @@ def safe_html(raw: str, inline: dict[str, str] | None = None) -> str:
             return whole[: match.start(2) - match.start(0) - len("src=") - 1] + f"data-remote-src={match.group(1)}{match.group(2)}{match.group(1)}"
         return whole.replace(match.group(2), "")
 
-    prepared = _TAG_SRC.sub(image, _DROP_WITH_CONTENT.sub("", raw))
+    prepared = _sub_img_src(_drop_with_content(raw, ""), image)
     cleaned = bleach.clean(
         prepared,
         tags=_TAGS,

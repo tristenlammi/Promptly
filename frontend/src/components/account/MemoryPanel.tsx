@@ -34,6 +34,7 @@ import { Modal } from "@/components/shared/Modal";
 import { formatRelativeTime } from "@/components/files/helpers";
 import { useAuthStore } from "@/store/authStore";
 import { apiErrorMessage } from "@/utils/apiError";
+import { FactHistory, FactPeople, MemoryExtras } from "./MemoryExtras";
 import { cn } from "@/utils/cn";
 
 type MemoryMode = "off" | "auto" | "manual";
@@ -502,6 +503,8 @@ export function MemoryPanel() {
                 onDismiss={() => setActionError(null)}
               />
             )}
+
+            <MemoryExtras />
 
             {/* ── Memory list ───────────────────────────────────────────── */}
             {isLoading ? (
@@ -1145,6 +1148,18 @@ function MemoryRow({
               <span className="text-[10px] text-[var(--text-muted)]">
                 {formatRelativeTime(m.created_at)}
               </span>
+              {m.expires_at && (
+                <span className="text-[10px] text-[var(--text-muted)]" title="It stops counting after this date">
+                  · Until {new Date(m.expires_at).toLocaleDateString()}
+                </span>
+              )}
+              {m.workspace_id && (
+                <span className="text-[10px] text-[var(--text-muted)]" title="Only used in that workspace's chats">
+                  · In one workspace
+                </span>
+              )}
+              <FactPeople id={m.id} />
+              <FactHistory id={m.id} />
               {m.times_used > 0 && (
                 <span
                   className="text-[10px] text-[var(--text-muted)]"

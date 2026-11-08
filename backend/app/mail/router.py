@@ -266,24 +266,11 @@ def _person(name: str, addr: str) -> dict[str, str]:
     return {"name": name, "addr": addr}
 
 
-@router.get("/threads")
-async def threads(
-    account: uuid.UUID | None = None,
-    role: str | None = Query(default="inbox", max_length=10),
-    folder: uuid.UUID | None = None,
-    label: uuid.UUID | None = None,
-    needs_reply: bool = False,
-    q: str = Query(default="", max_length=300),
-    before: datetime | None = None,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Conversations, newest first. With ``q``, a search across every folder."""
-    mine = await _my_account_ids(db, user)
-    accounts = [a for a in mine if account is None or a == account]
-    if not accounts:
-        return {"threads": [], "next": None}
-    query = q.strip()
+async def _view(
+    db: AsyncSession, user: User, accounts: list[uuid.UUID], role: str | None, label: uuid.UUID | None,
+    folder: uuid.UUID | None = None, query: str = "", needs_reply: bool = False,
+) -> tuple[str, dict[str, Any]] | None:
+    """Which emails a place shows, as a WHERE clause. None if there's nowhere to look."""
     if label or role == "snoozed":
         if label:
             await _my_label(db, user, label)
@@ -293,8 +280,8 @@ async def threads(
     else:
         folder_ids = await _folder_ids(db, accounts, None if query and not folder else role, folder)
     if not folder_ids:
-        return {"threads": [], "next": None}
-    params: dict[str, Any] = {"folders": folder_ids, "page": PAGE + 1, "accounts": accounts}
+        return None
+    params: dict[str, Any] = {"folders": folder_ids, "accounts": accounts}
     where = "folder_id = ANY(:folders) AND account_id = ANY(:accounts)"
     if not label and role == "snoozed":
         where += " AND (account_id, thread_key) IN (SELECT account_id, thread_key FROM mail_snoozes WHERE until > now())"
@@ -320,6 +307,33 @@ async def threads(
     if query:
         where += f" AND {_SEARCHABLE} @@ websearch_to_tsquery('simple', :q)"
         params["q"] = query
+    return where, params
+
+
+@router.get("/threads")
+async def threads(
+    account: uuid.UUID | None = None,
+    role: str | None = Query(default="inbox", max_length=10),
+    folder: uuid.UUID | None = None,
+    label: uuid.UUID | None = None,
+    needs_reply: bool = False,
+    q: str = Query(default="", max_length=300),
+    before: datetime | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Conversations, newest first. With ``q``, a search across every folder."""
+    mine = await _my_account_ids(db, user)
+    accounts = [a for a in mine if account is None or a == account]
+    if not accounts:
+        return {"threads": [], "next": None}
+    query = q.strip()
+    place = await _view(db, user, accounts, role, label, folder, query, needs_reply)
+    if place is None:
+        return {"threads": [], "next": None}
+    where, params = place
+    folder_ids = params["folders"]
+    params["page"] = PAGE + 1
     having = ""
     if before:
         having = "HAVING max(sent_at) < :before"
@@ -428,8 +442,11 @@ async def thread(account_id: uuid.UUID, key: str, db: AsyncSession = Depends(get
     }
 
 
+ActionName = Literal["read", "unread", "star", "unstar", "archive", "trash", "spam", "inbox", "no_reply"]
+
+
 class ThreadAction(BaseModel):
-    action: Literal["read", "unread", "star", "unstar", "archive", "trash", "spam", "inbox", "no_reply"]
+    action: ActionName
 
 
 _FLAG_OPS = {"read": ("seen", {"seen": True}), "unread": ("unseen", {"seen": False}), "star": ("flag", {"flagged": True}), "unstar": ("unflag", {"flagged": False})}
@@ -440,41 +457,126 @@ _MOVE_ROLES = {"archive": "archive", "trash": "trash", "spam": "spam", "inbox": 
 async def act(account_id: uuid.UUID, key: str, body: ThreadAction, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
     """Done here at once, so the screen is instant; the mailbox catches up in seconds."""
     await _mine(db, user, account_id)
+    await _act_on(db, account_id, [key], body.action)
+    await db.commit()
+
+
+class ThreadRef(BaseModel):
+    account_id: uuid.UUID
+    key: str = Field(min_length=1, max_length=200)
+
+
+class ManyThreads(BaseModel):
+    # More than this and the request stops fitting in what a closing page can send.
+    threads: list[ThreadRef] = Field(min_length=1, max_length=500)
+
+
+class ManyThreadsAction(ManyThreads):
+    action: ActionName
+
+
+def _by_account(body: ManyThreads) -> dict[uuid.UUID, list[str]]:
+    grouped: dict[uuid.UUID, list[str]] = {}
+    for t in body.threads:
+        grouped.setdefault(t.account_id, []).append(t.key)
+    return grouped
+
+
+@router.post("/threads/action", status_code=status.HTTP_204_NO_CONTENT)
+async def act_on_many(body: ManyThreadsAction, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    """All of them or none: nothing is saved until every mailbox has been checked."""
+    grouped = _by_account(body)
+    for account_id in grouped:
+        await _mine(db, user, account_id)
+    for account_id, keys in grouped.items():
+        await _act_on(db, account_id, keys, body.action)
+    await db.commit()
+
+
+class MarkAllRead(BaseModel):
+    role: str = Field(default="inbox", max_length=10)
+    account: uuid.UUID | None = None
+    labels: list[uuid.UUID] = Field(default_factory=list, max_length=rules.MAX_LABELS)
+
+
+# The most a single change asks of the mailbox.
+UIDS_PER_OP = 500
+
+
+@router.post("/mark-all-read")
+async def mark_all_read(body: MarkAllRead, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict[str, int]:
+    """Everything unread in a place, not just what's loaded on screen. As when you read
+    one, the whole conversation counts as read, wherever its other emails are."""
+    mine = await _my_account_ids(db, user)
+    accounts = [a for a in mine if body.account is None or a == body.account]
+    marked: set[tuple[uuid.UUID, str]] = set()
+    pending: dict[tuple[uuid.UUID, uuid.UUID], list[int]] = {}
+    for label in body.labels or [None]:
+        place = await _view(db, user, accounts, body.role, label) if accounts else None
+        if place is None:
+            continue
+        where, params = place
+        rows = (await db.execute(text(
+            "UPDATE mail_messages SET seen = true WHERE NOT seen AND (account_id, thread_key) IN "
+            f"(SELECT account_id, thread_key FROM mail_messages WHERE {where} AND NOT seen) "
+            "RETURNING account_id, thread_key, folder_id, uid"
+        ), params)).all()
+        for r in rows:
+            marked.add((r.account_id, r.thread_key))
+            if r.uid is not None:
+                pending.setdefault((r.account_id, r.folder_id), []).append(r.uid)
+    if pending:
+        paths = dict((await db.execute(select(MailFolder.id, MailFolder.path).where(MailFolder.id.in_({f for _, f in pending})))).all())
+        for (account_id, folder_id), uids in pending.items():
+            for start in range(0, len(uids), UIDS_PER_OP):
+                db.add(MailOp(account_id=account_id, kind="seen", folder_path=paths[folder_id], uids=uids[start:start + UIDS_PER_OP]))
+    await db.commit()
+    return {"marked": len(marked)}
+
+
+async def _act_on(db: AsyncSession, account_id: uuid.UUID, keys: list[str], action: str) -> None:
+    """One change per folder, however many conversations: the mailbox gets through a
+    limited number of changes each time round."""
     folders = {f.id: f for f in (await db.execute(select(MailFolder).where(MailFolder.account_id == account_id))).scalars()}
-    messages = (await db.execute(select(MailMessage).where(MailMessage.account_id == account_id, MailMessage.thread_key == key))).scalars().all()
-    if body.action == "no_reply":
+    messages = (await db.execute(select(MailMessage).where(MailMessage.account_id == account_id, MailMessage.thread_key.in_(keys)))).scalars().all()
+    if action == "no_reply":
         for m in messages:
             m.needs_reply = False
-        await db.commit()
         return
     by_folder: dict[uuid.UUID, list[MailMessage]] = {}
     for m in messages:
         by_folder.setdefault(m.folder_id, []).append(m)
 
-    if body.action in _FLAG_OPS:
-        kind, values = _FLAG_OPS[body.action]
+    if action in _FLAG_OPS:
+        kind, values = _FLAG_OPS[action]
         for folder_id, rows in by_folder.items():
             uids = [m.uid for m in rows if m.uid is not None]
             if uids:
                 db.add(MailOp(account_id=account_id, kind=kind, folder_path=folders[folder_id].path, uids=uids))
-        await db.execute(update(MailMessage).where(MailMessage.account_id == account_id, MailMessage.thread_key == key).values(**values))
-        await db.commit()
+        await db.execute(update(MailMessage).where(MailMessage.account_id == account_id, MailMessage.thread_key.in_(keys)).values(**values))
         return
 
-    role = _MOVE_ROLES[body.action]
+    role = _MOVE_ROLES[action]
     target = next((f for f in folders.values() if f.role == role), None)
     if target is None and role == "archive":
         # Gmail's archive is All Mail, which we don't copy, to avoid showing mail twice.
         target = await rules.archive_folder(db, account_id)
     if target is None:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="This mailbox doesn't have that folder.")
-    # Your sent copies normally stay in Sent. But if that's all there is, there's
-    # nothing else to move, and it would just come straight back.
-    only_yours = all(folders[m.folder_id].role in rules.STAY_PUT or m.folder_id == target.id for m in messages)
-    rules.move(db, folders, messages, target, even_sent=only_yours and body.action != "inbox")
+    # Your sent copies normally stay in Sent. But if that's all a conversation has,
+    # there's nothing else to move, and it would just come straight back.
+    by_thread: dict[str, list[MailMessage]] = {}
+    for m in messages:
+        by_thread.setdefault(m.thread_key, []).append(m)
+    yours_alone: list[MailMessage] = []
+    others: list[MailMessage] = []
+    for rows in by_thread.values():
+        alone = all(folders[m.folder_id].role in rules.STAY_PUT or m.folder_id == target.id for m in rows)
+        (yours_alone if alone and action != "inbox" else others).extend(rows)
+    rules.move(db, folders, others, target)
+    rules.move(db, folders, yours_alone, target, even_sent=True)
     # Moving it somewhere else takes it out of its label.
-    await rules.clear_label(db, account_id, key)
-    await db.commit()
+    await rules.clear_labels(db, account_id, keys)
 
 
 class SnoozeBody(BaseModel):
@@ -778,15 +880,31 @@ async def _thread_exists(db: AsyncSession, account_id: uuid.UUID, key: str) -> N
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Conversation not found.")
 
 
+async def _label_threads(db: AsyncSession, account_id: uuid.UUID, keys: list[str], label_id: uuid.UUID) -> None:
+    rows = (await db.execute(select(MailMessage).where(MailMessage.account_id == account_id, MailMessage.thread_key.in_(keys)))).scalars().all()
+    for key in {m.thread_key for m in rows}:
+        await rules.add_label(db, label_id, account_id, key)
+    await db.execute(delete(MailSnooze).where(MailSnooze.account_id == account_id, MailSnooze.thread_key.in_(keys)))
+    await rules.file_away(db, account_id, label_id, rows, None)
+
+
 @router.put("/threads/{account_id}/{key}/labels/{label_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def label_thread(account_id: uuid.UUID, key: str, label_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
     await _mine(db, user, account_id)
     await _my_label(db, user, label_id)
     await _thread_exists(db, account_id, key)
-    await rules.add_label(db, label_id, account_id, key)
-    await db.execute(delete(MailSnooze).where(MailSnooze.account_id == account_id, MailSnooze.thread_key == key))
-    rows = (await db.execute(select(MailMessage).where(MailMessage.account_id == account_id, MailMessage.thread_key == key))).scalars().all()
-    await rules.file_away(db, account_id, label_id, rows, None)
+    await _label_threads(db, account_id, [key], label_id)
+    await db.commit()
+
+
+@router.put("/labels/{label_id}/threads", status_code=status.HTTP_204_NO_CONTENT)
+async def label_many(label_id: uuid.UUID, body: ManyThreads, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> None:
+    await _my_label(db, user, label_id)
+    grouped = _by_account(body)
+    for account_id in grouped:
+        await _mine(db, user, account_id)
+    for account_id, keys in grouped.items():
+        await _label_threads(db, account_id, keys, label_id)
     await db.commit()
 
 

@@ -79,7 +79,7 @@ function InsidePicker({ value, places, onChange }: { value: string; places: stri
 const INPUT = "h-10 w-full rounded-lg border border-[var(--border)] bg-transparent px-3 text-sm text-[var(--text)] outline-none placeholder:text-[var(--text-muted)] focus:border-[#D97757]";
 
 /** Where this conversation should live. A label is a place, so it goes to just one. */
-export function LabelPicker({ target, labels, onMove, onToInbox, onMakeRule, onClose }: { target: LabelTarget; labels: MailLabel[]; onMove: (labelId: string) => void; onToInbox: () => void; onMakeRule: () => void; onClose: () => void }) {
+export function LabelPicker({ target, labels, onMove, onToInbox, onMakeRule, onClose }: { target: LabelTarget; labels: MailLabel[]; onMove: (labelId: string) => void; onToInbox: () => void; onMakeRule?: () => void; onClose: () => void }) {
   const refresh = useMailRefresh();
   const [name, setName] = useState("");
   const row = "flex min-h-11 w-full items-center gap-3 rounded-lg px-2 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]";
@@ -113,7 +113,7 @@ export function LabelPicker({ target, labels, onMove, onToInbox, onMakeRule, onC
         <input value={name} onChange={(e) => setName(e.target.value)} maxLength={60} placeholder="New label" aria-label="New label" className={INPUT} />
         <button type="submit" disabled={!name.trim()} aria-label="Add label" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[#D97757] text-white disabled:opacity-40"><Plus className="h-4 w-4" /></button>
       </form>
-      <button type="button" onClick={onMakeRule} className="mt-3 w-full rounded-lg px-2 py-2 text-left text-sm font-medium text-[#D97757] hover:bg-[var(--hover)]">Do this for future emails too…</button>
+      {onMakeRule && <button type="button" onClick={onMakeRule} className="mt-3 w-full rounded-lg px-2 py-2 text-left text-sm font-medium text-[#D97757] hover:bg-[var(--hover)]">Do this for future emails too…</button>}
     </Sheet>
   );
 }

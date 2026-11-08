@@ -96,6 +96,9 @@ test.describe("files", () => {
     await page.getByRole("menuitem", { name: "Folder", exact: true }).click();
     await page.getByLabel("Folder name").fill(folder);
     await page.getByRole("button", { name: "Create", exact: true }).click();
+    // A well-used account's list is long and virtualised: it may be further down.
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await showRow(page, page.locator("[data-drive-item]").filter({ has: page.getByText(folder, { exact: true }) }));
     await expect(row(page, folder)).toBeVisible();
 
     await row(page, folder).getByRole("button", { name: "More actions" }).click();

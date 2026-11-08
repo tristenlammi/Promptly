@@ -1159,6 +1159,9 @@ async def run_to_chat(
         )
 
     conv = Conversation(
+        # A report the automation wrote, not something you told it.
+        memory_captured_through=datetime.now(timezone.utc),
+        memory_private_until=datetime.now(timezone.utc),
         user_id=user.id,
         title=task.title[:255],
         model_id=task.model_id,

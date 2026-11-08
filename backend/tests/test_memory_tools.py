@@ -312,7 +312,7 @@ async def test_at_the_cap_an_auto_fact_is_evicted(db, user, conversation):
     )
     await db.commit()
 
-    rows = await _all(db, user)
+    rows = [r for r in await _all(db, user) if r.status == "active"]
     assert len(rows) == MAX_MEMORIES
     assert any(r.content == "User prefers tabs" for r in rows)
 
@@ -350,7 +350,7 @@ def test_both_tools_are_registered_under_the_memory_category():
     from app.chat.tools.registry import tools_in
 
     names = {t.name for t in tools_in({"memory"})}
-    assert names == {"remember", "forget", "recall"}
+    assert names == {"remember", "forget", "recall", "search_past_chats"}
 
 
 def test_memory_mode_resolution_gates_advertising():

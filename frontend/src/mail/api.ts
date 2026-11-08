@@ -167,6 +167,13 @@ export interface ThreadQuery {
   before?: string;
 }
 
+export interface ThreadRef {
+  account_id: string;
+  key: string;
+}
+
+const refOf = ({ account_id, key }: ThreadRef): ThreadRef => ({ account_id, key });
+
 export const mailApi = {
   async overview() {
     return (await apiClient.get<{ accounts: MailAccount[]; folders: MailFolder[]; labels: MailLabel[]; sorting: boolean; needs_reply: number; failed: FailedSend[] }>("/mail/overview")).data;
@@ -188,6 +195,28 @@ export const mailApi = {
       headers: { "Content-Type": "application/json", ...authHeader() },
       body: JSON.stringify({ action }),
     }).catch(() => undefined);
+  },
+  /** One action on several conversations, as one change for the mailbox. */
+  async actMany(rows: ThreadRef[], action: ThreadAction) {
+    if (rows.length === 1) return mailApi.act(rows[0].account_id, rows[0].key, action);
+    await apiClient.post("/mail/threads/action", { threads: rows.map(refOf), action });
+  },
+  actManyAsPageCloses(rows: ThreadRef[], action: ThreadAction) {
+    if (rows.length === 1) return mailApi.actAsPageCloses(rows[0].account_id, rows[0].key, action);
+    void fetch(`${API_BASE_URL}/mail/threads/action`, {
+      method: "POST",
+      keepalive: true,
+      headers: { "Content-Type": "application/json", ...authHeader() },
+      body: JSON.stringify({ threads: rows.map(refOf), action }),
+    }).catch(() => undefined);
+  },
+  async labelMany(rows: ThreadRef[], labelId: string) {
+    if (rows.length === 1) return mailApi.setThreadLabel(rows[0].account_id, rows[0].key, labelId, true);
+    await apiClient.put(`/mail/labels/${labelId}/threads`, { threads: rows.map(refOf) });
+  },
+  /** Everything unread in a place, including what hasn't loaded on screen. */
+  async markAllRead(place: { role?: string; account?: string; labels?: string[] }) {
+    return (await apiClient.post<{ marked: number }>("/mail/mark-all-read", place)).data.marked;
   },
   async addLabel(name: string, color: string) {
     return (await apiClient.post<MailLabel>("/mail/labels", { name, color })).data;

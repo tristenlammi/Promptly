@@ -1,8 +1,8 @@
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  AlarmClock, Archive, ArrowLeft, CalendarPlus, Check, CheckSquare, ChevronDown, ChevronUp, Download, Forward, Inbox, ListFilter, Loader2, Mail, MailOpen, Paperclip, Pen, Plus, Reply, ReplyAll, Search, Send, Settings, Sparkles, Star, Tag, Trash2, UserPlus, X, type LucideIcon,
+  AlarmClock, Archive, ArrowLeft, CalendarPlus, Check, CheckCheck, CheckSquare, ChevronDown, ChevronUp, Download, Forward, Inbox, ListFilter, Loader2, Mail, MailOpen, Paperclip, Pen, Plus, Reply, ReplyAll, Search, Send, Settings, Sparkles, Star, Tag, Trash2, UserPlus, X, type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Link as RouterLink, useLocation } from "react-router-dom";
 
 import { ModelSelector } from "@/components/chat/ModelSelector";
@@ -19,7 +19,7 @@ import { asParagraphs, Composer, type Draft } from "./Composer";
 import { AttachmentViewer, SaveToFiles, useSavedAttachments } from "./AttachmentViewer";
 import { useThreadDrag } from "./DragMove";
 import { LabelPicker, LabelPill, LabelsSheet, NewLabelSheet, RuleSheet, type LabelTarget } from "./Labels";
-import { labelRows, readFolded, saveFolded, unfolded } from "./labelTree";
+import { labelRows, labelsInside, readFolded, saveFolded, unfolded } from "./labelTree";
 import { MessageBody } from "./MessageBody";
 import { EditMailboxSheet, EventSheet, MailSettingsSheet, SnoozeSheet } from "./Sheets";
 
@@ -32,6 +32,9 @@ const ROLES: { role: string; label: string; icon: LucideIcon }[] = [
 ];
 const UNDO_MS = 5000;
 const LEAVE_MS = 200;
+// As many as the server takes at once.
+const MAX_PICKED = 500;
+const NONE: ReadonlySet<string> = new Set();
 
 interface View {
   role: string;
@@ -49,6 +52,9 @@ interface Open {
 }
 
 type People = Record<string, KnownPerson>;
+
+const idOf = (row: Open) => `${row.account_id}/${row.key}`;
+const conversations = (n: number) => `${n} conversation${n === 1 ? "" : "s"}`;
 
 /** The contact's own picture when you know them, otherwise their initial. */
 function Avatar({ person, people }: { person: Person; people: People }) {
@@ -74,9 +80,13 @@ export function MailApp() {
   const [labelsOpen, setLabelsOpen] = useState(false);
   const [folded, setFolded] = useState(readFolded);
   const [menu, setMenu] = useState<{ row: ThreadRow; x: number; y: number } | null>(null);
-  const [labelling, setLabelling] = useState<LabelTarget | null>(null);
+  const [placeMenu, setPlaceMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  // Picked with Ctrl or Shift, to act on together. What's left the list drops out by itself.
+  const [picked, setPicked] = useState<ReadonlySet<string>>(NONE);
+  const anchor = useRef<string | null>(null);
+  const [labelling, setLabelling] = useState<LabelTarget[] | null>(null);
   const [ruleFor, setRuleFor] = useState<LabelTarget | null>(null);
-  const [snoozing, setSnoozing] = useState<Open | null>(null);
+  const [snoozing, setSnoozing] = useState<Open[] | null>(null);
   const [editing, setEditing] = useState<MailAccount | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [undo, setUndo] = useState<{ label: string; run: () => void; timer?: number } | null>(null);
@@ -85,7 +95,7 @@ export function MailApp() {
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   const [hiddenTick, setHiddenTick] = useState(0);
   const leavingTimers = useRef(new Map<string, number>());
-  const [naming, setNaming] = useState<ThreadRow | null>(null);
+  const [naming, setNaming] = useState<ThreadRow[] | null>(null);
   const accounts = useMemo(() => overview?.accounts ?? [], [overview]);
   const location = useLocation();
   const undoTimer = useRef<number | null>(null);
@@ -127,6 +137,14 @@ export function MailApp() {
     () => (list.data?.pages.flatMap((p) => p.threads) ?? []).filter((t) => !hidden.current.has(`${t.account_id}/${t.key}`)),
     [list.data, hiddenTick], // eslint-disable-line react-hooks/exhaustive-deps
   );
+
+  const pickedRows = useMemo(() => rows.filter((r) => picked.has(idOf(r))), [rows, picked]);
+
+  // A selection belongs to the list you made it in.
+  useEffect(() => {
+    setPicked(NONE);
+    anchor.current = null;
+  }, [view.role, view.label, view.account, view.needsReply, search]);
 
   // Names and pictures from your Contacts, for whoever's on screen.
   const addresses = useMemo(() => [...new Set(rows.map((r) => r.from.addr.toLowerCase()))].sort(), [rows]);
@@ -176,21 +194,24 @@ export function MailApp() {
   }, []);
 
   /** Off the list at once. It only really happens once the undo has passed. */
-  const moveAway = useCallback((row: Open, action: "archive" | "trash", label: string) => {
-    const id = `${row.account_id}/${row.key}`;
-    leave(id);
-    setOpen((o) => (o && o.key === row.key ? null : o));
+  const moveAway = useCallback((what: Open | Open[], action: "archive" | "trash", label: string) => {
+    const many = Array.isArray(what) ? what : [what];
+    const ids = many.map(idOf);
+    const id = ids.join(",");
+    ids.forEach(leave);
+    setPicked(NONE);
+    setOpen((o) => (o && many.some((r) => r.key === o.key) ? null : o));
     const send = (closing = false) => {
       window.clearTimeout(timer);
       waiting.current.delete(id);
       setUndo((u) => (u?.timer === timer ? null : u));
       if (closing) {
-        mailApi.actAsPageCloses(row.account_id, row.key, action);
+        mailApi.actManyAsPageCloses(many, action);
         return;
       }
       void (async () => {
         try {
-          await mailApi.act(row.account_id, row.key, action);
+          await mailApi.actMany(many, action);
           // Kept off the list until the new list is here, or it flashes back.
           await qc.invalidateQueries({ queryKey: ["mail-threads"] });
           void qc.invalidateQueries({ queryKey: ["mail-overview"] });
@@ -198,7 +219,7 @@ export function MailApp() {
         } catch (e) {
           toast.error(apiErrorMessage(e, "Couldn't do that."));
         } finally {
-          stay(id);
+          ids.forEach(stay);
         }
       })();
     };
@@ -210,11 +231,16 @@ export function MailApp() {
       run: () => {
         window.clearTimeout(timer);
         waiting.current.delete(id);
-        stay(id);
+        ids.forEach(stay);
         setUndo(null);
       },
     });
   }, [qc, leave, stay]);
+
+  const sendAway = useCallback((chosen: Open[], action: "archive" | "trash") => {
+    const n = chosen.length;
+    moveAway(chosen, action, action === "archive" ? (n > 1 ? `Archived ${conversations(n)}` : "Archived") : (n > 1 ? `Moved ${conversations(n)} to Trash` : "Moved to Trash"));
+  }, [moveAway]);
 
   // Going to look for it means you've finished with Undo, and it has to be there.
   useEffect(() => {
@@ -238,32 +264,45 @@ export function MailApp() {
   }, []);
 
   /** Into a label, or back to the Inbox, straight away: undo puts it back where it was. */
-  const moveNow = useCallback(async (row: Open & { labels: string[] }, labelId: string | null, words: string, cameFrom: "inbox" | "archive" | "trash", fromLabel?: string) => {
-    const id = `${row.account_id}/${row.key}`;
+  const moveNow = useCallback(async (many: (Open & { labels: string[] })[], labelId: string | null, words: string, cameFrom: "inbox" | "archive" | "trash", fromLabel?: string) => {
+    const ids = many.map(idOf);
     if (undoTimer.current) window.clearTimeout(undoTimer.current);
-    leave(id);
-    setOpen((o) => (o && o.key === row.key ? null : o));
-    const put = async (label: string | null, action: ThreadAction) => {
-      if (label) await mailApi.setThreadLabel(row.account_id, row.key, label, true);
-      else await mailApi.act(row.account_id, row.key, action);
+    ids.forEach(leave);
+    setPicked(NONE);
+    setOpen((o) => (o && many.some((r) => r.key === o.key) ? null : o));
+    const put = async (which: Open[], label: string | null, action: ThreadAction) => {
+      if (label) await mailApi.labelMany(which, label);
+      else await mailApi.actMany(which, action);
+    };
+    const settled = async () => {
       await qc.invalidateQueries({ queryKey: ["mail-threads"] });
       void qc.invalidateQueries({ queryKey: ["mail-overview"] });
     };
     try {
-      await put(labelId, "inbox");
+      await put(many, labelId, "inbox");
+      await settled();
     } catch (e) {
-      stay(id);
+      ids.forEach(stay);
       toast.error(apiErrorMessage(e, "Couldn't move that."));
       return;
     }
-    stay(id);
+    ids.forEach(stay);
     undoTimer.current = window.setTimeout(() => setUndo(null), UNDO_MS);
     setUndo({
       label: words,
       run: () => {
         if (undoTimer.current) window.clearTimeout(undoTimer.current);
         setUndo(null);
-        void put(row.labels[0] ?? fromLabel ?? null, cameFrom).catch((e) => toast.error(apiErrorMessage(e, "Couldn't put that back.")));
+        // Each back where it was, which isn't always the same place.
+        const places = new Map<string | null, Open[]>();
+        for (const row of many) {
+          const place = row.labels[0] ?? fromLabel ?? null;
+          places.set(place, [...(places.get(place) ?? []), row]);
+        }
+        void (async () => {
+          for (const [place, which] of places) await put(which, place, cameFrom);
+          await settled();
+        })().catch((e) => toast.error(apiErrorMessage(e, "Couldn't put that back.")));
       },
     });
   }, [leave, stay, qc]);
@@ -283,33 +322,42 @@ export function MailApp() {
     });
   }, [refresh]);
 
-  const snooze = useCallback(async (at: Open, when: Date) => {
+  const snooze = useCallback(async (many: Open[], when: Date) => {
     setSnoozing(null);
-    setOpen((o) => (o && o.key === at.key ? null : o));
+    setPicked(NONE);
+    setOpen((o) => (o && many.some((r) => r.key === o.key) ? null : o));
     try {
-      await mailApi.snooze(at.account_id, at.key, when);
+      for (const at of many) await mailApi.snooze(at.account_id, at.key, when);
       toast.success(`Snoozed until ${when.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}.`);
       refresh();
     } catch (e) {
       toast.error(apiErrorMessage(e, "Couldn't snooze that."));
+      refresh();
     }
   }, [refresh]);
 
   const cameFrom: "inbox" | "archive" | "trash" = view.role === "archive" || view.role === "trash" ? view.role : "inbox";
-  const moveToLabel = useCallback((row: Open & { labels: string[] }, labelId: string, known?: string) => {
-    void moveNow(row, labelId, `Moved to ${known ?? labels.find((l) => l.id === labelId)?.name ?? "label"}`, cameFrom, view.label);
+  const moveToLabel = useCallback((many: (Open & { labels: string[] })[], labelId: string, known?: string) => {
+    const name = known ?? labels.find((l) => l.id === labelId)?.name ?? "label";
+    void moveNow(many, labelId, many.length > 1 ? `Moved ${conversations(many.length)} to ${name}` : `Moved to ${name}`, cameFrom, view.label);
   }, [moveNow, labels, cameFrom, view.label]);
 
+  const toInbox = useCallback((many: (Open & { labels: string[] })[], fromLabel?: string) => {
+    void moveNow(many, null, many.length > 1 ? `Moved ${conversations(many.length)} to Inbox` : "Moved to Inbox", cameFrom, fromLabel);
+  }, [moveNow, cameFrom]);
+
+  // Dragging one of those you've picked brings the rest with it.
   const dropped = useCallback((row: ThreadRow, target: string) => {
+    const chosen = picked.has(idOf(row)) ? pickedRows : [row];
     const [kind, value] = target.split(":");
-    if (kind === "label") moveToLabel(row, value);
-    else if (kind === "new") setNaming(row);
-    else if (value === "inbox") void moveNow(row, null, "Moved to Inbox", cameFrom, view.label);
-    else if (value === "archive") moveAway(row, "archive", "Archived");
-    else if (value === "trash") moveAway(row, "trash", "Moved to Trash");
-    else if (value === "snoozed") setSnoozing(row);
-  }, [moveToLabel, moveNow, moveAway, cameFrom, view.label]);
-  const { dragging, hover, startDrag, card } = useThreadDrag(dropped);
+    if (kind === "label") moveToLabel(chosen, value);
+    else if (kind === "new") setNaming(chosen);
+    else if (value === "inbox") toInbox(chosen, view.label);
+    else if (value === "archive") sendAway(chosen, "archive");
+    else if (value === "trash") sendAway(chosen, "trash");
+    else if (value === "snoozed") setSnoozing(chosen);
+  }, [picked, pickedRows, moveToLabel, toInbox, sendAway, view.label]);
+  const { dragging, hover, startDrag, card } = useThreadDrag(dropped, (row) => (picked.has(idOf(row)) && pickedRows.length > 1 ? conversations(pickedRows.length) : personName(row.from)));
 
   const newMessage = useCallback((): Draft => ({ account_id: view.account ?? accounts[0]?.id ?? "", to: "", subject: "" }), [view.account, accounts]);
 
@@ -317,7 +365,29 @@ export function MailApp() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (target.closest("input, textarea, select, [contenteditable]") || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (target.closest("input, textarea, select, [contenteditable]")) return;
+      // These keys are for the list. A menu or sheet on top has its own, and Delete
+      // there must never reach the emails underneath.
+      if (document.querySelector('[role="menu"], [role="dialog"]')) return;
+      // Reading an email, Ctrl+A is for its words.
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a" && (!open || picked.size > 0) && rows.length > 0) {
+        e.preventDefault();
+        if (rows.length > MAX_PICKED) toast.info(`That's the first ${MAX_PICKED}: the most at one time.`);
+        setPicked(new Set(rows.slice(0, MAX_PICKED).map(idOf)));
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const canTrash = view.role !== "trash" || !!view.label;
+      if (pickedRows.length > 0) {
+        if (e.key === "Escape") setPicked(NONE);
+        else if (e.key === "e") sendAway(pickedRows, "archive");
+        else if ((e.key === "#" || e.key === "Delete") && canTrash) sendAway(pickedRows, "trash");
+        if (["Escape", "e", "#", "Delete"].includes(e.key)) return;
+      }
+      if (open && e.key === "Delete" && canTrash) {
+        moveAway(open, "trash", "Moved to Trash");
+        return;
+      }
       const index = open ? rows.findIndex((r) => r.key === open.key) : -1;
       if (e.key === "j" || e.key === "k") {
         const next = rows[Math.min(rows.length - 1, Math.max(0, index + (e.key === "j" ? 1 : -1)))];
@@ -338,7 +408,7 @@ export function MailApp() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, rows, accounts, newMessage, moveAway]);
+  }, [open, rows, accounts, newMessage, moveAway, sendAway, picked, pickedRows, view.role, view.label]);
 
   if (isLoading) return <div className="flex h-full items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-[var(--text-muted)]" /></div>;
 
@@ -368,26 +438,97 @@ export function MailApp() {
     />
   );
   const shownLabel = labels.find((l) => l.id === view.label);
+  const icon = "h-4 w-4";
+  const markAllRead = async (place: { role?: string; labels?: string[] }) => {
+    try {
+      const marked = await mailApi.markAllRead({ ...place, account: view.account });
+      if (marked > 0) toast.success(`Marked ${conversations(marked)} as read.`);
+      else toast.info("Nothing unread there.");
+      refresh();
+    } catch (e) {
+      toast.error(apiErrorMessage(e, "Couldn't mark those as read."));
+    }
+  };
+  const markAllItem = (place: { role?: string; labels?: string[] }): ContextMenuItem => ({ label: "Mark all as read", icon: <CheckCheck className={icon} />, onClick: () => void markAllRead(place) });
+  // What's on screen is a whole place, unless it's search results or just what needs a reply.
+  const markAllHere: ContextMenuItem[] = search || view.needsReply ? [] : [markAllItem(view.label ? { labels: [view.label] } : { role: view.role })];
+  const openPlaceMenu = (e: ReactMouseEvent, items: ContextMenuItem[]) => {
+    e.preventDefault();
+    setPlaceMenu({ x: e.clientX, y: e.clientY, items });
+  };
+
+  /** Pick out conversations with Ctrl or Shift, as in a file list. A plain click just opens one. */
+  const clickRow = (e: ReactMouseEvent, row: ThreadRow) => {
+    const id = idOf(row);
+    const adding = e.ctrlKey || e.metaKey;
+    let next: Set<string>;
+    if (e.shiftKey) {
+      const to = rows.findIndex((r) => idOf(r) === id);
+      const start = anchor.current ?? (open ? idOf(open) : id);
+      const found = rows.findIndex((r) => idOf(r) === start);
+      const from = found < 0 ? to : found;
+      const range = rows.slice(Math.min(from, to), Math.max(from, to) + 1).map(idOf);
+      next = new Set(adding ? [...picked, ...range] : range);
+    } else if (adding || (isMobile && picked.size > 0)) {
+      next = new Set(picked);
+      // The one you're reading is where it started.
+      if (next.size === 0 && open && idOf(open) !== id) next.add(idOf(open));
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      anchor.current = id;
+    } else {
+      setPicked(NONE);
+      anchor.current = id;
+      setOpen({ account_id: row.account_id, key: row.key });
+      return;
+    }
+    if (next.size > MAX_PICKED) toast.info(`That's the first ${MAX_PICKED}: the most at one time.`);
+    setPicked(new Set([...next].slice(0, MAX_PICKED)));
+    setOpen(null);
+  };
+
+  const pickedItems = (): ContextMenuItem[] => {
+    const chosen = pickedRows;
+    const backToInbox = !view.label && (view.role === "archive" || view.role === "trash");
+    const flag = (action: ThreadAction) => () => void mailApi.actMany(chosen, action).then(refresh).catch((e) => toast.error(apiErrorMessage(e, "Couldn't do that.")));
+    const firstLabels = chosen[0]?.labels ?? [];
+    return [
+      ...(chosen.some((r) => r.unread > 0) ? [{ label: "Mark as read", icon: <MailOpen className={icon} />, onClick: flag("read") }] : []),
+      ...(chosen.some((r) => r.unread === 0) ? [{ label: "Mark as unread", icon: <Mail className={icon} />, onClick: flag("unread") }] : []),
+      ...(chosen.some((r) => !r.starred) ? [{ label: "Star", icon: <Star className={icon} />, onClick: flag("star") }] : []),
+      ...(chosen.some((r) => r.starred) ? [{ label: "Remove star", icon: <Star className={`${icon} fill-current`} />, onClick: flag("unstar") }] : []),
+      ...(view.role === "snoozed" && !view.label ? [] : [{ label: "Snooze…", icon: <AlarmClock className={icon} />, onClick: () => setSnoozing(chosen) }]),
+      // Ticked in the list only if they're all there already.
+      { label: "Move to label…", icon: <Tag className={icon} />, onClick: () => setLabelling(chosen.map((r) => ({ account_id: r.account_id, key: r.key, from: r.from, subject: r.subject, labels: chosen.every((c) => c.labels[0] === firstLabels[0]) ? firstLabels : [] }))) },
+      backToInbox
+        ? { label: "Move to Inbox", icon: <Inbox className={icon} />, onClick: () => toInbox(chosen) }
+        : { label: "Archive", icon: <Archive className={icon} />, onClick: () => sendAway(chosen, "archive") },
+      ...(view.role === "trash" && !view.label ? [] : [{ label: "Move to Trash", icon: <Trash2 className={icon} />, destructive: true, onClick: () => sendAway(chosen, "trash") }]),
+    ];
+  };
+
   const menuItems = (row: ThreadRow): ContextMenuItem[] => {
     const at = { account_id: row.account_id, key: row.key };
     const target: LabelTarget = { ...at, from: row.from, subject: row.subject, labels: row.labels };
-    const icon = "h-4 w-4";
     const backToInbox = !view.label && (view.role === "archive" || view.role === "trash");
     return [
       row.unread > 0
         ? { label: "Mark as read", icon: <MailOpen className={icon} />, onClick: () => void act(at, "read") }
         : { label: "Mark as unread", icon: <Mail className={icon} />, onClick: () => void act(at, "unread") },
+      ...markAllHere,
+      // A phone has no Ctrl or Shift. Once one's picked, tapping picks more.
+      ...(isMobile ? [{ label: "Select", icon: <CheckSquare className={icon} />, onClick: () => { setPicked(new Set([idOf(row)])); anchor.current = idOf(row); } }] : []),
       row.starred
         ? { label: "Remove star", icon: <Star className={icon} />, onClick: () => void act(at, "unstar") }
         : { label: "Star", icon: <Star className={icon} />, onClick: () => void act(at, "star") },
       ...(row.needs_reply ? [{ label: "No reply needed", icon: <Check className={icon} />, onClick: () => void act(at, "no_reply") }] : []),
       view.role === "snoozed" && !view.label
         ? { label: "Back to Inbox now", icon: <Inbox className={icon} />, onClick: () => void mailApi.unsnooze(at.account_id, at.key).then(refresh) }
-        : { label: "Snooze…", icon: <AlarmClock className={icon} />, onClick: () => setSnoozing(at) },
+        : { label: "Snooze…", icon: <AlarmClock className={icon} />, onClick: () => setSnoozing([at]) },
       { label: "Add to calendar…", icon: <CalendarPlus className={icon} />, onClick: () => setEventFor({ ...at, subject: row.subject }) },
       { label: "Turn into a task", icon: <CheckSquare className={icon} />, onClick: () => void mailApi.addTask(at.account_id, at.key).then(() => toast.success("Added to Tasks.")).catch((e) => toast.error(apiErrorMessage(e, "Couldn't add that task."))) },
       ...(people[row.from.addr.toLowerCase()] ? [] : [{ label: "Add to Contacts", icon: <UserPlus className={icon} />, onClick: () => void mailApi.addContact(row.from.name, row.from.addr).then(() => { toast.success("Added to Contacts."); void qc.invalidateQueries({ queryKey: ["mail-known-people"] }); }).catch((e) => toast.error(apiErrorMessage(e, "Couldn't add that contact."))) }]),
-      { label: "Move to label…", icon: <Tag className={icon} />, onClick: () => setLabelling(target) },
+      { label: "Move to label…", icon: <Tag className={icon} />, onClick: () => setLabelling([target]) },
       { label: "Make a rule from this…", icon: <ListFilter className={icon} />, onClick: () => setRuleFor(target) },
       backToInbox
         ? { label: "Move to Inbox", icon: <Inbox className={icon} />, onClick: () => void act(at, "inbox") }
@@ -410,7 +551,7 @@ export function MailApp() {
         : { label: "Mark as unread", icon: Mail, onClick: () => void act(at, "unread") },
       view.role === "snoozed" && !view.label
         ? { label: "Back to Inbox now", icon: Inbox, onClick: () => void mailApi.unsnooze(at.account_id, at.key).then(refresh) }
-        : { label: "Snooze", icon: AlarmClock, onClick: () => setSnoozing(at) },
+        : { label: "Snooze", icon: AlarmClock, onClick: () => setSnoozing([at]) },
     ];
   };
 
@@ -434,7 +575,7 @@ export function MailApp() {
       <div data-mail-rail-scroll className="promptly-scroll flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overflow-x-hidden px-0.5">
       <button type="button" onClick={() => setDraft(newMessage())} className="mb-3 inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-xl bg-[#D97757] text-sm font-medium text-white hover:opacity-90"><Pen className="h-4 w-4" />Compose</button>
       {ROLES.map(({ role, label, icon: Icon }) => (
-        <button key={role} type="button" onClick={() => showRole(role)} aria-current={!view.label && view.role === role ? "page" : undefined} {...(CAN_LAND.has(role) ? dropTarget(`role:${role}`, role === "snoozed" ? "Snooze" : `Move to ${label}`) : {})} style={dropStyle(`role:${role}`)} className={`flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-[background-color,box-shadow,transform,opacity] duration-150 ease-out ${dragging && !CAN_LAND.has(role) ? "opacity-40 " : ""}${!view.label && view.role === role ? "bg-[#D97757]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
+        <button key={role} type="button" onClick={() => showRole(role)} onContextMenu={(e) => openPlaceMenu(e, [markAllItem({ role })])} aria-current={!view.label && view.role === role ? "page" : undefined} {...(CAN_LAND.has(role) ? dropTarget(`role:${role}`, role === "snoozed" ? "Snooze" : `Move to ${label}`) : {})} style={dropStyle(`role:${role}`)} className={`flex h-9 shrink-0 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-[background-color,box-shadow,transform,opacity] duration-150 ease-out ${dragging && !CAN_LAND.has(role) ? "opacity-40 " : ""}${!view.label && view.role === role ? "bg-[#D97757]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
           <Icon className="h-4 w-4" /><span className="flex-1 text-left">{label}</span>
           {role === "inbox" && unreadInbox > 0 && <span className="text-xs font-medium text-[#D97757]">{unreadInbox}</span>}
         </button>
@@ -453,13 +594,13 @@ export function MailApp() {
         return (
           <div key={r.path} className="relative shrink-0">
             {l ? (
-              <button type="button" onClick={() => showLabel(l.id)} onContextMenu={(e) => { e.preventDefault(); setLabelsOpen(true); }} aria-current={view.label === l.id ? "page" : undefined} aria-label={l.name} title={l.name} {...dropTarget(`label:${l.id}`, `Move to ${l.name}`, l.color)} style={{ ...padding, ...dropStyle(`label:${l.id}`, l.color) }} className={`flex h-8 w-full items-center gap-2.5 rounded-lg text-sm transition-[background-color,box-shadow,transform] duration-150 ease-out ${r.hasChildren ? "pr-8" : "pr-2.5"} ${view.label === l.id ? "bg-[#D97757]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
+              <button type="button" onClick={() => showLabel(l.id)} onContextMenu={(e) => openPlaceMenu(e, [markAllItem({ labels: [l.id, ...(isFolded ? labelsInside(labels, r.path).map((x) => x.id) : [])] }), { label: "Manage labels and rules…", icon: <Settings className={icon} />, onClick: () => setLabelsOpen(true) }])} aria-current={view.label === l.id ? "page" : undefined} aria-label={l.name} title={l.name} {...dropTarget(`label:${l.id}`, `Move to ${l.name}`, l.color)} style={{ ...padding, ...dropStyle(`label:${l.id}`, l.color) }} className={`flex h-8 w-full items-center gap-2.5 rounded-lg text-sm transition-[background-color,box-shadow,transform] duration-150 ease-out ${r.hasChildren ? "pr-8" : "pr-2.5"} ${view.label === l.id ? "bg-[#D97757]/15 font-medium text-[var(--text)]" : "text-[var(--text-muted)] hover:bg-[var(--hover)]"}`}>
                 <span style={{ backgroundColor: l.color }} className="h-2 w-2 shrink-0 rounded-full" /><span className="min-w-0 flex-1 truncate text-left">{r.name}</span>
                 {count > 0 && <span className="text-xs font-medium text-[#D97757]">{count}</span>}
               </button>
             ) : (
               // Only a heading: there's a label inside it, but none called this.
-              <div style={padding} title={r.path} className="flex h-8 w-full items-center gap-2.5 pr-8 text-sm text-[var(--text-muted)]">
+              <div onContextMenu={(e) => openPlaceMenu(e, [markAllItem({ labels: labelsInside(labels, r.path).map((x) => x.id) })])} style={padding} title={r.path} className="flex h-8 w-full items-center gap-2.5 pr-8 text-sm text-[var(--text-muted)]">
                 <span className="min-w-0 flex-1 truncate">{r.name}</span>
                 {count > 0 && <span className="text-xs font-medium text-[#D97757]">{count}</span>}
               </div>
@@ -504,6 +645,15 @@ export function MailApp() {
           {typed && <button type="button" onClick={() => setTyped("")} aria-label="Clear search"><X className="h-4 w-4 text-[var(--text-muted)]" /></button>}
         </div>
       </div>
+      {pickedRows.length > 0 && (
+        <div role="toolbar" aria-label="Selected conversations" className="flex items-center gap-0.5 border-b border-[var(--border)] px-3 pb-2">
+          <button type="button" onClick={() => setPicked(NONE)} aria-label="Clear selection" title="Clear selection (Esc)" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] hover:bg-[var(--hover)]"><X className="h-4 w-4" /></button>
+          <span className="min-w-0 flex-1 truncate pl-1 text-sm font-medium text-[var(--text)]">{pickedRows.length} selected</span>
+          {pickedItems().map((item) => (
+            <button key={item.label} type="button" onClick={item.onClick} aria-label={item.label} title={item.label} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--text-muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--text)]">{item.icon}</button>
+          ))}
+        </div>
+      )}
       {problem && <p className="mx-3 mb-2 rounded-lg bg-[#C62828]/10 px-3 py-2 text-xs text-[var(--text)]"><strong>{problem.email}:</strong> {problem.status_detail}</p>}
       {(overview?.failed ?? []).map((f) => (
         <div key={f.id} role="alert" className="mx-3 mb-2 rounded-lg bg-[#C62828]/10 px-3 py-2 text-xs text-[var(--text)]">
@@ -528,7 +678,7 @@ export function MailApp() {
           <button type="button" onClick={() => showRole("inbox")} aria-label="Back to Inbox" className="text-[var(--text-muted)]"><X className="h-4 w-4" /></button>
         </div>
       )}
-      <div className="promptly-scroll min-h-0 flex-1 overflow-y-auto">
+      <div onContextMenu={(e) => { if (!e.defaultPrevented && markAllHere.length) openPlaceMenu(e, markAllHere); }} className="promptly-scroll min-h-0 flex-1 overflow-y-auto">
         {list.isLoading && <p className="p-6 text-center text-sm text-[var(--text-muted)]">Getting your mail…</p>}
         {!list.isLoading && rows.length === 0 && (
           <p className="p-8 text-center text-sm text-[var(--text-muted)]">
@@ -539,8 +689,8 @@ export function MailApp() {
           <div key={`${row.account_id}/${row.key}`}>
           {row.related && !rows[i - 1]?.related && <p className="px-4 pb-1 pt-3 text-[11px] font-medium uppercase tracking-wide text-[var(--text-muted)]">Related</p>}
           <div style={{ gridTemplateRows: leaving.has(`${row.account_id}/${row.key}`) ? "0fr" : "1fr", transitionDuration: `${LEAVE_MS}ms` }} className={`grid transition-[grid-template-rows,opacity] ease-out ${leaving.has(`${row.account_id}/${row.key}`) ? "opacity-0" : "opacity-100"}`}>
-          <div className={`min-h-0 overflow-hidden transition-opacity duration-150 ${dragging?.key === row.key && dragging.account_id === row.account_id ? "opacity-40" : ""}`}>
-          <ThreadItem key={`${row.account_id}/${row.key}`} quick={isMobile || row.related ? undefined : quickActions(row)} onDragStart={isMobile ? undefined : startDrag} row={row} selected={open?.key === row.key} colour={accounts.length > 1 ? accounts.find((a) => a.id === row.account_id)?.color : undefined} people={people} labels={row.labels.filter((id) => id !== view.label).flatMap((id) => labels.filter((l) => l.id === id))} onOpen={() => setOpen({ account_id: row.account_id, key: row.key })} onMenu={(x, y) => setMenu({ row, x, y })} onSwipe={isMobile ? (a) => (a === "archive" ? moveAway(row, "archive", "Archived") : moveAway(row, "trash", "Moved to Trash")) : undefined} />
+          <div className={`min-h-0 overflow-hidden transition-opacity duration-150 ${dragging && (idOf(dragging) === idOf(row) || (picked.has(idOf(dragging)) && picked.has(idOf(row)))) ? "opacity-40" : ""}`}>
+          <ThreadItem key={`${row.account_id}/${row.key}`} quick={isMobile || row.related || pickedRows.length > 0 ? undefined : quickActions(row)} onDragStart={isMobile ? undefined : startDrag} row={row} selected={open?.key === row.key || picked.has(idOf(row))} picked={picked.has(idOf(row))} colour={accounts.length > 1 ? accounts.find((a) => a.id === row.account_id)?.color : undefined} people={people} labels={row.labels.filter((id) => id !== view.label).flatMap((id) => labels.filter((l) => l.id === id))} onOpen={(e) => clickRow(e, row)} onMenu={(x, y) => { if (!picked.has(idOf(row))) setPicked(NONE); setMenu({ row, x, y }); }} onSwipe={isMobile && pickedRows.length === 0 ? (a) => (a === "archive" ? moveAway(row, "archive", "Archived") : moveAway(row, "trash", "Moved to Trash")) : undefined} />
           </div>
           </div>
           </div>
@@ -563,8 +713,8 @@ export function MailApp() {
       prefill={prefill}
       onPrefilled={() => setPrefill(null)}
       onAddEvent={(subject) => setEventFor({ ...open, subject })}
-      onLabel={setLabelling}
-      onSnooze={() => setSnoozing(open)}
+      onLabel={(t) => setLabelling([t])}
+      onSnooze={() => setSnoozing([open])}
       onUnsnooze={() => void mailApi.unsnooze(open.account_id, open.key).then(refresh)}
       onBack={() => setOpen(null)}
       onAct={(action) => void act(open, action)}
@@ -573,7 +723,13 @@ export function MailApp() {
       markRead={() => { void qc.invalidateQueries({ queryKey: ["mail-overview"] }); void qc.invalidateQueries({ queryKey: ["mail-threads"] }); }}
     />
   ) : (
-    !isMobile && <div className="flex flex-1 flex-col items-center justify-center gap-2 text-[var(--text-muted)]"><Mail className="h-8 w-8 opacity-40" /><p className="text-sm">Pick a conversation to read.</p></div>
+    !isMobile && (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-[var(--text-muted)]">
+        {pickedRows.length > 0
+          ? <><CheckSquare className="h-8 w-8 opacity-40" /><p className="text-sm">{conversations(pickedRows.length)} selected</p></>
+          : <><Mail className="h-8 w-8 opacity-40" /><p className="text-sm">Pick a conversation to read.</p></>}
+      </div>
+    )
   );
 
   return (
@@ -614,16 +770,17 @@ export function MailApp() {
         />
       )}
       {adding && <AccountSheet onClose={() => setAdding(false)} onSaved={() => { setAdding(false); refresh(); }} />}
-      {menu && <ContextMenu open x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={menuItems(menu.row)} />}
+      {menu && <ContextMenu open x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={picked.has(idOf(menu.row)) && pickedRows.length > 1 ? pickedItems() : menuItems(menu.row)} />}
+      {placeMenu && <ContextMenu open x={placeMenu.x} y={placeMenu.y} onClose={() => setPlaceMenu(null)} items={placeMenu.items} />}
       {labelsOpen && <LabelsSheet labels={labels} current={view.label} top={isMobile ? <button type="button" onClick={() => showRole("snoozed")} className="mb-1 flex min-h-11 w-full items-center gap-3 rounded-lg px-2 text-left text-sm text-[var(--text)] hover:bg-[var(--hover)]"><AlarmClock className="h-4 w-4 text-[var(--text-muted)]" />Snoozed</button> : undefined} onPick={showLabel} onClose={() => setLabelsOpen(false)} onRemoved={(id) => { if (view.label === id) showRole("inbox"); }} />}
       {labelling && (
         <LabelPicker
-          target={labelling}
+          target={labelling[0]}
           labels={labels}
           onMove={(id) => { moveToLabel(labelling, id); setLabelling(null); }}
-          onToInbox={() => { void moveNow(labelling, null, "Moved to Inbox", cameFrom); setLabelling(null); }}
+          onToInbox={() => { toInbox(labelling); setLabelling(null); }}
           onClose={() => setLabelling(null)}
-          onMakeRule={() => { setRuleFor(labelling); setLabelling(null); }}
+          onMakeRule={labelling.length === 1 ? () => { setRuleFor(labelling[0]); setLabelling(null); } : undefined}
         />
       )}
       {naming && <NewLabelSheet labels={labels} onMade={(id) => { void qc.invalidateQueries({ queryKey: ["mail-overview"] }); moveToLabel(naming, id, "your new label"); setNaming(null); }} onClose={() => setNaming(null)} />}
@@ -639,7 +796,7 @@ interface QuickAction {
   onClick: () => void;
 }
 
-function ThreadItem({ row, selected, colour, people, labels, onOpen, onMenu, onSwipe, onDragStart, quick }: { quick?: QuickAction[]; onDragStart?: (e: ReactPointerEvent<HTMLElement>, row: ThreadRow) => void; row: ThreadRow; selected: boolean; colour?: string; people: People; labels: MailLabel[]; onOpen: () => void; onMenu: (x: number, y: number) => void; onSwipe?: (action: "archive" | "trash") => void }) {
+function ThreadItem({ row, selected, picked, colour, people, labels, onOpen, onMenu, onSwipe, onDragStart, quick }: { quick?: QuickAction[]; onDragStart?: (e: ReactPointerEvent<HTMLElement>, row: ThreadRow) => void; row: ThreadRow; selected: boolean; picked: boolean; colour?: string; people: People; labels: MailLabel[]; onOpen: (e: ReactMouseEvent) => void; onMenu: (x: number, y: number) => void; onSwipe?: (action: "archive" | "trash") => void }) {
   const unread = row.unread > 0;
   // Press and hold on a phone is the right-click of a computer.
   const press = useRef<{ timer: number; x: number; y: number } | null>(null);
@@ -662,7 +819,9 @@ function ThreadItem({ row, selected, colour, people, labels, onOpen, onMenu, onS
     )}
     <button
       type="button"
-      onClick={() => { if (held.current) held.current = false; else onOpen(); }}
+      onClick={(e) => { if (held.current) held.current = false; else onOpen(e); }}
+      // Shift would otherwise select the text between the two rows.
+      onMouseDown={(e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault(); }}
       onPointerDown={onDragStart ? (e) => onDragStart(e, row) : undefined}
       onContextMenu={(e) => { e.preventDefault(); cancelPress(); onMenu(e.clientX, e.clientY); }}
       onTouchStart={(e) => {
@@ -694,9 +853,12 @@ function ThreadItem({ row, selected, colour, people, labels, onOpen, onMenu, onS
       }}
       onTouchCancel={() => { cancelPress(); sideways.current = false; setSlide(0); }}
       aria-current={selected ? "true" : undefined}
+      aria-pressed={picked ? true : undefined}
       style={{ WebkitTouchCallout: "none", transform: slide ? `translateX(${slide}px)` : undefined, touchAction: "pan-y" }}
       className={`relative flex w-full gap-3 border-b border-[var(--border)] px-3 py-3 text-left transition-colors ${selected ? "bg-[color-mix(in_srgb,#D97757_10%,var(--bg,var(--surface)))]" : "bg-[var(--bg,var(--surface))] hover:bg-[var(--hover)]"}`}>
-      <Avatar person={row.from} people={people} />
+      {picked
+        ? <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#D97757] text-white"><Check className="h-5 w-5" /></span>
+        : <Avatar person={row.from} people={people} />}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
           <span className={`min-w-0 flex-1 truncate text-sm ${unread ? "font-semibold text-[var(--text)]" : "text-[var(--text)]"}`}>{shownName(row.from, people)}{row.count > 1 && <span className="ml-1 font-normal text-[var(--text-muted)]">{row.count}</span>}</span>

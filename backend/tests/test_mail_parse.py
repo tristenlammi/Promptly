@@ -106,3 +106,68 @@ def test_conversation_ids():
     assert parse.message_ids("<a@x> <b@x>", "<c@x>") == ["<a@x>", "<b@x>", "<c@x>"]
     assert parse.thread_key("acc", "<a@x>") == parse.thread_key("acc", "<a@x>")
     assert parse.thread_key("acc", "<a@x>") != parse.thread_key("other", "<a@x>")
+
+
+# Hostile shapes that made the old one-line regexes rescan to the end of the
+# message from every opening: 1 MB of each took from 1.5 minutes to half an hour.
+_HOSTILE = {
+    "unclosed <script>": "<script>" * 25_600,
+    "<img> with no src": "<img " * 40_960,
+    "<img> src that never closes": "<img " * 40_958 + 'src="x',
+    "unclosed <br": "<br " * 51_200,
+    "lone <": "<" * 204_800,
+}
+
+
+def _seconds(work) -> float:
+    import time
+    start = time.perf_counter()
+    work()
+    return time.perf_counter() - start
+
+
+@pytest.mark.parametrize("name", list(_HOSTILE))
+def test_hostile_html_turns_into_text_quickly(name):
+    # 200 KB: a few milliseconds now; the old patterns took 3 s to over a minute.
+    assert _seconds(lambda: parse.html_to_text(_HOSTILE[name])) < 0.5
+
+
+@pytest.mark.parametrize("name", list(_HOSTILE))
+def test_hostile_html_is_prepared_for_cleaning_quickly(name, monkeypatch):
+    # Only the regex work before and after bleach is timed here; bleach is stubbed out.
+    monkeypatch.setattr(parse.bleach, "clean", lambda text, **_: text)
+    assert _seconds(lambda: parse.safe_html(_HOSTILE[name])) < 0.5
+
+
+@pytest.mark.parametrize("raw", [
+    "<p>a<br>b</p><SCRIPT>x</script >c<style>d</STYLE>e",
+    "<script>a<script>b</script>c</script>",
+    "<svg><script>x</svg>y</script>",
+    "<scripts>keep</scripts><noscript>drop</noscript>",
+    "<b>x</b> 3 < 4 and <br unclosed",
+    "<h3>T</h3 ><h7>u</h7><div>v</div><li>w",
+])
+def test_quick_tag_handling_matches_the_plain_patterns(raw):
+    import html as html_lib
+    import re
+    expect = re.sub(r"<(script|style|head|title|iframe|object|embed|svg|math|template|noscript)\b.*?</\1\s*>", " ", raw, flags=re.I | re.S)
+    expect = re.sub(r"<(br|/p|/div|/tr|/li|/h[1-6])\b[^>]*>", "\n", expect, flags=re.I)
+    expect = html_lib.unescape(re.sub(r"<[^>]+>", " ", expect))
+    expect = re.sub(r"\n\s*\n+", "\n\n", re.sub(r"[ \t\xa0]+", " ", expect)).strip()
+    assert parse.html_to_text(raw) == expect
+
+
+@pytest.mark.parametrize("raw", [
+    '<img alt="a>b" src="https://t.example/p.gif"><IMG SRC=\'cid:logo\'>',
+    '<img <img src="https://x.example/a.png">',
+    '<img alt=x> src="no" <img data-src="y" src="z">',
+    '<img src="https://a.example/x.png" src=\'cid:logo\'>',
+])
+def test_quick_image_handling_matches_the_plain_pattern(raw, monkeypatch):
+    import re
+    monkeypatch.setattr(parse.bleach, "clean", lambda text, **_: text)
+    seen: list[str] = []
+    monkeypatch.setattr(parse.html, "unescape", lambda s: seen.append(s) or s)
+    parse.safe_html(raw, {"logo": "data:image/png;base64,AAAA"})
+    plain = re.compile(r"""<img\b[^>]*?\bsrc\s*=\s*(["'])(.*?)\1""", re.I | re.S)
+    assert seen == [m.group(2).strip() for m in plain.finditer(raw)]

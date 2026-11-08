@@ -25,7 +25,7 @@ function calm(): boolean {
 /** Drag a conversation by its row. Anything marked ``data-mail-drop`` is somewhere it
  *  can land. The card follows the pointer directly rather than through React state,
  *  so it stays smooth however long the list is. Mouse only: phones have swipes. */
-export function useThreadDrag(onDrop: (row: ThreadRow, target: string) => void) {
+export function useThreadDrag(onDrop: (row: ThreadRow, target: string) => void, nameOf: (row: ThreadRow) => string = (row) => personName(row.from)) {
   const [dragging, setDragging] = useState<ThreadRow | null>(null);
   const [hover, setHover] = useState<Hover | null>(null);
   const ghost = useRef<HTMLDivElement | null>(null);
@@ -160,7 +160,7 @@ export function useThreadDrag(onDrop: (row: ThreadRow, target: string) => void) 
       className="pointer-events-none fixed left-0 top-0 z-[70] flex h-[26px] max-w-[170px] items-center gap-1.5 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2.5 text-xs font-medium text-[var(--text)] shadow-lg"
     >
       {hover ? <span style={{ backgroundColor: hover.colour ?? "#D97757" }} className="h-2 w-2 shrink-0 rounded-full" /> : <Mail className="h-3 w-3 shrink-0 text-[var(--text-muted)]" />}
-      <span className="min-w-0 truncate">{hover?.name ?? personName(dragging.from)}</span>
+      <span className="min-w-0 truncate">{hover?.name ?? nameOf(dragging)}</span>
     </div>,
     document.body,
   );
