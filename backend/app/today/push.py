@@ -209,6 +209,7 @@ async def _claim(db: AsyncSession, user_id, day: str) -> bool:  # noqa: ANN001
 async def send_due(db: AsyncSession, now: datetime | None = None) -> int:
     from app.items.service import zone_for
     from app.notifications import dispatch
+    from app.notifications import loops as held_loops
 
     from . import core
 
@@ -232,6 +233,13 @@ async def send_due(db: AsyncSession, now: datetime | None = None) -> int:
                 continue
             summary = await core.build(db, u, now, photos=False)
             msg = compose(summary)
+            # Pushes held for the daily summary (or by quiet hours) ride
+            # along as counts, so there's one morning push, not two.
+            held = await held_loops.take_for_morning(db, u, local.date())
+            if msg is None and held:
+                msg = (held_loops.SUMMARY_TITLE, held)
+            elif msg is not None and held:
+                msg = (msg[0], f"{msg[1]}\nAlso: {held}".strip()[:300])
             if msg is None:
                 continue
             await dispatch.notify_user(

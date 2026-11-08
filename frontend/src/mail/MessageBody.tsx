@@ -9,7 +9,7 @@ img[data-remote-src]{display:none}`;
 /** What an email looks like, in a page of its own. It's a sandbox with no scripts,
  *  and its own rules forbid fetching anything, so a message can't run code or tell
  *  anyone you opened it until you say so. */
-export function MessageBody({ html, text, remoteImages }: { html: string; text: string; remoteImages: boolean }) {
+export function MessageBody({ html, text, remoteImages, clipped }: { html: string; text: string; remoteImages: boolean; clipped?: boolean }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(120);
   const [pictures, setPictures] = useState<Record<string, string> | null>(null);
@@ -37,7 +37,14 @@ export function MessageBody({ html, text, remoteImages }: { html: string; text: 
     return () => window.clearTimeout(t);
   }, [page]);
 
-  if (!html) return <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-[var(--text)]">{text}</div>;
+  if (!html) {
+    return (
+      <div>
+        {clipped && <p className="mb-2 text-xs text-[var(--text-muted)]">This email couldn't be shown safely with its formatting, so it's shown as plain text.</p>}
+        <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed text-[var(--text)]">{text}</div>
+      </div>
+    );
+  }
 
   const showImages = async () => {
     const urls = [...html.matchAll(/data-remote-src=(["'])(.*?)\1/gi)].map((m) => m[2].replaceAll("&amp;", "&")).slice(0, 50);

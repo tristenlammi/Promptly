@@ -1,14 +1,14 @@
 """P Maps: offline areas people keep on their phones.
 
 Revision ID: 0310_maps_offline_areas
-Revises: 0260_pw_browsersync
+Revises: 0330_mail_html_clipped
 """
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "0310_maps_offline_areas"
-down_revision = "0260_pw_browsersync"
+down_revision = "0330_mail_html_clipped"
 branch_labels = None
 depends_on = None
 

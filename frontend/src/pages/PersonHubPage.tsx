@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  Ban,
   Cake,
   CalendarDays,
   CalendarPlus,
@@ -27,6 +28,7 @@ import { peopleHubApi, type PersonPage, type PersonRef } from "@/api/peopleHub";
 import { roomsApi } from "@/api/rooms";
 import { PersonAvatar } from "@/components/people/PeoplePicker";
 import { LinkedSection } from "@/components/links/LinkedSection";
+import { blockPerson, unblockPerson } from "@/components/people/blockActions";
 import { Button } from "@/components/shared/Button";
 import { fmt, parseYmd, sameDay, addDays, timeLabel } from "@/calendar/dates";
 import { daysFrom, fmtDate, nextOccurrence } from "@/items/kinds/contacts/model";
@@ -180,6 +182,18 @@ function PersonBody({ p }: { p: PersonPage }) {
           />
           <ActionTile icon={<Share2 className="h-5 w-5" />} label="Share my calendar" onClick={() => navigate("/calendar/?share=1")} />
         </section>
+      )}
+      {other && (
+        <div className="-mt-2 flex flex-wrap items-center justify-center gap-x-2 text-xs text-[var(--text-muted)] sm:justify-start">
+          {p.blocked && <span>You've blocked {first}. You can't message each other one-to-one.</span>}
+          <button
+            type="button"
+            onClick={() => void (p.blocked ? unblockPerson(qc, other) : blockPerson(qc, other))}
+            className="inline-flex min-h-8 items-center gap-1 rounded-lg px-1.5 font-medium hover:bg-[var(--hover)] hover:text-[var(--text)]"
+          >
+            <Ban className="h-3.5 w-3.5" /> {p.blocked ? `Unblock ${first}` : `Block ${first}`}
+          </button>
+        </div>
       )}
 
       {/* Contact card */}

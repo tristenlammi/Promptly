@@ -22,6 +22,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ## [Unreleased]
 
 ### Added
+- Notifications: quiet hours for all of Promptly (Account → Notifications), with start and end in your own time zone and different times on Friday and Saturday nights if you like. Notifications wait and arrive together when quiet hours end; calls, Calendar reminders, item reminders, Passwords and admin alerts always get through. Rooms and Mail can go in a daily summary instead, one push of counts at your Today summary time. And you can block someone from their profile or your 1:1 conversation: neither of you can message the other one-to-one, you get no notifications about what they do, and they aren't told. Account → Blocked people lists them, with Unblock.
+- `scripts/stack.sh` (and `scripts/stack.ps1`) runs a separate copy of Promptly for a worktree on its own port (`up`, `down`, `ls`, `e2e`), with its own containers, images, data and throwaway secrets, so testing a branch never touches the main app.
 <!-- P Maps offline (maps-offline) -->
 - P Maps in the car: "You've arrived at …" on the car's screen, with Save parking and Done, including for trips started from the car with the phone in a pocket.
 - P Maps in the car: lane guidance on the turn card at junctions where the map knows the lanes.
@@ -41,6 +43,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - P Maps in the car: the route choice uses the newer car screen on cars that support it.
 
 ### Fixed
+- Mail: a very large or tangled HTML email could still tie up the mail worker for minutes while it was cleaned. Cleaning now stops after 3 seconds, and an email it can't finish shows as plain text, with a note saying so. Sending works the same way, so a draft like that no longer holds up the app.
+- Workspaces: two board edits close together (adding a card, then dragging it to Done) could leave the board's text in chat search out of date, because both tried to create the workspace's Boards folder at once and one crashed. Making a workspace folder is now safe when two requests race, for every folder kind.
 <!-- P Maps offline (maps-offline) -->
 - P Maps (Android): your speed on the driving screen now turns red when you're over the road's speed limit. It never did, because the limit was read the wrong way.
 - P Maps: ending a trip from the car (or by voice) now closes the phone's driving screen instead of leaving a map with no trip.
