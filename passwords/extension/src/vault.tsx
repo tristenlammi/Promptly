@@ -226,7 +226,7 @@ function BookmarkSettings() {
 }
 
 /** What only the extension has. Mail codes are opt-in even though the device may read them. */
-type ExtShown = { onClickOnly: boolean; mailCodes: boolean; pin: boolean; clipCheck: boolean };
+type ExtShown = { onClickOnly: boolean; mailCodes: boolean; pin: boolean; pinShort?: boolean; clipCheck: boolean };
 
 function useExtSettings() {
   const [s, setS] = useState<ExtShown | null>(null);
@@ -312,6 +312,7 @@ function ExtPin() {
   if (!s) return null;
   return (
     <div className="flex flex-col gap-2 text-sm text-[var(--text)]">
+      {s.pin && s.pinShort && <Callout kind="warn">This PIN has fewer than 6 digits, which is easy to guess. Remove it and set one of 6 or more.</Callout>}
       {s.pin ? (
         <Button
           small
@@ -325,7 +326,7 @@ function ExtPin() {
         </Button>
       ) : (
         <div className="flex flex-wrap items-end gap-2">
-          <Label text="A short PIN for this browser" hint="Works until the browser closes, and five wrong tries remove it. Weaker than your master password.">
+          <Label text="A PIN for this browser, 6 to 12 digits" hint="Works until the browser closes, or 8 hours after the vault locks. Five wrong tries here remove it, but someone who can open the browser's developer tools while the vault's unlocked can copy it and guess without that limit. Weaker than your master password.">
             <input className={inputClass} inputMode="numeric" type="password" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value)} />
           </Label>
           <Button

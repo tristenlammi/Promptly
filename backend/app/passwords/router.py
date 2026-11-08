@@ -237,7 +237,8 @@ async def create_session(
     identity: VaultIdentity = Depends(get_vault_user),
     db: AsyncSession = Depends(get_db),
 ) -> s.SessionOut:
-    await _proof_blocked(request)
+    # The same key as _proof_failed below records, or this limit never comes into it.
+    await _proof_blocked(request, identity.user)
     user = identity.user
     account = await db.scalar(select(PwAccount).where(PwAccount.user_id == user.id).with_for_update())
     if account is None:
