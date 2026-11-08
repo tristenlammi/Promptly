@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+<!-- P Maps offline (maps-offline) -->
+- P Maps (Android): your speed on the driving screen now turns red when you're over the road's speed limit. It never did, because the limit was read the wrong way.
+
 ## [0.31.0] - 2026-11-08
 
 ### Added

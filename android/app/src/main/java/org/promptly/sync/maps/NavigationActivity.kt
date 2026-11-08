@@ -60,7 +60,7 @@ import com.stadiamaps.ferrostar.composeui.views.components.TripProgressView
 import com.stadiamaps.ferrostar.composeui.views.components.speedlimit.SignageStyle
 import com.stadiamaps.ferrostar.ui.formatters.DistanceMeasurementSystem
 import com.stadiamaps.ferrostar.ui.formatters.LocalizedDistanceFormatter
-import com.stadiamaps.ferrostar.core.annotation.Speed
+import com.stadiamaps.ferrostar.core.measurement.MeasurementSpeedUnit
 import com.stadiamaps.ferrostar.maplibreui.runtime.rememberNavigationMapState
 import com.stadiamaps.ferrostar.maplibreui.views.DynamicallyOrientingNavigationView
 import kotlinx.coroutines.Dispatchers
@@ -214,7 +214,8 @@ class NavigationActivity : ComponentActivity() {
                 },
                 mapContent = { TrafficOnRoute() },
             )
-            val limit = (state.currentAnnotation?.speedLimit as? Speed.Value)?.let { it.value }
+            // The road's limit in km/h, when the map has one (many Australian roads don't).
+            val limit = state.currentAnnotation?.speedLimit?.value(MeasurementSpeedUnit.KilometersPerHour)
             val kmh = state.location?.speed?.value?.let { (it * 3.6).toInt() }
             Column(
                 // Under the speed limit sign, clear of your position on the map.
