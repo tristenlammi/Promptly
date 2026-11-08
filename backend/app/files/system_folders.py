@@ -70,6 +70,9 @@ class SystemKind(str, Enum):
     # Attachments you saved from Mail. Not the old EMAIL_ATTACHMENTS kind, which
     # migration 0106 deleted.
     MAIL_ATTACHMENTS = "mail_attachments"
+    # Forms: where a form made from the Forms home (``/forms``) goes, made
+    # the first time it's needed. A form can be moved anywhere after.
+    FORMS = "forms"
     # NOTE: a Phase-12 ``EMAIL_ATTACHMENTS`` kind used to live here, lazily
     # seeded on first email-account connect. Email/calendar integration was
     # removed, and migration ``0106_remove_email_attachments_folder`` deletes
@@ -86,6 +89,7 @@ DISPLAY_NAMES: Final[dict[SystemKind, str]] = {
     SystemKind.CAMERA_UPLOADS: "Photos",
     SystemKind.APPS: "Apps",
     SystemKind.MAIL_ATTACHMENTS: "Email Attachments",
+    SystemKind.FORMS: "Forms",
 }
 
 # The per-type subfolders auto-created inside each workspace's Drive
@@ -129,6 +133,12 @@ async def _fetch(
 async def ensure_mail_attachments(db: AsyncSession, user) -> FileFolder:  # noqa: ANN001
     """Made the first time you save something from Mail."""
     return await _ensure(db, user.id, SystemKind.MAIL_ATTACHMENTS)
+
+
+async def ensure_forms_folder(db: AsyncSession, user) -> FileFolder:  # noqa: ANN001
+    """The ``Forms`` folder at the top of My files — made the first time a
+    form is made from the Forms home."""
+    return await _ensure(db, user.id, SystemKind.FORMS)
 
 
 async def _ensure(

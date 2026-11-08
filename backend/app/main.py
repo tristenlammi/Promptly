@@ -793,3 +793,14 @@ app.include_router(
     prefix="/api/notifications",
     tags=["notifications"],
 )
+# Forms (WP-F1.1): the owner side of a form, a Files document type.
+from app.forms.router import router as forms_router  # noqa: E402
+
+app.include_router(forms_router, prefix="/api/forms", tags=["forms"])
+# Forms (WP-F1.3): the answer side (no sign-in dependency: people without
+# an account answer link forms) and Admin → Forms.
+from app.forms.admin_router import router as forms_admin_router  # noqa: E402
+from app.forms.public_router import router as forms_answer_router  # noqa: E402
+
+app.include_router(forms_answer_router, prefix="/api/f", tags=["forms"])
+app.include_router(forms_admin_router, prefix="/api/admin/forms", tags=["forms"])

@@ -39,6 +39,7 @@ def office_kind_of(row: UserFile) -> str | None:
         GeneratedKind.DOCUMENT.value: "document",
         GeneratedKind.SHEET.value: "sheet",
         GeneratedKind.WHITEBOARD.value: "whiteboard",
+        GeneratedKind.FORM.value: "form",
     }.get(row.source_kind or "")
 
 
@@ -49,7 +50,7 @@ def office_title(row: UserFile) -> str:
         from app.items.service import title_of
 
         return title_of(row)
-    for suffix in (".html", ".sheet", ".whiteboard"):
+    for suffix in (".html", ".sheet", ".whiteboard", ".form"):
         if name.lower().endswith(suffix):
             return name[: -len(suffix)] or "Untitled"
     return name
@@ -107,6 +108,11 @@ async def copy_office_file(
 
         await relink_copy(db, src.id, doc)
         return doc
+    if kind == "form":
+        # The questions, theme and settings — never the answers or the link.
+        from app.forms.service import copy_form
+
+        return await copy_form(db, src, owner=owner, folder_id=folder_id, title=title)
     entity = await content_for_shell(db, src)
     shell, new = await create_office_file(
         db,

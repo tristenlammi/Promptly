@@ -24,7 +24,7 @@ import { cleanTitle, parseWhen } from "@/lib/quickdate";
  * mum tomorrow") is only ever offered, never preselected.
  */
 
-export type DoKind = "event" | "task" | "money" | "note" | "doc" | "sheet" | "slides" | "goto" | "message";
+export type DoKind = "event" | "task" | "money" | "note" | "doc" | "sheet" | "slides" | "form" | "goto" | "message";
 
 export interface Command {
   kind: DoKind;
@@ -41,6 +41,7 @@ export const CREATE_ACTIONS: { kind: DoKind; label: string; prefix: string; word
   { kind: "doc", label: "New doc", prefix: "new doc ", words: "new create document doc word" },
   { kind: "sheet", label: "New sheet", prefix: "new sheet ", words: "new create spreadsheet sheet excel" },
   { kind: "slides", label: "New slides", prefix: "new slides ", words: "new create slides presentation deck" },
+  { kind: "form", label: "New form", prefix: "new form ", words: "new create form survey rsvp signup sign-up questionnaire poll" },
   { kind: "note", label: "New note", prefix: "note ", words: "new create note" },
   { kind: "money", label: "Log an expense", prefix: "log $", words: "new add log expense spend spent budget transaction money" },
   { kind: "message", label: "New room message", prefix: "message ", words: "new room message dm direct chat send" },
@@ -68,6 +69,7 @@ const RULES: [RegExp, DoKind][] = [
   [/^(?:new|create|make)\s+(?:an?\s+)?(?:doc|document|word\s+doc(?:ument)?)\b:?\s*(.*)$/i, "doc"],
   [/^(?:new|create|make)\s+(?:an?\s+)?(?:sheet|spreadsheet)\b:?\s*(.*)$/i, "sheet"],
   [/^(?:new|create|make)\s+(?:an?\s+)?(?:slides?|slide\s*deck|deck|presentation)\b:?\s*(.*)$/i, "slides"],
+  [/^(?:new|create|make)\s+(?:an?\s+)?(?:form|survey|questionnaire|rsvp(?:\s+form)?|sign-?up\s+(?:form|sheet))\b:?\s*(.*)$/i, "form"],
   [/^(?:go\s*to|open|show(?:\s+me)?|switch\s+to|take\s+me\s+to)\s+(.+)$/i, "goto"],
   [/^new\s+(?:room\s+)?(?:message|dm)\b\s*(?:to\s+)?(.*)$/i, "message"],
   [/^(?:message|msg|dm)\s+(.*)$/i, "message"],

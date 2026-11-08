@@ -4517,6 +4517,9 @@ async def _stream_generator(
         # What retrieval found in the workspace for *this* message — kept
         # apart from the workspace's instructions, which don't change.
         workspace_knowledge_block: str | None = None
+        # A sheet holding a form's answers (other people's words) was read
+        # into this turn: it's outside content (Forms WP-F1.5).
+        workspace_untrusted = False
         if conv.workspace_id is not None:
             # Walk the workspace-share ACL so a collaborator's send
             # still picks up the workspace's system prompt + pinned
@@ -4598,6 +4601,7 @@ async def _stream_generator(
                     injection = WorkspaceInjection()
                 if injection.system_block:
                     workspace_knowledge_block = injection.system_block
+                workspace_untrusted = injection.untrusted
 
                 # ACL for pinned files in a (possibly shared) workspace:
                 # anyone with workspace access can *use* any file pinned
@@ -4692,7 +4696,7 @@ async def _stream_generator(
         # Shared by every tool call this turn (see ToolContext.turn).
         # Attached files are outside content too.
         turn_state = TurnState(
-            untrusted=bool(triggering_files),
+            untrusted=bool(triggering_files) or workspace_untrusted,
             # Your own files, attached here, and not a shared workspace's: enough to
             # log what they say (see ItemAction.from_documents), and nothing more.
             own_attachments_only=bool(triggering_files)

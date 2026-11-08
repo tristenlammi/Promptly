@@ -81,11 +81,12 @@ async def _current_usage_bytes(db: AsyncSession, user_id: uuid.UUID) -> tuple[in
     (Part C §3.3) — that content used to be free."""
     from sqlalchemy import case, or_
 
-    from app.files.generated_kinds import HIDDEN_KINDS, GeneratedKind
+    from app.files.generated_kinds import HIDDEN_KINDS, QUOTA_COUNTED_HIDDEN, GeneratedKind
 
     office = (GeneratedKind.SHEET.value, GeneratedKind.WHITEBOARD.value)
-    # document_asset bytes stay counted: they're real uploads.
-    derived = sorted(HIDDEN_KINDS - {GeneratedKind.DOCUMENT_ASSET.value})
+    # document_asset (and a form's pictures and answer files) stay counted:
+    # they're real uploads.
+    derived = sorted(HIDDEN_KINDS - QUOTA_COUNTED_HIDDEN)
     stmt = select(
         func.coalesce(func.sum(UserFile.size_bytes), 0),
         func.coalesce(

@@ -348,6 +348,8 @@ function systemFolderTooltip(kind: SystemFolderKind): string | undefined {
       return "Generated images, audio, and video.";
     case "camera_uploads":
       return "Phone backups and shared photos land here, in a folder for each year and month.";
+    case "forms":
+      return "Forms you make from the Forms app land here. You can move them anywhere.";
     default:
       return undefined;
   }

@@ -110,6 +110,13 @@ async def purge_file_rows(db: AsyncSession, rows, *, reason: str = "purge") -> i
 
             for fid in personal:
                 whiteboard_thumb_path(fid).unlink(missing_ok=True)
+    # A form goes with its answers, pictures and respondents' files (Forms).
+    form_ids = [r.id for r in rows if r.source_kind == GeneratedKind.FORM.value]
+    if form_ids:
+        from app.forms.service import purge_forms
+
+        seen_ids = {r.id for r in rows}
+        rows.extend(a for a in await purge_forms(db, form_ids) if a.id not in seen_ids)
     doc_ids = [r.id for r in rows if r.source_kind == GeneratedKind.DOCUMENT.value]
     # Their first-page thumbnails (Docs, Office files) go with them.
     from app.files import doc_thumbs

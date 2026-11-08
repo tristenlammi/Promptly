@@ -204,6 +204,8 @@ UNTRUSTED_CONTENT_TOOLS = frozenset(
         "read_room",
         # An earlier reply may repeat a web page or a file.
         "search_past_chats",
+        # Forms: answers are other people's words, even on a server form.
+        "read_form_responses",
     }
 )
 

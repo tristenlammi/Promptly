@@ -187,12 +187,23 @@ async def plan(db: AsyncSession, user: Any, part_gb: int) -> dict[str, Any]:
             stem = f.filename.rsplit(".", 1)[0] if "." in f.filename else f.filename
             ext = (
                 ".xlsx" if f.source_kind == GeneratedKind.SHEET.value
+                else ".form.zip" if f.source_kind == GeneratedKind.FORM.value
                 else "." + f.filename.rsplit(".", 1)[-1] + ".json" if f.source_kind == "item"
                 else ".excalidraw"
             )
             arc = unique(folder + _safe(stem or "Untitled") + ext)
             entries.append({"a": arc, "k": "shell", "f": str(f.id), "s": int(f.size_bytes or 0), "t": mtime})
             counts["documents"] += 1
+            if f.source_kind == GeneratedKind.FORM.value:
+                # Files people sent with their answers (Forms WP-F1.7), beside
+                # the form's .zip — streamed like any file, never held in memory.
+                from app.forms.uploads import export_entries
+
+                for name, path, size, when in await export_entries(db, f):
+                    entries.append({
+                        "a": unique(folder + _safe(stem or "Untitled") + " (files sent)/" + name),
+                        "k": "blob", "p": path, "s": size, "t": when,
+                    })
         elif f.storage_path:
             arc = unique(folder + _safe(f.filename))
             entry: dict[str, Any] = {"a": arc, "k": "blob", "p": f.storage_path, "s": int(f.size_bytes or 0), "t": mtime}
@@ -345,6 +356,8 @@ def readme(state: dict[str, Any]) -> bytes:
         "My files/   everything you own, in its folders, with its original name and date.\n"
         "            Documents are .docx, spreadsheets .xlsx, whiteboards .excalidraw\n"
         "            (open them at excalidraw.com).\n"
+        "            Forms are a .zip with the questions (form.json) and the answers as\n"
+        "            CSV; files people sent are beside it in \"<form> (files sent)\".\n"
         "            Beside each photo and video:\n"
         "              <name>.json  date taken, place, description, favourite, archived and\n"
         "                           albums, in Google Takeout's format — photo apps that\n"
@@ -548,7 +561,7 @@ async def _office_bytes(e: dict[str, Any]) -> tuple[bytes | None, bool]:
     they are now."""
     from app.database import SessionLocal
     from app.files.models import UserFile
-    from app.files.office import content_for_shell, export_for_download
+    from app.files.office import content_for_shell, export_shell
 
     async with SessionLocal() as db:
         row = await db.get(UserFile, uuid.UUID(e["f"]))
@@ -558,7 +571,7 @@ async def _office_bytes(e: dict[str, Any]) -> tuple[bytes | None, bool]:
             entity = await content_for_shell(db, row)
             if entity is None:
                 return None, False
-            data, _name, _mime = await asyncio.to_thread(export_for_download, row, entity)
+            data, _name, _mime = await export_shell(db, row, entity)
             return data, False
         from app.files import page_setup
         from app.files.docx_writer import html_to_docx

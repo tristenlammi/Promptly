@@ -115,7 +115,20 @@ async def hold(
     reason: str,
 ) -> None:
     """Keep a push for later (the caller commits). Keeps at most
-    :data:`HELD_CAP` per person, dropping the oldest."""
+    :data:`HELD_CAP` per person, dropping the oldest. For a category whose
+    rule says ``coalesce``, the push replaces the held one with the same tag
+    (it's a running total), so a busy form is one held row, not hundreds."""
+    from app.notifications.dispatch import rule_for
+
+    if rule_for(category).coalesce and payload.tag:
+        await db.execute(
+            delete(PushHeld).where(
+                PushHeld.user_id == user_id,
+                PushHeld.category == category,
+                PushHeld.tag == payload.tag[:200],
+                PushHeld.reason == reason,
+            )
+        )
     db.add(
         PushHeld(
             user_id=user_id,

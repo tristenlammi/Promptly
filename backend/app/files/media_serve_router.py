@@ -104,6 +104,11 @@ async def serve(token: str, request: Request, db: AsyncSession = Depends(get_db)
         return await _serve_export(claim)
     if claim.rendition == "face":
         return await _serve_crop(db, claim, request)
+    if claim.rendition in ("form_upload", "form_thumb"):
+        # A file someone sent with a form answer (Forms WP-F1.6).
+        from app.forms import uploads as form_uploads
+
+        return await form_uploads.serve(db, claim, user, request)
     try:
         row = await _load_readable_file(db, claim.file_id, user)
     except HTTPException:

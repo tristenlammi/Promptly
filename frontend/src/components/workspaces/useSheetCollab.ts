@@ -248,13 +248,59 @@ export function useSheetCollab({
     const unsubs: Array<() => void> = [];
 
     // ----- Yjs -> workbook ---------------------------------------------
+    // Cells for a tab this editor doesn't show yet (a tab someone just added
+    // — its structure entry applies on Fortune's next render), retried
+    // shortly. Forms writes a new "Form responses" tab this way (WP-F1.5).
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryKeys = new Set<string>();
+    let retries = 0;
+    unsubs.push(() => {
+      if (retryTimer) clearTimeout(retryTimer);
+    });
     const applyRemote = (keys: Iterable<string>) => {
       const wb = workbookRef.current;
       if (!wb) return;
+      // Fortune applies every API call later, inside a state update, where
+      // a cell beyond the grid (or on a missing tab) throws and takes the
+      // editor down. So: tabs it doesn't have wait; a grid too small for
+      // what's arriving (a form's answers appended below row 84) grows first.
+      let tabs: Set<string>;
+      try {
+        tabs = new Set(wb.getAllSheets().map((s, i) => String(s.id ?? `#${i}`)));
+      } catch {
+        return;
+      }
+      const later: string[] = [];
+      const ready: { key: string; sheetId: string; r: number; c: number }[] = [];
+      const need = new Map<string, { r: number; c: number }>();
       for (const key of keys) {
         const parsed = parseKey(key);
         if (!parsed) continue;
         const { sheetId, r, c } = parsed;
+        if (!sheetId.startsWith("#") && !tabs.has(sheetId)) {
+          later.push(key);
+          continue;
+        }
+        ready.push({ key, ...parsed });
+        if (yCells.get(key) != null && !sheetId.startsWith("#")) {
+          const n = need.get(sheetId) ?? { r: 0, c: 0 };
+          need.set(sheetId, { r: Math.max(n.r, r + 1), c: Math.max(n.c, c + 1) });
+        }
+      }
+      for (const [sheetId, n] of need) {
+        try {
+          const grid = (wb.getSheet({ id: sheetId }) as { data?: unknown[][] }).data;
+          const rows = grid?.length ?? 0;
+          const cols = (grid?.[0] as unknown[] | undefined)?.length ?? 0;
+          // A little room past the last cell, so a run of answers doesn't
+          // grow it one row at a time.
+          if (rows && n.r > rows) wb.insertRowOrColumn("row", rows - 1, n.r - rows + 20, "rightbottom", { id: sheetId });
+          if (cols && n.c > cols) wb.insertRowOrColumn("column", cols - 1, n.c - cols, "rightbottom", { id: sheetId });
+        } catch {
+          /* the next change tries again */
+        }
+      }
+      for (const { key, sheetId, r, c } of ready) {
         const opts = sheetId.startsWith("#") ? undefined : { id: sheetId };
         const v = yCells.get(key);
         try {
@@ -267,7 +313,20 @@ export function useSheetCollab({
             snapshot.set(key, sig(v));
           }
         } catch {
-          /* a cell outside the current grid bounds — skip */
+          /* best effort — the next change brings it */
+        }
+      }
+      if (later.length) {
+        later.forEach((k) => retryKeys.add(k));
+        if (!retryTimer && retries < 20) {
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            retries += 1;
+            const again = retryKeys;
+            retryKeys = new Set();
+            applyRemote(again);
+            if (!retryKeys.size) retries = 0;
+          }, 300);
         }
       }
     };

@@ -1,0 +1,220 @@
+/* A themed form surface (the builder's canvas, the preview, the answer
+   page). Colours come from the form's accent preset (theme.ts sets
+   --pf-accent-l / --pf-accent-d); light or dark follows the app
+   (data-scheme="app"), the device ("device"), or is fixed. */
+.pf-theme {
+  --pf-accent: var(--pf-accent-l, #a84b2a);
+  --pf-on-accent: #ffffff;
+  --pf-bg: color-mix(in srgb, var(--pf-accent-l, #a84b2a) 8%, #ffffff);
+  --pf-band: color-mix(in srgb, var(--pf-accent-l, #a84b2a) 18%, #ffffff);
+  --pf-card: #ffffff;
+  --pf-text: #1a1a19;
+  --pf-muted: #5c5752;
+  --pf-border: rgba(26, 26, 25, 0.14);
+  --pf-field: #ffffff;
+  --pf-hover: color-mix(in srgb, var(--pf-accent-l, #a84b2a) 7%, #ffffff);
+  --pf-selected: color-mix(in srgb, var(--pf-accent-l, #a84b2a) 12%, #ffffff);
+  --pf-error: #b42318;
+  --pf-error-bg: #fef3f2;
+  background: var(--pf-bg);
+  color: var(--pf-text);
+  font-family: var(--pf-font, inherit);
+  color-scheme: light;
+}
+
+html.dark .pf-theme[data-scheme="app"],
+.pf-theme[data-scheme="dark"] {
+  --pf-accent: var(--pf-accent-d, #f0a27f);
+  --pf-on-accent: #1a1a19;
+  --pf-bg: color-mix(in srgb, var(--pf-accent-d, #f0a27f) 10%, #1c1917);
+  --pf-band: color-mix(in srgb, var(--pf-accent-d, #f0a27f) 22%, #1c1917);
+  --pf-card: #27231e;
+  --pf-text: #f5f5f4;
+  --pf-muted: #b8b0a9;
+  --pf-border: rgba(245, 245, 244, 0.16);
+  --pf-field: #1f1b17;
+  --pf-hover: color-mix(in srgb, var(--pf-accent-d, #f0a27f) 10%, #27231e);
+  --pf-selected: color-mix(in srgb, var(--pf-accent-d, #f0a27f) 18%, #27231e);
+  --pf-error: #ff9b8f;
+  --pf-error-bg: rgba(255, 120, 100, 0.12);
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  .pf-theme[data-scheme="device"] {
+    --pf-accent: var(--pf-accent-d, #f0a27f);
+    --pf-on-accent: #1a1a19;
+    --pf-bg: color-mix(in srgb, var(--pf-accent-d, #f0a27f) 10%, #1c1917);
+    --pf-band: color-mix(in srgb, var(--pf-accent-d, #f0a27f) 22%, #1c1917);
+    --pf-card: #27231e;
+    --pf-text: #f5f5f4;
+    --pf-muted: #b8b0a9;
+    --pf-border: rgba(245, 245, 244, 0.16);
+    --pf-field: #1f1b17;
+    --pf-hover: color-mix(in srgb, var(--pf-accent-d, #f0a27f) 10%, #27231e);
+    --pf-selected: color-mix(in srgb, var(--pf-accent-d, #f0a27f) 18%, #27231e);
+    --pf-error: #ff9b8f;
+    --pf-error-bg: rgba(255, 120, 100, 0.12);
+    color-scheme: dark;
+  }
+}
+
+.pf-card {
+  background: var(--pf-card);
+  border: 1px solid var(--pf-border);
+  border-radius: 14px;
+}
+
+.pf-accent-text {
+  color: var(--pf-accent);
+}
+
+.pf-input {
+  width: 100%;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--pf-border);
+  background: var(--pf-field);
+  color: var(--pf-text);
+  padding: 10px 12px;
+  font-size: 16px; /* no zoom-on-focus on iPhones */
+  line-height: 1.4;
+}
+.pf-input::placeholder {
+  color: var(--pf-muted);
+}
+.pf-input:focus {
+  outline: 2px solid var(--pf-accent);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+.pf-input[aria-invalid="true"] {
+  border-color: var(--pf-error);
+}
+
+.pf-choice {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--pf-border);
+  cursor: pointer;
+}
+.pf-choice:hover {
+  background: var(--pf-hover);
+}
+.pf-choice:has(input:checked) {
+  background: var(--pf-selected);
+  border-color: var(--pf-accent);
+}
+.pf-choice:has(input:focus-visible) {
+  outline: 2px solid var(--pf-accent);
+  outline-offset: 1px;
+}
+.pf-choice input[type="radio"],
+.pf-choice input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  accent-color: var(--pf-accent);
+}
+
+.pf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-weight: 600;
+  font-size: 15px;
+}
+.pf-btn-primary {
+  background: var(--pf-accent);
+  color: var(--pf-on-accent);
+}
+.pf-btn-primary:hover {
+  filter: brightness(1.06);
+}
+.pf-btn-ghost {
+  color: var(--pf-accent);
+}
+.pf-btn-ghost:hover {
+  background: var(--pf-hover);
+}
+.pf-btn:focus-visible {
+  outline: 2px solid var(--pf-accent);
+  outline-offset: 2px;
+}
+.pf-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* A scale or rating step: a real radio, drawn as a button. */
+.pf-step {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--pf-border);
+  cursor: pointer;
+  font-weight: 600;
+}
+.pf-step:hover {
+  background: var(--pf-hover);
+}
+.pf-step:has(input:checked) {
+  background: var(--pf-accent);
+  border-color: var(--pf-accent);
+  color: var(--pf-on-accent);
+}
+.pf-step:has(input:focus-visible) {
+  outline: 2px solid var(--pf-accent);
+  outline-offset: 2px;
+}
+.pf-step input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.pf-rate {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--pf-muted);
+}
+.pf-rate[data-on="true"] {
+  color: var(--pf-accent);
+}
+.pf-rate:has(input:focus-visible) {
+  outline: 2px solid var(--pf-accent);
+  outline-offset: 1px;
+}
+.pf-rate input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.pf-link {
+  color: var(--pf-accent);
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}

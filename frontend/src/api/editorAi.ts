@@ -62,6 +62,16 @@ export const editorAiApi = {
     return data;
   },
 
+  /** Make with AI in the form builder: suggested questions (``draft``) or
+   *  options for one choice question — a preview, nothing added yet. */
+  async form(
+    fileId: string,
+    body: ModelPick & { mode: "draft" | "options"; prompt?: string; question?: string; existing?: string[] }
+  ): Promise<{ title: string | null; description: string | null; items: unknown[]; options: { id: string; label: string }[] }> {
+    const { data } = await apiClient.post(`/files/${fileId}/ai/form`, body, { timeout: 240_000 });
+    return data;
+  },
+
   async convert(
     body: ModelPick & { source_file_id: string; to: "sheet" | "document" }
   ): Promise<{ file: FileItem; notes: string[] }> {

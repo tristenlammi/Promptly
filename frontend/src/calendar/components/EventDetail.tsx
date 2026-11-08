@@ -1,11 +1,12 @@
 import { mapsSearchLink } from "@/maps/links";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, BellOff, CalendarDays, Clock, EyeOff, Hash, Mail, MapPin, Pencil, Repeat as RepeatIcon, Send, Tag as TagIcon, Text, Trash2, Users, X } from "lucide-react";
+import { Bell, BellOff, CalendarDays, ClipboardList, Clock, EyeOff, Hash, Mail, MapPin, Pencil, Repeat as RepeatIcon, Send, Tag as TagIcon, Text, Trash2, Users, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import { calendarApi, type CalendarBootstrap, type RsvpStatus } from "@/api/calendar";
 import { calendarReachApi, ROOM_REMIND_OPTIONS, type EventReachFields } from "@/api/calendarReach";
+import { formsApi } from "@/api/forms";
 import { trashApi } from "@/api/trash";
 import { extractError } from "@/components/files/helpers";
 import { LinkedSection } from "@/components/links/LinkedSection";
@@ -317,6 +318,8 @@ export function EventDetail({
         <LinkedSection thing={{ kind: "event", id: ev.event_id }} className="border-t border-[var(--border)] pt-3" />
       )}
 
+      {ev.can_edit && !v.extra && !ev.busy_only && <RsvpFormAction eventId={ev.event_id} form={full ? full.event.rsvp_form ?? null : undefined} />}
+
       {ev.can_edit && (
         <button
           type="button"
@@ -343,6 +346,51 @@ export function EventDetail({
     </div>
   );
 }
+
+/**
+ * The event's RSVP form (Forms WP-F1.7), in the event page's action stack
+ * (full-width outlined buttons, like "Share to a room"; Calls' "Join call"
+ * goes in the same stack): "Add an RSVP form" makes one from the RSVP
+ * template with the event's title, time and place, linked to the event;
+ * once there it reads "RSVP form · 14 answers" and opens its answers.
+ */
+function RsvpFormAction({ eventId, form }: { eventId: string; form: CalEventRsvp | null | undefined }) {
+  const navigate = useNavigate();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const cls =
+    "flex min-h-10 items-center justify-center gap-1.5 rounded-xl border border-[var(--border)] px-3 text-sm font-medium text-[var(--text)] hover:bg-[var(--hover)] disabled:opacity-60";
+  if (form === undefined) return null; // still loading the event
+  if (form)
+    return (
+      <Link to={`/files/form/${form.file_id}?tab=responses`} className={cls} data-testid="event-rsvp-form">
+        <ClipboardList className="h-4 w-4 text-[#7c3aed]" />
+        <span className="truncate">RSVP form · {form.answers === 1 ? "1 answer" : `${form.answers} answers`}</span>
+        {form.state === "closed" && <span className="text-xs text-[var(--text-muted)]">· closed</span>}
+      </Link>
+    );
+  const add = async () => {
+    setBusy(true);
+    try {
+      const r = await formsApi.fromEvent(eventId);
+      await qc.invalidateQueries({ queryKey: ["calendar", "event", eventId] });
+      toast.success("RSVP form made. Check it, then press Send.");
+      navigate(`/files/form/${r.file.id}`);
+    } catch (e) {
+      toast.error(extractError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button type="button" onClick={() => void add()} disabled={busy} className={cls}>
+      <ClipboardList className="h-4 w-4" />
+      {busy ? "Making the form…" : "Add an RSVP form"}
+    </button>
+  );
+}
+
+type CalEventRsvp = { file_id: string; title: string; answers: number; state: "open" | "closed" | "trashed" };
 
 function roomRemindLabel(m: number): string {
   if (m % 1440 === 0) return m === 1440 ? "a day" : `${m / 1440} days`;

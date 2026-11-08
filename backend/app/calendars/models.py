@@ -74,6 +74,8 @@ class CalEvent(UUIDPKMixin, TimestampMixin, Base):
     # {"kind": "task", "file_id": ..., "task_id": ...}.
     source: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     album_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("albums.id", ondelete="SET NULL"), nullable=True)  # made from its photos
+    # Its RSVP form (Forms, 0292): "Add an RSVP form" on the event page.
+    form_file_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("files.id", ondelete="SET NULL"), nullable=True)
 
 
 class CalAttendee(Base):

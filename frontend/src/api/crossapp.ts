@@ -7,7 +7,7 @@ import type { FileItem } from "@/api/files";
  * photo album and Budget spending, and the grocery list → Tasks.
  */
 
-export type ShareKind = "file" | "folder" | "photo" | "album" | "task" | "recipe" | "trip";
+export type ShareKind = "file" | "folder" | "photo" | "album" | "task" | "recipe" | "trip" | "form";
 
 /** What's being shared: ``id`` is the thing; tasks, recipes and trips also
  *  name the app file they live in (``file_id``). */
@@ -31,6 +31,12 @@ export interface ShareCard {
   emoji: string | null;
   image_url: string | null;
   file: FileItem | null;
+  /** The button's word ("Fill in" for a form; "Open" otherwise). */
+  action?: string;
+  /** A line of what it's about (a form's description). */
+  description?: string;
+  /** A form: where people who can change it manage it. */
+  manage_href?: string;
 }
 
 export interface ShareCardResp {

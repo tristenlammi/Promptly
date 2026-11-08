@@ -122,6 +122,14 @@ export interface TodayComing {
 
 export interface TodayHub {
   passwords?: { attention: number; updated_at: string | null };
+  /** Forms (WP-F1.4): answers you haven't seen, and your forms closing today. Counts only. */
+  forms?: {
+    url: string;
+    new_total: number;
+    forms: { title: string; new: number; total: number; url: string }[];
+    more: number;
+    closing: { title: string; closes_at: string; url: string }[];
+  };
   mail?: {
     url: string;
     unread: number;

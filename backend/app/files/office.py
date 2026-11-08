@@ -41,8 +41,9 @@ if TYPE_CHECKING:
 
 SHEET_MIME = "application/vnd.promptly.sheet+json"
 WHITEBOARD_MIME = "application/vnd.promptly.whiteboard+json"
+FORM_MIME = "application/vnd.promptly.form+json"
 
-OfficeKind = Literal["document", "sheet", "whiteboard"]
+OfficeKind = Literal["document", "sheet", "whiteboard", "form"]
 Access = Literal["none", "read", "comment", "edit"]
 
 # shell source_kind → (MIME, filename suffix)
@@ -52,10 +53,17 @@ _SHELLS: dict[str, tuple[str, str]] = {
     # Item Store files (app/items). Each kind has its own suffix (.workout),
     # which a rename keeps — see item_filename.
     "item": ("application/vnd.promptly.item+json", ".item"),
+    # Forms (WP-F1.1): the form itself is a ``forms`` row (app/forms).
+    GeneratedKind.FORM.value: (FORM_MIME, ".form"),
 }
 
 OFFICE_SOURCE_KINDS = frozenset(
-    {GeneratedKind.DOCUMENT.value, GeneratedKind.SHEET.value, GeneratedKind.WHITEBOARD.value}
+    {
+        GeneratedKind.DOCUMENT.value,
+        GeneratedKind.SHEET.value,
+        GeneratedKind.WHITEBOARD.value,
+        GeneratedKind.FORM.value,
+    }
 )
 
 _RANK = {"none": 0, "read": 1, "comment": 2, "edit": 3}
@@ -186,6 +194,11 @@ async def create_office_file(
 
         doc = await create_blank_document(db, owner_id=owner.id, folder_id=folder_id, name=title)
         return doc, None
+    if kind == "form":
+        # ``data``: a validated definition (a template); blank without it.
+        from app.forms.service import create_form
+
+        return await create_form(db, owner=owner, title=title, folder_id=folder_id, definition=data)
     if kind == "sheet":
         entity: Any = Spreadsheet(workspace_id=workspace_id, title=title, data=data, content_text=content_text)
         skind = GeneratedKind.SHEET.value
@@ -211,6 +224,10 @@ async def content_for_shell(db: AsyncSession, row: UserFile) -> Any | None:
         from app.items.models import ItemDocument
 
         return await db.get(ItemDocument, row.id)
+    if row.source_kind == GeneratedKind.FORM.value:
+        from app.forms.models import Form
+
+        return (await db.execute(select(Form).where(Form.file_id == row.id))).scalar_one_or_none()
     model = {
         GeneratedKind.SHEET.value: Spreadsheet,
         GeneratedKind.WHITEBOARD.value: WorkspaceCanvas,
@@ -326,6 +343,9 @@ def export_for_download(row: UserFile, entity: Any) -> tuple[bytes, str, str]:
     """(bytes, filename, MIME) for downloading a shell — exported on demand.
     Synchronous (openpyxl / the scene decoder); run it off the event loop."""
     base = (row.filename or "Untitled").rsplit(".", 1)[0] or "Untitled"
+    if row.source_kind == GeneratedKind.FORM.value:
+        # A form's answers live in the database: use export_shell.
+        raise ValueError("a form exports through export_shell")
     if row.source_kind == "item":
         from app.items.service import export_json
 
@@ -347,6 +367,19 @@ def export_for_download(row: UserFile, entity: Any) -> tuple[bytes, str, str]:
     return scene.encode("utf-8"), f"{base}.excalidraw", "application/json"
 
 
+async def export_shell(db: AsyncSession, row: UserFile, entity: Any) -> tuple[bytes, str, str]:
+    """:func:`export_for_download`, off the event loop — and for a form,
+    the ``.form.zip`` of its questions and answers (read from the
+    database, so it needs ``db``)."""
+    import asyncio
+
+    if row.source_kind == GeneratedKind.FORM.value:
+        from app.forms.service import export_zip
+
+        return await export_zip(db, row, entity)
+    return await asyncio.to_thread(export_for_download, row, entity)
+
+
 __all__ = [
     "OFFICE_SOURCE_KINDS",
     "SHEET_MIME",
@@ -355,6 +388,7 @@ __all__ = [
     "content_for_shell",
     "create_office_file",
     "export_for_download",
+    "export_shell",
     "get_office_access",
     "is_shell",
     "make_shell",

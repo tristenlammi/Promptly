@@ -8,6 +8,7 @@ import {
   type FileSearchFilters,
   type FileSearchType,
   supportsEditGrant,
+  shareLinksAllowed,
   shareRolesFor,
 } from "@/api/files";
 import { FilePreviewModal } from "@/components/files/FilePreviewModal";
@@ -310,6 +311,7 @@ export function SearchResultsPage() {
                 name: shareFor.filename,
                 supports_edit: supportsEditGrant(shareFor),
                 roles: shareRolesFor(shareFor),
+                links: shareLinksAllowed(shareFor),
               }
             : null
         }

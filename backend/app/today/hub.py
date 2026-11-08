@@ -600,6 +600,16 @@ async def extend(db: AsyncSession, user: User, out: dict[str, Any]) -> dict[str,
     except Exception:  # noqa: BLE001
         logger.exception("today maps section failed")
 
+    # Forms (WP-F1.4): new answers and forms closing today. Counts only.
+    try:
+        from app.forms.notify import today_section as forms_today
+
+        f = await forms_today(db, user, now, tz)
+        if f:
+            sec["forms"] = f
+    except Exception:  # noqa: BLE001
+        logger.exception("today forms section failed")
+
     found = await _primary(db, user, "tasks")
     tasks_data = found[1].data if found else None
     out["schedule"] = build_schedule(sec, today, tz)

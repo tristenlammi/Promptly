@@ -80,6 +80,9 @@ Category = Literal[
     "mail",
     # New-device approvals and shared-vault invites. Never any vault data.
     "passwords",
+    # Forms (0290): new answers to your forms ("BBQ RSVP: 6 new answers"),
+    # and your form closing. Counts only, never an answer.
+    "form_response",
     # ``test`` is reserved for the "send me a test push" button on
     # the Notifications panel and bypasses the per-category
     # preference lookup but *not* the master enable toggle.
@@ -102,6 +105,8 @@ CATEGORIES: tuple[str, ...] = (
     "calendar",
     "mail",
     "passwords",
+    # Forms
+    "form_response",
     "test",
 )
 
@@ -125,6 +130,11 @@ class Rule:
     url: str = "/"
     summary: bool = False
     kinds: tuple[tuple[str, str, str], ...] = ()
+    #: Each push is a running total for its ``tag`` ("6 new answers"): a
+    #: held one replaces the last held one with the same tag (its
+    #: ``extra.count`` is the total, not one more), and an unread inbox row
+    #: with the same link is replaced instead of stacking.
+    coalesce: bool = False
 
 
 # THE central list: every category says whether quiet hours may hold it.
@@ -149,6 +159,17 @@ RULES: dict[str, Rule] = {
     "mail": Rule(True, app="Mail", one="new email", many="new emails", url="/mail", summary=True),
     "passwords": Rule(False),
     "test": Rule(False),
+    # Forms: answers come in bursts; one row and one push per form, updated.
+    "form_response": Rule(
+        True,
+        app="Forms",
+        one="new answer",
+        many="new answers",
+        url="/forms",
+        summary=True,
+        kinds=(("closed", "form closed", "forms closed"), ("busy", "busy form", "busy forms")),
+        coalesce=True,
+    ),
 }
 _missing = set(CATEGORIES) - set(RULES)
 assert not _missing, f"notification categories without a quiet-hours rule: {_missing}"
@@ -296,6 +317,17 @@ async def _dispatch(
             try:
                 # An automation keeps one rolling inbox row — its latest
                 # result — instead of one per run (R-152).
+                if rule_for(category).coalesce and payload.url:
+                    # A running total (Forms): the unread row for the same
+                    # place is replaced, not stacked.
+                    await db.execute(
+                        delete(Notification).where(
+                            Notification.user_id == user_id,
+                            Notification.category == category,
+                            Notification.url == payload.url,
+                            Notification.read_at.is_(None),
+                        )
+                    )
                 if category == "task_complete" and payload.url:
                     await db.execute(
                         delete(Notification).where(

@@ -90,6 +90,7 @@ import {
 } from "./ToolActivityCard";
 import { MapChips } from "@/maps/MapChips";
 import { PhotoResultsCards } from "./PhotoResultsCard";
+import { FormDraftChips } from "./FormDraftChips";
 import { ToolApprovalCards } from "./ToolApprovalCard";
 import { VisionRelayChip } from "./VisionRelayChip";
 
@@ -1249,6 +1250,7 @@ function MessageBubbleImpl({
         )}
         {hasToolInvocations && <PhotoResultsCards steps={activitySteps} />}
         {hasToolInvocations && <MapChips steps={activitySteps} />}
+        {hasToolInvocations && <FormDraftChips steps={activitySteps} />}
         {!streaming && messageId && toolCalls && toolCalls.length > 0 && (
           <ToolApprovalCards messageId={messageId} toolCalls={toolCalls} />
         )}

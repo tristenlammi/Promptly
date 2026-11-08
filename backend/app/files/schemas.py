@@ -14,7 +14,7 @@ Scope = Literal["mine", "shared"]
 # Drive" PWA (stage 3) can pick a start_url without forking.
 FileListView = Literal["mine", "shared", "starred", "recent", "trash", "search"]
 ShareAccessMode = Literal["public", "invite"]
-ShareResourceType = Literal["file", "folder", "album"]  # album: a photo album (WP-9.5)
+ShareResourceType = Literal["file", "folder", "album", "form"]  # album: a photo album (WP-9.5); form: answer link (Forms)
 
 
 class GranteeBrief(BaseModel):

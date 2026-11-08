@@ -1,4 +1,5 @@
 import {
+  ClipboardList,
   FileText,
   FileUp,
   FolderPlus,
@@ -25,6 +26,7 @@ import { treeFromPicked, uploadTree } from "@/lib/folderUpload";
 import { useFilesShellStore } from "@/store/filesShellStore";
 import { toast } from "@/store/toastStore";
 import { useUploadStore } from "@/store/uploadStore";
+import { FORMS_BUILDER_READY } from "@/lib/forms";
 import { cn } from "@/utils/cn";
 
 import { extractError, openFile } from "./helpers";
@@ -159,6 +161,10 @@ export function useNewItems({
     { key: "sheet", group: "create", label: "Spreadsheet", icon: <Table2 className={cn(ic, "text-emerald-600")} />, onSelect: () => void newOffice("sheet") },
     { key: "presentation", group: "create", label: "Presentation", icon: <Presentation className={cn(ic, "text-orange-600")} />, onSelect: () => void newPresentation() },
     { key: "whiteboard", group: "create", label: "Whiteboard", icon: <Shapes className={cn(ic, "text-violet-600")} />, onSelect: () => void newOffice("whiteboard") },
+    // Forms: shown once the builder (WP-F1.2) is in.
+    ...(FORMS_BUILDER_READY
+      ? [{ key: "form", group: "create" as const, label: "Form", icon: <ClipboardList className={cn(ic, "text-purple-600")} />, onSelect: () => void newOffice("form") }]
+      : []),
     { key: "template", group: "import", label: "From template…", icon: <LayoutTemplate className={ic} />, onSelect: () => setTemplatesOpen(true) },
     { key: "import-word", group: "import", label: "Import Word document…", icon: <FileUp className={ic} />, onSelect: () => wordInputRef.current?.click() },
     { key: "import-sheet", group: "import", label: "Import spreadsheet…", icon: <FileUp className={ic} />, onSelect: () => sheetInputRef.current?.click() },

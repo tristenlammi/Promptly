@@ -165,11 +165,25 @@ const OfficeEditorPage = lazyWithRetry(
   () => import("@/pages/OfficeEditorPage").then((m) => ({ default: m.OfficeEditorPage })),
   "OfficeEditorPage"
 );
+// Forms: the builder and the Forms home.
+const FormBuilderPage = lazyWithRetry(
+  () => import("@/pages/FormBuilderPage").then((m) => ({ default: m.FormBuilderPage })),
+  "FormBuilderPage"
+);
+const FormsHomePage = lazyWithRetry(
+  () => import("@/pages/FormsHomePage").then((m) => ({ default: m.FormsHomePage })),
+  "FormsHomePage"
+);
 const SyncLandingPage = lazyWithRetry(
   () => import("@/pages/SyncLandingPage").then((m) => ({ default: m.SyncLandingPage })),
   "SyncLandingPage"
 );
 // An emailed calendar invitation's answer page — public, no sign-in.
+// Forms (WP-F1.3): answering a form from its link — signed in or not.
+const FormAnswerPage = lazyWithRetry(
+  () => import("@/pages/FormAnswerPage").then((m) => ({ default: m.FormAnswerPage })),
+  "FormAnswerPage"
+);
 const CalendarAnswerPage = lazyWithRetry(
   () => import("@/pages/CalendarAnswerPage").then((m) => ({ default: m.CalendarAnswerPage })),
   "CalendarAnswerPage"
@@ -580,6 +594,15 @@ export default function App() {
             </Suspense>
           }
         />
+        {/* A form's answer page: people without an account answer link forms. */}
+        <Route
+          path="/f/:token"
+          element={
+            <Suspense fallback={<FullScreenLoading />}>
+              <FormAnswerPage />
+            </Suspense>
+          }
+        />
         <Route path="*" element={<ToLogin />} />
       </Routes>
     );
@@ -676,6 +699,15 @@ export default function App() {
         <Route index element={<RoomsApp embedded />} />
         <Route path="*" element={<RoomsApp embedded />} />
       </Route>
+      {/* A form's answer page (Forms): no Promptly chrome, like the share page. */}
+      <Route
+        path="/f/:token"
+        element={
+          <Suspense fallback={<FullScreenLoading />}>
+            <FormAnswerPage />
+          </Suspense>
+        }
+      />
       {/* An emailed invitation's answer page (no Promptly chrome) — beats /calendar/*. */}
       <Route
         path="/calendar/answer/:token"
@@ -773,6 +805,9 @@ export default function App() {
         <Route path="/files/doc/:fileId" element={<OfficeEditorPage />} />
         <Route path="/files/sheet/:fileId" element={<OfficeEditorPage />} />
         <Route path="/files/whiteboard/:fileId" element={<OfficeEditorPage />} />
+        {/* Forms: the builder (a form is a file) and the Forms home. */}
+        <Route path="/files/form/:fileId" element={<FormBuilderPage />} />
+        <Route path="/forms" element={<FormsHomePage />} />
         <Route path="/files/item/:fileId" element={<ItemPage />} />
         {/* Apps: the launcher, the store, and each app (its file). Every
             app's data lives in My files › Apps › <App>. */}

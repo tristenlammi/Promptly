@@ -1,3 +1,5 @@
+import type { FormTemplateKey } from "@/lib/forms";
+
 import { apiClient } from "./client";
 import type { CollabTokenResponse } from "./documents";
 import type { FileItem } from "./files";
@@ -10,9 +12,9 @@ import type { SheetVersion, SpreadsheetData } from "./workspaces";
  * a workspace.
  */
 export type OfficeKind = "document" | "sheet" | "whiteboard";
-/** What ``POST /files/office`` can make: an office kind, or a "note" (a
- *  Document that starts as "Untitled note"). */
-export type NewOfficeKind = OfficeKind | "note";
+/** What ``POST /files/office`` can make: an office kind, a "note" (a
+ *  Document that starts as "Untitled note"), or a form (Forms). */
+export type NewOfficeKind = OfficeKind | "note" | "form";
 
 export interface OfficeEditorInfo {
   kind: OfficeKind;
@@ -35,7 +37,8 @@ export interface OfficeTemplate {
   modified_at: string | null;
 }
 
-/** ``/files/doc/<id>``, ``/files/sheet/<id>``, ``/files/whiteboard/<id>``. */
+/** ``/files/doc/<id>``, ``/files/sheet/<id>``, ``/files/whiteboard/<id>``,
+ *  ``/files/form/<id>`` (the form builder). */
 export function officeEditorPath(file: Pick<FileItem, "id" | "source_kind">): string | null {
   const seg =
     file.source_kind === "document"
@@ -44,7 +47,9 @@ export function officeEditorPath(file: Pick<FileItem, "id" | "source_kind">): st
         ? "sheet"
         : file.source_kind === "whiteboard"
           ? "whiteboard"
-          : null;
+          : file.source_kind === "form"
+            ? "form"
+            : null;
   return seg ? `/files/${seg}/${file.id}` : null;
 }
 
@@ -60,6 +65,8 @@ export const officeApi = {
     title?: string;
     folder_id?: string | null;
     template_id?: string;
+    /** Forms: start from a built-in template (RSVP, Sign-up sheet…). */
+    form_template?: FormTemplateKey;
   }): Promise<FileItem> {
     const { data } = await apiClient.post<FileItem>("/files/office", payload);
     return data;

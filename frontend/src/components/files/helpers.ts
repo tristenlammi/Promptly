@@ -7,6 +7,7 @@
 import { apiClient } from "@/api/client";
 import { itemLook } from "@/items/hooks";
 import { filesApi, type FileItem } from "@/api/files";
+import { FORMS_BUILDER_READY } from "@/lib/forms";
 import { apiErrorMessage } from "@/utils/apiError";
 
 export function humanSize(n: number): string {
@@ -36,6 +37,7 @@ export function kindLabel(file: FileItem): string {
   if (file.source_kind === "document") return "Doc";
   if (file.source_kind === "sheet") return "Sheet";
   if (file.source_kind === "whiteboard") return "Whiteboard";
+  if (file.source_kind === "form") return "Form";
   if (mime.startsWith("image/")) return "Image";
   if (mime === "application/pdf" || ext === "pdf") return "PDF";
   if (mime.startsWith("video/")) return "Video";
@@ -303,7 +305,8 @@ export function formatRelativeTime(iso: string | null | undefined): string {
 }
 
 /** Open a file from anywhere in Files (WP-3.4): a Document, Spreadsheet
- *  or Whiteboard goes to its editor page (``/files/doc|sheet|whiteboard/:id``)
+ *  or Whiteboard goes to its editor page (``/files/doc|sheet|whiteboard/:id``),
+ *  a form to its builder (``/files/form/:id``, once WP-F1.2 ships it)
  *  and this returns true; anything else returns false so the caller shows
  *  its preview. Trashed files always preview. */
 export function openFile(
@@ -324,7 +327,9 @@ export function openFile(
         ? "sheet"
         : file.source_kind === "whiteboard"
           ? "whiteboard"
-          : null;
+          : file.source_kind === "form" && FORMS_BUILDER_READY
+            ? "form"
+            : null;
   if (!seg) return false;
   navigate(`/files/${seg}/${file.id}`);
   return true;

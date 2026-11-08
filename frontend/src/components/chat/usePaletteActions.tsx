@@ -3,6 +3,7 @@ import {
   ArrowRight,
   CalendarPlus,
   CheckSquare,
+  ClipboardList,
   FileText,
   ListPlus,
   MapPin,
@@ -16,6 +17,7 @@ import {
 import { useMemo, useState, type ReactNode } from "react";
 
 import { calendarApi, type CalUser } from "@/api/calendar";
+import { formsApi } from "@/api/forms";
 import { officeApi } from "@/api/office";
 import { roomsApi } from "@/api/rooms";
 import { addDays, localZone, parseYmd, shortDay, timeLabel, timeRange, ymd } from "@/calendar/dates";
@@ -84,6 +86,7 @@ const ICONS: Record<DoKind, ReactNode> = {
   doc: <FileText className="h-4 w-4" />,
   sheet: <Table2 className="h-4 w-4" />,
   slides: <Presentation className="h-4 w-4" />,
+  form: <ClipboardList className="h-4 w-4" />,
   goto: <ArrowRight className="h-4 w-4" />,
   message: <MessageSquarePlus className="h-4 w-4" />,
 };
@@ -140,9 +143,13 @@ export function usePaletteActions(
       key: `create-${a.kind}`,
       icon: ICONS[a.kind],
       title: a.label,
-      detail: a.kind === "note" || a.kind === "doc" || a.kind === "sheet" || a.kind === "slides" ? "Make a blank one and open it" : `Type “${a.prefix.trim()} …”`,
+      detail:
+        a.kind === "note" || a.kind === "doc" || a.kind === "sheet" || a.kind === "slides" || a.kind === "form"
+          ? "Make a blank one and open it"
+          : `Type “${a.prefix.trim()} …”`,
       sure: false,
       run: async () => {
+        if (a.kind === "form") return makeForm("", navigate);
         if (a.kind === "note" || a.kind === "doc" || a.kind === "sheet" || a.kind === "slides") return makeFile(a.kind, "", navigate);
         setQuery(a.prefix);
         return false;
@@ -212,6 +219,18 @@ async function makeFile(kind: "note" | "doc" | "sheet" | "slides", title: string
     return true;
   } catch (e) {
     toast.error(extractError(e) || "Couldn't create it.");
+    return false;
+  }
+}
+
+/** A new form in your Forms folder (Forms WP-F1.7), opened in the builder. */
+async function makeForm(title: string, navigate: (to: string) => void): Promise<boolean> {
+  try {
+    const file = await formsApi.create(title ? { title } : {});
+    navigate(`/files/form/${file.id}`);
+    return true;
+  } catch (e) {
+    toast.error(extractError(e) || "Couldn't make the form.");
     return false;
   }
 }
@@ -348,6 +367,15 @@ function buildDo(cmd: Command, c: Ctx): PaletteAction {
         title: title ? `${label}: “${title}”` : label,
         detail: kind === "slides" ? "Creates the deck and opens it" : title ? "Creates it in My files" : "Make a blank one and open it",
         run: () => makeFile(kind, title, c.navigate),
+      };
+    }
+    case "form": {
+      const title = cmd.text.slice(0, 200).trim();
+      return {
+        ...base,
+        title: title ? `New form: “${title}”` : "New form",
+        detail: "Makes it in your Forms folder and opens it",
+        run: () => makeForm(title, c.navigate),
       };
     }
     case "goto": {

@@ -139,6 +139,10 @@ class PushPreferences(Base):
     calendar: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=True, server_default="true"
     )
+    # Forms (0290): "New answers to my forms". Counts only, never an answer.
+    form_response: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     # Quiet hours (0320), in the person's own time zone. One setting for all
     # of Promptly; ``dispatch.RULES`` says which categories they may hold.
     # The weekend pair, when set, is used for quiet periods that end on a

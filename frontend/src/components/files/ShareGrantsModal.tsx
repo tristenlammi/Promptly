@@ -44,6 +44,9 @@ interface ShareGrantsModalProps {
     /** What a share link (and a person) can be given on it — from
      *  ``shareRolesFor`` (WP-6.6). Commenter needs ``comment`` here. */
     roles?: ShareLinkRole[];
+    /** ``false`` for a form: no file links (it's answered through its own
+     *  link, made with Send in the form), and people added see its answers. */
+    links?: boolean;
   } | null;
   onClose: () => void;
   /** Called with the latest list whenever a grant is added,
@@ -110,6 +113,7 @@ export function ShareGrantsModal({
 
   const supportsEdit = resource?.supports_edit ?? resource?.roles?.includes("edit") ?? false;
   const supportsComment = resource?.roles?.includes("comment") ?? false;
+  const linksAllowed = resource?.links ?? true;
 
   // "Stop sharing" inline confirm — we deliberately don't stack
   // another <Modal> on top of this one (focus-trap nightmare) and
@@ -284,18 +288,26 @@ export function ShareGrantsModal({
           </span>
         </header>
 
-        <p className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
-          Picked users see this {resource.type} in their <strong>Shared</strong>{" "}
-          tab. Pick their access level: <strong>Viewer</strong> (read-only),{" "}
-          <strong>Viewer + copy</strong> (can save a copy into their own
-          Drive){supportsEdit ? (
-            <>
-              , or <strong>Editor</strong> (real-time co-editing — your
-              original stays a live shared doc)
-            </>
-          ) : null}
-          . Your original is never overwritten by a copy.
-        </p>
+        {linksAllowed ? (
+          <p className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
+            Picked users see this {resource.type} in their <strong>Shared</strong>{" "}
+            tab. Pick their access level: <strong>Viewer</strong> (read-only),{" "}
+            <strong>Viewer + copy</strong> (can save a copy into their own
+            Drive){supportsEdit ? (
+              <>
+                , or <strong>Editor</strong> (real-time co-editing — your
+                original stays a live shared doc)
+              </>
+            ) : null}
+            . Your original is never overwritten by a copy.
+          </p>
+        ) : (
+          <p className="rounded-md border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-xs text-[var(--text-muted)]">
+            People you add can see the form <strong>and all its answers</strong>.{" "}
+            <strong>Editors</strong> can also change the questions and settings.
+            To collect answers, open the form and use <strong>Send</strong>.
+          </p>
+        )}
 
         {error && (
           <div className="flex items-start gap-2 rounded-md border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-sm text-rose-600 dark:text-rose-400">
@@ -412,7 +424,9 @@ export function ShareGrantsModal({
         </div>
 
         {/* General access — public links, folded into the same dialog
-            so they can be made, seen and turned off from Drive (R-208). */}
+            so they can be made, seen and turned off from Drive (R-208).
+            Not on a form: its answer link lives in the form (Send). */}
+        {linksAllowed && (
         <div className="space-y-1">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
             General access
@@ -432,6 +446,7 @@ export function ShareGrantsModal({
             </Button>
           </div>
         </div>
+        )}
 
         {/* Inline "stop sharing" confirmation. Rendered as a banner
             rather than a nested modal so focus + keyboard flow stays

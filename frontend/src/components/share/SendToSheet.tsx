@@ -13,7 +13,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 /**
- * "Send to…": share a file, folder, photo, album, task, recipe or trip into
+ * "Send to…": share a file, folder, photo, album, task, recipe, trip or form into
  * a room or to a person (their DM, made if new). It posts a card in Rooms
  * with an optional message. Sending never gives anyone access on its own —
  * for things that can be shared (Drive files and folders, photos, albums)
@@ -222,7 +222,9 @@ function SendTo({ onClose, target, canGrant }: { onClose: () => void; target: Sh
         </label>
       ) : (
         <p className="mt-3 text-xs text-[var(--text-muted)]">
-          {home
+          {target.kind === "form"
+            ? "Everyone who can answer the form sees it with a Fill in button. It doesn't let anyone change the form or see its answers."
+            : home
             ? `Only people you've shared your ${home} with can open it — others see that it was shared.`
             : "Only people who already have access can open it — others see that it was shared."}
         </p>

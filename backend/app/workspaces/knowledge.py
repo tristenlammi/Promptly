@@ -2368,6 +2368,10 @@ class WorkspaceInjection:
     system_block: str | None = None
     attach_file_ids: list[uuid.UUID] = field(default_factory=list)
     retrieval_active: bool = False
+    # Something in it is other people's words — a sheet a form writes its
+    # answers into (``Spreadsheet.outside_content``, Forms WP-F1.5): the
+    # chat turn that reads it is untrusted, like one that read a web page.
+    untrusted: bool = False
 
 
 async def _indexed_token_total(
@@ -3153,6 +3157,8 @@ async def build_workspace_injection(
                 board_rows.append((it, _NS(id=None, content_text=live)))
     sheet_rows = _eligible(await _workspace_sheets(db, workspace_id, excluded))
     roster_rows = _eligible(await _workspace_rosters(db, workspace_id, excluded))
+    # Sheets go in whole (or by excerpt), so one holding form answers taints the turn.
+    outside = any(bool(getattr(sh, "outside_content", False)) for _, sh in sheet_rows)
     if (
         not file_rows
         and not note_rows
@@ -3214,6 +3220,7 @@ async def build_workspace_injection(
             system_block=_with_map(map_md, struct_block),
             attach_file_ids=[uf.id for _, uf in file_rows],
             retrieval_active=False,
+            untrusted=outside,
         )
 
     # Retrieval mode. The retrieved block already spans the whole
@@ -3268,6 +3275,7 @@ async def build_workspace_injection(
         system_block=_with_map(map_md, combined or None),
         attach_file_ids=attach_ids,
         retrieval_active=True,
+        untrusted=outside,
     )
 
 

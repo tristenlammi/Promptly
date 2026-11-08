@@ -144,6 +144,16 @@ class AppSettings(Base):
     # (see app/mail/search.py). The provider is the cloud one the admin agreed to.
     mail_ai_search: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     mail_ai_search_provider: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True), nullable=True)
+    # Forms (0290): may forms take answers from people without an account
+    # ("Anyone with the link")? On by default; off makes every link form
+    # answer "doesn't exist".
+    forms_link_answers: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    # Forms (0297): how much each form may take in files in 24 hours, in
+    # MB — a form for people on this server, and a link form.
+    forms_upload_cap_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=500, server_default="500")
+    forms_link_upload_cap_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=100, server_default="100")
 
     # ----- Public origins (replaces the old static .env ALLOWED_ORIGINS) -----
     # JSON array of fully-qualified origins (scheme + host [+ :port]) the
