@@ -468,3 +468,119 @@ async def _run_upgrade(name):
 
     async with engine.begin() as conn:
         await conn.run_sync(go)
+
+
+# ------------------------------------------------------------------ AP7
+
+
+async def _file(db, owner, name="Biopsy results.pdf", state="ready"):
+    from app.files.models import UserFile
+
+    f = UserFile(user_id=owner.id, filename=name, original_filename=name, mime_type="application/pdf",
+                 size_bytes=10, storage_path=f"x/{uuid.uuid4().hex}", blob_state=state)
+    db.add(f)
+    await db.commit()
+    await db.refresh(f)
+    return f
+
+
+async def test_storage_problems_show_kind_and_owner_not_the_name(db, client, user):
+    member = await _user(db, "rae")
+    f = await _file(db, member, state="damaged")
+    r = await client.get("/api/admin/storage/health", headers=_auth(user))
+    assert r.status_code == 200
+    [row] = [p for p in r.json()["problems"] if p["id"] == str(f.id)]
+    assert row["kind"] == ".pdf" and row["owner"] == member.username and "filename" not in row
+    assert "Biopsy" not in r.text
+
+
+async def test_the_storage_alert_counts_for_admins_and_names_for_owners(db, user, outbox):
+    from app.files.scrubber import _alert
+
+    a = await _user(db, "sol")
+    b = await _user(db, "tia")
+    bad = [await _file(db, a, "Biopsy results.pdf"), await _file(db, a, "Will.docx"), await _file(db, b, "Tax.xlsx")]
+    await _alert(bad)
+
+    admin = [p for p in outbox["push"] if p["user_id"] == user.id]
+    assert admin and "3 files are missing" in admin[0]["body"]
+    assert all(n not in admin[0]["body"] for n in ("Biopsy", "Will", "Tax"))
+    to_a = [p for p in outbox["push"] if p["user_id"] == a.id]
+    assert len(to_a) == 1 and "Biopsy results.pdf" in to_a[0]["body"] and "Will.docx" in to_a[0]["body"]
+    assert to_a[0]["title"] == "2 of your files are damaged" and "Tax" not in to_a[0]["body"]
+    [to_b] = [p for p in outbox["push"] if p["user_id"] == b.id]
+    assert to_b["title"] == "A file of yours is damaged"
+
+
+async def _connector(db):
+    from app.mcp.models import McpConnector
+
+    c = McpConnector(name=f"Alarm {uuid.uuid4().hex[:4]}", slug=f"alarm{uuid.uuid4().hex[:6]}", kind="mcp",
+                     url="http://192.168.1.20/mcp", availability="restricted", enabled=True)
+    db.add(c)
+    await db.commit()
+    await db.refresh(c)
+    return c
+
+
+async def test_the_connector_picker_lists_only_the_admins_workspaces(db, client, user):
+    from app.chat.models import Workspace, WorkspaceShare
+    from app.mcp.models import WorkspaceMcpConnector
+
+    stranger = await _user(db, "uma")
+    friend = await _user(db, "vic")
+    mine = Workspace(user_id=user.id, title="Admin's own")
+    theirs = Workspace(user_id=stranger.id, title="Uma's diary")
+    shared = Workspace(user_id=friend.id, title="Family")
+    db.add_all([mine, theirs, shared])
+    await db.flush()
+    db.add(WorkspaceShare(workspace_id=shared.id, inviter_user_id=friend.id, invitee_user_id=user.id,
+                          status="accepted", role="editor"))
+    c = await _connector(db)
+    # The stranger turned it on in their own workspace themselves.
+    db.add(WorkspaceMcpConnector(workspace_id=theirs.id, connector_id=c.id))
+    await db.commit()
+
+    r = await client.get("/api/admin/mcp/workspaces", headers=_auth(user))
+    assert r.status_code == 200
+    assert sorted(w["title"] for w in r.json()) == ["Admin's own", "Family"]
+    assert "diary" not in r.text
+
+    # Attaching to someone else's workspace is ignored; theirs is left alone.
+    r = await client.patch(
+        f"/api/admin/mcp/connectors/{c.id}", headers=_auth(user),
+        json={"workspace_ids": [str(mine.id), str(theirs.id)]},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["workspace_ids"] == [str(mine.id)] and body["other_workspace_count"] == 1
+    rows = (await db.execute(select(WorkspaceMcpConnector).where(WorkspaceMcpConnector.connector_id == c.id))).scalars().all()
+    assert {(x.workspace_id, x.attached_by_admin) for x in rows} == {(mine.id, True), (theirs.id, False)}
+
+    # Clearing the admin's list doesn't take it away from the stranger.
+    r = await client.patch(f"/api/admin/mcp/connectors/{c.id}", headers=_auth(user), json={"workspace_ids": []})
+    assert r.json()["workspace_ids"] == [] and r.json()["other_workspace_count"] == 1
+
+
+async def test_admin_forms_lists_reported_forms_and_counts_the_rest(db, client, user):
+    from app.files.models import UserFile
+    from app.forms.models import Form, FormReport
+
+    owner = await _user(db, "wes")
+    forms = []
+    for title in ("Secret santa", "Spam form"):
+        shell = UserFile(user_id=owner.id, filename=f"{title}.form", original_filename=f"{title}.form",
+                         mime_type="application/x-promptly-form", size_bytes=0, storage_path=f"x/{uuid.uuid4().hex}")
+        db.add(shell)
+        await db.flush()
+        f = Form(file_id=shell.id, definition={"title": title, "questions": []}, audience="link", accepting=True)
+        db.add(f)
+        await db.flush()
+        forms.append(f)
+    db.add(FormReport(form_id=forms[1].id, reason="phishing"))
+    await db.commit()
+
+    body = (await client.get("/api/admin/forms", headers=_auth(user))).json()
+    assert [x["title"] for x in body["forms"]] == ["Spam form"]
+    assert body["link_form_count"] == 2
+    assert "Secret santa" not in str(body)

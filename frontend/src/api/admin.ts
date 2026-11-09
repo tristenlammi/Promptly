@@ -319,7 +319,8 @@ export interface StorageCheckRun {
 
 export interface StorageProblem {
   id: string;
-  filename: string;
+  /** The file's extension (".pdf"), never its name: that's the owner's. */
+  kind: string;
   owner: string | null;
   state: "missing" | "damaged";
   size_bytes: number;

@@ -2,9 +2,11 @@
 
 Mounted under ``/api/workspaces``. Global connectors work everywhere;
 restricted ones work in a workspace once attached — by an admin (Admin →
-Connectors) or by the workspace's owner or admins, who can only attach
-connectors they can reach themselves. Attaching shares that connector, with
-its credential, with everyone in the workspace. Members can read the list.
+Connectors, only in workspaces they're in) or by the workspace's owner or
+admins, who can only attach connectors they can reach themselves. Attaching
+shares that connector, with its credential, with everyone in the workspace.
+Members can read the list. The workspace's owner and admins can always turn
+off one an admin attached: it's their workspace (admin privacy G8).
 """
 from __future__ import annotations
 
@@ -105,7 +107,11 @@ async def list_workspace_connectors(
         if row is None and not (manager and c.id in reachable):
             continue
         if row is not None and row.attached_by_admin:
-            can_change, reason = False, "Attached by an admin."
+            can_change, reason = (
+                (True, "Turned on by an admin. You can turn it off.")
+                if manager
+                else (False, "Turned on by an admin.")
+            )
         elif not manager:
             can_change, reason = False, "Only the workspace's owner and admins can change this."
         elif c.id not in reachable:
@@ -133,8 +139,9 @@ async def set_workspace_connectors(
     user: User = Depends(get_current_user),
 ):
     """Attach and detach the restricted connectors the caller is allowed
-    to manage. Everything else — rows an admin attached, rows for
-    connectors the caller can't reach — is left exactly as it was."""
+    to manage, and detach any an admin attached that isn't in the list.
+    Rows for connectors the caller can't reach, attached by another
+    member, are left exactly as they were."""
     await get_accessible_workspace(workspace_id, user, db)
     if not await _can_manage(db, workspace_id, user):
         raise HTTPException(
@@ -156,8 +163,11 @@ async def set_workspace_connectors(
     attached = {r.connector_id: r for r in rows}
     wanted = set(payload.connector_ids or []) & manageable
 
+    sent = set(payload.connector_ids or [])
     for cid, row in attached.items():
-        if cid in manageable and cid not in wanted and not row.attached_by_admin:
+        if cid in sent:
+            continue
+        if row.attached_by_admin or cid in manageable:
             await db.delete(row)
     for cid in wanted - set(attached):
         db.add(WorkspaceMcpConnector(workspace_id=workspace_id, connector_id=cid))

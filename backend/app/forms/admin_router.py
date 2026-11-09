@@ -5,8 +5,9 @@ What a server admin can do about forms, and nothing more:
 * turn answers from people without an account on or off for the whole
   server (``app_settings.forms_link_answers``; off makes every link form
   answer "doesn't exist");
-* see the forms anyone with the link can answer — title, owner, number of
-  answers, when it was made, and reports — and read the reports;
+* see the forms someone reported — title, owner, number of answers, when
+  it was made, and the reports — and read the reports; other link forms
+  are a total only (admin privacy, owner decision 2026-11-09);
 * close one of them, with a reason the owner is told;
 * set how much each form may take in files in a day (WP-F1.6) — forms for
   people on this server and link forms separately.
@@ -21,7 +22,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import require_admin
@@ -50,7 +51,7 @@ async def _listing(db: AsyncSession) -> list[dict[str, Any]]:
             .join(UserFile, UserFile.id == Form.file_id)
             .join(User, User.id == UserFile.user_id, isouter=True)
             .join(reports, reports.c.form_id == Form.id, isouter=True)
-            .where(or_(Form.audience == "link", reports.c.n.is_not(None)))
+            .where(reports.c.n.is_not(None))
             .order_by(func.coalesce(reports.c.last, Form.created_at).desc())
         )
     ).all()
@@ -83,8 +84,26 @@ async def _caps(db: AsyncSession) -> dict[str, int]:
     }
 
 
+async def _link_form_count(db: AsyncSession) -> int:
+    return int(
+        (
+            await db.execute(
+                select(func.count(Form.id))
+                .join(UserFile, UserFile.id == Form.file_id)
+                .where(Form.audience == "link", UserFile.trashed_at.is_(None))
+            )
+        ).scalar_one()
+    )
+
+
 async def _overview(db: AsyncSession) -> dict[str, Any]:
-    return {"link_answers": await link_answers_allowed(db), **await _caps(db), "forms": await _listing(db)}
+    return {
+        "link_answers": await link_answers_allowed(db),
+        **await _caps(db),
+        # Reported forms only; every other link form is just counted.
+        "forms": await _listing(db),
+        "link_form_count": await _link_form_count(db),
+    }
 
 
 @router.get("")

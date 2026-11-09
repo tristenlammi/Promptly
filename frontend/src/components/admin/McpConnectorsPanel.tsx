@@ -605,8 +605,8 @@ function ConnectorForm({
               }
             />
             <ScopePicker
-              label="Workspaces"
-              empty="No workspaces exist yet."
+              label="Workspaces you're in"
+              empty="You're not in any workspaces."
               items={workspaces.map((w) => ({
                 id: w.id,
                 label: w.title,
@@ -617,6 +617,15 @@ function ConnectorForm({
                 setWorkspaceIds((s) => toggle(s, id))
               }
             />
+            <p className="text-[11px] text-[var(--text-muted)]">
+              For someone else&apos;s workspace, add its owner under Users:
+              they can turn it on in the workspace&apos;s settings, under
+              Connectors.
+              {(connector?.other_workspace_count ?? 0) > 0 &&
+                ` It's on in ${connector?.other_workspace_count} other workspace${
+                  connector?.other_workspace_count === 1 ? "" : "s"
+                } you're not in.`}
+            </p>
           </div>
         )}
 
@@ -723,7 +732,7 @@ function toggle(set: Set<string>, id: string): Set<string> {
 function scopeLabel(c: McpConnector): string {
   const g = c.group_ids.length;
   const u = c.user_ids.length;
-  const w = c.workspace_ids.length;
+  const w = c.workspace_ids.length + (c.other_workspace_count ?? 0);
   const parts: string[] = [];
   if (g) parts.push(`${g} group${g === 1 ? "" : "s"}`);
   if (u) parts.push(`${u} user${u === 1 ? "" : "s"}`);

@@ -92,7 +92,11 @@ class ConnectorResponse(BaseModel):
     allowed_tools: list[str] | None
     group_ids: list[uuid.UUID]
     user_ids: list[uuid.UUID]
+    # Workspaces the admin is a member of that it's attached to. Other
+    # people's workspaces are only counted: their owners turn it on there
+    # (admin privacy G8).
     workspace_ids: list[uuid.UUID]
+    other_workspace_count: int = 0
     tools: list[ToolInfo]
     tools_refreshed_at: datetime | None
     # Health (R-158) — refreshes and live calls both update these.
@@ -166,10 +170,42 @@ async def _set_users(
         db.add(ConnectorUser(connector_id=connector_id, user_id=uid))
 
 
+async def admin_workspace_ids(db: AsyncSession, admin: User) -> set[uuid.UUID]:
+    """Workspaces ``admin`` is in: owns, or an accepted member of. Admin →
+    Connectors only lists, attaches to and detaches from these. Anyone
+    else's workspace is theirs to opt in from its settings (admin privacy
+    G8): an admin attaching a connector they run to someone's private
+    workspace would send that workspace's tool calls to them."""
+    from app.chat.models import Workspace
+    from app.chat.models import WorkspaceShare
+
+    owned = select(Workspace.id).where(Workspace.user_id == admin.id, Workspace.trashed_at.is_(None))
+    shared = (
+        select(WorkspaceShare.workspace_id)
+        .join(Workspace, Workspace.id == WorkspaceShare.workspace_id)
+        .where(
+            WorkspaceShare.invitee_user_id == admin.id,
+            WorkspaceShare.status == "accepted",
+            Workspace.trashed_at.is_(None),
+        )
+    )
+    return set((await db.execute(owned)).scalars()) | set((await db.execute(shared)).scalars())
+
+
 async def _set_workspaces(
-    db: AsyncSession, connector_id: uuid.UUID, workspace_ids: list[uuid.UUID]
+    db: AsyncSession,
+    connector_id: uuid.UUID,
+    workspace_ids: list[uuid.UUID],
+    *,
+    within: set[uuid.UUID] | None = None,
 ) -> None:
+    """Attach to exactly ``workspace_ids``. With ``within`` (the admin's
+    own workspaces), only those are touched: attachments elsewhere, made
+    by a workspace's owner, are left alone."""
     wanted = set(workspace_ids)
+    if within is not None:
+        wanted &= within
+        workspace_ids = [w for w in workspace_ids if w in within]
     existing = set(
         (
             await db.execute(
@@ -179,6 +215,8 @@ async def _set_workspaces(
             )
         ).scalars()
     )
+    if within is not None:
+        existing &= within
     if existing - wanted:
         await db.execute(
             delete(WorkspaceMcpConnector).where(
@@ -197,9 +235,11 @@ async def _set_workspaces(
 
 
 async def _to_response(
-    db: AsyncSession, c: McpConnector
+    db: AsyncSession, c: McpConnector, admin: User
 ) -> ConnectorResponse:
-    group_ids, user_ids, workspace_ids = await _scope_ids(db, c.id)
+    group_ids, user_ids, all_workspaces = await _scope_ids(db, c.id)
+    mine = await admin_workspace_ids(db, admin)
+    workspace_ids = [w for w in all_workspaces if w in mine]
     return ConnectorResponse(
         id=c.id,
         name=c.name,
@@ -215,6 +255,7 @@ async def _to_response(
         group_ids=group_ids,
         user_ids=user_ids,
         workspace_ids=workspace_ids,
+        other_workspace_count=len(all_workspaces) - len(workspace_ids),
         tools=[
             ToolInfo(
                 name=t.get("name", ""),
@@ -319,13 +360,17 @@ async def list_all_workspaces(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_admin),
 ) -> list[WorkspaceOption]:
-    """Workspaces the admin can attach a restricted connector to. Single-tenant:
-    all workspaces are visible."""
+    """Workspaces the admin can attach a restricted connector to: only
+    the ones they're in (admin privacy G8). Anyone else's workspace: give
+    its owner the connector, and they turn it on in the workspace's
+    settings."""
     from app.chat.models import Workspace
 
+    mine = await admin_workspace_ids(db, user)
     stmt = (
         select(Workspace.id, Workspace.title, User.username)
         .join(User, User.id == Workspace.user_id, isouter=True)
+        .where(Workspace.id.in_(mine or [uuid.uuid4()]))
         .order_by(Workspace.title.asc())
     )
     rows = (await db.execute(stmt)).all()
@@ -339,7 +384,7 @@ async def list_connectors(
 ) -> list[ConnectorResponse]:
     stmt = select(McpConnector).order_by(McpConnector.created_at.asc())
     rows = (await db.execute(stmt)).scalars().all()
-    return [await _to_response(db, c) for c in rows]
+    return [await _to_response(db, c, user) for c in rows]
 
 
 @router.post(
@@ -404,7 +449,7 @@ async def create_connector(
         )
         await _set_groups(db, connector.id, g)
         await _set_users(db, connector.id, u)
-        await _set_workspaces(db, connector.id, w)
+        await _set_workspaces(db, connector.id, w, within=await admin_workspace_ids(db, admin))
         await db.commit()
 
     # Best-effort initial tool discovery so the admin sees what they got.
@@ -413,7 +458,7 @@ async def create_connector(
         await db.refresh(connector)
     except McpError as e:
         logger.info("mcp create: catalog refresh failed for %s: %s", connector.slug, e)
-    return await _to_response(db, connector)
+    return await _to_response(db, connector, admin)
 
 
 @router.patch("/connectors/{connector_id}", response_model=ConnectorResponse)
@@ -462,7 +507,7 @@ async def update_connector(
         _g, _u, w = await _valid_targets(
             db, group_ids=[], user_ids=[], workspace_ids=payload.workspace_ids
         )
-        await _set_workspaces(db, c.id, w)
+        await _set_workspaces(db, c.id, w, within=await admin_workspace_ids(db, user))
     # Going back to global drops any restricted scoping so it can't linger.
     if c.availability == "global":
         await _set_groups(db, c.id, [])
@@ -478,7 +523,7 @@ async def update_connector(
         except McpError as e:
             logger.info("mcp update: catalog refresh failed for %s: %s", c.slug, e)
         await db.refresh(c)
-    return await _to_response(db, c)
+    return await _to_response(db, c, user)
 
 
 @router.delete(
@@ -506,7 +551,7 @@ async def refresh_connector(
     except McpError as e:
         raise HTTPException(status_code=502, detail=str(e)) from e
     await db.refresh(c)
-    return await _to_response(db, c)
+    return await _to_response(db, c, user)
 
 
 class TestRequest(BaseModel):

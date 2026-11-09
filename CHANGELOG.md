@@ -32,6 +32,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Admin → Audit no longer shows other people's workspace, note or item titles, file names, device names or credential names: rows keep ids, kinds and counts. Older rows were cleaned up the same way.
 - Admin → Audit no longer lists every AI tool call: only calls that change something or reach someone (adding an event, sending mail, saving to memory, making a file, connector tools, anything you approved). Your own chat still shows every call.
 - A sign-in for an account that doesn't exist is logged as the first two characters and the length of what was typed, in case it was a password.
+<!-- Admin privacy, AP7 -->
+- Admin → Storage lists damaged or missing files by kind, size and owner, without their names. Each owner gets a notification naming their own files, and the admins' alert gives a count only.
+- Admin → Connectors only lists and attaches to workspaces you're in. For someone else's workspace, give its owner the connector and they turn it on in the workspace's settings. A workspace's owner and admins can now turn off a connector an admin turned on there.
+- Admin → Forms lists reported forms and a count of link forms, not every link form's title and owner.
 
 ## [0.34.0] - 2026-11-09
 

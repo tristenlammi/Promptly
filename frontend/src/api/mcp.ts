@@ -31,7 +31,10 @@ export interface McpConnector {
   allowed_tools: string[] | null;
   group_ids: string[];
   user_ids: string[];
+  /** Workspaces you're in that it's turned on in. */
   workspace_ids: string[];
+  /** Other people's workspaces whose owners turned it on (count only). */
+  other_workspace_count?: number;
   tools: McpToolInfo[];
   tools_refreshed_at: string | null;
   /** Health — refreshes and live calls from chat, commands and
@@ -137,7 +140,8 @@ export const mcpApi = {
     return data;
   },
 
-  // All workspaces (id + title + owner) — feeds the restricted-scope selector.
+  // Workspaces you're in (id + title + owner) — feeds the restricted-scope
+  // selector. Anyone else's workspace is theirs to turn it on in.
   async listWorkspaceOptions(): Promise<WorkspaceOption[]> {
     const { data } = await apiClient.get<WorkspaceOption[]>(
       "/admin/mcp/workspaces"

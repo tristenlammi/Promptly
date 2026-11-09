@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth.audit import ext_of
 from app.auth.deps import require_admin
 from app.auth.models import User
 from app.database import get_db
@@ -70,7 +71,7 @@ async def storage_health(
             select(UserFile, User.username)
             .join(User, User.id == UserFile.user_id, isouter=True)
             .where(UserFile.blob_state.in_(("missing", "damaged")))
-            .order_by(UserFile.blob_state, UserFile.filename)
+            .order_by(UserFile.blob_state, User.username, UserFile.id)
             .limit(200)
         )
     ).all()
@@ -95,9 +96,13 @@ async def storage_health(
         },
         "checksums": checksums,
         "files": {"canonical": total, "hashed": hashed, "unhashed": total - hashed, "verified_30d": verified_30d},
+        # A problem file's kind (its extension), size and owner, never its
+        # name: the name is the owner's content (admin privacy G6). The
+        # owner is told by the storage check, and the admin restores it by
+        # its storage path.
         "problems": [
             {
-                "id": str(f.id), "filename": f.filename, "owner": username, "state": f.blob_state,
+                "id": str(f.id), "kind": ext_of(f.filename), "owner": username, "state": f.blob_state,
                 "size_bytes": f.size_bytes, "verified_at": f.verified_at.isoformat() if f.verified_at else None,
                 "storage_path": f.storage_path, "trashed": f.trashed_at is not None,
             }
