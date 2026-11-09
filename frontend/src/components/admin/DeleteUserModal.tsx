@@ -11,15 +11,13 @@ interface DeleteUserModalProps {
   open: boolean;
   userId: string | null;
   username: string;
-  /** Active admins — always eligible to take over a workspace. */
-  adminOptions: { id: string; username: string }[];
   /** Offered as the safer alternative when the account is still active. */
   onDisableInstead?: () => Promise<void>;
   onConfirm: (payload: DeleteUserPayload) => Promise<void> | void;
   onClose: () => void;
 }
 
-/** ``""`` = this workspace goes with the user (only allowed when solo). */
+/** Shared workspace id -> the member picked to take it over. */
 type Choice = Record<string, string>;
 
 const selectCls = cn(
@@ -28,16 +26,17 @@ const selectCls = cn(
 );
 
 /**
- * Offboarding, not just "delete". A user's workspaces hold their
- * collaborators' work too, so every workspace other people use must get a
- * new owner before the account can go (the server refuses otherwise). The
- * admin types the username to confirm, and is offered "Disable instead".
+ * Offboarding, not just "delete". A user's shared workspaces hold their
+ * collaborators' work too, so each goes to one of its members who can edit
+ * it (the server suggests who; the admin can pick another member). Private
+ * workspaces are only counted: they're deleted with the account, and the
+ * admin never sees their names or takes them over. The admin types the
+ * username to confirm, and is offered "Disable instead".
  */
 export function DeleteUserModal({
   open,
   userId,
   username,
-  adminOptions,
   onDisableInstead,
   onConfirm,
   onClose,
@@ -65,22 +64,11 @@ export function DeleteUserModal({
     }
   }, [open]);
 
-  const workspaces = preview.data?.workspaces ?? [];
-  const shared = workspaces.filter((w) => w.members.length > 0);
-  const missing = shared.filter((w) => !owners[w.id]);
+  const shared = preview.data?.workspaces ?? [];
+  const privateCount = preview.data?.private_workspace_count ?? 0;
   const confirmed = typed.trim() === username;
   const canDelete =
-    !busy && preview.isSuccess && !preview.data.is_admin && missing.length === 0 && confirmed;
-
-  // A workspace can go to one of its members or to any active admin.
-  const candidates = (w: (typeof workspaces)[number]) => {
-    const seen = new Set<string>();
-    return [...w.members, ...adminOptions].filter((u) => {
-      if (u.id === userId || seen.has(u.id)) return false;
-      seen.add(u.id);
-      return true;
-    });
-  };
+    !busy && preview.isSuccess && !preview.data.is_admin && confirmed;
 
   const handleClose = () => {
     if (busy) return;
@@ -103,8 +91,12 @@ export function DeleteUserModal({
     run(() =>
       onConfirm({
         confirm_username: typed.trim(),
+        // Only where the admin picked someone other than the suggested
+        // member; the server hands the rest to the suggested one.
         transfers: Object.fromEntries(
-          Object.entries(owners).filter(([, v]) => v)
+          Object.entries(owners).filter(
+            ([id, v]) => v && v !== shared.find((w) => w.id === id)?.heirs[0]?.id
+          )
         ),
       })
     );
@@ -114,7 +106,7 @@ export function DeleteUserModal({
       open={open}
       onClose={handleClose}
       title="Delete user"
-      description="Hand over anything the team still needs, then delete."
+      description="Their shared workspaces stay with the people in them."
       widthClass="max-w-lg"
       footer={
         <>
@@ -213,46 +205,74 @@ export function DeleteUserModal({
                 account instead.
               </p>
 
-              {workspaces.length > 0 && (
+              {shared.length > 0 && (
                 <div className="space-y-2">
-                  <p className="font-medium">Their workspaces</p>
-                  {workspaces.map((w) => {
-                    const solo = w.members.length === 0;
+                  <p className="font-medium">
+                    Shared workspaces ({shared.length})
+                  </p>
+                  <p className="text-[var(--text-muted)]">
+                    Each one moves to a member who can edit it, with
+                    everyone&apos;s notes and files.
+                  </p>
+                  {shared.map((w, i) => {
+                    const label = w.title ?? `Shared workspace ${i + 1}`;
+                    const people = `${w.member_count} other member${w.member_count === 1 ? "" : "s"}`;
+                    if (w.heirs.length === 0) {
+                      return (
+                        <p key={w.id} className="text-[var(--text-muted)]">
+                          <span className="text-[var(--text)]">{label}</span> ·{" "}
+                          {people}. Nobody else in it can edit, so it will be
+                          deleted.
+                        </p>
+                      );
+                    }
+                    if (w.heirs.length === 1) {
+                      return (
+                        <p key={w.id} className="text-[var(--text-muted)]">
+                          <span className="text-[var(--text)]">{label}</span> ·{" "}
+                          {people}. Goes to{" "}
+                          <span className="font-medium text-[var(--text)]">
+                            {w.heirs[0].username}
+                          </span>
+                          .
+                        </p>
+                      );
+                    }
                     return (
                       <label key={w.id} className="block space-y-1">
                         <span className="block text-[var(--text-muted)]">
-                          {w.title}
-                          {solo
-                            ? " · only they use it"
-                            : ` · ${w.members.length} member${w.members.length === 1 ? "" : "s"}`}
+                          <span className="text-[var(--text)]">{label}</span> ·{" "}
+                          {people}. Goes to:
                         </span>
                         <select
                           className={selectCls}
-                          value={owners[w.id] ?? ""}
+                          value={owners[w.id] ?? w.heirs[0].id}
                           onChange={(e) =>
                             setOwners((o) => ({ ...o, [w.id]: e.target.value }))
                           }
                         >
-                          <option value="">
-                            {solo ? "Delete it with the account" : "Choose a new owner…"}
-                          </option>
-                          {candidates(w).map((u) => (
+                          {w.heirs.map((u, n) => (
                             <option key={u.id} value={u.id}>
-                              Transfer to {u.username}
+                              {u.username}
+                              {n === 0 ? " (suggested)" : ""}
                             </option>
                           ))}
                         </select>
                       </label>
                     );
                   })}
-                  {missing.length > 0 && (
-                    <p className="text-[var(--text-muted)]">
-                      Other people work in{" "}
-                      {missing.map((w) => w.title).join(", ")} — pick who
-                      takes it over. Their notes and files move with it.
-                    </p>
-                  )}
                 </div>
+              )}
+
+              {privateCount > 0 && (
+                <p>
+                  {privateCount === 1
+                    ? "1 private workspace"
+                    : `${privateCount} private workspaces`}{" "}
+                  will be deleted with the account. If they want to keep{" "}
+                  {privateCount === 1 ? "it" : "them"}, ask them to use Export
+                  my library (Files, then Import &amp; export) first.
+                </p>
               )}
 
               <label className="block space-y-1">

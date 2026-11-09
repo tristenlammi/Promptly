@@ -7,6 +7,7 @@ owner (and a member) and check what survives and who owns it.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -63,15 +64,17 @@ async def team(db, tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_a_shared_workspace_must_be_handed_over_first(db, team):
-    leaver, _member, ws, _note = team
-    ws_id = ws.id
+async def test_a_shared_workspace_goes_to_its_member_by_default(db, team):
+    """No pick needed: the member who can edit it takes it over."""
+    leaver, member, ws, note = team
+    ws_id, note_id, member_id = ws.id, note.id, member.id
 
-    with pytest.raises(DeletionRefused, match="Team"):
-        await purge_user(db, leaver)
-    await db.rollback()
+    assert await purge_user(db, leaver) is True
 
-    assert await db.get(Workspace, ws_id) is not None
+    db.expire_all()
+    ws = await db.get(Workspace, ws_id)
+    assert ws is not None and ws.user_id == member_id
+    assert (await db.get(UserFile, note_id)).user_id == member_id
 
 
 @pytest.mark.asyncio
@@ -99,12 +102,20 @@ async def test_transfer_keeps_the_teams_work(db, team):
 
 
 @pytest.mark.asyncio
-async def test_new_owner_must_be_a_member_or_admin(db, team):
+async def test_new_owner_must_be_a_member_who_can_edit(db, team):
+    """Nobody outside the workspace can be handed it: not a stranger, and
+    not the server admin (admin privacy audit L2)."""
     leaver, _member, ws, _note = team
     stranger = await _user(db, "stranger")
+    admin = await _user(db, "boss", role="admin")
+    ws_id, leaver_id = ws.id, leaver.id
 
-    with pytest.raises(DeletionRefused, match="members or an admin"):
-        await purge_user(db, leaver, transfers={ws.id: stranger.id})
+    for outsider_id in (stranger.id, admin.id):
+        leaver = await db.get(User, leaver_id)
+        with pytest.raises(DeletionRefused, match="members who can edit"):
+            await purge_user(db, leaver, transfers={ws_id: outsider_id})
+        await db.rollback()
+    assert (await db.get(Workspace, ws_id)).user_id == leaver_id
 
 
 @pytest.mark.asyncio
@@ -159,10 +170,120 @@ async def test_admin_endpoint_requires_typed_confirmation(db, user, team):
     assert e.value.status_code == 400
 
     with pytest.raises(HTTPException) as e:
-        await delete_user(leaver_id, req, _DeleteUserRequest(confirm_username=leaver_name), db=db, actor=user)
-    assert e.value.status_code == 409  # shared workspace not handed over
+        await delete_user(
+            leaver_id, req,
+            _DeleteUserRequest(confirm_username=leaver_name, transfers={ws.id: user.id}),
+            db=db, actor=user,
+        )
+    assert e.value.status_code == 409  # the deleting admin isn't a member
 
     await db.refresh(user)
     with pytest.raises(HTTPException) as e:
         await delete_user(admin_id, req, _DeleteUserRequest(confirm_username=admin_name), db=db, actor=user)
     assert e.value.status_code == 403 and "Change their role" in e.value.detail
+
+
+# ------------------------------------------------- admin privacy (AP4, L2/G7)
+
+
+async def _ws(db, owner, title, members=()):
+    ws = Workspace(user_id=owner.id, title=title)
+    db.add(ws)
+    await db.flush()
+    for i, (m, role) in enumerate(members):
+        db.add(WorkspaceShare(
+            workspace_id=ws.id, inviter_user_id=owner.id, invitee_user_id=m.id,
+            status="accepted", role=role,
+            accepted_at=datetime.now(timezone.utc) - timedelta(days=30 - i),
+        ))
+    await db.commit()
+    return ws
+
+
+@pytest.mark.asyncio
+async def test_a_private_workspace_can_never_be_handed_over(db, tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "UPLOAD_ROOT", tmp_path.resolve())
+    leaver = await _user(db, "leaver")
+    admin = await _user(db, "boss", role="admin")
+    diary = await _ws(db, leaver, "Diary")
+    diary_id, leaver_id, admin_id = diary.id, leaver.id, admin.id
+
+    with pytest.raises(DeletionRefused, match="shares with others"):
+        await purge_user(db, leaver, transfers={diary_id: admin_id})
+    await db.rollback()
+
+    assert await purge_user(db, await db.get(User, leaver_id)) is True
+    db.expire_all()
+    assert await db.get(Workspace, diary_id) is None
+
+
+@pytest.mark.asyncio
+async def test_the_heir_is_the_longest_standing_admin_then_editor(db, tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "UPLOAD_ROOT", tmp_path.resolve())
+    leaver = await _user(db, "leaver")
+    viewer = await _user(db, "viewer")
+    old_editor = await _user(db, "oldeditor")
+    new_editor = await _user(db, "neweditor")
+    ws_admin = await _user(db, "wsadmin")
+    only_viewers = await _user(db, "watcher")
+    # Joined in this order: viewer, old editor, new editor, workspace admin.
+    team = await _ws(db, leaver, "Team", [(viewer, "viewer"), (old_editor, "editor"),
+                                          (new_editor, "editor"), (ws_admin, "admin")])
+    editors = await _ws(db, leaver, "Editors", [(new_editor, "editor"), (old_editor, "editor")])
+    readers = await _ws(db, leaver, "Readers", [(only_viewers, "viewer")])
+    team_id, editors_id, readers_id = team.id, editors.id, readers.id
+    ws_admin_id, new_editor_id = ws_admin.id, new_editor.id
+
+    assert await purge_user(db, leaver) is True
+
+    db.expire_all()
+    assert (await db.get(Workspace, team_id)).user_id == ws_admin_id
+    assert (await db.get(Workspace, editors_id)).user_id == new_editor_id  # joined first there
+    # Nobody else in it can edit: it goes with the account.
+    assert await db.get(Workspace, readers_id) is None
+
+
+@pytest.mark.asyncio
+async def test_the_admin_may_pick_another_member_who_can_edit(db, tmp_path, monkeypatch):
+    monkeypatch.setattr(storage, "UPLOAD_ROOT", tmp_path.resolve())
+    leaver = await _user(db, "leaver")
+    first = await _user(db, "first")
+    second = await _user(db, "second")
+    viewer = await _user(db, "viewer")
+    ws = await _ws(db, leaver, "Team", [(first, "editor"), (second, "editor"), (viewer, "viewer")])
+    ws_id, second_id, viewer_id, leaver_id = ws.id, second.id, viewer.id, leaver.id
+
+    with pytest.raises(DeletionRefused, match="members who can edit"):
+        await purge_user(db, leaver, transfers={ws_id: viewer_id})
+    await db.rollback()
+
+    leaver = await db.get(User, leaver_id)
+    assert await purge_user(db, leaver, transfers={ws_id: second_id}) is True
+    db.expire_all()
+    assert (await db.get(Workspace, ws_id)).user_id == second_id
+
+
+@pytest.mark.asyncio
+async def test_the_preview_counts_private_workspaces_and_names_only_ones_the_admin_is_in(db, tmp_path, monkeypatch):
+    from app.admin.router import user_deletion_preview
+
+    monkeypatch.setattr(storage, "UPLOAD_ROOT", tmp_path.resolve())
+    leaver = await _user(db, "leaver")
+    admin = await _user(db, "boss", role="admin")
+    colleague = await _user(db, "colleague")
+    await _ws(db, leaver, "Biopsy results")
+    await _ws(db, leaver, "Private plans")
+    await _ws(db, leaver, "Their team", [(colleague, "editor")])
+    await _ws(db, leaver, "Ops", [(admin, "editor"), (colleague, "viewer")])
+
+    out = await user_deletion_preview(leaver.id, db=db, actor=admin)
+
+    assert out.private_workspace_count == 2
+    body = out.model_dump_json()
+    for secret in ("Biopsy results", "Private plans", "Their team"):
+        assert secret not in body
+    by_title = {w.title: w for w in out.workspaces}
+    assert set(by_title) == {None, "Ops"}
+    assert [h.username for h in by_title[None].heirs] == [colleague.username]
+    assert by_title["Ops"].member_count == 2
+    assert [h.username for h in by_title["Ops"].heirs] == [admin.username]

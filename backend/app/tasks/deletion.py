@@ -8,8 +8,14 @@ the workspace chats they'd started. All of it went with no record.
 
 Now deletion is an offboarding step:
 
-* workspaces that have other members must be handed to a new owner first
-  (:func:`app.workspaces.ownership.transfer_workspace`); the admin picks who;
+* a workspace that other people work in goes to one of them
+  (:func:`app.workspaces.ownership.transfer_workspace`): the longest-standing
+  member who can edit it (workspace admins before editors), or another such
+  member the admin picks. With nobody who can edit it, it's deleted;
+* a private workspace (nobody else in it) always goes with the account. The
+  server admin can never take it over, or take over a shared one they
+  weren't in (admin privacy audit L2); someone who wants to keep their own
+  work exports it first (Export my library);
 * invitations the user sent and workspace-visible chats they started in
   workspaces that survive are handed to that workspace's owner;
 * the user's own bytes are tombstoned, not unlinked — recoverable for 14 days;
@@ -50,6 +56,14 @@ class OwnedWorkspace:
     id: uuid.UUID
     title: str
     member_ids: list[uuid.UUID]
+    # Members who can edit it (workspace admins, then editors; each the
+    # longest-standing first; active accounts before disabled ones). The
+    # first one takes it over unless the admin picks another.
+    heir_ids: list[uuid.UUID] = field(default_factory=list)
+
+    @property
+    def shared(self) -> bool:
+        return bool(self.member_ids)
 
 
 @dataclass
@@ -77,9 +91,34 @@ async def deletion_preview(db: AsyncSession, user: User) -> DeletionPreview:
         await db.execute(select(Workspace).where(Workspace.user_id == user.id).order_by(Workspace.title))
     ).scalars():
         out.workspaces.append(
-            OwnedWorkspace(id=ws.id, title=ws.title, member_ids=await member_ids(db, ws.id))
+            OwnedWorkspace(
+                id=ws.id,
+                title=ws.title,
+                member_ids=await member_ids(db, ws.id),
+                heir_ids=await _heirs(db, ws.id),
+            )
         )
     return out
+
+
+async def _heirs(db: AsyncSession, workspace_id: uuid.UUID) -> list[uuid.UUID]:
+    """Accepted members who can edit ``workspace_id``, best heir first."""
+    rows = await db.execute(
+        select(WorkspaceShare.invitee_user_id)
+        .join(User, User.id == WorkspaceShare.invitee_user_id)
+        .where(
+            WorkspaceShare.workspace_id == workspace_id,
+            WorkspaceShare.status == "accepted",
+            WorkspaceShare.role.in_(("admin", "editor")),
+        )
+        .order_by(
+            User.disabled.asc(),
+            (WorkspaceShare.role != "admin").asc(),
+            func.coalesce(WorkspaceShare.accepted_at, WorkspaceShare.created_at).asc(),
+            WorkspaceShare.created_at.asc(),
+        )
+    )
+    return [r for (r,) in rows]
 
 
 async def purge_user(
@@ -92,45 +131,49 @@ async def purge_user(
 ) -> bool:
     """Hard-delete ``user`` after handing shared work to its new owners.
 
-    ``transfers`` maps each owned workspace to keep onto its new owner (a
-    member of that workspace, or an admin). A workspace with other members
-    that isn't in ``transfers`` refuses the whole deletion — losing a team's
-    work must never be the default. Workspaces nobody else uses go with the
-    user unless transferred.
+    Every workspace other people work in goes to one of its members who can
+    edit it: the first of :attr:`OwnedWorkspace.heir_ids`, unless
+    ``transfers`` (workspace id -> member id) picks another of them. One
+    with no such member is deleted. Private workspaces always go with the
+    account; ``transfers`` can't name one, and can't name anyone outside the
+    workspace, the server admin included.
 
     Returns ``False`` for a protected (admin) account; raises
     :class:`DeletionRefused` for a bad request. Commits.
     """
     if _protected(user):
-        logger.warning("refusing to purge admin account %s (%s)", user.id, user.email)
+        logger.warning("refusing to purge admin account %s", user.id)
         return False
     transfers = dict(transfers or {})
     uid = user.id
 
     preview = await deletion_preview(db, user)
     owned = {w.id: w for w in preview.workspaces}
-    unknown = set(transfers) - set(owned)
-    if unknown:
-        raise DeletionRefused("A workspace to transfer isn't owned by this user.")
-    stranded = [w.title for w in preview.workspaces if w.member_ids and w.id not in transfers]
-    if stranded:
-        raise DeletionRefused(
-            "Choose a new owner for these shared workspaces first: " + ", ".join(stranded)
-        )
-
-    transferred: list[str] = []
     for ws_id, new_owner_id in transfers.items():
-        new_owner = await db.get(User, new_owner_id)
-        w = owned[ws_id]
-        if new_owner is None or new_owner.id == uid or new_owner.disabled:
-            raise DeletionRefused(f"Pick an active user to own “{w.title}”.")
-        if new_owner.role != "admin" and new_owner.id not in w.member_ids:
+        w = owned.get(ws_id)
+        if w is None or not w.shared:
             raise DeletionRefused(
-                f"The new owner of “{w.title}” must be one of its members or an admin."
+                "Only a workspace this user shares with others can be handed over."
             )
-        ws = await db.get(Workspace, ws_id)
+        if new_owner_id not in w.heir_ids:
+            raise DeletionRefused(
+                "A shared workspace can only go to one of its members who can edit it."
+            )
+
+    transferred = 0
+    for w in preview.workspaces:
+        if not w.shared:
+            continue
+        new_owner_id = transfers.get(w.id) or (w.heir_ids[0] if w.heir_ids else None)
+        if new_owner_id is None:
+            continue  # nobody left who can edit it: it goes with the account
+        new_owner = await db.get(User, new_owner_id)
+        if new_owner is None or new_owner.id == uid:
+            continue
+        ws = await db.get(Workspace, w.id)
         await transfer_workspace(db, ws, new_owner)
-        transferred.append(w.title)
+        transfers[w.id] = new_owner.id
+        transferred += 1
 
     # Invitations they sent to workspaces that survive: hand to the owner,
     # or every member they invited would lose access (inviter FK cascades).
@@ -181,12 +224,12 @@ async def purge_user(
 
     from app.auth.audit import record_event
 
-    deleted_ws = [w.title for w in preview.workspaces if w.id not in transfers]
+    deleted_ws = sum(1 for w in preview.workspaces if w.id not in transfers)
     detail = (
         f"{user.username} <{user.email}> deleted"
         + (f" by {actor.username}" if actor else "")
         + f"; files={int(remaining_files)}"
-        + f"; transferred={len(transferred)}; deleted_workspaces={len(deleted_ws)}"
+        + f"; transferred={transferred}; deleted_workspaces={deleted_ws}"
         + f"; chats_handed_over={handed_chats}"
     )
     await record_event(
@@ -204,10 +247,11 @@ async def purge_user(
     await db.execute(
         _text("DELETE FROM forms WHERE file_id IN (SELECT id FROM files WHERE user_id = :u)"), {"u": uid}
     )
-    # Workspaces still owned here (the solo ones) cascade with the user.
+    # Workspaces still owned here (private ones, and shared ones nobody else
+    # can edit) cascade with the user.
     await db.delete(user)
     await db.commit()
-    logger.info("purged user %s: %s", uid, detail)
+    logger.info("purged user %s: transferred=%d deleted_workspaces=%d", uid, transferred, deleted_ws)
     return True
 
 

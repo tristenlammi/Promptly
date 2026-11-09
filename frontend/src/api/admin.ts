@@ -115,17 +115,23 @@ export interface UserDeletionPreview {
   file_count: number;
   file_bytes: number;
   conversation_count: number;
+  /** Workspaces they share with others. ``title`` is null unless you're a
+   *  member. ``heirs`` can edit it, best first; ``heirs[0]`` takes it over
+   *  unless you pick another. No heirs: it's deleted with the account. */
   workspaces: {
     id: string;
-    title: string;
-    members: { id: string; username: string }[];
+    title: string | null;
+    member_count: number;
+    heirs: { id: string; username: string }[];
   }[];
+  /** Workspaces only they use: deleted with the account, never named. */
+  private_workspace_count: number;
 }
 
 export interface DeleteUserPayload {
   /** Must equal the username (type-to-confirm, enforced server-side). */
   confirm_username: string;
-  /** workspace id -> new owner id, for each owned workspace to keep. */
+  /** Shared workspace id -> the member who takes it over (one of its heirs). */
   transfers: Record<string, string>;
 }
 

@@ -115,7 +115,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Porch and Notes opened inside Promptly keep Promptly's menu: on a big screen they sit in Promptly's layout, and on a phone Porch's pages have Promptly's menu button at the top (Porch's "Back to Promptly" links are gone). Only the installed Porch or Notes app shows just that app.
 <!-- v0.34.0 integration: phone app -->
 - Promptly for Android 1.6.0 brings this release's phone parts: calls that ring like phone calls, Talk on the phone, the Notes widgets and quick capture, and sharing to Porch from other apps.
-
+<!-- Admin privacy, AP4 -->
+- Admin → Users → Delete: shared workspaces no longer need a new owner picked by hand; each says who it goes to, and private ones come with a reminder to ask the person to use Export my library first.
 ### Fixed
 <!-- Calls (DM calls), WP-D5 -->
 - Calls: a 1:1 call no longer ends when one side's connection drops for a moment and comes back (for example moving from Wi-Fi to mobile data). A connection now has 15 seconds to come back before it counts as hanging up.
@@ -135,6 +136,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 ### Security
 <!-- Admin privacy, AP3 -->
 - Custom models: an admin can only add files they can open themselves. Before, any person's file could be added by its id, and everyone using the model could then search it. Other people's files already in a custom model are taken out when the server updates (only the number is logged).
+<!-- Admin privacy, AP4 -->
+- Deleting a user: an admin can no longer take over the person's workspaces. A private workspace is deleted with the account, and a shared one goes to one of its own members who can edit it (the longest-standing workspace admin, then editor; the admin can pick another of them). With nobody else who can edit it, it's deleted.
+- Deleting a user: the confirmation no longer shows the names of their workspaces. Private ones are only counted, and a shared one is named only if you're in it.
 
 ## [0.33.0] - 2026-11-09
 
