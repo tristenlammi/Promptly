@@ -64,7 +64,8 @@ print(base64.b64encode(b.getvalue()).decode())
 test.describe("notes: moving in from Google Keep", () => {
   test("a Keep Takeout comes in with colours, pins, labels, lists, pictures and recordings, once", async ({ alice: page }) => {
     test.setTimeout(240_000);
-    const tag = stamp;
+    // Its own tag: notes-across and notes make a "Gate code <stamp>" too.
+    const tag = `${stamp}k`;
     const zip = keepTakeout(tag);
     const auth = await notesReady(page);
 

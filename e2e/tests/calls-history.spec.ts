@@ -105,6 +105,28 @@ asyncio.run(main())
     .slice(7);
 }
 
+/** Take "Mum" back out of Alice's Contacts (aliceContacts put her there). */
+function removeMum(): void {
+  py(`
+import asyncio, uuid
+import app.db_models  # noqa: F401
+from app.auth.models import User
+from app.database import SessionLocal
+from app.items import service as items
+async def main():
+    async with SessionLocal() as db:
+        alice = await db.get(User, uuid.UUID("${run.users.alice.id}"))
+        for row, doc in await items.list_items(db, alice, "contacts", limit=5, archives=False):
+            d = dict(doc.data or {})
+            kept = [c for c in d.get("contacts", []) if c.get("id") != "mum"]
+            if len(kept) != len(d.get("contacts", [])):
+                d["contacts"] = kept
+                await items.save_data(db, alice, row, doc, d, base_revision=None)
+        await db.commit()
+asyncio.run(main())
+`);
+}
+
 /** Alice's Contacts: Bob as "Margaret Lee", nickname Mum. Returns the file id. */
 function aliceContacts(): string {
   return py(`
@@ -212,6 +234,9 @@ test.describe("Call history and missed calls", () => {
   test.afterAll(() => {
     try {
       callsOn(false);
+      // Leave Alice's Contacts as they were: with Bob saved as "Margaret Lee",
+      // other specs' people pickers show that name instead of his username.
+      removeMum();
     } catch {
       /* the stack went away */
     }

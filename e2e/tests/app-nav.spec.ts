@@ -204,7 +204,7 @@ test.describe("app navigation", () => {
       await button.click();
       const drawer = phone.page.getByRole("dialog", { name: "Navigation menu" });
       await expect(drawer).toBeVisible();
-      await expect(drawer.getByRole("button", { name: "New chat", exact: true })).toBeVisible();
+      await expect(drawer.getByRole("button", { name: "New chat", exact: true }).first()).toBeVisible();
       await drawer.getByRole("link", { name: "Files", exact: true }).click();
       await expect(phone.page).toHaveURL(/\/files$/);
     }
