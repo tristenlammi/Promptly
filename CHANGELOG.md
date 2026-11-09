@@ -32,6 +32,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - After a chat has read something from outside (a web page, an email, a shared file), Promptly asks before it opens a website you didn't give it or its search didn't find ("Promptly wants to open example.com"), and before it runs code. A page could otherwise tell the AI to send your information somewhere in a web address. Sub-agents and automations refuse instead of asking.
 - The code sandbox and the Office converter can no longer call Promptly's own server directly over the internal network they share with it, and big-upload hooks need their secret (no more "it came from inside, so it's fine").
 - Fetching a web page (the AI's page reader, remote images in Mail, automations, link previews) connects to the exact address that was checked, so a site can't switch its DNS to an address inside your network between the check and the request.
+- nginx ignores the visitor address in CF-Connecting-IP when it arrives through Docker's gateway, so a device on your network can't pretend to be someone else to the rate limits. cloudflared should run as a container on Promptly's network (README, "Cloudflare Tunnel").
+- New optional NGINX_BIND in .env picks which address ports 8087/8488 open on (usually the server's LAN address). By default they now open on IPv4 only. The README has a new "Exposure" section: what should be reachable, and how to check from outside on IPv4 and IPv6.
 
 ## [0.35.0] - 2026-11-09
 

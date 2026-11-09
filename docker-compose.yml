@@ -63,9 +63,23 @@ services:
     # this reverse proxy. That's simpler for the user (one URL:
     # http://<host>:8087 serves UI + API) and safer (your
     # database is never exposed on the LAN).
+    #
+    # NGINX_BIND (optional, .env) limits which of the host's addresses the
+    # ports open on. Unset = every IPv4 address (0.0.0.0); IPv6 isn't
+    # published (security review M3). Usually set to the server's LAN
+    # address (e.g. 192.168.1.20), so the LAN reaches it and the machine's
+    # other interfaces don't; 127.0.0.1 only when cloudflared runs on the
+    # host itself and nothing on the LAN needs Promptly. Either way: never
+    # port-forward these ports on your router (README, "Exposure").
     ports:
-      - "${NGINX_HTTP_PORT:-8087}:80"
-      - "${NGINX_HTTPS_PORT:-8488}:443"
+      - target: 80
+        published: "${NGINX_HTTP_PORT:-8087}"
+        host_ip: "${NGINX_BIND:-0.0.0.0}"
+        protocol: tcp
+      - target: 443
+        published: "${NGINX_HTTPS_PORT:-8488}"
+        host_ip: "${NGINX_BIND:-0.0.0.0}"
+        protocol: tcp
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/ssl:/etc/nginx/ssl:ro
@@ -1079,7 +1093,8 @@ services:
         webhook:
           api_key: "${LIVEKIT_API_KEY:-}"
           urls:
-            - "http://127.0.0.1:${NGINX_HTTP_PORT:-8087}/api/calls/webhook"
+            # nginx on this host: wherever NGINX_BIND opened it (loopback when unset).
+            - "http://${NGINX_BIND:-127.0.0.1}:${NGINX_HTTP_PORT:-8087}/api/calls/webhook"
         logging:
           level: info
     cpus: 2
