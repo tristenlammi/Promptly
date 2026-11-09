@@ -451,6 +451,9 @@ class TalkCore(
 
     fun clearNotice() = set { copy(notice = null) }
 
+    /** Something to show briefly ("Using your phone's microphone."). */
+    fun notice(text: String) = ticker.run { set { copy(notice = text) } }
+
     /** A call is ringing or another app took the audio: stop talking and listening,
      *  and say nothing. [resume] picks it up again when the audio comes back. */
     fun yieldAudio() = ticker.run {

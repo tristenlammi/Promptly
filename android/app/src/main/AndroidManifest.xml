@@ -205,6 +205,12 @@
                 <action android:name="android.intent.action.ASSIST" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <!-- Talk phase 2: a headset's or car's Bluetooth voice button (AOSP sends
+                 VOICE_COMMAND for the hands-free voice-recognition command). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
         <activity
             android:name=".assistant.AssistantSettingsActivity"

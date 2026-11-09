@@ -198,13 +198,26 @@ class PhoneSpeaker(route: PlaybackRoute, private val tones: Boolean = true, priv
 /** The phone's audio while a conversation is on: focus (a call or another app's
  *  voice takes it, and Talk waits quietly), call mode for the echo canceller, and
  *  which speaker or headset that uses. Everything is given back at the end. */
-class AudioRoute(context: Context, private val route: PlaybackRoute, private val onYield: (Boolean) -> Unit, private val main: Executor) {
+class AudioRoute(
+    private val context: Context,
+    private val route: PlaybackRoute,
+    private val onYield: (Boolean) -> Unit,
+    private val main: Executor,
+    /** Something to say on the screen once ("Using your phone's microphone."). */
+    private val notice: (String) -> Unit = {},
+    /** Android Auto is connected: never the car's hands-free link (WP-T13). */
+    private val carProjection: () -> Boolean = { false },
+) {
     private val audio = context.getSystemService(AudioManager::class.java)
     private var request: AudioFocusRequest? = null
     private var oldMode: Int? = null
     private var setDevice = false
     private var speakerOn = false
     private var modeListener: Any? = null
+    private var devices: android.media.AudioDeviceCallback? = null
+    private var scoOn = false
+    private var toldMusicOnly = false
+    @Volatile private var opened = false
 
     fun open() {
         val am = audio ?: return
@@ -229,7 +242,16 @@ class AudioRoute(context: Context, private val route: PlaybackRoute, private val
                 oldMode = am.mode
                 runCatching { am.mode = AudioManager.MODE_IN_COMMUNICATION }
             }
-            pickDevice(am)
+            opened = true
+            pickDevice(am, waitForSco = true)
+            // Earbuds connecting, running flat or going out of range: pick again,
+            // without ending the conversation (WP-T13).
+            val cb = object : android.media.AudioDeviceCallback() {
+                override fun onAudioDevicesAdded(added: Array<out AudioDeviceInfo>) = repick()
+                override fun onAudioDevicesRemoved(removed: Array<out AudioDeviceInfo>) = repick()
+            }
+            runCatching { am.registerAudioDeviceCallback(cb, android.os.Handler(android.os.Looper.getMainLooper())) }
+            devices = cb
         }
         if (Build.VERSION.SDK_INT >= 31) {
             val l = AudioManager.OnModeChangedListener { mode ->
@@ -242,27 +264,92 @@ class AudioRoute(context: Context, private val route: PlaybackRoute, private val
     }
 
     /** A headset if one's plugged in or connected, else the loudspeaker (call audio
-     *  would otherwise come out of the earpiece). */
+     *  would otherwise come out of the earpiece). Which one: [RoutePick]. */
     @Suppress("DEPRECATION")
-    private fun pickDevice(am: AudioManager) {
+    private fun pickDevice(am: AudioManager, waitForSco: Boolean) {
+        val outputs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).map { it.type }
         if (Build.VERSION.SDK_INT >= 31) {
-            val devices = am.availableCommunicationDevices
-            val order = listOf(
-                AudioDeviceInfo.TYPE_WIRED_HEADSET, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_BLE_HEADSET,
-                AudioDeviceInfo.TYPE_BLUETOOTH_SCO, AudioDeviceInfo.TYPE_WIRED_HEADPHONES, AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
-            )
-            val pick = order.firstNotNullOfOrNull { type -> devices.firstOrNull { it.type == type } }
-            if (pick != null) setDevice = runCatching { am.setCommunicationDevice(pick) }.getOrDefault(false)
-        } else {
-            val headset = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
-                it.type == AudioDeviceInfo.TYPE_WIRED_HEADSET || it.type == AudioDeviceInfo.TYPE_WIRED_HEADPHONES ||
-                    it.type == AudioDeviceInfo.TYPE_USB_HEADSET || it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO
+            val available = am.availableCommunicationDevices
+            val choice = RoutePick.pick(available.map { it.type }, outputs, carProjection(), Build.VERSION.SDK_INT)
+            val pick = choice.type?.let { t -> available.firstOrNull { it.type == t } }
+            if (pick != null && am.communicationDevice?.id != pick.id) setDevice = runCatching { am.setCommunicationDevice(pick) }.getOrDefault(false) || setDevice
+            tell(choice)
+            return
+        }
+        // Android 10-11: the old Bluetooth hands-free link, waited for so the first
+        // words aren't lost; if it doesn't come up, the phone's microphone.
+        val choice = RoutePick.pick(outputs, outputs, carProjection(), Build.VERSION.SDK_INT)
+        if (choice.legacySco) {
+            if (!scoOn && startSco(am, if (waitForSco) SCO_WAIT_MS else 0L)) {
+                if (speakerOn) {
+                    speakerOn = false
+                    am.isSpeakerphoneOn = false
+                }
+                return
             }
-            if (!headset) {
-                speakerOn = true
-                am.isSpeakerphoneOn = true
+            if (scoOn) return
+        } else if (scoOn) {
+            stopSco(am)
+        }
+        val wantSpeaker = choice.type == null
+        if (wantSpeaker != speakerOn) {
+            speakerOn = wantSpeaker
+            am.isSpeakerphoneOn = wantSpeaker
+        }
+        tell(choice)
+    }
+
+    private fun tell(choice: RoutePick.Choice) {
+        if (choice.musicOnly && !toldMusicOnly) {
+            toldMusicOnly = true
+            notice(RoutePick.MUSIC_ONLY)
+        }
+    }
+
+    /** Devices changed mid-conversation. */
+    private fun repick() {
+        val am = audio ?: return
+        if (!opened) return
+        runCatching { pickDevice(am, waitForSco = false) }
+    }
+
+    /** Android 10-11: bring up the headset's hands-free link, waiting up to [waitMs]
+     *  for it. True once it's connected. */
+    @Suppress("DEPRECATION")
+    private fun startSco(am: AudioManager, waitMs: Long): Boolean {
+        val up = java.util.concurrent.CountDownLatch(1)
+        val receiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: android.content.Intent) {
+                if (intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1) == AudioManager.SCO_AUDIO_STATE_CONNECTED) up.countDown()
             }
         }
+        runCatching { context.registerReceiver(receiver, android.content.IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)) }
+        try {
+            am.startBluetoothSco()
+            am.isBluetoothScoOn = true
+            scoOn = true
+            val ok = waitMs <= 0 || up.await(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+            if (!ok) {
+                stopSco(am)
+                return false
+            }
+            return true
+        } catch (e: Exception) {
+            Log.w(TAG, "No Bluetooth hands-free link", e)
+            stopSco(am)
+            return false
+        } finally {
+            runCatching { context.unregisterReceiver(receiver) }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun stopSco(am: AudioManager) {
+        runCatching {
+            am.isBluetoothScoOn = false
+            am.stopBluetoothSco()
+        }
+        scoOn = false
     }
 
     /** Take the audio back after a call or another app (the Unmute button). */
@@ -274,6 +361,10 @@ class AudioRoute(context: Context, private val route: PlaybackRoute, private val
     @Suppress("DEPRECATION")
     fun close() {
         val am = audio ?: return
+        opened = false
+        devices?.let { runCatching { am.unregisterAudioDeviceCallback(it) } }
+        devices = null
+        if (scoOn) stopSco(am)
         request?.let { runCatching { am.abandonAudioFocusRequest(it) } }
         request = null
         if (Build.VERSION.SDK_INT >= 31) {
@@ -288,6 +379,9 @@ class AudioRoute(context: Context, private val route: PlaybackRoute, private val
         speakerOn = false
     }
 }
+
+/** How long Android 10-11 waits for a Bluetooth headset's hands-free link. */
+private const val SCO_WAIT_MS = 3000L
 
 /** RMS of a frame, 0..1. */
 fun levelOf(frame: ShortArray, count: Int): Double {

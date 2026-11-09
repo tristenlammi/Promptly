@@ -59,10 +59,17 @@ object Talk {
     val live: Boolean get() = _ui.value.phase.let { it != Phase.OFF && it != Phase.ENDED } || starting || current != null
 
     // ------------------------------------------------------------ settings
-    /** Hands-free conversations (Talk), or one question at a time (the old sheet). */
-    fun enabled(context: Context): Boolean = prefs(context).getBoolean("live", true)
+    /** Tap to talk on this phone (WP-T14: what the old "Hands-free conversations"
+     *  switch became). Off: the account's own choice (hands-free by default). The
+     *  one-question-at-a-time sheet is only the fallback now, for a server
+     *  without Talk. */
+    fun tapToTalk(context: Context): Boolean = prefs(context).getBoolean("tap", false)
 
-    fun setEnabled(context: Context, on: Boolean) = prefs(context).edit().putBoolean("live", on).apply()
+    fun setTapToTalk(context: Context, on: Boolean) = prefs(context).edit().putBoolean("tap", on).apply()
+
+    /** Account -> Voice: may a Bluetooth button start Talk while the phone is locked?
+     *  Remembered from the server each time Talk starts (WP-T13; off by default). */
+    fun bluetoothLocked(context: Context): Boolean = prefs(context).getBoolean("bt_locked", false)
 
     fun playbackRoute(context: Context): PlaybackRoute =
         if (prefs(context).getString("route", "call") == "assistant") PlaybackRoute.ASSISTANT else PlaybackRoute.CALL
@@ -75,7 +82,9 @@ object Talk {
     // ------------------------------------------------------------ starting
     /** Start a conversation. Call it from the visible sheet: the microphone's
      *  foreground service may only start from there (or the tile, a notification). */
-    fun start(context: Context) {
+    /** [locked]: started by a car's or headset's Bluetooth button on a locked phone,
+     *  which you allowed in Account -> Voice: private reads stay behind the lock. */
+    fun start(context: Context, locked: Boolean = false) {
         val app = context.applicationContext
         synchronized(this) {
             if (live) return
@@ -85,7 +94,7 @@ object Talk {
         VoiceTrail.note("talk", "starting", _ui.value.startedAt)
         thread(name = "talk-start") {
             try {
-                begin(app)
+                begin(app, locked)
             } catch (e: Exception) {
                 Log.w(TAG, "Talk couldn't start", e)
                 failed(app, TalkProblem("failed", "Talk couldn't start.", true))
@@ -95,7 +104,7 @@ object Talk {
         }
     }
 
-    private fun begin(app: Context) {
+    private fun begin(app: Context, locked: Boolean) {
         val account = Store(app).account
         if (account == null) {
             failed(app, TalkProblem("not_linked", "Link this phone to your Promptly first.", false))
@@ -125,9 +134,14 @@ object Talk {
             return
         }
         val captions = config.optJSONObject("prefs")?.optBoolean("captions", true) ?: true
+        prefs(app).edit().putBoolean("bt_locked", config.optJSONObject("prefs")?.optBoolean("bluetooth_locked", false) ?: false).apply()
 
         // The phone's audio, then the microphone (call mode before a call-mode recording).
-        val audio = AudioRoute(app, playbackRoute(app), { lost -> core?.let { if (lost) it.yieldAudio() else it.resume() } }, { Handler(Looper.getMainLooper()).post(it) })
+        val audio = AudioRoute(
+            app, playbackRoute(app), { lost -> core?.let { if (lost) it.yieldAudio() else it.resume() } }, { Handler(Looper.getMainLooper()).post(it) },
+            notice = { said -> core?.notice(said) },
+            carProjection = { carConnected(app) },
+        )
         audio.open()
         val source = TalkDebug.mic(app) ?: PhoneMic.open()
         if (source == null) {
@@ -151,7 +165,11 @@ object Talk {
             hello = {
                 // From the car's screen nothing can be pressed on the phone.
                 val caps = if (inCar) TalkProtocol.PHONE_CAPS.filter { it !in setOf("dial", "message", "open_app") } else TalkProtocol.PHONE_CAPS
-                TalkProtocol.hello(caps, TimeZone.getDefault().id, Locale.getDefault().toLanguageTag())
+                TalkProtocol.hello(
+                    caps, TimeZone.getDefault().id, Locale.getDefault().toLanguageTag(),
+                    turnMode = if (tapToTalk(app)) "tap" else null,
+                    locked = locked,
+                )
             },
         )
         val session = Live(made, tick, out, audio, source)
@@ -179,6 +197,10 @@ object Talk {
             }
         }
     }
+
+    /** Android Auto is connected (P Maps on the car's screen, or the phone in car mode). */
+    fun carConnected(context: Context): Boolean =
+        Voice.inCar || context.getSystemService(android.app.UiModeManager::class.java)?.currentModeType == android.content.res.Configuration.UI_MODE_TYPE_CAR
 
     private fun failed(app: Context, problem: TalkProblem) {
         _ui.value = _ui.value.copy(phase = Phase.ENDED, problem = problem, endReason = "error")

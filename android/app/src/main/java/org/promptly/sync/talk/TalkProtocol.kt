@@ -48,7 +48,18 @@ object TalkProtocol {
      *  needs the phone's screen. */
     val CAR_CAPS = listOf("timer", "alarm", "navigate")
 
-    fun hello(caps: List<String>, tz: String?, lang: String?, play: String = "pcm16", codec: String = "pcm16"): JSONObject =
+    /** [turnMode]: "tap" when this phone is set to Tap to talk (else the account's
+     *  own choice). [locked]: started from a Bluetooth button on a locked phone
+     *  (WP-T13): private reads stay behind the lock. */
+    fun hello(
+        caps: List<String>,
+        tz: String?,
+        lang: String?,
+        play: String = "pcm16",
+        codec: String = "pcm16",
+        turnMode: String? = null,
+        locked: Boolean = false,
+    ): JSONObject =
         JSONObject()
             .put("type", "hello")
             .put("codec", codec)
@@ -59,6 +70,8 @@ object TalkProtocol {
             .apply {
                 tz?.let { put("tz", it) }
                 lang?.let { put("lang", it) }
+                turnMode?.let { put("turn_mode", it) }
+                if (locked) put("locked", true)
             }
 
     /** The car's hello (WP-T8): one press, one turn, and no talking over it (road
