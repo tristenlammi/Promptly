@@ -31,6 +31,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Updated python-jose to 3.4.0 and cryptography to 44.0.1 for their security fixes.
 - After a chat has read something from outside (a web page, an email, a shared file), Promptly asks before it opens a website you didn't give it or its search didn't find ("Promptly wants to open example.com"), and before it runs code. A page could otherwise tell the AI to send your information somewhere in a web address. Sub-agents and automations refuse instead of asking.
 - The code sandbox and the Office converter can no longer call Promptly's own server directly over the internal network they share with it, and big-upload hooks need their secret (no more "it came from inside, so it's fine").
+- Fetching a web page (the AI's page reader, remote images in Mail, automations, link previews) connects to the exact address that was checked, so a site can't switch its DNS to an address inside your network between the check and the request.
 
 ## [0.35.0] - 2026-11-09
 
