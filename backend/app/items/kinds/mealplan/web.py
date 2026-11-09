@@ -47,7 +47,8 @@ async def fetch_page(url: str) -> str:
     except ResponseTooLargeError as e:
         raise ImportFailed("That page is too big to import.") from e
     except Exception as e:  # noqa: BLE001 — timeouts, TLS, DNS…
-        logger.info("recipe fetch failed for %s: %r", u, e)
+        # Not the recipe's address (admin privacy G3).
+        logger.info("recipe fetch failed: %s", type(e).__name__)
         raise ImportFailed("Couldn't reach that page. Check the link, or paste the recipe text instead.") from e
     if res.status_code >= 400:
         raise ImportFailed(f"The site answered {res.status_code}. Some sites block imports — paste the recipe text instead.")

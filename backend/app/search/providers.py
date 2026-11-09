@@ -789,13 +789,8 @@ async def run_search(
         raise SearchError(f"Unsupported search provider type: {provider.type!r}")
 
     n = _result_count(provider, count)
-    logger.info(
-        "Running search via %s (provider=%s) n=%d q=%r",
-        provider.type,
-        provider.name,
-        n,
-        query[:80],
-    )
+    # Not the query: it's what someone is looking for (admin privacy).
+    logger.info("Running search via %s (provider=%s) n=%d", provider.type, provider.name, n)
     raw = await adapter(provider, query, n)
     deduped = _dedupe_results(raw)
     if len(deduped) != len(raw):

@@ -292,8 +292,8 @@ async def run_search_with_failover(
         # healthy provider on its own.
         _note_soft_failure(sp.id, sp.type)
         logger.info(
-            "search failover: provider=%s returned 0 results for %r; %d left",
-            sp.type, query[:80], len(candidates) - i - 1,
+            "search failover: provider=%s returned 0 results; %d left",
+            sp.type, len(candidates) - i - 1,
         )
 
     if first_reachable is None and last_error is not None:

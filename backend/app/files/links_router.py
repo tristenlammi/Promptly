@@ -143,7 +143,7 @@ async def unfurl(
             try:
                 parser.feed(resp.text[:_MAX_HTML_BYTES])
             except Exception:  # noqa: BLE001 — never let bad markup 500
-                logger.debug("unfurl parse error for %s", url, exc_info=True)
+                logger.debug("unfurl parse error", exc_info=True)
             title = (
                 parser.og.get("title")
                 or (parser.title or "").strip()
@@ -161,9 +161,10 @@ async def unfurl(
                 or None,
             )
     except (UnsafeURLError, ResponseTooLargeError) as e:
-        logger.info("unfurl declined for %s: %s", url, e)
+        # Not the link: it's what someone pasted (admin privacy G3).
+        logger.info("unfurl declined: %s", type(e).__name__)
     except Exception as e:  # noqa: BLE001 — a preview is best-effort
-        logger.info("unfurl failed for %s: %s", url, type(e).__name__)
+        logger.info("unfurl failed: %s", type(e).__name__)
 
     # Crude cap: clear wholesale rather than track LRU order — the cache is
     # a nicety, not a correctness requirement.

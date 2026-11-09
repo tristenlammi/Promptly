@@ -147,7 +147,8 @@ async def _store_media(db: AsyncSession, user: User, pkg: apkg.Package, path: st
                 pkg.warnings.append(str(e))
                 break
         except Exception:  # noqa: BLE001 — one bad file mustn't sink the import
-            logger.exception("flashcards: storing media %r failed", name)
+            # Not the file's name (admin privacy G3).
+            logger.exception("flashcards: storing a media file failed")
             await db.rollback()
             failed += 1
     return ids, failed

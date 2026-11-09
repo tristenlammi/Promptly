@@ -26,6 +26,7 @@ from app.auth.models import User
 from app.database import get_db
 from app.observability.capture import fingerprint
 from app.observability.models import ErrorEvent
+from app.observability.scrub import scrub_stack, scrub_text
 
 logger = logging.getLogger("promptly.observability.phone")
 
@@ -35,7 +36,6 @@ _bearer = HTTPBearer(auto_error=False)
 LOGGER = "android"
 CONSOLE = "/admin?tab=console&view=errors&source=android"
 _DAILY_LIMIT = 100
-_MOST_ALERTS = 3  # at once: a phone's first report can hold old crashes
 _OLDEST = timedelta(days=60)
 _KINDS = {
     "crash": "Crash",
@@ -44,7 +44,9 @@ _KINDS = {
     "memory": "Out of memory",
     "startup": "Failed to start",
 }
-# An exception's message can quote a URL or a request. Nothing secret stays in it.
+# An exception's message can quote a URL or a request. Nothing secret stays in
+# it, and no one's content: URL queries and long quoted strings come out too
+# (admin privacy audit G5).
 _SECRET = re.compile(
     r"(?i)\b(password|passwd|token|secret|api[_-]?key|key|code|authorization)\b(\s*[=:]\s*)(?:basic\s+|bearer\s+)?[^\s&\"',;)]+"
 )
@@ -52,7 +54,13 @@ _VOLATILE = re.compile(r"0x[0-9a-fA-F]+|@[0-9a-fA-F]{5,}")
 
 
 def scrub(text: str) -> str:
-    return _SECRET.sub(lambda m: f"{m.group(1)}{m.group(2)}[removed]", text)
+    return scrub_text(_SECRET.sub(lambda m: f"{m.group(1)}{m.group(2)}[removed]", text))
+
+
+def scrub_trace(text: str) -> str:
+    """A Java stack: secrets out of every line, content out of the message
+    lines (the ``at …`` frames stay as they are)."""
+    return scrub_stack(_SECRET.sub(lambda m: f"{m.group(1)}{m.group(2)}[removed]", text)) or ""
 
 
 class Report(BaseModel):
@@ -140,7 +148,7 @@ async def report_crashes(body: Reports, db: AsyncSession = Depends(get_db), user
                 logger=LOGGER,
                 exception_class=klass[:128],
                 message=message[:8000],
-                stack=scrub(r.stack) or None,
+                stack=scrub_trace(r.stack) or None,
                 route=where[:255] or None,
                 request_id=r.key,
                 user_id=user.id,
@@ -161,38 +169,30 @@ async def report_crashes(body: Reports, db: AsyncSession = Depends(get_db), user
         ).scalars()
     )
     await db.commit()
-    alerts = [message for mark, message in fresh.items() if mark not in known]
-    if alerts:
-        await tell_admins(alerts, user.username, body.device)
+    new_faults = sum(1 for mark in fresh if mark not in known)
+    if new_faults:
+        await tell_admins(new_faults)
     return {"added": added}
 
 
-async def tell_admins(faults: list[str], who: str, device: str) -> None:
-    """Never in the way of the phone's report: the row is already saved."""
+async def tell_admins(count: int) -> None:
+    """One push per report, with only the number of new faults: no fault
+    text, no person and no device (admin privacy audit G5). The details are
+    in Admin → Console → Errors. Never in the way of the phone's report:
+    the rows are already saved."""
     from app.database import SessionLocal
     from app.notifications.dispatch import notify_user
 
     try:
         async with SessionLocal() as db:
             admins = (await db.execute(select(User.id).where(User.role == "admin", User.disabled.is_(False)))).scalars().all()
-        place = f"{who} on {device}" if device else who
-        for fault in faults[:_MOST_ALERTS]:
-            for admin in admins:
-                await notify_user(
-                    user_id=admin,
-                    category="system_alert",
-                    title="The Android app crashed",
-                    body=f"{fault[:160]} ({place})",
-                    url=CONSOLE,
-                )
-        if len(faults) > _MOST_ALERTS:
-            for admin in admins:
-                await notify_user(
-                    user_id=admin,
-                    category="system_alert",
-                    title="More Android app crashes",
-                    body=f"{len(faults) - _MOST_ALERTS} more from {place}.",
-                    url=CONSOLE,
-                )
+        for admin in admins:
+            await notify_user(
+                user_id=admin,
+                category="system_alert",
+                title="The Android app crashed",
+                body=f"{count} new {'fault' if count == 1 else 'faults'}. See Admin → Console → Errors.",
+                url=CONSOLE,
+            )
     except Exception:  # noqa: BLE001 - an alert must never break a report
         logger.warning("couldn't tell admins about a phone crash", exc_info=True)

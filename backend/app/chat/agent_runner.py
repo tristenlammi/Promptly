@@ -294,7 +294,8 @@ async def run_agent(
                 error="provider_error",
             )
         except Exception:  # noqa: BLE001 — never let one agent kill the fan-out
-            logger.exception("sub-agent crashed on task=%r", task[:120])
+            # Not the task: it's the user's words (admin privacy L9).
+            logger.exception("sub-agent crashed (task of %d characters)", len(task))
             return AgentResult(
                 task=task,
                 text="the agent failed unexpectedly",

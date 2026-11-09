@@ -207,6 +207,12 @@ class JsonFormatter(logging.Formatter):
         # ``getMessage()`` interpolates ``record.args`` into ``record.msg``
         # so ``logger.info("hi %s", name)`` ends up as a single string.
         message = record.getMessage()
+        if record.levelno >= logging.WARNING:
+            # Warnings and errors often quote an exception: no URL queries
+            # or long quoted strings in what the admin reads (audit G4).
+            from app.observability.scrub import scrub_text
+
+            message = scrub_text(message)
 
         payload: dict[str, Any] = {
             "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(
@@ -252,7 +258,11 @@ class JsonFormatter(logging.Formatter):
             payload["exception_class"] = (
                 record.exc_info[0].__name__ if record.exc_info[0] else None
             )
-            payload["stack"] = self.formatException(record.exc_info)
+            # The live tail shows this: the exception's message lines lose
+            # URL queries and long quoted strings (admin privacy audit G4).
+            from app.observability.scrub import scrub_stack
+
+            payload["stack"] = scrub_stack(self.formatException(record.exc_info))
         elif record.stack_info:
             payload["stack"] = record.stack_info
 

@@ -143,12 +143,8 @@ class DeepResearchTool(Tool):
                 "unavailable."
             ) from exc
 
-        logger.info(
-            "deep_research user=%s conv=%s query=%r",
-            ctx.user.id,
-            ctx.conversation_id,
-            query[:80],
-        )
+        # Not the question: it's the user's words (admin privacy).
+        logger.info("deep_research conv=%s", ctx.conversation_id)
 
         def _on_progress(ev: dict[str, Any]) -> None:
             label = _progress_label(ev)

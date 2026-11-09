@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from urllib.parse import urlsplit
 from typing import Any
 
 from sqlalchemy import select
@@ -53,6 +54,14 @@ from app.search import deepseek
 from app.search.providers import ollama_web_fetch, tavily_extract
 
 logger = logging.getLogger("promptly.tools.fetch_url")
+
+
+def _log_host(url: str) -> str:
+    """The site only, for logs: the full address says what someone was reading."""
+    try:
+        return urlsplit(url).hostname or "?"
+    except ValueError:
+        return "?"
 
 # Cap the extracted text so a 50 KB article doesn't wipe out the
 # remaining context budget. ~6 000 chars is roughly 1 500 tokens,
@@ -426,9 +435,9 @@ class FetchUrlTool(Tool):
                 final_url = url
                 recovered_via = "deepseek"
                 logger.info(
-                    "fetch_url: direct path blocked (%s); recovered via DeepSeek Fetch for %s",
+                    "fetch_url: direct path blocked (%s); recovered via DeepSeek Fetch from %s",
                     block_reason,
-                    url[:120],
+                    _log_host(url),
                 )
 
         # --- Attempt 3: Tavily Extract fallback (1 credit / 5 URLs). ---
@@ -447,9 +456,9 @@ class FetchUrlTool(Tool):
                     recovered_via = "tavily"
                     logger.info(
                         "fetch_url: direct path blocked (%s); recovered via "
-                        "Tavily Extract for %s",
+                        "Tavily Extract from %s",
                         block_reason,
-                        url[:120],
+                        _log_host(url),
                     )
 
         # --- Attempt 4: Ollama web_fetch fallback (free tier). ---
@@ -468,9 +477,9 @@ class FetchUrlTool(Tool):
                     recovered_via = "ollama"
                     logger.info(
                         "fetch_url: direct path blocked (%s); recovered via "
-                        "Ollama web_fetch for %s",
+                        "Ollama web_fetch from %s",
                         block_reason,
-                        url[:120],
+                        _log_host(url),
                     )
 
         if text is None or not text.strip():

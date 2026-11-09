@@ -145,6 +145,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Admin privacy, AP1 -->
 - Admin → Console and Admin → Errors no longer show the addresses people open. Each request is shown by its route, like GET /api/calendar/feed/{token}.ics, so calendar feed links, signed photo and file links, share, album and form links, phone pairing codes, WebDAV file names and map positions stay out of them. Everyday request lines no longer say who made them; errors still do. Errors and rate-limit records saved before the update are rewritten the same way, and old errors whose address can't be matched to a route are removed.
 - Pairing a phone: the page now checks the pairing code in the body of the request rather than in its address, so the code can't show up in a log.
+<!-- Admin privacy, AP2 -->
+- Admin → Console and Admin → Errors no longer show what people type or say: no file-search or web-search words, research questions, sub-agent tasks, voice assistant requests, WebDAV file names, pasted links, recipe links, flashcard file names or fetched page addresses (only the site's name). Saved errors and Android crash reports lose web address queries and long quoted text before they're stored.
+- The admin's "The Android app crashed" notification now says only how many new faults came in, without the fault text, the person or the phone.
 
 ## [0.33.0] - 2026-11-09
 

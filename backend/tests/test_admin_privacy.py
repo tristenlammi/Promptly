@@ -8,6 +8,7 @@ leaks that were closed:
   0403 migration detaches other people's files already attached.
 * AP1 (L3-L7, G1): logs and stored errors carry route templates, never raw
   paths, and routine lines carry no user id; 0402 rewrites stored paths.
+* AP2 (L8-L10, G2-G5): no user content in logs, errors or crash reports.
 
 (AP4, deleting a user, is in test_user_deletion.py.)
 """
@@ -446,3 +447,101 @@ async def test_migration_rewrites_stored_paths_to_templates(db, user, caplog):
     logged = "\n".join(r.getMessage() for r in caplog.records)
     assert "4 error route(s) rewritten, 1 deleted, 3 audit detail(s) rewritten" in logged
     assert SECRET not in logged
+
+
+# ------------------------------------------------------------- AP2 / L8-L10, G2-G5
+
+
+def test_no_log_line_passes_what_someone_typed_or_said():
+    """A guard: a logger call whose argument is a query, a task, a prompt,
+    a transcript or a pasted URL puts someone's words in the admin's log.
+    Log a count, a length or a host instead."""
+    import ast
+
+    deny = {"query", "said", "transcript", "prompt", "task", "url", "filename", "title"}
+    levels = {"debug", "info", "warning", "error", "exception", "critical"}
+    root = Path(__file__).resolve().parent.parent / "app"
+    found = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in levels and isinstance(node.func.value, ast.Name)
+                    and "log" in node.func.value.id.lower()):
+                continue
+            for arg in node.args[1:]:
+                target = arg.value if isinstance(arg, ast.Subscript) else arg
+                if isinstance(target, ast.Name) and target.id in deny:
+                    found.append(f"{path.relative_to(root)}:{node.lineno} {target.id}")
+    assert not found, "user content in a log line:\n" + "\n".join(found)
+
+
+def test_scrub_takes_queries_and_long_quotes_out():
+    from app.observability.scrub import scrub_stack, scrub_text
+
+    msg = ("Client error '404 Not Found' for url 'https://nominatim.example/search?q=12+Main+St&format=json'"
+           ' and "this is a long prompt someone typed into the chat box today"')
+    out = scrub_text(msg)
+    assert "Main" not in out and "prompt someone" not in out
+    assert "https://nominatim.example/search?…" in out or "'…'" in out
+    assert "'404 Not Found'" in out  # short quotes stay: they're the error itself
+    assert scrub_text("GET /api/x?token=abc failed") == "GET /api/x?… failed"
+    assert scrub_text("Is it done?") == "Is it done?"
+
+    stack = (
+        "Traceback (most recent call last):\n"
+        '  File "/app/app/geo.py", line 3, in find\n'
+        "    r = await http.get(url, params={'q': q})\n"
+        "httpx.HTTPStatusError: failed for https://geo.example/s?q=Biopsy+clinic\n"
+    )
+    out = scrub_stack(stack)
+    assert "Biopsy" not in out
+    assert "    r = await http.get(url, params={'q': q})" in out  # frames stay
+
+
+@pytest.mark.asyncio
+async def test_stored_errors_are_scrubbed(db):
+    from app.observability.capture import CapturedError, _persist_async
+    from app.observability.models import ErrorEvent
+
+    await _persist_async(CapturedError(
+        level="ERROR", logger_name="promptly.x", exception_class="HTTPStatusError",
+        message="lookup failed for https://geo.example/s?q=12+Main+St",
+        stack="Traceback (most recent call last):\n  File \"x.py\", line 1, in f\n"
+              "HTTPStatusError: lookup failed for https://geo.example/s?q=12+Main+St\n",
+        route="GET /api/maps/search", method="GET", status_code=500, request_id=None,
+        user_id=None, extra=None,
+    ))
+    row = (await db.execute(select(ErrorEvent))).scalar_one()
+    assert "Main" not in row.message and "Main" not in row.stack
+    assert row.message == "lookup failed for https://geo.example/s?…"
+
+
+@pytest.mark.asyncio
+async def test_android_crash_text_is_scrubbed_and_the_push_names_nothing(db, client, user, monkeypatch):
+    from datetime import datetime, timezone
+
+    from app.notifications import dispatch
+    from app.observability.models import ErrorEvent
+
+    told = []
+
+    async def fake(**kw):
+        told.append(kw)
+
+    monkeypatch.setattr(dispatch, "notify_user", fake)
+    report = {
+        "key": "k1", "at": datetime.now(timezone.utc).isoformat(), "kind": "crash", "thread": "main",
+        "message": "java.io.FileNotFoundException: https://p.example/api/m/abc?name=Divorce%20papers.pdf "
+                   "'/storage/emulated/0/Documents/Divorce papers final version.pdf'",
+        "stack": "java.io.FileNotFoundException: https://p.example/api/m/abc?name=Divorce\n"
+                 "\tat org.promptly.sync.Upload.run(Upload.kt:12)\n",
+    }
+    r = await client.post("/api/devices/crashes", headers=_auth(user),
+                          json={"app_version": "1.6.0", "device": "Pixel 8", "android": "15", "reports": [report]})
+    assert r.json() == {"added": 1}
+    row = (await db.execute(select(ErrorEvent).where(ErrorEvent.logger == "android"))).scalar_one()
+    assert "Divorce" not in row.message and "Divorce" not in (row.stack or "")
+    assert "\tat org.promptly.sync.Upload.run(Upload.kt:12)" in row.stack
+    assert told and all("Divorce" not in t["body"] and "FileNotFound" not in t["body"] for t in told)
+    assert all(user.username not in t["body"] and "Pixel" not in t["body"] for t in told)

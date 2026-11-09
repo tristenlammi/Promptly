@@ -65,6 +65,15 @@ async def api_key(db: Any, provider_id: uuid.UUID) -> str | None:
         return None
 
 
+def _host(url: str) -> str:
+    from urllib.parse import urlsplit
+
+    try:
+        return urlsplit(url).hostname or "?"
+    except ValueError:
+        return "?"
+
+
 def _headers(key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
 
@@ -112,10 +121,11 @@ async def fetch(key: str, url: str) -> tuple[str, str] | None:
     try:
         resp = await _safe_request("POST", FETCH_URL, provider_label="DeepSeek", headers=_headers(key), json={"url": url})
     except SearchError as e:
-        logger.info("DeepSeek fetch of %s failed: %s", url[:120], e)
+        # The site only: the address says what someone searched for.
+        logger.info("DeepSeek fetch from %s failed: %s", _host(url), type(e).__name__)
         return None
     if not resp.is_success:
-        logger.info("DeepSeek fetch of %s answered %s", url[:120], resp.status_code)
+        logger.info("DeepSeek fetch from %s answered %s", _host(url), resp.status_code)
         return None
     try:
         data = resp.json()

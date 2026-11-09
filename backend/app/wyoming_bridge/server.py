@@ -116,7 +116,8 @@ class PromptlyHandler(AsyncEventHandler):
             try:
                 return await answer(db, user, said)
             except Exception:  # noqa: BLE001 — never kill the listener
-                logger.exception("wyoming: failed handling %r", said)
+                # Not what they said (admin privacy L10).
+                logger.exception("wyoming: failed handling a request of %d characters", len(said or ""))
                 from app.wyoming_bridge.service import SpokenResult
 
                 return SpokenResult("Something went wrong.", handled=True)
