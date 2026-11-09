@@ -479,7 +479,55 @@ function SrTable({ caption, rows }: { caption: string; rows: [string, string][] 
   );
 }
 
+/** A grid's summary: a small group of bars per row (one bar per column,
+ *  percentages of the people who answered that row), with the same numbers
+ *  in a real table for screen readers. */
+function GridSummary({ q, narrow }: { q: SummaryQuestion; narrow: boolean }) {
+  const rows = q.rows ?? [];
+  const cols = q.columns ?? [];
+  const multi = q.kind === "checkbox_grid";
+  return (
+    <>
+      <div className="space-y-3" aria-hidden="true">
+        {rows.map((r) => (
+          <div key={r.id}>
+            <p className="mb-0.5 break-words text-xs font-medium text-[var(--text)]">
+              {r.label} <span className="font-normal text-[var(--text-muted)]">· {answeredWords(r.answered)}</span>
+            </p>
+            <ChoiceBars rows={cols.map((c) => ({ key: c.id, label: c.label, count: r.counts[c.id] ?? 0 }))} of={r.answered} narrow={narrow} />
+          </div>
+        ))}
+      </div>
+      <table className="sr-only">
+        <caption>{`${q.title}: answers per row and column`}</caption>
+        <thead>
+          <tr>
+            <td />
+            {cols.map((c) => (
+              <th key={c.id} scope="col">
+                {c.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.id}>
+              <th scope="row">{`${r.label} (${answeredWords(r.answered)})`}</th>
+              {cols.map((c) => (
+                <td key={c.id}>{`${r.counts[c.id] ?? 0}, ${pct(r.counts[c.id] ?? 0, r.answered)}`}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {multi && <p className="mt-1 text-xs text-[var(--text-muted)]">People could tick more than one per row, so a row can add up to more than 100%.</p>}
+    </>
+  );
+}
+
 function QuestionSummary({ q, narrow, onQuestion, onAnswer }: { q: SummaryQuestion; narrow: boolean; onQuestion: (id: string) => void; onAnswer: (n: number) => void }) {
+  if (q.rows && q.columns) return <GridSummary q={q} narrow={narrow} />;
   if (q.options) {
     const rows: ChoiceRow[] = q.options.map((o) => ({
       key: o.id,

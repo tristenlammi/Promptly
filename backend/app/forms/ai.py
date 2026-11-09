@@ -32,19 +32,22 @@ ANSWER_CHARS = 1_500
 
 # What the model may ask for. Uploads aren't drafted: the owner decides
 # who may send files.
-DRAFT_KINDS = tuple(k for k in QUESTION_KINDS if k != "file_upload") + ("section", "text")
+DRAFT_KINDS = tuple(k for k in QUESTION_KINDS if k not in ("file_upload", "location")) + ("section", "text")
 
 DRAFT_SYSTEM = """You design forms (like Google Forms) for people to fill in.
 Reply with JSON only, no prose, in exactly this shape:
 {"title": "...", "description": "...", "items": [
   {"kind": "...", "title": "...", "description": "", "required": true,
    "options": ["..."], "other": false, "max": 5, "min_label": "", "max_label": "",
-   "validation": "any|number|email|url", "include_time": false, "mode": "time|duration"}
+   "validation": "any|number|email|url", "include_time": false, "mode": "time|duration",
+   "rows": ["..."], "columns": ["..."]}
 ]}
 kind is one of: short_text, paragraph, multiple_choice, checkboxes, dropdown, linear_scale,
-rating, date, time, section, text. Only give the fields that kind uses (options for the
-three choice kinds; max/min_label/max_label for linear_scale; max for rating;
-validation for short_text; include_time for date; mode for time). Use plain, friendly
+rating, date, time, choice_grid, checkbox_grid, section, text. Only give the fields that kind
+uses (options for the three choice kinds; max/min_label/max_label for linear_scale; max for
+rating; validation for short_text; include_time for date; mode for time; rows and columns
+for the two grids: at most 20 rows and 8 short columns, e.g. rows of days and columns of
+times). Use plain, friendly
 words. Keep it short: what's needed, nothing more. Never ask for passwords or bank details."""
 
 OPTIONS_SYSTEM = """You suggest the options for one multiple-choice question on a form.
@@ -123,9 +126,30 @@ def _item(raw: dict[str, Any]) -> dict[str, Any] | None:
         cfg["include_time"] = bool(raw.get("include_time"))
     elif kind == "time":
         cfg["mode"] = "duration" if raw.get("mode") == "duration" else "time"
+    elif kind in ("choice_grid", "checkbox_grid"):
+        rows = _labels(raw.get("rows"), 20, 300)
+        cols = _labels(raw.get("columns"), 8, 40)
+        if not rows or not cols:
+            return None
+        cfg["rows"] = [{"id": _id("r"), "label": r} for r in rows]
+        cfg["columns"] = [{"id": _id("c"), "label": c} for c in cols]
     elif kind == "section":
         cfg["after"] = "continue"
     return item
+
+
+def _labels(raw: Any, most: int, chars: int) -> list[str]:
+    """Distinct non-empty labels from a model's list (grid rows/columns)."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for v in raw if isinstance(raw, list) else []:
+        label = _s(v.get("label") if isinstance(v, dict) else v, chars)
+        if label and label.lower() not in seen:
+            seen.add(label.lower())
+            out.append(label)
+        if len(out) >= most:
+            break
+    return out
 
 
 def items_from(data: Any) -> dict[str, Any]:

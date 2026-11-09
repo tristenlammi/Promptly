@@ -42,7 +42,9 @@ export type QuestionKind =
   | "rating"
   | "date"
   | "time"
-  | "file_upload";
+  | "file_upload"
+  | "choice_grid"
+  | "checkbox_grid";
 export type BlockKind = "text" | "image" | "section";
 export type ItemKind = QuestionKind | BlockKind;
 
@@ -105,6 +107,26 @@ export interface FileUploadConfig {
   max_files: number;
   max_size_mb: number;
 }
+/** A grid's row or column (stable ids, like options: a renamed row keeps its answers). */
+export interface GridLine {
+  id: string;
+  label: string;
+}
+export interface ChoiceGridConfig {
+  rows: GridLine[];
+  columns: GridLine[];
+  /** Every row needs an answer (``required`` alone means at least one). */
+  each_row: boolean;
+  shuffle_rows: boolean;
+  /** Each column can be picked in one row only ("rank these"). */
+  one_per_column: boolean;
+}
+export interface CheckboxGridConfig {
+  rows: GridLine[];
+  columns: GridLine[];
+  each_row: boolean;
+  shuffle_rows: boolean;
+}
 export interface ImageConfig {
   alt: string;
 }
@@ -124,6 +146,8 @@ export interface ConfigByKind {
   date: DateConfig;
   time: TimeConfig;
   file_upload: FileUploadConfig;
+  choice_grid: ChoiceGridConfig;
+  checkbox_grid: CheckboxGridConfig;
   text: Record<string, never>;
   image: ImageConfig;
   section: SectionConfig;
@@ -272,6 +296,9 @@ export interface SummaryQuestion {
   latest?: { number: number; text: string; submitted_at: string | null }[];
   /** File questions: the newest files sent (WP-F1.6). */
   files?: (AnswerFile & { number: number })[];
+  /** Grids (WP-F2.1): how many picked each column, per row. */
+  rows?: { id: string; label: string; answered: number; counts: Record<string, number> }[];
+  columns?: GridLine[];
 }
 
 /** A file someone sent with an answer: signed links that work for a few

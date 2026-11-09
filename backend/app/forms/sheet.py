@@ -50,7 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.forms.definition import questions
-from app.forms.export import answer_text, when
+from app.forms.export import question_columns, when
 from app.forms.models import Form, FormResponse
 
 logger = logging.getLogger("promptly.forms.sheet")
@@ -163,8 +163,8 @@ def wanted_columns(
     qs = questions(definition or {}, include_deleted=True)
     qs = [q for q in qs if not q.get("deleted")] + [q for q in qs if q.get("deleted")]
     for q in qs:
-        title = (q.get("title") or "").strip() or "Untitled question"
-        out.append((f"q:{q.get('id')}", f"{title} (deleted question)" if q.get("deleted") else title))
+        # One column per question; a grid gets one per row (WP-F2.1).
+        out.extend((key, title) for key, title, _fn in question_columns(q))
     return out
 
 
@@ -213,7 +213,8 @@ def row_values(
                 value, (lambda uid, n=r.number: link(n, uid)) if link is not None else None
             )
         else:
-            out[f"q:{q.get('id')}"] = answer_text(q, value)
+            for key, _title, fn in question_columns(q):
+                out[key] = fn(value)
     return out
 
 

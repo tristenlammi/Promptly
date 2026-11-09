@@ -26,7 +26,7 @@ READ_TEXT_CHARS = 400
 
 _KINDS = [
     "short_text", "paragraph", "multiple_choice", "checkboxes", "dropdown",
-    "linear_scale", "rating", "date", "time", "section", "text",
+    "linear_scale", "rating", "date", "time", "choice_grid", "checkbox_grid", "section", "text",
 ]
 
 
@@ -68,6 +68,10 @@ class DraftFormTool(Tool):
                         "other": {"type": "boolean", "description": "Add an 'Other' choice."},
                         "max": {"type": "integer", "description": "linear_scale top (2-10) or rating stars (3-10)."},
                         "validation": {"type": "string", "enum": ["any", "number", "email", "url"]},
+                        "rows": {"type": "array", "items": {"type": "string"},
+                                 "description": "For the grid kinds: the rows (at most 20)."},
+                        "columns": {"type": "array", "items": {"type": "string"},
+                                    "description": "For the grid kinds: short column labels (at most 8)."},
                     },
                     "required": ["kind", "title"],
                 },
@@ -199,6 +203,12 @@ class ReadFormResponsesTool(Tool):
                     lines.append(f"- Other: {q['other']}")
             elif q.get("bins") is not None:
                 lines.append(f"- average {q.get('average')}; " + ", ".join(f"{b['value']}: {b['count']}" for b in q["bins"]))
+            elif q.get("rows") is not None and q.get("columns") is not None:
+                # A grid: counts per row (WP-F2.1).
+                cols = {c["id"]: c["label"] for c in q["columns"]}
+                for row in q["rows"]:
+                    counts = ", ".join(f"{cols[c]}: {n}" for c, n in row["counts"].items() if c in cols)
+                    lines.append(f"- {row['label']}: {counts}")
             elif q.get("groups") is not None:
                 lines.append("- " + ", ".join(f"{g['value']}: {g['count']}" for g in q["groups"][:30]))
             elif q["kind"] in results.TEXT_KINDS and q["answered"]:

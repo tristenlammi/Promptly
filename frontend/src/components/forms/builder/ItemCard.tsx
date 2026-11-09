@@ -43,6 +43,7 @@ import { cn } from "@/utils/cn";
 
 import { fileHint } from "../FormRenderer";
 import { BRANCHING_KINDS, CHOICE_KINDS, KIND_META, changeKind, isQuestion, newOption, type SectionInfo } from "../model";
+import { GridEditor } from "./GridEditor";
 import { PicturePicker } from "./PicturePicker";
 import { AutoTextarea, Menu, MenuItem, NumberBox, Switch, fieldCls, iconBtnCls } from "./ui";
 
@@ -82,6 +83,7 @@ const KIND_GROUPS: { label: string; kinds: ItemKind[] }[] = [
   { label: "Text", kinds: ["short_text", "paragraph"] },
   { label: "Choices", kinds: ["multiple_choice", "checkboxes", "dropdown"] },
   { label: "Scales", kinds: ["linear_scale", "rating"] },
+  { label: "Grids", kinds: ["choice_grid", "checkbox_grid"] },
   { label: "Date and time", kinds: ["date", "time"] },
   { label: "Files", kinds: ["file_upload"] },
 ];
@@ -335,6 +337,7 @@ function Summary({ item, label, assetUrls }: { item: FormItem; label: string; as
       {item.description && <span className="line-clamp-2 whitespace-pre-line text-sm text-[var(--text-muted)]">{item.description}</span>}
       {img && <img src={img} alt="" className="max-h-40 w-full rounded-md object-cover" />}
       {item.kind === "image" && !img && <span className="text-sm text-[var(--text-muted)]">No picture yet</span>}
+      {(item.kind === "choice_grid" || item.kind === "checkbox_grid") && <GridSummary item={item} />}
       {opts && opts.length > 0 && (
         <span className="flex flex-col gap-1 text-sm text-[var(--text)]">
           {opts.slice(0, 6).map((o) => (
@@ -353,6 +356,25 @@ function Summary({ item, label, assetUrls }: { item: FormItem; label: string; as
           {opts.length > 6 && <span className="text-xs text-[var(--text-muted)]">and {opts.length - 6} more</span>}
         </span>
       )}
+    </span>
+  );
+}
+
+function GridSummary({ item }: { item: FormItem }) {
+  const c = item.config as { rows: { id: string; label: string }[]; columns: { id: string; label: string }[] };
+  const rows = c.rows.map((r, i) => r.label || `Row ${i + 1}`);
+  const cols = c.columns.map((x, i) => x.label || `Column ${i + 1}`);
+  return (
+    <span className="flex flex-col gap-0.5 text-sm text-[var(--text)]">
+      <span className="truncate">
+        <span className="text-[var(--text-muted)]">Rows: </span>
+        {rows.slice(0, 6).join(", ")}
+        {rows.length > 6 ? ` and ${rows.length - 6} more` : ""}
+      </span>
+      <span className="truncate">
+        <span className="text-[var(--text-muted)]">Columns: </span>
+        {cols.join(", ")}
+      </span>
     </span>
   );
 }
@@ -591,6 +613,9 @@ function KindEditor(p: KindEditorProps) {
         </fieldset>
       );
     }
+    case "choice_grid":
+    case "checkbox_grid":
+      return <GridEditor item={item as FormItem<"choice_grid">} setConfig={setConfig} />;
     case "file_upload":
       return <UploadEditor item={item as FormItem<"file_upload">} setConfig={setConfig} />;
     case "image":

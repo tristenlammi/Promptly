@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.files.models import UserFile
 from app.forms import answering as ans
 from app.forms.definition import questions
-from app.forms.export import NUMBER_KINDS, answer_text, labels
+from app.forms.export import GRID_KINDS, NUMBER_KINDS, answer_text, grid_columns, grid_rows, labels
 from app.forms.models import Form, FormOptionCount, FormResponse
 
 if TYPE_CHECKING:
@@ -163,6 +163,33 @@ async def summary(db: AsyncSession, form: Form, user: User | None = None) -> dic
         ):
             strings.setdefault(k, {})[v] = int(n)
 
+    # Grids (WP-F2.1): how many picked each column, per row. A choice
+    # grid's row holds one column id, a checkbox grid's a list of them.
+    grid_ids = [q["id"] for q in qs if q.get("kind") in GRID_KINDS]
+    cells: dict[str, dict[str, dict[str, int]]] = {}
+    row_answers: dict[str, dict[str, int]] = {}
+    if grid_ids:
+        for k, row, col, n in await grouped(
+            f"SELECT e.key, g.key, c.value, count(*) FROM form_responses r "
+            f"CROSS JOIN LATERAL jsonb_each(r.answers) e "
+            f"CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof(e.value) = 'object' "
+            f"AND jsonb_typeof(e.value->'rows') = 'object' THEN e.value->'rows' ELSE '{{}}'::jsonb END) g "
+            f"CROSS JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(g.value) = 'array' THEN g.value "
+            f"WHEN jsonb_typeof(g.value) = 'string' THEN jsonb_build_array(g.value) ELSE '[]'::jsonb END) c(value) "
+            f"WHERE {_LIVE} AND e.key = ANY(:keys) GROUP BY 1, 2, 3",
+            keys=grid_ids,
+        ):
+            cells.setdefault(k, {}).setdefault(row, {})[col] = int(n)
+        for k, row, n in await grouped(
+            f"SELECT e.key, g.key, count(*) FROM form_responses r "
+            f"CROSS JOIN LATERAL jsonb_each(r.answers) e "
+            f"CROSS JOIN LATERAL jsonb_each(CASE WHEN jsonb_typeof(e.value) = 'object' "
+            f"AND jsonb_typeof(e.value->'rows') = 'object' THEN e.value->'rows' ELSE '{{}}'::jsonb END) g "
+            f"WHERE {_LIVE} AND e.key = ANY(:keys) GROUP BY 1, 2",
+            keys=grid_ids,
+        ):
+            row_answers.setdefault(k, {})[row] = int(n)
+
     latest_ids = [q["id"] for q in qs if q.get("kind") in TEXT_KINDS]
     latest: dict[str, list[dict[str, Any]]] = {}
     if latest_ids:
@@ -235,6 +262,19 @@ async def summary(db: AsyncSession, form: Form, user: User | None = None) -> dic
             groups = sorted(strings.get(qid, {}).items())
             block["groups"] = [{"value": v, "count": c} for v, c in groups[:MAX_GROUPS]]
             block["more_groups"] = max(0, len(groups) - MAX_GROUPS)
+        elif kind in GRID_KINDS:
+            got = cells.get(qid, {})
+            columns = grid_columns(q)
+            block["columns"] = [{"id": cid, "label": label} for cid, label in columns.items()]
+            block["rows"] = [
+                {
+                    "id": rid,
+                    "label": label,
+                    "answered": row_answers.get(qid, {}).get(rid, 0),
+                    "counts": {cid: got.get(rid, {}).get(cid, 0) for cid in columns},
+                }
+                for rid, label in grid_rows(q)
+            ]
         elif kind in TEXT_KINDS:
             block["latest"] = latest.get(qid, [])
         elif kind == "file_upload":

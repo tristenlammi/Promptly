@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- Forms phase 2, WP-F2.1 -->
+- Forms: multiple-choice grids and checkbox grids (for example days down the side and times across the top). On a computer a grid is a table; on a phone each row becomes its own small group of big buttons, so nothing scrolls sideways. You can require an answer in every row, allow each column only once ("rank these"), and shuffle the rows. Up to 20 rows and 8 short columns. Responses show bars for each row, and downloads and the linked sheet get one column per row.
+
 ## [0.34.0] - 2026-11-09
 
 ### Added

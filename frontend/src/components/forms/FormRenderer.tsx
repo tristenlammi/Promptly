@@ -1,8 +1,9 @@
 import { Heart, MoreHorizontal, Star, ThumbsUp, Upload } from "lucide-react";
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 
 import type {
   CheckboxesConfig,
+  ChoiceGridConfig,
   DateConfig,
   DropdownConfig,
   FileUploadConfig,
@@ -29,6 +30,7 @@ import {
   type Answers,
   type CheckboxAnswer,
   type ChoiceAnswer,
+  type GridAnswer,
 } from "./logic";
 import { isQuestion, sectionsOf } from "./model";
 import { themeVars } from "./theme";
@@ -802,6 +804,9 @@ function Control(p: QuestionProps & { describedBy?: string; labelId: string }) {
       return <DateControl {...p} fieldProps={fieldProps} />;
     case "time":
       return <TimeControl {...p} fieldProps={fieldProps} />;
+    case "choice_grid":
+    case "checkbox_grid":
+      return <GridControl {...p} />;
     case "file_upload": {
       const cfg = item.config as FileUploadConfig;
       if (p.renderUpload && p.mode === "answer")
@@ -938,6 +943,137 @@ function Choices(p: QuestionProps & { multi: boolean; describedBy?: string }) {
             />
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** The room a box has, kept up to date (grids pick table or phone rows by it). */
+function useWidth<T extends HTMLElement>(): [RefObject<T>, number] {
+  const ref = useRef<T>(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setW(el.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w];
+}
+
+/**
+ * A multiple-choice or checkbox grid. With room, a real table: column
+ * headers, a row header per row, a radio or checkbox in each cell. On a
+ * phone (or a narrow card), each row is its own group (its words as the
+ * legend) with the columns as big chips that wrap, so nothing scrolls
+ * sideways. "Only one per column": picking a column moves it from the row
+ * that had it.
+ */
+function GridControl(p: QuestionProps & { describedBy?: string }) {
+  const { item, value, onChange, domId } = p;
+  const cfg = item.config as ChoiceGridConfig;
+  const multi = item.kind === "checkbox_grid";
+  const [box, width] = useWidth<HTMLDivElement>();
+  const rows = useMemo(
+    () => (cfg.shuffle_rows ? shuffled(cfg.rows, p.seed + item.id.length) : cfg.rows),
+    [cfg.shuffle_rows, cfg.rows, p.seed, item.id]
+  );
+  const cur = ((value as GridAnswer | undefined)?.rows ?? {}) as Record<string, string | string[]>;
+  const table = width >= 600 && width >= 150 + cfg.columns.length * 76;
+
+  const put = (next: Record<string, string | string[]>) => {
+    const out: GridAnswer = { rows: next };
+    onChange(isEmpty(item, out) ? undefined : out);
+  };
+  const pick = (rowId: string, colId: string) => {
+    if (multi) {
+      const had = Array.isArray(cur[rowId]) ? (cur[rowId] as string[]) : [];
+      const list = had.includes(colId) ? had.filter((c) => c !== colId) : [...had, colId];
+      const next = { ...cur };
+      if (list.length) next[rowId] = list;
+      else delete next[rowId];
+      return put(next);
+    }
+    const next: Record<string, string | string[]> = {};
+    for (const [r, c] of Object.entries(cur)) if (!(cfg.one_per_column && c === colId)) next[r] = c;
+    next[rowId] = colId;
+    put(next);
+  };
+  const on = (rowId: string, colId: string) => (multi ? Array.isArray(cur[rowId]) && (cur[rowId] as string[]).includes(colId) : cur[rowId] === colId);
+  const rowWords = (label: string, i: number) => label || `Row ${i + 1}`;
+  const colWords = (label: string, i: number) => label || `Column ${i + 1}`;
+
+  return (
+    <div ref={box} className="min-w-0" data-grid={table ? "table" : "rows"}>
+      {table ? (
+        <table className="pf-grid">
+          <thead>
+            <tr>
+              <td />
+              {cfg.columns.map((c, ci) => (
+                <th key={c.id} scope="col">
+                  {colWords(c.label, ci)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => {
+              const ri = cfg.rows.indexOf(r);
+              return (
+                <tr key={r.id}>
+                  <th scope="row">{rowWords(r.label, ri)}</th>
+                  {cfg.columns.map((c, ci) => (
+                    <td key={c.id}>
+                      <label className="pf-grid-cell">
+                        <input
+                          type={multi ? "checkbox" : "radio"}
+                          name={`${domId}-${r.id}`}
+                          checked={on(r.id, c.id)}
+                          onChange={() => pick(r.id, c.id)}
+                          aria-label={`${rowWords(r.label, ri)}: ${colWords(c.label, ci)}`}
+                          aria-describedby={p.describedBy}
+                        />
+                      </label>
+                    </td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {rows.map((r) => {
+            const ri = cfg.rows.indexOf(r);
+            return (
+              <fieldset key={r.id} className="flex min-w-0 flex-col gap-2" aria-describedby={p.describedBy}>
+                <legend className="mb-2 text-[15px] font-medium [overflow-wrap:anywhere]">{rowWords(r.label, ri)}</legend>
+                <div className="flex flex-wrap gap-2">
+                  {cfg.columns.map((c, ci) => (
+                    <label key={c.id} className="pf-step pf-chip">
+                      <input
+                        type={multi ? "checkbox" : "radio"}
+                        name={`${domId}-${r.id}`}
+                        checked={on(r.id, c.id)}
+                        onChange={() => pick(r.id, c.id)}
+                      />
+                      <span>{colWords(c.label, ci)}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            );
+          })}
+        </div>
+      )}
+      {multi || !cfg.one_per_column ? null : (
+        <p className="mt-2 text-sm" style={{ color: "var(--pf-muted)" }}>
+          Each column can be picked in one row only.
+        </p>
       )}
     </div>
   );

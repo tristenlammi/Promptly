@@ -29,7 +29,7 @@ import io
 import json
 import zipfile
 from datetime import datetime, timezone, tzinfo
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from app.forms.definition import questions
 
@@ -73,11 +73,58 @@ def _choice_part(names: dict[str, str], v: Any) -> str:
     return _plain(v)
 
 
+GRID_KINDS = ("choice_grid", "checkbox_grid")
+
+
+def grid_rows(question: dict[str, Any]) -> list[tuple[str, str]]:
+    """A grid's rows as ``(id, label)`` (a blank label reads "Row n")."""
+    return [
+        (str(r.get("id")), (r.get("label") or "").strip() or f"Row {n}")
+        for n, r in enumerate((question.get("config") or {}).get("rows") or [], start=1)
+    ]
+
+
+def grid_columns(question: dict[str, Any]) -> dict[str, str]:
+    return {
+        str(c.get("id")): (c.get("label") or "").strip() or f"Column {n}"
+        for n, c in enumerate((question.get("config") or {}).get("columns") or [], start=1)
+    }
+
+
+def grid_cell(question: dict[str, Any], value: Any, row_id: str) -> str:
+    """One row of a grid answer: the column picked, or the columns ticked
+    joined with ", " (a sheet or export cell)."""
+    if not isinstance(value, dict) or not isinstance(value.get("rows"), dict):
+        return ""
+    x = value["rows"].get(row_id)
+    cols = grid_columns(question)
+    if isinstance(x, list):
+        return ", ".join(cols.get(str(c), str(c)) for c in x)
+    if isinstance(x, str):
+        return cols.get(x, x)
+    return ""
+
+
+def _grid_text(question: dict[str, Any], value: Any) -> str:
+    if not isinstance(value, dict) or not isinstance(value.get("rows"), dict):
+        return _plain(value)
+    known = dict(grid_rows(question))
+    parts = []
+    order = [rid for rid, _ in grid_rows(question)] + [k for k in value["rows"] if k not in known]
+    for rid in order:
+        cell = grid_cell(question, value, rid)
+        if cell:
+            parts.append(f"{known.get(rid, '(removed row)')}: {cell}")
+    return "; ".join(parts)
+
+
 def answer_text(question: dict[str, Any], value: Any) -> str:
     """One answer as readable text (not yet neutralised)."""
     if value is None:
         return ""
     kind = question.get("kind")
+    if kind in GRID_KINDS:
+        return _grid_text(question, value)
     if kind in ("multiple_choice", "dropdown"):
         names = labels(question)
         if isinstance(value, dict) and isinstance(value.get("option"), str):
@@ -103,6 +150,22 @@ def answer_text(question: dict[str, Any], value: Any) -> str:
             return "; ".join(names_)
         return _plain(value)
     return _plain(value)
+
+
+def question_columns(question: dict[str, Any]) -> list[tuple[str, str, Callable[[Any], str]]]:
+    """The columns one question takes in a download and the linked Sheet:
+    ``(key, title, text of an answer)``. One per question (key
+    ``q:<id>``), except a grid: one per row, titled "Question [Row]" like
+    Google, keyed ``q:<id>:<row id>``. Deleted questions say so."""
+    qid = question.get("id")
+    title = (question.get("title") or "").strip() or "Untitled question"
+    gone = " (deleted question)" if question.get("deleted") else ""
+    if question.get("kind") in GRID_KINDS:
+        return [
+            (f"q:{qid}:{rid}", f"{title} [{label}]{gone}", (lambda v, rid=rid: grid_cell(question, v, rid)))
+            for rid, label in grid_rows(question)
+        ]
+    return [(f"q:{qid}", f"{title}{gone}", lambda v: answer_text(question, v))]
 
 
 def when(d: datetime | None, tz: tzinfo | None = None) -> str:
@@ -136,9 +199,9 @@ def table(
         header.append("Email (typed, not checked)")
     if has_account:
         header.append("Account")
-    for q in qs:
-        title = (q.get("title") or "").strip() or "Untitled question"
-        header.append(f"{title} (deleted question)" if q.get("deleted") else title)
+    cols = [(q, col) for q in qs for col in question_columns(q)]
+    for _q, (_key, title, _fn) in cols:
+        header.append(title)
     out: list[list[Any]] = [[neutralise(h) for h in header]]
     for r in rows:
         line: list[Any] = [r.number if typed else str(r.number), when(r.submitted_at, tz), when(r.edited_at, tz)]
@@ -147,12 +210,12 @@ def table(
         if has_account:
             line.append(neutralise((who or {}).get(r.respondent_id, "") if r.respondent_id else ""))
         answers = r.answers or {}
-        for q in qs:
+        for q, (_key, _title, fn) in cols:
             v = answers.get(q.get("id"))
             if typed and q.get("kind") in NUMBER_KINDS and isinstance(v, int) and not isinstance(v, bool):
                 line.append(v)
             else:
-                line.append(neutralise(answer_text(q, v)))
+                line.append(neutralise(fn(v)))
         out.append(line)
     return out
 
@@ -226,8 +289,13 @@ def form_zip(
 
 
 __all__ = [
+    "GRID_KINDS",
     "NUMBER_KINDS",
     "answer_text",
+    "grid_cell",
+    "grid_columns",
+    "grid_rows",
+    "question_columns",
     "form_zip",
     "labels",
     "neutralise",
