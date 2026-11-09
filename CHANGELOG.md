@@ -21,6 +21,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-09
+
 ### Added
 <!-- Porch phases 2–3 (porch-p2) -->
 - Porch stories: photo, video and text stories that disappear after a day, posted to your groups the way posts are and seen only by the people in those groups. Only you see who has viewed yours. Videos can be up to a minute. A story can carry words, an @mention and a place; the person mentioned gets a notification, and nothing else about a story sends one. Stories are never searched, they are in Export my library, and a story can be reported to its group's admins like a post.
