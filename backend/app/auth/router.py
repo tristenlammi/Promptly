@@ -943,6 +943,10 @@ async def refresh(
         token_tv = int(payload.get("tv", 0))
         if await _refresh_revoked(payload.get("jti")):
             raise TokenError("signed out")
+        from app.auth.revoked_sessions import session_revoked
+
+        if await session_revoked(payload.get("sid")):
+            raise TokenError("signed out")
     except (TokenError, ValueError, KeyError) as e:
         _clear_refresh_cookie(response)
         await record_event(
@@ -1047,6 +1051,11 @@ async def logout(
             # Signing out used to only clear the cookie — a copy of it
             # stayed usable for 30 days (R-191).
             await _revoke_refresh(payload.get("jti"), payload.get("exp"))
+            # ...and the access token it last minted stopped working only
+            # when it expired, up to 15 minutes later (L3).
+            from app.auth.revoked_sessions import revoke_session
+
+            await revoke_session(payload.get("sid"))
         except (TokenError, ValueError, KeyError):
             user_id = None
     if user_id is not None:
