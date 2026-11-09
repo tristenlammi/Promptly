@@ -1160,6 +1160,7 @@ async def list_cards(
     q: str | None = None,
     cursor: str | None = None,
     limit: int = 60,
+    with_user: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """A page of cards: pinned first, then your own order (Trash: newest
     deleted first). Filters narrow it; nothing outside what you can open
@@ -1185,6 +1186,9 @@ async def list_cards(
         if color not in COLORS:
             raise bad("Pick one of the note colours.")
         stmt = stmt.where(Note.color == color)
+    if with_user is not None and view != "trash":
+        # "See all" from a person page (N2.5): the notes you both have.
+        stmt = stmt.where(access.visible_predicate(with_user))
     if label is not None:
         stmt = stmt.where(
             exists().where(

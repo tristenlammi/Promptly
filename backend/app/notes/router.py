@@ -4,7 +4,7 @@ Every route loads the note through :mod:`app.notes.access` — 404 for
 anything the caller can't open, never 403 — commits, then tells the
 people on the note through their live stream (ids only).
 
-    GET    /notes?view=home|archive|trash|reminders&label=&color=&type=&q=&cursor=
+    GET    /notes?view=home|archive|trash|reminders&label=&color=&type=&q=&cursor=&with=<user id (notes you both have)>
     GET    /notes/labels                    your labels on notes, with counts
     GET    /notes/events                    live updates (SSE)
     POST   /notes                           create {client_id, kind, …}
@@ -193,10 +193,13 @@ async def list_notes(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
-    return await service.list_cards(db, user, view=view, label=label, color=color, type_=type, q=q, cursor=cursor, limit=limit)
+    return await service.list_cards(
+        db, user, view=view, label=label, color=color, type_=type, q=q, cursor=cursor, limit=limit, with_user=with_,
+    )
 
 
 @router.get("/labels")
+    with_: uuid.UUID | None = Query(None, alias="with"),
 async def labels(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     return {"labels": await service.label_counts(db, user)}
 

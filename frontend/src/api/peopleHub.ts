@@ -60,6 +60,26 @@ export interface PersonFile {
   direction: "mine" | "theirs";
 }
 
+/** A section another app adds to the person page. */
+export interface PersonSection {
+  key: string;
+  title: string;
+  kind: "grid" | "list";
+  items: PersonSectionItem[];
+  more_url: string | null;
+}
+
+export interface PersonSectionItem {
+  id: string;
+  title: string;
+  subtitle?: string;
+  href: string;
+  /** A Notes palette key ("mint"): the card is that colour. */
+  color?: string;
+  kind?: string;
+  thumb?: string | null;
+}
+
 export interface PersonPage {
   name: string;
   is_me: boolean;
@@ -78,6 +98,8 @@ export interface PersonPage {
   /** Rooms you're both in — names only. */
   rooms: { room_id: string; name: string; space: string | null; kind: string }[];
   files: PersonFile[];
+  /** What other apps add (``app/people/sections.py``): Notes, later Porch. */
+  sections?: PersonSection[];
   /** Whether you blocked them (never whether they blocked you). */
   blocked?: boolean;
   /** Calls: you can call them (calls on for both, no block either way). */

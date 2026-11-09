@@ -7,6 +7,9 @@ import {
   CalendarPlus,
   ChevronRight,
   Contact as ContactIcon,
+  LayoutGrid,
+  ListChecks,
+  StickyNote,
   ExternalLink,
   FileText,
   Folder,
@@ -25,7 +28,7 @@ import {
 import { useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { peopleHubApi, type PersonPage, type PersonRef } from "@/api/peopleHub";
+import { peopleHubApi, type PersonPage, type PersonRef, type PersonSection } from "@/api/peopleHub";
 import { roomsApi } from "@/api/rooms";
 import { PersonAvatar } from "@/components/people/PeoplePicker";
 import { LinkedSection } from "@/components/links/LinkedSection";
@@ -40,6 +43,7 @@ import { calls } from "@/rtc/call/actions";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
+import "@/notes/notes.css";
 
 /** Which person the URL names: /people/u/<user>, /people/c/<file>/<contact>, /people/p/<photos person>. */
 function usePersonRef(): PersonRef | null {
@@ -378,6 +382,11 @@ function PersonBody({ p }: { p: PersonPage }) {
               <Empty text={`You and ${first} haven't shared any files with each other.`} />
             )}
           </Section>
+
+          {/* Other apps' sections (Notes, …), hidden when empty. */}
+          {(p.sections ?? []).map((s) => (
+            <AppSection key={s.key} section={s} />
+          ))}
         </>
       )}
 
@@ -476,5 +485,53 @@ function ActionTile({
       <span className="text-[var(--accent-text,var(--accent))]">{icon}</span>
       {label}
     </button>
+  );
+}
+
+/** A section another app adds (``app/people/sections.py``): cards (Notes
+ *  shows them in their own colours) or rows, and "See all". */
+function AppSection({ section }: { section: PersonSection }) {
+  const icon = section.key === "notes" ? <StickyNote className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />;
+  const more = section.more_url && (
+    <Link to={section.more_url} className="rounded-md px-2 py-1 text-xs font-medium text-[var(--accent-text)] hover:bg-[var(--hover)]">
+      See all
+    </Link>
+  );
+  return (
+    <Section title={section.title} icon={icon} extra={more}>
+      {section.kind === "grid" ? (
+        <ul className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {section.items.map((i) => (
+            <li key={i.id}>
+              <Link
+                to={i.href}
+                data-color={i.color ?? "default"}
+                className="note-c flex h-full min-h-[72px] flex-col gap-1 rounded-xl border p-3 transition hover:shadow-[var(--shadow-sm)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              >
+                <span className="flex items-start gap-1.5">
+                  {i.kind === "list" && <ListChecks className="mt-0.5 h-3.5 w-3.5 shrink-0 note-muted" aria-hidden />}
+                  <span className="line-clamp-2 min-w-0 flex-1 text-sm font-medium">{i.title}</span>
+                </span>
+                {i.subtitle && <span className="mt-auto truncate text-xs note-muted">{i.subtitle}</span>}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <ul className="flex flex-col">
+          {section.items.map((i) => (
+            <li key={i.id}>
+              <Link to={i.href} className="flex min-h-12 items-center gap-3 rounded-lg px-1 py-1.5 hover:bg-[var(--hover)]">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm text-[var(--text)]">{i.title}</span>
+                  {i.subtitle && <span className="block truncate text-xs text-[var(--text-muted)]">{i.subtitle}</span>}
+                </span>
+                <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" />
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }

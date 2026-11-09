@@ -253,6 +253,8 @@ async def _page(db: AsyncSession, viewer: User, p: Person) -> dict[str, Any]:
         "dm_room_id": None,
         "rooms": [],
         "files": [],
+        # What other apps add (people/sections.py): Notes, Porch.
+        "sections": [],
         # Only whether *you* blocked them — never whether they blocked you.
         "blocked": False,
         "can_call": False,
@@ -269,6 +271,9 @@ async def _page(db: AsyncSession, viewer: User, p: Person) -> dict[str, Any]:
         out["events"] = await _events(db, viewer, p.user)
         out["dm_room_id"], out["rooms"] = await _rooms(db, viewer, p.user)
         out["files"] = await _files(db, viewer, p.user)
+        from . import sections
+
+        out["sections"] = await sections.for_page(db, viewer, p.user)
     return out
 
 
