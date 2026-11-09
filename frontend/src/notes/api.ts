@@ -7,6 +7,8 @@ export interface Page {
   notes: Note[];
   next_cursor: string | null;
   users: Record<string, NoteUser>;
+  /** With words, first page: notes close in meaning that don't use them (AI search). */
+  related?: Note[];
 }
 
 export interface NewNote {
@@ -134,6 +136,24 @@ export const notesApi = {
     const { data } = await apiClient.put<TranscriptionStatus>("/notes/admin/transcription", { on });
     return data;
   },
+  /** AI search over notes: the admin's switch and two totals. */
+  async aiSearch(): Promise<AiSearchStatus> {
+    const { data } = await apiClient.get<AiSearchStatus>("/notes/admin/ai-search");
+    return data;
+  },
+  async setAiSearch(on: boolean): Promise<AiSearchStatus> {
+    const { data } = await apiClient.put<AiSearchStatus>("/notes/admin/ai-search", { on });
+    return data;
+  },
+  /** Your own "Find notes by meaning". */
+  async mySearch(): Promise<MySearch> {
+    const { data } = await apiClient.get<MySearch>("/notes/settings/search");
+    return data;
+  },
+  async setMySearch(on: boolean): Promise<MySearch> {
+    const { data } = await apiClient.put<MySearch>("/notes/settings/search", { on });
+    return data;
+  },
   async versions(id: string): Promise<NoteVersionRow[]> {
     const { data } = await apiClient.get<{ versions: NoteVersionRow[] }>(`/notes/${id}/versions`);
     return data.versions;
@@ -207,4 +227,23 @@ export interface TranscriptionStatus {
   backend: "local" | "openai";
   choice: boolean | null;
   ready: boolean;
+}
+
+/** The admin's switch for finding notes by meaning (two totals, nobody's notes). */
+export interface AiSearchStatus {
+  ready: boolean;
+  on: boolean;
+  local: boolean;
+  provider: string;
+  model: string;
+  indexed: number;
+  total: number;
+}
+
+/** Your own "Find notes by meaning"; ``available`` is the server's switch. */
+export interface MySearch {
+  available: boolean;
+  on: boolean;
+  local: boolean;
+  provider: string;
 }

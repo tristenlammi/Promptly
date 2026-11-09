@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- Notes phase 2, N2.1 -->
+- Notes search also shows "Related notes" under the exact matches: notes about what you typed that don't use the words (searching "wifi" finds the note with the router password). Chat's note search finds them too. Ctrl+K stays words only.
+- Admin → Defaults: the "AI search for mail" card is now "AI search", with its own switch for Notes beside Mail's (on for an indexer on your own network, off for a cloud one until you turn it on). It shows only how many notes are indexed, never anyone's notes.
+- Notes → Settings: "Find notes by meaning", so each person can keep their own notes out of AI search (a shared note follows its owner's choice). With a cloud indexer it names the service the notes would go to.
+
 ## [0.34.0] - 2026-11-09
 
 ### Added

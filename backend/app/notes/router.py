@@ -27,6 +27,8 @@ people on the note through their live stream (ids only).
     DELETE /notes/{id}/attachments/{aid}    out of the note (the file stays in Drive)
     POST   /notes/{id}/attachments/{aid}/transcribe   try the words again
     GET|PUT /notes/admin/transcription      the admin's switch for transcribing voice notes
+    GET|PUT /notes/admin/ai-search          the admin's switch for finding notes by meaning (two totals, nothing else)
+    GET|PUT /notes/settings/search          your own "Find notes by meaning"
     PUT    /notes/{id}/reminder             {due, time?, repeat?} — your reminder (a task in your Tasks)
     DELETE /notes/{id}/reminder             take your reminder off (its open task goes too)
     POST   /notes/{id}/ai/{action}          tidy|to_list|title|to_tasks|to_event → a proposal (nothing saved)
@@ -52,6 +54,7 @@ from app.database import get_db
 
 from . import access, events, push, reminders, service, transcription
 from . import ai as note_ai
+from . import search as note_search
 from . import attachments as attach
 from . import convert
 from .body import BodyError
@@ -220,6 +223,54 @@ async def transcription_status(db: AsyncSession = Depends(get_db), user: User = 
 async def set_transcription(body: TranscriptionIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)) -> dict:
     _ = user
     return _transcription_out(await transcription.set_choice(db, body.on))
+
+
+# ------------------------------------------------------------------ AI search (N2.1)
+
+
+def _ai_search_out(cfg, indexed: int, total: int) -> dict:  # noqa: ANN001 — search.Config
+    """The switch, how the server's indexer runs, and two totals. Never a
+    note, a title or anyone's count."""
+    return {
+        "ready": cfg.ready, "on": cfg.on, "local": cfg.local, "provider": cfg.provider.name if cfg.provider else "",
+        "model": cfg.model, "indexed": indexed, "total": total,
+    }
+
+
+@router.get("/admin/ai-search")
+async def ai_search_status(db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)) -> dict:
+    _ = user
+    return _ai_search_out(await note_search.config(db), *await note_search.counts(db))
+
+
+@router.put("/admin/ai-search")
+async def set_ai_search(body: TranscriptionIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)) -> dict:
+    _ = user
+    cfg = await note_search.set_choice(db, body.on)
+    return _ai_search_out(cfg, *await note_search.counts(db))
+
+
+async def _my_search_out(db: AsyncSession, user: User) -> dict:
+    cfg = await note_search.config(db)
+    return {
+        # The server's switch: when it's off there's nothing to choose.
+        "available": cfg.on,
+        "on": note_search.person_on(user),
+        "local": cfg.local,
+        "provider": cfg.provider.name if cfg.provider and cfg.on else "",
+    }
+
+
+@router.get("/settings/search")
+async def my_search(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Your "Find notes by meaning"."""
+    return await _my_search_out(db, user)
+
+
+@router.put("/settings/search")
+async def set_my_search(body: TranscriptionIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    await note_search.set_person(db, user, body.on)
+    return await _my_search_out(db, user)
 
 
 @router.get("/events")

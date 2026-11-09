@@ -9,7 +9,7 @@ import type { AppSettings, AvailableModel } from "@/api/types";
 import type { AppSettingsPatch } from "@/api/admin";
 import { useModelStore } from "@/store/modelStore";
 
-import { MailSearchCard } from "@/mail/AdminSearchCard";
+import { AiSearchCard } from "@/mail/AdminSearchCard";
 import { NotesTranscriptionCard } from "@/notes/AdminTranscriptionCard";
 
 import { EmbeddingConfigCard } from "./CustomModelsPanel";
@@ -108,7 +108,7 @@ export function DefaultsTab() {
         busy={update.isPending}
       />
       <EmbeddingConfigCard />
-      <MailSearchCard />
+      <AiSearchCard />
       <NotesTranscriptionCard />
     </div>
   );

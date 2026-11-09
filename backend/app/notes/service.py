@@ -832,6 +832,9 @@ async def trash(db: AsyncSession, user: User, note: Note) -> None:
         raise forbidden("Only the note's owner can delete it.")
     note.trashed_at = _now()
     note.trashed_by = user.id
+    from .search import forget
+
+    await forget(db, [note.id])
     await db.flush()
 
 
@@ -1114,10 +1117,13 @@ async def list_cards(
             stmt = stmt.where(or_(Note.owner_id != user.id, exists().where(NoteMember.note_id == Note.id)))
         else:
             stmt = stmt.where(Note.id.in_(await _reminder_ids(db, user)))
+    base = stmt  # Related notes: the same place, without the words
     if q and q.strip():
         term = q.strip()[:200]
         pat = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-        stmt = stmt.where(or_(literal_column("notes.tsv").op("@@")(drive_tsquery(term)), Note.title.ilike(pat, escape="\\")))
+        words = or_(literal_column("notes.tsv").op("@@")(drive_tsquery(term)), Note.title.ilike(pat, escape="\\"))
+        stmt = stmt.where(words)
+        base = base.where(~words)
 
     limit = max(1, min(limit, 200))
     after = _decode_cursor(cursor, view)
@@ -1135,7 +1141,15 @@ async def list_cards(
     rows = list((await db.execute(stmt.limit(limit + 1))).scalars())
     more = len(rows) > limit
     rows = rows[:limit]
-    cards, people = await _cards(db, user, rows)
+    related: list[Note] = []
+    if q and q.strip() and after is None:
+        # Notes about this that don't use these words (N2.1), after the exact
+        # matches, first page only. Same view and filters; empty when AI
+        # search is off.
+        related = await _related(db, user, q.strip()[:200], base, {n.id for n in rows})
+    cards, people = await _cards(db, user, rows + related)
+    rel_cards = cards[len(rows):]
+    cards = cards[: len(rows)]
     nxt = None
     if more and rows:
         last, card = rows[-1], cards[-1]
@@ -1143,7 +1157,23 @@ async def list_cards(
             nxt = _encode_cursor(view, [last.trashed_at.isoformat(), str(last.id)])
         else:
             nxt = _encode_cursor(view, [0 if card["pinned"] else 1, card["position"], str(last.id)])
-    return {"notes": cards, "next_cursor": nxt, "users": await users_map(db, people)}
+    out: dict[str, Any] = {"notes": cards, "next_cursor": nxt, "users": await users_map(db, people)}
+    if q and q.strip() and after is None:
+        out["related"] = rel_cards
+    return out
+
+
+async def _related(db: AsyncSession, user: User, q: str, stmt: Any, shown: set[uuid.UUID]) -> list[Note]:
+    """Up to 8 notes close in meaning to ``q`` that the word search didn't
+    find, inside the same view (``stmt`` without its words)."""
+    from . import search
+
+    near = await search.nearest(db, user, q, limit=search.RELATED + len(shown) + 4)
+    near = [i for i in near if i not in shown]
+    if not near:
+        return []
+    found = {n.id: n for n in (await db.execute(stmt.where(Note.id.in_(near)))).scalars()}
+    return [found[i] for i in near if i in found][: search.RELATED]
 
 
 __all__ = [

@@ -42,6 +42,7 @@ import type { CardActions } from "./components/NoteCard";
 import { NoteDialog } from "./components/NoteDialog";
 import { NoteEditor } from "./components/NoteEditor";
 import { NoteGrid } from "./components/NoteGrid";
+import { NotesSettingsButton } from "./components/NotesSettings";
 import { ColorGrid, LabelChooser } from "./components/pickers";
 import { Pop } from "./components/Pop";
 import { ReminderPicker, reminderMoment, reminderWhen } from "./components/Reminder";
@@ -147,7 +148,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const anchor = useRef<string | null>(null);
   const [searchFocus, setSearchFocus] = useState(false);
-  const [serverHits, setServerHits] = useState<{ q: string; ids: Set<string> } | null>(null);
+  const [serverHits, setServerHits] = useState<{ q: string; ids: Set<string>; related: string[] } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const layout: "grid" | "list" = (settings?.notes_view as "grid" | "list" | undefined) ?? "grid";
   const [now, setNow] = useState(() => Date.now());
@@ -243,8 +244,8 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       return;
     }
     const t = setTimeout(async () => {
-      const ids = await searchServer(term);
-      if (ids) setServerHits({ q: term, ids: new Set(ids) });
+      const hits = await searchServer(term);
+      if (hits) setServerHits({ q: term, ids: new Set(hits.ids), related: hits.related });
     }, 300);
     return () => clearTimeout(t);
   }, [q]);
@@ -291,9 +292,27 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     return list.sort(byOrder);
   }, [all, live, searching, q, typeFilter, colorFilter, place.view, place.label, serverHits]);
 
+  // Notes about what you typed that don't use the words (AI search, online
+  // only), under the exact matches, with the same filters.
+  const related = useMemo(() => {
+    const term = q.trim();
+    if (!term || serverHits?.q !== term || !serverHits.related.length) return [];
+    const shown = new Set(visible.map((n) => n.id));
+    return serverHits.related
+      .map((id) => notes[id])
+      .filter((n): n is Note => !!n && !n.trashed_at && !shown.has(n.id))
+      .filter((n) => (!typeFilter || matchesType(n, typeFilter)) && (!colorFilter || n.color === colorFilter) && (place.view !== "label" || hasLabel(n, place.label)))
+      .slice(0, 8);
+  }, [q, serverHits, visible, notes, typeFilter, colorFilter, place.view, place.label]);
+
   const sections = useMemo(() => {
     if (place.view === "trash" && !searching) return [{ key: "trash", notes: visible }];
-    if (searching) return [{ key: "results", notes: visible }];
+    if (searching) {
+      const out: { key: string; title?: string; notes: Note[] }[] = [];
+      if (visible.length) out.push({ key: "results", notes: visible });
+      if (related.length) out.push({ key: "related", title: "Related notes", notes: related });
+      return out;
+    }
     if (place.view === "reminders") {
       const at = new Date(now);
       const groups: { key: string; title: string; notes: Note[] }[] = [
@@ -313,7 +332,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
     out.push({ key: "others", title: pinned.length ? "Others" : undefined, notes: place.view === "archive" ? [...others, ...archived] : others });
     if (place.view === "label" && archived.length) out.push({ key: "archived", title: "Archived", notes: archived });
     return out;
-  }, [visible, place.view, searching, now]);
+  }, [visible, related, place.view, searching, now]);
 
   const order = useMemo(() => sections.flatMap((s) => s.notes.map((n) => n.id)), [sections]);
 
@@ -488,6 +507,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
       <RailLink to={KEEP_IMPORT} icon={Import} active={false} onNavigate={() => setDrawer(false)}>
         Import from Google Keep
       </RailLink>
+      <NotesSettingsButton />
       {embedded && isPhone && (
         <button
           type="button"
@@ -664,7 +684,7 @@ export function NotesApp({ embedded = false }: { embedded?: boolean } = {}) {
         </div>
       );
     }
-    if (visible.length) return null;
+    if (visible.length || related.length) return null;
     if (searching) return <Empty icon={Search} title={q.trim() ? `Nothing matches “${q.trim()}”` : "No notes match"} body="Try other words, or clear the filters." />;
     if (place.view === "trash") {
       if (!loaded.trash) return <div className="flex items-center justify-center gap-2 py-24 text-sm text-[var(--text-muted)]" role="status"><Loader2 className="h-4 w-4 animate-spin" /> Loading the Trash…</div>;

@@ -335,11 +335,14 @@ export async function fetchNote(id: string): Promise<"ok" | "gone" | "offline"> 
 
 /** Search on the server (words in long notes, every list item): the ids
  *  that match, in your notes and archive. */
-export async function searchServer(q: string): Promise<string[] | null> {
+/** The server's matches for words (``ids``), and notes close in meaning
+ * that don't use them (``related``, nearest first; empty when AI search is off). */
+export async function searchServer(q: string): Promise<{ ids: string[]; related: string[] } | null> {
   try {
     const [a, b] = await Promise.all([notesApi.list("home", { q, limit: 200 }), notesApi.list("archive", { q, limit: 200 })]);
-    learn([...a.notes, ...b.notes], true);
-    return [...a.notes, ...b.notes].map((n) => n.id);
+    const related = [...(a.related ?? []), ...(b.related ?? [])];
+    learn([...a.notes, ...b.notes, ...related], true);
+    return { ids: [...a.notes, ...b.notes].map((n) => n.id), related: related.map((n) => n.id) };
   } catch {
     return null;
   }
