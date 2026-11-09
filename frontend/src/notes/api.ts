@@ -180,6 +180,15 @@ export const notesApi = {
     const { data } = await apiClient.delete<{ note: Note }>(`/notes/${id}/to-document`);
     return data.note;
   },
+  /** Copy to a workspace (N2.6): where you can add a page. */
+  async workspaceTargets(): Promise<WorkspaceTarget[]> {
+    const { data } = await apiClient.get<{ workspaces: WorkspaceTarget[] }>("/notes/to-workspace/targets");
+    return data.workspaces;
+  },
+  async toWorkspace(id: string, workspaceId: string, parentId: string | null): Promise<{ workspace: string; href: string; item_id: string; title: string }> {
+    const { data } = await apiClient.post(`/notes/${id}/to-workspace`, { workspace_id: workspaceId, parent_id: parentId });
+    return data;
+  },
   async taskLists(): Promise<{ available: boolean; lists: { id: string; name: string; color?: string | null }[] }> {
     const { data } = await apiClient.get("/notes/to-tasks/lists");
     return data;
@@ -246,4 +255,12 @@ export interface MySearch {
   on: boolean;
   local: boolean;
   provider: string;
+}
+
+/** A workspace a note can be copied into (you're its owner, an admin or an editor). */
+export interface WorkspaceTarget {
+  id: string;
+  title: string;
+  role: string;
+  notebooks: { id: string; title: string }[];
 }

@@ -36,6 +36,8 @@ people on the note through their live stream (ids only).
     POST   /notes/{id}/to-document          {folder_id?} — Open as document (owner); DELETE = undo
     GET    /notes/to-tasks/lists            the lists in your Tasks
     POST   /notes/{id}/to-tasks             {list?, tasks} — Turn into tasks; POST …/undo {file_id, task_ids}
+    GET    /notes/to-workspace/targets      workspaces you can add a page to (N2.6)
+    POST   /notes/{id}/to-workspace         {workspace_id, parent_id?} — Copy to a workspace (owner), as a Page
 """
 from __future__ import annotations
 
@@ -127,10 +129,10 @@ class ItemPatch(BaseModel):
     checked: bool | None = None
     parent_id: uuid.UUID | None = None  # send null to outdent
     position: float | None = None
-
-
     # A list kept by aisle: dragged across an aisle line (a foods.AISLES key).
     aisle: str | None = Field(default=None, max_length=16)
+
+
 class ItemsBulk(BaseModel):
     action: Literal["untick_all", "delete_ticked", "sort", "sort_aisle"]
 
@@ -171,6 +173,11 @@ class ToDocumentIn(BaseModel):
     folder_id: uuid.UUID | None = None
 
 
+class ToWorkspaceIn(BaseModel):
+    workspace_id: uuid.UUID
+    parent_id: uuid.UUID | None = None  # a notebook in it; else the top
+
+
 class BulkIn(BaseModel):
     ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
     action: Literal["pin", "unpin", "archive", "unarchive", "color", "label", "unlabel", "trash"]
@@ -190,6 +197,7 @@ async def list_notes(
     q: str | None = Query(None, max_length=200),
     cursor: str | None = Query(None, max_length=400),
     limit: int = Query(60, ge=1, le=200),
+    with_: uuid.UUID | None = Query(None, alias="with"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> dict:
@@ -199,9 +207,16 @@ async def list_notes(
 
 
 @router.get("/labels")
-    with_: uuid.UUID | None = Query(None, alias="with"),
 async def labels(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
     return {"labels": await service.label_counts(db, user)}
+
+
+@router.get("/to-workspace/targets")
+async def workspace_targets(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    """Workspaces you can copy a note into (you can add pages there), with their notebooks."""
+    from . import to_workspace
+
+    return {"workspaces": await to_workspace.targets(db, user)}
 
 
 @router.get("/to-tasks/lists")
@@ -838,3 +853,21 @@ async def undo_to_tasks(
     n = await convert.undo_tasks(db, user, note, body)
     await db.commit()
     return {"removed": n}
+
+
+@router.post("/{note_id}/to-workspace", status_code=status.HTTP_201_CREATED)
+async def to_workspace(
+    note_id: uuid.UUID, body: ToWorkspaceIn, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    """Copy to a workspace (N2.6): a Page with the note's words and pictures.
+    The note itself is unchanged and stays private."""
+    from . import to_workspace as tw
+
+    note = await access.load(db, user, note_id)
+    try:
+        out = await tw.copy(db, user, note, body.workspace_id, body.parent_id)
+    except HTTPException:
+        await db.rollback()
+        raise
+    await db.commit()
+    return out
