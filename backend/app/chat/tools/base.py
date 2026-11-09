@@ -217,6 +217,8 @@ UNTRUSTED_CONTENT_TOOLS = frozenset(
         "search_my_files", "read_file", "list_my_files",
         # Other people's messages in Rooms.
         "read_room",
+        # ...and the latest of them, by voice (Talk phase 2).
+        "rooms_unread",
         # An earlier reply may repeat a web page or a file.
         "search_past_chats",
         # Forms: answers are other people's words, even on a server form.

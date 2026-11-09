@@ -174,9 +174,39 @@ async def _event_title(db, user: User, args: dict[str, Any]) -> tuple[str | None
     return ev.title, None
 
 
+async def _message(db, user: User, args: dict[str, Any]) -> tuple[str, str | None]:  # noqa: ANN001
+    """A Rooms message, said back whole: "Message Sam on Promptly: '...' Send it?"."""
+    from sqlalchemy import func, or_, select
+
+    text = " ".join(str(args.get("message") or "").split())[:400]
+    to = str(args.get("to") or "").strip().lstrip("@")
+    if to:
+        n = to.lower()
+        rows = (
+            await db.execute(
+                select(User).where(User.disabled.is_(False), or_(func.lower(User.username) == n, func.lower(User.email) == n))
+            )
+        ).scalars().all()
+        if len(rows) != 1 or rows[0].id == user.id:
+            return "", f"there's no one called {to[:60]} on this Promptly. Use find_person for their username"
+        other = rows[0]
+        who = str((other.settings or {}).get("display_name") or other.username).strip()[:60]
+        return f"Message {who} on Promptly: “{text}” Send it?", None
+    room = " ".join(str(args.get("room") or "").split())[:60]
+    if not room:
+        return "", "say which room, or who to message"
+    return f"Post in {room}: “{text}” Send it?", None
+
+
 async def read_back(db, user: User, name: str, args: dict[str, Any]) -> tuple[str, str | None]:  # noqa: ANN001
     """``(question, problem)``. A problem means don't ask: it can't be done,
     and the model is told why instead."""
+    if name == "post_to_room":
+        return await _message(db, user, args)
+    if name in ("create_note", "add_to_note", "tick_note_items"):
+        from app.chat.holds import question as hold_question
+
+        return hold_question(name, args), None
     if name == "mail_reply":
         shown, problem = await reply_to_whom(db, user, args)
         return question(name, shown), problem

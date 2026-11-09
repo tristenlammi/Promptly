@@ -95,6 +95,7 @@ async def config(user: User = Depends(assistant_user)) -> dict[str, Any]:
             "turn_mode": prefs.turn_mode,
             "interrupt": prefs.interrupt,
             "captions": prefs.captions,
+            "bluetooth_locked": prefs.bluetooth_locked,
         },
         "limits": {
             "live_slots": server.live_slots,

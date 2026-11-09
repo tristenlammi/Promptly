@@ -3729,6 +3729,15 @@ async def _talk_categories(
         cats.add("drive")
     if device_tools(talk.get("caps")):
         cats.add("device")
+    # Talk phase 2: the trip's own tools while one is running (app/talk/drive.py).
+    if talk.get("trip"):
+        cats.add("trip")
+    # Talk phase 2: notes and lists; Rooms messages to people on this Promptly
+    # (a first message opens the DM, so not only for people already in rooms).
+    cats |= {"notes", "rooms"}
+    # "Send that to my phone", once something with a link has come up.
+    if talk.get("links"):
+        cats.add("talk")
     return cats
 
 
@@ -4287,6 +4296,9 @@ async def _dispatch_tools(
                     else:
                         voice_gate.held += 1
                 if asked and not problem:
+                    if voice_gate is not None:
+                        # Talk: say where it came from ("From that email: ...").
+                        asked = voice_gate.from_where(asked)
                     hold_meta = holds.meta_for(name, call_args, asked, spoken=voice_gate is not None)
                     event = {
                         "event": "tool_finished",
@@ -5289,6 +5301,13 @@ async def _stream_generator(
                 turn_state["talk"] = {
                     "device": talk_turn.get("device") or "web",
                     "driving": bool(talk_turn.get("driving")),
+                    # Talk phase 2: read by the trip's tools and the
+                    # "your own words" check, never shown to the model.
+                    "trip": talk_turn.get("trip"),
+                    "said": talk_turn.get("said"),
+                    "tz": talk_turn.get("tz"),
+                    "links": talk_turn.get("links") or [],
+                    "sent": talk_turn.get("sent") or 0,
                 }
         else:
             if ctx.get("tools_enabled"):
@@ -5390,7 +5409,12 @@ async def _stream_generator(
         if talk_turn is not None and tools_payload:
             from app.talk.tools import VoiceGate, voice_tool_names
 
-            _voice_names = voice_tool_names(talk_turn.get("caps"))
+            _voice_names = voice_tool_names(
+                talk_turn.get("caps"),
+                device=str(talk_turn.get("device") or "web"),
+                trip=bool(talk_turn.get("trip")),
+                locked=bool(talk_turn.get("locked")),
+            )
             tools_payload = [
                 t for t in tools_payload if t.get("function", {}).get("name") in _voice_names
             ] or None
@@ -5838,6 +5862,7 @@ async def _stream_generator(
                 {t.get("function", {}).get("name") for t in tools_payload},
                 device=str(talk_turn.get("device") or "web"),
                 driving=bool(talk_turn.get("driving")),
+                locked=bool(talk_turn.get("locked")),
             )
         elif enabled_categories and tools_payload:
             tools_prompt_text = (
@@ -6127,6 +6152,20 @@ async def _stream_generator(
                 "If they're changing what they asked for, call the tool again with the change, and "
                 "they'll be asked again. If they don't want it, say you'll leave it, in a few words."
             )
+        # Talk phase 2 (WP-T9): the trip they're on, without coordinates.
+        if talk_turn is not None and talk_turn.get("trip"):
+            from app.talk.drive import context_line as _trip_line
+
+            _trip_said = _trip_line(talk_turn.get("trip"), talk_turn.get("tz"))
+            if _trip_said:
+                turn_context.append(_trip_said)
+        # Talk phase 2 (WP-T11): what send_to_phone can send, by number.
+        if talk_turn is not None and talk_turn.get("links"):
+            from app.talk.followup import context_line as _send_line
+
+            _send_said = _send_line(talk_turn.get("links"))
+            if _send_said:
+                turn_context.append(_send_said)
 
         # Standing layers first (cacheable), this turn's context last.
         _turn_text = "\n\n".join(p.strip() for p in turn_context if p and p.strip())
@@ -6612,6 +6651,7 @@ async def _stream_generator(
                                 _name,
                                 tool_history_msg["content"],
                                 device=str(talk_turn.get("device") or "web"),
+                                driving=bool(talk_turn.get("driving")),
                             )
                             if _note:
                                 tool_history_msg = {

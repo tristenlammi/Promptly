@@ -49,13 +49,15 @@ def test_the_voice_allowlist():
     from app.chat.tools.registry import get_tool
 
     names = voice_tools.voice_tool_names([])
-    assert set(voice_tools.READS) | set(voice_tools.WRITES) == names
-    for name in (*names, *voice_tools.DEVICE):
+    assert set(voice_tools.READS) | set(voice_tools.WRITES) | set(voice_tools.QUICK) == names
+    for name in (*names, *voice_tools.DEVICE, *voice_tools.DRIVE):
         assert get_tool(name) is not None, name
-    # What needs a screen and minutes, or deletes, or posts for you: never.
+    # What needs a screen and minutes, or deletes: never.
     assert not names & set(voice_tools.NOT_ON_VOICE)
-    for name in ("deep_research", "run_agents", "code_interpreter", "generate_image", "forget", "post_to_room"):
+    for name in ("deep_research", "run_agents", "code_interpreter", "generate_image", "forget", "read_room"):
         assert name not in names
+    # A Rooms message waits for a yes like any change (phase 2).
+    assert "post_to_room" in names and voice_tools.is_write("post_to_room")
     # The phone's actions only when the phone says it can.
     assert not names & set(voice_tools.DEVICE)
     assert voice_tools.voice_tool_names(["timer", "navigate"]) & set(voice_tools.DEVICE) == {"set_timer", "navigate"}

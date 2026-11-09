@@ -343,6 +343,11 @@ class UserPreferencesUpdate(BaseModel):
     talk_interrupt: Literal["talk", "tap"] | None = None
     talk_captions: bool | None = None
     talk_save: Literal["chat", "temporary"] | None = None
+    # Talk phase 2: which parts "Read me my day" reads (``today/briefing.py``;
+    # unset = all of them), and whether a car's or headset's Bluetooth button
+    # may start Talk while the phone is locked (Android reads it; off).
+    briefing_sections: list[Literal["weather", "events", "tasks", "bills", "birthdays", "mail"]] | None = Field(default=None, max_length=6)
+    talk_bluetooth_locked: bool | None = None
     # Preferred display currency (ISO 4217 code, e.g. ``"AUD"``). Surfaces in
     # the ambient personal-context block and takes precedence over whatever
     # the user's location would imply — so someone whose locale is ambiguous

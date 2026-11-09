@@ -39,6 +39,8 @@ class TalkSettingsPatch(BaseModel):
     # [] or null = everyone; otherwise only members of these groups (admins always).
     group_ids: list[uuid.UUID] | None = None
     live_slots: int | None = Field(default=None, ge=1, le=MAX_LIVE_SLOTS)
+    # "Read me my day": one line of weather from Open-Meteo (phase 2).
+    weather: bool | None = None
 
 
 async def _settings_row(db: AsyncSession):
@@ -126,6 +128,7 @@ async def _out(db: AsyncSession, row) -> dict[str, Any]:  # noqa: ANN001
         # Groups deleted since they were picked no longer count.
         "group_ids": [str(g) for g in group_ids if g in known],
         "live_slots": int(row.talk_live_slots or 2),
+        "weather": bool(getattr(row, "weather_enabled", True)),
         "max_live_slots": MAX_LIVE_SLOTS,
         "talking_now": talk.live_count(),
         "answers": await _answers(db, row),
@@ -171,6 +174,9 @@ async def patch_talk(
     if "live_slots" in fields and body.live_slots is not None and body.live_slots != row.talk_live_slots:
         row.talk_live_slots = body.live_slots
         diff["talk_live_slots"] = body.live_slots
+    if "weather" in fields and body.weather is not None and body.weather != row.weather_enabled:
+        row.weather_enabled = body.weather
+        diff["weather_enabled"] = body.weather
     if diff:
         await record_event(
             db,

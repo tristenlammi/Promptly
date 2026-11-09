@@ -103,6 +103,9 @@ class VoicePrefs:
     turn_mode: str  # "hands_free" | "tap"
     interrupt: str  # "talk" | "tap"
     captions: bool
+    # Phase 2: a car's or headset's Bluetooth button may start Talk while the
+    # phone is locked (off by default; private reads still need an unlock).
+    bluetooth_locked: bool = False
 
 
 def voice_prefs(user: User) -> VoicePrefs:
@@ -119,6 +122,7 @@ def voice_prefs(user: User) -> VoicePrefs:
         turn_mode="tap" if s.get("talk_turn_mode") == "tap" else "hands_free",
         interrupt="tap" if s.get("talk_interrupt") == "tap" else "talk",
         captions=s.get("talk_captions") is not False,
+        bluetooth_locked=s.get("talk_bluetooth_locked") is True,
     )
 
 
