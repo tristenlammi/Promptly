@@ -31,6 +31,17 @@ async def _send_to_tasks(ctx: ItemContext, data: dict, p: _SendToTasks):  # noqa
     return await send_action(ctx, data, p)
 
 
+class _SendToNote(BaseModel):
+    note_id: str | None = None
+
+
+async def _send_to_note(ctx: ItemContext, data: dict, p: _SendToNote):  # noqa: ANN202
+    # Notes phase 2 (N2.3). Imported when run, like Send to Tasks.
+    from app.crossapp.groceries_note import SendToNote, send_action
+
+    return await send_action(ctx, data, SendToNote(note_id=p.note_id))
+
+
 AI_BRIEF = """
 You are an experienced meal-planning coach and recipe developer — part registered-dietitian sense, part home-cook pragmatism. You plan real weeks for real households: food they'll actually cook, eat and enjoy, with less waste, less cost and less stress.
 
@@ -108,6 +119,8 @@ SPEC = ItemSpec(
         ItemAction("add_starter_recipes", "Add six reliable starter recipes (fajitas, dal, salmon, stir-fry, overnight oats, chickpea salad).", A.AddStarters, A.add_starter_recipes),
         ItemAction("what_can_i_make", "Rank saved recipes by what's on hand (given ingredients, or the pantry): what's missing for each. Read-only.", A.WhatCanIMake, A.what_can_i_make, writes=False),
         ItemAction("send_grocery_list_to_tasks", "Send the grocery list to the person's Tasks app as a \"Groceries\" list, ordered by aisle (sending again updates the same list). Changes their Tasks, not this file.", _SendToTasks, _send_to_tasks, writes=False, chat=False),
+        # Notes phase 2 (N2.3): a write (to a note), so chat asks first on an untrusted turn; the plan itself doesn't change.
+        ItemAction("send_grocery_list_to_note", "Send the grocery list to the person's Shopping note in Notes (or the note_id they pick from find_notes; a new \"Groceries\" list if they have none), by aisle. Sending again updates the same items, ticks what's ticked here and never touches items people typed. Changes the note, not this file.", _SendToNote, _send_to_note),
         ItemAction("plan_summary", "A date range of the plan in numbers: meals per day, empty slots, repeats, cuisines, time-limit breaches, allergy/diet warnings, per-person calories/protein from recipes vs targets (incl. the Meals & Macros item). Read-only.", A.PlanSummary, A.plan_summary, writes=False),
         ItemAction("recipe_nutrition", "A recipe's nutrition per serving and for N servings, with % of daily targets and the macro split. Read-only.", A.RecipeNutrition, A.recipe_nutrition, writes=False),
     ],

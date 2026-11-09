@@ -198,7 +198,7 @@ export const notesApi = {
 export interface NoteVersionRow {
   id: string;
   revision: number;
-  reason: "edit" | "restore" | "ai";
+  reason: "edit" | "restore" | "ai" | "send";
   made_by: string | null;
   created_at: string;
   title: string;

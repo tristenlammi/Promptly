@@ -12,6 +12,8 @@ export interface Toast {
   duration: number;
   /** Optional inline action ("Undo") — clicking runs it and dismisses. */
   action?: { label: string; onClick: () => void };
+  /** A second action beside it ("Open" · "Undo"). */
+  secondary?: { label: string; onClick: () => void };
 }
 
 interface ToastState {
@@ -77,6 +79,7 @@ function make(type: ToastType) {
       title?: string;
       duration?: number;
       action?: Toast["action"];
+      secondary?: Toast["secondary"];
     },
   ) => useToastStore.getState().push({ type, message, ...opts });
 }

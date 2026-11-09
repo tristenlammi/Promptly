@@ -1,7 +1,6 @@
-import { ListChecks, Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Share2, ShoppingBasket, ShoppingCart, Sparkles, Store, Trash2, X } from "lucide-react";
+import { Loader2, MoreHorizontal, Pencil, Plus, RefreshCw, Share2, ShoppingBasket, ShoppingCart, Sparkles, Store, Trash2, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
 
 import { usePopoverDismiss } from "@/hooks/usePopoverDismiss";
 import type { ItemViewProps } from "@/items/types";
@@ -13,6 +12,7 @@ import { cn } from "@/utils/cn";
 import { addGroceryLines } from "./foods";
 import { fmtRange, startOfWeek, useWakeLock } from "./helpers";
 import { CheckDot } from "./parts";
+import { SendToList } from "./SendToList";
 import { AISLES, type GroceryItem, type MealPlanData } from "./types";
 import { UNIT_CHOICES, fmtAmounts, unitLabel } from "./units";
 
@@ -81,24 +81,6 @@ export function GroceryView({ item, isPhone, ask, goTo }: ItemViewProps<MealPlan
   const menuRef = useRef<HTMLDivElement>(null);
   usePopoverDismiss(menu, menuRef, () => setMenu(false));
   const can = item.canEdit;
-  const navigate = useNavigate();
-  const [sending, setSending] = useState(false);
-
-  // "Send to Tasks": the list as a Groceries list in Tasks (the same list
-  // each time), so it's on the phone with everything else to do.
-  const sendToTasks = async () => {
-    setSending(true);
-    try {
-      const r = await item.runAction<{ href: string }>("send_grocery_list_to_tasks");
-      toast.success(`${r.summary}. To shop together, share your Tasks from Tasks.`, {
-        action: { label: "Open Tasks", onClick: () => navigate(r.result.href) },
-      });
-    } catch (e) {
-      toast.error(errDetail(e, "Couldn't send the list to Tasks."));
-    } finally {
-      setSending(false);
-    }
-  };
 
   const toggle = (i: GroceryItem) => setChecked(item, i.id, !i.checked);
 
@@ -167,14 +149,8 @@ export function GroceryView({ item, isPhone, ask, goTo }: ItemViewProps<MealPlan
           </span>
         </div>
       )}
-      {open.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <ItemButton size="sm" variant="ghost" icon={sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ListChecks className="h-4 w-4" />} disabled={sending} onClick={() => void sendToTasks()}>
-            Send to Tasks
-          </ItemButton>
-          <span className="text-xs text-[var(--text-muted)]">Makes a Groceries list in Tasks, by aisle. Share the list from Tasks.</span>
-        </div>
-      )}
+      {/* "Send to list": your Shopping note by default (Notes N2.3), another note, or Tasks. */}
+      {open.length > 0 && <SendToList item={item} fileId={item.fileId} />}
       {isPhone && (regenBtn || shopBtn) && (
         <div className={cn("grid gap-2", regenBtn && shopBtn ? "grid-cols-2" : "grid-cols-1")}>
           {regenBtn}
