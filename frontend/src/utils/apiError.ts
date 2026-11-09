@@ -16,20 +16,37 @@ interface PydanticErrorItem {
   loc?: unknown;
 }
 
-/** Turn one Pydantic validation item into "field: message". */
+/** Make a Pydantic message read like a sentence: drop the "Value error, "
+ *  / "Assertion failed, " lead-in our own validators get, and give a
+ *  built-in one ("String should have at least 10 characters") its field. */
+export function cleanValidationMessage(msg: string, field?: string): string {
+  const own = msg.replace(/^(Value error|Assertion failed),\s*/i, "");
+  if (own !== msg) return own.charAt(0).toUpperCase() + own.slice(1);
+  // Pydantic's built-in wording is about "String"/"Input"/"Value": name the
+  // field instead ("Password should have at least 10 characters").
+  if (field && /^(String|Input|Value) /.test(msg)) {
+    const name = field.replace(/[_-]+/g, " ").trim();
+    return name.charAt(0).toUpperCase() + name.slice(1) + msg.replace(/^(String|Input|Value)/, "");
+  }
+  return msg;
+}
+
+/** Turn one Pydantic validation item into a plain message. */
 function itemToMessage(item: unknown): string | null {
   if (typeof item === "string") return item;
   if (!item || typeof item !== "object") return null;
   const { msg, loc } = item as PydanticErrorItem;
   const message = typeof msg === "string" ? msg : null;
   if (!message) return null;
-  // loc is like ["body", "password"] — the tail is the field name;
-  // drop the "body"/"query" prefix, it means nothing to users.
+  // loc is like ["body", "new_password"]: the tail is the field name. It
+  // used to lead the message ("new_password: Value error, …"), which means
+  // nothing to people; it's only used to name a built-in message now.
+  let field: string | undefined;
   if (Array.isArray(loc)) {
-    const field = loc.filter((p) => typeof p === "string" && p !== "body" && p !== "query").pop();
-    if (typeof field === "string" && field) return `${field}: ${message}`;
+    const tail = loc.filter((p) => typeof p === "string" && p !== "body" && p !== "query").pop();
+    if (typeof tail === "string" && tail) field = tail;
   }
-  return message;
+  return cleanValidationMessage(message, field);
 }
 
 /**

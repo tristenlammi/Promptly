@@ -30,6 +30,9 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Admin → Users: the create form checks the password against the same rules as the server and shows them, and the role choices are described in plain words.
 
 ### Fixed
+<!-- New-member onboarding (onboard-fixes) -->
+- Choosing a password: a live checklist shows the rules (length, a number, a symbol), and errors read as plain sentences instead of "new_password: Value error, …".
+- After changing your password, an old error message no longer stays on screen, and you see that it worked.
 - Files: the "System" row at the bottom of a folder no longer cuts off the list's rounded corners.
 
 ## [0.35.0] - 2026-11-09
