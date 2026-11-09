@@ -1,22 +1,7 @@
-import {
-  BookOpen,
-  CalendarDays,
-  CircleCheckBig,
-  Contact,
-  Dices,
-  Dumbbell,
-  HeartPulse,
-  Layers,
-  LayoutGrid,
-  ListChecks,
-  ListTodo,
-  Plane,
-  Salad,
-  Wallet,
-  type LucideIcon,
-} from "lucide-react";
-
+import { itemIcon } from "./itemIcons";
 import type { ItemModule } from "./types";
+
+export { itemIcon };
 
 /**
  * Every item kind's frontend, found on its own: each
@@ -40,27 +25,6 @@ export async function loadModule(kind: string): Promise<ItemModule | null> {
   const load = byKind[kind];
   if (!load) return null;
   return (await load()).default;
-}
-
-/** Icons named by the backend spec (``icon``), for the Store, New and Files. */
-const ICONS: Record<string, LucideIcon> = {
-  dumbbell: Dumbbell,
-  "heart-pulse": HeartPulse,
-  salad: Salad,
-  "calendar-days": CalendarDays,
-  "circle-check-big": CircleCheckBig,
-  wallet: Wallet,
-  contact: Contact,
-  plane: Plane,
-  "book-open": BookOpen,
-  dices: Dices,
-  layers: Layers,
-  "list-checks": ListChecks,
-  "list-todo": ListTodo,
-};
-
-export function itemIcon(name: string | null | undefined): LucideIcon {
-  return (name && ICONS[name]) || LayoutGrid;
 }
 
 /** The kind an item file is, from its name's suffix (``Leg day.workout``). */

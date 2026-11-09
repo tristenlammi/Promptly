@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
   AtSign,
@@ -59,7 +60,7 @@ export function InboxPanel({
     }
   };
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 px-4 pt-[10vh]"
       onClick={onClose}
@@ -170,6 +171,10 @@ export function InboxPanel({
           )}
         </div>
       </div>
-    </div>
+    </div>,
+    // On the body, so it shows even when it's opened while the phone menu
+    // that holds the bell is closed (the Passwords page links here with
+    // ``?sidebar=inbox``).
+    document.body
   );
 }

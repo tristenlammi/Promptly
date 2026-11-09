@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { CalendarDays, ClipboardList, KeyRound, Mail, MessageCircle, Navigation, type LucideIcon } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import { authApi } from "@/api/auth";
@@ -8,29 +7,10 @@ import { useAuthStore } from "@/store/authStore";
 import { toast } from "@/store/toastStore";
 
 import { itemsApi } from "./api";
-import { itemIcon } from "./registry";
+import { BUILT_IN_APPS, type NavApp } from "./builtInApps";
+import { itemIcon } from "./itemIcons";
 
-/** An app that can sit in the sidebar: a built-in one or an added Item Store app. */
-export interface NavApp {
-  id: string;
-  name: string;
-  icon: string;
-  /** The line icon used when the sidebar shows simple icons. */
-  glyph: LucideIcon;
-  to: string;
-}
-
-/** Apps that are part of Promptly itself (not file-backed items). */
-export const BUILT_IN_APPS: NavApp[] = [
-  { id: "rooms", name: "Rooms", icon: "/item-icons/rooms-192.png", glyph: MessageCircle, to: "/rooms" },
-  { id: "calendar", name: "Calendar", icon: "/item-icons/calendar-192.png", glyph: CalendarDays, to: "/calendar" },
-  { id: "maps", name: "Maps", icon: "/item-icons/maps-192.png", glyph: Navigation, to: "/maps" },
-  { id: "mail", name: "Mail", icon: "/item-icons/mail-192.png", glyph: Mail, to: "/mail" },
-  // Its own page: the route in App.tsx turns this into a full page load.
-  { id: "passwords", name: "Passwords", icon: "/item-icons/passwords-192.png", glyph: KeyRound, to: "/passwords" },
-  // Forms: a home page of your forms (each form is a file in Files).
-  { id: "forms", name: "Forms", icon: "/item-icons/forms-192.png", glyph: ClipboardList, to: "/forms" },
-];
+export { BUILT_IN_APPS, type NavApp };
 
 /**
  * The apps this person pinned to their sidebar (``settings.nav_apps``) —

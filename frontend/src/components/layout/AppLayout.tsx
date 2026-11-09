@@ -1,6 +1,6 @@
 import { Suspense, useEffect, useRef, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Outlet, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { InstallFromLink } from "@/components/pwa/InstallFromLink";
 import { RouteBoundary } from "@/components/system/RouteBoundary";
@@ -48,6 +48,17 @@ export function AppLayout({ children }: { children?: ReactNode } = {}) {
   useEffect(() => {
     if (isMobile) closeMobileNav();
   }, [location.pathname, location.search, isMobile, closeMobileNav]);
+
+  // ``?search=1`` opens the search palette on arrival: the Passwords page's
+  // copy of the sidebar can't run it, so its Search links here.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get("search") !== "1") return;
+    openSearchPalette();
+    const next = new URLSearchParams(searchParams);
+    next.delete("search");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, openSearchPalette]);
 
   // Global Ctrl/Cmd+K to open the search palette. We intentionally
   // *don't* suppress the shortcut while the user is typing in an

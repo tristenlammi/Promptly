@@ -83,6 +83,7 @@ export function UserAvatar({
   }
   return (
     <span
+      data-avatar
       title={title ?? name}
       style={{
         width: size,

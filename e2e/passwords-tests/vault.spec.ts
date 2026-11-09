@@ -261,9 +261,9 @@ test("works at phone width", async ({ browser }) => {
   const page = await ctx.newPage();
   await onboard(page).catch(async () => {
     // At phone width the nav sits in a drawer, so the desktop check doesn't apply.
-    await expect(page.getByRole("button", { name: "Menu" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Menu", exact: true })).toBeVisible();
   });
-  await expect(page.getByRole("button", { name: "Menu" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Menu", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "New", exact: true }).click();
   await page.getByRole("menuitem", { name: "Secure note" }).click();
   await page.getByLabel("Name", { exact: true }).fill("Phone note");
@@ -271,7 +271,7 @@ test("works at phone width", async ({ browser }) => {
   await page.getByRole("button", { name: "Save" }).click();
   await expect(page.getByRole("article", { name: "Phone note" })).toBeVisible();
   await page.getByRole("button", { name: /Back/ }).click();
-  await page.getByRole("button", { name: "Menu" }).click();
+  await page.getByRole("button", { name: "Menu", exact: true }).click();
   await page.getByRole("navigation", { name: "Passwords" }).getByRole("button", { name: "Generator" }).click();
   await expect(page.getByTestId("generated")).not.toBeEmpty();
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);

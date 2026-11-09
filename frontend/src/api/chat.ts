@@ -1,3 +1,4 @@
+import { CONVERSATION_PAGE_SIZE, conversationCursor } from "./chatPaging";
 import { apiClient } from "./client";
 import type {
   ChatMessage,
@@ -184,17 +185,7 @@ export interface ImportConversationsResponse {
   }>;
 }
 
-/** Rows per page of the conversation list. */
-export const CONVERSATION_PAGE_SIZE = 50;
-
-/** Where the next page of the conversation list starts: built from the
- *  previous page's last row (the server pages by these keys, so chats that
- *  move while you scroll don't get skipped or repeated). */
-export function conversationCursor(c: ConversationSummary, archived = false): string {
-  return archived
-    ? `${c.archived_at}|${c.id}`
-    : `${c.pinned ? 1 : 0}|${c.updated_at}|${c.id}`;
-}
+export { CONVERSATION_PAGE_SIZE, conversationCursor };
 
 export interface ChatConnector {
   id: string;

@@ -21,6 +21,10 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Fixed
+- Passwords: opened inside Promptly, it now has Promptly's normal sidebar (expanded, with New chat, Search, your pages and pinned apps in the same simple icons, folders, recent chats and your account) instead of a narrow strip with coloured app icons, and the same slide-in menu on a phone. It follows your collapsed or expanded choice, the same as the rest of Promptly.
+- Opening Passwords while you're in a voice call no longer drops the call: Passwords opens in a new tab and the call carries on in the first one.
+
 ## [0.33.0] - 2026-11-09
 
 ### Added
