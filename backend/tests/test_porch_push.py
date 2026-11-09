@@ -5,9 +5,9 @@ when they post"), mentions, tag requests (with buttons), comments, replies,
 reactions (Daily summary by default), invites (Join / Not now), birthdays
 (once a day); never for your own actions, never to someone who can't see
 the post, nothing across a block; each kind On / Daily summary / Off, the
-account switch, quiet hours holding them. Reports: anyone who can see a
-post or comment reports it; a server admin removes it (the poster sees why)
-or keeps it. Admin → Porch: off, user groups, limits, Everyone's name.
+account switch, quiet hours holding them. Admin → Porch: off, user groups,
+limits, Everyone's name, taking a post out of Everyone. Reports are in
+``test_porch_reports.py``.
 """
 from __future__ import annotations
 
@@ -341,75 +341,7 @@ async def test_birthday_pushes_once_a_day_for_your_groups(client, db, people, pu
     assert kinds(pushes, dan) == ["birthday"] and kinds(pushes, bob) == []
 
 
-# ------------------------------------------------------------------ reports and admin
-
-
-async def test_report_and_admin_removes_the_poster_is_told(client, db, people, pushes, devices):
-    ann, bob, cat, dan = people  # Ann is the server admin, and not in Mates
-    mates = await members_of(client, cat, "Mates", [bob])
-    post = await say(client, cat, [mates], "Something rude")
-    pid = post["id"]
-
-    # Only people who can see it can report it; not your own.
-    r = await client.post("/api/porch/reports", headers=H(dan), json={"target_type": "post", "target_id": pid, "reason": "x"})
-    assert r.status_code == 404
-    r = await client.post("/api/porch/reports", headers=H(cat), json={"target_type": "post", "target_id": pid})
-    assert r.status_code == 400
-    pushes.calls.clear()
-    rep = await ok(await client.post("/api/porch/reports", headers=H(bob), json={"target_type": "post", "target_id": pid, "reason": "Not kind"}), 201)
-    # The admins are nudged — without who or what.
-    nudges = [c for c in pushes.calls if c["category"] == "system_alert"]
-    assert [c["user_id"] for c in nudges] == [ann.id] and "Not kind" not in nudges[0]["body"] and "rude" not in nudges[0]["body"]
-    # Reporting again only updates the reason (one row, no second nudge).
-    pushes.calls.clear()
-    await ok(await client.post("/api/porch/reports", headers=H(bob), json={"target_type": "post", "target_id": pid, "reason": "Really not kind"}), 201)
-    assert [c for c in pushes.calls if c["category"] == "system_alert"] == []
-
-    # Non-admins can't see the queue.
-    assert (await client.get("/api/admin/porch/reports", headers=H(bob))).status_code == 403
-    q = await ok(await client.get("/api/admin/porch/reports", headers=H(ann)))
-    assert len(q) == 1 and q[0]["target"]["body"] == "Something rude"
-    assert [x["reason"] for x in q[0]["reports"]] == ["Really not kind"]
-    # The admin isn't in Mates: it isn't named to them.
-    assert q[0]["target"]["groups"] == {"in_everyone": False, "named": [], "others": 1}
-    assert (await ok(await client.get("/api/admin/porch", headers=H(ann))))["open_reports"] == 1
-
-    pushes.calls.clear()
-    out = await ok(await client.post(f"/api/admin/porch/reports/{rep['id']}", headers=H(ann), json={"action": "remove", "reason": "Please keep it friendly"}))
-    assert out["status"] == "removed" and out["closed"] == 1
-    assert not await sees(client, bob, pid) and not await sees(client, cat, pid)
-    told = porch_for(pushes, cat)
-    assert [c["extra"]["kind"] for c in told] == ["removed"] and told[0]["title"] == "Your post was removed"
-    assert "Please keep it friendly" in told[0]["body"]
-    act = await ok(await client.get("/api/porch/activity", headers=H(cat)))
-    gone = [i for i in act["items"] if i["kind"] == "removed"]
-    assert len(gone) == 1 and gone[0]["removed"] == {"scope": "all", "reason": "Please keep it friendly"} and gone[0]["text"] == "Something rude"
-    # Nobody else hears about it.
-    assert not any(i["kind"] == "removed" for i in (await ok(await client.get("/api/porch/activity", headers=H(bob))))["items"])
-    assert await ok(await client.get("/api/admin/porch/reports", headers=H(ann))) == []
-    done = await ok(await client.get("/api/admin/porch/reports", headers=H(ann), params={"status": "handled"}))
-    assert done[0]["status"] == "removed" and done[0]["note"] == "Please keep it friendly"
-
-
-async def test_report_a_comment_keep_and_remove(client, db, people, pushes, devices):
-    ann, bob, cat, _ = people
-    fam = await members_of(client, bob, "Fam", [cat])
-    pid = (await say(client, bob, [fam], "Holiday"))["id"]
-    c = await comment(client, cat, pid, "Meh")
-    rep = await ok(await client.post("/api/porch/reports", headers=H(bob), json={"target_type": "comment", "target_id": c["id"], "reason": "Rude"}), 201)
-    q = await ok(await client.get("/api/admin/porch/reports", headers=H(ann)))
-    assert q[0]["target"]["type"] == "comment" and q[0]["target"]["body"] == "Meh" and q[0]["target"]["post_body"] == "Holiday"
-    # Keep: closed, nothing happens to it.
-    await ok(await client.post(f"/api/admin/porch/reports/{rep['id']}", headers=H(ann), json={"action": "keep"}))
-    got = await ok(await client.get(f"/api/porch/posts/{pid}/comments", headers=H(bob)))
-    assert [x["body"] for x in got["comments"]] == ["Meh"]
-    # Reported again, then removed: gone, and Cat is told.
-    rep2 = await ok(await client.post("/api/porch/reports", headers=H(bob), json={"target_type": "comment", "target_id": c["id"]}), 201)
-    pushes.calls.clear()
-    await ok(await client.post(f"/api/admin/porch/reports/{rep2['id']}", headers=H(ann), json={"action": "remove", "reason": "Be nice"}))
-    got = await ok(await client.get(f"/api/porch/posts/{pid}/comments", headers=H(bob)))
-    assert got["count"] == 0
-    assert porch_for(pushes, cat)[0]["title"] == "Your comment was removed"
+# ------------------------------------------------------------------ admin (reports: test_porch_reports.py)
 
 
 async def test_admin_takes_a_post_out_of_everyone(client, db, people, pushes, devices):
@@ -473,19 +405,3 @@ async def test_admin_porch_settings(client, db, people):
         assert (await client.get("/api/porch/bootstrap", headers=H(u))).status_code == 404
     await ok(await client.patch("/api/admin/porch", headers=H(ann), json={"enabled": True}))
     assert (await client.get("/api/porch/bootstrap", headers=H(bob))).status_code == 200
-
-
-async def test_admin_sees_a_reported_photo_and_only_while_it_is_open(client, db, people):
-    from tests.porch_kit import mpath, photo, post_photos
-
-    ann, bob, cat, _ = people
-    mates = await members_of(client, cat, "Mates", [bob])
-    pic = await photo(client, cat)
-    made = await post_photos(client, cat, [mates], [pic], body="look")
-    assert not await sees(client, ann, made["id"])
-    rep = await ok(await client.post("/api/porch/reports", headers=H(bob), json={"target_type": "post", "target_id": made["id"]}), 201)
-    q = await ok(await client.get("/api/admin/porch/reports", headers=H(ann)))
-    thumb = q[0]["target"]["media"][0]["thumb"]
-    assert (await client.get(mpath(thumb), headers=H(ann))).status_code == 200
-    await ok(await client.post(f"/api/admin/porch/reports/{rep['id']}", headers=H(ann), json={"action": "keep"}))
-    assert (await client.get(mpath(thumb), headers=H(ann))).status_code == 404

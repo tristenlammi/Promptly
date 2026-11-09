@@ -326,7 +326,7 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
   if (c.can_edit) actions.push({ label: "Edit", icon: Pencil, onClick: () => { setDraft(c.body); setEditing(true); } });
   if (c.can_delete) actions.push({ label: "Delete", icon: Trash2, danger: true, hint: c.mine ? undefined : "It's on your post, so you can delete it", onClick: () => void remove() });
   const name = c.author?.name ?? "Someone";
-  if (!c.mine) actions.push({ label: "Report", icon: TriangleAlert, danger: true, hint: "Tell the person who runs this Promptly", onClick: () => setReporting(true) });
+  if (!c.mine) actions.push({ label: "Report", icon: TriangleAlert, danger: true, hint: "Tell the admins of a group it's in", onClick: () => setReporting(true) });
   const r = c.reactions;
 
   return (
@@ -417,7 +417,7 @@ function CommentRow({ c, post, onReply, small = false }: { c: PorchComment; post
       )}
       <ReactionPicker open={!!picker} at={picker} current={r.mine} onPick={(e) => void react(e)} onClose={() => setPicker(null)} label={`React to ${name}'s comment`} />
       <ActionSheet open={menu} onClose={() => setMenu(false)} title={c.mine ? "Your comment" : `${name}'s comment`} actions={actions} />
-      {!c.mine && <ReportSheet open={reporting} onClose={() => setReporting(false)} target="comment" id={c.id} who={name} />}
+      {!c.mine && <ReportSheet open={reporting} onClose={() => setReporting(false)} target="comment" id={c.id} who={name} authorId={c.author?.id} groups={post.groups} />}
       {c.mine && <WhoReactedSheet target="comment" id={c.id} open={who} onClose={() => setWho(false)} />}
     </div>
   );

@@ -15,8 +15,10 @@ something you can't see any more: only posts you can see
 Live: :func:`tell` sends ``{"type": "activity"}`` to the people something
 new is for, so their badge and list refresh. Push notifications
 (:mod:`app.porch.push`) go from the same places: ``after_comment``,
-``after_post``, reactions, invites. A server admin's removals
+``after_post``, reactions, invites. An admin's removals
 (``porch_removals``) show here too, with the reason, to the poster only.
+Someone who runs a group sees how many things wait in its Reports tab
+(pinned, like invites, until they're handled; never who reported them).
 """
 from __future__ import annotations
 
@@ -224,10 +226,14 @@ async def collect(db: AsyncSession, user: User) -> dict[str, Any]:
         }
         for t, p in tag_rows
     ]
-    # A server admin took something of yours down: what, where, and why.
-    from .reports import removals_for
+    # An admin took something of yours down: what, where, and why.
+    from .models import PorchGroup
+    from .reports import removals_for, waiting
 
-    for r in await removals_for(db, me, since):
+    removals = await removals_for(db, me, since)
+    gids = {r.group_id for r in removals if r.group_id}
+    gnames = dict((await db.execute(select(PorchGroup.id, PorchGroup.name).where(PorchGroup.id.in_(gids)))).all()) if gids else {}
+    for r in removals:
         items.append(
             {
                 "id": f"x:{r.id}",
@@ -244,15 +250,20 @@ async def collect(db: AsyncSession, user: User) -> dict[str, Any]:
                 "emoji": None,
                 "target": r.target_type,
                 "comment_id": str(r.target_id) if r.target_type == "comment" else None,
-                "removed": {"scope": r.scope, "reason": r.reason},
+                "removed": {"scope": r.scope, "reason": r.reason, "group": gnames.get(r.group_id) if r.group_id else None},
                 "unseen": seen is None or r.created_at > seen,
             }
         )
     items.sort(key=lambda i: i["at"], reverse=True)
     invites = await _invites(db, user)
-    unseen = sum(1 for i in items if i["unseen"]) + len(tag_requests) + len(invites)
+    # Groups you run with something reported in them.
+    run = [m.group for m in await access.my_groups(db, user) if m.is_admin]
+    counts = await waiting(db, user, run)
+    reports = [{"group": access.group_label(g), "count": counts[g.id]} for g in run if counts.get(g.id)]
+    unseen = sum(1 for i in items if i["unseen"]) + len(tag_requests) + len(invites) + len(reports)
     return {
         "invites": invites,
+        "reports": reports,
         "tag_requests": tag_requests,
         "items": items,
         "seen_at": seen.isoformat() if seen else None,

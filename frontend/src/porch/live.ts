@@ -181,9 +181,12 @@ export async function applyPorchEvent(qc: QueryClient, ev: PorchEvent): Promise<
       void refreshPost(qc, ev.post_id);
       return;
     case "activity":
-      // Something new about you: the badge and the Activity list.
+      // Something new about you: the badge and the Activity list (and, for
+      // a group you run, its Reports tab and count).
       void qc.invalidateQueries({ queryKey: BOOTSTRAP_KEY });
       void qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
+      void qc.invalidateQueries({ queryKey: ["porch", "reports"] });
+      void qc.invalidateQueries({ queryKey: ["porch", "group"] });
       return;
   }
 }

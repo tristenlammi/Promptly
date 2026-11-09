@@ -215,12 +215,16 @@ class PorchAlert(Base):
 
 
 class PorchReport(UUIDPKMixin, CreatedAtMixin, Base):
-    """A post or comment reported to the server admins (the queue: WP-P1.7)."""
+    """A post or comment reported to the admins of the group it was seen in
+    (``group_id``; NULL = Everyone, whose admins are the server admins).
+    One row per reporter and group (WP-P1.7, WP-P2.0)."""
 
     __tablename__ = "porch_reports"
 
     reporter_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    target_type: Mapped[str] = mapped_column(String(8), nullable=False)  # post | comment
+    # The group it was reported in (0392); NULL = Everyone.
+    group_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("porch_groups.id", ondelete="CASCADE"), nullable=True)
+    target_type: Mapped[str] = mapped_column(String(8), nullable=False)  # post | comment (| story, later)
     target_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     reason: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
     status: Mapped[str] = mapped_column(String(8), nullable=False, default="open", server_default="open")
@@ -232,10 +236,12 @@ class PorchReport(UUIDPKMixin, CreatedAtMixin, Base):
 
 
 class PorchRemoval(UUIDPKMixin, CreatedAtMixin, Base):
-    """A post or comment a server admin took down (0272): from a report
-    (``scope='all'``: gone for everyone) or out of Everyone only
-    (``scope='everyone'``: it stays in the poster's other groups). The poster
-    sees it in Activity with the reason; nobody else is told."""
+    """A post or comment an admin took down (0272): a comment, gone for
+    everyone (``scope='all'``), or a post taken out of one group only —
+    Everyone by a server admin (``scope='everyone'``) or one of the poster's
+    groups by its admins (``scope='group'``, ``group_id``; 0392). A post
+    left in no group is deleted. The poster sees it in Activity with the
+    reason; nobody else is told."""
 
     __tablename__ = "porch_removals"
 
@@ -244,6 +250,7 @@ class PorchRemoval(UUIDPKMixin, CreatedAtMixin, Base):
     target_id: Mapped[uuid.UUID] = mapped_column(nullable=False)
     post_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("porch_posts.id", ondelete="CASCADE"), nullable=True)
     scope: Mapped[str] = mapped_column(String(8), nullable=False, default="all", server_default="all")
+    group_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("porch_groups.id", ondelete="SET NULL"), nullable=True)
     reason: Mapped[str] = mapped_column(String(500), nullable=False, default="", server_default="")
     # A few words of what was removed, so the poster knows which one.
     snippet: Mapped[str] = mapped_column(String(200), nullable=False, default="", server_default="")

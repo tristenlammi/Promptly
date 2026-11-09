@@ -5,7 +5,11 @@
   Porch's own).
 * Video limits for posts (length and size).
 * Everyone's name ("Lammi Clan").
-* The reports queue: remove (the poster is told why) or keep.
+* Everyone's reports: things reported in the Everyone group (and only
+  those: a report in any other group goes to that group's admins), shown
+  only while the admin can see them as an Everyone member. Remove takes a
+  post out of Everyone (the poster is told why) or removes a comment; Keep
+  leaves it. Nobody is told who reported it.
 * Take a post out of Everyone, with a reason.
 """
 from __future__ import annotations
@@ -55,13 +59,18 @@ async def _out(db: AsyncSession) -> dict:
         "everyone_emoji": ev.emoji,
         "people": await access.member_count(db, ev) if s.porch_enabled else 0,
         "user_groups": [{"id": str(g.id), "name": g.name, "member_count": int(counts.get(g.id, 0))} for g in ugs],
-        "open_reports": await reports.open_count(db),
     }
 
 
-@router.get("")
-async def get_porch(db: AsyncSession = Depends(get_db), _admin: User = Depends(require_admin)) -> dict:
+async def _with_reports(db: AsyncSession, admin: User) -> dict:
     out = await _out(db)
+    out["open_reports"] = await reports.open_count(db, admin)
+    return out
+
+
+@router.get("")
+async def get_porch(db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)) -> dict:
+    out = await _with_reports(db, admin)
     await db.commit()
     return out
 
@@ -77,7 +86,7 @@ class PorchPatch(BaseModel):
 
 
 @router.patch("")
-async def patch_porch(body: PorchPatch, db: AsyncSession = Depends(get_db), _admin: User = Depends(require_admin)) -> dict:
+async def patch_porch(body: PorchPatch, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)) -> dict:
     s = await _settings_row(db)
     sent = body.model_fields_set
     if body.enabled is not None:
@@ -109,29 +118,31 @@ async def patch_porch(body: PorchPatch, db: AsyncSession = Depends(get_db), _adm
         if body.everyone_emoji is not None:
             ev.emoji = body.everyone_emoji.strip() or core.EVERYONE_EMOJI
     await db.commit()
-    return await _out(db)
+    return await _with_reports(db, admin)
 
 
-# ------------------------------------------------------------------ reports
+# ------------------------------------------------------------------ reports (Everyone's only)
 
 
 @router.get("/reports")
 async def list_reports(status: Literal["open", "handled"] = "open", db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)) -> list[dict]:
+    """Reports made in Everyone (never another group's), each shown only if
+    this admin can see it as an Everyone member."""
+    ev = await core.everyone(db)
     if status == "open":
-        return await reports.queue(db, admin)
-    return await reports.handled(db)
-
-
-class DecideIn(BaseModel):
-    action: Literal["remove", "keep"]
-    reason: str = Field(default="", max_length=500)
+        out = await reports.queue(db, admin, ev)
+    else:
+        out = await reports.handled(db, admin, ev)
+    await db.commit()
+    return out
 
 
 @router.post("/reports/{report_id}")
-async def decide(report_id: uuid.UUID, body: DecideIn, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)) -> dict:
-    """Remove what was reported (the poster sees the reason) or keep it.
-    Every open report on the same post or comment is closed with it."""
-    return await reports.decide(db, admin, report_id, body.action, body.reason)
+async def decide(report_id: uuid.UUID, body: reports.DecideIn, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)) -> dict:
+    """Take a post out of Everyone or remove a comment (the poster sees the
+    reason), or keep it. Every open report on it in Everyone closes with it."""
+    ev = await core.everyone(db)
+    return await reports.decide(db, admin, ev, report_id, body.action, body.reason)
 
 
 class RemoveIn(BaseModel):
@@ -149,7 +160,7 @@ async def remove_from_everyone(post_id: uuid.UUID, body: RemoveIn, db: AsyncSess
     inside = (await db.execute(select(PorchPostGroup).where(PorchPostGroup.post_id == post.id, PorchPostGroup.group_id == ev.id))).first()
     if inside is None:
         raise core.bad("This post isn't in Everyone")
-    return await reports.remove_post(db, admin, post, body.reason.strip(), scope="everyone")
+    return await reports.remove_post(db, admin, post, body.reason.strip(), group=ev)
 
 
 __all__ = ["router"]

@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AtSign, Bell, Heart, MessageCircle, Reply, ShieldAlert } from "lucide-react";
+import { AtSign, Bell, ChevronRight, Flag, Heart, MessageCircle, Reply, ShieldAlert } from "lucide-react";
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import { Link } from "react-router-dom";
 
-import { porchApi, type ActivityItem, type TagRequest } from "@/api/porch";
+import { porchApi, type Activity, type ActivityItem, type TagRequest } from "@/api/porch";
 import { EmptyState, ItemButton, List, Section } from "@/items/ui";
 import { toast } from "@/store/toastStore";
 import { apiErrorMessage } from "@/utils/apiError";
@@ -45,11 +45,14 @@ function itemWords(it: ActivityItem): { lead: string; rest: string; quote: strin
   }
 }
 
-/** A server admin took down your post or comment (or took it out of
- *  Everyone): what, and the reason they gave. Only you see this. */
+/** An admin took down your comment, or your post out of Everyone or one
+ *  of your groups: what, and the reason they gave. Only you see this. */
 function RemovedRow({ it }: { it: ActivityItem }) {
   const what = it.target === "comment" ? "comment" : "post";
-  const where = it.removed?.scope === "everyone" ? " from Everyone" : "";
+  const scope = it.removed?.scope;
+  const group = it.removed?.group;
+  const where = scope === "everyone" ? " from Everyone" : scope === "group" ? ` from ${group ?? "a group"}` : "";
+  const by = scope !== "everyone" && group ? ` by an admin of ${group}.` : " by the person who runs this Promptly.";
   const reason = it.removed?.reason?.trim();
   const inner = (
     <>
@@ -60,7 +63,7 @@ function RemovedRow({ it }: { it: ActivityItem }) {
         <b className="font-semibold">
           Your {what} was removed{where}
         </b>
-        {reason ? <span className="text-[var(--text-muted)]">: “{reason}”</span> : <span className="text-[var(--text-muted)]"> by the person who runs this Promptly.</span>}
+        {reason ? <span className="text-[var(--text-muted)]">: “{reason}”</span> : <span className="text-[var(--text-muted)]">{by}</span>}
         {it.text && <span className="mt-0.5 block truncate text-xs text-[var(--text-muted)]">{it.text}</span>}
         <span className="mt-0.5 block text-xs text-[var(--text-muted)]">
           <time dateTime={it.at} title={fullTime(it.at)}>
@@ -89,6 +92,30 @@ function RemovedRow({ it }: { it: ActivityItem }) {
       className={cn(cls, "transition hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]")}
     >
       {inner}
+    </Link>
+  );
+}
+
+/** A group you run has something reported in it: straight to its Reports
+ *  tab. Never who reported it. */
+function ReportsRow({ r }: { r: Activity["reports"][number] }) {
+  const things = r.count === 1 ? "1 thing was" : `${r.count} things were`;
+  return (
+    <Link
+      to={`/porch/g/${r.group.id}?tab=reports`}
+      data-activity="reports"
+      className="flex min-h-[64px] items-center gap-3 px-3 py-2.5 transition hover:bg-[var(--hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]"
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--item-accent)_14%,transparent)] text-[var(--item-accent)]" aria-hidden>
+        <Flag className="h-5 w-5" />
+      </span>
+      <span className="min-w-0 flex-1 text-sm leading-snug text-[var(--text)]">
+        <b className="font-semibold">
+          {things} reported in {r.group.emoji} {r.group.name}
+        </b>
+        <span className="mt-0.5 block text-xs text-[var(--text-muted)]">You help run it, so you decide: keep it or remove it.</span>
+      </span>
+      <ChevronRight className="h-4 w-4 shrink-0 text-[var(--text-muted)]" aria-hidden />
     </Link>
   );
 }
@@ -203,7 +230,7 @@ export function ActivityPage() {
     firstAt.current = q.dataUpdatedAt;
     void porchApi
       .activitySeen()
-      .then(() => updateBootstrap(qc, (b) => ({ ...b, activity_unseen: data.invites.length + data.tag_requests.length })))
+      .then(() => updateBootstrap(qc, (b) => ({ ...b, activity_unseen: data.invites.length + data.tag_requests.length + (data.reports?.length ?? 0) })))
       .catch(() => {
         marked.current = false;
       });
@@ -219,7 +246,7 @@ export function ActivityPage() {
   let body;
   if (q.isPending) body = <p className="px-4 py-10 text-center text-sm text-[var(--text-muted)]">Loading…</p>;
   else if (q.isError) body = <LoadError what="Couldn't load your activity." onRetry={refetch} />;
-  else if (data && !data.items.length && !data.invites.length && !data.tag_requests.length) {
+  else if (data && !data.items.length && !data.invites.length && !data.tag_requests.length && !data.reports?.length) {
     body = <EmptyState className="mx-4 mt-4 md:mx-0" icon={Bell} title="Nothing new" text="Comments, reactions and invites show up here." />;
   } else if (data) {
     const groups: { title: string; items: ActivityItem[] }[] = [];
@@ -236,6 +263,15 @@ export function ActivityPage() {
             <List>
               {data.invites.map((g) => (
                 <InviteRow key={g.id} g={g} />
+              ))}
+            </List>
+          </Section>
+        )}
+        {(data.reports?.length ?? 0) > 0 && (
+          <Section title="Reports to look at" hint="Things people reported in groups you run. You see why, never who.">
+            <List>
+              {data.reports.map((r) => (
+                <ReportsRow key={r.group.id} r={r} />
               ))}
             </List>
           </Section>

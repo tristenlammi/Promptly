@@ -205,6 +205,8 @@ RULES: dict[str, Rule] = {
             ("invite", "group invite", "group invites"),
             ("birthday", "birthday", "birthdays"),
             ("removed", "note from the admin", "notes from the admin"),
+            # Porch reports go to the group's admins (WP-P2.0).
+            ("report", "report", "reports"),
         ),
     ),
 }

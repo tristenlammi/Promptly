@@ -8,9 +8,9 @@ import { expect, ready, stamp, test } from "../fixtures";
 
 /** Porch push, admin and phone (WP-P1.7): Settings → Notifications kind by
  *  kind (kept after a reload), a group's bell and "Notify me" on a profile;
- *  report a post → the admin removes it in Admin → Porch → the poster sees
- *  why in Activity; Admin → Porch off hides Porch; a phone width; and
- *  accessibility scans. Dana is the server admin. Screenshots go to
+ *  report a post in a group → that group's admin removes it from the group
+ *  (the server admin never sees it) → the poster sees why in Activity;
+ *  Admin → Porch off hides Porch; a phone width; and accessibility scans. Dana is the server admin. Screenshots go to
  *  ``PORCH_SHOTS`` (default ``test-results/porch-shots``). */
 
 const SHOTS = process.env.PORCH_SHOTS || path.join("test-results", "porch-shots");
@@ -125,50 +125,69 @@ test("Settings → Notifications per kind, a group's bell and Notify me, on a ph
   await porch(alice, aAuth).del(`/porch/groups/${famId}`);
 });
 
-test("report a post; the admin removes it in Admin → Porch; the poster sees why", async ({ alice, bob, dana }) => {
+test("report a post in a group; the group's admin removes it from that group; the server admin never sees it", async ({ alice, bob, dana }) => {
   test.setTimeout(180_000);
   const [aAuth, bAuth, dAuth] = [await bearer(alice), await bearer(bob), await bearer(dana)];
   const [, bobId] = [await porchReady(alice, aAuth), await porchReady(bob, bAuth), await porchReady(dana, dAuth)];
+  const everyoneId = (await (await porch(bob, bAuth).get("/porch/bootstrap")).json()).everyone.id as string;
+  // Alice runs Mates; Bob is in it; Dana (a server admin) isn't.
   const mates = `Mates ${stamp}`;
   const gid = await groupWith(alice, aAuth, mates, [[bob, bAuth, bobId]]);
   const words = `Rude words ${stamp}`;
-  const post = await (await porch(alice, aAuth).post("/porch/posts", { kind: "text", body: words, groups: [gid] })).json();
+  const post = await (await porch(bob, bAuth).post("/porch/posts", { kind: "text", body: words, groups: [everyoneId, gid] })).json();
 
-  // Bob reports it from the post's "…".
-  await bob.goto(`/porch/p/${post.id}`);
-  await bob.getByRole("button", { name: /More for/ }).first().click();
-  await bob.getByRole("button", { name: "Report" }).click();
-  const sheet = bob.getByRole("dialog", { name: "Report this post" });
+  // Alice sees it in Mates and in Everyone: she reports it to Mates' admins.
+  await alice.goto(`/porch/p/${post.id}`);
+  await alice.getByRole("button", { name: /More for/ }).first().click();
+  await alice.getByRole("button", { name: "Report" }).click();
+  const sheet = alice.getByRole("dialog", { name: "Report this post" });
+  await expect(sheet.getByRole("checkbox", { name: "The people who run this Promptly" })).toBeVisible();
+  await sheet.getByRole("checkbox", { name: `The admins of ${mates}` }).click();
   await sheet.getByRole("radio", { name: "It's unkind or hurtful" }).click();
   await sheet.getByRole("textbox", { name: /Anything to add/ }).fill("Not nice to Mum");
-  const errs = await scan(bob, "report sheet", '[role="dialog"]');
+  await shot(alice, "report-sheet");
+  const errs = await scan(alice, "report sheet", '[role="dialog"]');
   await sheet.getByRole("button", { name: "Send report" }).click();
-  await expect(bob.getByText(/Thanks for telling us/)).toBeVisible();
+  await expect(alice.getByText(`Thanks for telling us. The admins of ${mates} will look at it.`)).toBeVisible();
 
-  // Dana (a server admin, not in Mates) handles it in Admin → Porch.
+  // Dana runs this Promptly but isn't in Mates: nothing in Admin → Porch.
   await dana.goto("/admin?tab=porch");
   await expect(dana.getByRole("heading", { name: "Reports" })).toBeVisible();
-  const row = dana.locator("[data-report]").filter({ hasText: words });
+  await expect(dana.getByText(/Reports made in other groups go to those groups' own admins/)).toBeVisible();
+  await expect(dana.locator("[data-report]").filter({ hasText: words })).toHaveCount(0);
+  expect(await (await porch(dana, dAuth).get("/admin/porch/reports")).text()).not.toContain(words);
+  errs.push(...(await scan(dana, "admin porch", "main")));
+
+  // Alice runs Mates: Activity points her to its Reports tab.
+  await alice.goto("/porch/activity");
+  const waiting = alice.locator('[data-activity="reports"]').filter({ hasText: mates });
+  await expect(waiting).toContainText(`1 thing was reported in`);
+  await waiting.click();
+  await expect(alice).toHaveURL(new RegExp(`/porch/g/${gid}`));
+  await expect(alice.getByRole("radio", { name: /Reports/ })).toHaveAttribute("aria-checked", "true");
+  const row = alice.locator("[data-report]").filter({ hasText: words });
   await expect(row).toBeVisible();
   await expect(row).toContainText("It's unkind or hurtful. Not nice to Mum");
-  await expect(row).toContainText("1 other group"); // a group she isn't in isn't named
-  await shot(dana, "admin-reports");
-  errs.push(...(await scan(dana, "admin porch", "main")));
-  await row.getByRole("textbox", { name: /Reason, if you remove it/ }).fill(`Please keep it friendly ${stamp}`);
-  await row.getByRole("button", { name: "Remove" }).click();
-  await expect(dana.getByText(/Removed\. .* told why/)).toBeVisible();
-  await expect(dana.locator("[data-report]").filter({ hasText: words })).toHaveCount(0);
+  await shot(alice, "group-reports");
+  errs.push(...(await scan(alice, "group reports", "#porch-scroll")));
+  await row.getByRole("textbox", { name: /Why you're removing it/ }).fill(`Please keep it friendly ${stamp}`);
+  await row.getByRole("button", { name: `Remove from ${mates}` }).click();
+  await expect(alice.getByText(new RegExp(`Removed from ${mates}\\. It stays in`))).toBeVisible();
+  await expect(alice.locator("[data-report]").filter({ hasText: words })).toHaveCount(0);
+  await expect(alice.getByText("Nothing to look at")).toBeVisible();
 
-  // Gone for Bob; Alice is told why, in Activity.
-  expect((await porch(bob, bAuth).get(`/porch/posts/${post.id}`)).status()).toBe(404);
-  await alice.goto("/porch/activity");
-  const told = alice.locator('[data-activity="removed"]').filter({ hasText: `Please keep it friendly ${stamp}` });
-  await expect(told).toContainText("Your post was removed");
+  // Out of Mates only: still in Everyone. Bob is told why, in Activity.
+  const after = await (await porch(dana, dAuth).get(`/porch/posts/${post.id}`)).json();
+  expect(after.groups.map((g: { id: string }) => g.id)).toEqual([everyoneId]);
+  await bob.goto("/porch/activity");
+  const told = bob.locator('[data-activity="removed"]').filter({ hasText: `Please keep it friendly ${stamp}` });
+  await expect(told).toContainText(`Your post was removed from ${mates}`);
   await expect(told).toContainText(words);
-  await shot(alice, "activity-removed");
-  errs.push(...(await scan(alice, "activity", "#porch-scroll")));
+  await shot(bob, "activity-removed");
+  errs.push(...(await scan(bob, "activity", "#porch-scroll")));
   expect(errs).toEqual([]);
 
+  await porch(bob, bAuth).del(`/porch/posts/${post.id}`);
   await porch(alice, aAuth).del(`/porch/groups/${gid}`);
 });
 
