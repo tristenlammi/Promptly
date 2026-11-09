@@ -100,6 +100,10 @@ class NoteItem(Base):
     created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    # 0360: the store aisle (a Meal Plan ``foods.AISLES`` key) on a list kept
+    # by aisle; Meal Plan's id for an item it sent (people's own have none).
+    aisle: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    ref: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class NoteMember(Base):
@@ -166,7 +170,7 @@ class NoteReminder(Base):
 class NoteVersion(Base):
     __tablename__ = "note_versions"
     __table_args__ = (
-        CheckConstraint("reason IN ('edit', 'restore', 'ai')", name="ck_note_versions_reason"),
+        CheckConstraint("reason IN ('edit', 'restore', 'ai', 'send')", name="ck_note_versions_reason"),
         Index("ix_note_versions_note_created", "note_id", "created_at"),
     )
 

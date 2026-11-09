@@ -1,4 +1,4 @@
-import { Archive, ArchiveRestore, ArrowLeft, ArrowDownAZ, BellPlus, CalendarPlus, CheckSquare, CloudOff, Copy, FileText, Heading, ListTodo, ListX, Mic, MoreVertical, Palette, Pin, Send, Sparkles, Square, Tag, Trash2, Type, UserPlus, Users, WandSparkles } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, ArrowDownAZ, BellPlus, CalendarPlus, CheckSquare, CloudOff, Copy, FileText, Heading, ListTodo, ListX, Mic, MoreVertical, Palette, Pin, Send, ShoppingBasket, Sparkles, Square, Store, Tag, Trash2, Type, UserPlus, Users, WandSparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
@@ -661,6 +661,29 @@ export function NoteEditor({
                   Sort A–Z
                 </MenuItem>
               )}
+              {note.items.length > 1 && !note.list_opts.aisles && (
+                <MenuItem
+                  icon={ShoppingBasket}
+                  onClick={() => {
+                    setPop(null);
+                    flush();
+                    notesActions.itemsBulk(id, "sort_aisle");
+                  }}
+                >
+                  Sort by aisle
+                </MenuItem>
+              )}
+              <MenuItem
+                icon={Store}
+                checked={!!note.list_opts.aisles}
+                onClick={() => {
+                  setPop(null);
+                  flush();
+                  notesActions.patch(id, { list_opts: { ...note.list_opts, aisles: !note.list_opts.aisles } });
+                }}
+              >
+                Keep sorted by aisle
+              </MenuItem>
             </>
           )}
           {editable && hasModel && !isDraft && note.kind === "text" && (

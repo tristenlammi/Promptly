@@ -1,7 +1,7 @@
 /** The Notes API (``/api/notes``, ``backend/app/notes/router.py``). */
 import { apiClient } from "@/api/client";
 
-import type { AiAction, AiProposal, DocNode, Note, NoteItem, NoteKind, NoteLabel, NoteUser, NoteView, ProposedTask, ReminderIn } from "./types";
+import type { AiAction, AiProposal, DocNode, ListOpts, Note, NoteItem, NoteKind, NoteLabel, NoteUser, NoteView, ProposedTask, ReminderIn } from "./types";
 
 export interface Page {
   notes: Note[];
@@ -30,7 +30,7 @@ export interface NotePatch {
   body_doc?: DocNode | null;
   color?: string;
   kind?: NoteKind;
-  list_opts?: Record<string, boolean>;
+  list_opts?: ListOpts;
   /** An AI proposal being applied: the note as it was is kept as a version. */
   checkpoint?: "ai";
 }
@@ -60,13 +60,13 @@ export const notesApi = {
     const { data } = await apiClient.post<{ item: NoteItem }>(`/notes/${id}/items`, body);
     return data.item;
   },
-  async patchItem(id: string, itemId: string, body: { text?: string; checked?: boolean; parent_id?: string | null; position?: number }): Promise<void> {
+  async patchItem(id: string, itemId: string, body: { text?: string; checked?: boolean; parent_id?: string | null; position?: number; aisle?: string }): Promise<void> {
     await apiClient.patch(`/notes/${id}/items/${itemId}`, body);
   },
   async deleteItem(id: string, itemId: string): Promise<void> {
     await apiClient.delete(`/notes/${id}/items/${itemId}`);
   },
-  async itemsBulk(id: string, action: "untick_all" | "delete_ticked" | "sort"): Promise<void> {
+  async itemsBulk(id: string, action: "untick_all" | "delete_ticked" | "sort" | "sort_aisle"): Promise<void> {
     await apiClient.post(`/notes/${id}/items/bulk`, { action });
   },
   async me(id: string, body: { pinned?: boolean; archived?: boolean; position?: number; seen?: boolean }): Promise<void> {

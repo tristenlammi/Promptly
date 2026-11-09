@@ -55,7 +55,7 @@ PREVIEW_ITEMS = 8
 SNIPPET_CHARS = 1000
 VIEWS = ("home", "archive", "trash", "reminders")
 TYPES = ("list", "image", "voice", "shared", "reminder")
-LIST_OPTS = ("hide_checked", "ticked_open")
+LIST_OPTS = ("hide_checked", "ticked_open", "aisles")
 
 
 class Stale(Exception):
@@ -161,9 +161,18 @@ async def refresh_search_text(db: AsyncSession, note: Note) -> list[NoteItem]:
     return items
 
 
-def _clean_list_opts(raw: dict[str, Any] | None) -> dict[str, bool]:
-    out: dict[str, bool] = {}
+def _clean_list_opts(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """On/off options, plus the store order of a list kept by aisle (N2.2)."""
+    from .aisles import clean_order
+
+    out: dict[str, Any] = {}
     for k, v in (raw or {}).items():
+        if k == "aisle_order":
+            try:
+                out[k] = clean_order(v)
+            except ValueError:
+                raise bad("That isn't a list of aisles.") from None
+            continue
         if k not in LIST_OPTS:
             raise bad("That list option isn't one Notes knows.")
         out[k] = bool(v)
@@ -195,7 +204,10 @@ def _snapshot(note: Note, items: list[NoteItem]) -> dict[str, Any]:
         "color": note.color,
         "list_opts": note.list_opts or {},
         "items": [
-            {"id": str(i.id), "parent_id": str(i.parent_id) if i.parent_id else None, "text": i.text, "checked": i.checked, "position": i.position}
+            {
+                "id": str(i.id), "parent_id": str(i.parent_id) if i.parent_id else None, "text": i.text, "checked": i.checked,
+                "position": i.position, "aisle": i.aisle, "ref": i.ref,
+            }
             for i in items
         ],
     }
@@ -270,6 +282,7 @@ async def restore_version(db: AsyncSession, user: User, note: Note, version_id: 
         db.add(NoteItem(
             id=iid, note_id=note.id, text=str(raw.get("text") or "")[:1000], checked=bool(raw.get("checked")),
             checked_at=_now() if raw.get("checked") else None, position=float(raw.get("position") or 0), created_by=user.id,
+            aisle=raw.get("aisle") if raw.get("aisle") in _aisle_keys() else None, ref=(str(raw["ref"])[:64] if raw.get("ref") else None),
         ))
         if raw.get("parent_id"):
             parents[iid] = uuid.UUID(raw["parent_id"])
@@ -417,6 +430,7 @@ async def patch(
     if base_revision != note.revision:
         raise Stale(note)
     await save_version(db, note, user, reason="ai" if reason == "ai" else "edit")
+    was_kept = bool((note.list_opts or {}).get("aisles"))
     new_kind = changes.pop("kind", note.kind)
     if new_kind != note.kind:
         await _convert(db, user, note, new_kind)
@@ -427,9 +441,34 @@ async def patch(
         note.body_text = B.doc_text(note.body_doc)
     for k, v in changes.items():
         setattr(note, k, v)
+    if note.kind == "list" and not was_kept and (note.list_opts or {}).get("aisles"):
+        # Keep sorted by aisle, just turned on: the list is sorted now, in
+        # this person's store order (unless the list already has one).
+        await _sort_by_aisle(db, user, note)
     _bump(note, user, revision=True)
     await _after_change(db, note, user)
     return True
+
+
+def _aisle_keys() -> dict[str, str]:
+    from .aisles import AISLES
+
+    return AISLES
+
+
+async def _sort_by_aisle(db: AsyncSession, user: User, note: Note) -> bool:
+    """Store order, then A–Z; children under their parent. Whether the order
+    or any aisle changed."""
+    from .aisles import ensure_order, sorted_items
+
+    order = await ensure_order(db, user, note)
+    items = await items_of(db, note.id)
+    before = [(i.id, i.aisle) for i in items]
+    out = sorted_items(items, order)
+    for n, it in enumerate(out):
+        it.position = float(n + 1)
+    await db.flush()
+    return [(i.id, i.aisle) for i in out] != before
 
 
 async def _convert(db: AsyncSession, user: User, note: Note, kind: str) -> None:
@@ -460,6 +499,15 @@ async def _convert(db: AsyncSession, user: User, note: Note, kind: str) -> None:
 def _need_list(note: Note) -> None:
     if note.kind != "list":
         raise bad("This note isn't a list. Show checkboxes first.")
+
+
+async def _aisle_at(db: AsyncSession, it: NoteItem) -> str | None:
+    """The aisle an item sits in (a child: its parent's)."""
+    if it.parent_id is not None:
+        parent = await db.get(NoteItem, it.parent_id)
+        if parent is not None:
+            return parent.aisle
+    return it.aisle
 
 
 def item_not_found() -> HTTPException:
@@ -513,10 +561,15 @@ async def _check_parent(db: AsyncSession, note: Note, item_id: uuid.UUID, parent
 
 async def add_item(
     db: AsyncSession, user: User, note: Note, *, item_id: uuid.UUID, text: str, after_id: uuid.UUID | None = None,
-    parent_id: uuid.UUID | None = None, checked: bool = False,
+    parent_id: uuid.UUID | None = None, checked: bool = False, aisle: str | None = None, ref: str | None = None,
 ) -> tuple[NoteItem, bool]:
     """Add an item (below ``after_id``, else at the end). A retry with the
-    same id returns the item it already made."""
+    same id returns the item it already made.
+
+    On a list kept by aisle (N2.2) an item with no ``after_id`` goes after
+    the last item of its aisle, whoever adds it and from wherever (web,
+    widgets, chat, the phone, a Meal Plan send); one put in a place takes the
+    aisle of the item above it, and a child its parent's."""
     _need_list(note)
     existing = await db.get(NoteItem, item_id)
     if existing is not None:
@@ -529,10 +582,30 @@ async def add_item(
     after = await _item_in(db, note, after_id)
     await _check_parent(db, note, item_id, parent_id)
     await save_version(db, note, user)
-    pos = await _position_after(db, note, after)
+    if aisle is not None and aisle not in _aisle_keys():
+        aisle = None
+    kept = bool((note.list_opts or {}).get("aisles"))
+    first = False  # before everything on the list
+    if kept and parent_id is not None:
+        parent = await db.get(NoteItem, parent_id)
+        aisle = parent.aisle if parent is not None else aisle
+    elif kept and after is not None:
+        aisle = aisle or await _aisle_at(db, after)
+    elif kept:
+        from .aisles import aisle_of, order_of, placement
+
+        aisle = aisle or aisle_of(text)
+        rows = await items_of(db, note.id)
+        after = placement(rows, aisle, order_of(note))
+        first = after is None and bool(rows)
+    if first:
+        pos = (await db.scalar(select(func.min(NoteItem.position)).where(NoteItem.note_id == note.id)) or 0.0) - 1.0
+    else:
+        pos = await _position_after(db, note, after)
     it = NoteItem(
         id=item_id, note_id=note.id, parent_id=parent_id, text=text[:1000], checked=checked, position=pos, created_by=user.id,
-        checked_at=_now() if checked else None, checked_by=user.id if checked else None,
+        checked_at=_now() if checked else None, checked_by=user.id if checked else None, aisle=aisle,
+        ref=ref[:64] if ref else None,
     )
     db.add(it)
     await db.flush()
@@ -550,6 +623,8 @@ async def update_item(db: AsyncSession, user: User, note: Note, item_id: uuid.UU
     changed = False
     if "parent_id" in fields and fields["parent_id"] != it.parent_id:
         await _check_parent(db, note, it.id, fields["parent_id"])
+    if "aisle" in fields and fields["aisle"] is not None and fields["aisle"] not in _aisle_keys():
+        raise bad("That isn't one of the aisles.")
     want = {k: v for k, v in fields.items() if getattr(it, k) != v}
     if not want:
         return it, False
@@ -565,6 +640,10 @@ async def update_item(db: AsyncSession, user: User, note: Note, item_id: uuid.UU
             it.position = float(v)
         elif k == "parent_id":
             it.parent_id = v
+        elif k == "aisle":
+            # Dragged across an aisle line: its own items go with it.
+            it.aisle = v
+            await db.execute(update(NoteItem).where(NoteItem.parent_id == it.id).values(aisle=v))
         changed = True
     it.updated_at = _now()
     await db.flush()
@@ -591,8 +670,8 @@ async def delete_item(db: AsyncSession, user: User, note: Note, item_id: uuid.UU
 
 
 async def bulk_items(db: AsyncSession, user: User, note: Note, action: str) -> bool:
-    """Untick all, delete ticked items, or sort A–Z (children stay with
-    their parent)."""
+    """Untick all, delete ticked items, sort A–Z, or sort by aisle (store
+    order, then A–Z); children stay with their parent."""
     _need_list(note)
     items = await items_of(db, note.id)
     if action == "untick_all":
@@ -623,6 +702,15 @@ async def bulk_items(db: AsyncSession, user: User, note: Note, action: str) -> b
         await save_version(db, note, user)
         for n, it in enumerate(order):
             it.position = float(n + 1)
+    elif action == "sort_aisle":
+        await save_version(db, note, user)
+        had_order = bool((note.list_opts or {}).get("aisle_order"))
+        changed = await _sort_by_aisle(db, user, note)
+        if not changed and had_order:
+            return False
+        _bump(note, user, revision=not had_order)
+        await _after_change(db, note, user)
+        return True
     else:
         raise bad("That isn't something Notes can do to a list.")
     await db.flush()
@@ -642,6 +730,9 @@ def item_out(it: NoteItem) -> dict[str, Any]:
         "position": it.position,
         "created_by": str(it.created_by) if it.created_by else None,
         "updated_at": it.updated_at,
+        "aisle": it.aisle,
+        # Sent from a Meal Plan (N2.3); the app doesn't need the id itself.
+        "from_plan": bool(it.ref),
     }
 
 

@@ -26,6 +26,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Notes search also shows "Related notes" under the exact matches: notes about what you typed that don't use the words (searching "wifi" finds the note with the router password). Chat's note search finds them too. Ctrl+K stays words only.
 - Admin → Defaults: the "AI search for mail" card is now "AI search", with its own switch for Notes beside Mail's (on for an indexer on your own network, off for a cloud one until you turn it on). It shows only how many notes are indexed, never anyone's notes.
 - Notes → Settings: "Find notes by meaning", so each person can keep their own notes out of AI search (a shared note follows its owner's choice). With a cloud indexer it names the service the notes would go to.
+<!-- Notes phase 2, N2.2 -->
+- Notes lists by aisle: ⋯ → Sort by aisle puts a shopping list in store order (Meal Plan's food list and your own store order from its Kitchen view; no AI), and Keep sorted by aisle makes everything added later, from chat, the widget, the phone or a family member, land in its aisle instead of at the bottom. Thin aisle lines show where each aisle starts; drag an item across one to move it there.
 
 ## [0.34.0] - 2026-11-09
 

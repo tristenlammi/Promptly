@@ -7,6 +7,14 @@
 export type NoteKind = "text" | "list";
 export type NoteView = "home" | "archive" | "trash" | "reminders";
 
+/** A list's options; ``aisles`` keeps it sorted by aisle in ``aisle_order`` (N2.2). */
+export interface ListOpts {
+  hide_checked?: boolean;
+  ticked_open?: boolean;
+  aisles?: boolean;
+  aisle_order?: string[];
+}
+
 export interface NoteItem {
   id: string;
   parent_id: string | null;
@@ -17,6 +25,10 @@ export interface NoteItem {
   position?: number;
   created_by?: string | null;
   updated_at?: string | null;
+  /** On a list kept by aisle: a Meal Plan aisle key ("dairy"). */
+  aisle?: string | null;
+  /** Sent from a Meal Plan's grocery list. */
+  from_plan?: boolean;
 }
 
 export interface NoteLabel {
@@ -117,7 +129,7 @@ export interface Note {
   body_doc?: DocNode | null;
   body_text?: string;
   color: string;
-  list_opts: { hide_checked?: boolean; ticked_open?: boolean };
+  list_opts: ListOpts;
   items: NoteItem[];
   items_total: number;
   items_checked: number;

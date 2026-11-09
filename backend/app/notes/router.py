@@ -13,8 +13,8 @@ people on the note through their live stream (ids only).
     GET    /notes/{id}                      the whole note
     PATCH  /notes/{id}                      {base_revision, title?, body_doc?|text?, color?, kind?, list_opts?}
     POST   /notes/{id}/items                {id, text, after_id?, parent_id?, checked?}
-    POST   /notes/{id}/items/bulk           {action: untick_all|delete_ticked|sort}
-    PATCH  /notes/{id}/items/{iid}          {text?, checked?, parent_id?, position?}
+    POST   /notes/{id}/items/bulk           {action: untick_all|delete_ticked|sort|sort_aisle}
+    PATCH  /notes/{id}/items/{iid}          {text?, checked?, parent_id?, position?, aisle?}
     DELETE /notes/{id}/items/{iid}
     PUT    /notes/{id}/me                   {pinned?, archived?, position?, seen?}
     PUT    /notes/{id}/labels               {tag_ids}
@@ -108,7 +108,7 @@ class NotePatch(BaseModel):
     text: str | None = Field(default=None, max_length=40_000)
     color: str | None = Field(default=None, max_length=16)
     kind: Literal["text", "list"] | None = None
-    list_opts: dict[str, bool] | None = None
+    list_opts: dict[str, Any] | None = None  # on/off options, and aisle_order (a list)
     # "ai": an AI proposal being applied — the note as it was is kept as a
     # version first.
     checkpoint: Literal["ai"] | None = None
@@ -129,8 +129,10 @@ class ItemPatch(BaseModel):
     position: float | None = None
 
 
+    # A list kept by aisle: dragged across an aisle line (a foods.AISLES key).
+    aisle: str | None = Field(default=None, max_length=16)
 class ItemsBulk(BaseModel):
-    action: Literal["untick_all", "delete_ticked", "sort"]
+    action: Literal["untick_all", "delete_ticked", "sort", "sort_aisle"]
 
 
 class MeIn(BaseModel):
@@ -453,7 +455,7 @@ async def patch_item(
 ) -> dict:
     note = await access.load(db, user, note_id, lock=True)
     fields = body.model_dump(exclude_unset=True)
-    for k in ("text", "checked", "position"):
+    for k in ("text", "checked", "position", "aisle"):
         if k in fields and fields[k] is None:
             fields.pop(k)
     try:
