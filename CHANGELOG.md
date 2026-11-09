@@ -37,6 +37,7 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - The server, its workers, the upload service and the Office converter run with almost all Linux privileges removed and can't gain new ones.
 - Signing out now ends that session's access straight away, instead of up to 15 minutes later.
 - Once a public address is set, pages on this machine's localhost are no longer allowed to make signed-in requests to Promptly (unless DEBUG is on).
+- Calls on Linux: LiveKit's ports 7880 and 6789 are documented as firewall-only (they can't be limited to localhost because nginx and the backend reach them over Docker's bridge).
 
 ## [0.35.0] - 2026-11-09
 

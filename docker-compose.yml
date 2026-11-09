@@ -1114,9 +1114,13 @@ services:
     network_mode: host
     environment:
       LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-}: ${LIVEKIT_API_SECRET:-}"
-      # 7880 (signalling + API) also listens on the LAN in host mode; it
-      # only answers requests signed with the key pair. Keep it 7880: nginx
-      # and the backend look for it there.
+      # 7880 (signalling + API) and the metrics port also listen on the LAN
+      # in host mode: nginx and the backend reach them from Docker's bridge
+      # (host.docker.internal), so they can't be bound to 127.0.0.1, and
+      # LiveKit has no bind setting for metrics. 7880 only answers requests
+      # signed with the key pair. Firewall both from the LAN/internet and
+      # never forward them (README, "Calls"); only 7881/tcp and 7882/udp are
+      # meant to be reachable. Keep it 7880: nginx and the backend look there.
       LIVEKIT_CONFIG: |
         port: 7880
         prometheus_port: ${LIVEKIT_METRICS_PORT:-6789}
