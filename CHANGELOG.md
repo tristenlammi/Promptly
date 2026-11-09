@@ -129,6 +129,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Notes: list tick boxes were plain white squares in dark mode; they now match the cards in both themes.
 - People picker (sharing in Notes, Files, Calendar, Rooms): each person in the list was a button inside a list option, which screen readers announce badly; the option itself is now what you pick.
 - Notes: a label's page opened while the label was new on the device stopped working once it was saved; it now keeps working.
+<!-- v0.34.0 integration -->
+- Notes: pressing Esc while typing in a note's text didn't close the new note or the open note (it only worked from the title). It now closes and saves from anywhere in the note, and still just closes the link suggestions when they're showing.
 
 ## [0.33.0] - 2026-11-09
 

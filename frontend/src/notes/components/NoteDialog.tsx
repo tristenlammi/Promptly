@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 import { displayTitle, type Note } from "../types";
+import { escapeTaken, takeEscape } from "./BodyEditor";
 import { NoteEditor } from "./NoteEditor";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [contenteditable="true"], [tabindex]:not([tabindex="-1"])';
@@ -20,12 +21,13 @@ export function NoteDialog({ note, onClose, autoFocus, startWith }: { note: Note
       if (!box.current?.contains(document.activeElement) && !(document.activeElement as HTMLElement | null)?.closest("[data-note-pop]")) box.current?.querySelector<HTMLElement>(autoFocus ? FOCUSABLE : '[aria-label="Title"]')?.focus();
     });
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented) return;
       if (e.key === "Escape") {
-        e.preventDefault();
+        if (escapeTaken(e)) return;
+        takeEscape(e);
         closer.current?.();
         return;
       }
+      if (e.defaultPrevented) return;
       if (e.key !== "Tab" || !box.current) return;
       if ((document.activeElement as HTMLElement | null)?.closest("[data-note-pop]")) return;
       const els = Array.from(box.current.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((el) => el.offsetParent !== null);

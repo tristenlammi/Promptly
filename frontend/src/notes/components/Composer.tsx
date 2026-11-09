@@ -7,6 +7,7 @@ import { closeDraft, newDraft, notesActions, useNote } from "../store";
 import { uuid, type NoteKind, type NoteLabel } from "../types";
 import { addFiles } from "../uploads";
 import { AddImageButton } from "./AddImage";
+import { escapeTaken, takeEscape } from "./BodyEditor";
 import { NoteEditor } from "./NoteEditor";
 
 /** Pictures from Photos into a note (referenced, not copied). */
@@ -48,8 +49,8 @@ export function Composer({ label }: { label?: NoteLabel | null }) {
       closer.current?.();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !e.defaultPrevented) {
-        e.preventDefault();
+      if (e.key === "Escape" && !escapeTaken(e)) {
+        takeEscape(e);
         closer.current?.();
       }
     };

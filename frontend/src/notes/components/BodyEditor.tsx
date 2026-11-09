@@ -61,6 +61,42 @@ const BlockIds = Extension.create({
   },
 });
 
+/** Escape presses the body editor didn't use itself. ProseMirror calls
+ *  preventDefault on every Escape (its own key capture), so the note around
+ *  it can't tell "a popup in the editor took it" from "nobody wanted it" by
+ *  ``defaultPrevented`` alone. This plugin runs last: reached, nothing in the
+ *  editor (like the [[ link suggestions) handled the key, so the composer and
+ *  the note dialog may close on it. */
+export const escapeNotUsed = new WeakSet<Event>();
+
+const PassEscape = Extension.create({
+  name: "notePassEscape",
+  priority: 1,
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          handleKeyDown: (_view, event) => {
+            if (event.key === "Escape") escapeNotUsed.add(event);
+            return false;
+          },
+        },
+      }),
+    ];
+  },
+});
+
+/** Did something else (a popup, a menu, a sheet) already answer this Escape? */
+export function escapeTaken(e: KeyboardEvent): boolean {
+  return e.defaultPrevented && !escapeNotUsed.has(e);
+}
+
+/** Answer this Escape: nothing else around it closes on it too. */
+export function takeEscape(e: KeyboardEvent): void {
+  e.preventDefault();
+  escapeNotUsed.delete(e);
+}
+
 export interface BodyEditorHandle {
   focus: (where?: "start" | "end") => void;
   editor: Editor | null;
@@ -185,6 +221,7 @@ export const BodyEditor = forwardRef<
       Placeholder.configure({ placeholder }),
       BlockIds,
       wiki,
+      PassEscape,
     ],
     content: (value as object) ?? EMPTY,
     editable,
