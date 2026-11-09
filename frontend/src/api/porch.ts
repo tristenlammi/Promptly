@@ -815,6 +815,11 @@ export const porchApi = {
     const { data } = await apiClient.get<{ count: number; viewers: StoryViewer[] }>(`/porch/stories/${id}/viewers`);
     return data;
   },
+  /** Reply or react to someone's story: a message in your 1:1 Rooms conversation, with the story attached. */
+  async replyStory(id: string, body: { text?: string; emoji?: string }): Promise<{ room_id: string; url: string; message_id: string }> {
+    const { data } = await apiClient.post<{ room_id: string; url: string; message_id: string }>(`/porch/stories/${id}/reply`, body);
+    return data;
+  },
   /** Every story you've posted, newest first (private to you). */
   async storyArchive(before: string | null): Promise<{ stories: PorchStory[]; next: string | null }> {
     const { data } = await apiClient.get<{ stories: PorchStory[]; next: string | null }>("/porch/stories/archive", { params: { before: before || undefined } });

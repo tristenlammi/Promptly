@@ -7,6 +7,7 @@ import {
   File as FileIcon,
   Folder,
   House,
+  CircleDashed,
   Image as ImageIcon,
   Images,
   Lock,
@@ -44,6 +45,7 @@ export const SHARE_ICONS: Record<ShareKind, LucideIcon> = {
   form: ClipboardList,
   note: StickyNote,
   porch_post: House,
+  porch_story: CircleDashed,
 };
 
 export const shareKey = (messageId: string) => ["rooms", "share-card", messageId] as const;
@@ -80,7 +82,7 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
           <Lock className="h-5 w-5" />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-sm font-medium text-[var(--text)]">{kind === "porch_post" ? "Porch post" : "Shared item"}</span>
+          <span className="block text-sm font-medium text-[var(--text)]">{kind === "porch_post" ? "Porch post" : kind === "porch_story" ? "Porch story" : "Shared item"}</span>
           <span className="block text-xs text-[var(--text-muted)]">
             {isError
               ? "Couldn't load this."
@@ -88,6 +90,8 @@ export function ShareCard({ messageId, kind, label }: { messageId: string; kind:
                 ? "This note isn't shared with you."
                 : kind === "porch_post"
                   ? "This post isn't shared with you."
+                : kind === "porch_story"
+                  ? "This story has ended."
                 : `You don't have access to ${data?.label ?? label ?? "it"}.`}
           </span>
         </span>

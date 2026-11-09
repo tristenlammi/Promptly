@@ -109,6 +109,15 @@ test("a text story reaches only its group, and its poster sees who watched", asy
   await expect(player.getByText(new RegExp(`^in ${fam} · `))).toBeVisible();
   await viewed;
   expect(await scan(bob, "story viewer", "[data-story-player]")).toEqual([]);
+
+  // Bob replies (WP-P2.3): it lands in their 1:1 conversation in Rooms, with the story.
+  const replied = bob.waitForResponse((r) => r.url().includes("/reply") && r.request().method() === "POST");
+  await player.getByLabel(/^Send .* a message$/).fill(`Yum ${stamp}`);
+  await player.getByRole("button", { name: "Send", exact: true }).click();
+  const reply = await (await replied).json();
+  await expect(bob.getByText(/Sent to .* in Rooms\./)).toBeVisible();
+  await player.getByRole("button", { name: "Send ❤️" }).click();
+  await expect(bob.getByText(/Sent ❤️ to/)).toBeVisible();
   await bob.keyboard.press("Escape");
   await expect(player).toHaveCount(0);
   await expect(ring).toHaveAttribute("aria-label", /seen/);
@@ -122,6 +131,14 @@ test("a text story reaches only its group, and its poster sees who watched", asy
   const list = alice.getByRole("dialog", { name: "Seen by 1 person" });
   await expect(list.getByText(/Bob/i)).toBeVisible();
   await shot(alice, "story-seen-by");
+  await alice.keyboard.press("Escape");
+  await alice.keyboard.press("Escape");
+
+  // The reply in Alice's Rooms conversation, with the story's card while it's live.
+  await alice.goto(reply.url);
+  await expect(alice.getByText(`Yum ${stamp}`, { exact: true })).toBeVisible();
+  await expect(alice.getByRole("button", { name: new RegExp(words) }).first()).toBeVisible();
+  await shot(alice, "story-reply-in-rooms");
 
   // A phone: the row and the viewer fit the screen; the story maker's start.
   await bob.setViewportSize({ width: 390, height: 844 });

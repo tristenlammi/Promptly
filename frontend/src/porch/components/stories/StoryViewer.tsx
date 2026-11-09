@@ -15,6 +15,7 @@ import { STORIES_KEY, STORIES_ROW_KEY, userStoriesKey } from "../../cache";
 import { ReportSheet } from "../ReportSheet";
 import { ActionSheet, type MenuAction } from "../ui";
 import { StoryPlayer } from "./StoryPlayer";
+import { StoryReplyBar } from "./StoryReplyBar";
 import { ViewersSheet } from "./ViewersSheet";
 
 /** Close the viewer: back where you came from, else the feed. */
@@ -51,6 +52,7 @@ export function StoryViewer({ userId }: { userId: string }) {
   const [menu, setMenu] = useState<PorchStory | null>(null);
   const [viewers, setViewers] = useState<string | null>(null);
   const [reporting, setReporting] = useState<PorchStory | null>(null);
+  const [sending, setSending] = useState(false);
 
   // Who comes next: the row as it was when you opened it (carried along
   // from person to person, so seeing someone doesn't reshuffle it).
@@ -158,7 +160,7 @@ export function StoryViewer({ userId }: { userId: string }) {
         onDone={() => goPerson(nextPerson)}
         onBeforeFirst={prevPerson ? () => goPerson(prevPerson) : undefined}
         onShown={markSeen}
-        hold={!!menu || !!viewers || !!reporting}
+        hold={!!menu || !!viewers || !!reporting || sending}
         label={stories[0]?.mine ? "Your story" : `${name}'s story`}
         menu={(s) => () => setMenu(s)}
         footer={(s) =>
@@ -171,7 +173,9 @@ export function StoryViewer({ userId }: { userId: string }) {
               <Eye className="h-5 w-5" aria-hidden />
               {s.view_count ? `Seen by ${s.view_count}` : "No views yet"}
             </button>
-          ) : null
+          ) : (
+            <StoryReplyBar story={s} onBusy={setSending} />
+          )
         }
       />
       {menu && <ActionSheet open onClose={() => setMenu(null)} title={menu.mine ? "Your story" : `${menu.author?.name ?? "Someone"}'s story`} actions={actions(menu)} />}

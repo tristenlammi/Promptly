@@ -46,7 +46,7 @@ from app.files import media_urls
 from app.files.models import FileMedia, UserFile
 from app.people import blocks
 
-from . import access, core, media, push
+from . import access, core, deps, media, push
 from .deps import require_porch
 from .models import PorchStory, PorchStoryGroup, PorchStoryView
 
@@ -483,6 +483,95 @@ async def viewers(story_id: uuid.UUID, db: AsyncSession = Depends(get_db), user:
     return {"count": len(rows), "viewers": [{"user": core.user_out(u), "seen_at": at.isoformat()} for u, at in rows]}
 
 
+# ------------------------------------------------------------------ replies (WP-P2.3)
+
+#: A story's card in Rooms (``crossapp/shares.py``).
+CARD_KIND = "porch_story"
+
+
+async def card(db: AsyncSession, viewer: User, story_id: Any) -> dict[str, Any] | None:
+    """The story's card in a Rooms message, as ``viewer`` sees it: only
+    while it's live and theirs to see — the poster too — else None, which
+    Rooms draws as "This story has ended". Never why."""
+    try:
+        sid = uuid.UUID(str(story_id))
+    except (TypeError, ValueError):
+        return None
+    if not await deps.allowed(db, viewer):
+        return None
+    s = (await db.execute(select(PorchStory).where(PorchStory.id == sid, _live(), access.visible_story(viewer.id)))).scalar_one_or_none()
+    if s is None:
+        return None
+    shown = (await stories_out(db, viewer, [s], views=False))[0]
+    who = "Your" if s.author_id == viewer.id else f"{shown['author']['name']}'s" if shown["author"] else "A"
+    first = next((x.strip() for x in (s.text or "").splitlines() if x.strip()), "")
+    words = first if len(first) <= 60 else first[:59].rstrip() + "…"
+    where = " · ".join(g["name"] for g in shown["groups"][:2])
+    m = shown["media"] or {}
+    return {
+        "title": words or f"{who} story",
+        "subtitle": "Porch story" + (f" · in {where}" if where else "") + " · " + _ends(s),
+        "thumb": m.get("thumb") or m.get("poster"),
+        "href": f"/porch/stories/{s.author_id}",
+    }
+
+
+def _ends(s: PorchStory) -> str:
+    left = (s.expires_at - core.now()).total_seconds()
+    if left < 3600:
+        return f"ends in {max(1, int(left // 60))}m"
+    return f"ends in {int(left // 3600)}h"
+
+
+class ReplyIn(BaseModel):
+    text: str = Field(default="", max_length=2000)
+    emoji: str | None = Field(default=None, max_length=16)
+
+
+@router.post("/stories/{story_id}/reply", status_code=201)
+async def reply(story_id: uuid.UUID, body: ReplyIn, db: AsyncSession = Depends(get_db), user: User = Depends(require_porch)) -> dict:
+    """Reply to a story, or react to it: a message in your 1:1 Rooms
+    conversation with its poster, with the story's card. A block either
+    way refuses it, as a DM would be."""
+    from app.background import spawn
+    from app.people.blocks import dm_refusal
+    from app.rooms import core as rooms_core
+    from app.rooms import service as rooms_service
+    from app.rooms.push import fan_out
+
+    from .talk import REACTIONS
+
+    s = await access.load_story(db, user, story_id)
+    if s.author_id == user.id:
+        raise core.bad("That's your own story")
+    if body.emoji is not None and body.emoji not in REACTIONS:
+        raise core.bad("Pick one of the six reactions")
+    words = body.emoji or body.text.strip()
+    if not words:
+        raise core.bad("Write something first")
+    why = await dm_refusal(db, user.id, s.author_id)
+    if why:
+        raise core.forbidden(why)
+    author_id = s.author_id
+    room = await rooms_service.open_dm(db, user, [author_id])
+    room, _sm = await rooms_core.load_room(db, room.id, user, lock=True)
+    members = await rooms_core.member_ids(db, room)
+    msg = await rooms_service.post_message(db, room, user, words)
+    # The card names only the story; each person sees it as they may.
+    msg.meta = {**(msg.meta or {}), "share": {"kind": CARD_KIND, "id": str(story_id), "label": "a Porch story", "has_note": True}}
+    await db.commit()
+    await db.refresh(msg)
+    out = await rooms_core.message_out(db, msg)
+    await rooms_core.publish(members, {"type": "message", "message": out})
+    for uid in members:
+        if uid != user.id:
+            u = await db.get(User, uid)
+            if u is not None:
+                await rooms_core.publish([uid], {"type": "room", "room": await rooms_core.room_out(db, room, u)})
+    spawn(fan_out(msg.id), name=f"rooms-push-{msg.id}")
+    return {"room_id": str(room.id), "url": f"/rooms/r/{room.id}", "message_id": str(msg.id)}
+
+
 # ------------------------------------------------------------------ bytes
 
 
@@ -572,4 +661,4 @@ async def serve(db: AsyncSession, claim: media_urls.MediaClaim, user: User, requ
     return media._send(path, "image/webp", headers, request)
 
 
-__all__ = ["BACKGROUNDS", "LIFETIME", "VIDEO_MAX_SECONDS", "forget_renders", "reachable", "router", "serve", "stories_out"]
+__all__ = ["BACKGROUNDS", "CARD_KIND", "LIFETIME", "VIDEO_MAX_SECONDS", "card", "forget_renders", "reachable", "router", "serve", "stories_out"]

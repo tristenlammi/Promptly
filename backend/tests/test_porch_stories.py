@@ -290,6 +290,45 @@ async def test_export_has_your_stories(client, db, people):
     assert datetime.now(timezone.utc)
 
 
+# ------------------------------------------------------------------ replies (WP-P2.3)
+
+
+async def test_a_reply_lands_in_the_posters_dm_with_the_story(client, db, people):
+    ann, bob, cat, dan = people
+    fam = await members_of(client, ann, "Family", [bob, cat])
+    s = await story(client, ann, [fam], text="New puppy!")
+    got = await ok(await client.post(f"/api/porch/stories/{s['id']}/reply", headers=H(bob), json={"text": "So cute"}), 201)
+    room = got["room_id"]
+    boot_ann = await ok(await client.get("/api/rooms/bootstrap", headers=H(ann)))
+    assert room in [d["id"] for d in boot_ann["dms"]]
+    msgs = await ok(await client.get(f"/api/rooms/rooms/{room}/messages", headers=H(ann)))
+    items = msgs["messages"] if isinstance(msgs, dict) else msgs
+    last = items[-1]
+    assert last["body"] == "So cute" and last["meta"]["share"]["kind"] == "porch_story" and last["meta"]["share"]["id"] == s["id"]
+    # The card while it's live: both of them see it; nobody else would.
+    for u in (ann, bob):
+        c = await ok(await client.get(f"/api/crossapp/share/card/{last['id']}", headers=H(u)))
+        assert c["card"]["title"] == "New puppy!" and c["card"]["href"] == f"/porch/stories/{ann.id}" and c["can_grant"] is False
+    # A reaction is the emoji, in the same conversation.
+    again = await ok(await client.post(f"/api/porch/stories/{s['id']}/reply", headers=H(bob), json={"emoji": "❤️"}), 201)
+    assert again["room_id"] == room
+    assert (await client.post(f"/api/porch/stories/{s['id']}/reply", headers=H(bob), json={"emoji": "🍕"})).status_code == 400
+    assert (await client.post(f"/api/porch/stories/{s['id']}/reply", headers=H(bob), json={"text": "  "})).status_code == 400
+    # Your own story: nobody to reply to; an outsider: 404.
+    assert (await client.post(f"/api/porch/stories/{s['id']}/reply", headers=H(ann), json={"text": "hi"})).status_code == 400
+    assert (await client.post(f"/api/porch/stories/{s['id']}/reply", headers=H(dan), json={"text": "hi"})).status_code == 404
+    # Ended: the card is gone for everyone, the poster too ("This story has ended").
+    await expire(db, s["id"])
+    for u in (ann, bob):
+        c = await ok(await client.get(f"/api/crossapp/share/card/{last['id']}", headers=H(u)))
+        assert c["card"] is None and c["label"] == "a Porch story"
+    assert (await client.post(f"/api/porch/stories/{s['id']}/reply", headers=H(bob), json={"text": "late"})).status_code == 404
+    # A block either way refuses it.
+    s2 = await story(client, ann, [fam], text="Another")
+    await ok(await client.put(f"/api/people/blocks/{cat.id}", headers=H(ann)))
+    assert (await client.post(f"/api/porch/stories/{s2['id']}/reply", headers=H(cat), json={"text": "hi"})).status_code in (403, 404)
+
+
 async def test_stories_remember_their_own_audience(client, db, people):
     from tests.porch_kit import say
 
