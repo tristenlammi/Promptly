@@ -285,7 +285,9 @@ test("on a phone: the composer is full screen and passes an accessibility scan; 
   await expect(chips).toBeVisible();
   found.push(...(await scan(alice, "phone feed chips")));
 
-  await alice.getByRole("navigation", { name: "Porch" }).getByRole("button", { name: "New post" }).click();
+  // ＋ offers a post or a story (WP-P2.2).
+  await alice.getByRole("navigation", { name: "Porch" }).getByRole("button", { name: "New post or story" }).click();
+  await alice.getByRole("dialog", { name: "New" }).getByRole("button", { name: /^Post/ }).click();
   await expect(alice).toHaveURL(/\/porch\/new$/);
   await expect(alice.getByRole("navigation", { name: "Porch" })).toHaveCount(0);
   await expect(alice.getByRole("heading", { name: "Pick photos" })).toBeVisible();

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 
 import { linksApi } from "@/api/links";
 import { memoriesApi } from "@/api/memories";
-import type { PhotoItem } from "@/api/photos";
+import { photosApi, type PhotoItem } from "@/api/photos";
 import { porchApi, type PorchPost, type PorchUser } from "@/api/porch";
 import { Callout } from "@/components/shared/Callout";
 import { confirm } from "@/components/shared/ConfirmDialog";
@@ -41,6 +41,8 @@ export interface ComposerStart {
   shared?: boolean;
   /** ``?for=<user id>``: "Post for Sam" on their birthday (Today, Porch). */
   forUser?: string | null;
+  /** ``?file=<library file id>``: a video too long for a story, posted instead. */
+  file?: string | null;
 }
 
 const STEP_TITLES: Record<Step, string> = { pick: "Pick photos", arrange: "Arrange", share: "Share" };
@@ -97,7 +99,7 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
   // ---------------------------------------------------------------- start
   const initial = useMemo<{ draft: Draft; restored: boolean }>(() => {
     if (editing) return { draft: fromPost(editing), restored: false };
-    const fresh = !!(start?.memory || start?.shared || start?.forUser);
+    const fresh = !!(start?.memory || start?.shared || start?.forUser || start?.file);
     const kept = fresh ? null : loadDraft();
     const d: Draft = kept ?? { ...EMPTY };
     // A kept draft's groups: only ones you're still in.
@@ -258,6 +260,16 @@ export function Composer({ start, editing }: { start?: ComposerStart; editing?: 
           }));
         })
         .catch(() => toast.error("That memory isn't there any more."));
+    }
+    if (start?.file) {
+      void photosApi
+        .items([start.file])
+        .then((items) => {
+          const own = items.filter((p) => p.mine !== false);
+          if (!own.length) throw new Error("gone");
+          setDraft((d) => ({ ...d, step: "arrange", picks: own.map(libraryPick) }));
+        })
+        .catch(() => toast.error("That photo or video isn't in your library any more."));
     }
     if (start?.forUser) {
       // A birthday post: "Happy birthday @sam! 🎂", mentioning them.

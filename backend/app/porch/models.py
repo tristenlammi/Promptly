@@ -115,6 +115,8 @@ class PorchProfile(Base):
     welcomed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # The audience picker's starting choice: "all" or a list of group ids.
     last_groups: Mapped[Any] = mapped_column(JSONB, nullable=True)
+    # The story maker's own starting choice (0394), apart from posts'.
+    last_story_groups: Mapped[Any] = mapped_column(JSONB, nullable=True)
     # Per-kind push modes (on / summary / off), WP-P1.7.
     push: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
     # The local day today's birthday pushes went (0272): claimed once a day.

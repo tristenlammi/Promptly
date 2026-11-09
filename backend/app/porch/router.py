@@ -57,6 +57,7 @@ def _profile_out(p: PorchProfile, *, me: bool) -> dict[str, Any]:
             activity_seen_at=p.activity_seen_at.isoformat() if p.activity_seen_at else None,
             welcomed=p.welcomed_at is not None,
             last_groups=p.last_groups,
+            last_story_groups=p.last_story_groups,
         )
     return out
 

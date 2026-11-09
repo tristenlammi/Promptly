@@ -10,6 +10,7 @@ import { apiErrorMessage } from "@/utils/apiError";
 import { cn } from "@/utils/cn";
 
 import { ACTIVITY_KEY, BOOTSTRAP_KEY, groupKey, reportsKey } from "../cache";
+import { BACKGROUND_LOOK } from "./stories/look";
 import { LoadError, PorchAvatar, fullTime, shortAgo } from "./ui";
 
 /**
@@ -40,7 +41,7 @@ export function GroupReports({ g }: { g: PorchGroup }) {
       <EmptyState
         icon={Flag}
         title="Nothing to look at"
-        text={`When someone reports a post or comment in ${g.name}, it shows here for you to decide what happens.`}
+        text={`When someone reports a post, comment or story in ${g.name}, it shows here for you to decide what happens.`}
       />
     );
   } else {
@@ -88,6 +89,8 @@ function ReportCard({ r, g, onDone }: { r: ReportItem; g: PorchGroup; onDone: ()
   const reasonId = useId();
   const name = t.author?.name ?? "They";
   const isPost = t.type === "post";
+  // A post or a story leaves this group only; a comment goes for everyone.
+  const leaves = t.type !== "comment";
 
   const decide = async (action: "remove" | "keep") => {
     if (action === "remove" && !t.gone && !reason.trim()) {
@@ -100,7 +103,7 @@ function ReportCard({ r, g, onDone }: { r: ReportItem; g: PorchGroup; onDone: ()
       const out = await porchApi.decideGroupReport(g.id, r.id, action, reason.trim());
       if (t.gone) toast.success("Report closed.");
       else if (action === "keep") toast.success("Kept. The report is closed.");
-      else if (!isPost) toast.success(`Comment removed. ${name} has been told why.`);
+      else if (!leaves) toast.success(`Comment removed. ${name} has been told why.`);
       else if (out.deleted) toast.success(`Removed. It was only in ${g.name}, so it's gone. ${name} has been told why.`);
       else toast.success(`Removed from ${g.name}. It stays in ${name}'s other groups, and ${name} has been told why.`);
       onDone();
@@ -112,13 +115,14 @@ function ReportCard({ r, g, onDone }: { r: ReportItem; g: PorchGroup; onDone: ()
   };
 
   const href = t.post_id ? `/porch/p/${t.post_id}${t.type === "comment" ? `#comment-${t.id}` : ""}` : null;
+  const storyBg = t.type === "story" && t.kind === "text" ? BACKGROUND_LOOK[t.background ?? "sunset"] : null;
 
   return (
     <li data-report={r.id} className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3">
       {t.gone ? (
         <div className="flex items-center gap-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--text-muted)]" aria-hidden>
-            {isPost ? <Flag className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
+            {leaves ? <Flag className="h-4 w-4" /> : <MessageCircle className="h-4 w-4" />}
           </span>
           <p className="text-sm text-[var(--text-muted)]">
             A reported {t.type} that's been deleted, or isn't in {g.name} any more. Nothing more to do: close the report.
@@ -140,11 +144,20 @@ function ReportCard({ r, g, onDone }: { r: ReportItem; g: PorchGroup; onDone: ()
               )}
             </p>
             {t.post_body && <p className="mt-0.5 truncate text-xs text-[var(--text-muted)]">On the post: {t.post_body}</p>}
-            {t.body && <p className="mt-1.5 whitespace-pre-wrap break-words rounded-xl bg-[var(--surface-2)] p-2.5 text-sm text-[var(--text)]">{t.body}</p>}
+            {t.body && !storyBg && <p className="mt-1.5 whitespace-pre-wrap break-words rounded-xl bg-[var(--surface-2)] p-2.5 text-sm text-[var(--text)]">{t.body}</p>}
+            {storyBg && (
+              <p
+                className={cn("mt-1.5 whitespace-pre-wrap break-words rounded-xl p-3 text-center text-sm font-bold", storyBg.dark ? "text-[#2A2118]" : "text-white")}
+                style={{ background: storyBg.css }}
+              >
+                {t.body}
+              </p>
+            )}
+            {t.type === "story" && <p className="mt-1 text-xs text-[var(--text-muted)]">A story: it shows for a day, or longer in a highlight.</p>}
             {t.media && t.media.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2">
                 {t.media.slice(0, 6).map((m, i) =>
-                  m.thumb ? <img key={i} src={m.thumb} alt={m.alt || `Photo ${i + 1} of the post`} className="h-20 w-20 rounded-lg object-cover" /> : null,
+                  m.thumb ? <img key={i} src={m.thumb} alt={m.alt || `Photo ${i + 1} of the ${t.type}`} className="h-20 w-20 rounded-lg object-cover" /> : null,
                 )}
               </div>
             )}
@@ -172,7 +185,7 @@ function ReportCard({ r, g, onDone }: { r: ReportItem; g: PorchGroup; onDone: ()
           <TextInput id={reasonId} value={reason} maxLength={500} onChange={(e) => setReason(e.target.value)} placeholder="Please keep it friendly" />
         </label>
       )}
-      {!t.gone && isPost && (
+      {!t.gone && leaves && (
         <p className="text-xs text-[var(--text-muted)]">
           Removing takes it out of {g.name} only: people in {name}'s other groups still see it there. If {g.name} is its only group, it's deleted.
         </p>
@@ -193,7 +206,7 @@ function ReportCard({ r, g, onDone }: { r: ReportItem; g: PorchGroup; onDone: ()
               onClick={() => void decide("remove")}
               className="inline-flex h-11 select-none items-center justify-center gap-2 rounded-xl border border-[var(--danger-border)] bg-[var(--surface)] px-4 text-sm font-medium text-[var(--danger)] transition hover:bg-[var(--danger-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--item-accent)] focus-visible:ring-offset-1 disabled:cursor-not-allowed disabled:opacity-50 md:h-10"
             >
-              {isPost ? `Remove from ${g.name}` : "Remove comment"}
+              {leaves ? `Remove from ${g.name}` : "Remove comment"}
             </button>
           </>
         )}

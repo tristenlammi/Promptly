@@ -193,7 +193,7 @@ export interface ActivityItem {
   post: PostRef | null;
   text: string | null;
   emoji: string[] | null;
-  target: "post" | "comment";
+  target: "post" | "comment" | "story";
   comment_id: string | null;
   unseen: boolean;
   /** ``removed``: an admin took your comment down (``all``), or your post
@@ -319,6 +319,8 @@ export interface MyProfile {
   activity_seen_at: string | null;
   welcomed: boolean;
   last_groups: "all" | string[] | null;
+  /** The story maker's own starting choice (stories remember theirs apart from posts). */
+  last_story_groups?: "all" | string[] | null;
 }
 
 export interface Bootstrap {
@@ -328,7 +330,7 @@ export interface Bootstrap {
   groups: PorchGroup[];
   invites: PorchGroup[];
   everyone: { id: string; name: string; emoji: string; member_count: number };
-  limits: { max_media: number; video_max_seconds: number; video_max_mb: number };
+  limits: { max_media: number; video_max_seconds: number; video_max_mb: number; story_video_max_seconds: number };
   /** The Activity badge: new since you last looked, plus invites and tag requests waiting. */
   activity_unseen: number;
 }
@@ -383,7 +385,108 @@ export type PorchEvent =
   | { type: "group"; group_id: string }
   | { type: "invite"; group_id: string }
   | { type: "comment"; post_id: string; comment_id: string }
-  | { type: "activity" };
+  | { type: "activity" }
+  /** Someone's stories changed (a new one, or one deleted). */
+  | { type: "story"; user_id: string }
+  /** Someone saw one of your stories. */
+  | { type: "story_view"; story_id: string };
+
+// ---- stories (WP-P2.1, P2.2)
+
+/** The six text-story backgrounds (``stories.BACKGROUNDS``). */
+export const STORY_BACKGROUNDS = ["sunset", "ocean", "forest", "berry", "night", "sand"] as const;
+export type StoryBackground = (typeof STORY_BACKGROUNDS)[number];
+export type StoryTextStyle = "classic" | "bold" | "box";
+
+/** A sticker on a story: where its middle sits (shares of the 9:16 frame), its size and turn. */
+interface OverlayBase {
+  x: number;
+  y: number;
+  scale: number;
+  rotate: number;
+  style: StoryTextStyle;
+}
+export type StoryOverlay =
+  | (OverlayBase & { type: "text"; text: string })
+  | (OverlayBase & { type: "mention"; user: PorchUser })
+  | (OverlayBase & { type: "place"; place: PostPlace });
+
+/** A sticker as sent: a mention names the person by id. */
+export type StoryOverlayIn =
+  | (OverlayBase & { type: "text"; text: string })
+  | (OverlayBase & { type: "mention"; user_id: string })
+  | (OverlayBase & { type: "place"; place: PostPlace });
+
+export interface StoryMedia {
+  kind: "image" | "video";
+  thumb: string | null;
+  preview: string | null;
+  poster: string | null;
+  video: string | null;
+  state: string;
+  duration_ms: number | null;
+  width: number | null;
+  height: number | null;
+  thumbhash: string | null;
+}
+
+export interface PorchStory {
+  id: string;
+  author: PorchUser | null;
+  kind: "photo" | "video" | "text";
+  created_at: string;
+  expires_at: string;
+  /** Past its 24 hours (only ever yours, or in a highlight). */
+  expired: boolean;
+  /** Its groups that are also yours. */
+  groups: GroupLabel[];
+  media: StoryMedia | null;
+  text: string;
+  background: StoryBackground | null;
+  overlays: StoryOverlay[];
+  alt_text: string;
+  mine: boolean;
+  /** You've seen it (your own always count as seen). */
+  seen: boolean;
+  /** Yours only: how many people saw it. */
+  view_count?: number;
+  file_id?: string | null;
+}
+
+/** One circle in the stories row. */
+export interface StoryRing {
+  user: PorchUser;
+  count: number;
+  unseen: number;
+  latest_at: string;
+  /** Every story of theirs you see is in this one group of yours: its emoji goes on the ring. */
+  ring_group: GroupLabel | null;
+  thumb: { image: string | null; background: StoryBackground | null; kind: PorchStory["kind"] };
+  /** Your own circle: everyone who's seen your live stories. */
+  views?: number;
+}
+
+export interface StoriesRow {
+  me: StoryRing | null;
+  people: StoryRing[];
+}
+
+export interface NewStory {
+  kind: PorchStory["kind"];
+  groups: "all" | string[];
+  file_id?: string;
+  /** Its 9:16 crop for this story only. */
+  edit?: Pick<EditOps, "crop"> | null;
+  text?: string;
+  background?: StoryBackground;
+  overlays?: StoryOverlayIn[];
+  alt_text?: string;
+}
+
+export interface StoryViewer {
+  user: PorchUser;
+  seen_at: string;
+}
 
 export interface NewGroup {
   name: string;
@@ -664,7 +767,7 @@ export const porchApi = {
   },
   /** Report a post or comment to the admins of the groups picked (yours
    *  that it's in; Everyone's admins are the people who run this Promptly). */
-  async report(targetType: "post" | "comment", targetId: string, reason: string, groups: string[]): Promise<{ id: string; groups: GroupLabel[] }> {
+  async report(targetType: "post" | "comment" | "story", targetId: string, reason: string, groups: string[]): Promise<{ id: string; groups: GroupLabel[] }> {
     const { data } = await apiClient.post<{ id: string; groups: GroupLabel[] }>("/porch/reports", { target_type: targetType, target_id: targetId, reason, groups });
     return data;
   },
@@ -679,6 +782,42 @@ export const porchApi = {
   },
   async decideGroupReport(groupId: string, reportId: string, action: "remove" | "keep", reason: string): Promise<{ deleted?: boolean; already_gone?: boolean }> {
     const { data } = await apiClient.post<{ deleted?: boolean; already_gone?: boolean }>(`/porch/groups/${groupId}/reports/${reportId}`, { action, reason });
+    return data;
+  },
+
+  // ---- stories (WP-P2.1)
+  /** The stories row: you, then people with live stories in your ticked groups. */
+  async storiesRow(): Promise<StoriesRow> {
+    const { data } = await apiClient.get<StoriesRow>("/porch/stories");
+    return data;
+  },
+  /** Someone's live stories you can see, oldest first (``feed``: as the row shows them). */
+  async userStories(userId: string, feed: boolean): Promise<{ user: PorchUser; stories: PorchStory[] }> {
+    const { data } = await apiClient.get<{ user: PorchUser; stories: PorchStory[] }>(`/porch/stories/u/${userId}`, { params: { feed: feed || undefined } });
+    return data;
+  },
+  async story(id: string): Promise<PorchStory> {
+    const { data } = await apiClient.get<PorchStory>(`/porch/stories/${id}`);
+    return data;
+  },
+  async createStory(body: NewStory): Promise<PorchStory> {
+    const { data } = await apiClient.post<PorchStory>("/porch/stories", body);
+    return data;
+  },
+  async deleteStory(id: string): Promise<void> {
+    await apiClient.delete(`/porch/stories/${id}`);
+  },
+  async viewStory(id: string): Promise<void> {
+    await apiClient.post(`/porch/stories/${id}/view`);
+  },
+  /** Who saw your story (yours only). */
+  async storyViewers(id: string): Promise<{ count: number; viewers: StoryViewer[] }> {
+    const { data } = await apiClient.get<{ count: number; viewers: StoryViewer[] }>(`/porch/stories/${id}/viewers`);
+    return data;
+  },
+  /** Every story you've posted, newest first (private to you). */
+  async storyArchive(before: string | null): Promise<{ stories: PorchStory[]; next: string | null }> {
+    const { data } = await apiClient.get<{ stories: PorchStory[]; next: string | null }>("/porch/stories/archive", { params: { before: before || undefined } });
     return data;
   },
 };
@@ -722,13 +861,16 @@ export interface PorchAdminSettings {
 }
 
 export interface ReportTarget {
-  type: "post" | "comment";
+  type: "post" | "comment" | "story";
   id: string;
   /** Deleted, or no longer in this group: nothing more is shown. */
   gone: boolean;
   author?: PorchUser | null;
   post_id?: string;
-  kind?: PostKind;
+  /** A story: its id, and a text story's colour. */
+  story_id?: string;
+  background?: StoryBackground | null;
+  kind?: PostKind | "text";
   created_at?: string;
   body?: string;
   /** A comment's post, a few words of it. */
@@ -751,7 +893,7 @@ export interface ReportItem {
 
 export interface HandledReport {
   id: string;
-  target_type: "post" | "comment";
+  target_type: "post" | "comment" | "story";
   status: "removed" | "kept";
   note: string;
   handled_at: string | null;

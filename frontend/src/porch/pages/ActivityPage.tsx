@@ -48,7 +48,7 @@ function itemWords(it: ActivityItem): { lead: string; rest: string; quote: strin
 /** An admin took down your comment, or your post out of Everyone or one
  *  of your groups: what, and the reason they gave. Only you see this. */
 function RemovedRow({ it }: { it: ActivityItem }) {
-  const what = it.target === "comment" ? "comment" : "post";
+  const what = it.target === "comment" ? "comment" : it.target === "story" ? "story" : "post";
   const scope = it.removed?.scope;
   const group = it.removed?.group;
   const where = scope === "everyone" ? " from Everyone" : scope === "group" ? ` from ${group ?? "a group"}` : "";

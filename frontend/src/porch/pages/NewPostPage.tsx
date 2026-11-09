@@ -20,6 +20,7 @@ export function NewPostPage() {
         memory: params.get("memory"),
         shared: params.get("shared") === "1",
         forUser: params.get("for"),
+        file: params.get("file"),
       }}
     />
   );

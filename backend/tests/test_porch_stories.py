@@ -288,3 +288,14 @@ async def test_export_has_your_stories(client, db, people):
     assert out["stories"][0]["groups"] == ["Family"] and out["stories"][0]["stickers"] == ["Yum"]
     assert datetime.fromisoformat(out["stories"][0]["ended"]) - datetime.fromisoformat(out["stories"][0]["posted"]) == timedelta(hours=24)
     assert datetime.now(timezone.utc)
+
+
+async def test_stories_remember_their_own_audience(client, db, people):
+    from tests.porch_kit import say
+
+    ann, bob, *_ = people
+    fam = await members_of(client, ann, "Family", [bob])
+    await say(client, ann, [fam], "A post to Family")
+    await story(client, ann, "all", text="A story to everyone")
+    prof = (await boot(client, ann))["profile"]
+    assert prof["last_groups"] == [fam] and prof["last_story_groups"] == "all"

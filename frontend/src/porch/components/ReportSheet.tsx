@@ -46,7 +46,7 @@ export function ReportSheet({
 }: {
   open: boolean;
   onClose: () => void;
-  target: "post" | "comment";
+  target: "post" | "comment" | "story";
   id: string;
   who: string;
   /** Who wrote it: they can't be the one to judge it. */
@@ -106,12 +106,12 @@ export function ReportSheet({
   };
 
   const nowhere = usable.length === 0;
-  const thing = target === "post" ? "post" : "comment";
+  const thing = target;
   return (
     <Sheet
       open={open}
       onClose={onClose}
-      title={target === "post" ? "Report this post" : "Report this comment"}
+      title={`Report this ${target}`}
       size="sm"
       footer={
         <div className="flex justify-end gap-2">

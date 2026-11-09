@@ -47,6 +47,7 @@ MAPS_SHORTCUTS = [
 # Append a key here to give another launcher one.
 SHORTCUT_KEYS = ["promptly", "photos", "maps"]
 SHORTCUT_KEYS += ["notes"]  # Notes
+SHORTCUT_KEYS += ["porch"]  # Porch (WP-P2.2): long-press → New story · New post
 
 # Native screens in :app, not web pages: they get an icon and a row in the picker, but no
 # TWA launcher class or activity here. :app's manifest declares the activity-alias.
@@ -209,7 +210,28 @@ def shortcut_xml(note: str, items: list[tuple[str, str, str, str]]) -> str:
     '    <string name="notes_new_note">New note</string>\n'
     '    <string name="notes_new_list">New list</string>\n'
     '    <string name="notes_voice_note">Voice note</string>\n'
+    # Porch: P Porch's long-press menu.
+    '    <string name="porch_new_story">New story</string>\n'
+    '    <string name="porch_new_post">New post</string>\n'
     '</resources>\n'
+)
+# Porch (WP-P2.2): long-press P Porch → New story (the phone's camera is one tap
+# away there) or New post. Each opens the Porch launcher at that page
+# (SuiteLauncher.EXTRA_URL_PATH, a path on the saved server).
+(MOD / "res/xml/shortcuts_porch.xml").write_text(
+    '<?xml version="1.0" encoding="utf-8"?>\n<!-- Long-press P Porch: New story, New post. -->\n'
+    '<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">\n'
+    + "".join(
+        f'    <shortcut android:shortcutId="{sid}" android:enabled="true" android:icon="@mipmap/ic_porch"\n'
+        f'        android:shortcutShortLabel="@string/{sid}">\n'
+        '        <intent android:action="android.intent.action.VIEW" android:targetPackage="org.promptly.app"\n'
+        '            android:targetClass="org.promptly.app.PorchLauncher">\n'
+        f'            <extra android:name="org.promptly.app.URL_PATH" android:value="{path}" />\n'
+        '        </intent>\n'
+        '    </shortcut>\n'
+        for sid, path in (("porch_new_story", "/porch/story/new"), ("porch_new_post", "/porch/new"))
+    )
+    + '</shortcuts>\n'
 )
 # Notes: long-press P Notes → the native quick capture screens in :app (they work with
 # no signal). New list is Quick note opened as a list (its data says so).

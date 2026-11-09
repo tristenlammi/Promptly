@@ -10,6 +10,7 @@ import { cn } from "@/utils/cn";
 import { feedKey, listPosts } from "../cache";
 import { GroupChips } from "../components/GroupChips";
 import { PostCard, PostList } from "../components/PostCard";
+import { StoriesRow } from "../components/stories/StoriesRow";
 import { Column, LoadError, PageHeader, PostSkeleton } from "../components/ui";
 import { usePorch } from "../context";
 import { usePorchStore } from "../store";
@@ -251,6 +252,9 @@ export function FeedPage() {
           </button>
         </div>
       )}
+      <div className="md:pt-3">
+        <StoriesRow />
+      </div>
       <div className="pt-2 md:pt-3">{body}</div>
     </Column>
   );

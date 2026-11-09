@@ -224,7 +224,7 @@ test("on a phone: its own app with a bottom bar, and the screens pass an accessi
   await alice.goto("/porch/");
   const bar = alice.getByRole("navigation", { name: "Porch" });
   await expect(bar).toBeVisible();
-  for (const label of ["Feed", "Groups", "New post", "Profile"]) await expect(bar.getByRole(label === "New post" ? "button" : "link", { name: label })).toBeVisible();
+  for (const label of ["Feed", "Groups", "New post or story", "Profile"]) await expect(bar.getByRole(label === "New post or story" ? "button" : "link", { name: label })).toBeVisible();
   await expect(alice.getByRole("heading", { name: "Porch", exact: true })).toBeVisible();
   await expect(alice.locator(`article[data-post="${pid}"]`)).toBeVisible();
   // Nothing wider than the screen.

@@ -421,7 +421,7 @@ async def create_story(body: StoryIn, db: AsyncSession = Depends(get_db), user: 
     story.overlays = overlays
     story.mentions = mentions
     prof = await core.profile(db, user.id)
-    prof.last_groups = "all" if body.groups == "all" else [str(g) for g in group_ids]
+    prof.last_story_groups = "all" if body.groups == "all" else [str(g) for g in group_ids]
     await db.commit()
     await db.refresh(story)
     await core.publish(audience, {"type": "story", "user_id": str(user.id)})

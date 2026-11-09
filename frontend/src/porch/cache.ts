@@ -28,6 +28,12 @@ export const savedKey = ["porch", "list", "saved"] as const;
 export const commentsKey = (postId: string) => ["porch", "comments", postId] as const;
 export const ACTIVITY_KEY = ["porch", "activity"] as const;
 export const NOTIFY_KEY = ["porch", "notifications"] as const;
+/** Stories (WP-P2.2): the row, one person's live ones, and your archive. */
+export const STORIES_KEY = ["porch", "stories"] as const;
+export const STORIES_ROW_KEY = ["porch", "stories", "row"] as const;
+export const userStoriesKey = (id: string, feed: boolean) => ["porch", "stories", "u", id, feed] as const;
+export const storyViewersKey = (id: string) => ["porch", "stories", "viewers", id] as const;
+export const STORY_ARCHIVE_KEY = ["porch", "stories", "archive"] as const;
 export const ALERTS_KEY = ["porch", "alerts"] as const;
 
 /** Change one post wherever it's cached (lists and its own query). */

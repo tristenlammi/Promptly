@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { isAxiosError } from "axios";
-import { Bell, Bookmark, Check, Loader2, Newspaper, PenSquare, Plus, Search, Settings, UserRound, Users } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from "react";
+import { Bell, Bookmark, Check, CircleDashed, Loader2, Newspaper, PenSquare, Plus, Search, Settings, UserRound, Users } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 
 import { porchApi, type Bootstrap } from "@/api/porch";
@@ -18,7 +18,9 @@ import { useGroupActions } from "./actions";
 import { BOOTSTRAP_KEY, discoverKey } from "./cache";
 import { NewGroupSheet } from "./components/GroupSheets";
 import { SearchSheet } from "./components/SearchSheet";
-import { GroupTile, PorchAvatar } from "./components/ui";
+import { StoryComposer } from "./components/stories/StoryComposer";
+import { StoryViewer } from "./components/stories/StoryViewer";
+import { ActionSheet, GroupTile, PorchAvatar } from "./components/ui";
 import { WelcomeSheet } from "./components/WelcomeSheet";
 import { PorchContext } from "./context";
 import { usePorchEvents } from "./live";
@@ -45,6 +47,8 @@ type Route =
   | { page: "post"; id: string }
   | { page: "group"; id: string }
   | { page: "user"; id: string }
+  | { page: "stories"; id: string }
+  | { page: "newStory" }
   | { page: "unknown" };
 
 const ID = "([0-9a-fA-F-]{36})";
@@ -57,6 +61,7 @@ function parse(path: string): Route {
   if (p === "/porch/saved") return { page: "saved" };
   if (p === "/porch/settings") return { page: "settings" };
   if (p === "/porch/new") return { page: "new" };
+  if (p === "/porch/story/new") return { page: "newStory" };
   let m = new RegExp(`^/porch/p/${ID}$`).exec(p);
   if (m) return { page: "post", id: m[1] };
   m = new RegExp(`^/porch/p/${ID}/edit$`).exec(p);
@@ -65,6 +70,8 @@ function parse(path: string): Route {
   if (m) return { page: "group", id: m[1] };
   m = new RegExp(`^/porch/u/${ID}$`).exec(p);
   if (m) return { page: "user", id: m[1] };
+  m = new RegExp(`^/porch/stories/${ID}$`).exec(p);
+  if (m) return { page: "stories", id: m[1] };
   return { page: "unknown" };
 }
 
@@ -118,7 +125,9 @@ export function PorchApp({ embedded = false, promptlyNav = false }: { embedded?:
 
   // Each page opens at its top; the feed comes back where you left it.
   const route = parse(location.pathname);
-  const key = route.page === "feed" ? "feed" : location.pathname;
+  // Stories open over the feed, which keeps its place underneath.
+  const overFeed = route.page === "stories" || route.page === "newStory";
+  const key = route.page === "feed" || overFeed ? "feed" : location.pathname;
   const scrolls = useRef(new Map<string, number>());
   const lastKey = useRef(key);
   useLayoutEffect(() => {
@@ -183,6 +192,8 @@ export function PorchApp({ embedded = false, promptlyNav = false }: { embedded?:
   let page: ReactNode;
   switch (route.page) {
     case "feed":
+    case "stories":
+    case "newStory":
       page = <FeedPage />;
       break;
     case "groups":
@@ -237,6 +248,8 @@ export function PorchApp({ embedded = false, promptlyNav = false }: { embedded?:
           </div>
         ),
       )}
+      {route.page === "stories" && <StoryViewer key={route.id} userId={route.id} />}
+      {route.page === "newStory" && <StoryComposer />}
       <WelcomeSheet />
       <GlobalSheets />
     </PorchContext.Provider>
@@ -269,6 +282,7 @@ function Badge({ n, className }: { n: number; className?: string }) {
 /** Phone: Feed · Groups · ＋ · Activity · Profile. */
 function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
   const navigate = useNavigate();
+  const [making, setMaking] = useState(false);
   const tab = "relative flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[11px] font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--item-accent)]";
   const is = (on: boolean) => (on ? "text-[var(--accent-text)]" : "text-[var(--text-muted)]");
   const me = route.page === "user" && route.id === b.me.id;
@@ -282,7 +296,7 @@ function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
         <Users className="h-5 w-5" aria-hidden />
         Groups
       </Link>
-      <button type="button" onClick={() => navigate("/porch/new")} aria-label="New post" className={cn(tab, "text-[var(--text-muted)]")}>
+      <button type="button" onClick={() => setMaking(true)} aria-label="New post or story" aria-haspopup="dialog" className={cn(tab, "text-[var(--text-muted)]")}>
         <span className="flex h-9 w-12 items-center justify-center rounded-xl bg-[var(--item-accent)] text-white">
           <Plus className="h-5 w-5" aria-hidden />
         </span>
@@ -298,6 +312,15 @@ function BottomBar({ b, route }: { b: Bootstrap; route: Route }) {
         <PorchAvatar user={b.me} size={22} className={cn(me && "ring-2 ring-[var(--item-accent)]")} />
         Profile
       </Link>
+      <ActionSheet
+        open={making}
+        onClose={() => setMaking(false)}
+        title="New"
+        actions={[
+          { label: "Post", icon: PenSquare, hint: "Photos, words, a poll or news, kept on Porch", onClick: () => navigate("/porch/new") },
+          { label: "Story", icon: CircleDashed, hint: "A photo, video or a few words, for a day", onClick: () => navigate("/porch/story/new") },
+        ]}
+      />
     </nav>
   );
 }
@@ -318,8 +341,11 @@ function SideNav({ b, route }: { b: Bootstrap; route: Route }) {
         <img src="/item-icons/porch-192.png" alt="" className="h-8 w-8 rounded-lg" />
         <span className="text-lg font-bold text-[var(--text)]">Porch</span>
       </div>
-      <ItemButton variant="primary" icon={<PenSquare className="h-4 w-4" />} onClick={() => navigate("/porch/new")} className="mb-2">
+      <ItemButton variant="primary" icon={<PenSquare className="h-4 w-4" />} onClick={() => navigate("/porch/new")}>
         New post
+      </ItemButton>
+      <ItemButton variant="secondary" icon={<CircleDashed className="h-4 w-4" />} onClick={() => navigate("/porch/story/new")} className="mb-2">
+        New story
       </ItemButton>
       <Link to="/porch/" aria-current={route.page === "feed" ? "page" : undefined} className={item(route.page === "feed")}>
         <Newspaper className="h-[18px] w-[18px]" aria-hidden /> Feed

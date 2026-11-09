@@ -17,7 +17,7 @@ import { API_BASE_URL, authHeader, refreshAccessToken } from "@/api/client";
 import { PORCH_EVENTS_PATH, porchApi, type Bootstrap, type PorchEvent, type PostPage } from "@/api/porch";
 import { badgesStale } from "@/hooks/useNavBadges";
 
-import { ACTIVITY_KEY, BOOTSTRAP_KEY, commentsKey, feedKey, groupsChanged, listPosts, putPost, refreshPost } from "./cache";
+import { ACTIVITY_KEY, BOOTSTRAP_KEY, STORIES_KEY, STORIES_ROW_KEY, commentsKey, feedKey, groupsChanged, listPosts, putPost, refreshPost, storyViewersKey } from "./cache";
 import { usePorchStore } from "./store";
 
 const BASE_RETRY_MS = 1000;
@@ -46,6 +46,7 @@ export function usePorchEvents(enabled: boolean) {
 
     const resync = () => {
       void qc.invalidateQueries({ queryKey: BOOTSTRAP_KEY });
+      void qc.invalidateQueries({ queryKey: STORIES_ROW_KEY });
       void qc.invalidateQueries({ queryKey: ACTIVITY_KEY });
       void checkFeedHead(qc);
     };
@@ -182,6 +183,16 @@ export async function applyPorchEvent(qc: QueryClient, ev: PorchEvent): Promise<
       // The thread (if it's open) and the post's count and latest two.
       void qc.invalidateQueries({ queryKey: commentsKey(ev.post_id) });
       void refreshPost(qc, ev.post_id);
+      return;
+    case "story":
+      // Someone's stories changed: the row, and their stories if they're open.
+      void qc.invalidateQueries({ queryKey: STORIES_ROW_KEY });
+      void qc.invalidateQueries({ queryKey: ["porch", "stories", "u", ev.user_id] });
+      return;
+    case "story_view":
+      // Someone saw one of yours: "Seen by" and the list.
+      void qc.invalidateQueries({ queryKey: storyViewersKey(ev.story_id) });
+      void qc.invalidateQueries({ queryKey: STORIES_KEY, predicate: (q) => q.queryKey[2] === "u" || q.queryKey[2] === "row" });
       return;
     case "activity":
       // Something new about you: the badge and the Activity list (and, for
