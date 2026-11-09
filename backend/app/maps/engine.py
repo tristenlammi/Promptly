@@ -39,7 +39,8 @@ async def valhalla(path: str, body: dict[str, Any]) -> dict[str, Any]:
         raise _down()
     data = r.json()
     if r.status_code != 200:
-        logger.info("valhalla %s said %s: %s", path, data.get("error_code"), data.get("error"))
+        # The code only: Valhalla's text can name the places asked about (G3).
+        logger.info("valhalla %s said %s", path, data.get("error_code"))
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=_why(data))
     return data
 

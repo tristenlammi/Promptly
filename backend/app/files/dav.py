@@ -1305,7 +1305,8 @@ async def dav(request: Request, path: str = "", db: AsyncSession = Depends(get_d
             return await do_unlock(request, tree, segs)
     except DavError as e:
         if e.status >= 500 and e.status != 507:
-            logger.warning("dav %s %s -> %s %s", method, path, e.status, e.message)
+            # Method and status only: the path and message name files (audit G2).
+            logger.warning("dav %s -> %s", method, e.status)
         return _error(e)
     return Response(status_code=405)
 

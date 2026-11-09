@@ -491,9 +491,6 @@ export function UsersPanel() {
         open={modal.kind === "delete"}
         userId={modal.kind === "delete" ? modal.user.id : null}
         username={modal.kind === "delete" ? modal.user.username : ""}
-        adminOptions={(users ?? [])
-          .filter((u) => u.role === "admin" && !u.disabled)
-          .map((u) => ({ id: u.id, username: u.username }))}
         onDisableInstead={
           modal.kind === "delete" && !modal.user.disabled
             ? async () => {

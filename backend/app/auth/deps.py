@@ -150,6 +150,8 @@ async def get_current_user(
 
     # Attach to request.state for cheap reuse by other dependencies/middleware.
     request.state.user = user
+    # Read by the unhandled-error handler, which runs outside this context.
+    request.state.user_id = str(user.id)
     # Bind user id to the contextvars used by the JSON logger so any
     # log line emitted further down the stack carries it.
     bind_user(user.id)

@@ -41,6 +41,7 @@ from app.logging_setup import (
     get_user_id,
 )
 from app.observability.models import ErrorEvent
+from app.observability.scrub import scrub_stack, scrub_text
 
 logger = logging.getLogger("promptly.observability")
 
@@ -129,11 +130,16 @@ async def _persist_async(captured: CapturedError) -> None:
         except (ValueError, TypeError):
             user_uuid = None
 
+    # No one's content in what the admin reads: URL queries and long quoted
+    # strings come out of the message and the stack's message lines
+    # (admin privacy audit G4).
+    message = scrub_text(captured.message)
+    stack = scrub_stack(captured.stack)
     fp = fingerprint(
         level=captured.level,
         logger_name=captured.logger_name,
         exception_class=captured.exception_class,
-        message=captured.message,
+        message=message,
     )
 
     row = ErrorEvent(
@@ -142,8 +148,8 @@ async def _persist_async(captured: CapturedError) -> None:
         level=captured.level,
         logger=captured.logger_name[:128],
         exception_class=(captured.exception_class or None),
-        message=captured.message[:8000],
-        stack=(captured.stack or None),
+        message=message[:8000],
+        stack=(stack or None),
         route=(captured.route or None),
         method=(captured.method or None),
         status_code=captured.status_code,

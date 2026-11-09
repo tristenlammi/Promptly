@@ -19,6 +19,7 @@ from app.logging_setup import (
     configure_logging,
     get_request_id,
     get_user_id,
+    route_label,
 )
 from app.observability.capture import (
     CapturedError,
@@ -218,6 +219,14 @@ app = FastAPI(
 install_error_capture()
 
 
+def _request_user_id(request: Request) -> str | None:
+    """Whose request failed. The user id is bound in the route's own context,
+    which this handler (outside the middleware stack) doesn't see; the user
+    id is also left on ``request.state`` by ``get_current_user``."""
+    uid = getattr(request.state, "user_id", None)
+    return str(uid) if uid else None
+
+
 @app.exception_handler(Exception)
 async def _capture_unhandled_error(request: Request, exc: Exception) -> JSONResponse:
     """Persist 500-class errors before the framework hides them.
@@ -236,11 +245,12 @@ async def _capture_unhandled_error(request: Request, exc: Exception) -> JSONResp
             message=f"{type(exc).__name__}: {exc}",
             exception_class=type(exc).__name__,
             stack=stack,
-            route=f"{request.method} {request.url.path}",
+            # The route template, never the raw path (admin privacy AP1).
+            route=route_label(request),
             method=request.method,
             status_code=500,
             request_id=get_request_id(),
-            user_id=get_user_id(),
+            user_id=get_user_id() or _request_user_id(request),
             extra=None,
         )
     )

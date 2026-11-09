@@ -119,6 +119,8 @@ The in-app version tag (bottom of the sidebar) reads the injected
 - Porch and Notes opened inside Promptly keep Promptly's menu: on a big screen they sit in Promptly's layout, and on a phone Porch's pages have Promptly's menu button at the top (Porch's "Back to Promptly" links are gone). Only the installed Porch or Notes app shows just that app.
 <!-- v0.34.0 integration: phone app -->
 - Promptly for Android 1.6.0 brings this release's phone parts: calls that ring like phone calls, Talk on the phone, the Notes widgets and quick capture, and sharing to Porch from other apps.
+<!-- Admin privacy, AP4 -->
+- Admin → Users → Delete: shared workspaces no longer need a new owner picked by hand; each says who it goes to, and private ones come with a reminder to ask the person to use Export my library first.
 
 ### Fixed
 <!-- Porch: reports go to the group's admins (WP-P2.0) -->
@@ -146,6 +148,23 @@ The in-app version tag (bottom of the sidebar) reads the injected
 <!-- Passwords: vault nav -->
 - Passwords: opened inside Promptly, it now has Promptly's normal sidebar (expanded, with New chat, Search, your pages and pinned apps in the same simple icons, folders, recent chats and your account) instead of a narrow strip with coloured app icons, and the same slide-in menu on a phone. It follows your collapsed or expanded choice, the same as the rest of Promptly.
 - Opening Passwords while you're in a voice call no longer drops the call: Passwords opens in a new tab and the call carries on in the first one.
+<!-- Admin privacy, AP3 -->
+- Custom models: taking a file out of a custom model now also stops the model from finding what was in it.
+<!-- Admin privacy, AP1 -->
+- Admin → Errors: a request that crashed now shows whose request it was; the person was always left blank.
+
+### Security
+<!-- Admin privacy, AP3 -->
+- Custom models: an admin can only add their own files. Before, any person's file could be added by its id, and everyone using the model could then search it. A file someone shared with the admin can't be added either, because it was shared with the admin alone. Other people's files already in a custom model are taken out when the server updates (only the number is logged).
+<!-- Admin privacy, AP4 -->
+- Deleting a user: an admin can no longer take over the person's workspaces. A private workspace is deleted with the account, and a shared one goes to one of its own members who can edit it (the longest-standing workspace admin, then editor; the admin can pick another of them). With nobody else who can edit it, it's deleted.
+- Deleting a user: the confirmation no longer shows the names of their workspaces. Private ones are only counted, and a shared one is named only if you're in it.
+<!-- Admin privacy, AP1 -->
+- Admin → Console and Admin → Errors no longer show the addresses people open. Each request is shown by its route, like GET /api/calendar/feed/{token}.ics, so calendar feed links, signed photo and file links, share, album and form links, phone pairing codes, WebDAV file names and map positions stay out of them. Everyday request lines no longer say who made them; errors still do. Errors and rate-limit records saved before the update are rewritten the same way, and old errors whose address can't be matched to a route are removed.
+- Pairing a phone: the page now checks the pairing code in the body of the request rather than in its address, so the code can't show up in a log.
+<!-- Admin privacy, AP2 -->
+- Admin → Console and Admin → Errors no longer show what people type or say: no file-search or web-search words, research questions, sub-agent tasks, voice assistant requests, WebDAV file names, pasted links, recipe links, flashcard file names or fetched page addresses (only the site's name). Saved errors and Android crash reports lose web address queries and long quoted text before they're stored.
+- The admin's "The Android app crashed" notification now says only how many new faults came in, without the fault text, the person or the phone.
 
 ## [0.33.0] - 2026-11-09
 

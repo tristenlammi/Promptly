@@ -265,13 +265,8 @@ def _render(ctx: ToolContext, query: str, results: list, meta: dict[str, Any]) -
         for r in results
     ]
 
-    logger.info(
-        "web_search ok user=%s provider=%s n=%d q=%r",
-        ctx.user.id,
-        meta.get("provider"),
-        len(results),
-        query[:80],
-    )
+    # Not the query: it's what the user is looking for (admin privacy).
+    logger.info("web_search ok provider=%s n=%d", meta.get("provider"), len(results))
 
     meta = {**meta, "query": query, "result_count": len(results)}
     return ToolResult(content=content, sources=sources, meta=meta)

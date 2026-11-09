@@ -534,10 +534,25 @@ async def _audit(db, request, actor: User, event_type: str, target, **detail) ->
     await db.commit()
 
 
-class _DeletionWorkspace(BaseModel):
+class _DeletionHeir(BaseModel):
     id: uuid.UUID
-    title: str
-    members: list[dict]
+    username: str
+
+
+class _DeletionWorkspace(BaseModel):
+    """One shared workspace of the user being deleted.
+
+    ``title`` is only filled in when the admin is a member of it: a
+    workspace they weren't invited to is none of their business (admin
+    privacy audit G7). ``heirs`` are the members who can edit it, best
+    first; ``heirs[0]`` takes it over unless the admin picks another. With
+    no heirs it's deleted with the account.
+    """
+
+    id: uuid.UUID
+    title: str | None
+    member_count: int
+    heirs: list[_DeletionHeir]
 
 
 class _DeletionPreviewResponse(BaseModel):
@@ -546,13 +561,16 @@ class _DeletionPreviewResponse(BaseModel):
     file_count: int
     file_bytes: int
     conversation_count: int
+    # Shared workspaces only; private ones are just counted.
     workspaces: list[_DeletionWorkspace]
+    private_workspace_count: int
 
 
 class _DeleteUserRequest(BaseModel):
     # Type-to-confirm, checked server-side too.
     confirm_username: str = ""
-    # workspace id -> new owner id, for every owned workspace to keep.
+    # Optional: shared workspace id -> the member who takes it over, when
+    # the admin picks someone other than the suggested heir.
     transfers: dict[uuid.UUID, uuid.UUID] = Field(default_factory=dict)
 
 
@@ -562,15 +580,17 @@ async def user_deletion_preview(
     db: AsyncSession = Depends(get_db),
     actor: User = Depends(require_admin),
 ) -> _DeletionPreviewResponse:
-    """What deleting this user would remove, and which of their workspaces
-    other people use — so the admin can hand those over first (R-004)."""
+    """What deleting this user would remove, in counts, and who takes over
+    each workspace they share with others (R-004). Private workspaces are
+    counted, never named."""
     target = await db.get(User, user_id)
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     from app.tasks.deletion import deletion_preview
 
     p = await deletion_preview(db, target)
-    ids = {m for w in p.workspaces for m in w.member_ids}
+    shared = [w for w in p.workspaces if w.shared]
+    ids = {m for w in shared for m in w.heir_ids}
     names = {
         u.id: u.username
         for u in (await db.execute(select(User).where(User.id.in_(ids)))).scalars()
@@ -584,11 +604,13 @@ async def user_deletion_preview(
         workspaces=[
             _DeletionWorkspace(
                 id=w.id,
-                title=w.title,
-                members=[{"id": str(m), "username": names.get(m, "?")} for m in w.member_ids],
+                title=w.title if actor.id in w.member_ids else None,
+                member_count=len(w.member_ids),
+                heirs=[_DeletionHeir(id=m, username=names.get(m, "?")) for m in w.heir_ids],
             )
-            for w in p.workspaces
+            for w in shared
         ],
+        private_workspace_count=len(p.workspaces) - len(shared),
     )
 
 

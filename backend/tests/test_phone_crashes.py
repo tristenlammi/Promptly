@@ -164,7 +164,10 @@ async def test_admins_hear_about_a_new_fault_once_and_again_if_it_returns(client
     assert {t["user_id"] for t in told} == {user.id}
     alert = told[0]
     assert alert["category"] == "system_alert" and alert["url"] == "/admin?tab=console&view=errors&source=android"
-    assert "IllegalStateException" in alert["body"] and "plainuser on Pixel 8" in alert["body"]
+    # The number of new faults only: no fault text, no person, no device
+    # (admin privacy G5). The details are in Admin → Console → Errors.
+    assert alert["body"].startswith("1 new fault")
+    assert "IllegalStateException" not in alert["body"] and "plainuser" not in alert["body"]
 
     # The same fault again, and the same report again: no more noise.
     told.clear()
@@ -183,7 +186,7 @@ async def test_admins_hear_about_a_new_fault_once_and_again_if_it_returns(client
 async def test_a_backlog_of_faults_doesnt_flood_admins(client, user, told):
     reports = [_report(str(i), message=f"java.lang.Error{i}Error: x") for i in range(6)]
     assert (await client.post("/api/devices/crashes", headers=_auth(user), json=_body(*reports))).json() == {"added": 6}
-    assert len(told) == 4 and "3 more" in told[-1]["body"]
+    assert len(told) == 1 and told[0]["body"].startswith("6 new faults")
 
 
 async def test_a_failed_alert_doesnt_lose_the_report(client, db, user, monkeypatch):

@@ -311,7 +311,7 @@ async def create_custom_model(
     await db.flush()
 
     if payload.file_ids:
-        await _attach_files(cm.id, payload.file_ids, db, background)
+        await _attach_files(cm.id, payload.file_ids, db, background, caller=user)
 
     await db.commit()
     await db.refresh(cm)
@@ -707,8 +707,18 @@ async def _attach_files(
     file_ids: Iterable[uuid.UUID],
     db: AsyncSession,
     background: BackgroundTasks,
+    *,
+    caller: User,
 ) -> list[uuid.UUID]:
     """Insert pivot rows + queue ingestion. Skips files already attached.
+
+    Only files the caller owns (and hasn't trashed) can be attached. An
+    admin used to be able to attach any user's file by id, which made it
+    searchable through the model by everyone who can pick it (admin privacy
+    audit L1). A file shared with the caller doesn't count either: it was
+    shared with them alone, and a model would widen who sees it. A file that
+    doesn't exist and one the caller doesn't own get the same 404, so the
+    check can't be used to probe for ids.
 
     Returns the list of file ids that were *newly* attached so the
     caller can shape the response accordingly.
@@ -717,16 +727,21 @@ async def _attach_files(
     if not requested:
         return []
 
-    # Validate the source files exist before we start inserting pivots.
-    found_rows = (
-        await db.execute(select(UserFile.id).where(UserFile.id.in_(requested)))
-    ).scalars().all()
-    found = set(found_rows)
-    missing = [fid for fid in requested if fid not in found]
-    if missing:
+    owned = set(
+        (
+            await db.execute(
+                select(UserFile.id).where(
+                    UserFile.id.in_(requested),
+                    UserFile.user_id == caller.id,
+                    UserFile.trashed_at.is_(None),
+                )
+            )
+        ).scalars()
+    )
+    if any(fid not in owned for fid in requested):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"file_ids not found: {[str(m) for m in missing]}",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One of those files wasn't found in your files.",
         )
 
     # Skip already-attached pairs so the call is idempotent.
@@ -769,7 +784,7 @@ async def attach_files(
     user: User = Depends(require_admin),
 ) -> CustomModelDetail:
     cm = await _get_or_404(custom_model_id, user, db)
-    await _attach_files(cm.id, payload.file_ids, db, background)
+    await _attach_files(cm.id, payload.file_ids, db, background, caller=user)
     await db.commit()
     return await _detail(cm, db)
 
@@ -793,6 +808,17 @@ async def detach_file(
             detail="File is not attached to this custom model",
         )
     await db.delete(pivot)
+    # Its chunks too: retrieval reads knowledge_chunks by model, not through
+    # the pivot, so a detached file used to stay searchable in the model.
+    from app.custom_models.ingestion import delete_existing_chunks
+
+    await delete_existing_chunks(
+        db,
+        scope_kind="custom_model",
+        scope_id=cm.id,
+        user_file_id=user_file_id,
+        commit=False,
+    )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

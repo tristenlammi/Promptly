@@ -287,7 +287,8 @@ class SearchMyFilesTool(Tool):
                 meta={"query": query, "result_count": 0},
             )
         content, sources = render_hits(query, hits, limit)
-        logger.info("search_my_files ok user=%s n=%d q=%r", ctx.user.id, len(sources), query[:80])
+        # The count only: what someone searches for is theirs (admin privacy L8).
+        logger.info("search_my_files ok n=%d", len(sources))
         return ToolResult(content=content, sources=sources, meta={"query": query, "result_count": len(sources)})
 
 
