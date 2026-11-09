@@ -26,6 +26,7 @@ import { PersonalContextPanel } from "@/components/account/PersonalContextPanel"
 import { BodyProfilePanel } from "@/components/account/BodyProfilePanel";
 import { UnitsPanel } from "@/components/account/UnitsPanel";
 import { ProfilePanel } from "@/components/account/ProfilePanel";
+import { RecentActivityPanel } from "@/components/account/RecentActivityPanel";
 import { SavedPromptsPanel } from "@/components/account/SavedPromptsPanel";
 import { SignOutEverywherePanel } from "@/components/account/SignOutEverywherePanel";
 import { DevicesPanel } from "@/components/account/DevicesPanel";
@@ -94,6 +95,7 @@ export function AccountSecurityPage() {
           <ChangePasswordPanel />
           <MfaSettingsPanel defaultEmail={user?.email} />
           <SignOutEverywherePanel />
+          <RecentActivityPanel />
         </div>
       ),
     },

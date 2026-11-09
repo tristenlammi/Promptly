@@ -61,6 +61,9 @@ EVENT_EMAIL_CHANGED = "email_changed"
 EVENT_USERS_IMPORTED = "users_imported"
 EVENT_GROUP_CHANGED = "group_changed"
 EVENT_PROVIDER_KEY_CHANGED = "provider_key_changed"
+# An SSO identity was bound to an account for the first time (admin
+# privacy AP5, U3). ``detail`` carries the provider's host only.
+EVENT_SSO_LINKED = "sso_linked"
 
 # Emitted when the rate limiter rejects a request. Surfaced in the audit
 # log so admins can spot brute-force / spray attempts at a glance even

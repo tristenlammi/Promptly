@@ -146,6 +146,14 @@ export function useResetUserPassword() {
   });
 }
 
+export function useSendResetLink() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => adminApi.sendResetLink(id),
+    onSuccess: () => invalidateUserViews(qc),
+  });
+}
+
 // ---------------- Audit log ----------------
 export function useAuthEvents(query: AuthEventsQuery = {}) {
   return useQuery<AuthEvent[]>({

@@ -21,6 +21,12 @@ The in-app version tag (bottom of the sidebar) reads the injected
 
 ## [Unreleased]
 
+### Added
+<!-- Admin privacy, AP5 -->
+- Account → Security → Recent activity: your sign-ins, password and two-step changes, and every change an administrator made to your account, marked "By your administrator".
+- When an administrator resets your password, changes your email or role, or turns off your two-step verification, you're told: an email (an email change also goes to the old address), a notification, and a banner the next time you open Promptly on any device. Linking single sign-on to your account for the first time emails you too.
+- Admin → Users → Reset password can email the person a reset link instead of setting a temporary password, so the admin never knows their password. It's the default when email is set up.
+
 ## [0.34.0] - 2026-11-09
 
 ### Added

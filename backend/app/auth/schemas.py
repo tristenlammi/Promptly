@@ -153,6 +153,10 @@ class UserResponse(BaseModel):
     must_change_password: bool = False
     # Shown in the user's own profile.
     last_login_at: datetime | None = None
+    # A one-time banner: an admin changed this account (AP5). Both None
+    # once the person has closed it.
+    admin_notice_at: datetime | None = None
+    admin_notice_kind: str | None = None
 
 
 class DirectoryUser(BaseModel):

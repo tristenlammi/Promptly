@@ -191,6 +191,9 @@ export interface UserPreferencesUpdate {
   voice_local_mutes?: string[];
 }
 
+/** What an admin changed on someone's account (AP5). */
+export type AdminNoticeKind = "password_reset" | "email_changed" | "role_changed" | "mfa_reset" | "sso_linked";
+
 export interface User {
   id: string;
   email: string;
@@ -212,6 +215,10 @@ export interface User {
   must_change_password?: boolean;
   /** Last successful login. Surfaced in profile + admin user table. */
   last_login_at?: string | null;
+  /** An admin changed this account and the person hasn't closed the banner
+   *  yet (admin privacy AP5): when, and what (latest wins). */
+  admin_notice_at?: string | null;
+  admin_notice_kind?: AdminNoticeKind | null;
   /** Enrolled MFA method or null. Mirrored from the user_mfa_secrets row. */
   mfa_enrolled_method?: "totp" | "email" | null;
   mfa_enrolled_at?: string | null;

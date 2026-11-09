@@ -42,7 +42,9 @@ import {
   useEnableUser,
   useLogoutEverywhere,
   useResetUserMfa,
+  useAppSettings,
   useResetUserPassword,
+  useSendResetLink,
   useUnlockUser,
   useUpdateAdminUser,
 } from "@/hooks/useAdminUsers";
@@ -79,6 +81,8 @@ export function UsersPanel() {
   const logoutEverywhere = useLogoutEverywhere();
   const resetMfa = useResetUserMfa();
   const resetPassword = useResetUserPassword();
+  const sendResetLink = useSendResetLink();
+  const { data: appSettings } = useAppSettings();
 
   const [modal, setModal] = useState<ModalState>({ kind: "closed" });
   const close = () => setModal({ kind: "closed" });
@@ -515,6 +519,12 @@ export function UsersPanel() {
             ? handleResetPassword(modal.user, password)
             : Promise.resolve()
         }
+        canEmail={!!appSettings?.smtp_configured}
+        onSendLink={async () => {
+          if (modal.kind !== "reset") return;
+          await sendResetLink.mutateAsync(modal.user.id);
+          toast.success(`Reset link emailed to ${modal.user.username}.`);
+        }}
       />
       <UserUsageModal
         open={modal.kind === "usage"}

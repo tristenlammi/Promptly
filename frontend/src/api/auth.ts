@@ -161,4 +161,28 @@ export const authApi = {
     );
     return data;
   },
+  /** Your own account history, newest first (Account → Security). */
+  async securityEvents(before?: string): Promise<SecurityEvent[]> {
+    const { data } = await apiClient.get<SecurityEvent[]>("/auth/security-events", {
+      params: before ? { before } : undefined,
+    });
+    return data;
+  },
+  /** Close the "your administrator changed your account" banner everywhere. */
+  async dismissAdminNotice(): Promise<User> {
+    const { data } = await apiClient.post<User>("/auth/me/admin-notice/dismiss");
+    return data;
+  },
 };
+
+/** One row of Account → Security → Recent activity. */
+export interface SecurityEvent {
+  id: string;
+  at: string;
+  kind: string;
+  ip: string;
+  user_agent: string;
+  by_admin: boolean;
+  admin_name: string | null;
+  via: "sso" | "reset_link" | "awaiting_mfa" | "edit" | null;
+}

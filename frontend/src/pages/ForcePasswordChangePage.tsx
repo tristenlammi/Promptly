@@ -15,10 +15,18 @@ export function ForcePasswordChangePage() {
           <KeyRound className="h-5 w-5 text-[var(--accent-text)]" aria-hidden />
           <h1 className="text-lg font-semibold">Choose your own password</h1>
         </div>
-        <p className="mb-4 text-sm text-[var(--text-muted)]">
-          {user?.username ? `Welcome, ${user.username}. ` : ""}Your account was set up with a
-          password someone else chose. Pick a new one to continue.
-        </p>
+        {user?.admin_notice_kind === "password_reset" && user.admin_notice_at ? (
+          <p className="mb-4 text-sm text-[var(--text-muted)]">
+            Your administrator reset your password on{" "}
+            {new Date(user.admin_notice_at).toLocaleDateString(undefined, { dateStyle: "medium" })}.
+            Pick a new one to continue. If you didn&apos;t ask for this, tell them.
+          </p>
+        ) : (
+          <p className="mb-4 text-sm text-[var(--text-muted)]">
+            {user?.username ? `Welcome, ${user.username}. ` : ""}Your account was set up with a
+            password someone else chose. Pick a new one to continue.
+          </p>
+        )}
         <ChangePasswordPanel />
       </div>
     </div>

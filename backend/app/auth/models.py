@@ -168,6 +168,13 @@ class User(UUIDPKMixin, CreatedAtMixin, Base):
     mfa_enrolled_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, default=None
     )
+    # The one-time banner after an admin changed this account (0404,
+    # admin privacy AP5): when, and what (latest wins). Cleared when the
+    # person closes it. See app/auth/admin_notice.py.
+    admin_notice_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+    admin_notice_kind: Mapped[str | None] = mapped_column(String(32), nullable=True, default=None)
 
     # ------------------------------------------------------------------
     # Quota overrides (added in 0009_phase3_quotas)

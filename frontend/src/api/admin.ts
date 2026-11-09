@@ -497,6 +497,14 @@ export const adminApi = {
     );
     return data;
   },
+  /** Email the person a single-use link to choose a new password (AP5):
+   *  the admin never learns a working password. Needs email set up. */
+  async sendResetLink(id: string): Promise<AdminUser> {
+    const { data } = await apiClient.post<AdminUser>(
+      `/admin/users/${id}/send-reset-link`
+    );
+    return data;
+  },
 
   // ---------------- Model pool ----------------
   async modelPool(): Promise<AdminModelOption[]> {

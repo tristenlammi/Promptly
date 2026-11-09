@@ -26,13 +26,14 @@ import re
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from fastapi import (
     APIRouter,
     Body,
     Depends,
     HTTPException,
+    Query,
     Request,
     Response,
     UploadFile,
@@ -415,6 +416,7 @@ async def oidc_callback(
         )
     ).scalar_one_or_none()
     email = verified_email_from_claims(claims, trust_unverified=cfg.trust_unverified_email)
+    newly_linked = False
     if user is None:
         # First SSO sign-in: match the invited account by a verified email,
         # then bind it, so later sign-ins don't depend on the email at all.
@@ -429,6 +431,8 @@ async def oidc_callback(
             # Already bound to a different identity — someone else holding
             # the same address at the provider doesn't get this account.
             return _sso_fail("linked_elsewhere")
+        if user is not None and not user.oidc_subject:
+            newly_linked = True
         if user is not None:
             user.oidc_issuer, user.oidc_subject = issuer, subject
     # Invite-only: SSO logs in EXISTING, active accounts only. An unknown or
@@ -471,6 +475,8 @@ async def oidc_callback(
                 user_id=user.id, identifier=email or user.email, detail="sso_awaiting_mfa",
             )
             await db.commit()
+            if newly_linked:
+                await _tell_sso_linked(db, request, user, issuer)
             # The SPA can't receive JSON on a redirect, and a challenge
             # token doesn't belong in a URL: hand it over in a short-lived
             # cookie that /oidc/pending reads once.
@@ -505,6 +511,8 @@ async def oidc_callback(
     )
     await db.commit()
     await db.refresh(user)
+    if newly_linked:
+        await _tell_sso_linked(db, request, user, issuer)
 
     # Set the refresh cookie on the redirect and bounce into the app; the SPA
     # exchanges it for an access token on load (same as a normal page refresh).
@@ -517,6 +525,22 @@ async def oidc_callback(
     )
     redirect.delete_cookie(_OIDC_TX_COOKIE, path="/api/auth")
     return redirect
+
+
+async def _tell_sso_linked(db: AsyncSession, request: Request, user: User, issuer: str) -> None:
+    """An SSO identity was bound to this account for the first time. The
+    admin chooses the provider, so a provider they control could sign in as
+    anyone (audit U3): the person is emailed and notified, and it shows in
+    their Recent activity."""
+    from app.auth import admin_notice
+    from app.auth.events import EVENT_SSO_LINKED
+
+    await record_event(
+        db, request=request, event_type=EVENT_SSO_LINKED, user_id=user.id,
+        identifier=user.username, detail=f"issuer_host={urlparse(issuer).hostname or ''}",
+    )
+    await db.commit()
+    await admin_notice.tell(db, user, admin_notice.SSO_LINKED, issuer=issuer, banner=False)
 
 
 @router.post("/oidc/pending", response_model=AuthResponse)
@@ -1136,7 +1160,6 @@ async def password_policy() -> dict:
 # --------------------------------------------------------------------
 # Forgot password (R-191)
 # --------------------------------------------------------------------
-_RESET_TTL_S = 30 * 60
 _RESET_SENDS_PER_HOUR = 3
 
 
@@ -1149,12 +1172,6 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=1, max_length=128)
 
 
-def _reset_key(token: str) -> str:
-    import hashlib
-
-    return "promptly:pw-reset:" + hashlib.sha256(token.encode()).hexdigest()
-
-
 @router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
 async def forgot_password(
     payload: ForgotPasswordRequest,
@@ -1164,8 +1181,7 @@ async def forgot_password(
 ) -> dict:
     """Email a single-use, 30-minute reset link. Always answers the same
     way, so it can't be used to find out which addresses have accounts."""
-    import secrets as _secrets
-
+    from app.auth.reset_link import send_reset_link
     from app.redis_client import redis
 
     email = payload.email.strip().lower()
@@ -1178,26 +1194,8 @@ async def forgot_password(
         if sends == 1:
             await redis.expire(sends_key, 3600)
         if sends <= _RESET_SENDS_PER_HOUR:
-            token = _secrets.token_urlsafe(32)
-            await redis.set(
-                _reset_key(token), f"{user.id}:{user.token_version}", ex=_RESET_TTL_S
-            )
-            proto = request.headers.get("x-forwarded-proto") or request.url.scheme
-            host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
-            link = f"{proto}://{host}/reset-password?token={token}"
             try:
-                from app.mfa.smtp import send_message
-
-                await send_message(
-                    db,
-                    to=user.email,
-                    subject="Promptly: reset your password",
-                    text_body=(
-                        f"Hi {user.username},\n\nSomeone asked to reset the password for "
-                        f"this account. To choose a new one, open this link within 30 "
-                        f"minutes:\n\n{link}\n\nIf it wasn't you, you can ignore this email."
-                    ),
-                )
+                await send_reset_link(db, request, user)
             except Exception:  # noqa: BLE001 — SMTP missing or failing: same answer
                 logger.info("password reset email not sent for user %s", user.id)
             await record_event(
@@ -1219,9 +1217,10 @@ async def reset_password_with_token(
     """Set a new password from an emailed link. Single use, and every
     session the account had is ended."""
     from app.auth.password_policy import validate_password_strength
+    from app.auth.reset_link import reset_key
     from app.redis_client import redis
 
-    key = _reset_key(payload.token)
+    key = reset_key(payload.token)
     stored = await redis.get(key)
     if stored is None:
         raise HTTPException(status_code=400, detail="That link has expired or was already used — ask for a new one.")
@@ -1257,6 +1256,128 @@ async def reset_password_with_token(
 @router.get("/me", response_model=UserResponse)
 async def me(current_user: User = Depends(get_current_user)) -> UserResponse:
     return UserResponse.model_validate(current_user)
+
+
+@router.post("/me/admin-notice/dismiss", response_model=UserResponse)
+async def dismiss_admin_notice(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Close the "your administrator changed your account" banner (AP5),
+    on every device. Recent activity still lists the change."""
+    current_user.admin_notice_at = None
+    current_user.admin_notice_kind = None
+    await db.commit()
+    await db.refresh(current_user)
+    return UserResponse.model_validate(current_user)
+
+
+# The person's own account history (Account → Security → Recent activity,
+# admin privacy AP5): sign-ins, password and two-step changes, and every
+# change an admin made to the account. Only these types; the rest of
+# ``auth_events`` (token refreshes, tool calls, workspace events) is noise.
+SECURITY_EVENT_TYPES: tuple[str, ...] = (
+    "login_success",
+    "login_fail",
+    "lockout",
+    "unlock",
+    "disable",
+    "enable",
+    "logout",
+    "force_logout_all",
+    "password_change",
+    "password_reset_by_admin",
+    "password_reset_requested",
+    "mfa_enrolled",
+    "mfa_fail",
+    "mfa_reset",
+    "mfa_backup_used",
+    "mfa_device_trusted",
+    "mfa_device_revoked",
+    "app_password_created",
+    "app_password_revoked",
+    "user_created",
+    "role_changed",
+    "email_changed",
+    "sso_linked",
+)
+
+_BY_ADMIN_RE = re.compile(r"by_admin='([0-9a-fA-F-]{36})'")
+
+
+class SecurityEventOut(BaseModel):
+    id: uuid.UUID
+    at: datetime
+    kind: str
+    ip: str
+    user_agent: str
+    #: An administrator did this (their username, when the account still exists).
+    by_admin: bool = False
+    admin_name: str | None = None
+    #: How a sign-in or password change happened: ``sso``, ``reset_link``,
+    #: ``awaiting_mfa``. Never the raw detail.
+    via: str | None = None
+
+
+def _via(kind: str, detail: str | None) -> str | None:
+    d = detail or ""
+    if d.startswith("sso"):
+        return "awaiting_mfa" if "awaiting_mfa" in d else "sso"
+    if d == "reset_link":
+        return "reset_link"
+    if kind == "password_reset_by_admin" and "via='edit'" in d:
+        return "edit"
+    return None
+
+
+@router.get("/security-events", response_model=list[SecurityEventOut])
+async def my_security_events(
+    before: datetime | None = Query(default=None),
+    limit: int = Query(default=30, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[SecurityEventOut]:
+    """Your own recent account activity, newest first. Only rows about
+    your account; ``before`` pages back."""
+    from app.auth.events import AuthEvent
+
+    q = (
+        select(AuthEvent)
+        .where(AuthEvent.user_id == current_user.id, AuthEvent.event_type.in_(SECURITY_EVENT_TYPES))
+        .order_by(AuthEvent.created_at.desc())
+        .limit(limit)
+    )
+    if before is not None:
+        q = q.where(AuthEvent.created_at < before)
+    rows = (await db.execute(q)).scalars().all()
+    admin_ids: set[uuid.UUID] = set()
+    by: dict[uuid.UUID, uuid.UUID] = {}
+    for r in rows:
+        m = _BY_ADMIN_RE.search(r.detail or "")
+        if m:
+            try:
+                by[r.id] = uuid.UUID(m.group(1))
+                admin_ids.add(by[r.id])
+            except ValueError:
+                pass
+    names: dict[uuid.UUID, str] = {}
+    if admin_ids:
+        names = dict(
+            (await db.execute(select(User.id, User.username).where(User.id.in_(admin_ids)))).all()
+        )
+    return [
+        SecurityEventOut(
+            id=r.id,
+            at=r.created_at,
+            kind=r.event_type,
+            ip=r.ip or "",
+            user_agent=r.user_agent or "",
+            by_admin=r.id in by,
+            admin_name=names.get(by[r.id]) if r.id in by else None,
+            via=_via(r.event_type, r.detail),
+        )
+        for r in rows
+    ]
 
 
 @router.post("/me/password", response_model=AuthResponse)

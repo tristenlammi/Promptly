@@ -16,6 +16,7 @@ import { useAuthStore } from "@/store/authStore";
 import { useUIStore } from "@/store/uiStore";
 import { cn } from "@/utils/cn";
 
+import { AdminNoticeBanner } from "./AdminNoticeBanner";
 import { NetworkStatusToast } from "./NetworkStatusToast";
 import { WelcomeAppsDialog } from "./WelcomeAppsDialog";
 import { Sidebar } from "./Sidebar";
@@ -194,6 +195,7 @@ export function AppLayout({ children }: { children?: ReactNode } = {}) {
 
       {/* The page's own content — the one "main" landmark (PH-7 a11y). */}
       <main id="main" className="flex h-full min-w-0 flex-1 flex-col">
+        <AdminNoticeBanner />
         {/* Route components are code-split (see App.tsx), so a first visit
             to a page fetches its chunk. The boundary sits *here* rather
             than around the whole router on purpose: the sidebar stays put
